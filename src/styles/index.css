@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #fdfaf3;
+    color: #1a1a1a;
+  }
+
+  /* Tiptap editor content styles */
+  /* ProseMirror is the contenteditable div — tiptap-editor is a class
+     we add to it directly via editorProps, so selectors target it directly. */
+  .ProseMirror {
+    outline: none;
+    font-family: 'IM Fell DW Pica', 'EB Garamond', Georgia, serif;
+    font-size: 1.125rem;
+    line-height: 1.65;
+    color: #1a1a1a;
+    min-height: calc(100vh - 6rem);
+    cursor: text;
+  }
+
+  .ProseMirror p {
+    margin-bottom: 1.25em;
+  }
+
+  .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: #b0a898;
+    pointer-events: none;
+    height: 0;
+    font-style: italic;
+  }
+
+  /* Selection colour — soft ink-blue tint */
+  .ProseMirror ::selection {
+    background-color: rgba(42, 59, 95, 0.12);
+  }
+}
