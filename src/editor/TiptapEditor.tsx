@@ -117,8 +117,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   return (
     <ComplianceContext.Provider value={compliance}>
-      <div className="inkwave-editor-surface min-h-screen bg-parchment px-6 py-12 md:px-0">
-        <div className="mx-auto w-full max-w-[680px] relative">
+      <div className="inkwave-editor-surface min-h-screen bg-parchment px-5 py-10">
+        <div className="mx-auto w-full max-w-[480px] md:max-w-[640px] relative">
           <EditorContent editor={editor} />
           {editor && (
             <ThesaurusPopover
