@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from './thesaurus'
 import { useCompliance } from '../../scas/compliance'
-import { getActiveVocab } from '../../scas/ranking'
+import { isInVocab } from '../../scas/ranking'
 
 interface PopoverState {
   word: string
@@ -102,9 +102,8 @@ export function ThesaurusPopover({
     setLoading(true)
     getSynonyms(word).then((candidates) => {
       setLoading(false)
-      const vocab = getActiveVocab(paraIdx, scasSessionSeed, scasLimitN)
       const suggestions = candidates
-        .filter((w) => vocab.has(w.toLowerCase()))
+        .filter((w) => isInVocab(w, paraIdx, scasSessionSeed, scasLimitN))
         .slice(0, 4)
       onHintChange(from)
       setPopover({ word, from, to, suggestions, anchor, openedByKey })

@@ -1,8 +1,8 @@
 // Thesaurus integration — synonym lookups via Datamuse API.
 //
 // Datamuse is a free, no-auth REST API that returns synonyms, related words,
-// and rhymes. We use `rel_syn` (synonyms) and `rel_trg` (triggered by / semantically
-// related) to generate a small candidate list.
+// and rhymes. We use `ml` (means like) and `rel_syn` (synonyms) to generate
+// a small candidate list.
 //
 // Results are cached in memory so repeated lookups are instant.
 // Offline or API failure returns an empty list (no suggestions shown).
@@ -12,8 +12,31 @@ const CACHE = new Map<string, string[]>()
 const MAX_CANDIDATES = 40
 
 /**
+ * Derive a Datamuse `sp` (spelled-like) wildcard pattern from a word's suffix
+ * so that results match the same grammatical form.
+ * e.g. "running" → "*ing", "requirements" → "*s", "quickly" → "*ly"
+ * Returns null for base/uninflected forms.
+ */
+function getSpPattern(word: string): string | null {
+  const w = word.toLowerCase()
+  if (w.endsWith('ing') && w.length > 5) return '*ing'
+  if (w.endsWith('tion') && w.length > 6) return '*tion'
+  if (w.endsWith('ness') && w.length > 6) return '*ness'
+  if (w.endsWith('ment') && w.length > 6) return '*ment'
+  if (w.endsWith('ation') && w.length > 7) return '*ation'
+  if (w.endsWith('ly') && w.length > 4) return '*ly'
+  if (w.endsWith('est') && w.length > 5) return '*est'
+  if (w.endsWith('ed') && w.length > 4) return '*ed'
+  if (w.endsWith('er') && w.length > 4) return '*er'
+  if (w.endsWith('ies') && w.length > 4) return '*ies'
+  if (w.endsWith('es') && w.length > 4) return '*es'
+  if (w.endsWith('s') && w.length > 3 && !w.endsWith('ss')) return '*s'
+  return null
+}
+
+/**
  * Look up synonyms for a word.
- * Returns up to MAX_SUGGESTIONS alternatives, sorted by Datamuse score.
+ * Returns up to MAX_CANDIDATES alternatives, sorted by Datamuse score.
  * Returns [] on failure or if no synonyms found.
  */
 export async function getSynonyms(word: string): Promise<string[]> {
@@ -21,35 +44,46 @@ export async function getSynonyms(word: string): Promise<string[]> {
 
   if (CACHE.has(key)) return CACHE.get(key)!
 
+  // Apply a spelled-like pattern to the ml query so results match the
+  // grammatical form of the input word (plurals stay plural, -ing stays -ing etc.)
+  const spPattern = getSpPattern(key)
+  const spParam = spPattern ? `&sp=${encodeURIComponent(spPattern)}` : ''
+
   try {
-    // Fetch synonyms and semantically-triggered words in parallel.
+    // ml with sp= enforces form matching; rel_syn provides base-form alternatives.
     const [mlRes, synRes] = await Promise.allSettled([
-      fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(key)}&max=40`),
+      fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(key)}&max=40${spParam}`),
       fetch(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(key)}&max=20`),
     ])
 
-    const candidates: Array<{ word: string; score: number }> = []
+    // ml results go first — they are form-matched via sp=.
+    // rel_syn results are base-form synonyms and only fill in as fallback.
+    // Merging into a single score-sorted pool lets base forms outscore inflected
+    // ones, breaking grammatical agreement — so we keep the two buckets separate.
+    const seen = new Set<string>([key])
+    const accept = (word: string) => {
+      const w = word.toLowerCase()
+      if (seen.has(w) || !/^[a-z]+$/.test(word)) return false
+      seen.add(w)
+      return true
+    }
+
+    const mlWords: string[] = []
+    const synWords: string[] = []
 
     if (mlRes.status === 'fulfilled' && mlRes.value.ok) {
-      const data = await mlRes.value.json()
-      candidates.push(...data)
+      const data: Array<{ word: string; score: number }> = await mlRes.value.json()
+      data.sort((a, b) => b.score - a.score)
+      for (const c of data) if (accept(c.word)) mlWords.push(c.word)
     }
     if (synRes.status === 'fulfilled' && synRes.value.ok) {
-      const data = await synRes.value.json()
-      candidates.push(...data)
+      const data: Array<{ word: string; score: number }> = await synRes.value.json()
+      data.sort((a, b) => b.score - a.score)
+      for (const c of data) if (accept(c.word)) synWords.push(c.word)
     }
 
-    // Deduplicate, filter out the original word, sort by score desc.
-    const seen = new Set<string>([key])
-    const unique = candidates
-      .filter((c) => {
-        if (seen.has(c.word.toLowerCase())) return false
-        seen.add(c.word.toLowerCase())
-        return /^[a-z]+$/.test(c.word) // alphabetic only
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, MAX_CANDIDATES)
-      .map((c) => c.word)
+    // Form-matched ml words fill first; rel_syn words top up if ml falls short.
+    const unique = [...mlWords, ...synWords].slice(0, MAX_CANDIDATES)
 
     CACHE.set(key, unique)
     return unique
