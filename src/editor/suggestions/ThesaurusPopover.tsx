@@ -54,8 +54,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     if (!word) return
 
     const view = editor.view
-    const domPos = view.posAtDOM(target, 0)
-    if (domPos == null) return
+    let domPos: number
+    try {
+      // Resolve from the text node inside the span — more reliable than the
+      // span element itself when sibling widget decorations are present.
+      const node = target.firstChild ?? target
+      domPos = view.posAtDOM(node, 0)
+    } catch {
+      return
+    }
 
     const from = domPos
     const to = from + word.length
@@ -119,11 +126,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
         }
 
         if (e.key === 'Enter') {
-          const top = filteredSuggestions[0]
-          if (top) {
-            e.preventDefault()
-            acceptSuggestion(top)
-          }
+          e.preventDefault()
           return
         }
 
@@ -144,14 +147,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
           return
         }
 
-        // Space: accept only if buffer is an exact match. Otherwise reset buffer.
+        // Space: accept exact match and advance, otherwise reset buffer.
         if (e.key === ' ') {
           e.preventDefault()
           const exactMatch = popover.suggestions.find(
             (s) => s.toLowerCase() === typeBuffer
           )
           if (exactMatch) {
-            acceptSuggestion(exactMatch)
+            acceptSuggestion(exactMatch, true)
           } else {
             setTypeBuffer('')
           }
@@ -213,8 +216,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     return () => document.removeEventListener('mousedown', onMouseDown)
   }, [popover, recordIgnored])
 
-  function acceptSuggestion(replacement: string) {
+  function acceptSuggestion(replacement: string, advance = false) {
     if (!popover) return
+    const acceptedFrom = popover.from
     editor
       .chain()
       .focus()
@@ -224,6 +228,22 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     recordAccepted()
     setPopover(null)
     setTypeBuffer('')
+
+    if (advance) {
+      // Wait one frame for decorations to rebuild, then jump to the next red word.
+      requestAnimationFrame(() => {
+        const editorDom = editor.view.dom
+        const allRed = Array.from(editorDom.querySelectorAll<HTMLElement>('.scas-red'))
+        const nextTarget = allRed.find(el => {
+          try {
+            return editor.view.posAtDOM(el.firstChild ?? el, 0) > acceptedFrom
+          } catch {
+            return false
+          }
+        })
+        if (nextTarget) openPopoverForElement(nextTarget, null)
+      })
+    }
   }
 
   if (!popover && !loading) return null

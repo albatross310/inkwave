@@ -91,6 +91,16 @@ function buildDecorations(pmDoc: PMNode, inkDoc: InkwaveDocument, cursorPos: num
 
         wordIndexInParagraph++
 
+        // Badge widget — zero-width anchor + absolutely positioned badge so
+        // the layout of the text line is completely unaffected (no cursor jump).
+        const anchor = document.createElement('span')
+        anchor.className = 'scas-badge-anchor'
+        const badge = document.createElement('span')
+        badge.className = 'scas-badge'
+        badge.textContent = String(wordIndexInParagraph)
+        anchor.appendChild(badge)
+        decorations.push(Decoration.widget(from, anchor, { side: -1 }))
+
         decorations.push(
           Decoration.inline(from, to, {
             class: 'scas-red',

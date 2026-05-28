@@ -41,29 +41,37 @@
 
   /* SCAS red highlight — words outside active vocabulary */
   .scas-red {
-    position: relative;
-    display: inline-block;
     color: #c0392b;
     cursor: pointer;
   }
 
-  /* Number label floating above each red word — grey boxed badge */
-  .scas-red[data-scas-n]::before {
-    content: attr(data-scas-n);
+  /* Zero-size anchor: containing block for the badge, zero layout impact */
+  .scas-badge-anchor {
+    display: inline-block;
+    width: 0;
+    overflow: visible;
+    position: relative;
+    font-size: 0;
+    line-height: 0;
+    vertical-align: baseline;
+  }
+
+  /* Number badge floating above the word */
+  .scas-badge {
     position: absolute;
-    top: -1.1em;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 0.5em;
+    bottom: 0.8rem;
+    left: 0;
+    font-size: 9px;
     font-family: sans-serif;
     font-weight: 500;
     color: #6b7280;
     background: #f3f4f6;
     border: 1px solid #d1d5db;
     border-radius: 2px;
-    padding: 0 2px;
+    padding: 0 3px;
     line-height: 1.5;
     pointer-events: none;
     white-space: nowrap;
+    user-select: none;
   }
 }
