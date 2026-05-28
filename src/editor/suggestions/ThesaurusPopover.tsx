@@ -1,15 +1,16 @@
-// ThesaurusPopover — click or number-key to open, type-to-filter suggestions.
+// ThesaurusPopover — Tab/Shift+Tab to navigate flagged words, Space to accept.
 //
 // Interaction model:
-//   1. Click a red word, OR press its number key (shown above the word).
-//      → Popover appears with up to 4 in-vocab synonym suggestions.
-//   2. Press the same number key again → popover collapses (toggle).
+//   1. Tab (or click a red word) → opens popover with up to 4 in-vocab synonyms.
+//   2. Shift+Tab → opens the previous flagged word.
 //   3. With popover open, type letters to filter suggestions.
-//      → Matched prefix is highlighted. Non-matching keystrokes are ignored.
-//      → Tiptap is suppressed — nothing goes to the editor while popover is open.
-//      → Enter accepts the top filtered match.
+//      → Matched prefix highlighted. Non-matching keystrokes ignored.
+//      → Tiptap suppressed — nothing goes to the editor while popover is open.
 //   4. Press 1–4 to accept by position.
-//   5. Esc dismisses without change.
+//   5. Space → accept top filtered match and advance to next flagged word.
+//   6. Tab → skip (dismiss without accepting) and advance.
+//   7. Shift+Tab → skip and go to previous.
+//   8. Esc → dismiss without change.
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
@@ -31,9 +32,16 @@ interface ThesaurusPopoverProps {
   paragraphIndex: number
   scasLimitN: number | 'infinite'
   scasSessionSeed: string
+  onHintChange: (pos: number | null) => void
 }
 
-export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessionSeed }: ThesaurusPopoverProps) {
+export function ThesaurusPopover({
+  editor,
+  paragraphIndex,
+  scasLimitN,
+  scasSessionSeed,
+  onHintChange,
+}: ThesaurusPopoverProps) {
   const [popover, setPopover] = useState<PopoverState | null>(null)
   const [loading, setLoading] = useState(false)
   const [typeBuffer, setTypeBuffer] = useState('')
@@ -46,9 +54,25 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
       : popover.suggestions
     : []
 
-  // -------------------------------------------------------------------------
-  // Shared: open popover for a given .scas-red DOM element.
-  // -------------------------------------------------------------------------
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  function closePopover(record = true) {
+    if (record) recordIgnored()
+    onHintChange(null)
+    setPopover(null)
+    setTypeBuffer('')
+  }
+
+  /** Find all .scas-red elements sorted by document position. */
+  function allRedWords(): HTMLElement[] {
+    return Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red'))
+  }
+
+  function posOf(el: HTMLElement): number {
+    try { return editor.view.posAtDOM(el.firstChild ?? el, 0) } catch { return -1 }
+  }
+
+  // ── Open popover for a given .scas-red DOM element ─────────────────────────
   function openPopoverForElement(target: HTMLElement, openedByKey: number | null = null) {
     const word = target.dataset.word ?? target.textContent ?? ''
     if (!word) return
@@ -56,8 +80,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     const view = editor.view
     let domPos: number
     try {
-      // Resolve from the text node inside the span — more reliable than the
-      // span element itself when sibling widget decorations are present.
       const node = target.firstChild ?? target
       domPos = view.posAtDOM(node, 0)
     } catch {
@@ -70,8 +92,8 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     const rect = target.getBoundingClientRect()
     const editorRect = view.dom.getBoundingClientRect()
     const anchor = {
-      top: rect.bottom - editorRect.top + 6,
-      left: rect.left - editorRect.left,
+      top: rect.bottom - editorRect.top - 13,
+      left: rect.left - editorRect.left - 6,
     }
 
     const paraIdx = parseInt(target.dataset.para ?? '0', 10)
@@ -84,13 +106,24 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
       const suggestions = candidates
         .filter((w) => vocab.has(w.toLowerCase()))
         .slice(0, 4)
+      onHintChange(from)
       setPopover({ word, from, to, suggestions, anchor, openedByKey })
     })
   }
 
-  // -------------------------------------------------------------------------
-  // Click handler — open popover when a red word is clicked.
-  // -------------------------------------------------------------------------
+  // ── Navigate to next/prev red word ────────────────────────────────────────
+
+  function goNext(afterPos: number) {
+    const next = allRedWords().find(el => posOf(el) > afterPos)
+    if (next) openPopoverForElement(next, null)
+  }
+
+  function goPrev(beforePos: number) {
+    const prev = [...allRedWords()].reverse().find(el => posOf(el) < beforePos)
+    if (prev) openPopoverForElement(prev, null)
+  }
+
+  // ── Click handler ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!editor) return
 
@@ -106,48 +139,40 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     return () => editorEl.removeEventListener('click', onEditorClick)
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -------------------------------------------------------------------------
-  // Key handler — capture phase so we intercept before Tiptap sees the event.
-  // -------------------------------------------------------------------------
+  // ── Key handler (capture phase) ────────────────────────────────────────────
   useEffect(() => {
     if (!editor) return
 
     function onKeyDown(e: KeyboardEvent) {
+      // ── Popover open ───────────────────────────────────────────────────────
       if (popover) {
-        // Always swallow the event so Tiptap never sees it while popover is open.
         e.stopPropagation()
 
         if (e.key === 'Escape') {
-          recordIgnored()
-          setPopover(null)
-          setTypeBuffer('')
           e.preventDefault()
+          closePopover(true)
           return
         }
 
+        // Tab / Shift+Tab: skip current word and advance / go back.
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          const from = popover.from
+          closePopover(true)
+          requestAnimationFrame(() => {
+            if (e.shiftKey) goPrev(from)
+            else goNext(from)
+          })
+          return
+        }
+
+        // Enter: swallowed but no action.
         if (e.key === 'Enter') {
           e.preventDefault()
           return
         }
 
-        // Number key: toggle if same key, else accept by position.
-        const n = parseInt(e.key, 10)
-        if (!isNaN(n) && n >= 1 && n <= 9) {
-          e.preventDefault()
-          if (popover.openedByKey === n) {
-            recordIgnored()
-            setPopover(null)
-            setTypeBuffer('')
-          } else {
-            const idx = n - 1
-            if (idx < filteredSuggestions.length) {
-              acceptSuggestion(filteredSuggestions[idx])
-            }
-          }
-          return
-        }
-
-        // Space: accept exact match and advance, otherwise reset buffer.
+        // Space: accept top filtered match and advance.
         if (e.key === ' ') {
           e.preventDefault()
           const exactMatch = popover.suggestions.find(
@@ -168,57 +193,55 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
           return
         }
 
-        // Alphabetic: type-to-filter. Always preventDefault to block Tiptap.
+        // Alphabetic: type-to-filter.
         if (/^[a-z]$/i.test(e.key)) {
           e.preventDefault()
           const next = typeBuffer + e.key.toLowerCase()
           const hasMatch = popover.suggestions.some((s) => s.toLowerCase().startsWith(next))
           if (hasMatch) setTypeBuffer(next)
-          // If no match, ignore — don't update buffer, don't insert into editor.
           return
         }
 
-        // All other keys: prevent default to keep editor clean.
         e.preventDefault()
         return
       }
 
-      // No popover open — number key 1–9 opens nth red word in current paragraph.
-      const n = parseInt(e.key, 10)
-      if (isNaN(n) || n < 1 || n > 9) return
-
-      const editorDom = editor.view.dom
-      const target = editorDom.querySelector<HTMLElement>(
-        `.scas-red[data-para="${paragraphIndex}"][data-scas-n="${n}"]`
-      )
-      if (!target) return
-
-      e.preventDefault()
-      openPopoverForElement(target, n)
+      // ── No popover ─────────────────────────────────────────────────────────
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const cursorPos = editor.state.selection.from
+        if (e.shiftKey) {
+          const prev = [...allRedWords()].reverse().find(el => posOf(el) < cursorPos)
+          if (prev) openPopoverForElement(prev, null)
+        } else {
+          const next = allRedWords().find(el => posOf(el) >= cursorPos)
+          if (next) openPopoverForElement(next, null)
+        }
+      }
     }
 
-    // Capture phase: fires before Tiptap's bubble-phase listeners.
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [editor, popover, typeBuffer, filteredSuggestions, paragraphIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Dismiss on outside click.
+  // ── Dismiss on outside click ───────────────────────────────────────────────
   useEffect(() => {
     if (!popover) return
     function onMouseDown(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        recordIgnored()
-        setPopover(null)
-        setTypeBuffer('')
+        closePopover(true)
       }
     }
     document.addEventListener('mousedown', onMouseDown)
     return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [popover, recordIgnored])
+  }, [popover]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function acceptSuggestion(replacement: string, advance = false) {
+  // ── Accept a suggestion ────────────────────────────────────────────────────
+  function acceptSuggestion(replacement: string, advance: boolean) {
     if (!popover) return
     const acceptedFrom = popover.from
+    // Clear hint state before the transaction so the rebuild sees focusedPos = null.
+    onHintChange(null)
     editor
       .chain()
       .focus()
@@ -230,18 +253,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
     setTypeBuffer('')
 
     if (advance) {
-      // Wait one frame for decorations to rebuild, then jump to the next red word.
       requestAnimationFrame(() => {
-        const editorDom = editor.view.dom
-        const allRed = Array.from(editorDom.querySelectorAll<HTMLElement>('.scas-red'))
-        const nextTarget = allRed.find(el => {
-          try {
-            return editor.view.posAtDOM(el.firstChild ?? el, 0) > acceptedFrom
-          } catch {
-            return false
-          }
-        })
-        if (nextTarget) openPopoverForElement(nextTarget, null)
+        const next = allRedWords().find(el => posOf(el) > acceptedFrom)
+        if (next) openPopoverForElement(next, null)
       })
     }
   }
@@ -251,7 +265,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
   return (
     <div
       ref={containerRef}
-      className="absolute z-50 rounded border border-stone-200 bg-white shadow-md py-1.5 px-2 text-sm font-sans min-w-[160px]"
+      className="absolute z-50 rounded border border-stone-200 bg-white/75 backdrop-blur-sm shadow-sm py-1 px-0 text-sm font-sans w-fit"
       style={popover ? { top: popover.anchor.top, left: popover.anchor.left } : { display: 'none' }}
     >
       {loading && (
@@ -259,26 +273,20 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
       )}
       {popover && (
         <>
-          <div className="mb-1 px-1">
-            <span className="text-[10px] uppercase tracking-wide text-stone-400">
-              Replace &ldquo;{popover.word}&rdquo;
-            </span>
-          </div>
-
           {popover.suggestions.length === 0 ? (
             <div className="px-1.5 py-1 text-stone-400 text-xs italic">
-              No in-vocab suggestions found.
+              No suggestions found.
             </div>
           ) : filteredSuggestions.length === 0 ? (
             <div className="px-1.5 py-1 text-stone-400 text-xs italic">
               No match for &ldquo;{typeBuffer}&rdquo;.
             </div>
           ) : (
-            filteredSuggestions.map((s, i) => (
+            filteredSuggestions.map((s) => (
               <button
                 key={s}
                 className="block w-full text-left px-1.5 py-0.5 rounded hover:bg-stone-100 text-stone-700"
-                onClick={() => acceptSuggestion(s)}
+                onClick={() => acceptSuggestion(s, false)}
               >
                 {typeBuffer ? (
                   <>
@@ -289,8 +297,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, scasLimitN, scasSessi
               </button>
             ))
           )}
-
-          <div className="text-[10px] text-stone-500 mt-1 px-1">esc to dismiss</div>
         </>
       )}
     </div>

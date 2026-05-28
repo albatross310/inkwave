@@ -4,7 +4,8 @@ import StarterKit from '@tiptap/starter-kit'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
-import { RedHighlightExtension } from './extensions/RedHighlightExtension'
+import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
+import type { HintState } from './extensions/RedHighlightExtension'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { LimitSelector } from '../components/LimitSelector'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
@@ -21,14 +22,37 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [doc])
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
+  const [showHints, setShowHints] = useState(true)
+
+  // Shared mutable ref read synchronously by the decoration plugin.
+  const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true })
 
   const compliance = useComplianceProvider()
+
+  // Keep showHints in sync with the ref and force a decoration rebuild.
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null)
+  useEffect(() => {
+    hintStateRef.current = { ...hintStateRef.current, showHints }
+    const ed = editorRef.current
+    if (ed && !ed.isDestroyed) {
+      ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
+    }
+  }, [showHints])
+
+  function handleHintChange(pos: number | null) {
+    hintStateRef.current = { focusedPos: pos, showHints: hintStateRef.current.showHints }
+    const ed = editorRef.current
+    if (ed && !ed.isDestroyed) {
+      ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
+    }
+  }
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       RedHighlightExtension.configure({
         getDoc: () => docRef.current,
+        getHintState: () => hintStateRef.current,
       }),
     ],
     content: doc.contentJson,
@@ -65,6 +89,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     },
   })
 
+  // Keep editorRef in sync so the hint-change handler can reach the editor.
+  useEffect(() => {
+    // @ts-expect-error — writing a normally-readonly ref for internal use
+    editorRef.current = editor
+  }, [editor])
+
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
     const currentContent = JSON.stringify(editor.getJSON())
@@ -97,17 +127,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               paragraphIndex={currentParagraphIndex}
               scasLimitN={doc.scasLimitN}
               scasSessionSeed={doc.scasSessionSeed}
+              onHintChange={handleHintChange}
             />
           )}
         </div>
 
         {/* Footer bar */}
         <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-4 pointer-events-none">
-          <div className="pointer-events-auto">
+          <div className="pointer-events-auto flex items-center gap-4">
             <LimitSelector
               value={doc.scasLimitN}
               onChange={handleLimitChange}
             />
+            <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showHints}
+                onChange={e => setShowHints(e.target.checked)}
+                className="accent-stone-400"
+              />
+              hints
+            </label>
           </div>
         </div>
       </div>
