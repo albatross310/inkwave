@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Inkwave placeholder icon: ink-blue square with stylised "I" -->
+  <rect width="512" height="512" rx="80" fill="#2a3b5f"/>
+  <!-- Stylised "I" letterform in cream -->
+  <rect x="220" y="100" width="72" height="16" rx="4" fill="#fdfaf3"/>
+  <rect x="220" y="396" width="72" height="16" rx="4" fill="#fdfaf3"/>
+  <rect x="244" y="116" width="24" height="280" rx="4" fill="#fdfaf3"/>
+  <!-- Small ink wave below the letterform -->
+  <path d="M176 440 Q216 424 256 440 Q296 456 336 440"
+        stroke="#fdfaf3" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.6"/>
+</svg>
