@@ -424,19 +424,22 @@ export function ThesaurusPopover({
           fontFamily,
           fontSize,
           background: 'white',
-          border: '1px solid rgba(210, 140, 60, 0.6)',
+          border: '1px solid rgba(180, 90, 10, 0.85)',
           borderRadius: '15%',
           padding: `${cardPadY}px 3px`,
           boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
         }}
       >
         <div
-          style={{ ...rowStyle, color: '#7c3300', opacity: 0.45, cursor: 'pointer' }}
+          style={{ ...rowStyle, fontSize: fontSize * 0.92, color: '#c96a00', opacity: 0.86, cursor: 'pointer' }}
           onClick={() => acceptSuggestion(prevSynonym, true)}
         >{displayFor(prevSynonym)}</div>
-        <div style={{ ...rowStyle, color: '#c96a00', opacity: currentSynonym === DELETE_SENTINEL ? 0.30 : 1, pointerEvents: 'none' }}>{displayFor(currentSynonym)}</div>
         <div
-          style={{ ...rowStyle, color: '#7c3300', opacity: 0.45, cursor: 'pointer' }}
+          style={{ ...rowStyle, color: '#c96a00', opacity: currentSynonym === DELETE_SENTINEL ? 0.30 : 1, cursor: 'pointer' }}
+          onClick={() => acceptSuggestion(currentSynonym, true)}
+        >{displayFor(currentSynonym)}</div>
+        <div
+          style={{ ...rowStyle, fontSize: fontSize * 0.92, color: '#c96a00', opacity: 0.86, cursor: 'pointer' }}
           onClick={() => acceptSuggestion(nextSynonym, true)}
         >{displayFor(nextSynonym)}</div>
       </div>

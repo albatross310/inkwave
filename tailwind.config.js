@@ -9,7 +9,7 @@ export default {
           light: '#4a5f8a',
         },
         parchment: {
-          DEFAULT: '#fdfaf3',
+          DEFAULT: '#f7f2e8',
           dark: '#f5f0e4',
         },
       },

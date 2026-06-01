@@ -4,7 +4,7 @@
 
 @layer base {
   html {
-    background-color: #fdfaf3;
+    background-color: #f7f2e8;
     color: #1a1a1a;
   }
 
@@ -51,7 +51,7 @@
   .scas-red {
     display: inline-block;
     position: relative;
-    color: #c0392b;
+    color: #a02020;
     cursor: pointer;
   }
 

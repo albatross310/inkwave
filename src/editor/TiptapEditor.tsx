@@ -26,6 +26,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [showHints, setShowHints] = useState(true)
   const [cycleActive, setCycleActive] = useState(false)
+  const [containerRight, setContainerRight] = useState(0)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
   const containerRef = useRef<HTMLDivElement>(null)
@@ -116,6 +117,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editorRef.current = editor
   }, [editor])
 
+  // Track the container's right edge in viewport coords so CycleHintPanel
+  // can sit flush against it at any window size or zoom level.
+  useEffect(() => {
+    function update() {
+      if (containerRef.current)
+        setContainerRight(containerRef.current.getBoundingClientRect().right)
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
   // Warm the synonym cache as soon as the editor is ready (existing red words).
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -150,7 +163,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   return (
     <ComplianceContext.Provider value={compliance}>
-      <div className="inkwave-editor-surface min-h-screen bg-parchment px-5 pt-10 pb-24">
+      <div className="inkwave-editor-surface min-h-screen bg-parchment pl-2 pr-5 pt-10 pb-24">
         <div className="mx-auto w-full max-w-[480px] md:max-w-[640px] relative" ref={containerRef}>
           <EditorContent editor={editor} />
           {editor && (
@@ -164,13 +177,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           )}
         </div>
 
-        <CycleHintPanel active={cycleActive} showHints={showHints} />
+        <CycleHintPanel active={cycleActive} showHints={showHints} containerRight={containerRight} />
 
         {/* Footer bar */}
         <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-4 pointer-events-none">
           <div
             className="pointer-events-auto flex items-center gap-4 bg-white px-4 py-2 shadow-sm"
-            style={{ border: '1px solid rgba(210, 140, 60, 0.6)', borderRadius: '15%' }}
+            style={{ border: '1px solid rgba(180, 90, 10, 0.85)', borderRadius: '15px' }}
           >
             <LimitSelector
               value={doc.scasLimitN}
