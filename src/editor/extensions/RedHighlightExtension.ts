@@ -90,15 +90,18 @@ function buildDecorations(
   // ── 1. Collect every out-of-vocab word (skip cursor word) ────────────────
   const redWords: RedWord[] = []
   let paragraphIndex = 0
+  let cursorParaIdx = 0
 
   pmDoc.descendants((node: PMNode, pos: number) => {
-    if (node.type.name !== 'paragraph') {
-      if (node.type.name !== 'doc') paragraphIndex++
-      return true
-    }
+    if (node.type.name !== 'paragraph') return true
 
     const pIdx = paragraphIndex
     paragraphIndex++
+
+    // Track which paragraph the cursor is in.
+    const paraStart = pos + 1
+    const paraEnd = pos + node.nodeSize - 1
+    if (cursorPos >= paraStart && cursorPos <= paraEnd) cursorParaIdx = pIdx
 
     let seqInPara = 0
 
@@ -128,26 +131,29 @@ function buildDecorations(
   })
 
   // ── 2. Determine which words get hint badges ──────────────────────────────
+  // Hints are only shown on the two nearest red words in the relevant paragraph
+  // (the one containing the cursor, or the one containing the focused word).
+  // Tab = backward → prev word gets 'tab'.
+  // Shift+Tab = forward → next word gets '⇧+tab'.
   const hintMap = new Map<number, string>() // from → hint label
 
   if (hintState.showHints) {
     const { focusedPos } = hintState
 
     if (focusedPos === null) {
-      // Show "tab" on the first red word in each paragraph.
-      const seenParas = new Set<number>()
-      for (const rw of redWords) {
-        if (!seenParas.has(rw.pIdx)) {
-          seenParas.add(rw.pIdx)
-          hintMap.set(rw.from, 'tab')
-        }
-      }
+      // No popover: hint the nearest red words before and after the cursor,
+      // crossing paragraph boundaries if needed.
+      const prevWord = [...redWords].reverse().find(rw => rw.from < cursorPos)
+      const nextWord = redWords.find(rw => rw.from > cursorPos)
+      if (prevWord) hintMap.set(prevWord.from, 'tab')
+      if (nextWord) hintMap.set(nextWord.from, '⇧+tab')
     } else {
-      // A word is focused: label its neighbours.
+      // Popover open: hint the neighbours of the focused word,
+      // crossing paragraph boundaries if needed.
       const prevWord = [...redWords].reverse().find(rw => rw.from < focusedPos)
       const nextWord = redWords.find(rw => rw.from > focusedPos)
-      if (nextWord) hintMap.set(nextWord.from, 'tab')
-      if (prevWord) hintMap.set(prevWord.from, '⇧+tab')
+      if (prevWord) hintMap.set(prevWord.from, 'tab')
+      if (nextWord) hintMap.set(nextWord.from, '⇧+tab')
     }
   }
 

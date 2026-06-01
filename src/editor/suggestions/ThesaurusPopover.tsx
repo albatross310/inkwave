@@ -1,16 +1,24 @@
 // ThesaurusPopover — Tab/Shift+Tab to navigate flagged words, Space to accept.
 //
 // Interaction model:
-//   1. Tab (or click a red word) → opens popover with up to 4 in-vocab synonyms.
-//   2. Shift+Tab → opens the previous flagged word.
-//   3. With popover open, type letters to filter suggestions.
+//   1. Shift+Tab → opens first red word in current paragraph (forward).
+//   2. Tab        → opens the previous flagged word (backward).
+//   3. Click a red word → opens popover for that word.
+//   4. With popover open, type letters to filter suggestions.
 //      → Matched prefix highlighted. Non-matching keystrokes ignored.
 //      → Tiptap suppressed — nothing goes to the editor while popover is open.
-//   4. Press 1–4 to accept by position.
-//   5. Space → accept top filtered match and advance to next flagged word.
-//   6. Tab → skip (dismiss without accepting) and advance.
-//   7. Shift+Tab → skip and go to previous.
-//   8. Esc → dismiss without change.
+//   5. Space      → accept top filtered match and advance forward.
+//   6. Shift+Tab  → skip and advance forward.
+//   7. Tab        → skip and go backward.
+//   8. Esc        → dismiss without change.
+//
+// Cursor behaviour:
+//   - Saved when a keyboard Tab session begins; pinned there for the whole session.
+//   - Adjusted for length differences when a replacement word is shorter/longer.
+//   - Restored (editor focused) only when the session ends: Esc, outside click,
+//     or no more words within the original cursor boundary.
+//   - Navigation never advances past the original cursor position.
+//   - Click-initiated popovers do not participate in cursor save/restore.
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
@@ -24,7 +32,6 @@ interface PopoverState {
   to: number
   suggestions: string[]
   anchor: { top: number; left: number }
-  openedByKey: number | null
 }
 
 interface ThesaurusPopoverProps {
@@ -48,22 +55,53 @@ export function ThesaurusPopover({
   const containerRef = useRef<HTMLDivElement>(null)
   const { recordAccepted, recordIgnored } = useCompliance()
 
+  // Saved when a keyboard Tab session begins. Null = no active session.
+  const tabCursorRef = useRef<number | null>(null)
+
   const filteredSuggestions = popover
     ? typeBuffer
       ? popover.suggestions.filter((s) => s.toLowerCase().startsWith(typeBuffer))
       : popover.suggestions
     : []
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Cursor management ──────────────────────────────────────────────────────
 
-  function closePopover(record = true) {
+  /** End the session: focus the editor and restore cursor to pre-session position. */
+  function restoreCursor() {
+    if (tabCursorRef.current !== null) {
+      const pos = tabCursorRef.current
+      tabCursorRef.current = null
+      requestAnimationFrame(() => {
+        if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run()
+      })
+    }
+  }
+
+  /** Keep cursor pinned at the saved position mid-session (no focus change). */
+  function pinCursor() {
+    if (tabCursorRef.current !== null && !editor.isDestroyed) {
+      editor.commands.setTextSelection(tabCursorRef.current)
+    }
+  }
+
+  // ── Popover lifecycle ──────────────────────────────────────────────────────
+
+  /**
+   * Close the popover.
+   * @param record   Fire recordIgnored (default true).
+   * @param restore  End the session and restore cursor (default true).
+   *                 Pass false when immediately opening the next word.
+   */
+  function closePopover(record = true, restore = true) {
     if (record) recordIgnored()
     onHintChange(null)
     setPopover(null)
     setTypeBuffer('')
+    if (restore) restoreCursor()
   }
 
-  /** Find all .scas-red elements sorted by document position. */
+  // ── DOM helpers ────────────────────────────────────────────────────────────
+
   function allRedWords(): HTMLElement[] {
     return Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red'))
   }
@@ -72,29 +110,19 @@ export function ThesaurusPopover({
     try { return editor.view.posAtDOM(el.firstChild ?? el, 0) } catch { return -1 }
   }
 
-  // ── Open popover for a given .scas-red DOM element ─────────────────────────
-  function openPopoverForElement(target: HTMLElement, openedByKey: number | null = null) {
+  // ── Open popover ───────────────────────────────────────────────────────────
+
+  function openPopoverForElement(target: HTMLElement) {
     const word = target.dataset.word ?? target.textContent ?? ''
     if (!word) return
 
-    const view = editor.view
     let domPos: number
     try {
-      const node = target.firstChild ?? target
-      domPos = view.posAtDOM(node, 0)
-    } catch {
-      return
-    }
-
-    const from = domPos
-    const to = from + word.length
+      domPos = editor.view.posAtDOM(target.firstChild ?? target, 0)
+    } catch { return }
 
     const rect = target.getBoundingClientRect()
-    const editorRect = view.dom.getBoundingClientRect()
-    const anchor = {
-      top: rect.bottom - editorRect.top - 13,
-      left: rect.left - editorRect.left - 6,
-    }
+    const editorRect = editor.view.dom.getBoundingClientRect()
 
     const paraIdx = parseInt(target.dataset.para ?? '0', 10)
 
@@ -105,40 +133,55 @@ export function ThesaurusPopover({
       const suggestions = candidates
         .filter((w) => isInVocab(w, paraIdx, scasSessionSeed, scasLimitN))
         .slice(0, 4)
-      onHintChange(from)
-      setPopover({ word, from, to, suggestions, anchor, openedByKey })
+      onHintChange(domPos)
+      setPopover({
+        word,
+        from: domPos,
+        to: domPos + word.length,
+        suggestions,
+        anchor: {
+          top: rect.bottom - editorRect.top - 13,
+          left: rect.left - editorRect.left - 6,
+        },
+      })
     })
   }
 
-  // ── Navigate to next/prev red word ────────────────────────────────────────
+  // ── Navigation ─────────────────────────────────────────────────────────────
 
-  function goNext(afterPos: number) {
-    const next = allRedWords().find(el => posOf(el) > afterPos)
-    if (next) openPopoverForElement(next, null)
+  /** Next red word after afterPos, optionally bounded by maxPos. */
+  function goNext(afterPos: number, maxPos?: number): boolean {
+    const next = allRedWords().find(el => {
+      const p = posOf(el)
+      return p > afterPos && (maxPos === undefined || p < maxPos)
+    })
+    if (next) { openPopoverForElement(next); return true }
+    return false
   }
 
-  function goPrev(beforePos: number) {
+  /** Previous red word before beforePos. */
+  function goPrev(beforePos: number): boolean {
     const prev = [...allRedWords()].reverse().find(el => posOf(el) < beforePos)
-    if (prev) openPopoverForElement(prev, null)
+    if (prev) { openPopoverForElement(prev); return true }
+    return false
   }
 
   // ── Click handler ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!editor) return
-
     function onEditorClick(e: MouseEvent) {
       const target = (e.target as HTMLElement).closest('.scas-red') as HTMLElement | null
       if (!target) return
       e.preventDefault()
-      openPopoverForElement(target, null)
+      tabCursorRef.current = null // clicks don't participate in cursor save/restore
+      openPopoverForElement(target)
     }
-
     const editorEl = editor.view.dom
-    editorEl.addEventListener('click', onEditorClick)
-    return () => editorEl.removeEventListener('click', onEditorClick)
+    editorEl.addEventListener('click', onEditorClick, { capture: true })
+    return () => editorEl.removeEventListener('click', onEditorClick, { capture: true })
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Key handler (capture phase) ────────────────────────────────────────────
+  // ── Key handler ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!editor) return
 
@@ -147,57 +190,41 @@ export function ThesaurusPopover({
       if (popover) {
         e.stopPropagation()
 
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          closePopover(true)
-          return
-        }
+        if (e.key === 'Escape') { e.preventDefault(); closePopover(); return }
 
-        // Tab / Shift+Tab: skip current word and advance / go back.
         if (e.key === 'Tab') {
           e.preventDefault()
           const from = popover.from
-          closePopover(true)
+          closePopover(true, false) // don't restore yet — may open another word
           requestAnimationFrame(() => {
-            if (e.shiftKey) goPrev(from)
-            else goNext(from)
+            const found = e.shiftKey
+              ? goNext(from)
+              : goPrev(from)
+            if (!found) restoreCursor()
           })
           return
         }
 
-        // Enter: swallowed but no action.
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          return
-        }
+        if (e.key === 'Enter') { e.preventDefault(); return }
 
-        // Space: accept top filtered match and advance.
         if (e.key === ' ') {
           e.preventDefault()
-          const exactMatch = popover.suggestions.find(
-            (s) => s.toLowerCase() === typeBuffer
-          )
-          if (exactMatch) {
-            acceptSuggestion(exactMatch, true)
-          } else {
-            setTypeBuffer('')
-          }
+          const match = popover.suggestions.find(s => s.toLowerCase() === typeBuffer)
+          if (match) acceptSuggestion(match, true)
+          else setTypeBuffer('')
           return
         }
 
-        // Backspace: trim buffer.
         if (e.key === 'Backspace') {
           e.preventDefault()
-          setTypeBuffer((b) => b.slice(0, -1))
+          setTypeBuffer(b => b.slice(0, -1))
           return
         }
 
-        // Alphabetic: type-to-filter.
         if (/^[a-z]$/i.test(e.key)) {
           e.preventDefault()
           const next = typeBuffer + e.key.toLowerCase()
-          const hasMatch = popover.suggestions.some((s) => s.toLowerCase().startsWith(next))
-          if (hasMatch) setTypeBuffer(next)
+          if (popover.suggestions.some(s => s.toLowerCase().startsWith(next))) setTypeBuffer(next)
           return
         }
 
@@ -208,27 +235,37 @@ export function ThesaurusPopover({
       // ── No popover ─────────────────────────────────────────────────────────
       if (e.key === 'Tab') {
         e.preventDefault()
+        if (tabCursorRef.current === null) tabCursorRef.current = editor.state.selection.from
         const cursorPos = editor.state.selection.from
+
         if (e.shiftKey) {
-          const prev = [...allRedWords()].reverse().find(el => posOf(el) < cursorPos)
-          if (prev) openPopoverForElement(prev, null)
+          // Forward: first red word in current paragraph at or after cursor,
+          // else first red word after cursor in any paragraph.
+          const reds = allRedWords()
+          const target =
+            reds.find(el => parseInt(el.dataset.para ?? '0', 10) === paragraphIndex && posOf(el) >= cursorPos) ??
+            reds.find(el => posOf(el) > cursorPos)
+          if (target) openPopoverForElement(target)
+          else tabCursorRef.current = null
         } else {
-          const next = allRedWords().find(el => posOf(el) >= cursorPos)
-          if (next) openPopoverForElement(next, null)
+          // Backward: last red word before cursor.
+          const prev = [...allRedWords()].reverse().find(el => posOf(el) < cursorPos)
+          if (prev) openPopoverForElement(prev)
+          else tabCursorRef.current = null
         }
       }
     }
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [editor, popover, typeBuffer, filteredSuggestions, paragraphIndex]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editor, popover, typeBuffer, paragraphIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Dismiss on outside click ───────────────────────────────────────────────
+  // ── Outside click ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!popover) return
     function onMouseDown(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        closePopover(true)
+        closePopover()
       }
     }
     document.addEventListener('mousedown', onMouseDown)
@@ -239,26 +276,35 @@ export function ThesaurusPopover({
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!popover) return
     const acceptedFrom = popover.from
-    // Clear hint state before the transaction so the rebuild sees focusedPos = null.
+    const lengthDiff = replacement.length - (popover.to - popover.from)
+
+    // Keep the saved cursor anchored correctly after a shorter/longer replacement.
+    if (tabCursorRef.current !== null && popover.from < tabCursorRef.current) {
+      tabCursorRef.current += lengthDiff
+    }
+
     onHintChange(null)
-    editor
-      .chain()
-      .focus()
+    editor.chain()
       .deleteRange({ from: popover.from, to: popover.to })
       .insertContentAt(popover.from, replacement)
       .run()
+    pinCursor() // snap cursor back before React re-renders
+
     recordAccepted()
     setPopover(null)
     setTypeBuffer('')
 
     if (advance) {
       requestAnimationFrame(() => {
-        const next = allRedWords().find(el => posOf(el) > acceptedFrom)
-        if (next) openPopoverForElement(next, null)
+        const found = goNext(acceptedFrom, tabCursorRef.current ?? undefined)
+        if (!found) restoreCursor()
       })
+    } else {
+      restoreCursor()
     }
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   if (!popover && !loading) return null
 
   return (
@@ -273,9 +319,7 @@ export function ThesaurusPopover({
       {popover && (
         <>
           {popover.suggestions.length === 0 ? (
-            <div className="px-1.5 py-1 text-stone-400 text-xs italic">
-              No suggestions found.
-            </div>
+            <div className="px-1.5 py-1 text-stone-400 text-xs italic">No suggestions found.</div>
           ) : filteredSuggestions.length === 0 ? (
             <div className="px-1.5 py-1 text-stone-400 text-xs italic">
               No match for &ldquo;{typeBuffer}&rdquo;.
@@ -285,7 +329,7 @@ export function ThesaurusPopover({
               <button
                 key={s}
                 className="block w-full text-left px-1.5 py-0.5 rounded hover:bg-stone-100 text-stone-700"
-                onClick={() => acceptSuggestion(s, false)}
+                onClick={() => acceptSuggestion(s, true)}
               >
                 {typeBuffer ? (
                   <>
