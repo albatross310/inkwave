@@ -43,15 +43,19 @@ interface CycleState {
   to: number
   synonyms: string[]   // exactly CYCLE_SIZE entries
   currentIdx: number
-  // No pre-computed anchor — positions are read live from the DOM in render
-  // so they stay correct across zoom changes.
+  minWidth: number     // px — min-width applied to focused word decoration
+  naturalWidth: number // px — word's natural width before decoration
 }
 
 interface ThesaurusPopoverProps {
   editor: Editor
   paragraphIndex: number
   containerEl: React.RefObject<HTMLDivElement>
-  onHintChange: (pos: number | null, minWidth?: number | null) => void
+  onHintChange: (
+    pos: number | null,
+    minWidth?: number | null,
+    lineRange?: { from: number; to: number; letterSpacingEm: number } | null,
+  ) => void
   onCycleChange: (active: boolean) => void
 }
 
@@ -83,6 +87,77 @@ export function ThesaurusPopover({
       window.removeEventListener('scroll', update, true)
     }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Line-compression effect: measure which chars share the focused word's visual
+  // line (using Range rects at current zoom), compute the exact letter-spacing
+  // needed to absorb the min-width expansion, dispatch as a hint update.
+  useEffect(() => {
+    if (!cycle) return
+
+    function updateCompression() {
+      const focusedEl = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+      if (!focusedEl) return
+
+      const fRect = focusedEl.getBoundingClientRect()
+      const lineMidY = (fRect.top + fRect.bottom) / 2
+      const paraEl = focusedEl.closest('p')
+      if (!paraEl) return
+
+      let lineFrom: number | null = null
+      let lineTo: number | null = null
+      let charCount = 0
+
+      const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT)
+      const r = document.createRange()
+
+      for (;;) {
+        const node = walker.nextNode() as Text | null
+        if (!node) break
+        if (!node.length) continue
+
+        // Skip text nodes entirely above/below this line.
+        r.setStart(node, 0)
+        r.setEnd(node, node.length)
+        const nr = r.getBoundingClientRect()
+        if (nr.bottom < fRect.top - 2 || nr.top > fRect.bottom + 2) continue
+
+        for (let i = 0; i < node.length; i++) {
+          r.setStart(node, i)
+          r.setEnd(node, i + 1)
+          const cr = r.getBoundingClientRect()
+          if (Math.abs((cr.top + cr.bottom) / 2 - lineMidY) < fRect.height / 2) {
+            try {
+              const pmPos = editor.view.posAtDOM(node, i)
+              if (lineFrom === null || pmPos < lineFrom) lineFrom = pmPos
+              if (lineTo   === null || pmPos + 1 > lineTo) lineTo = pmPos + 1
+              charCount++
+            } catch { /* skip non-editable nodes */ }
+          }
+        }
+      }
+
+      if (lineFrom === null || lineTo === null) return
+
+      const expansion = Math.max(0, cycle!.minWidth - cycle!.naturalWidth)
+      const charsExcludingWord = Math.max(1, charCount - (cycle!.to - cycle!.from))
+      const fontSize = parseFloat(window.getComputedStyle(focusedEl).fontSize) || 18
+      const lsEm = expansion > 0 ? expansion / charsExcludingWord / fontSize : 0
+
+      onHintChange(
+        cycle!.from,
+        cycle!.minWidth,
+        lsEm > 0 ? { from: lineFrom, to: lineTo, letterSpacingEm: lsEm } : null,
+      )
+    }
+
+    // RAF ensures the min-width decoration has been painted before we measure.
+    const raf = requestAnimationFrame(updateCompression)
+    window.addEventListener('resize', updateCompression)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', updateCompression)
+    }
+  }, [cycle?.from]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cursor management ──────────────────────────────────────────────────────
 
@@ -165,6 +240,8 @@ export function ThesaurusPopover({
         to: domPos + displayWord.length,
         synonyms,
         currentIdx: 0,
+        minWidth: maxWidth,
+        naturalWidth: wordWidth,
       })
     })
   }

@@ -32,7 +32,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Shared mutable ref read synchronously by the decoration plugin.
-  const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null })
+  const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null })
 
   // Debounced prefetch — fires after typing pauses so popover opens instantly.
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -49,11 +49,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
   }, [showHints])
 
-  function handleHintChange(pos: number | null, minWidth?: number | null) {
+  function handleHintChange(
+    pos: number | null,
+    minWidth?: number | null,
+    lineRange?: { from: number; to: number; letterSpacingEm: number } | null,
+  ) {
     hintStateRef.current = {
       ...hintStateRef.current,
       focusedPos: pos,
       focusedMinWidth: minWidth ?? null,
+      lineCompressionRange: lineRange ?? null,
     }
     const ed = editorRef.current
     if (ed && !ed.isDestroyed) {

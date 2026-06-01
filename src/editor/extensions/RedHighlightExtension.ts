@@ -14,9 +14,12 @@ export const SCAS_HINT_META = 'scasHintUpdate'
 const WORD_RE = /[a-zA-Z]+/g
 
 export interface HintState {
-  focusedPos: number | null     // ProseMirror position of the currently open word
+  focusedPos: number | null
   showHints: boolean
-  focusedMinWidth: number | null  // px width to reserve on the focused word span
+  focusedMinWidth: number | null
+  // Letter-spacing compression applied to chars on the focused word's visual line
+  // (split around the focused word) to absorb the min-width expansion in-place.
+  lineCompressionRange: { from: number; to: number; letterSpacingEm: number } | null
 }
 
 interface RedHighlightOptions {
@@ -32,7 +35,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
       getDoc: () => {
         throw new Error('RedHighlightExtension: getDoc option is required')
       },
-      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null }),
+      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null }),
     }
   },
 
@@ -181,6 +184,19 @@ function buildDecorations(
     }
 
     decorations.push(Decoration.inline(from, to, attrs))
+  }
+
+  // Line compression: tighten letter-spacing on chars either side of the
+  // focused word so the min-width expansion fits without wrapping.
+  const { lineCompressionRange } = hintState
+  if (lineCompressionRange && focusedPos !== null) {
+    const fw = redWords.find(rw => rw.from === focusedPos)
+    if (fw) {
+      const { from: lf, to: lt, letterSpacingEm: ls } = lineCompressionRange
+      const style = `letter-spacing: -${ls.toFixed(4)}em`
+      if (lf < fw.from) decorations.push(Decoration.inline(lf, fw.from, { style }))
+      if (fw.to < lt)   decorations.push(Decoration.inline(fw.to, lt,   { style }))
+    }
   }
 
   return DecorationSet.create(pmDoc, decorations)
