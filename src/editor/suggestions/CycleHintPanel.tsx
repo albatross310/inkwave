@@ -48,19 +48,7 @@ export function CycleHintPanel({ active, showHints, containerRight }: CycleHintP
         ))}
       </div>
 
-      {/* ── Mobile: bottom strip — sits above the footer bar ────────────────── */}
-      <div
-        aria-hidden="true"
-        className="flex min-[720px]:hidden fixed bottom-20 left-0 right-0 z-40
-                   justify-center gap-5 pb-2 pt-2 pointer-events-none select-none"
-      >
-        {HINTS.map(({ keys, label }) => (
-          <div key={keys} className="flex items-baseline gap-1">
-            <span className="font-mono text-xs text-stone-400">{keys}</span>
-            <span className="text-xs text-stone-300">{label}</span>
-          </div>
-        ))}
-      </div>
+      {/* Mobile hint strip intentionally omitted — tap controls are self-evident */}
     </>
   )
 }

@@ -280,29 +280,31 @@ export function ThesaurusPopover({
       openCycleForElement(target)
     }
 
-    // Touch: open cycle on tap, suppress the synthetic mouse events that follow.
+    // Touch: intercept at document level (capture) so we beat ProseMirror's own
+    // touch handling. touchstart preventDefault blocks cursor placement + scroll
+    // only when the tap lands on a red word.
+    function onTouchStart(e: TouchEvent) {
+      const target = (e.target as HTMLElement).closest('.scas-red')
+      if (target && editorEl.contains(target)) e.preventDefault()
+    }
+
     function onTouchEnd(e: TouchEvent) {
       const target = (e.target as HTMLElement).closest('.scas-red') as HTMLElement | null
-      if (!target) return
+      if (!target || !editorEl.contains(target)) return
       e.preventDefault()
       tabCursorRef.current = null
       openCycleForElement(target)
     }
 
-    // Prevent cursor placement on touchstart for red words (must be non-passive).
-    function onTouchStart(e: TouchEvent) {
-      if ((e.target as HTMLElement).closest('.scas-red')) e.preventDefault()
-    }
-
-    editorEl.addEventListener('mousedown',  onMouseDown,  { capture: true })
-    editorEl.addEventListener('click',      onEditorClick, { capture: true })
-    editorEl.addEventListener('touchstart', onTouchStart,  { capture: true, passive: false })
-    editorEl.addEventListener('touchend',   onTouchEnd,    { capture: true })
+    editorEl.addEventListener('mousedown', onMouseDown,  { capture: true })
+    editorEl.addEventListener('click',     onEditorClick, { capture: true })
+    document.addEventListener('touchstart', onTouchStart, { capture: true, passive: false })
+    document.addEventListener('touchend',   onTouchEnd,   { capture: true })
     return () => {
-      editorEl.removeEventListener('mousedown',  onMouseDown,  { capture: true })
-      editorEl.removeEventListener('click',      onEditorClick, { capture: true })
-      editorEl.removeEventListener('touchstart', onTouchStart,  { capture: true })
-      editorEl.removeEventListener('touchend',   onTouchEnd,    { capture: true })
+      editorEl.removeEventListener('mousedown', onMouseDown,  { capture: true })
+      editorEl.removeEventListener('click',     onEditorClick, { capture: true })
+      document.removeEventListener('touchstart', onTouchStart, { capture: true })
+      document.removeEventListener('touchend',   onTouchEnd,   { capture: true })
     }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
