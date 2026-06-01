@@ -212,8 +212,6 @@ export function ThesaurusPopover({
 
     // Capture geometry BEFORE the async getSynonyms call.
     const rect = target.getBoundingClientRect()
-    const containerRect = containerEl.current?.getBoundingClientRect()
-      ?? editor.view.dom.getBoundingClientRect()
     const font = getFont(target)
     const wordWidth = rect.width
 
