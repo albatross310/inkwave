@@ -371,15 +371,31 @@ export function ThesaurusPopover({
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [editor, cycle, paragraphIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Outside click ──────────────────────────────────────────────────────────
+  // ── Outside click / tap ────────────────────────────────────────────────────
   useEffect(() => {
     if (!cycle) return
-    function onMouseDown(e: MouseEvent) {
-      const target = e.target as HTMLElement
-      if (!target.closest?.('.scas-red') && !target.closest?.('.scas-cycle-card')) closeCycle()
+
+    function isOutside(target: HTMLElement | null) {
+      return target && !target.closest?.('.scas-red') && !target.closest?.('.scas-cycle-card')
     }
+
+    function onMouseDown(e: MouseEvent) {
+      if (isOutside(e.target as HTMLElement)) closeCycle()
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      const touch = e.touches[0]
+      if (!touch) return
+      const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement | null
+      if (isOutside(target)) closeCycle()
+    }
+
     document.addEventListener('mousedown', onMouseDown)
-    return () => document.removeEventListener('mousedown', onMouseDown)
+    document.addEventListener('touchstart', onTouchStart, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('touchstart', onTouchStart)
+    }
   }, [cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Accept a suggestion ────────────────────────────────────────────────────
