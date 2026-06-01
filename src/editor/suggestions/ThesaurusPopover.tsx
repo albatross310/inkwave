@@ -50,8 +50,11 @@ interface CycleState {
   to: number
   synonyms: string[]   // exactly CYCLE_SIZE entries
   currentIdx: number
-  minWidth: number     // px — min-width applied to focused word decoration
-  naturalWidth: number // px — word's natural width before decoration
+  minWidth: number          // px — min-width applied to focused word decoration
+  naturalWidth: number      // px — word's natural width before decoration
+  naturalTop: number        // px viewport-y — focused word's top in pre-decoration layout
+  naturalBottom: number     // px viewport-y — focused word's bottom in pre-decoration layout
+  naturalLineRight: number  // px — rightmost char on the focused word's line, pre-decoration
 }
 
 interface ThesaurusPopoverProps {
@@ -95,11 +98,10 @@ export function ThesaurusPopover({
     }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Line-compression effect: compress ALL non-word chars on the focused word's
-  // visual line (both before and after) to absorb the min-width expansion evenly.
-  // To prevent flows-back, we add margin-left to the focused word equal to the
-  // total space lost by compressing chars before it (offsetLeft), anchoring it
-  // to its original horizontal position regardless of zoom or line position.
+  // Line-compression effect: tighten letter-spacing on non-word chars on the
+  // focused word's visual line so the min-width expansion fits without wrapping.
+  // A widget at the visual line start cancels the first-word's compression,
+  // keeping it anchored and preventing flows-back to the previous line.
   useEffect(() => {
     if (!cycle) return
 
@@ -107,41 +109,43 @@ export function ThesaurusPopover({
       const focusedEl = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
       if (!focusedEl) return
 
-      const fRect = focusedEl.getBoundingClientRect()
-      const lineMidY = (fRect.top + fRect.bottom) / 2
       const paraEl = focusedEl.closest('p')
       if (!paraEl) return
 
-      let lineFrom: number | null = null
+      // Use the NATURAL y-position of the focused word (pre-decoration) as the
+      // reference for line detection. Post-decoration, the browser may have
+      // wrapped the focused word to a different visual line, so fRect.top would
+      // point to the wrong line. naturalTop/Bottom are viewport-relative
+      // snapshots taken synchronously before any decoration fired.
+      const naturalMidY = (cycle!.naturalTop + cycle!.naturalBottom) / 2
+      const naturalHeight = cycle!.naturalBottom - cycle!.naturalTop
+      const tolerance = naturalHeight * 0.45
+
+      let lineFrom:  number | null = null
       let lineFromX  = Infinity   // x-coord of lineFrom — picks true visual line start
-      let lineTo:   number | null = null
+      let lineTo:    number | null = null
       let charsBefore = 0
       let charsAfter  = 0
 
       const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT)
       const r = document.createRange()
 
-      // Use a strict vertical tolerance: chars must have their midpoint within
-      // 30% of the focused word's line-box height from the line centre.
-      // This avoids accidentally catching chars on adjacent lines at any zoom.
-      const tolerance = fRect.height * 0.3
-
       for (;;) {
         const node = walker.nextNode() as Text | null
         if (!node) break
         if (!node.length) continue
 
-        // Skip text nodes entirely above/below this line.
+        // Skip text nodes entirely above/below the original line.
         r.setStart(node, 0)
         r.setEnd(node, node.length)
         const nr = r.getBoundingClientRect()
-        if (nr.bottom < fRect.top - 2 || nr.top > fRect.bottom + 2) continue
+        if (nr.bottom < cycle!.naturalTop - 2 || nr.top > cycle!.naturalBottom + 2) continue
 
         for (let i = 0; i < node.length; i++) {
           r.setStart(node, i)
           r.setEnd(node, i + 1)
           const cr = r.getBoundingClientRect()
-          if (Math.abs((cr.top + cr.bottom) / 2 - lineMidY) < tolerance) {
+          if (Math.abs((cr.top + cr.bottom) / 2 - naturalMidY) < tolerance) {
             try {
               const pmPos = editor.view.posAtDOM(node, i)
               if (pmPos < cycle!.from) {
@@ -169,28 +173,67 @@ export function ThesaurusPopover({
         return
       }
 
-      const expansion = Math.max(0, cycle!.minWidth - cycle!.naturalWidth)
-      const fontSize  = parseFloat(window.getComputedStyle(focusedEl).fontSize) || 18
-      const lsEm      = expansion > 0 ? expansion / totalNonWord / fontSize : 0
+      // naturalLineRight includes all chars on the original line (before and
+      // after the focused word) measured before decoration fired. This gives
+      // correct slack even when after-chars wrapped due to the expansion.
+      const paraRight    = paraEl.getBoundingClientRect().right
+      const naturalSlack = Math.max(0, paraRight - cycle!.naturalLineRight)
+      const expansion    = Math.max(0, cycle!.minWidth - cycle!.naturalWidth)
+      // Add a 2 px buffer when compression is already needed: absorbs subpixel
+      // rounding differences between browsers and font hinting that can leave
+      // a single word just over the fold even with otherwise-correct compression.
+      const netExpansion = expansion > naturalSlack
+        ? expansion - naturalSlack + 2
+        : 0
 
-      // Count the first word on the visual line using PM document text starting
-      // at lineFrom. This is robust against stray chars from adjacent lines
-      // slipping through the tolerance check.
-      // Stop at the first whitespace; punctuation attached to words (e.g. the
-      // comma in "hantavirus,") is included so the word boundary is correct.
+      // Slack already covers the expansion — no compression needed.
+      if (netExpansion === 0) {
+        onHintChange(cycle!.from, cycle!.minWidth, null)
+        return
+      }
+
+      const fontSize = parseFloat(window.getComputedStyle(focusedEl).fontSize) || 18
+
+      // The widget that cancels first-word compression only makes sense when
+      // there is a previous visual line within the paragraph that text could
+      // flow back onto. On the first visual line of a paragraph (lineFrom at
+      // parentOffset 0) there is nothing above to reflow into, so skip the
+      // widget and compress all chars uniformly instead.
       let firstWordChars = 0
       if (lineFrom !== null) {
-        const docSize = editor.state.doc.content.size
-        let p = lineFrom
-        while (p < cycle!.from && p + 1 <= docSize) {
-          try {
-            const ch = editor.state.doc.textBetween(p, p + 1)
-            if (ch === ' ' || ch === '\t' || ch === '\xa0') break
-            firstWordChars++
-          } catch { break }
-          p++
+        const isFirstLineOfPara = (() => {
+          try { return editor.state.doc.resolve(lineFrom).parentOffset === 0 }
+          catch { return false }
+        })()
+
+        if (!isFirstLineOfPara) {
+          // Count chars of the first word on the line (up to first whitespace).
+          // These are excluded from charsToCompress because the widget cancels
+          // their compression, keeping the first word anchored in place.
+          const docSize = editor.state.doc.content.size
+          let p = lineFrom
+          while (p < cycle!.from && p + 1 <= docSize) {
+            try {
+              const ch = editor.state.doc.textBetween(p, p + 1)
+              if (ch === ' ' || ch === '\t' || ch === '\xa0') break
+              firstWordChars++
+            } catch { break }
+            p++
+          }
         }
       }
+
+      // The widget cancels the compression on firstWordChars, so those chars
+      // contribute zero net line reduction. Only the remaining chars absorb
+      // the overflow — divide by (totalNonWord - firstWordChars).
+      // If that denominator is zero (only the first word exists, no other chars
+      // to compress), skip compression — the widget would cancel everything.
+      const charsToCompress = totalNonWord - firstWordChars
+      if (charsToCompress <= 0) {
+        onHintChange(cycle!.from, cycle!.minWidth, null)
+        return
+      }
+      const lsEm = netExpansion / charsToCompress / fontSize
 
       // Widget width is based only on the first word's compression — we only
       // need to anchor the first word so it cannot flow back to the previous line.
@@ -274,6 +317,34 @@ export function ThesaurusPopover({
     const font = getFont(target)
     const wordWidth = rect.width
 
+    // Measure the rightmost char on the focused word's visual line right now,
+    // while the layout is still natural (no min-width decoration yet).
+    // Also captures top/bottom so the compression walker can find chars on the
+    // correct original line even if the word later wraps to a different line.
+    let naturalLineRight = rect.right
+    const pEl = target.closest('p')
+    if (pEl) {
+      const midY = (rect.top + rect.bottom) / 2
+      const tol  = rect.height * 0.45
+      const tw   = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT)
+      const rng  = document.createRange()
+      for (;;) {
+        const nd = tw.nextNode() as Text | null
+        if (!nd) break
+        rng.setStart(nd, 0)
+        rng.setEnd(nd, nd.length)
+        const nr = rng.getBoundingClientRect()
+        if (nr.bottom < rect.top - 2 || nr.top > rect.bottom + 2) continue
+        for (let i = 0; i < nd.length; i++) {
+          rng.setStart(nd, i)
+          rng.setEnd(nd, i + 1)
+          const cr = rng.getBoundingClientRect()
+          if (Math.abs((cr.top + cr.bottom) / 2 - midY) < tol && cr.right > naturalLineRight)
+            naturalLineRight = cr.right
+        }
+      }
+    }
+
     getSynonyms(lookupWord).then((candidates) => {
       // Slot 0 = original word, slots 1-6 = synonyms, slot 7 = delete sentinel.
       // Delete is above index 0 (reached by pressing j once from default).
@@ -299,6 +370,9 @@ export function ThesaurusPopover({
         currentIdx: 0,
         minWidth: maxWidth,
         naturalWidth: wordWidth,
+        naturalTop: rect.top,
+        naturalBottom: rect.bottom,
+        naturalLineRight,
       })
     })
   }
