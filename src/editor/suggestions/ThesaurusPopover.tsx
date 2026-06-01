@@ -117,9 +117,16 @@ export function ThesaurusPopover({
       // wrapped the focused word to a different visual line, so fRect.top would
       // point to the wrong line. naturalTop/Bottom are viewport-relative
       // snapshots taken synchronously before any decoration fired.
-      const naturalMidY = (cycle!.naturalTop + cycle!.naturalBottom) / 2
+      //
+      // NOTE: .scas-red is display:inline-block, so naturalTop/Bottom span the
+      // full line-height box (2.5 × fontSize ≈ 45px). Pure vertical-overlap
+      // would include glyphs from the NEXT visual line (their cr.top falls
+      // within the generous line-height box). A midpoint+tolerance check is
+      // safer: all glyphs on the current line have midpoints within ±0.45×height
+      // of the line centre, while next-line glyphs are ~45px away.
+      const naturalMidY  = (cycle!.naturalTop + cycle!.naturalBottom) / 2
       const naturalHeight = cycle!.naturalBottom - cycle!.naturalTop
-      const tolerance = naturalHeight * 0.45
+      const tolerance     = naturalHeight * 0.45
 
       let lineFrom:  number | null = null
       let lineFromX  = Infinity   // x-coord of lineFrom — picks true visual line start
@@ -259,7 +266,7 @@ export function ThesaurusPopover({
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', updateCompression)
     }
-  }, [cycle?.from]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Cursor management ──────────────────────────────────────────────────────
 
@@ -301,8 +308,6 @@ export function ThesaurusPopover({
   // ── Open cycle ─────────────────────────────────────────────────────────────
 
   function openCycleForElement(target: HTMLElement) {
-    // displayWord preserves original capitalisation for showing in the cycle.
-    // lookupWord is lowercase for the thesaurus API.
     const displayWord = target.textContent ?? ''
     const lookupWord  = target.dataset.word ?? displayWord.toLowerCase()
     if (!lookupWord) return
@@ -312,22 +317,28 @@ export function ThesaurusPopover({
       domPos = editor.view.posAtDOM(target.firstChild ?? target, 0)
     } catch { return }
 
-    // Capture geometry BEFORE the async getSynonyms call — layout is still natural here.
+    // Clear any existing decoration synchronously first. PM dispatch is
+    // synchronous so the DOM reverts to natural (un-decorated) layout before
+    // we measure. This prevents geometry corruption when the previous word's
+    // min-width or letter-spacing is still active in the DOM.
+    onHintChange(null, null)
+
+    // Capture geometry with the DOM in its natural state.
     const rect = target.getBoundingClientRect()
     const font = getFont(target)
     const wordWidth = rect.width
 
-    // Measure the rightmost char on the focused word's visual line right now,
-    // while the layout is still natural (no min-width decoration yet).
+    // Measure rightmost char on the focused word's visual line (vertical-overlap).
     // Also captures top/bottom so the compression walker can find chars on the
-    // correct original line even if the word later wraps to a different line.
+    // correct original line even if the word later wraps after decoration fires.
     let naturalLineRight = rect.right
     const pEl = target.closest('p')
     if (pEl) {
-      const midY = (rect.top + rect.bottom) / 2
-      const tol  = rect.height * 0.45
-      const tw   = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT)
-      const rng  = document.createRange()
+      // Vertical-overlap: char is on the same line if its bbox overlaps the
+      // focused word's bbox vertically.  Correctly captures tall glyphs
+      // (capitals, ascenders) whose midpoint would be clipped by a tolerance check.
+      const tw  = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT)
+      const rng = document.createRange()
       for (;;) {
         const nd = tw.nextNode() as Text | null
         if (!nd) break
@@ -339,15 +350,39 @@ export function ThesaurusPopover({
           rng.setStart(nd, i)
           rng.setEnd(nd, i + 1)
           const cr = rng.getBoundingClientRect()
-          if (Math.abs((cr.top + cr.bottom) / 2 - midY) < tol && cr.right > naturalLineRight)
+          if (cr.bottom >= rect.top && cr.top <= rect.bottom && cr.right > naturalLineRight)
             naturalLineRight = cr.right
         }
       }
     }
 
+    // Apply .scas-focused immediately with provisional min-width = natural word
+    // width.  This prevents the null-render gap between closing one cycle and
+    // opening the next — the Tab-navigation flash is eliminated because we
+    // never pass through a state where both cycle and focusedEl are absent.
+    onHintChange(domPos, wordWidth)
+
+    // Set provisional cycle so the popover card renders right away.
+    // All synonym slots show the word itself until getSynonyms resolves.
+    const provisionalSynonyms = Array.from(
+      { length: CYCLE_SIZE },
+      (_, i) => i === CYCLE_SIZE - 1 ? DELETE_SENTINEL : displayWord,
+    )
+    setCycle({
+      word: lookupWord,
+      from: domPos,
+      to: domPos + displayWord.length,
+      synonyms: provisionalSynonyms,
+      currentIdx: 0,
+      minWidth: wordWidth,
+      naturalWidth: wordWidth,
+      naturalTop: rect.top,
+      naturalBottom: rect.bottom,
+      naturalLineRight,
+    })
+
     getSynonyms(lookupWord).then((candidates) => {
       // Slot 0 = original word, slots 1-6 = synonyms, slot 7 = delete sentinel.
-      // Delete is above index 0 (reached by pressing j once from default).
       const base = [displayWord, ...candidates].slice(0, CYCLE_SIZE - 1)
       const padded = Array.from(
         { length: CYCLE_SIZE - 1 },
@@ -361,19 +396,14 @@ export function ThesaurusPopover({
       const CARD_PAD_X = 3
       const measurable = synonyms.filter(s => s !== DELETE_SENTINEL)
       const maxWidth = Math.max(wordWidth, ...measurable.map(s => measureTextWidth(s, font))) + CARD_PAD_X * 2
+
       onHintChange(domPos, maxWidth)
-      setCycle({
-        word: lookupWord,
-        from: domPos,
-        to: domPos + displayWord.length,
-        synonyms,
-        currentIdx: 0,
-        minWidth: maxWidth,
-        naturalWidth: wordWidth,
-        naturalTop: rect.top,
-        naturalBottom: rect.bottom,
-        naturalLineRight,
-      })
+      // Guard: if another word was opened while we were fetching, discard.
+      setCycle(prev =>
+        prev && prev.from === domPos
+          ? { ...prev, synonyms, minWidth: maxWidth }
+          : prev
+      )
     })
   }
 
@@ -440,11 +470,16 @@ export function ThesaurusPopover({
         if (e.key === 'Tab') {
           e.preventDefault()
           const from = cycle.from
-          closeCycle(true, false)
-          requestAnimationFrame(() => {
-            const found = e.shiftKey ? goNext(from) : goPrev(from)
-            if (!found) restoreCursor()
-          })
+          recordIgnored()
+          // Navigate directly without closing the cycle first.
+          // openCycleForElement clears and replaces the cycle atomically,
+          // so we never pass through a null cycle state (no flash).
+          const found = e.shiftKey ? goNext(from) : goPrev(from)
+          if (!found) {
+            onHintChange(null, null)
+            setCycle(null)
+            restoreCursor()
+          }
           return
         }
 
