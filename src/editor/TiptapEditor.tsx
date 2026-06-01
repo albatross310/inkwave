@@ -145,6 +145,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => window.removeEventListener('resize', update)
   }, [])
 
+
   // Warm the synonym cache as soon as the editor is ready (existing red words).
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -190,7 +191,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           <ScrollHead position="top" />
 
           {/* Parchment paper body */}
-          <div className="scroll-paper relative pl-2 pr-5 pt-10 pb-24">
+          <div className="scroll-paper relative px-2 pt-10 pb-24">
             <div className="mx-auto w-full max-w-[560px] md:max-w-[720px] relative" ref={containerRef}>
               <EditorContent editor={editor} />
               {editor && (
@@ -215,7 +216,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-4 pointer-events-none">
           <div
             className="pointer-events-auto flex items-center gap-4 bg-white px-4 py-2 shadow-sm"
-            style={{ border: '1px solid rgba(180, 90, 10, 0.85)', borderRadius: '15px' }}
+            style={{ border: '1px solid rgba(92, 45, 138, 0.75)', borderRadius: '15px' }}
           >
             <LimitSelector
               value={doc.scasLimitN}
@@ -238,51 +239,68 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 }
 
 function ScrollHead({ position }: { position: 'top' | 'bottom' }) {
-  const isTop = position === 'top'
-  const outerRadius = isTop ? '6px 6px 0 0' : '0 0 6px 6px'
-  const capRadiusL  = isTop ? '6px 0 0 0'   : '0 0 0 6px'
-  const capRadiusR  = isTop ? '0 6px 0 0'   : '0 0 6px 0'
+  const isTop  = position === 'top'
+  const brOuter = isTop ? '8px 8px 0 0' : '0 0 8px 8px'
+  const brL     = isTop ? '8px 0 0 0'   : '0 0 0 8px'
+  const brR     = isTop ? '0 8px 0 0'   : '0 0 8px 0'
+
   return (
     <div
       aria-hidden="true"
       style={{
-        height: '24px',
+        height: '36px',
         width: '100%',
-        background: 'linear-gradient(to bottom, #c8a45a 0%, #e8c97a 28%, #f5dea0 48%, #d4a84e 70%, #8b6520 100%)',
-        borderRadius: outerRadius,
         position: 'relative',
+        borderRadius: brOuter,
         overflow: 'hidden',
+        // Cylinder gradient: very dark top edge → warm wood → bright highlight band → lit face → darkening back → very dark bottom edge
+        background: 'linear-gradient(to bottom, #160901 0%, #5a2e06 5%, #a86018 13%, #d99430 22%, #f8d060 30%, #fce070 36%, #eab030 46%, #b87020 58%, #7a4010 72%, #3e1e06 86%, #140800 100%)',
       }}
     >
-      {/* Highlight streak — simulates cylinder curvature */}
+      {/* Subtle horizontal wood grain */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: brOuter,
+        backgroundImage: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 4px, rgba(0,0,0,0.045) 4px, rgba(0,0,0,0.045) 5px)',
+      }} />
+
+      {/* Primary glint — bright highlight near the top of the curve */}
       <div style={{
         position: 'absolute',
-        top: '2px', left: '8%', right: '8%', height: '5px',
-        background: 'linear-gradient(to right, transparent, rgba(255,248,210,0.7) 30%, rgba(255,255,240,0.85) 50%, rgba(255,248,210,0.7) 70%, transparent)',
-        borderRadius: '3px',
+        top: '22%', left: '8%', right: '8%', height: '16%',
+        background: 'linear-gradient(to right, transparent, rgba(255,253,225,0.72) 22%, rgba(255,255,248,0.94) 50%, rgba(255,253,225,0.72) 78%, transparent)',
+        borderRadius: '6px',
       }} />
-      {/* Left end cap darker rim */}
+
+      {/* Soft secondary reflection on the lower curve */}
       <div style={{
         position: 'absolute',
-        top: 0, left: 0, bottom: 0, width: '18px',
-        background: 'linear-gradient(to right, rgba(80,45,5,0.45), transparent)',
-        borderRadius: capRadiusL,
+        bottom: '16%', left: '20%', right: '20%', height: '8%',
+        background: 'linear-gradient(to right, transparent, rgba(215,155,45,0.24) 50%, transparent)',
+        borderRadius: '4px',
       }} />
-      {/* Right end cap darker rim */}
+
+      {/* Left end-cap — multi-stop dark wedge simulating the cylinder turning at the edge */}
       <div style={{
-        position: 'absolute',
-        top: 0, right: 0, bottom: 0, width: '18px',
-        background: 'linear-gradient(to left, rgba(80,45,5,0.45), transparent)',
-        borderRadius: capRadiusR,
+        position: 'absolute', top: 0, left: 0, bottom: 0, width: '36px',
+        background: 'linear-gradient(to right, rgba(6,2,0,0.92) 0px, rgba(18,7,0,0.68) 8px, rgba(35,14,0,0.35) 20px, transparent 36px)',
+        borderRadius: brL,
       }} />
-      {/* Shadow edge — bottom for top head, top for bottom head */}
+
+      {/* Right end-cap */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0, bottom: 0, width: '36px',
+        background: 'linear-gradient(to left, rgba(6,2,0,0.92) 0px, rgba(18,7,0,0.68) 8px, rgba(35,14,0,0.35) 20px, transparent 36px)',
+        borderRadius: brR,
+      }} />
+
+      {/* Paper-contact shadow — parchment wraps tightly around the roller here */}
       <div style={{
         position: 'absolute',
         ...(isTop ? { bottom: 0 } : { top: 0 }),
-        left: 0, right: 0, height: '4px',
+        left: 0, right: 0, height: '10px',
         background: isTop
-          ? 'linear-gradient(to top, rgba(60,35,5,0.35), transparent)'
-          : 'linear-gradient(to bottom, rgba(60,35,5,0.35), transparent)',
+          ? 'linear-gradient(to top, rgba(0,0,0,0.52), transparent)'
+          : 'linear-gradient(to bottom, rgba(0,0,0,0.52), transparent)',
       }} />
     </div>
   )

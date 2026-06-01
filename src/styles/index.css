@@ -30,13 +30,6 @@
     cursor: text;
   }
 
-  /* Right margin (desktop only) — gives the CycleHintPanel a consistent zone
-     to sit in. Word overflow is handled by letter-spacing compression. */
-  @media (min-width: 768px) {
-    .ProseMirror {
-      padding-right: 4em;
-    }
-  }
 
   .ProseMirror p {
     margin-bottom: 1.25em;
@@ -56,17 +49,17 @@
     background-color: rgba(42, 59, 95, 0.12);
   }
 
-  /* SCAS red highlight — words outside active vocabulary */
+  /* SCAS highlight — words outside active vocabulary */
   .scas-red {
     display: inline-block;
     position: relative;
-    color: #a02020;
+    color: #5c2d8a;
     cursor: pointer;
   }
 
-  /* Focused word (popover open) — dark orange */
+  /* Focused word (popover open) — lighter purple */
   .scas-focused {
-    color: #c96a00;
+    color: #9b5ccc;
   }
 
   /* "tab" hint badge — centred above word */

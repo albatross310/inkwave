@@ -169,7 +169,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   const prev    = cycle.synonyms[(cycle.currentIdx - 1 + CYCLE_SIZE) % CYCLE_SIZE]
   const current = cycle.synonyms[cycle.currentIdx]
   const next    = cycle.synonyms[(cycle.currentIdx + 1) % CYCLE_SIZE]
-  const colorOf   = (s: string) => s === cycle.synonyms[0] ? '#a02020' : '#c96a00'
+  const colorOf   = (s: string) => s === cycle.synonyms[0] ? '#5c2d8a' : '#9b5ccc'
   const opacityOf = (s: string) => s === cycle.synonyms[0] ? 0.92 : 0.72
   const mobile    = window.innerWidth < 768 ? 1.4 : 1
   const rowBase: React.CSSProperties = {
@@ -186,7 +186,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       {/* Three-row card: prev / current / next */}
       <div className="absolute z-50 select-none scas-cycle-card"
         style={{ top: contTop, left, width: Math.ceil(rect.width), fontFamily: cs.fontFamily, fontSize: fsz,
-                 background: 'white', border: '1px solid rgba(180, 90, 10, 0.85)', borderRadius: '10px',
+                 background: 'white', border: '1px solid rgba(92, 45, 138, 0.75)', borderRadius: '10px',
                  padding: `${cardPadY}px 3px`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <div style={{ ...rowBase, height: outerLH, fontSize: fsz * 0.92, color: colorOf(prev), opacity: opacityOf(prev), cursor: 'pointer' }}
           onClick={() => acceptSuggestion(prev, true)}>{displayFor(prev, mobile)}</div>
