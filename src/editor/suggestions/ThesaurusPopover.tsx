@@ -98,172 +98,150 @@ export function ThesaurusPopover({
     }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Line-compression effect: tighten letter-spacing on non-word chars on the
-  // focused word's visual line so the min-width expansion fits without wrapping.
-  // A widget at the visual line start cancels the first-word's compression,
-  // keeping it anchored and preventing flows-back to the previous line.
+  // ── Line compression helper ────────────────────────────────────────────────
+
+  // Synchronously computes the letter-spacing range needed to absorb the
+  // focused word's min-width expansion without overflowing the visual line.
+  // Uses stored natural geometry (naturalTop/Bottom) so it does NOT require
+  // the min-width decoration to be painted first.  Safe to call in the same
+  // synchronous turn as onHintChange(pos, minWidth, ...) so that both land
+  // in a single PM dispatch — preventing the one-frame expanded-but-
+  // uncompressed state that previously caused the "wound" overflow.
+  //
+  // NOTE: .scas-red is display:inline-block so naturalTop/Bottom span the
+  // full line-height box (≈45px). A midpoint+tolerance check is used rather
+  // than pure vertical-overlap to exclude glyphs on adjacent lines whose
+  // cr.top can fall inside the tall inline-block box.
+  function computeLineCompressionRange(
+    naturalTop: number,
+    naturalBottom: number,
+    naturalLineRight: number,
+    naturalWidth: number,
+    minWidth: number,
+    wordFrom: number,
+    wordTo: number,
+    paraEl: Element,
+  ): { from: number; to: number; letterSpacingEm: number; offsetLeft: number } | null {
+    const naturalMidY   = (naturalTop + naturalBottom) / 2
+    const naturalHeight = naturalBottom - naturalTop
+    const tolerance     = naturalHeight * 0.45
+
+    let lineFrom:  number | null = null
+    let lineFromX  = Infinity
+    let lineTo:    number | null = null
+    let charsBefore = 0
+    let charsAfter  = 0
+
+    const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT)
+    const r = document.createRange()
+
+    for (;;) {
+      const node = walker.nextNode() as Text | null
+      if (!node) break
+      if (!node.length) continue
+
+      r.setStart(node, 0)
+      r.setEnd(node, node.length)
+      const nr = r.getBoundingClientRect()
+      if (nr.bottom < naturalTop - 2 || nr.top > naturalBottom + 2) continue
+
+      for (let i = 0; i < node.length; i++) {
+        r.setStart(node, i)
+        r.setEnd(node, i + 1)
+        const cr = r.getBoundingClientRect()
+        if (Math.abs((cr.top + cr.bottom) / 2 - naturalMidY) < tolerance) {
+          try {
+            const pmPos = editor.view.posAtDOM(node, i)
+            if (pmPos < wordFrom) {
+              charsBefore++
+              // Min x-coordinate → true visual line start (not a stray trailing
+              // char from the previous line which would sit at a large x).
+              if (cr.left < lineFromX) { lineFromX = cr.left; lineFrom = pmPos }
+            } else if (pmPos >= wordTo) {
+              charsAfter++
+              if (lineTo === null || pmPos + 1 > lineTo) lineTo = pmPos + 1
+            }
+          } catch { /* skip non-editable nodes */ }
+        }
+      }
+    }
+
+    const totalNonWord = charsBefore + charsAfter
+    if (totalNonWord === 0) return null
+
+    const paraRight    = paraEl.getBoundingClientRect().right
+    const naturalSlack = Math.max(0, paraRight - naturalLineRight)
+    // Use Math.ceil(minWidth) to match the px value that RedHighlightExtension
+    // actually applies to the DOM (min-width: Math.ceil(mw)px).  Without the
+    // ceil, expansion is underestimated by up to 1 px — enough to skip
+    // compression when naturalSlack is just above the raw expansion value.
+    const expansion    = Math.max(0, Math.ceil(minWidth) - naturalWidth)
+    const netExpansion = expansion > naturalSlack
+      ? expansion - naturalSlack + 2
+      : 0
+
+    if (netExpansion === 0) return null
+
+    const focusedEl = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+    const fontSize  = parseFloat(
+      focusedEl ? window.getComputedStyle(focusedEl).fontSize : '18'
+    ) || 18
+
+    // Skip the first-word widget on the first visual line of a paragraph —
+    // nothing above to reflow onto, so compress all chars uniformly.
+    let firstWordChars = 0
+    if (lineFrom !== null) {
+      const isFirstLineOfPara = (() => {
+        try { return editor.state.doc.resolve(lineFrom).parentOffset === 0 }
+        catch { return false }
+      })()
+      if (!isFirstLineOfPara) {
+        const docSize = editor.state.doc.content.size
+        let p = lineFrom
+        while (p < wordFrom && p + 1 <= docSize) {
+          try {
+            const ch = editor.state.doc.textBetween(p, p + 1)
+            if (ch === ' ' || ch === '\t' || ch === '\xa0') break
+            firstWordChars++
+          } catch { break }
+          p++
+        }
+      }
+    }
+
+    const charsToCompress = totalNonWord - firstWordChars
+    if (charsToCompress <= 0) return null
+
+    const lsEm       = netExpansion / charsToCompress / fontSize
+    const offsetLeft = firstWordChars * lsEm * fontSize
+    const rangeFrom  = lineFrom ?? wordFrom
+
+    return { from: rangeFrom, to: lineTo ?? wordTo, letterSpacingEm: lsEm, offsetLeft }
+  }
+
+  // Line-compression effect: recalculates compression on resize and whenever
+  // cycle geometry or minWidth changes.  The initial application is done
+  // synchronously inside getSynonyms().then() so that min-width and
+  // compression land in a single PM dispatch (no one-frame overflow).
+  // This effect is therefore mostly a resize handler / safety net.
   useEffect(() => {
     if (!cycle) return
 
     function updateCompression() {
       const focusedEl = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
       if (!focusedEl) return
-
       const paraEl = focusedEl.closest('p')
       if (!paraEl) return
-
-      // Use the NATURAL y-position of the focused word (pre-decoration) as the
-      // reference for line detection. Post-decoration, the browser may have
-      // wrapped the focused word to a different visual line, so fRect.top would
-      // point to the wrong line. naturalTop/Bottom are viewport-relative
-      // snapshots taken synchronously before any decoration fired.
-      //
-      // NOTE: .scas-red is display:inline-block, so naturalTop/Bottom span the
-      // full line-height box (2.5 × fontSize ≈ 45px). Pure vertical-overlap
-      // would include glyphs from the NEXT visual line (their cr.top falls
-      // within the generous line-height box). A midpoint+tolerance check is
-      // safer: all glyphs on the current line have midpoints within ±0.45×height
-      // of the line centre, while next-line glyphs are ~45px away.
-      const naturalMidY  = (cycle!.naturalTop + cycle!.naturalBottom) / 2
-      const naturalHeight = cycle!.naturalBottom - cycle!.naturalTop
-      const tolerance     = naturalHeight * 0.45
-
-      let lineFrom:  number | null = null
-      let lineFromX  = Infinity   // x-coord of lineFrom — picks true visual line start
-      let lineTo:    number | null = null
-      let charsBefore = 0
-      let charsAfter  = 0
-
-      const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT)
-      const r = document.createRange()
-
-      for (;;) {
-        const node = walker.nextNode() as Text | null
-        if (!node) break
-        if (!node.length) continue
-
-        // Skip text nodes entirely above/below the original line.
-        r.setStart(node, 0)
-        r.setEnd(node, node.length)
-        const nr = r.getBoundingClientRect()
-        if (nr.bottom < cycle!.naturalTop - 2 || nr.top > cycle!.naturalBottom + 2) continue
-
-        for (let i = 0; i < node.length; i++) {
-          r.setStart(node, i)
-          r.setEnd(node, i + 1)
-          const cr = r.getBoundingClientRect()
-          if (Math.abs((cr.top + cr.bottom) / 2 - naturalMidY) < tolerance) {
-            try {
-              const pmPos = editor.view.posAtDOM(node, i)
-              if (pmPos < cycle!.from) {
-                charsBefore++
-                // Track the LEFTMOST char as the true visual line start.
-                // Using min x-coordinate (not min pmPos) prevents stray end-of-
-                // previous-line chars (e.g. a trailing comma) from being picked
-                // up as lineFrom — they sit at large x values, not small ones.
-                if (cr.left < lineFromX) {
-                  lineFromX = cr.left
-                  lineFrom  = pmPos
-                }
-              } else if (pmPos >= cycle!.to) {
-                charsAfter++
-                if (lineTo === null || pmPos + 1 > lineTo) lineTo = pmPos + 1
-              }
-            } catch { /* skip non-editable nodes */ }
-          }
-        }
-      }
-
-      const totalNonWord = charsBefore + charsAfter
-      if (totalNonWord === 0) {
-        onHintChange(cycle!.from, cycle!.minWidth, null)
-        return
-      }
-
-      // naturalLineRight includes all chars on the original line (before and
-      // after the focused word) measured before decoration fired. This gives
-      // correct slack even when after-chars wrapped due to the expansion.
-      const paraRight    = paraEl.getBoundingClientRect().right
-      const naturalSlack = Math.max(0, paraRight - cycle!.naturalLineRight)
-      const expansion    = Math.max(0, cycle!.minWidth - cycle!.naturalWidth)
-      // Add a 2 px buffer when compression is already needed: absorbs subpixel
-      // rounding differences between browsers and font hinting that can leave
-      // a single word just over the fold even with otherwise-correct compression.
-      const netExpansion = expansion > naturalSlack
-        ? expansion - naturalSlack + 2
-        : 0
-
-      // Slack already covers the expansion — no compression needed.
-      if (netExpansion === 0) {
-        onHintChange(cycle!.from, cycle!.minWidth, null)
-        return
-      }
-
-      const fontSize = parseFloat(window.getComputedStyle(focusedEl).fontSize) || 18
-
-      // The widget that cancels first-word compression only makes sense when
-      // there is a previous visual line within the paragraph that text could
-      // flow back onto. On the first visual line of a paragraph (lineFrom at
-      // parentOffset 0) there is nothing above to reflow into, so skip the
-      // widget and compress all chars uniformly instead.
-      let firstWordChars = 0
-      if (lineFrom !== null) {
-        const isFirstLineOfPara = (() => {
-          try { return editor.state.doc.resolve(lineFrom).parentOffset === 0 }
-          catch { return false }
-        })()
-
-        if (!isFirstLineOfPara) {
-          // Count chars of the first word on the line (up to first whitespace).
-          // These are excluded from charsToCompress because the widget cancels
-          // their compression, keeping the first word anchored in place.
-          const docSize = editor.state.doc.content.size
-          let p = lineFrom
-          while (p < cycle!.from && p + 1 <= docSize) {
-            try {
-              const ch = editor.state.doc.textBetween(p, p + 1)
-              if (ch === ' ' || ch === '\t' || ch === '\xa0') break
-              firstWordChars++
-            } catch { break }
-            p++
-          }
-        }
-      }
-
-      // The widget cancels the compression on firstWordChars, so those chars
-      // contribute zero net line reduction. Only the remaining chars absorb
-      // the overflow — divide by (totalNonWord - firstWordChars).
-      // If that denominator is zero (only the first word exists, no other chars
-      // to compress), skip compression — the widget would cancel everything.
-      const charsToCompress = totalNonWord - firstWordChars
-      if (charsToCompress <= 0) {
-        onHintChange(cycle!.from, cycle!.minWidth, null)
-        return
-      }
-      const lsEm = netExpansion / charsToCompress / fontSize
-
-      // Widget width is based only on the first word's compression — we only
-      // need to anchor the first word so it cannot flow back to the previous line.
-      const offsetLeft = firstWordChars * lsEm * fontSize
-
-      // Use cycle.from as range start when there are no before-chars so
-      // RedHighlightExtension's "lf < fw.from" guard stays false in that case.
-      const rangeFrom = lineFrom ?? cycle!.from
-
-      onHintChange(
-        cycle!.from,
-        cycle!.minWidth,
-        lsEm > 0
-          ? { from: rangeFrom, to: lineTo ?? cycle!.to, letterSpacingEm: lsEm, offsetLeft }
-          : null,
+      const lineRange = computeLineCompressionRange(
+        cycle!.naturalTop, cycle!.naturalBottom, cycle!.naturalLineRight,
+        cycle!.naturalWidth, cycle!.minWidth, cycle!.from, cycle!.to, paraEl,
       )
+      onHintChange(cycle!.from, cycle!.minWidth, lineRange)
     }
 
-    // RAF ensures the min-width decoration has been painted before we measure.
-    const raf = requestAnimationFrame(updateCompression)
+    updateCompression()
     window.addEventListener('resize', updateCompression)
     return () => {
-      cancelAnimationFrame(raf)
       window.removeEventListener('resize', updateCompression)
     }
   }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -323,16 +301,35 @@ export function ThesaurusPopover({
     // min-width or letter-spacing is still active in the DOM.
     onHintChange(null, null)
 
+    // Re-acquire a live element reference after the PM DOM rebuild.
+    // onHintChange(null,null) dispatches a PM transaction that rebuilds the
+    // DecorationSet. If the previous compression range covered this word,
+    // PM's reconciler destroys and recreates the DOM nodes in that range,
+    // silently invalidating the original `target` pointer. Calling
+    // getBoundingClientRect() on a detached node returns all zeros, which
+    // makes naturalTop/Bottom=0 and breaks the compression walker entirely.
+    // Re-querying by PM position gives us a guaranteed-live element.
+    let liveTarget: HTMLElement | null = null
+    for (const el of editor.view.dom.querySelectorAll<HTMLElement>('.scas-red')) {
+      try {
+        if (editor.view.posAtDOM(el.firstChild ?? el, 0) === domPos) {
+          liveTarget = el
+          break
+        }
+      } catch {}
+    }
+    if (!liveTarget) return
+
     // Capture geometry with the DOM in its natural state.
-    const rect = target.getBoundingClientRect()
-    const font = getFont(target)
+    const rect = liveTarget.getBoundingClientRect()
+    const font = getFont(liveTarget)
     const wordWidth = rect.width
 
     // Measure rightmost char on the focused word's visual line (vertical-overlap).
     // Also captures top/bottom so the compression walker can find chars on the
     // correct original line even if the word later wraps after decoration fires.
     let naturalLineRight = rect.right
-    const pEl = target.closest('p')
+    const pEl = liveTarget.closest('p')
     if (pEl) {
       // Vertical-overlap: char is on the same line if its bbox overlaps the
       // focused word's bbox vertically.  Correctly captures tall glyphs
@@ -397,8 +394,33 @@ export function ThesaurusPopover({
       const measurable = synonyms.filter(s => s !== DELETE_SENTINEL)
       const maxWidth = Math.max(wordWidth, ...measurable.map(s => measureTextWidth(s, font))) + CARD_PAD_X * 2
 
-      onHintChange(domPos, maxWidth)
-      // Guard: if another word was opened while we were fetching, discard.
+      // Guard: bail if the cycle was closed, OR if another word has since been
+      // focused (stale .then() from a previous word whose network fetch resolved
+      // late — its onHintChange would refocus the wrong word and corrupt compression).
+      const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+      if (!fe) return
+      let fePos: number
+      try {
+        fePos = editor.view.posAtDOM(fe.firstChild ?? fe, 0)
+      } catch { return }
+      if (fePos !== domPos) return
+
+      // Compute compression synchronously using the natural geometry captured
+      // above, then dispatch min-width + letter-spacing in ONE onHintChange call.
+      // This eliminates the one-frame expanded-but-uncompressed paint gap that
+      // was the true cause of the "wound" overflow (the old RAF left a full
+      // animation frame where the word was wider but not yet compressed).
+      const pe = (fe.closest('p') ?? pEl) as Element | null
+      const lineRange = pe
+        ? computeLineCompressionRange(
+            rect.top, rect.bottom, naturalLineRight,
+            wordWidth, maxWidth,
+            domPos, domPos + displayWord.length, pe,
+          )
+        : null
+
+      onHintChange(domPos, maxWidth, lineRange)
+      // Guard: if another word was opened while synonyms were fetching, discard.
       setCycle(prev =>
         prev && prev.from === domPos
           ? { ...prev, synonyms, minWidth: maxWidth }
