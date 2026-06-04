@@ -241,12 +241,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         <CycleHintPanel active={cycleActive} showHints={showHints} containerRight={containerRight} />
 
-        {/* Footer bar */}
-        <div className="fixed bottom-0 left-0 right-0 flex justify-center pb-4 pointer-events-none">
+        {/* Footer bar. On a phone it docks flush to the bottom (the top of the Safari URL
+            bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
+        <div
+          className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
+          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
+        >
           <div
             className="pointer-events-auto flex items-center gap-4 bg-white px-4 py-2 shadow-sm"
             style={{
-              border: '1px solid rgba(92, 45, 138, 0.75)', borderRadius: '15px',
+              border: '1px solid rgba(92, 45, 138, 0.75)',
+              borderRadius: isTouch ? '15px 15px 0 0' : '15px',
               opacity: hideToolbar ? 0 : 1,
               pointerEvents: hideToolbar ? 'none' : 'auto',
               transition: 'opacity 160ms ease',
