@@ -508,7 +508,8 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   const rows: React.ReactNode[] = []
   for (let d = -WINDOW; d <= WINDOW; d++) {
     const ring    = base + d
-    const word    = cycle.synonyms[((ring % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE]
+    const slotIdx = ((ring % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE
+    const word    = cycle.synonyms[slotIdx]
     const rel     = ring - reel                       // continuous offset from centre, in rows
     const a       = Math.abs(rel)
     const isOrig  = word === cycle.synonyms[0]
@@ -531,29 +532,25 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           opacity,
           WebkitTapHighlightColor: 'transparent',
         }}>
-        {displayFor(word, mobile)}
+        {slotIdx === 0 ? (
+          // The original word carries a little uneven ink-blot, pinned just before its
+          // first letter (so it rides with the word), shown only while the reel scrolls.
+          <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <span aria-hidden="true" className="scas-origin-dot"
+              style={{ position: 'absolute', right: '100%', marginRight: '1.5px', top: '50%',
+                       width: 4.5, height: 5, background: '#5c2d8a',
+                       borderRadius: '70% 30% 55% 45% / 55% 65% 35% 45%',
+                       transform: 'translateY(-50%) rotate(-18deg)',
+                       opacity: moving ? 1 : 0, transition: 'opacity 140ms ease', pointerEvents: 'none' }} />
+            {displayFor(word, mobile)}
+          </span>
+        ) : displayFor(word, mobile)}
       </div>,
     )
   }
 
-  // Marker beside the ORIGINAL word's row — shown only while the reel is scrolling.
-  // The original recurs every CYCLE_SIZE rings; follow the nearest one to centre, and
-  // fade it out as it scrolls past the edges (and whenever the reel is still).
-  const origRel     = Math.round(reel / CYCLE_SIZE) * CYCLE_SIZE - reel
-  const origY       = cardTop + cardH / 2 + origRel * rowH
-  const origOpacity = moving ? Math.max(0, Math.min(1, 1.25 - Math.abs(origRel) * 0.55)) : 0
-
   return (
     <>
-      {/* Original-word marker — a small uneven ink blot tracking the original's row,
-          shown in motion only and tucked right up against the word. */}
-      <div aria-hidden="true" className="absolute z-50 scas-origin-dot"
-        style={{ position: 'absolute', top: origY, left: left - 5,
-                 width: 5, height: 5.5, background: '#5c2d8a',
-                 borderRadius: '70% 30% 55% 45% / 55% 65% 35% 45%',
-                 transform: 'translateY(-50%) rotate(-18deg)', opacity: origOpacity,
-                 transition: 'opacity 140ms ease', pointerEvents: 'none' }} />
-
       {/* Sliding reel card — fully transparent: no border/shadow/background, so the
           word floats directly on the parchment (lines above/below may show through). */}
       <div className="absolute z-50 select-none scas-cycle-card"
