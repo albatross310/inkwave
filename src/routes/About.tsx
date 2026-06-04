@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 
 export function About() {
   return (
-    <div className="min-h-screen bg-white p-8">
+    <div className="min-h-screen bg-white p-8 font-serif">
       <Link to="/edit" className="text-sm text-stone-400 hover:text-[#5c2d8a]">← Back</Link>
     </div>
   )

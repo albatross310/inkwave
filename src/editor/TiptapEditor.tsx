@@ -229,7 +229,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               value={doc.scasLimitN}
               onChange={handleLimitChange}
             />
-            <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none font-serif">
               <input
                 type="checkbox"
                 checked={showHints}

@@ -60,7 +60,7 @@ export function LimitSelector({ value, onChange }: LimitSelectorProps) {
   }
 
   return (
-    <div className="flex items-center gap-4 text-sm text-stone-400 select-none font-sans">
+    <div className="flex items-center gap-4 text-sm text-stone-400 select-none font-serif">
       <span className="tracking-wide uppercase text-xs">Vocab limit</span>
 
       {/* Number input */}

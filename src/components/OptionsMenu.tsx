@@ -67,7 +67,7 @@ export function OptionsMenu() {
       {menuOpen && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full mb-2 z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-sans"
+          className="absolute right-0 bottom-full mb-2 z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif"
           style={{ border: `1px solid ${INK}66`, borderRadius: '10px' }}
         >
           {items.map(it => (
