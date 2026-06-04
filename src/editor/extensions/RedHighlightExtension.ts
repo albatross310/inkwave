@@ -68,6 +68,7 @@ interface RedWord {
   to: number
   pIdx: number
   word: string
+  dataWord: string   // synonym-lookup key: the slot's original word (= word, unless managed)
   seqInPara: number  // 1-based — kept for data-scas-n (debugging / future use)
 }
 
@@ -92,6 +93,10 @@ function buildDecorations(
     node.forEach((child: PMNode, offset: number) => {
       if (!child.isText || !child.text) return
       const text = child.text
+      // A SCAS-managed run (a previously-cycled word) stays red regardless of vocab,
+      // and its synonym list stays anchored to the original word stored on the mark.
+      const slotMark = child.marks.find(m => m.type.name === 'scasSlot')
+      const slotOriginal = (slotMark?.attrs.original as string | null) ?? null
       let match: RegExpExecArray | null
       WORD_RE.lastIndex = 0
       while ((match = WORD_RE.exec(text)) !== null) {
@@ -100,15 +105,20 @@ function buildDecorations(
         const from = pos + 1 + offset + match.index
         const to   = from + word.length
 
-        // Skip the word under the cursor unless it's already been committed
-        // (committed = a space or punctuation immediately follows it).
-        if (cursorPos >= from && cursorPos <= to) {
-          const nextChar = text[match.index + word.length] ?? null
-          if (!nextChar || !/[\s.,;:!?)\-'"…]/.test(nextChar)) continue
+        if (!slotMark) {
+          // Skip the word under the cursor unless it's already been committed
+          // (committed = a space or punctuation immediately follows it).
+          if (cursorPos >= from && cursorPos <= to) {
+            const nextChar = text[match.index + word.length] ?? null
+            if (!nextChar || !/[\s.,;:!?)\-'"…]/.test(nextChar)) continue
+          }
+          if (isInVocab(word, pIdx, scasSessionSeed, scasLimitN)) continue
         }
-        if (isInVocab(word, pIdx, scasSessionSeed, scasLimitN)) continue
 
-        redWords.push({ from, to, pIdx, word, seqInPara: ++seqInPara })
+        redWords.push({
+          from, to, pIdx, word, seqInPara: ++seqInPara,
+          dataWord: slotOriginal ?? word.toLowerCase(),
+        })
       }
     })
 
@@ -131,11 +141,11 @@ function buildDecorations(
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
-  for (const { from, to, word, pIdx, seqInPara } of redWords) {
+  for (const { from, to, dataWord, pIdx, seqInPara } of redWords) {
     const isFocused = focusedPos !== null && from === focusedPos
     const attrs: Record<string, string> = {
       class: isFocused ? 'scas-red scas-focused' : 'scas-red',
-      'data-word': word.toLowerCase(),
+      'data-word': dataWord,
       'data-para': String(pIdx),
       'data-scas-n': String(seqInPara),
     }

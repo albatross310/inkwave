@@ -80,15 +80,22 @@ export function usePopoverLayout(
       const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
       if (!fe || posOf(fe, editor) !== domPos) return
 
-      const { synonyms, minWidth } = buildSynonyms(displayWord, candidates, font, rect.width)
+      // Slot 0 is the ORIGINAL word (lookupWord = the managed slot's original, or the
+      // word itself when unmanaged), so a managed word re-offers the original's list.
+      const { synonyms, minWidth } = buildSynonyms(lookupWord, candidates, font, rect.width)
       const pe = (fe.closest('p') ?? pEl) as Element | null
       // Compute compression atomically with min-width — single PM dispatch, no overflow frame.
       const lineRange = pe
         ? computeLineCompressionRange(rect.top, rect.bottom, natRight,
             rect.width, minWidth, domPos, domPos + displayWord.length, pe, editor)
         : null
+      // Centre the reel on the word currently in the text (may differ from the original
+      // for a managed slot), so reopening shows what's there, not the original.
+      const cur = displayWord.toLowerCase()
+      let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
+      if (reelPos < 0) reelPos = 0
       onHintChange(domPos, minWidth, lineRange)
-      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth } : prev)
+      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
     })
   }
 

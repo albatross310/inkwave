@@ -6,6 +6,7 @@ import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import type { HintState } from './extensions/RedHighlightExtension'
+import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CycleHintPanel } from './suggestions/CycleHintPanel'
 import { prefetchSynonyms } from './suggestions/thesaurus'
@@ -69,6 +70,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,
+      ScasSlotMark,
       // Single Enter = hard break (stay in paragraph).
       // Double Enter (Shift+Enter) = new paragraph.
       Extension.create({

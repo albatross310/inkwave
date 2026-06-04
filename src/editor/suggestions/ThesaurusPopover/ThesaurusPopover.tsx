@@ -55,6 +55,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   const rafRef    = useRef<number | null>(null)
   const rowHRef   = useRef(20)             // current row height in px (from geometry)
   const engagedRef = useRef(false)         // has the reel reached a non-original slot this session?
+  const openedByPointerRef = useRef(false) // did the in-flight press just open the cycle? (don't commit on its release)
 
   function cancelAnim() {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
@@ -105,7 +106,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       editor.chain().deleteRange({ from, to }).run()
     } else if (replacement !== editor.state.doc.textBetween(from, to)) {
       if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
-      editor.chain().deleteRange({ from, to }).insertContentAt(from, replacement).run()
+      // Carry the SCAS-slot mark (anchored to this slot's original word) so the position
+      // stays managed: it keeps rendering red/changeable even if the new word is in vocab,
+      // and reopening re-offers the original's synonym list. cycle.word holds the original.
+      editor.chain().deleteRange({ from, to }).insertContentAt(from, {
+        type: 'text', text: replacement,
+        marks: [{ type: 'scasSlot', attrs: { original: cycle.word } }],
+      }).run()
     }
     // else: committing the unchanged original — record the deliberate choice, skip the edit.
     pinCursor(); recordAccepted(); setCycle(null); advanceOrRestore(from, advance)
@@ -181,6 +188,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       const t = (e.target as HTMLElement).closest('.scas-red') as HTMLElement | null
       if (!t || !edEl.contains(t)) return
       e.preventDefault(); tabCursorRef.current = null
+      openedByPointerRef.current = true   // this press opens a cycle — its release must not commit
       openCycleForElement(t)
     }
     document.addEventListener('pointerdown', onPointerDown, { capture: true })
@@ -189,13 +197,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   // Reset the reel whenever a different word is focused (or the cycle opens/closes).
   // Keyed on `from` only — synonym loads (which keep `from`) must not reset position.
+  // Also keyed on cycle.synonyms: when the real synonym list loads it carries the
+  // reel position centred on the current word, so resync reelRef to it then.
   useEffect(() => {
     cancelAnim()
     velRef.current = 0
     engagedRef.current = false
     reelRef.current = cycle ? cycle.reelPos : 0
     targetRef.current = cycle ? Math.round(cycle.reelPos) : 0
-  }, [cycle?.from]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cycle?.from, cycle?.synonyms]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
@@ -336,12 +346,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     function onPointerUp(e: PointerEvent) {
       const wasDragging = lastY !== null
       lastY = null
+      const opened = openedByPointerRef.current
+      openedByPointerRef.current = false
       const c = cycleRef.current
       const dist = Math.hypot(e.clientX - downX, e.clientY - downY)
       if (dist < TAP_PX && e.timeStamp - downT < TAP_MS) {
-        // A short click → commit the rested word. The opening click (cycle not yet
-        // rendered) and clicks on another red word are left to the open handler.
-        if (!c) return
+        // The press that opened the cycle leaves it open — don't commit on the same
+        // tap, regardless of whether the card painted before this release fired.
+        if (opened || !c) return
         const el = e.target as HTMLElement | null
         if (el?.closest?.('.scas-red') && !el.closest?.('.scas-cycle-card')) return
         cancelAnim(); commitRested()
