@@ -514,7 +514,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const a       = Math.abs(rel)
     const isOrig  = word === cycle.synonyms[0]
     const opacity = Math.max(0, Math.min(1, 1.22 - a * 0.6))
-    const scale   = Math.max(0.9, 1 - a * 0.035)    // gentle depth cue; big swings read as jiggle
     rows.push(
       <div key={ring}
         style={{
@@ -523,10 +522,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           whiteSpace: 'nowrap', overflow: 'hidden', cursor: 'pointer',
           fontSize: fsz,
-          // Move via translateY (compositor-only) rather than `top`, which relayouts
-          // every frame and shimmers the glyphs. Scale is folded into the same transform.
-          transform: `translateY(${(rel * rowH).toFixed(2)}px) scale(${scale.toFixed(3)})`,
-          transformOrigin: 'center',
+          // Move via translateY only (compositor-only). No scale: scaling centred text
+          // shifts its edges ~1px as the row's distance-from-centre wobbles, which reads
+          // as a left/right jiggle while scrolling. Depth comes from the opacity fade.
+          transform: `translateY(${(rel * rowH).toFixed(2)}px)`,
           willChange: 'transform',
           color: isOrig ? '#5c2d8a' : '#9b5ccc',
           opacity,
@@ -541,7 +540,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
                        width: 4.5, height: 5, background: '#5c2d8a',
                        borderRadius: '70% 30% 55% 45% / 55% 65% 35% 45%',
                        transform: 'translateY(-50%) rotate(-18deg)',
-                       opacity: moving ? 1 : 0, transition: 'opacity 140ms ease', pointerEvents: 'none' }} />
+                       // No opacity transition: the original passes dead-centre faster than a
+                       // fade, so a transition lags behind the motion. The row's opacity fade
+                       // (which it inherits) already smooths it spatially as it scrolls.
+                       opacity: moving ? 1 : 0, pointerEvents: 'none' }} />
             {displayFor(word, mobile)}
           </span>
         ) : displayFor(word, mobile)}
