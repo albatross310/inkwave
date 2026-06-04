@@ -38,6 +38,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Keyboard state (touch only): the toolbar stays hidden until the on-screen keyboard
   // opens, then floats just above it (below the URL bar). Driven by the visual viewport.
   const [kb, setKb] = useState({ up: false, offset: 0, vh: 0, ot: 0, ref: 0, ih: 0 })
+  const maxVHRef = useRef(0)   // largest visual-viewport height seen = the no-keyboard height
 
   // Shared mutable ref read synchronously by the decoration plugin.
   const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null })
@@ -149,13 +150,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
+    let lastWidth = vv.width
     const update = () => {
-      // Reference height = the full (no-keyboard) viewport. On iOS window.innerHeight can
-      // shrink WITH the keyboard (breaking detection), while documentElement.clientHeight
-      // stays at the layout viewport — so take the larger of the two as the stable ref.
-      const ref = Math.max(window.innerHeight, document.documentElement.clientHeight)
+      // On iOS 8 Plus etc. innerHeight AND clientHeight shrink together with the keyboard,
+      // so neither is a stable reference. Instead track the largest visual-viewport height
+      // ever seen — that's the no-keyboard height — and measure the shrink against it.
+      if (vv.width !== lastWidth) { lastWidth = vv.width; maxVHRef.current = 0 }   // rotation: recapture
+      if (vv.height > maxVHRef.current) maxVHRef.current = vv.height
+      const ref = maxVHRef.current
       const offset = Math.max(0, Math.round(ref - (vv.height + vv.offsetTop)))
-      setKb({ up: offset > 120, offset, vh: Math.round(vv.height), ot: Math.round(vv.offsetTop), ref, ih: window.innerHeight })
+      setKb({ up: offset > 120, offset, vh: Math.round(vv.height), ot: Math.round(vv.offsetTop), ref: Math.round(ref), ih: window.innerHeight })
     }
     update()
     vv.addEventListener('resize', update)
