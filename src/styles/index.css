@@ -53,9 +53,13 @@
     background-color: rgba(42, 59, 95, 0.12);
   }
 
-  /* SCAS highlight — words outside active vocabulary */
+  /* SCAS highlight — words outside active vocabulary.
+     display:inline (not inline-block) so a flagged word at the start of a wrapped line
+     is not an atomic box — the caret placed before it then renders on that line rather
+     than at the end of the previous one. The FOCUSED word re-asserts inline-block via an
+     inline style (for its min-width expansion); see RedHighlightExtension. */
   .scas-red {
-    display: inline-block;
+    display: inline;
     position: relative;
     color: #5c2d8a;
     cursor: pointer;
