@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useEditor, EditorContent, Extension } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import TextStyle from '@tiptap/extension-text-style'
+import FontFamily from '@tiptap/extension-font-family'
+import TextAlign from '@tiptap/extension-text-align'
+import { FontSize } from './extensions/FontSize'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
@@ -12,9 +16,8 @@ import { CycleHintPanel } from './suggestions/CycleHintPanel'
 import { prefetchSynonyms } from './suggestions/thesaurus'
 import { LimitSelector } from '../components/LimitSelector'
 import { OptionsMenu } from '../components/OptionsMenu'
-import { StyleMenu } from '../components/StyleMenu'
+import { StyleBar } from '../components/StyleBar'
 import { GuideMenu } from '../components/GuideMenu'
-import { DEFAULT_TEXT_STYLE, type TextStyle } from '../types/document'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 
 interface TiptapEditorProps {
@@ -37,8 +40,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // screen for writing; it returns when the keyboard is dismissed. Editor focus is the
   // reliable "keyboard up" signal on iOS.
   const [editorFocused, setEditorFocused] = useState(false)
-  // User-chosen typography, read from the document so it persists across reloads.
-  const textStyle = doc.textStyle ?? DEFAULT_TEXT_STYLE
+  // Formatting (font/size/align) is per-selection via marks, persisted in the content.
+  const [styleBarOpen, setStyleBarOpen] = useState(false)
+  const [selectionEmpty, setSelectionEmpty] = useState(true)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
   const containerRef = useRef<HTMLDivElement>(null)
@@ -84,6 +88,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     extensions: [
       StarterKit,
       ScasSlotMark,
+      TextStyle,
+      FontFamily,
+      FontSize,
+      TextAlign.configure({ types: ['paragraph'] }),
       // Single Enter = hard break (stay in paragraph).
       // Double Enter (Shift+Enter) = new paragraph.
       Extension.create({
@@ -150,15 +158,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editorRef.current = editor
   }, [editor])
 
-  // Apply the user's typography to the editor DOM (inline styles override .ProseMirror
-  // CSS; text-align cascades to the paragraphs).
+  // Track whether the selection is collapsed — on touch the toolbar hides while typing
+  // (empty selection) but stays up when text is selected so it can be formatted.
   useEffect(() => {
-    const dom = editor?.view.dom as HTMLElement | undefined
-    if (!dom) return
-    dom.style.fontFamily = textStyle.font
-    dom.style.fontSize = textStyle.size
-    dom.style.textAlign = textStyle.align
-  }, [editor, textStyle])
+    if (!editor) return
+    const upd = () => setSelectionEmpty(editor.state.selection.empty)
+    upd()
+    editor.on('selectionUpdate', upd)
+    editor.on('transaction', upd)
+    return () => { editor.off('selectionUpdate', upd); editor.off('transaction', upd) }
+  }, [editor])
 
   // Track the container's right edge in viewport coords so CycleHintPanel
   // can sit flush against it at any window size or zoom level.
@@ -212,23 +221,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
   }
 
-  function handleStyleChange(patch: Partial<TextStyle>) {
-    const current = docRef.current
-    const updated: InkwaveDocument = {
-      ...current,
-      textStyle: { ...(current.textStyle ?? DEFAULT_TEXT_STYLE), ...patch },
-      updatedAt: new Date().toISOString(),
-    }
-    docRef.current = updated
-    onDocChange(updated)
-    scheduleSave(updated)
-  }
-
   // Hide the toolbar only on touch-only devices (phones/tablets — they have no hover)
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = typeof window !== 'undefined'
     && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
-  const hideToolbar = isTouch && editorFocused
+  // Hide while typing (cursor only); keep it up when text is selected so it's formattable.
+  const hideToolbar = isTouch && editorFocused && selectionEmpty
 
   return (
     <ComplianceContext.Provider value={compliance}>
@@ -275,7 +273,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
         >
           <div
-            className={`pointer-events-auto flex items-center bg-white px-4 py-2 shadow-sm ${isTouch ? 'w-full justify-between' : 'gap-4'}`}
+            className={`pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
             style={{
               border: '1px solid rgba(92, 45, 138, 0.75)',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
@@ -284,22 +282,39 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               transition: 'opacity 160ms ease',
             }}
           >
-            <LimitSelector
-              value={doc.scasLimitN}
-              onChange={handleLimitChange}
-            />
-            <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none font-serif">
-              <input
-                type="checkbox"
-                checked={showHints}
-                onChange={e => setShowHints(e.target.checked)}
-                className="accent-stone-400"
+            {/* Flat style sub-bar, flush above the main controls */}
+            {styleBarOpen && editor && (
+              <div className="flex items-center px-4 py-2 border-b border-stone-200">
+                <StyleBar editor={editor} />
+              </div>
+            )}
+
+            {/* Main toolbar row */}
+            <div className={`flex items-center px-4 py-2 ${isTouch ? 'justify-between' : 'gap-4'}`}>
+              <LimitSelector
+                value={doc.scasLimitN}
+                onChange={handleLimitChange}
               />
-              hints
-            </label>
-            <StyleMenu style={textStyle} onChange={handleStyleChange} />
-            <GuideMenu />
-            <OptionsMenu paperRight={paperRight} />
+              <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none font-serif">
+                <input
+                  type="checkbox"
+                  checked={showHints}
+                  onChange={e => setShowHints(e.target.checked)}
+                  className="accent-stone-400"
+                />
+                hints
+              </label>
+              <button
+                type="button"
+                aria-pressed={styleBarOpen}
+                onClick={() => setStyleBarOpen(o => !o)}
+                className={`uppercase tracking-wide text-xs transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+              >
+                style
+              </button>
+              <GuideMenu />
+              <OptionsMenu paperRight={paperRight} />
+            </div>
           </div>
         </div>
       </div>

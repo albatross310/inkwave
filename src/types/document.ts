@@ -8,21 +8,9 @@ export type TiptapJSON = JSONContent
 
 export type SchemaVersion = '0.1.0'
 
-// ─── Typography (user-chosen, persisted per document) ──────────────────────────
-
-export interface TextStyle {
-  font: string                     // CSS font-family
-  size: string                     // CSS font-size
-  align: 'left' | 'center' | 'justify'
-}
-
-export const DEFAULT_TEXT_STYLE: TextStyle = {
-  font: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif",
-  size: '1.125rem',
-  align: 'left',
-}
-
 // ─── Primary document model ───────────────────────────────────────────────────
+// Typography (font / size / alignment) is stored per-selection as ProseMirror marks
+// inside contentJson, so it persists with the content — no separate field needed.
 
 export interface InkwaveDocument {
   id: string
@@ -33,7 +21,6 @@ export interface InkwaveDocument {
   schemaVersion: SchemaVersion
   scasLimitN: number | 'infinite'  // active SCAS vocabulary cap (Week 2)
   scasSessionSeed: string          // deterministic-per-document ranking seed (Week 2)
-  textStyle: TextStyle             // user-chosen font / size / alignment
 }
 
 // ─── Paragraph metadata ───────────────────────────────────────────────────────

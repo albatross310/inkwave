@@ -12,6 +12,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@tiptap/extension-font-family": "^2.27.2",
+    "@tiptap/extension-text-align": "^2.27.2",
+    "@tiptap/extension-text-style": "^2.27.2",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
