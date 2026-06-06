@@ -1,8 +1,8 @@
-// CaretGutter — an invisible click strip filling the left margin. It adds no layout
-// (absolutely positioned, transparent, zero footprint in flow) and no visible mark; it
-// only widens the target for the otherwise-fiddly "drop the caret at the very start of
-// the line". Tapping beside a line places the caret before that line's first word; a
-// drag from the margin selects text outward from that line start.
+// CaretGutter — an invisible click strip filling a side margin (left or right). It adds no
+// layout (absolutely positioned, transparent, zero footprint in flow) and no visible mark;
+// it only widens the target for the otherwise-fiddly "drop the caret at the very start (or
+// end) of the line". Tapping beside a line places the caret before its first word (left) or
+// after its last word (right); a drag selects text outward from there.
 //
 // Placement uses the LIVE pointer position against the current layout (no precomputed
 // per-line boxes that could drift after a scroll or the phone keyboard opening).
@@ -11,38 +11,50 @@ import { useEffect, useState, type PointerEvent as ReactPointerEvent, type RefOb
 import type { Editor } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 
+type Side = 'left' | 'right'
+
 type CaretDoc = Document & {
   caretRangeFromPoint?: (x: number, y: number) => Range | null
   caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
 }
 
 export function CaretGutter(
-  { editor, containerEl }: { editor: Editor; containerEl: RefObject<HTMLDivElement> },
+  { editor, containerEl, side = 'left' }:
+  { editor: Editor; containerEl: RefObject<HTMLDivElement>; side?: Side },
 ) {
-  // Width = the text column's distance from the viewport's left edge, so the strip fills
-  // the whole left margin (generous on desktop, the full sliver on a phone) and its left
-  // edge sits exactly at the viewport edge — never overflowing into horizontal scroll.
+  // Width = the text column's distance from the matching viewport edge, so the strip fills
+  // that whole margin and its outer edge sits exactly at the viewport edge — never
+  // overflowing into horizontal scroll.
   const [width, setWidth] = useState(0)
   useEffect(() => {
     const el = containerEl.current
     if (!el) return
-    const update = () => setWidth(Math.max(0, el.getBoundingClientRect().left))
+    const update = () => {
+      const r = el.getBoundingClientRect()
+      const w = side === 'left' ? r.left : document.documentElement.clientWidth - r.right
+      setWidth(Math.max(0, w))
+    }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [containerEl])
+  }, [containerEl, side])
 
-  // Drop a collapsed caret at pos, fixing WebKit's upstream wrap-boundary affinity:
-  // setTextSelection alone renders a wrap-boundary caret at the END of the previous line,
-  // so re-place the DOM caret from a POINT on the downstream line's glyph (coordsAtPos(pos,
-  // 1) gives that line's coords; a Range from a point there carries the line's affinity —
-  // the same path a real click takes). Works for any node structure.
+  // The x just inside the text column on this side — the line start (left) or end (right).
+  const edgeX = (rect: DOMRect) => (side === 'left' ? rect.left + 2 : rect.right - 2)
+
+  // Drop a collapsed caret at pos, fixing WebKit's wrap-boundary affinity. A position at a
+  // soft wrap is visually shared by two lines; setTextSelection can render it on the wrong
+  // one (WebKit). Re-place the DOM caret from a POINT on the intended line's glyph: left
+  // wants the lower line (bias +1, just right of the caret x), right wants the upper line
+  // (bias -1, just left of it). A Range from a point there carries that line's affinity,
+  // exactly as a real click does, for any node structure.
   function placeCaret(pos: number) {
     const view = editor.view
     editor.chain().focus().setTextSelection(pos).run()
     try {
-      const c = view.coordsAtPos(pos, 1)
-      const gx = c.left + 2, gy = (c.top + c.bottom) / 2
+      const c = view.coordsAtPos(pos, side === 'left' ? 1 : -1)
+      const gx = side === 'left' ? c.left + 2 : c.left - 2
+      const gy = (c.top + c.bottom) / 2
       const d = document as CaretDoc
       let range: Range | null = null
       if (d.caretRangeFromPoint) {
@@ -57,7 +69,7 @@ export function CaretGutter(
         sel?.removeAllRanges()
         sel?.addRange(range)
       }
-    } catch { /* coords/caret APIs unavailable — keep the upstream caret */ }
+    } catch { /* coords/caret APIs unavailable — keep the caret as set */ }
   }
 
   function onPointerDown(e: ReactPointerEvent) {
@@ -65,12 +77,20 @@ export function CaretGutter(
     const view = editor.view
     const rect = view.dom.getBoundingClientRect()
     // posAtCoords maps any y in the (tall, 2.5-line-height) line band to the right line.
-    const at = view.posAtCoords({ left: rect.left + 2, top: e.clientY })
+    const at = view.posAtCoords({ left: edgeX(rect), top: e.clientY })
     if (!at) return
-    const anchor = at.pos
+    let anchor = at.pos
+    if (side === 'right') {
+      // At a wrapped line's right edge posAtCoords lands PAST the wrap space (= start of the
+      // next line); step back over trailing whitespace so the caret sits after this line's
+      // last word. (No-op on the last line, which has no trailing wrap space.)
+      const doc = view.state.doc
+      let guard = 0
+      while (anchor > 0 && guard++ < 200 && /\s/.test(doc.textBetween(anchor - 1, anchor))) anchor--
+    }
     placeCaret(anchor) // a plain click leaves this collapsed caret (with the affinity fix)
 
-    // Dragging out of the margin extends a selection from the line start to the pointer.
+    // Dragging out of the margin extends a selection from the line edge to the pointer.
     const strip = e.currentTarget as HTMLElement
     try { strip.setPointerCapture(e.pointerId) } catch { /* older browsers */ }
     let dragging = false
@@ -82,8 +102,10 @@ export function CaretGutter(
       view.dispatch(view.state.tr.setSelection(sel))
     }
     const onMove = (ev: PointerEvent) => {
-      // Clamp x into the text column so a pointer still in the margin reads as the line start.
-      const x = Math.max(ev.clientX, rect.left + 2)
+      // Clamp x into the text column so a pointer still in the margin reads as the line edge.
+      const x = side === 'left'
+        ? Math.max(ev.clientX, rect.left + 2)
+        : Math.min(ev.clientX, rect.right - 2)
       const h = view.posAtCoords({ left: x, top: ev.clientY })
       if (!h) return
       if (h.pos !== anchor) dragging = true
@@ -103,6 +125,7 @@ export function CaretGutter(
     strip.addEventListener('pointercancel', onUp)
   }
 
+  const placement = side === 'left' ? { left: -width } : { right: -width }
   return (
     <div
       aria-hidden
@@ -111,7 +134,7 @@ export function CaretGutter(
       // ProseMirror reads for selection — block it so it can't override our handling.
       onMouseDown={e => e.preventDefault()}
       className="absolute pointer-events-auto"
-      style={{ top: 0, bottom: 0, left: -width, width, cursor: 'text', touchAction: 'none' }}
+      style={{ top: 0, bottom: 0, width, cursor: 'text', touchAction: 'none', ...placement }}
     />
   )
 }

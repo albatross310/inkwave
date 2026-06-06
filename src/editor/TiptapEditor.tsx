@@ -286,7 +286,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             <div className="mx-auto w-full max-w-[560px] md:max-w-[720px] relative" ref={containerRef}>
               <EditorContent editor={editor} />
               {editor && (
-                <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} />
+                <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
+              )}
+              {editor && (
+                <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="right" />
               )}
               {editor && (
                 <ThesaurusPopover
