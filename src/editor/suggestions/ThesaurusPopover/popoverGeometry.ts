@@ -83,12 +83,6 @@ export function computeLineCompressionRange(
   // min-width:naturalWidth at this point, so its right edge is the natural right edge.)
   const wordRight = fe ? fe.getBoundingClientRect().right : naturalLineRight
   const rightRoom = Math.max(0, paraRight - wordRight)
-  // Slide the box left by `half` (centred) when there's at least half a room on the right;
-  // when the word hugs the right edge, slide it further so the expanded box still fits the
-  // line instead of wrapping. (A right-edge word then sits slightly left of centre — the
-  // unavoidable edge case — but never wraps.)
-  const beforeShift = Math.min(exp, Math.max(half, exp - rightRoom))
-
   // Keep the line's first word uncompressed (squeezing it would jitter the line start);
   // count its chars so the before-compression starts just after it.
   let fwc = 0
@@ -100,10 +94,18 @@ export function computeLineCompressionRange(
     }
   }
   const firstWordEnd = (lineFrom ?? wordFrom) + fwc
-
-  // BEFORE: compress [firstWordEnd, wordFrom] by `beforeShift` so the word's box — and the
-  // before-neighbour — slide left by that much, centring (or fitting) the reserved box.
   const nBeforeComp = nBefore - fwc
+
+  // Slide the box left by `half` (centred) when there's room; further if the word hugs the
+  // right edge so the box still fits; but never more than the before-text can readably give
+  // up (MAX_LS_EM cap) — a left-edge word with little before-text slides less and so sits
+  // left of centre, the unavoidable edge case.
+  const MAX_LS_EM = 0.14
+  const maxShift  = Math.max(0, nBeforeComp) * MAX_LS_EM * fsz
+  const beforeShift = Math.min(Math.max(half, exp - rightRoom), maxShift)
+
+  // BEFORE: compress [firstWordEnd, wordFrom] by `beforeShift` so the box — and the
+  // before-neighbour — slide left by that much, centring (or fitting) the reserved box.
   const lsBeforeEm  = nBeforeComp > 0 ? beforeShift / nBeforeComp / fsz : 0
   // AFTER: the box pushes the after-text right by (exp - beforeShift); compress it only by
   // the part that exceeds the line's right-hand slack — the rest extends into the slack.
@@ -111,5 +113,8 @@ export function computeLineCompressionRange(
   const lsAfterEm   = nAfter > 0 ? afterPush / nAfter / fsz : 0
 
   if (lsBeforeEm === 0 && lsAfterEm === 0) return null
-  return { from: lineFrom ?? wordFrom, firstWordEnd, to: lineTo ?? wordTo, lsBeforeEm, lsAfterEm }
+  // The box only actually slides left when the before-side compresses; otherwise it grows
+  // rightward from its natural left, so the reel must left-align (fraction 0).
+  const alignFraction = lsBeforeEm > 0 ? beforeShift / exp : 0
+  return { from: lineFrom ?? wordFrom, firstWordEnd, to: lineTo ?? wordTo, lsBeforeEm, lsAfterEm, alignFraction }
 }

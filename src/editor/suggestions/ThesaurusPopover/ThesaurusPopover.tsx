@@ -485,6 +485,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const fsz  = parseFloat(cs.fontSize) || 18
     const left = rect.left - cRect.left
 
+    // Align the reel at the fraction the box actually slid left (beforeShift/exp), supplied
+    // by the line compression. f=0.5 for a centred box (mid-line word) → centred reel; f→0
+    // for a left-edge word the box couldn't slide → left-aligned; f→1 for a right-edge word →
+    // right-aligned. This lands the ORIGINAL word on its natural x for every position (no
+    // entry jump, even at the edges) and is robust to the open-reflow (intent, not a measure).
+    const alignF = cycle.alignFraction
+
     const textNode = focusedEl.firstChild
     let textMid: number
     if (textNode?.nodeType === Node.TEXT_NODE) {
@@ -498,7 +505,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rowH  = Math.round(fsz * 1.15)
     const cardH = rowH * 3                    // prev / current / next visible at once
     return {
-      fsz, left, rowH, cardH,
+      fsz, left, rowH, cardH, alignF,
       cardTop: textMid - cardH / 2,           // current row centred on the focused word
       width: Math.ceil(rect.width),
       fontFamily: cs.fontFamily,
@@ -509,7 +516,8 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   if (!cycle || !geom) return null
   rowHRef.current = geom.rowH
-  const { fsz, left, rowH, cardH, cardTop, width, fontFamily } = geom
+  const { fsz, left, rowH, cardH, cardTop, width, fontFamily, alignF } = geom
+  const fPct   = (alignF * 100).toFixed(3) // align each reel word at fraction f of the card
   const reel   = cycle.reelPos
   const mobile = window.innerWidth < 768 ? 1.4 : 1
   // Overlay mode (touch): the word isn't expanded, so size the opaque card to the widest
@@ -538,7 +546,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         style={{
           position: 'absolute', left: 0, right: 0, height: rowH,
           top: (cardH - rowH) / 2,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
           whiteSpace: 'nowrap', overflow: 'hidden', cursor: 'pointer',
           fontSize: fsz,
           // Move via translateY only (compositor-only). No scale: scaling centred text
@@ -550,6 +558,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           opacity,
           WebkitTapHighlightColor: 'transparent',
         }}>
+        {/* margin-left:f% then translateX(-f%) places the word at fraction f of the card's
+            free space (any width), so the original lands on its natural x for every word. */}
+        <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${fPct}%`, transform: `translateX(-${fPct}%)` }}>
         {slotIdx === 0 ? (
           // The original word carries a little uneven ink-blot, pinned just before its
           // first letter (so it rides with the word), shown only while the reel scrolls.
@@ -566,6 +577,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
             {displayFor(word, mobile)}
           </span>
         ) : displayFor(word, mobile)}
+        </span>
       </div>,
     )
   }
