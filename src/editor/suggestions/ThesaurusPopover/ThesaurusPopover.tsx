@@ -542,7 +542,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rel     = ring - reel                       // continuous offset from centre, in rows
     const a       = Math.abs(rel)
     const isOrig  = word === cycle.synonyms[0]
-    const opacity = Math.max(0, Math.min(1, 1.22 - a * 0.6))
+    // The card is transparent and 3 rows tall, so at rest the peeking prev/next synonyms
+    // bleed onto the text lines above and below (no background to mask them). So reveal the
+    // neighbours ONLY while the reel is in motion: at rest just the centre word shows, in
+    // place — calm, no bleed, nothing for the eye to read as movement. `reveal` collapses to
+    // the centre row (a≈0) when still; the fade-out is transitioned (see row style) so the
+    // ghosts settle softly, while motion keeps the per-frame opacity crisp (transition off).
+    const reveal  = moving ? 1 : Math.max(0, 1 - a * 2.4)
+    const opacity = Math.max(0, Math.min(1, 1.22 - a * 0.6)) * reveal
     rows.push(
       <div key={ring}
         style={{
@@ -558,6 +565,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           willChange: 'transform',
           color: isOrig ? '#5c2d8a' : '#9b5ccc',
           opacity,
+          // Smooth the neighbours' fade-out when the reel settles; none while moving so the
+          // per-frame opacity stays crisp (a transition would smear the scrolling fade).
+          transition: moving ? 'none' : 'opacity 160ms ease',
           WebkitTapHighlightColor: 'transparent',
         }}>
         {/* margin-left:f% then translateX(-f%) places the word at fraction f of the card's
