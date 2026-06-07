@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
@@ -33,23 +33,66 @@ export function usePopoverLayout(
     return () => { window.removeEventListener('resize', upd); window.removeEventListener('scroll', upd, true) }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reapply compression on resize or when cycle geometry changes.
-  // The initial application is done synchronously inside openCycleForElement
-  // (single PM dispatch). This is a safety net for reflow events.
+  // ── Shared layout pass (Fix 2): always re-measure the NATURAL line fresh ──────
+  // Clear decorations, re-find the live element, measure rect + line-right ANEW, recompute
+  // compression, apply. Never reuse coords captured at open time — they are viewport-relative
+  // and go stale after any scroll or iOS toolbar resize, which made compression classify
+  // against the wrong visual line and compound per pass. Idempotent by construction.
+  function applyLayout(from: number, to: number, minWidth: number, overlay: boolean) {
+    if (overlay) { onHintChange(from, null); return }   // overlay mode never compresses
+    onHintChange(null, null)                            // clear so we measure the natural line
+    const fe = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red'))
+      .find(el => posOf(el, editor) === from)
+    const pe = fe?.closest('p')
+    if (!fe || !pe) return
+    const rect     = fe.getBoundingClientRect()
+    const natRight = measureNaturalLineRight(rect, pe)
+    const lineRange = computeLineCompressionRange(
+      rect.top, rect.bottom, natRight, rect.width, minWidth, from, to, pe, editor,
+    )
+    onHintChange(from, minWidth, lineRange)
+    const alignFraction = lineRange?.alignFraction ?? 0
+    setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth: rect.width } : prev)
+  }
+
+  // ── Defer layout while a pointer is held (Fix 3) ─────────────────────────────
+  // Expanding/compressing rebuilds the DOM; doing that under an active touch makes iOS drop
+  // scroll-suppression and pan the page under the reel (synonyms landing mid-drag triggered
+  // it). So while a pointer is down we record the intended pass and flush it on release.
+  const pointerHeldRef = useRef(false)
+  const pendingRef = useRef<{ from: number; to: number; minWidth: number; overlay: boolean } | null>(null)
+  function requestLayout(from: number, to: number, minWidth: number, overlay: boolean) {
+    if (pointerHeldRef.current) pendingRef.current = { from, to, minWidth, overlay }
+    else applyLayout(from, to, minWidth, overlay)
+  }
+  const flushRef = useRef<() => void>(() => {})
+  flushRef.current = () => {
+    const p = pendingRef.current
+    if (!p) return
+    pendingRef.current = null
+    applyLayout(p.from, p.to, p.minWidth, p.overlay)
+    forceUpdate(n => n + 1)   // the focused rect just changed — recompute geometry
+  }
   useEffect(() => {
-    if (!cycle || cycle.overlay) return   // overlay mode never compresses
-    function recompress() {
-      const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
-      const pe = fe?.closest('p')
-      if (!fe || !pe) return
-      onHintChange(cycle!.from, cycle!.minWidth, computeLineCompressionRange(
-        cycle!.naturalTop, cycle!.naturalBottom, cycle!.naturalLineRight,
-        cycle!.naturalWidth, cycle!.minWidth, cycle!.from, cycle!.to, pe, editor,
-      ))
+    const down = () => { pointerHeldRef.current = true }
+    const up   = () => { pointerHeldRef.current = false; flushRef.current() }
+    document.addEventListener('pointerdown', down, true)
+    document.addEventListener('pointerup', up, true)
+    document.addEventListener('pointercancel', up, true)
+    return () => {
+      document.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('pointerup', up, true)
+      document.removeEventListener('pointercancel', up, true)
     }
-    recompress()
-    window.addEventListener('resize', recompress)
-    return () => window.removeEventListener('resize', recompress)
+  }, [])
+
+  // Resize safety net — re-measure & re-apply for the current cycle (deferred if held).
+  useEffect(() => {
+    if (!cycle || cycle.overlay) return
+    const c = cycle
+    const onResize = () => requestLayout(c.from, c.to, c.minWidth, c.overlay)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function openCycleForElement(target: HTMLElement) {
@@ -97,22 +140,17 @@ export function usePopoverLayout(
       // through every slot (and on commit).
       const capitalize = /^[A-Z]/.test(displayWord)
       const { synonyms, minWidth } = buildSynonyms(lookupWord, candidates, font, rect.width, capitalize)
-      const pe = (fe.closest('p') ?? pEl) as Element | null
-      // In-place mode expands the word to minWidth and compresses the surrounding line to
-      // absorb it. Overlay mode does neither — the opaque card (sized to minWidth) just
-      // floats over the word, so the document never reflows.
-      const lineRange = overlay || !pe
-        ? null
-        : computeLineCompressionRange(rect.top, rect.bottom, natRight,
-            rect.width, minWidth, domPos, domPos + displayWord.length, pe, editor)
-      // Centre the reel on the word currently in the text (may differ from the original
-      // for a managed slot), so reopening shows what's there, not the original.
+      // Centre the reel on the word currently in the text (may differ from the original for a
+      // managed slot), so reopening shows what's there. Don't snap it under a steering finger
+      // (Fix 3) — keep the live reel position while a pointer is held.
       const cur = displayWord.toLowerCase()
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
-      onHintChange(domPos, overlay ? null : minWidth, lineRange)
-      const alignFraction = lineRange?.alignFraction ?? 0
-      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos, alignFraction } : prev)
+      setCycle(prev => prev?.from === domPos
+        ? { ...prev, synonyms, minWidth, reelPos: pointerHeldRef.current ? prev.reelPos : reelPos }
+        : prev)
+      // Apply the expand+compress pass via the shared, fresh-measuring path (deferred if held).
+      requestLayout(domPos, domPos + displayWord.length, minWidth, overlay)
     })
   }
 

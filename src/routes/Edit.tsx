@@ -60,6 +60,12 @@ export function Edit() {
         setDoc(fresh)
       } catch (err) {
         console.error('[inkwave] init failed:', err)
+        // Never strand the writer on the blank placeholder. Fall back to a fresh
+        // in-memory document under a NEW id, so no existing file is ever overwritten.
+        // localStorage can throw (private mode), so guard it on its own.
+        const fresh = newDocument()
+        try { localStorage.setItem(ACTIVE_DOC_KEY, fresh.id) } catch { /* private mode */ }
+        setDoc(fresh)
       }
     }
 

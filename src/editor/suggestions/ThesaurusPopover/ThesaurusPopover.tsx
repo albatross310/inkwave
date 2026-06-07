@@ -204,6 +204,23 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       if (!t || !edEl.contains(t)) return
       e.preventDefault(); tabCursorRef.current = null
       openedByPointerRef.current = true   // this press opens a cycle — its release must not commit
+      // Fix 4: opening rebuilds this .scas-red span (PM dispatch), and WebKit keeps sending the
+      // gesture's touch events to the now-DETACHED node — which has no ancestors, so the
+      // document-level touchmove handler never sees them and iOS starts scrolling. CSS
+      // touch-action can't help (inert on display:inline, read only at gesture start). So
+      // attach a non-passive touchmove listener to the touched node ITSELF, before the rebuild;
+      // a detached node still receives its own gesture's events, so preventDefault keeps working.
+      if (e.pointerType === 'touch') {
+        const suppress = (ev: TouchEvent) => ev.preventDefault()
+        const cleanup = () => {
+          t.removeEventListener('touchmove', suppress)
+          t.removeEventListener('touchend', cleanup)
+          t.removeEventListener('touchcancel', cleanup)
+        }
+        t.addEventListener('touchmove', suppress, { passive: false })
+        t.addEventListener('touchend', cleanup)
+        t.addEventListener('touchcancel', cleanup)
+      }
       openCycleForElement(t)
     }
     document.addEventListener('pointerdown', onPointerDown, { capture: true })
