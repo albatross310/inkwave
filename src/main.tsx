@@ -4,7 +4,7 @@ import './styles/index.css'
 import App from './App.tsx'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
-console.log('%c[inkwave] build: uniform-rate-compression-r5 (no overlap)', 'color:#5c2d8a;font-weight:bold')
+console.log('%c[inkwave] build: exit-stationary-reel-r6', 'color:#5c2d8a;font-weight:bold')
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')

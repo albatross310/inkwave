@@ -16,6 +16,7 @@ import { CYCLE_SIZE } from './popoverConstants'
 import type { OnHintChange } from './popoverConstants'
 import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
+import { measureTextWidth, getFont } from '../textMetrics'
 import { usePopoverLayout } from './usePopoverLayout'
 
 // The selected slot for a given continuous position = nearest ring, wrapped into [0,SIZE).
@@ -484,19 +485,23 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const cs   = window.getComputedStyle(focusedEl)
     const fsz  = parseFloat(cs.fontSize) || 18
 
-    // Anchor the reel to the word's KNOWN natural x (measured before expansion), using the
-    // INTENDED slide — never the rendered box. The expanded box's left is naturalLeft minus
-    // however far the browser actually paints the negative letter-spacing, which is font-
-    // specific and sub-pixel-variable; reading it back made the original word drift, and when
-    // the real slide exceeded `exp` the [0,1] clamp parked the word LEFT of its left neighbour
-    // (the serif "prehensile|tail" overlap). Both naturalLeft and alignFraction (= intended
-    // beforeShift/exp) are known up front, so placing the card at naturalLeft − alignF·exp
-    // lands the original word on its pre-click x EXACTLY, in any font, with no clamp.
-    // f→0 left-aligned, .5 centred, →1 right-aligned: the continuum, still intact.
-    const exp    = Math.max(0, cycle.minWidth - cycle.naturalWidth)
-    const alignF = exp > 0 ? cycle.alignFraction : 0
-    const cardW  = Math.max(Math.ceil(cycle.minWidth), Math.ceil(rect.width))
-    const left   = (cycle.naturalLeft - cRect.left) - alignF * exp
+    // EXIT-STATIONARY reel. Each synonym renders with its LEFT edge at the word's natural x —
+    // exactly where it lands when committed (the text before it is unchanged), so the chosen
+    // word doesn't jump on exit. A synonym wide enough to cross the writing-space edge is
+    // shifted left ONLY as far as needed to stay inside it (such a word reflows to the next
+    // line on commit anyway, so that residual offset is unavoidable — and kept minimal).
+    const font         = getFont(focusedEl)
+    const naturalLeftC = cycle.naturalLeft - cRect.left
+    const pEl          = focusedEl.closest('p')
+    const paraRightC   = (pEl ? pEl.getBoundingClientRect().right : cRect.right) - cRect.left
+    const widths       = cycle.synonyms.map(s => measureTextWidth(s, font))
+    const widestW      = Math.max(Math.ceil(cycle.naturalWidth), ...widths.map(w => Math.ceil(w)))
+    const DOT_PAD      = 8   // room left of the word for the origin ink-blot
+    const left         = Math.min(naturalLeftC, paraRightC - widestW) - DOT_PAD
+    const cardW        = paraRightC - left
+    // Per-slot left offset within the card: left-aligned at natural x, clamped so the word's
+    // right edge never passes the writing-space edge.
+    const slotLefts    = widths.map(w => Math.min(naturalLeftC, paraRightC - w) - left)
 
     const textNode = focusedEl.firstChild
     let textMid: number
@@ -511,19 +516,18 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rowH  = Math.round(fsz * 1.15)
     const cardH = rowH * 3                    // prev / current / next visible at once
     return {
-      fsz, left, rowH, cardH, alignF,
+      fsz, left, rowH, cardH, slotLefts,
       cardTop: textMid - cardH / 2,           // current row centred on the focused word
-      width: cardW,                           // reserved width (known min-width, font-agnostic)
+      width: cardW,
       fontFamily: cs.fontFamily,
     }
-  }, [cycle?.from, cycle?.minWidth, geomNonce]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cycle?.from, cycle?.minWidth, cycle?.synonyms, geomNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (!cycle || !geom) return null
   rowHRef.current = geom.rowH
-  const { fsz, left, rowH, cardH, cardTop, width, fontFamily, alignF } = geom
-  const fPct   = (alignF * 100).toFixed(3) // align each reel word at fraction f of the card
+  const { fsz, left, rowH, cardH, cardTop, width, fontFamily, slotLefts } = geom
   const reel   = cycle.reelPos
   const mobile = window.innerWidth < 768 ? 1.4 : 1
   // Overlay mode (touch): the word isn't expanded, so size the opaque card to the widest
@@ -574,9 +578,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           transition: moving ? 'none' : 'opacity 160ms ease',
           WebkitTapHighlightColor: 'transparent',
         }}>
-        {/* margin-left:f% then translateX(-f%) places the word at fraction f of the card's
-            free space (any width), so the original lands on its natural x for every word. */}
-        <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${fPct}%`, transform: `translateX(-${fPct}%)` }}>
+        {/* Left-align the word at its clamped natural-x offset within the card, so what's
+            shown is exactly where it commits (no jump on exit). */}
+        <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${slotLefts[slotIdx]}px` }}>
         {slotIdx === 0 ? (
           // The original word carries a little uneven ink-blot, pinned just before its
           // first letter (so it rides with the word). It marks the original whenever that
