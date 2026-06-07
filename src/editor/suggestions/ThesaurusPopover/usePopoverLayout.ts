@@ -82,7 +82,7 @@ export function usePopoverLayout(
       word: lookupWord, from: domPos, to: domPos + displayWord.length,
       synonyms: Array(CYCLE_SIZE).fill(displayWord),
       reelPos: 0, overlay,
-      minWidth: rect.width, naturalWidth: rect.width,
+      minWidth: rect.width, naturalWidth: rect.width, naturalLeft: rect.left, alignFraction: 0.5,
       naturalTop: rect.top, naturalBottom: rect.bottom, naturalLineRight: natRight,
     })
 
@@ -111,7 +111,8 @@ export function usePopoverLayout(
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
       onHintChange(domPos, overlay ? null : minWidth, lineRange)
-      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
+      const alignFraction = lineRange?.alignFraction ?? 0
+      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos, alignFraction } : prev)
     })
   }
 

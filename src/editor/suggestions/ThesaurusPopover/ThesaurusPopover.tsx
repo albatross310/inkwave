@@ -483,7 +483,20 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rect = focusedEl.getBoundingClientRect()
     const cs   = window.getComputedStyle(focusedEl)
     const fsz  = parseFloat(cs.fontSize) || 18
-    const left = rect.left - cRect.left
+
+    // Anchor the reel to the word's KNOWN natural x (measured before expansion), using the
+    // INTENDED slide — never the rendered box. The expanded box's left is naturalLeft minus
+    // however far the browser actually paints the negative letter-spacing, which is font-
+    // specific and sub-pixel-variable; reading it back made the original word drift, and when
+    // the real slide exceeded `exp` the [0,1] clamp parked the word LEFT of its left neighbour
+    // (the serif "prehensile|tail" overlap). Both naturalLeft and alignFraction (= intended
+    // beforeShift/exp) are known up front, so placing the card at naturalLeft − alignF·exp
+    // lands the original word on its pre-click x EXACTLY, in any font, with no clamp.
+    // f→0 left-aligned, .5 centred, →1 right-aligned: the continuum, still intact.
+    const exp    = Math.max(0, cycle.minWidth - cycle.naturalWidth)
+    const alignF = exp > 0 ? cycle.alignFraction : 0
+    const cardW  = Math.max(Math.ceil(cycle.minWidth), Math.ceil(rect.width))
+    const left   = (cycle.naturalLeft - cRect.left) - alignF * exp
 
     const textNode = focusedEl.firstChild
     let textMid: number
@@ -498,9 +511,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rowH  = Math.round(fsz * 1.15)
     const cardH = rowH * 3                    // prev / current / next visible at once
     return {
-      fsz, left, rowH, cardH,
+      fsz, left, rowH, cardH, alignF,
       cardTop: textMid - cardH / 2,           // current row centred on the focused word
-      width: Math.ceil(rect.width),
+      width: cardW,                           // reserved width (known min-width, font-agnostic)
       fontFamily: cs.fontFamily,
     }
   }, [cycle?.from, cycle?.minWidth, geomNonce]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -509,7 +522,8 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   if (!cycle || !geom) return null
   rowHRef.current = geom.rowH
-  const { fsz, left, rowH, cardH, cardTop, width, fontFamily } = geom
+  const { fsz, left, rowH, cardH, cardTop, width, fontFamily, alignF } = geom
+  const fPct   = (alignF * 100).toFixed(3) // align each reel word at fraction f of the card
   const reel   = cycle.reelPos
   const mobile = window.innerWidth < 768 ? 1.4 : 1
   // Overlay mode (touch): the word isn't expanded, so size the opaque card to the widest
@@ -532,13 +546,20 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rel     = ring - reel                       // continuous offset from centre, in rows
     const a       = Math.abs(rel)
     const isOrig  = word === cycle.synonyms[0]
-    const opacity = Math.max(0, Math.min(1, 1.22 - a * 0.6))
+    // The card is transparent and 3 rows tall, so at rest the peeking prev/next synonyms
+    // bleed onto the text lines above and below (no background to mask them). So reveal the
+    // neighbours ONLY while the reel is in motion: at rest just the centre word shows, in
+    // place — calm, no bleed, nothing for the eye to read as movement. `reveal` collapses to
+    // the centre row (a≈0) when still; the fade-out is transitioned (see row style) so the
+    // ghosts settle softly, while motion keeps the per-frame opacity crisp (transition off).
+    const reveal  = moving ? 1 : Math.max(0, 1 - a * 2.4)
+    const opacity = Math.max(0, Math.min(1, 1.22 - a * 0.6)) * reveal
     rows.push(
       <div key={ring}
         style={{
           position: 'absolute', left: 0, right: 0, height: rowH,
           top: (cardH - rowH) / 2,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
           whiteSpace: 'nowrap', overflow: 'hidden', cursor: 'pointer',
           fontSize: fsz,
           // Move via translateY only (compositor-only). No scale: scaling centred text
@@ -548,11 +569,19 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           willChange: 'transform',
           color: isOrig ? '#5c2d8a' : '#9b5ccc',
           opacity,
+          // Smooth the neighbours' fade-out when the reel settles; none while moving so the
+          // per-frame opacity stays crisp (a transition would smear the scrolling fade).
+          transition: moving ? 'none' : 'opacity 160ms ease',
           WebkitTapHighlightColor: 'transparent',
         }}>
+        {/* margin-left:f% then translateX(-f%) places the word at fraction f of the card's
+            free space (any width), so the original lands on its natural x for every word. */}
+        <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${fPct}%`, transform: `translateX(-${fPct}%)` }}>
         {slotIdx === 0 ? (
           // The original word carries a little uneven ink-blot, pinned just before its
-          // first letter (so it rides with the word), shown only while the reel scrolls.
+          // first letter (so it rides with the word). It marks the original whenever that
+          // word is the one resting in place (a≈0), and stays lit while the reel scrolls so
+          // you can see the original pass; it only hides on the off-centre rows mid-spin.
           <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
             <span aria-hidden="true" className="scas-origin-dot"
               style={{ position: 'absolute', right: '100%', marginRight: '1.5px', top: '50%',
@@ -562,10 +591,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
                        // No opacity transition: the original passes dead-centre faster than a
                        // fade, so a transition lags behind the motion. The row's opacity fade
                        // (which it inherits) already smooths it spatially as it scrolls.
-                       opacity: moving ? 1 : 0, pointerEvents: 'none' }} />
+                       opacity: (moving || a < 0.5) ? 1 : 0, pointerEvents: 'none' }} />
             {displayFor(word, mobile)}
           </span>
         ) : displayFor(word, mobile)}
+        </span>
       </div>,
     )
   }

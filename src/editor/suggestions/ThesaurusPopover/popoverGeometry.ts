@@ -70,32 +70,70 @@ export function computeLineCompressionRange(
 
   if (nBefore + nAfter === 0) return null
 
-  const slack = Math.max(0, paraEl.getBoundingClientRect().right - naturalLineRight)
+  const paraRight = paraEl.getBoundingClientRect().right
+  const slack = Math.max(0, paraRight - naturalLineRight)
   const exp   = Math.max(0, Math.ceil(minWidth) - naturalWidth)
-  const net   = exp > slack ? exp - slack + 2 : 0
-  if (net === 0) return null
+  if (exp === 0) return null
 
   const fe  = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
   const fsz = parseFloat(fe ? window.getComputedStyle(fe).fontSize : '18') || 18
 
-  // The first word on a wrapped line is excluded from compression — a widget at the
-  // line start offsets it instead, keeping the focused word anchored to its original x.
-  // On the very first paragraph line skip the widget (nothing above to reflow).
+  // Keep the line's first word uncompressed (squeezing it would jitter the line start);
+  // count its chars so the before-compression starts just after it.
   let fwc = 0
   if (lineFrom !== null) {
-    let isFirst = false
-    try { isFirst = editor.state.doc.resolve(lineFrom).parentOffset === 0 } catch {}
-    if (!isFirst) {
-      const dz = editor.state.doc.content.size
-      for (let p = lineFrom; p < wordFrom && p + 1 <= dz; p++) {
-        try { const c = editor.state.doc.textBetween(p, p + 1); if (/[ \t\xa0]/.test(c)) break; fwc++ }
-        catch { break }
-      }
+    const dz = editor.state.doc.content.size
+    for (let p = lineFrom; p < wordFrom && p + 1 <= dz; p++) {
+      try { const c = editor.state.doc.textBetween(p, p + 1); if (/[ \t\xa0]/.test(c)) break; fwc++ }
+      catch { break }
     }
   }
+  const firstWordEnd = (lineFrom ?? wordFrom) + fwc
+  const nBeforeComp = nBefore - fwc
 
-  const nCompress = nBefore + nAfter - fwc
-  if (nCompress <= 0) return null
-  const lsEm = net / nCompress / fsz
-  return { from: lineFrom ?? wordFrom, to: lineTo ?? wordTo, letterSpacingEm: lsEm, offsetLeft: fwc * lsEm * fsz }
+  // EQUAL BUFFERS. The reserved (widest-synonym) box is centred on the word: it extends
+  // exp/2 to each side, so every synonym shows with an equal gap left and right and the
+  // original keeps its natural x. Each side's extension is made by compressing that side's
+  // text; the RIGHT side spends the line's slack before it has to compress (so we never
+  // compress more than needed, and the trailing words can't wrap). If a side can't give its
+  // half — too little text, or the readable cap — the shortfall moves to the other side, so
+  // the box leans only at the true line edges (the left→right continuum).
+  // fe carries min-width:naturalWidth here, so its rect is the word's natural box. rightRoom
+  // is the room from the word's right edge to the margin — the most the box can grow right
+  // before it (and the trailing words) would cross the margin and wrap.
+  const wordRight = fe ? fe.getBoundingClientRect().right : naturalLineRight
+  const rightRoom = Math.max(0, paraRight - wordRight)
+  const SAFETY    = 2   // px: keep the line just inside the margin so it never wraps on a tie
+
+  const MAX_LS_EM = 0.08   // px-per-em cap that still reads without glyphs touching
+
+  // Total width the line must give up so the expanded box fits: the right slack absorbs part,
+  // the rest is shared. Distribute it at a SINGLE uniform per-character rate across BOTH sides
+  // — so a short side (e.g. a 2-letter trailing word) is never crushed into overlap; the long
+  // side simply absorbs more total at the same gentle rate. (+SAFETY keeps the line a hair
+  // inside the margin so it never wraps on a tie.)
+  const compressTotal = exp > slack ? exp - slack + SAFETY : 0
+  const nComp = Math.max(0, nBeforeComp) + nAfter
+  const ls = nComp > 0 ? Math.min(MAX_LS_EM, compressTotal / nComp / fsz) : 0
+  let beforeComp = Math.max(0, nBeforeComp) * ls * fsz
+  let afterComp  = nAfter * ls * fsz
+
+  // Box-fit: the box's right edge must not cross the margin, i.e. it must slide left at least
+  // (exp − rightRoom). If the uniform split doesn't slide it far enough, move the shortfall
+  // onto the before-side (long → still gentle), easing the after-side further.
+  const minBefore = Math.max(0, exp - rightRoom)
+  if (beforeComp < minBefore && nBeforeComp > 0) {
+    const shift = Math.min(minBefore - beforeComp, afterComp)
+    beforeComp += shift
+    afterComp  -= shift
+  }
+
+  const lsBeforeEm = nBeforeComp > 0 ? Math.min(MAX_LS_EM, beforeComp / nBeforeComp / fsz) : 0
+  const lsAfterEm  = nAfter > 0 ? Math.min(MAX_LS_EM, afterComp / nAfter / fsz) : 0
+
+  if (lsBeforeEm === 0 && lsAfterEm === 0) return null
+  // Where the word sits inside the reserved box (= how far the box slid left, as a fraction
+  // of the expansion): 0.5 ≈ centred, →0 left-edge, →1 right-edge — the left→right continuum.
+  const alignFraction = exp > 0 ? Math.min(1, beforeComp / exp) : 0
+  return { from: lineFrom ?? wordFrom, firstWordEnd, to: lineTo ?? wordTo, lsBeforeEm, lsAfterEm, alignFraction }
 }
