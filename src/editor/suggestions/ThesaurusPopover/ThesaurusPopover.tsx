@@ -485,12 +485,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const fsz  = parseFloat(cs.fontSize) || 18
     const left = rect.left - cRect.left
 
-    // Align the reel at the fraction the box actually slid left (beforeShift/exp), supplied
-    // by the line compression. f=0.5 for a centred box (mid-line word) → centred reel; f→0
-    // for a left-edge word the box couldn't slide → left-aligned; f→1 for a right-edge word →
-    // right-aligned. This lands the ORIGINAL word on its natural x for every position (no
-    // entry jump, even at the edges) and is robust to the open-reflow (intent, not a measure).
-    const alignF = cycle.alignFraction
+    // Align the reel so the original word lands EXACTLY on its pre-click x. The box's left
+    // is its natural left minus however far it actually slid (the browser's real letter-
+    // spacing, not the intended amount) — so measure that slide directly: alignF = (naturalLeft
+    // - boxLeft) / exp. This is sub-pixel exact (no 1-3px drift), and clamps to [0,1] so the
+    // word stays inside the card if the line reflowed it. (cycle.alignFraction is the intent,
+    // kept for reference.) f→0 left-aligned, .5 centred, →1 right-aligned: the continuum.
+    const exp    = Math.max(1, cycle.minWidth - cycle.naturalWidth)
+    const alignF = Math.max(0, Math.min(1, (cycle.naturalLeft - rect.left) / exp))
 
     const textNode = focusedEl.firstChild
     let textMid: number
