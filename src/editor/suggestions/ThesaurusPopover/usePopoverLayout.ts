@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
@@ -55,55 +55,18 @@ export function usePopoverLayout(
     setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth: rect.width } : prev)
   }
 
-  // ── Defer layout while a pointer is held (Fix 3) ─────────────────────────────
-  // Expanding/compressing rebuilds the DOM; doing that under an active touch makes iOS drop
-  // scroll-suppression and pan the page under the reel (synonyms landing mid-drag triggered
-  // it). So while a pointer is down we record the intended pass and flush it on release.
-  const pointerHeldRef = useRef(false)
-  const pendingRef = useRef<{ from: number; to: number; minWidth: number; overlay: boolean } | null>(null)
-  function requestLayout(from: number, to: number, minWidth: number, overlay: boolean) {
-    if (pointerHeldRef.current) pendingRef.current = { from, to, minWidth, overlay }
-    else applyLayout(from, to, minWidth, overlay)
-  }
-  const flushRef = useRef<() => void>(() => {})
-  flushRef.current = () => {
-    const p = pendingRef.current
-    if (!p) return
-    pendingRef.current = null
-    applyLayout(p.from, p.to, p.minWidth, p.overlay)
-    forceUpdate(n => n + 1)   // the focused rect just changed — recompute geometry
-  }
-  useEffect(() => {
-    // Only TOUCH gestures need deferral (iOS drops scroll-suppression when the DOM rebuilds
-    // mid-drag). A mouse press-and-hold is a normal way to browse synonyms on desktop and must
-    // compress in place immediately — so never treat the mouse as "held".
-    const down     = (e: PointerEvent) => { if (e.pointerType === 'touch') pointerHeldRef.current = true }
-    const downTouch = () => { pointerHeldRef.current = true }
-    const up       = () => { pointerHeldRef.current = false; flushRef.current() }
-    document.addEventListener('pointerdown', down, true)
-    document.addEventListener('pointerup', up, true)
-    document.addEventListener('pointercancel', up, true)
-    // iOS Safari can swallow pointerup after a preventDefault'd pointerdown, leaving the
-    // layout stuck deferred (the reel never compresses → overlap). touchend/touchcancel always
-    // fire on iOS, so flush from them too.
-    document.addEventListener('touchstart', downTouch, true)
-    document.addEventListener('touchend', up, true)
-    document.addEventListener('touchcancel', up, true)
-    return () => {
-      document.removeEventListener('pointerdown', down, true)
-      document.removeEventListener('pointerup', up, true)
-      document.removeEventListener('pointercancel', up, true)
-      document.removeEventListener('touchstart', downTouch, true)
-      document.removeEventListener('touchend', up, true)
-      document.removeEventListener('touchcancel', up, true)
-    }
-  }, [])
+  // Expand/compress immediately (no deferral). We tried deferring the pass while a touch was
+  // held — to avoid rebuilding the DOM under an active gesture — but with no reserved space
+  // during the hold, wide synonyms had nowhere to go (they overlapped, then clipped, the
+  // surrounding text). The iOS gesture is instead kept alive by the on-node touchmove
+  // suppressor in ThesaurusPopover (Fix 4), which survives the rebuild, so we can apply the
+  // layout right away and the reel always has its box.
 
-  // Resize safety net — re-measure & re-apply for the current cycle (deferred if held).
+  // Resize safety net — re-measure & re-apply for the current cycle (idempotent).
   useEffect(() => {
     if (!cycle || cycle.overlay) return
     const c = cycle
-    const onResize = () => requestLayout(c.from, c.to, c.minWidth, c.overlay)
+    const onResize = () => applyLayout(c.from, c.to, c.minWidth, c.overlay)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -154,16 +117,13 @@ export function usePopoverLayout(
       const capitalize = /^[A-Z]/.test(displayWord)
       const { synonyms, minWidth } = buildSynonyms(lookupWord, candidates, font, rect.width, capitalize)
       // Centre the reel on the word currently in the text (may differ from the original for a
-      // managed slot), so reopening shows what's there. Don't snap it under a steering finger
-      // (Fix 3) — keep the live reel position while a pointer is held.
+      // managed slot), so reopening shows what's there, not the original.
       const cur = displayWord.toLowerCase()
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
-      setCycle(prev => prev?.from === domPos
-        ? { ...prev, synonyms, minWidth, reelPos: pointerHeldRef.current ? prev.reelPos : reelPos }
-        : prev)
-      // Apply the expand+compress pass via the shared, fresh-measuring path (deferred if held).
-      requestLayout(domPos, domPos + displayWord.length, minWidth, overlay)
+      setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
+      // Apply the expand+compress pass immediately via the shared, fresh-measuring path.
+      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay)
     })
   }
 
