@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
@@ -33,26 +33,66 @@ export function usePopoverLayout(
     return () => { window.removeEventListener('resize', upd); window.removeEventListener('scroll', upd, true) }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Cancel any in-flight open animation when the cycle closes.
+  useEffect(() => { if (!cycle) cancelAnim() }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // rAF handle for the open animation (so a new open / close can cancel it).
+  const animRef = useRef<number | null>(null)
+  const cancelAnim = () => { if (animRef.current !== null) { cancelAnimationFrame(animRef.current); animRef.current = null } }
+
   // ── Shared layout pass (Fix 2): always re-measure the NATURAL line fresh ──────
   // Clear decorations, re-find the live element, measure rect + line-right ANEW, recompute
   // compression, apply. Never reuse coords captured at open time — they are viewport-relative
   // and go stale after any scroll or iOS toolbar resize, which made compression classify
   // against the wrong visual line and compound per pass. Idempotent by construction.
-  function applyLayout(from: number, to: number, minWidth: number, overlay: boolean) {
+  // When `animate`, ramp the box expansion + line compression together over ~one keyboard-
+  // raise (easeInOutCubic) instead of snapping — so clicking a word reflows smoothly.
+  function applyLayout(from: number, to: number, minWidth: number, overlay: boolean, animate = false) {
+    cancelAnim()
     if (overlay) { onHintChange(from, null); return }   // overlay mode never compresses
     onHintChange(null, null)                            // clear so we measure the natural line
     const fe = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red'))
       .find(el => posOf(el, editor) === from)
     const pe = fe?.closest('p')
     if (!fe || !pe) return
-    const rect     = fe.getBoundingClientRect()
-    const natRight = measureNaturalLineRight(rect, pe)
+    const rect         = fe.getBoundingClientRect()
+    const naturalWidth = rect.width
+    const natRight     = measureNaturalLineRight(rect, pe)
     const lineRange = computeLineCompressionRange(
-      rect.top, rect.bottom, natRight, rect.width, minWidth, from, to, pe, editor,
+      rect.top, rect.bottom, natRight, naturalWidth, minWidth, from, to, pe, editor,
     )
-    onHintChange(from, minWidth, lineRange)
     const alignFraction = lineRange?.alignFraction ?? 0
-    setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth: rect.width } : prev)
+    const finish = () => setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth } : prev)
+
+    if (!animate || minWidth <= naturalWidth) {
+      onHintChange(from, minWidth, lineRange)
+      finish()
+      return
+    }
+
+    // Animate: ramp the box expansion (and the compression, if any) together over ~one
+    // keyboard-raise, so the box grows and the surrounding text squeezes to match — no overflow
+    // at any frame. (When there's no compression, the box just grows into the line's slack.)
+    const exp = minWidth - naturalWidth
+    const lsB = lineRange?.lsBeforeEm ?? 0
+    const lsA = lineRange?.lsAfterEm ?? 0
+    const DURATION = 280   // ~Apple keyboard raise
+    const ease = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2) // easeInOutCubic
+    const frame = (e: number) => onHintChange(from, naturalWidth + e * exp,
+      lineRange ? { ...lineRange, lsBeforeEm: e * lsB, lsAfterEm: e * lsA } : null)
+    frame(0)   // e=0 synchronously so .scas-focused exists immediately (no flash)
+    let t0: number | null = null
+    const step = (t: number) => {
+      // Bail if the cycle moved or closed (don't re-assert focus on a dead cycle).
+      const live = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+      if (!live || posOf(live, editor) !== from) { animRef.current = null; return }
+      if (t0 === null) t0 = t
+      const e = ease(Math.min(1, (t - t0) / DURATION))
+      frame(e)
+      if (e < 1) { animRef.current = requestAnimationFrame(step) }
+      else { animRef.current = null; finish() }
+    }
+    animRef.current = requestAnimationFrame(step)
   }
 
   // Expand/compress immediately (no deferral). We tried deferring the pass while a touch was
@@ -122,8 +162,8 @@ export function usePopoverLayout(
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
       setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
-      // Apply the expand+compress pass immediately via the shared, fresh-measuring path.
-      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay)
+      // Animate the expand+compress reflow via the shared, fresh-measuring path.
+      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay, true)
     })
   }
 
