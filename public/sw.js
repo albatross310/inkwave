@@ -4,7 +4,7 @@ const CACHE = 'inkwave-v0.1.0'
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE).then((cache) =>
-      cache.addAll(['/', '/edit', '/manifest.webmanifest'])
+      cache.addAll(['/', '/manifest.webmanifest'])
     )
   )
   self.skipWaiting()

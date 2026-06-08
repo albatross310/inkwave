@@ -12,6 +12,16 @@
     text-size-adjust: 100%;
   }
 
+  /* The editor page surface — white background behind the parchment. Padding lives here (not
+     in Tailwind utilities on the element) so the page-position is a single CSS knob shared by
+     the live editor and the prerendered shell. Top padding is small so the parchment sits near
+     the top of the viewport; the bottom leaves room for the floating footer toolbar. */
+  .inkwave-editor-surface {
+    min-height: 100vh;
+    background-color: #ffffff;
+    padding: 0.625rem 1rem 8rem;
+  }
+
   /* Parchment paper texture for the scroll body */
   .scroll-paper {
     background-color: #f7f2e8;

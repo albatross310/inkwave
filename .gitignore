@@ -9,3 +9,7 @@ dist-ssr
 # Browser-automation / manual test artifacts (screenshots live at repo root)
 .playwright-mcp/
 /*.png
+
+# React Router framework generated types
+.react-router/
+/build/

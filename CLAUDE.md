@@ -33,14 +33,26 @@ Do **not** build against the older v3/v4 architecture docs (audit trail only).
 ## Tech stack
 
 Vite + React 18 + TypeScript + Tailwind 3 + Tiptap (on ProseMirror) + OPFS/IndexedDB.
-React Router for routing. `uuid` for IDs. Hosting: Vercel. Domain: `inkwave.studio`.
+**React Router v7 in framework mode** (`@react-router/dev` Vite plugin) for routing +
+build-time prerendering. `uuid` for IDs. Hosting: Vercel. Domain: `inkwave.studio`.
 
 ```
-pnpm dev        # vite dev server (http://localhost:5173)
-pnpm build      # tsc -b && vite build
+pnpm dev        # react-router dev (http://localhost:5173)
+pnpm build      # react-router build — outputs static client + prerendered HTML to build/client/
+pnpm typecheck  # react-router typegen && tsc -b
+pnpm preview    # vite preview --outDir build/client
 pnpm test       # vitest (NOTE: no tests written yet)
 pnpm test:e2e   # playwright (none written yet)
 ```
+
+**Routing / SSR model.** `react-router.config.ts` sets `ssr: false` (SPA mode, no runtime
+server) + `prerender(['/', '/about'])` — `/` and `/about` are rendered to static HTML at
+build for SEO + instant first paint. The editor IS the landing page (`/`): the route
+prerenders the empty-editor SHELL (`<Scroll>` chrome + `<EmptyEditorSurface>` facsimile,
+same CSS classes as the live editor — see `src/editor/Scroll.tsx`), then the real Tiptap
+editor mounts client-side in its place (ProseMirror can't SSR). The prerendered page is a
+direct CSS function of the shared components, so style changes propagate automatically.
+Flip `ssr: true` later when the Phase-2 "rooms" model needs per-request rendering.
 
 Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 
@@ -61,9 +73,15 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 ## Code map
 
 ```
+app/                                   # React Router v7 framework layer (thin; imports from src/)
+  root.tsx                             # document shell (<html>/<head>), <Meta>/<Links>, fonts, global CSS
+  routes.ts                            # route config: index('routes/home.tsx') + 'about'
+  routes/home.tsx                      # '/' = the editor (renders <Edit/>) + SEO meta()
+  routes/about.tsx                     # '/about'
+  entry.client.tsx                     # hydrateRoot + service-worker registration + build marker
 src/
-  App.tsx                              # router: /edit only, * → /edit
-  routes/Edit.tsx                      # loads/creates the active doc, owns doc state
+  routes/Edit.tsx                      # loads/creates the active doc; renders the shell until it loads
+  editor/Scroll.tsx                    # shared scroll-paper chrome + EmptyEditorSurface facsimile (CSS-function shell)
   types/document.ts                    # InkwaveDocument, Snapshot, ProvenanceEvent types
   editor/
     TiptapEditor.tsx                   # editor surface, scroll-head chrome, footer, prefetch

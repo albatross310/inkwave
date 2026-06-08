@@ -4,7 +4,7 @@
 // open empty centred modals over the editor (placeholders for now).
 
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 
 type ModalKey = 'login' | 'save' | 'recent' | 'open' | 'settings'
 

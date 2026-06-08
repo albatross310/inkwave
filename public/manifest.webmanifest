@@ -2,7 +2,7 @@
   "name": "Inkwave",
   "short_name": "Inkwave",
   "description": "A calm writing environment for serious intellectual work.",
-  "start_url": "/edit",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#fdfaf3",
   "theme_color": "#2a3b5f",

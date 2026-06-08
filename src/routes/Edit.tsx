@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { TiptapEditor } from '../editor/TiptapEditor'
+import { Scroll, EmptyEditorSurface } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
 import { loadDocument, emptyTiptapDoc } from '../storage/opfs'
 import { listMeta } from '../storage/indexeddb'
@@ -76,13 +77,17 @@ export function Edit() {
     setDoc(updated)
   }
 
+  // Before the document loads (and during prerender, where effects never run) render the SHARED
+  // empty-editor shell — the same Scroll chrome + an empty .ProseMirror facsimile the live
+  // editor uses. So the prerendered landing page is a direct CSS function of the editor, and the
+  // real editor mounts in its place with no visual jump.
   if (!doc) {
-    return <div className="min-h-screen bg-parchment" />
+    return (
+      <Scroll>
+        <EmptyEditorSurface />
+      </Scroll>
+    )
   }
 
-  return (
-    <div className="relative min-h-screen bg-parchment">
-      <TiptapEditor doc={doc} onDocChange={handleDocChange} />
-    </div>
-  )
+  return <TiptapEditor doc={doc} onDocChange={handleDocChange} />
 }
