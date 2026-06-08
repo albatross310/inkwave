@@ -2,6 +2,12 @@ export const CYCLE_SIZE      = 8
 export const DELETE_SENTINEL = '\x00delete'
 export const CARD_PAD_X      = 3
 
+// Cap on the RIGHT-side squeeze (em). The line's slack is spent first, then the after-text
+// compresses up to this much; any remaining expansion (a long synonym) compresses the LEFT
+// (before-text) instead, so the right never squeezes harder than this. The box still fits the
+// widest synonym (no clipping) — the long synonym just leans left into the freed space.
+export const MAX_BOX_EXPANSION_EM = 2.25
+
 
 // Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
 // transition over this duration (CSS-driven, so it stays smooth on phones). ~half an Apple

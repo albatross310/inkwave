@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react'
-import type { LineRange } from './popoverConstants'
+import { MAX_BOX_EXPANSION_EM, type LineRange } from './popoverConstants'
 
 // Returns the PM position of el, or -1 on failure.
 export function posOf(el: Element, editor: Editor): number {
@@ -95,21 +95,17 @@ export function computeLineCompressionRange(
 
   const MAX_LS_EM = 0.08   // px-per-em cap that still reads without glyphs touching
 
-  // RIGHT-PREFERRING absorption (exit-stationary). The reserved box grows RIGHTWARD from the
-  // word — pushing the after-text right and compressing it — so the word keeps its natural x and
-  // never drifts right of the text before it. The box slides LEFT (compressing the before-text)
-  // ONLY when the word sits too near the right margin for the right side to absorb the whole
-  // expansion. This is the left→right continuum: mid-line words lean fully right (no left gap),
-  // right-edge words lean left as much as needed.
+  // CAPPED-RIGHT, EXCESS-LEFT. Spend the line's right slack first (free), then squeeze the
+  // after-text — but only up to MAX_BOX_EXPANSION_EM, so the right squeeze stays gentle. Any
+  // remaining expansion (a long synonym) compresses the LEFT (before-text) instead: the box
+  // slides left and the long synonym sits in the space the before-text frees, with no overlap.
+  // Short synonyms (within slack + the cap) need no left compression, so the word doesn't move.
   const nBC          = Math.max(0, nBeforeComp)
   const maxAfterComp = nAfter * MAX_LS_EM * fsz          // most the after-text can give up
   const maxBeforeComp= nBC    * MAX_LS_EM * fsz          // most the before-text can give up
-  // Slide the box left only by the expansion the right side genuinely can't take (slack it can
-  // spend for free + the most the after-text can compress), capped by the before-text's room.
-  const beforeComp = Math.min(maxBeforeComp, Math.max(0, exp + SAFETY - slack - maxAfterComp))
-  // The remaining rightward push (exp − beforeComp) is absorbed by spending the slack first,
-  // then compressing the after-text by whatever's left over (never more than it can give).
-  const afterComp  = Math.min(maxAfterComp, Math.max(0, (exp - beforeComp) - slack + SAFETY))
+  const remaining    = Math.max(0, exp + SAFETY - slack) // expansion the free slack can't absorb
+  const afterComp    = Math.min(maxAfterComp, Math.min(remaining, MAX_BOX_EXPANSION_EM * fsz))
+  const beforeComp   = Math.min(maxBeforeComp, remaining - afterComp)
 
   const lsBeforeEm = nBC    > 0 ? Math.min(MAX_LS_EM, beforeComp / nBC    / fsz) : 0
   const lsAfterEm  = nAfter > 0 ? Math.min(MAX_LS_EM, afterComp  / nAfter / fsz) : 0
