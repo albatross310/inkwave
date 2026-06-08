@@ -2,6 +2,14 @@ export const CYCLE_SIZE      = 8
 export const DELETE_SENTINEL = '\x00delete'
 export const CARD_PAD_X      = 3
 
+// Cap on how far the reserved box may grow PAST the focused word, in em. The box is normally
+// sized to the widest synonym in the reel; reserving the full widest width on a full line means
+// the after-text must compress by that whole amount, which "feels like a lot". Capping the box
+// bounds the everyday squeeze: a synonym wider than (word + this) is shown shifted left (the
+// documented wide-word compromise) rather than forcing the whole line to compress to fit it.
+export const MAX_BOX_EXPANSION_EM = 3
+
+
 // Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
 // transition over this duration (CSS-driven, so it stays smooth on phones). ~half an Apple
 // keyboard raise. The close timer in usePopoverLayout matches it.
