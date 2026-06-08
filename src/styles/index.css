@@ -37,6 +37,11 @@
 
   .ProseMirror p {
     margin-bottom: 1.25em;
+    /* Isolate each paragraph's layout so the SCAS reflow animation (min-width +
+       letter-spacing changing every frame) only re-lays-out the focused paragraph,
+       not the whole document. This is what keeps the animation smooth on high-refresh
+       (120/144Hz) displays, where the per-frame layout budget is ~7–8ms. */
+    contain: layout;
   }
 
   .ProseMirror p.is-editor-empty:first-child::before {
