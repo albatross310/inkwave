@@ -2,6 +2,12 @@ export const CYCLE_SIZE      = 8
 export const DELETE_SENTINEL = '\x00delete'
 export const CARD_PAD_X      = 3
 
+// Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
+// transition over this duration (CSS-driven, so it stays smooth on phones). ~half an Apple
+// keyboard raise. The close timer in usePopoverLayout matches it.
+export const REFLOW_MS   = 140
+export const REFLOW_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)'
+
 export interface CycleState {
   word: string
   from: number; to: number

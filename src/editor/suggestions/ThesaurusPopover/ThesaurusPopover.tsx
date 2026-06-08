@@ -39,7 +39,7 @@ interface ThesaurusPopoverProps {
 export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange }: ThesaurusPopoverProps) {
   const { recordAccepted, recordIgnored } = useCompliance()
   const tabCursorRef = useRef<number | null>(null)
-  const { cycle, setCycle, openCycleForElement } = usePopoverLayout(editor, onHintChange)
+  const { cycle, setCycle, openCycleForElement, closeWithAnimation } = usePopoverLayout(editor, onHintChange)
 
   // Bump on scroll/resize so the memoised geometry recomputes; reel animation does NOT
   // touch this, so per-frame reelPos updates never redo getBoundingClientRect.
@@ -95,7 +95,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       editor.commands.setTextSelection(tabCursorRef.current)
   }
   function closeCycle(record = true, restore = true) {
-    if (record) recordIgnored(); onHintChange(null, null); setCycle(null); if (restore) restoreCursor()
+    if (record) recordIgnored()
+    // Ease the reflow back to natural, then tear down (restoreCursor runs after the animation).
+    closeWithAnimation(restore ? restoreCursor : undefined)
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────

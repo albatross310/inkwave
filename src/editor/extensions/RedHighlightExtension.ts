@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { isInVocab } from '../../scas/ranking'
 import type { InkwaveDocument } from '../../types/document'
-import type { LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { REFLOW_MS, REFLOW_EASE, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
 
 export const RED_HIGHLIGHT_KEY = new PluginKey<DecorationSet>('redHighlight')
 
@@ -155,7 +155,7 @@ function buildDecorations(
 
     if (isFocused) {
       const mw = hintState.focusedMinWidth
-      attrs['style'] = `display:inline-block;color:transparent${mw ? `;min-width:${Math.ceil(mw)}px` : ''}`
+      attrs['style'] = `display:inline-block;color:transparent${mw ? `;min-width:${Math.ceil(mw)}px` : ''};transition:min-width ${REFLOW_MS}ms ${REFLOW_EASE}`
     }
 
     decorations.push(Decoration.inline(from, to, attrs))
@@ -169,11 +169,14 @@ function buildDecorations(
     const fw = redWords.find(rw => rw.from === focusedPos)
     if (fw) {
       const { firstWordEnd: fwe, to: lt, lsBeforeEm, lsAfterEm } = lineCompressionRange
-      if (lsBeforeEm > 0 && fwe < fw.from) {
-        decorations.push(Decoration.inline(fwe, fw.from, { style: `letter-spacing: -${lsBeforeEm.toFixed(4)}em` }))
+      const lsTransition = `;transition:letter-spacing ${REFLOW_MS}ms ${REFLOW_EASE}`
+      // Apply the span whenever its range exists (even at letter-spacing 0): a 0 span is a
+      // visual no-op but must be present so the open/close transition has something to animate.
+      if (fwe < fw.from) {
+        decorations.push(Decoration.inline(fwe, fw.from, { style: `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}` }))
       }
-      if (lsAfterEm > 0 && fw.to < lt) {
-        decorations.push(Decoration.inline(fw.to, lt, { style: `letter-spacing: -${lsAfterEm.toFixed(4)}em` }))
+      if (fw.to < lt) {
+        decorations.push(Decoration.inline(fw.to, lt, { style: `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}` }))
       }
     }
   }
