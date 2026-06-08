@@ -54,6 +54,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Ref to the parchment/scroll column — its right edge anchors the options panel.
   const paperRef = useRef<HTMLDivElement>(null)
+  // Footer bar + live mirrors of derived flags, read by the caret-keep-visible handler.
+  const footerRef = useRef<HTMLDivElement>(null)
+  const keyboardUpRef = useRef(false)
+  const barVisibleRef = useRef(false)
 
   // Shared mutable ref read synchronously by the decoration plugin.
   const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null })
@@ -201,6 +205,38 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { vv.removeEventListener('resize', onVV); vv.removeEventListener('scroll', onVV) }
   }, [])
 
+  // Keep the caret above the keyboard / bottom toolbar. While the keyboard is up, if typing or
+  // a caret move would put the caret below the keyboard top (or the visible bar above it),
+  // scroll down just enough to lift it back into view. Reads live values via refs so the
+  // editor subscription can be set up once. No-op while the keyboard is down (desktop too).
+  const keepCaretRef = useRef<() => void>(() => {})
+  keepCaretRef.current = () => {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed || !keyboardUpRef.current) return
+    const vv = window.visualViewport
+    let obstructionTop = vv ? vv.offsetTop + vv.height : window.innerHeight
+    if (footerRef.current && barVisibleRef.current) {
+      const t = footerRef.current.getBoundingClientRect().top
+      if (t > 0 && t < obstructionTop) obstructionTop = t
+    }
+    let caretBottom: number
+    try { caretBottom = ed.view.coordsAtPos(ed.state.selection.head).bottom } catch { return }
+    const overshoot = caretBottom - (obstructionTop - 12)
+    if (overshoot > 4) window.scrollBy(0, overshoot)
+  }
+  useEffect(() => {
+    if (!editor) return
+    let raf = 0
+    const onChange = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => keepCaretRef.current()) }
+    editor.on('selectionUpdate', onChange)
+    editor.on('update', onChange)
+    return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); cancelAnimationFrame(raf) }
+  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+  // When the keyboard opens, the caret may already be behind it — lift it once.
+  useEffect(() => {
+    if (keyboardUp) requestAnimationFrame(() => keepCaretRef.current())
+  }, [keyboardUp])
+
   // Track the container's right edge in viewport coords so CycleHintPanel
   // can sit flush against it at any window size or zoom level.
   useEffect(() => {
@@ -278,6 +314,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const showStyle  = !!editor && (styleBarOpen || !selectionEmpty) && !styleScrollHidden
   const showMain   = !isTouch || !keyboardUp
   const barVisible = showStyle || showMain
+  keyboardUpRef.current = keyboardUp
+  barVisibleRef.current = barVisible
 
   return (
     <ComplianceContext.Provider value={compliance}>
@@ -330,6 +368,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
         >
           <div
+            ref={footerRef}
             className={`pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
             style={{
               border: '1px solid rgba(92, 45, 138, 0.75)',
