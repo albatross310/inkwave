@@ -77,15 +77,25 @@ export function usePopoverLayout(
     // Only TOUCH gestures need deferral (iOS drops scroll-suppression when the DOM rebuilds
     // mid-drag). A mouse press-and-hold is a normal way to browse synonyms on desktop and must
     // compress in place immediately — so never treat the mouse as "held".
-    const down = (e: PointerEvent) => { if (e.pointerType === 'touch') pointerHeldRef.current = true }
-    const up   = () => { pointerHeldRef.current = false; flushRef.current() }
+    const down     = (e: PointerEvent) => { if (e.pointerType === 'touch') pointerHeldRef.current = true }
+    const downTouch = () => { pointerHeldRef.current = true }
+    const up       = () => { pointerHeldRef.current = false; flushRef.current() }
     document.addEventListener('pointerdown', down, true)
     document.addEventListener('pointerup', up, true)
     document.addEventListener('pointercancel', up, true)
+    // iOS Safari can swallow pointerup after a preventDefault'd pointerdown, leaving the
+    // layout stuck deferred (the reel never compresses → overlap). touchend/touchcancel always
+    // fire on iOS, so flush from them too.
+    document.addEventListener('touchstart', downTouch, true)
+    document.addEventListener('touchend', up, true)
+    document.addEventListener('touchcancel', up, true)
     return () => {
       document.removeEventListener('pointerdown', down, true)
       document.removeEventListener('pointerup', up, true)
       document.removeEventListener('pointercancel', up, true)
+      document.removeEventListener('touchstart', downTouch, true)
+      document.removeEventListener('touchend', up, true)
+      document.removeEventListener('touchcancel', up, true)
     }
   }, [])
 
