@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
-import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_MS } from './popoverConstants'
+import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS } from './popoverConstants'
 import type { CycleState, OnHintChange, LineRange } from './popoverConstants'
 import { posOf, measureNaturalLineRight, computeLineCompressionRange } from './popoverGeometry'
 import { buildSynonyms } from './popoverFallbacks'
@@ -76,11 +76,11 @@ export function usePopoverLayout(
       //    transition in every browser; if min-width snaps to full while letter-spacing still
       //    animates, the after-text overflows for a few frames. Splitting the two guarantees
       //    both ramp together.
-      onHintChange(from, naturalWidth, flat, true)
+      onHintChange(from, naturalWidth, flat, true, REFLOW_OPEN_MS)
       void focused()?.offsetWidth
       // 3. END — values change with the transition already armed: min-width + letter-spacing
-      //    ramp in lockstep, every time.
-      onHintChange(from, minWidth, lineRange, true)
+      //    ramp in lockstep, every time. OPEN is snappy.
+      onHintChange(from, minWidth, lineRange, true, REFLOW_OPEN_MS)
     } else {
       onHintChange(from, minWidth, lineRange, false)    // no animation requested → apply instantly
     }
@@ -99,13 +99,16 @@ export function usePopoverLayout(
     // the same compression ranges but with letter-spacing 0, so the spans transition rather than
     // vanish. The reel stays up (the chosen word sits at its natural x, which doesn't move).
     const lr = lastLineRangeRef.current
-    onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null)
+    // COMMIT/close is a slower, gentler settle — both sides (left + right) de-compress and the
+    // box ramps to the target together, so a long synonym (and the before-text it pushed) slide
+    // back smoothly rather than snapping.
+    onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null, true, REFLOW_COMMIT_MS)
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null
       onHintChange(null, null)
       setCycle(null)
       after?.()
-    }, REFLOW_MS)
+    }, REFLOW_COMMIT_MS)
   }
 
   // Expand/compress immediately (no deferral). We tried deferring the pass while a touch was

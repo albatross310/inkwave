@@ -14,7 +14,7 @@ export default {
         },
       },
       fontFamily: {
-        serif: ['"IM Fell DW Pica"', '"EB Garamond"', 'Georgia', 'serif'],
+        serif: ['"EB Garamond"', '"IM Fell DW Pica"', 'Georgia', 'serif'],
       },
       lineHeight: {
         reading: '1.65',

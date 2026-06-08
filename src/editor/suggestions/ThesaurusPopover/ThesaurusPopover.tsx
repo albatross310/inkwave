@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useCompliance } from '../../../scas/compliance'
-import { CYCLE_SIZE, REFLOW_MS } from './popoverConstants'
+import { CYCLE_SIZE, REFLOW_OPEN_MS } from './popoverConstants'
 import type { OnHintChange } from './popoverConstants'
 import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
@@ -516,7 +516,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   useEffect(() => {
     if (!cycle || cycle.overlay) return
     setSettled(false)
-    const t = setTimeout(() => { setSettled(true); setGeomNonce(n => n + 1) }, REFLOW_MS + 30)
+    const t = setTimeout(() => { setSettled(true); setGeomNonce(n => n + 1) }, REFLOW_OPEN_MS + 30)
     return () => clearTimeout(t)
   }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -38,7 +38,7 @@
      we add to it directly via editorProps, so selectors target it directly. */
   .ProseMirror {
     outline: none;
-    font-family: 'IM Fell DW Pica', 'EB Garamond', Georgia, serif;
+    font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;
     font-size: 1.125rem;
     line-height: 2.5;
     color: #1a1a1a;

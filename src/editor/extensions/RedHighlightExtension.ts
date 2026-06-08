@@ -4,7 +4,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { isInVocab } from '../../scas/ranking'
 import type { InkwaveDocument } from '../../types/document'
-import { REFLOW_MS, REFLOW_EASE, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { REFLOW_OPEN_MS, REFLOW_EASE, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
 
 export const RED_HIGHLIGHT_KEY = new PluginKey<DecorationSet>('redHighlight')
 
@@ -26,6 +26,8 @@ export interface HintState {
   // instantly — used for the START (jump-to-natural) of an open and for snap (wrap) commits, so
   // a reused decoration node never animates from the previous word's reserved width (overflow flash).
   animate: boolean
+  // Transition duration for this change (open is snappy, commit/close is a slower settle).
+  durationMs: number
 }
 
 interface RedHighlightOptions {
@@ -39,7 +41,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
   addOptions() {
     return {
       getDoc: () => { throw new Error('RedHighlightExtension: getDoc option is required') },
-      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true }),
+      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS }),
     }
   },
 
@@ -159,7 +161,7 @@ function buildDecorations(
 
     if (isFocused) {
       const mw = hintState.focusedMinWidth
-      const trans = hintState.animate ? `transition:min-width ${REFLOW_MS}ms ${REFLOW_EASE}` : 'transition:none'
+      const trans = hintState.animate ? `transition:min-width ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
       attrs['style'] = `display:inline-block;color:transparent${mw ? `;min-width:${Math.ceil(mw)}px` : ''};${trans}`
     }
 
@@ -174,7 +176,7 @@ function buildDecorations(
     const fw = redWords.find(rw => rw.from === focusedPos)
     if (fw) {
       const { firstWordEnd: fwe, to: lt, lsBeforeEm, lsAfterEm } = lineCompressionRange
-      const lsTransition = hintState.animate ? `;transition:letter-spacing ${REFLOW_MS}ms ${REFLOW_EASE}` : ';transition:none'
+      const lsTransition = hintState.animate ? `;transition:letter-spacing ${hintState.durationMs}ms ${REFLOW_EASE}` : ';transition:none'
       // Apply the span whenever its range exists (even at letter-spacing 0): a 0 span is a
       // visual no-op but must be present so the open/close transition has something to animate.
       if (fwe < fw.from) {

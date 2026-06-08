@@ -10,11 +10,11 @@ export const CARD_PAD_X      = 3
 export const MAX_RIGHT_LS_EM = 0.04
 
 
-// Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
-// transition over this duration (CSS-driven, so it stays smooth on phones). ~half an Apple
-// keyboard raise. The close timer in usePopoverLayout matches it.
-export const REFLOW_MS   = 140
-export const REFLOW_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)'
+// Reflow animation (CSS-driven, smooth on phones). The OPEN is snappy; the COMMIT/close settle
+// is slower and gentler. easeOutQuint decelerates smoothly into place (no harsh stop).
+export const REFLOW_OPEN_MS   = 120
+export const REFLOW_COMMIT_MS = 240
+export const REFLOW_EASE      = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
 export interface CycleState {
   word: string
@@ -49,4 +49,5 @@ export type OnHintChange = (
   minWidth?: number | null,
   lineRange?: LineRange | null,
   animate?: boolean,        // false = apply this state instantly (no CSS transition); default true
+  durationMs?: number,      // transition duration for this change (open vs commit)
 ) => void
