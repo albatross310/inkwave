@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useCompliance } from '../../../scas/compliance'
-import { CYCLE_SIZE } from './popoverConstants'
+import { CYCLE_SIZE, REFLOW_MS } from './popoverConstants'
 import type { OnHintChange } from './popoverConstants'
 import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
@@ -501,6 +501,17 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     return () => { window.removeEventListener('resize', bump); window.removeEventListener('scroll', bump, true) }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-measure ONCE the open reflow has settled. geom reads the live box for an exact exit, but
+  // when this cycle first mounts (or re-lays-out) the box is still mid-CSS-transition, so the
+  // first read is of a half-grown box. Bump geomNonce after REFLOW_MS so the memo re-runs
+  // against the final box. Keyed on minWidth (the reserved width that triggers the animation);
+  // does NOT fire during close (close eases the box via onHintChange, not cycle.minWidth).
+  useEffect(() => {
+    if (!cycle || cycle.overlay) return
+    const t = setTimeout(() => setGeomNonce(n => n + 1), REFLOW_MS + 30)
+    return () => clearTimeout(t)
+  }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Geometry (memoised — depends on the focused word, NOT the reel position) ──
 
   const geom = useMemo(() => {
@@ -520,15 +531,16 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // line on commit anyway, so that residual offset is unavoidable — and kept minimal).
     const font         = getFont(focusedEl)
     const naturalLeftC = cycle.naturalLeft - cRect.left
-    // The reserved box: reel words must stay within [boxLeft, boxRight] or they paint over the
-    // text. Compute it from the FINAL cycle geometry (min-width + how far compression slid the
-    // box left), NOT the live rect — during the open/close ANIMATION the rect is mid-transition,
-    // which would clamp the reel to a too-small box (clipping wide synonyms, skewing the sides).
+    // The reserved box IS the focused word's expanded rect; the after-text begins at its right
+    // edge. So reel words must stay within [boxLeft, boxRight] or they paint over the text.
+    // Read the LIVE rect (the browser's true rendered box, letter-spacing and all) so exit is
+    // exact — but only once the open animation has SETTLED: a post-settle geomNonce bump
+    // (see the effect below) re-runs this memo against the final box, since reading it mid-CSS-
+    // transition would clamp the reel to a half-grown box (the cause of the earlier clipping).
     // Short words sit at their natural x (exit-stationary); a word too wide is pushed left into
     // the box's left-compression space — as close to natural x as it fits.
-    const exp       = Math.max(0, Math.ceil(cycle.minWidth) - cycle.naturalWidth)
-    const boxLeftC  = naturalLeftC - cycle.alignFraction * exp
-    const boxRightC = boxLeftC + Math.ceil(cycle.minWidth)
+    const boxLeftC  = rect.left  - cRect.left
+    const boxRightC = rect.right - cRect.left
     const widths    = cycle.synonyms.map(s => measureTextWidth(s, font))
     const DOT_PAD   = 8   // room left of the word for the origin ink-blot
     const left      = boxLeftC - DOT_PAD
