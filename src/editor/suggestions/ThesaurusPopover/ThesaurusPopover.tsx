@@ -511,12 +511,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // line on commit anyway, so that residual offset is unavoidable — and kept minimal).
     const font         = getFont(focusedEl)
     const naturalLeftC = cycle.naturalLeft - cRect.left
-    // The reserved box IS the focused word's expanded rect; the after-text begins at its right
-    // edge. So reel words must stay within [boxLeft, boxRight] or they paint over the text.
-    // Short words sit at their natural x (exit-stationary); a word too wide to fit there is
-    // pushed left into the box's left-compression space — as close to natural x as it fits.
-    const boxLeftC  = rect.left  - cRect.left
-    const boxRightC = rect.right - cRect.left
+    // The reserved box: reel words must stay within [boxLeft, boxRight] or they paint over the
+    // text. Compute it from the FINAL cycle geometry (min-width + how far compression slid the
+    // box left), NOT the live rect — during the open/close ANIMATION the rect is mid-transition,
+    // which would clamp the reel to a too-small box (clipping wide synonyms, skewing the sides).
+    // Short words sit at their natural x (exit-stationary); a word too wide is pushed left into
+    // the box's left-compression space — as close to natural x as it fits.
+    const exp       = Math.max(0, Math.ceil(cycle.minWidth) - cycle.naturalWidth)
+    const boxLeftC  = naturalLeftC - cycle.alignFraction * exp
+    const boxRightC = boxLeftC + Math.ceil(cycle.minWidth)
     const widths    = cycle.synonyms.map(s => measureTextWidth(s, font))
     const DOT_PAD   = 8   // room left of the word for the origin ink-blot
     const left      = boxLeftC - DOT_PAD
