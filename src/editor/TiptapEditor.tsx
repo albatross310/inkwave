@@ -38,10 +38,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [cycleActive, setCycleActive] = useState(false)
   const [containerRight, setContainerRight] = useState(0)
   const [paperRight, setPaperRight] = useState(0)
-  // On a phone the toolbar hides while the keyboard is up (editor focused) to free the
-  // screen for writing; it returns when the keyboard is dismissed. Editor focus is the
-  // reliable "keyboard up" signal on iOS.
-  const [editorFocused, setEditorFocused] = useState(false)
+  // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
+  // and returns when the keyboard is dismissed. We detect the keyboard via the visual
+  // viewport (its visible height shrinks when the keyboard shows) — far more reliable than
+  // editor focus, whose blur doesn't fire on iOS when the keyboard is dismissed (which left
+  // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
+  const [keyboardUp, setKeyboardUp] = useState(false)
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
   const [styleBarOpen, setStyleBarOpen] = useState(false)
   const [selectionEmpty, setSelectionEmpty] = useState(true)
@@ -120,8 +122,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         spellcheck: 'false',
       },
     },
-    onFocus: () => setEditorFocused(true),
-    onBlur:  () => setEditorFocused(false),
     onTransaction: ({ editor: e }) => {
       const current = docRef.current
       const updated: InkwaveDocument = {
@@ -186,6 +186,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // Detect the on-screen keyboard via the visual viewport: when it's up, the visible height
+  // drops well below the layout height. This drives hiding the toolbar on phones. The 150px
+  // threshold ignores smaller resizes (URL bar collapse, the toolbar itself).
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const onVV = () => setKeyboardUp(window.innerHeight - vv.height - vv.offsetTop > 150)
+    onVV()
+    vv.addEventListener('resize', onVV)
+    vv.addEventListener('scroll', onVV)
+    return () => { vv.removeEventListener('resize', onVV); vv.removeEventListener('scroll', onVV) }
   }, [])
 
   // Track the container's right edge in viewport coords so CycleHintPanel
@@ -263,7 +276,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // opened with the STYLE button. The main row hides while the editor is focused on touch
   // (typing or selecting), so a selection brings up the style bar alone.
   const showStyle  = !!editor && (styleBarOpen || !selectionEmpty) && !styleScrollHidden
-  const showMain   = !isTouch || !editorFocused
+  const showMain   = !isTouch || !keyboardUp
   const barVisible = showStyle || showMain
 
   return (
