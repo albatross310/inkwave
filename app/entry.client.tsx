@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
-console.log('%c[inkwave] build: box-cap-r25', 'color:#5c2d8a;font-weight:bold')
+console.log('%c[inkwave] build: box-cap-1p5em-r27', 'color:#5c2d8a;font-weight:bold')
 
 startTransition(() => {
   hydrateRoot(

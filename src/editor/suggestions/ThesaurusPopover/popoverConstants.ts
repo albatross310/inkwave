@@ -7,7 +7,7 @@ export const CARD_PAD_X      = 3
 // the after-text must compress by that whole amount, which "feels like a lot". Capping the box
 // bounds the everyday squeeze: a synonym wider than (word + this) is shown shifted left (the
 // documented wide-word compromise) rather than forcing the whole line to compress to fit it.
-export const MAX_BOX_EXPANSION_EM = 3
+export const MAX_BOX_EXPANSION_EM = 1.5
 
 
 // Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
