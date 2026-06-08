@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react'
-import { MAX_BOX_EXPANSION_EM, type LineRange } from './popoverConstants'
+import { MAX_RIGHT_LS_EM, type LineRange } from './popoverConstants'
 
 // Returns the PM position of el, or -1 on failure.
 export function posOf(el: Element, editor: Editor): number {
@@ -95,16 +95,16 @@ export function computeLineCompressionRange(
 
   const MAX_LS_EM = 0.08   // px-per-em cap that still reads without glyphs touching
 
-  // CAPPED-RIGHT, EXCESS-LEFT. Spend the line's right slack first (free), then squeeze the
-  // after-text — but only up to MAX_BOX_EXPANSION_EM, so the right squeeze stays gentle. Any
-  // remaining expansion (a long synonym) compresses the LEFT (before-text) instead: the box
-  // slides left and the long synonym sits in the space the before-text frees, with no overlap.
-  // Short synonyms (within slack + the cap) need no left compression, so the word doesn't move.
+  // GENTLE-RIGHT-RATE, EXCESS-LEFT. Spend the line's right slack first (free), then squeeze the
+  // after-text — but only at MAX_RIGHT_LS_EM per character, so a word near the right margin with
+  // few characters after it never gets crammed. Whatever the right can't absorb at that gentle
+  // rate compresses the LEFT (before-text, up to the readability cap) instead — the box slides
+  // left and a long synonym sits in the freed space. Short synonyms need no left compression, so
+  // the word doesn't move.
   const nBC          = Math.max(0, nBeforeComp)
-  const maxAfterComp = nAfter * MAX_LS_EM * fsz          // most the after-text can give up
-  const maxBeforeComp= nBC    * MAX_LS_EM * fsz          // most the before-text can give up
+  const maxBeforeComp= nBC * MAX_LS_EM * fsz             // before-text may compress up to the readability cap
   const remaining    = Math.max(0, exp + SAFETY - slack) // expansion the free slack can't absorb
-  const afterComp    = Math.min(maxAfterComp, Math.min(remaining, MAX_BOX_EXPANSION_EM * fsz))
+  const afterComp    = Math.min(remaining, nAfter * MAX_RIGHT_LS_EM * fsz)
   const beforeComp   = Math.min(maxBeforeComp, remaining - afterComp)
 
   const lsBeforeEm = nBC    > 0 ? Math.min(MAX_LS_EM, beforeComp / nBC    / fsz) : 0

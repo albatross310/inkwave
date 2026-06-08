@@ -2,11 +2,12 @@ export const CYCLE_SIZE      = 8
 export const DELETE_SENTINEL = '\x00delete'
 export const CARD_PAD_X      = 3
 
-// Cap on the RIGHT-side squeeze (em). The line's slack is spent first, then the after-text
-// compresses up to this much; any remaining expansion (a long synonym) compresses the LEFT
-// (before-text) instead, so the right never squeezes harder than this. The box still fits the
-// widest synonym (no clipping) — the long synonym just leans left into the freed space.
-export const MAX_BOX_EXPANSION_EM = 2.25
+// Cap on the RIGHT-side compression RATE (letter-spacing em per character). The after-text
+// squeezes at most this much per character — so a word near the right margin, with only a few
+// characters after it, never gets crammed (the real cause of the "strict" look). Whatever the
+// right can't absorb at this gentle rate compresses the LEFT (before-text, which usually has far
+// more characters to spread it over) up to MAX_LS_EM. Box still fits the widest synonym (no clip).
+export const MAX_RIGHT_LS_EM = 0.04
 
 
 // Open/close reflow animation: the focused word's min-width and the surrounding letter-spacing
