@@ -65,12 +65,22 @@ export function usePopoverLayout(
     setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth } : prev)
 
     if (animate && minWidth > naturalWidth) {
-      // START: natural width, no compression, applied INSTANTLY (animate=false) — then force the
-      // browser to commit it so the END transitions from natural, never from a reused node's
-      // previous (wider) reserved width, which would briefly overflow when tabbing between words.
-      onHintChange(from, naturalWidth, lineRange ? { ...lineRange, lsBeforeEm: 0, lsAfterEm: 0 } : null, false)
-      void (editor.view.dom.querySelector('.scas-focused') as HTMLElement | null)?.offsetWidth
-      onHintChange(from, minWidth, lineRange, true)     // END — CSS transitions ramp to it
+      const flat = lineRange ? { ...lineRange, lsBeforeEm: 0, lsAfterEm: 0 } : null
+      const focused = () => editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+      // 1. START at natural, INSTANTLY (transition:none) — so a reused decoration node never
+      //    animates from the previous word's reserved (wider) width, the tab-overflow flash.
+      onHintChange(from, naturalWidth, flat, false)
+      void focused()?.offsetWidth
+      // 2. ARM the transition (turn it on) WITHOUT changing the values yet. Toggling
+      //    transition none->on AND changing a value in the same step does not reliably start a
+      //    transition in every browser; if min-width snaps to full while letter-spacing still
+      //    animates, the after-text overflows for a few frames. Splitting the two guarantees
+      //    both ramp together.
+      onHintChange(from, naturalWidth, flat, true)
+      void focused()?.offsetWidth
+      // 3. END — values change with the transition already armed: min-width + letter-spacing
+      //    ramp in lockstep, every time.
+      onHintChange(from, minWidth, lineRange, true)
     } else {
       onHintChange(from, minWidth, lineRange, false)    // no animation requested → apply instantly
     }
