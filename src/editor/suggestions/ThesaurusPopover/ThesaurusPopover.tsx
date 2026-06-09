@@ -629,6 +629,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // 3-row card filled plus a fade margin, so a fast spin never shows white.
   const WINDOW = 3
   const base = Math.round(reel)
+  // On commit the WHOLE reel eases onto the integer grid (chosen word → centre): every row gets
+  // this same vertical shift, so the words above and below glide WITH the chosen word instead of
+  // hanging at their offset and blinking out. (reel-base) is the fraction to absorb; for the centre
+  // row it equals -rel, so the chosen word lands exactly on the text line.
+  const reelSettle = (reel - base) * rowH
   const rows: React.ReactNode[] = []
   for (let d = -WINDOW; d <= WINDOW; d++) {
     const ring    = base + d
@@ -659,10 +664,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           transform: `translateY(${(rel * rowH).toFixed(2)}px)`,
           willChange: 'transform',
           color: isOrig ? '#5c2d8a' : '#9b5ccc',
-          opacity,
+          // On commit keep the chosen word opaque and fade the neighbours to 0 over the glide, so
+          // they ease away in step with the reel settling rather than vanishing with the card.
+          opacity: committing ? (ring === base ? 1 : 0) : opacity,
           // Smooth the neighbours' fade-out when the reel settles; none while moving so the
           // per-frame opacity stays crisp (a transition would smear the scrolling fade).
-          transition: moving ? 'none' : 'opacity 160ms ease',
+          transition: committing ? `opacity ${REFLOW_COMMIT_MS}ms ${REFLOW_EASE}` : (moving ? 'none' : 'opacity 160ms ease'),
           WebkitTapHighlightColor: 'transparent',
         }}>
         {/* Left-align the word at its clamped natural-x offset within the card, so what's
@@ -673,7 +680,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
             was resting between slots, the chosen word eases onto the baseline instead of snapping. */}
         <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${slotLefts[slotIdx]}px`,
                        transform: committing
-                         ? `translate(${(geom.naturalInCard - slotLefts[slotIdx]).toFixed(2)}px, ${(ring === base ? -rel * rowH : 0).toFixed(2)}px)`
+                         ? `translate(${(ring === base ? geom.naturalInCard - slotLefts[slotIdx] : 0).toFixed(2)}px, ${reelSettle.toFixed(2)}px)`
                          : 'none',
                        transition: committing ? `transform ${REFLOW_COMMIT_MS}ms ${REFLOW_EASE}` : 'none' }}>
         {slotIdx === 0 ? (
