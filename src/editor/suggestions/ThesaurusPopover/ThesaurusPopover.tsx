@@ -563,7 +563,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const widths    = cycle.synonyms.map(s => measureTextWidth(s, font))
     const DOT_PAD   = 8   // room left of the word for the origin ink-blot
     const left      = boxLeftC - DOT_PAD
-    const cardW     = boxRightC - left
+    // Card is wide enough to hold any synonym at its committed natural-x (where it slides to on
+    // commit), so the slide-home tail is never clipped — without needing overflow:visible (which
+    // would leak the faded neighbour rows and flash). Card stays transparent + overflow:hidden.
+    const cardW     = Math.max(boxRightC - left, (naturalLeftC - left) + Math.max(...widths) + DOT_PAD)
     // Per-slot left within the card: natural x, clamped to the box (never past its right edge,
     // never left of its left edge).
     const slotLefts = widths.map(w =>
@@ -632,8 +635,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           position: 'absolute', left: 0, right: 0, height: rowH,
           top: (cardH - rowH) / 2,
           display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
-          // overflow visible during commit so the synonym's tail isn't clipped as it slides home.
-          whiteSpace: 'nowrap', overflow: committing ? 'visible' : 'hidden', cursor: 'pointer',
+          whiteSpace: 'nowrap', overflow: 'hidden', cursor: 'pointer',
           fontSize: fsz,
           // Move via translateY only (compositor-only). No scale: scaling centred text
           // shifts its edges ~1px as the row's distance-from-centre wobbles, which reads
@@ -683,7 +685,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           word floats directly on the parchment (lines above/below may show through). */}
       <div className="absolute z-50 select-none scas-cycle-card"
         style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
-                 fontFamily, fontSize: fsz, overflow: committing ? 'visible' : 'hidden',
+                 fontFamily, fontSize: fsz, overflow: 'hidden',
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
         {rows}
       </div>

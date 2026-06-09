@@ -105,9 +105,11 @@ export function usePopoverLayout(
     onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null, true, REFLOW_COMMIT_MS)
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null
+      // Swap FIRST (old word -> committed synonym), THEN clear the decoration + reel — so the
+      // original word is never revealed for a frame between the clear and the text swap (a flash).
+      after?.()
       onHintChange(null, null)
       setCycle(null)
-      after?.()
     }, REFLOW_COMMIT_MS)
   }
 
