@@ -123,6 +123,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
+    cancelAnim()   // freeze the reel at its current (maybe fractional) spot so the commit glide is stable
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
@@ -383,6 +384,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     let lastY: number | null = null
     let lastT = 0
     let downX = 0, downY = 0, downT = 0
+    let dragArmed = false   // only a press that STARTS on the word/reel may drag-scroll it
     let lastTapTime = 0, lastTapX = 0, lastTapY = 0   // for manual double-tap detection
     let pushScheduled = false
     function schedulePush() {
@@ -393,9 +395,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     function onPointerDown(e: PointerEvent) {
       downX = e.clientX; downY = e.clientY; downT = e.timeStamp
       lastY = null                                   // a drag begins on the first move
+      // Arm the drag-to-scroll only if the press lands on the word or the reel — a drag that
+      // begins on empty parchment / body text must NOT spin the reel.
+      const el = e.target as HTMLElement | null
+      dragArmed = !!el?.closest?.('.scas-red, .scas-cycle-card')
     }
     function onPointerMove(e: PointerEvent) {
-      if (!(e.buttons & 1) || !cycleRef.current) { lastY = null; draggingRef.current = false; return }
+      if (!(e.buttons & 1) || !cycleRef.current || !dragArmed) { lastY = null; draggingRef.current = false; return }
       if (lastY === null) {                          // drag begins — grab any in-flight momentum
         cancelAnim()
         lastY = e.clientY; lastT = e.timeStamp; velRef.current = 0
@@ -652,9 +658,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         {/* Left-align the word at its clamped natural-x offset within the card, so what's
             shown is exactly where it commits (no jump on exit). On COMMIT, slide it from there to
             its committed natural-x (translateX) over the same 240ms as the de-compression, so the
-            word travels home WITH the surrounding text instead of snapping after it. */}
+            word travels home WITH the surrounding text instead of snapping after it. The committed
+            row (ring === base) ALSO glides vertically to the text line (translateY): if the reel
+            was resting between slots, the chosen word eases onto the baseline instead of snapping. */}
         <span style={{ display: 'inline-block', whiteSpace: 'nowrap', marginLeft: `${slotLefts[slotIdx]}px`,
-                       transform: committing ? `translateX(${(geom.naturalInCard - slotLefts[slotIdx]).toFixed(2)}px)` : 'none',
+                       transform: committing
+                         ? `translate(${(geom.naturalInCard - slotLefts[slotIdx]).toFixed(2)}px, ${(ring === base ? -rel * rowH : 0).toFixed(2)}px)`
+                         : 'none',
                        transition: committing ? `transform ${REFLOW_COMMIT_MS}ms ${REFLOW_EASE}` : 'none' }}>
         {slotIdx === 0 ? (
           // The original word carries a little uneven ink-blot, pinned just before its
