@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
-import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS, REFLOW_EASE } from './popoverConstants'
+import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS } from './popoverConstants'
 import type { CycleState, OnHintChange, LineRange } from './popoverConstants'
 import { posOf, measureNaturalLineRight, computeLineCompressionRange } from './popoverGeometry'
 import { buildSynonyms } from './popoverFallbacks'
@@ -126,26 +126,20 @@ export function usePopoverLayout(
     // ThesaurusPopover), so the part the eye is on glides while the rest just resolves.
     onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null, false)
 
-    // FLIP play: the snap above moved the after-text to its final spot in one reflow. Now invert
-    // it (translateX back to beforeRight) and transition to 0 — the run slides smoothly on the
-    // compositor without any further layout. The after-run is single-line by construction (its
-    // range ends at the focused word's visual line end), so inline-block can't break wrapping.
-    if (flip && beforeRight !== null) {
+    // FLIP play: the snap above moved the after-text to its final spot in one reflow. Now measure
+    // how far it travelled (the focused word's right edge IS the after-run's left edge), then
+    // re-render the after-run inverted (translateX back to where it was, transition off) and — after
+    // a forced reflow — at 0 with the transition armed. The run eases home on the compositor with no
+    // further layout. Done through the DECORATION (two onHintChange dispatches) so PM keeps the
+    // transform; a manual DOM edit is reverted by PM's reconciler within a frame.
+    if (flip && beforeRight !== null && lr) {
       const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
-      // The after-compression decoration wraps [word.to, lineEnd] in a letter-spacing span that
-      // sits immediately after the focused word — find it by that signature.
-      let afterSpan = fe?.nextElementSibling as HTMLElement | null
-      if (afterSpan && !afterSpan.style?.letterSpacing) afterSpan = null
-      if (fe && afterSpan) {
-        const dx = beforeRight - fe.getBoundingClientRect().right   // how far the after-text snapped left
-        if (Math.abs(dx) > 0.5) {
-          afterSpan.style.display    = 'inline-block'
-          afterSpan.style.transform  = `translateX(${dx.toFixed(2)}px)`
-          afterSpan.style.transition = 'none'
-          void afterSpan.offsetWidth                                 // commit the inverted start
-          afterSpan.style.transition = `transform ${REFLOW_COMMIT_MS}ms ${REFLOW_EASE}`
-          afterSpan.style.transform  = 'translateX(0)'
-        }
+      const dx = fe ? beforeRight - fe.getBoundingClientRect().right : 0
+      if (fe && Math.abs(dx) > 0.5) {
+        const flat = { ...lr, lsBeforeEm: 0, lsAfterEm: 0 }
+        onHintChange(c.from, targetWidth ?? c.naturalWidth, { ...flat, afterSlidePx: dx }, false)   // invert, instant
+        void (editor.view.dom.querySelector('.scas-comp-after') as HTMLElement | null)?.offsetWidth // commit the start
+        onHintChange(c.from, targetWidth ?? c.naturalWidth, { ...flat, afterSlidePx: 0 }, true, REFLOW_COMMIT_MS) // play home
       }
     }
 

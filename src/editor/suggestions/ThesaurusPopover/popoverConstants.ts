@@ -42,6 +42,10 @@ export type LineRange = {
   alignFraction: number // fraction (beforeShift/exp) the box actually slid left — the reel
                         // aligns each word at this fraction so the original lands on its
                         // natural x for any position (0=left-edge, .5=centred, 1=right-edge)
+  afterSlidePx?: number // FLIP commit (?flip=1) only: render the after-run as inline-block with
+                        // transform:translateX(this) so it can be eased home on the compositor.
+                        // Driven through the decoration (not a DOM mutation) so PM's reconciler
+                        // doesn't revert it. undefined = normal (no transform, display:inline).
 }
 
 export type OnHintChange = (

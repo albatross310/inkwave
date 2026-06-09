@@ -180,10 +180,20 @@ function buildDecorations(
       // Apply the span whenever its range exists (even at letter-spacing 0): a 0 span is a
       // visual no-op but must be present so the open/close transition has something to animate.
       if (fwe < fw.from) {
-        decorations.push(Decoration.inline(fwe, fw.from, { style: `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}` }))
+        decorations.push(Decoration.inline(fwe, fw.from, { class: 'scas-comp-before', style: `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}` }))
       }
       if (fw.to < lt) {
-        decorations.push(Decoration.inline(fw.to, lt, { style: `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}` }))
+        // The after-run carries a stable class so the FLIP commit (?flip=1) can find it.
+        // When afterSlidePx is set (FLIP), render it as a transformable inline-block carrying the
+        // invert translateX and transition the TRANSFORM — driven by the decoration so PM's
+        // reconciler keeps it (a manual DOM style edit gets reverted within a frame). Otherwise
+        // it's a plain inline letter-spacing span that transitions letter-spacing.
+        const slide = lineCompressionRange.afterSlidePx
+        const afterStyle = slide !== undefined
+          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;transform:translateX(${slide.toFixed(2)}px);` +
+            (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
+          : `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
+        decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))
       }
     }
   }
