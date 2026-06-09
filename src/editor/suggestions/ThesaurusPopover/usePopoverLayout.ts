@@ -17,15 +17,15 @@ function wantsOverlay(): boolean {
   } catch { return false }
 }
 
-// EXPERIMENTAL (?flip=1): FLIP the after-text slide on commit/close instead of snapping it.
-// The layout still changes in ONE step (one reflow, no per-frame layout = no lag), but the
-// after-text run is then pulled back to where it was with a compositor transform and eased to
-// 0 — so the surrounding text appears to slide smoothly. Off by default; A/B against the snap.
+// FLIP the after-text slide on commit/close instead of snapping it: the layout still changes in
+// ONE step (one reflow, no per-frame layout = no lag), but the after-run is then pulled back to
+// where it was with a compositor transform and eased to 0 — so the surrounding text slides
+// smoothly. ON by default; ?flip=0 falls back to the instant snap (kept as a debug escape hatch).
 function wantsFlip(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof window === 'undefined') return true
   try {
-    return new URLSearchParams(window.location.search).get('flip') === '1'
-  } catch { return false }
+    return new URLSearchParams(window.location.search).get('flip') !== '0'
+  } catch { return true }
 }
 
 export function usePopoverLayout(
