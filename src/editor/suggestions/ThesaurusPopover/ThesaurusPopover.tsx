@@ -656,7 +656,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           position: 'absolute', left: 0, right: 0, height: rowH,
           top: (cardH - rowH) / 2,
           display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
-          whiteSpace: 'nowrap', overflow: 'hidden', cursor: 'pointer',
+          // No overflow:hidden here — the row box is only rowH tall (≈1.15em), so clipping it cut
+          // the descenders (g/p/y) off the centre word. The CARD's overflow:hidden still bounds the
+          // 3-row band; the centre row sits inside it, so its glyphs now show in full.
+          whiteSpace: 'nowrap', cursor: 'pointer',
           fontSize: fsz,
           // Move via translateY only (compositor-only). No scale: scaling centred text
           // shifts its edges ~1px as the row's distance-from-centre wobbles, which reads

@@ -12,8 +12,18 @@ export const MAX_RIGHT_LS_EM = 0.04
 
 // Reflow animation (CSS-driven, smooth on phones). The OPEN is snappy; the COMMIT/close settle
 // is slower and gentler. easeOutQuint decelerates smoothly into place (no harsh stop).
+// Debug knob: ?slow=N multiplies the COMMIT duration (the word slide-home, reel glide and FLIP
+// after-text return) so the animation can be eyeballed frame-by-frame. Default 1 = 240ms.
+function commitSlowFactor(): number {
+  if (typeof window === 'undefined') return 1
+  try {
+    const s = new URLSearchParams(window.location.search).get('slow')
+    const n = s ? parseFloat(s) : NaN
+    return Number.isFinite(n) && n > 0 ? n : 1
+  } catch { return 1 }
+}
 export const REFLOW_OPEN_MS   = 120
-export const REFLOW_COMMIT_MS = 240
+export const REFLOW_COMMIT_MS = Math.round(240 * commitSlowFactor())
 export const REFLOW_EASE      = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
 export interface CycleState {
