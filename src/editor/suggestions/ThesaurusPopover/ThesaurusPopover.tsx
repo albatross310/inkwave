@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useCompliance } from '../../../scas/compliance'
-import { CYCLE_SIZE, REFLOW_OPEN_MS, REFLOW_COMMIT_MS, REFLOW_EASE } from './popoverConstants'
+import { CYCLE_SIZE, REFLOW_COMMIT_MS, REFLOW_EASE } from './popoverConstants'
 import type { OnHintChange } from './popoverConstants'
 import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
@@ -531,19 +531,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     return () => { window.removeEventListener('resize', bump); window.removeEventListener('scroll', bump, true) }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // `settled` is false while the open reflow is mid-CSS-transition (the box is still half-grown),
-  // true once it has reached its final width. geom uses the MODEL box (final, computed) while
-  // unsettled — so the card is full-size from frame one and never clips a wide synonym — and
-  // switches to the LIVE box once settled, for a pixel-exact exit. Keyed on minWidth (the
-  // reserved width that triggers the animation); does NOT fire during close.
-  const [settled, setSettled] = useState(false)
-  useEffect(() => {
-    if (!cycle || cycle.overlay) return
-    setSettled(false)
-    const t = setTimeout(() => { setSettled(true); setGeomNonce(n => n + 1) }, REFLOW_OPEN_MS + 30)
-    return () => clearTimeout(t)
-  }, [cycle?.from, cycle?.minWidth]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Geometry (memoised — depends on the focused word, NOT the reel position) ──
 
   const geom = useMemo(() => {
@@ -564,21 +551,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const font         = getFont(focusedEl)
     const naturalLeftC = cycle.naturalLeft - cRect.left
     // The reserved box IS the focused word's expanded rect; the after-text begins at its right
-    // edge. So reel words must stay within [boxLeft, boxRight] or they paint over the text.
-    // While the open reflow is still animating, use the MODEL box (final width, computed from
-    // alignFraction + min-width) so the card is full-size immediately and never clips a wide
-    // synonym mid-grow. Once settled, switch to the LIVE rect (the browser's true rendered box,
-    // letter-spacing and all) for a pixel-exact exit. Short words sit at their natural x
-    // (exit-stationary); a word too wide is pushed left into the box's left-compression space.
-    let boxLeftC: number, boxRightC: number
-    if (settled) {
-      boxLeftC  = rect.left  - cRect.left
-      boxRightC = rect.right - cRect.left
-    } else {
-      const exp = Math.max(0, Math.ceil(cycle.minWidth) - cycle.naturalWidth)
-      boxLeftC  = naturalLeftC - cycle.alignFraction * exp
-      boxRightC = boxLeftC + Math.ceil(cycle.minWidth)
-    }
+    // edge, so reel words must stay within [boxLeft, boxRight] or they paint over the text. We use
+    // the LIVE rendered rect directly (single coordinate source). The open layout is applied
+    // instantly, so there's no half-grown box to outrun — the old MODEL-box / `settled` swap only
+    // existed for a CSS-transition grow that the default path never ran, and switching model→live
+    // ~150ms after every open was itself a guaranteed horizontal pop (audit F1/F4). Gone now.
+    const boxLeftC  = rect.left  - cRect.left
+    const boxRightC = rect.right - cRect.left
     const widths    = cycle.synonyms.map(s => measureTextWidth(s, font))
     const DOT_PAD   = 8   // room left of the word for the origin ink-blot
     const left      = boxLeftC - DOT_PAD
@@ -611,7 +590,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       width: cardW,
       fontFamily: cs.fontFamily,
     }
-  }, [cycle?.from, cycle?.minWidth, cycle?.synonyms, cycle?.alignFraction, settled, geomNonce]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cycle?.from, cycle?.minWidth, cycle?.synonyms, geomNonce]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ────────────────────────────────────────────────────────────────
 
