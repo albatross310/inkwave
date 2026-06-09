@@ -99,10 +99,10 @@ export function usePopoverLayout(
     // the same compression ranges but with letter-spacing 0, so the spans transition rather than
     // vanish. The reel stays up (the chosen word sits at its natural x, which doesn't move).
     const lr = lastLineRangeRef.current
-    // COMMIT/close is a slower, gentler settle — both sides (left + right) de-compress and the
-    // box ramps to the target together, so a long synonym (and the before-text it pushed) slide
-    // back smoothly rather than snapping.
-    onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null, true, REFLOW_COMMIT_MS)
+    // Settle the surrounding text to natural INSTANTLY (no per-frame reflow — the lag). The word
+    // itself still slides home smoothly on the compositor (the `committing` transform in
+    // ThesaurusPopover), so the part the eye is on glides while the rest just resolves.
+    onHintChange(c.from, targetWidth ?? c.naturalWidth, lr ? { ...lr, lsBeforeEm: 0, lsAfterEm: 0 } : null, false)
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null
       // Swap FIRST (old word -> committed synonym), THEN clear the decoration + reel — so the
@@ -182,8 +182,10 @@ export function usePopoverLayout(
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
       setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
-      // Animate the expand+compress reflow via the shared, fresh-measuring path.
-      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay, true)
+      // Apply the expand+compress layout INSTANTLY (no per-frame reflow animation — that was the
+      // lag). The surrounding text settles in one step; the reel's vertical scroll and the
+      // commit word-slide stay smooth on the compositor.
+      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay, false)
     })
   }
 
