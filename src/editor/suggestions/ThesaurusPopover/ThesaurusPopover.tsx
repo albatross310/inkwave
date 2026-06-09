@@ -170,14 +170,24 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     acceptRef.current(c.synonyms[slotAt(pos)], advance)
   }
 
-  // Ease reelPos to an integer slot and rest there. No commit — the writer accepts
-  // by tapping the rested word (or anywhere else); see the pointer handlers below.
-  function settleTo(target: number) {
+  // Commit whatever slot the reel has come to rest on, honouring the original-not-engaged rule:
+  // resting on the untouched original (slot 0, reel never moved) dismisses rather than commits.
+  // Used by fling so a released flick auto-commits once its momentum settles.
+  function commitLandedRest() {
+    const c = cycleRef.current; if (!c) return
+    const idx = slotAt(reelRef.current)
+    if (idx === 0 && !engagedRef.current) closeCycle()
+    else acceptRef.current(c.synonyms[idx], false)
+  }
+
+  // Ease reelPos to an integer slot. `onRest` fires once it lands — fling passes the commit so a
+  // released flick auto-accepts; keyboard/wheel settles pass nothing and just rest.
+  function settleTo(target: number, onRest?: () => void) {
     cancelAnim()
     targetRef.current = target
     const start = reelRef.current
     const dist  = target - start
-    if (Math.abs(dist) < 0.001) { reelRef.current = target; pushReel(); return }
+    if (Math.abs(dist) < 0.001) { reelRef.current = target; pushReel(); onRest?.(); return }
     const dur = Math.min(280, 130 + Math.abs(dist) * 90)
     let t0: number | null = null
     const step = (t: number) => {
@@ -187,13 +197,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       reelRef.current = start + dist * e
       pushReel()
       if (p < 1) { rafRef.current = requestAnimationFrame(step) }
-      else { rafRef.current = null; reelRef.current = target; pushReel() }
+      else { rafRef.current = null; reelRef.current = target; pushReel(); onRest?.() }
     }
     rafRef.current = requestAnimationFrame(step)
   }
 
-  // Coast with the release velocity, decaying exponentially, then rest on the nearest
-  // slot. Low/zero v0 rests almost immediately. No auto-commit — tap to accept.
+  // Coast with the release velocity, decaying exponentially, then settle on the nearest slot and
+  // COMMIT it — a released flick lands and accepts once its momentum runs out (no second tap).
   function fling(v0: number) {
     cancelAnim()
     velRef.current = Math.max(-MAX_VEL, Math.min(MAX_VEL, v0))
@@ -205,7 +215,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       reelRef.current += velRef.current * dt
       velRef.current  *= Math.exp(-dt / FLING_TAU)
       pushReel()
-      if (Math.abs(velRef.current) < VEL_STOP) { rafRef.current = null; settleTo(Math.round(reelRef.current)) }
+      if (Math.abs(velRef.current) < VEL_STOP) { rafRef.current = null; settleTo(Math.round(reelRef.current), commitLandedRest) }
       else rafRef.current = requestAnimationFrame(step)
     }
     rafRef.current = requestAnimationFrame(step)
