@@ -460,12 +460,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         return
       }
       if (wasDragging && c) {
-        // A gentle release means the reel has effectively landed → commit it. (If the
-        // finger paused before lifting, the smoothed velocity is stale, so treat a
-        // pre-release pause as zero so a deliberate landing still commits.) A faster
-        // flick coasts and rests instead — click again to accept.
+        // A gentle release: ease the reel the rest of the way onto the centre slot, THEN commit —
+        // so letting go off-centre shows the vertical settle (not an instant commit from wherever
+        // it happened to be). A faster flick coasts (fling), and also settles + commits when it
+        // stops. (A pre-release pause makes the smoothed velocity stale, so treat it as zero.)
         const v = e.timeStamp - lastT > 80 ? 0 : velRef.current
-        if (Math.abs(v) <= COMMIT_VEL) { cancelAnim(); commitRested() }
+        if (Math.abs(v) <= COMMIT_VEL) { cancelAnim(); settleTo(Math.round(reelRef.current), commitLandedRest) }
         else fling(v)
       }
     }
