@@ -271,10 +271,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     engagedRef.current = false
     reelRef.current = cycle ? cycle.reelPos : 0
     targetRef.current = cycle ? Math.round(cycle.reelPos) : 0
-    // Light the original marker the moment a cycle opens or moves to another word — it
-    // renders only if the original is in view — then let it linger briefly and fade.
-    if (cycle) { setMoving(true); scheduleMovingOff(650) }
-    else { if (movingTimerRef.current) clearTimeout(movingTimerRef.current); setMoving(false) }
+    // Do NOT auto-reveal the neighbour rows on open. It used to light them ("the original marker")
+    // for 650ms — but the open fires this twice (placeholder open, then real-synonym load), so the
+    // rows above/below flashed in, faded, and flashed again = the "flicker on first click". Open is
+    // now calm: only the centre word shows; neighbours appear once the reel is actually moving.
+    if (!cycle) { if (movingTimerRef.current) clearTimeout(movingTimerRef.current); setMoving(false) }
   }, [cycle?.from, cycle?.synonyms]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
@@ -374,6 +375,8 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     let lastT = 0
     let downX = 0, downY = 0
     let dragArmed = false   // only a press that STARTS on the word/reel may drag-scroll it
+    let pointerIsDown = false  // OUR own down-tracking — touch/pen pointermove reports buttons:0 (a
+                               // finger isn't a "button"), so we can't trust e.buttons there.
     let lastTapTime = 0, lastTapX = 0, lastTapY = 0   // for manual double-tap detection
     let pushScheduled = false
     function schedulePush() {
@@ -382,6 +385,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       requestAnimationFrame(() => { pushScheduled = false; pushReel() })
     }
     function onPointerDown(e: PointerEvent) {
+      pointerIsDown = true
       downX = e.clientX; downY = e.clientY
       lastY = null                                   // a drag begins on the first move
       // Arm the drag-to-scroll only if the press lands on the word or the reel — a drag that
@@ -390,7 +394,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       dragArmed = !!el?.closest?.('.scas-red, .scas-cycle-card')
     }
     function onPointerMove(e: PointerEvent) {
-      if (!(e.buttons & 1) || !cycleRef.current || !dragArmed) { lastY = null; draggingRef.current = false; return }
+      // Mouse: trust e.buttons (catches button-released-without-pointerup). Touch/pen: that bit is
+      // unreliably 0 during a drag, so use our own down-tracking instead — otherwise the FIRST
+      // press-drag on a phone froze the reel (it reported buttons:0 and bailed every move).
+      const held = e.pointerType === 'mouse' ? (e.buttons & 1) : pointerIsDown
+      if (!held || !cycleRef.current || !dragArmed) { lastY = null; draggingRef.current = false; return }
       if (lastY === null) {                          // drag begins — grab any in-flight momentum
         cancelAnim()
         lastY = e.clientY; lastT = e.timeStamp; velRef.current = 0
@@ -412,6 +420,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       acceptRef.current(c.synonyms[slotAt(reelRef.current)], false)
     }
     function onPointerUp(e: PointerEvent) {
+      pointerIsDown = false
       const wasDragging = lastY !== null
       lastY = null
       draggingRef.current = false
@@ -455,6 +464,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       }
     }
     function onPointerCancel() {
+      pointerIsDown = false
       const wasDragging = lastY !== null
       lastY = null; draggingRef.current = false
       if (wasDragging) { fling(velRef.current); scheduleMovingOff() }
@@ -658,22 +668,16 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     )
   }
 
-  // Firefox rounds an absolutely-positioned element's LAYOUT top to device pixels differently
-  // from how it places the inline text baseline — so a fractional `top` landed the reel glyph
-  // ~1px off the real word (the "drift down on click") and the rounding could flip between
-  // renders (the "flash"). Chromium doesn't round the same way, hence it was Firefox-only.
-  // Fix: pin the layout top to an INTEGER and carry the sub-pixel remainder in a composited
-  // transform (transforms bypass layout-pixel snapping), so the glyph sits exactly on textMid.
-  const cardTopInt  = Math.round(cardTop)
-  const cardTopFrac = cardTop - cardTopInt
   return (
     <>
       {/* Sliding reel card — fully transparent: no border/shadow/background, so the
-          word floats directly on the parchment (lines above/below may show through). */}
+          word floats directly on the parchment (lines above/below may show through).
+          NB: do NOT put a transform on this card to "snap" sub-pixel position — promoting it to a
+          GPU layer disables subpixel-antialiasing on the reel text (visible colour/weight shift)
+          and nudges horizontal sub-pixel position. Keep it a plain absolutely-positioned box. */}
       <div className="absolute z-50 select-none scas-cycle-card"
-        style={{ top: cardTopInt, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
+        style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
                  fontFamily, fontSize: fsz, overflow: 'hidden',
-                 transform: `translate3d(0, ${cardTopFrac.toFixed(2)}px, 0)`,
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
         {rows}
       </div>
