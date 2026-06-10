@@ -405,7 +405,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       // Arm the drag-to-scroll only if the press lands on the word or the reel — a drag that
       // begins on empty parchment / body text must NOT spin the reel.
       const el = e.target as HTMLElement | null
-      dragArmed = !!el?.closest?.('.scas-red, .scas-cycle-card')
+      // Arm the drag-to-scroll if the press lands on the word/reel — OR if it just OPENED a cycle.
+      // The opening press is, by definition, on a red word; but the capture-phase open handler (which
+      // runs before this) rebuilds the DOM and applies compression, so a real hit-test can resolve
+      // e.target to a sibling `.scas-comp-before/after` span (no matching class) → dragArmed went
+      // false → the opening press couldn't scroll the reel. openedByPointerRef (set by that handler)
+      // tells us this press opened a cycle, so arm it unconditionally.
+      dragArmed = openedByPointerRef.current || !!el?.closest?.('.scas-red, .scas-cycle-card')
     }
     function onPointerMove(e: PointerEvent) {
       // Mouse: trust e.buttons (catches button-released-without-pointerup). Touch/pen: that bit is
