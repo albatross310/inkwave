@@ -143,8 +143,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       }
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // Committing the UNCHANGED original — no edit, just close and restore the caret.
-    if (!changed) { onHintChange(null, null); setCycle(null); swap(); return }
+    // Committing the word UNCHANGED (e.g. opened, scrolled away and back, then accepted) — no edit,
+    // but still ease the line back to natural instead of snapping (closeWithAnimation runs the same
+    // de-compress as a dismiss; swap() here only restores the caret). Was an instant snap before.
+    if (!changed) { closeWithAnimation(swap); return }
     // SWAP-FIRST: replace the word now (paragraph rewraps to its final layout), tear the reel down,
     // then slide the rest of the committed line — including any word that rewrapped up — in from the
     // right as one flush motion; lines below snap. (See commitWithSlide.)
