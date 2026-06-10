@@ -52,10 +52,12 @@ export type LineRange = {
   alignFraction: number // fraction (beforeShift/exp) the box actually slid left — the reel
                         // aligns each word at this fraction so the original lands on its
                         // natural x for any position (0=left-edge, .5=centred, 1=right-edge)
-  afterSlidePx?: number // FLIP commit (?flip=1) only: render the after-run as inline-block with
-                        // transform:translateX(this) so it can be eased home on the compositor.
-                        // Driven through the decoration (not a DOM mutation) so PM's reconciler
-                        // doesn't revert it. undefined = normal (no transform, display:inline).
+  afterSlidePx?: number // OPEN animation: render the after-run as inline-block with
+                        // transform:translateX(this) so it slides on the compositor (driven through
+                        // the decoration so PM's reconciler keeps it). undefined = plain inline span.
+  afterScaleX?: number  // paired with afterSlidePx: horizontal scale (origin-left) animating the
+                        // COMPRESSION as the run slides out on open (starts stretched/de-compressed
+                        // >1, eases to 1) — the mirror of the commit's scaleX. Default 1.
 }
 
 // Post-commit slide-in range (see HintState.slideRange in RedHighlightExtension). `px` is the

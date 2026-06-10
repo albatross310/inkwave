@@ -202,8 +202,9 @@ function buildDecorations(
         // reconciler keeps it (a manual DOM style edit gets reverted within a frame). Otherwise
         // it's a plain inline letter-spacing span that transitions letter-spacing.
         const slide = lineCompressionRange.afterSlidePx
+        const asx = lineCompressionRange.afterScaleX ?? 1
         const afterStyle = slide !== undefined
-          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;transform:translateX(${slide.toFixed(2)}px);` +
+          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
             (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
           : `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))

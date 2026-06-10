@@ -658,13 +658,22 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     )
   }
 
+  // Firefox rounds an absolutely-positioned element's LAYOUT top to device pixels differently
+  // from how it places the inline text baseline — so a fractional `top` landed the reel glyph
+  // ~1px off the real word (the "drift down on click") and the rounding could flip between
+  // renders (the "flash"). Chromium doesn't round the same way, hence it was Firefox-only.
+  // Fix: pin the layout top to an INTEGER and carry the sub-pixel remainder in a composited
+  // transform (transforms bypass layout-pixel snapping), so the glyph sits exactly on textMid.
+  const cardTopInt  = Math.round(cardTop)
+  const cardTopFrac = cardTop - cardTopInt
   return (
     <>
       {/* Sliding reel card — fully transparent: no border/shadow/background, so the
           word floats directly on the parchment (lines above/below may show through). */}
       <div className="absolute z-50 select-none scas-cycle-card"
-        style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
+        style={{ top: cardTopInt, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
                  fontFamily, fontSize: fsz, overflow: 'hidden',
+                 transform: `translate3d(0, ${cardTopFrac.toFixed(2)}px, 0)`,
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
         {rows}
       </div>

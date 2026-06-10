@@ -76,25 +76,35 @@ export function usePopoverLayout(
     lastLineRangeRef.current = lineRange
     setCycle(prev => (prev && prev.from === from) ? { ...prev, alignFraction, naturalWidth } : prev)
 
-    if (animate && minWidth > naturalWidth) {
-      const flat = lineRange ? { ...lineRange, lsBeforeEm: 0, lsAfterEm: 0 } : null
-      const focused = () => editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
-      // 1. START at natural, INSTANTLY (transition:none) — so a reused decoration node never
-      //    animates from the previous word's reserved (wider) width, the tab-overflow flash.
-      onHintChange(from, naturalWidth, flat, false)
-      void focused()?.offsetWidth
-      // 2. ARM the transition (turn it on) WITHOUT changing the values yet. Toggling
-      //    transition none->on AND changing a value in the same step does not reliably start a
-      //    transition in every browser; if min-width snaps to full while letter-spacing still
-      //    animates, the after-text overflows for a few frames. Splitting the two guarantees
-      //    both ramp together.
-      onHintChange(from, naturalWidth, flat, true, REFLOW_OPEN_MS)
-      void focused()?.offsetWidth
-      // 3. END — values change with the transition already armed: min-width + letter-spacing
-      //    ramp in lockstep, every time. OPEN is snappy.
-      onHintChange(from, minWidth, lineRange, true, REFLOW_OPEN_MS)
+    // FLIP-OPEN (mirror of the commit slide): the box expands and the after-text gets pushed right
+    // and compressed. We apply that final layout INSTANTLY (the box is transparent — the reel paints
+    // the word — so its own snap isn't seen), then slide the after-run in from where it sat at
+    // natural width and ease the COMPRESSION on with scaleX. So the after-text appears to glide OUT
+    // to make room rather than teleporting. (min-width can't transition cheaply — that was the lag.)
+    if (animate && minWidth > naturalWidth && lineRange && to < (lineRange.to)) {
+      const naturalAfterLeft = rect.right                       // after-run's left at natural width
+      const fsz = parseFloat(window.getComputedStyle(fe).fontSize) || 18
+      onHintChange(from, minWidth, lineRange, false)            // apply expanded + compressed layout instantly
+      const feNow = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+      const comp  = editor.view.dom.querySelector('.scas-comp-after') as HTMLElement | null
+      if (feNow && comp) {
+        const dx     = feNow.getBoundingClientRect().right - naturalAfterLeft  // >0: after-run pushed right
+        const compW  = Math.max(1, comp.getBoundingClientRect().width)
+        // scaleStart from the COMPRESSION AMOUNT (lsAfterEm·fsz·chars), not a width ratio — a ratio
+        // is corrupted when the line rewraps on open (different content). De-compressed width =
+        // compW + that amount; start there, ease to 1. Capped at +50% so it never looks stretched.
+        const chars  = Math.max(1, lineRange.to - to)
+        const decompress = (lineRange.lsAfterEm || 0) * fsz * chars
+        const scaleStart = Math.max(1, Math.min(1.5, (compW + decompress) / compW))
+        if (Math.abs(dx) > 0.5 || scaleStart > 1.01) {
+          onHintChange(from, minWidth, { ...lineRange, afterSlidePx: -dx, afterScaleX: scaleStart }, false) // invert
+          void comp.offsetWidth
+          onHintChange(from, minWidth, { ...lineRange, afterSlidePx: 0, afterScaleX: 1 }, true, REFLOW_OPEN_MS) // play out
+          return
+        }
+      }
     } else {
-      onHintChange(from, minWidth, lineRange, false)    // no animation requested → apply instantly
+      onHintChange(from, minWidth, lineRange, false)    // no animation (or nothing to slide) → instant
     }
   }
 
@@ -292,10 +302,9 @@ export function usePopoverLayout(
       let reelPos = synonyms.findIndex(s => s !== DELETE_SENTINEL && s.toLowerCase() === cur)
       if (reelPos < 0) reelPos = 0
       setCycle(prev => prev?.from === domPos ? { ...prev, synonyms, minWidth, reelPos } : prev)
-      // Apply the expand+compress layout INSTANTLY (no per-frame reflow animation — that was the
-      // lag). The surrounding text settles in one step; the reel's vertical scroll and the
-      // commit word-slide stay smooth on the compositor.
-      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay, false)
+      // Animate the OPEN (FLIP-out): the box expands and the after-text glides out to make room
+      // (compositor transform — no per-frame layout), mirroring the commit's inward slide.
+      applyLayout(domPos, domPos + displayWord.length, minWidth, overlay, true)
     })
   }
 
