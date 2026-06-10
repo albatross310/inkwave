@@ -1,5 +1,5 @@
 import React from 'react'
-import { CYCLE_SIZE, DELETE_SENTINEL, CARD_PAD_X } from './popoverConstants'
+import { CYCLE_SIZE, DELETE_SENTINEL } from './popoverConstants'
 import { measureTextWidth } from '../textMetrics'
 
 // Renders ⌫ in system-ui (IM Fell DW Pica doesn't have this glyph), otherwise returns s.
@@ -28,11 +28,13 @@ export function buildSynonyms(
   const cap      = capitalize ? capitalizeFirst : (w: string) => w
   const pool     = [displayWord, ...candidates].map(cap)
   const synonyms = Array.from({ length: CYCLE_SIZE }, (_, i) => pool[i % pool.length])
-  // The reserved box must fit the WIDEST synonym in the reel, or a longer synonym would be
-  // clipped by the box edge. (A cap on this width clips long synonyms — don't reintroduce it.)
+  // Reserve EXACTLY the widest content's width — no extra padding. With a buffer, committing the
+  // longest synonym still slid the after-text by that buffer; sized exactly, the longest word fills
+  // the box and commits with zero right-side motion (only a synonym too long to fit the box, which
+  // the reel left-aligns, still moves on commit). Shorter synonyms shrink the box and slide as usual.
   const minWidth = Math.max(
     wordWidth,
     ...synonyms.map(s => measureTextWidth(s, font)),
-  ) + CARD_PAD_X * 2
+  )
   return { synonyms, minWidth }
 }

@@ -333,31 +333,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       return !!el && (edEl.contains(el) || !!el.closest?.('.scas-cycle-card'))
     }
 
-    // Trackpad-vs-mouse-wheel is heuristic — there is no reliable API. Physical
-    // wheels emit line/page granularity OR large fixed integer pixel steps with no
-    // horizontal component; trackpads emit small, often fractional pixel deltas and
-    // frequently carry a horizontal component. We scroll ONLY on trackpad and ignore
-    // the physical mouse wheel, leaving it free for the future anti-cheat gate.
-    function isTrackpadScroll(e: WheelEvent): boolean {
-      if (e.deltaMode !== 0) return false           // line/page mode → physical wheel
-      if (e.deltaX !== 0) return true               // horizontal jitter → trackpad
-      if (!Number.isInteger(e.deltaY)) return true  // sub-pixel delta → trackpad
-      return Math.abs(e.deltaY) < 50                // small step → trackpad; large notch → wheel
-    }
-
-    // Trackpad: scroll the continuous reel directly, then settle to the nearest slot
-    // when the gesture goes idle (no accept — trackpad is for browsing).
-    let wheelIdle: ReturnType<typeof setTimeout> | null = null
-    function onWheel(e: WheelEvent) {
-      if (!cycleRef.current || !overTarget(e.target)) return
-      if (!isTrackpadScroll(e)) return              // reserved for the anti-cheat gate
-      e.preventDefault()
-      cancelAnim()
-      reelRef.current -= e.deltaY / (rowHRef.current || 1)   // down → previous, matching a downward drag
-      pushReel()
-      if (wheelIdle) clearTimeout(wheelIdle)
-      wheelIdle = setTimeout(() => settleTo(Math.round(reelRef.current)), 90)
-    }
+    // Trackpad/wheel reel-scrolling is DISABLED (per request): the reel is driven by press-drag and
+    // the keyboard (j/k) only. Wheel events pass through, so the page scrolls normally (the popover
+    // follows the word via the scroll handler). The physical wheel stays free for the anti-cheat gate.
+    function onWheel() { /* no-op — trackpad/wheel reel scroll turned off */ }
 
     // Right-click accepts the centred word and advances (same as Space).
     function onContextMenu(e: MouseEvent) {
@@ -453,11 +432,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           return
         }
         lastTapTime = e.timeStamp; lastTapX = e.clientX; lastTapY = e.clientY
-        // The press that opened the cycle leaves it open — don't commit on the same
-        // tap, regardless of whether the card painted before this release fired.
-        if (opened || !c) return
+        if (!c) return
         const el = e.target as HTMLElement | null
         const onCard = !!el?.closest?.('.scas-cycle-card')
+        // The press that OPENED this cycle, released with no drag, commits the centred (original)
+        // word — a single click "snaps it back". (To pick a synonym you press-hold-drag-release.)
+        if (opened) { cancelAnim(); commitRested(); return }
         if (!onCard && el?.closest?.('.scas-red')) return   // tapped another red word — the open handler dealt with it
         cancelAnim()
         if (onCard) commitRested()                          // tap on the reel/word → confirm (even un-scrolled)
@@ -494,7 +474,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     document.addEventListener('selectstart', onSelectStart)
     return () => {
-      if (wheelIdle) clearTimeout(wheelIdle)
       document.removeEventListener('wheel', onWheel)
       document.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('pointerdown', onPointerDown)
