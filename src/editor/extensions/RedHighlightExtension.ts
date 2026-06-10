@@ -28,6 +28,11 @@ export interface HintState {
   animate: boolean
   // Transition duration for this change (open is snappy, commit/close is a slower settle).
   durationMs: number
+  // Post-commit slide-in (independent of focusedPos, so it survives the cycle teardown): render
+  // [from,to] — the rest of the committed word's visual line, including any word that rewrapped up
+  // onto it — as one inline-block translated by `px`, eased to 0 so the after-text (and the joining
+  // word, flush) slides in from the right while the lines below snap. null = inactive.
+  slideRange: { from: number; to: number; px: number } | null
 }
 
 interface RedHighlightOptions {
@@ -41,7 +46,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
   addOptions() {
     return {
       getDoc: () => { throw new Error('RedHighlightExtension: getDoc option is required') },
-      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS }),
+      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS, slideRange: null }),
     }
   },
 
@@ -204,6 +209,20 @@ function buildDecorations(
         decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))
       }
     }
+  }
+
+  // Post-commit slide-in: render [from,to] (the rest of the committed word's visual line, incl. a
+  // word that rewrapped up onto it) as ONE inline-block translated by px, eased to 0 — so the
+  // after-text and the joining word slide in flush from the right while the lines below snap.
+  // Built post-swap on the FINAL layout, so the inline-block fits its line (no wrap-drop); the
+  // translateX is purely visual overflow during the transient. Independent of focusedPos.
+  const { slideRange } = hintState
+  if (slideRange && slideRange.to > slideRange.from) {
+    const tr = hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
+    decorations.push(Decoration.inline(slideRange.from, slideRange.to, {
+      class: 'scas-slide-after',
+      style: `display:inline-block;transform:translateX(${slideRange.px.toFixed(2)}px);${tr}`,
+    }))
   }
 
   return DecorationSet.create(pmDoc, decorations)

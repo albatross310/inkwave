@@ -58,10 +58,14 @@ export type LineRange = {
                         // doesn't revert it. undefined = normal (no transform, display:inline).
 }
 
+// Post-commit slide-in range (see HintState.slideRange in RedHighlightExtension).
+export type SlideRange = { from: number; to: number; px: number }
+
 export type OnHintChange = (
   pos: number | null,
   minWidth?: number | null,
   lineRange?: LineRange | null,
   animate?: boolean,        // false = apply this state instantly (no CSS transition); default true
   durationMs?: number,      // transition duration for this change (open vs commit)
+  slideRange?: SlideRange | null,  // omitted = preserve current; null = clear; set = slide [from,to] by px
 ) => void

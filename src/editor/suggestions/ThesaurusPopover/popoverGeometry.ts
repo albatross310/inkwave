@@ -28,6 +28,34 @@ export function measureNaturalLineRight(rect: DOMRect, pEl: Element): number {
   return right
 }
 
+// Position just past the last character on the same visual line as `wordRect`, to the RIGHT of
+// `wordTo`. Used post-commit to slide the whole after-run (the rest of the focused word's line,
+// including any word that rewrapped up onto it) in from the right as one flush motion. Returns
+// wordTo when the word is alone at the line end (nothing to slide).
+export function lineEndPosAfter(wordRect: DOMRect, wordTo: number, paraEl: Element, editor: Editor): number {
+  const midY = (wordRect.top + wordRect.bottom) / 2
+  const tol  = (wordRect.bottom - wordRect.top) * 0.45
+  let lineTo = wordTo
+  const w = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT)
+  const r = document.createRange()
+  for (;;) {
+    const nd = w.nextNode() as Text | null
+    if (!nd) break
+    if (!nd.length) continue
+    r.setStart(nd, 0); r.setEnd(nd, nd.length)
+    const nr = r.getBoundingClientRect()
+    if (nr.bottom < wordRect.top - 2 || nr.top > wordRect.bottom + 2) continue
+    for (let i = 0; i < nd.length; i++) {
+      r.setStart(nd, i); r.setEnd(nd, i + 1)
+      const cr = r.getBoundingClientRect()
+      if (Math.abs((cr.top + cr.bottom) / 2 - midY) >= tol) continue
+      try { const p = editor.view.posAtDOM(nd, i); if (p >= wordTo && p + 1 > lineTo) lineTo = p + 1 }
+      catch { /* skip */ }
+    }
+  }
+  return lineTo
+}
+
 // Computes negative letter-spacing range to absorb the focused word's min-width
 // expansion without paragraph overflow.  Dispatched atomically with the min-width
 // so there is no intermediate painted frame where the word is expanded but not yet

@@ -10,7 +10,7 @@ import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import type { HintState } from './extensions/RedHighlightExtension'
-import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
+import { REFLOW_OPEN_MS, type LineRange, type SlideRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { Scroll } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -61,7 +61,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const barVisibleRef = useRef(false)
 
   // Shared mutable ref read synchronously by the decoration plugin.
-  const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS })
+  const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS, slideRange: null })
 
   // Debounced prefetch — fires after typing pauses so popover opens instantly.
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -84,6 +84,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     lineRange?: LineRange | null,
     animate: boolean = true,
     durationMs: number = REFLOW_OPEN_MS,
+    slideRange?: SlideRange | null,
   ) {
     hintStateRef.current = {
       ...hintStateRef.current,
@@ -92,6 +93,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       lineCompressionRange: lineRange ?? null,
       animate,
       durationMs,
+      // omitted (undefined) → keep the current slide; null → clear it; object → set it.
+      slideRange: slideRange === undefined ? hintStateRef.current.slideRange : slideRange,
     }
     const ed = editorRef.current
     if (ed && !ed.isDestroyed) {

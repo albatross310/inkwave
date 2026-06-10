@@ -39,7 +39,7 @@ interface ThesaurusPopoverProps {
 export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange }: ThesaurusPopoverProps) {
   const { recordAccepted, recordIgnored } = useCompliance()
   const tabCursorRef = useRef<number | null>(null)
-  const { cycle, setCycle, openCycleForElement, closeWithAnimation } = usePopoverLayout(editor, onHintChange)
+  const { cycle, setCycle, openCycleForElement, closeWithAnimation, commitWithSlide } = usePopoverLayout(editor, onHintChange)
 
   // Bump on scroll/resize so the memoised geometry recomputes; reel animation does NOT
   // touch this, so per-frame reelPos updates never redo getBoundingClientRect.
@@ -126,15 +126,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
-    cancelAnim()   // freeze the reel at its current (maybe fractional) spot so the commit glide is stable
+    cancelAnim()
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
-    // Ease the reserved box down to the chosen synonym's own width (and de-compress the line)
-    // before swapping — so the commit reflows like the open did, instead of snapping. The reel's
-    // chosen word already sits at its natural x, so it stays put while the surroundings settle.
-    const focusedEl = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
-    const targetW   = focusedEl ? measureTextWidth(replacement, getFont(focusedEl)) : undefined
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
@@ -146,17 +141,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           marks: [{ type: 'scasSlot', attrs: { original: word } }],
         }).run()
       }
-      // else: committing the unchanged original — record the deliberate choice, skip the edit.
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // If the committed word would cross the right margin — it wraps to the next line by design
-    // (uncommon; the line's slack usually absorbs it) — a reflow can't animate cleanly across a
-    // line break, so snap instead: clear and swap instantly, no easing.
-    const paraRight = focusedEl?.closest('p')?.getBoundingClientRect().right
-    const willWrap  = targetW !== undefined && paraRight !== undefined && cycle.naturalLeft + targetW > paraRight - 2
-    if (willWrap) { onHintChange(null, null); setCycle(null); swap(); return }
-    setCommitting(true)          // slide the reel synonym home in sync with the de-compression
-    closeWithAnimation(swap, targetW)
+    // Committing the UNCHANGED original — no edit, just close and restore the caret.
+    if (!changed) { onHintChange(null, null); setCycle(null); swap(); return }
+    // SWAP-FIRST: replace the word now (paragraph rewraps to its final layout), tear the reel down,
+    // then slide the rest of the committed line — including any word that rewrapped up — in from the
+    // right as one flush motion; lines below snap. (See commitWithSlide.)
+    commitWithSlide(swap, from, replacement.length)
   }
 
   // Refs so the once-subscribed input handlers below read live state without

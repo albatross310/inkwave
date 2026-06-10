@@ -241,3 +241,162 @@ While `getSynonyms` is in flight the reel shows the original word in all 8 slots
 width; on resolve it pops to 8 real synonyms **and** the box grows (N1). Warm prefetch hides
 this, but a cold/cache-miss open flashes the placeholder then jumps. Tied to N1 — fixing the
 open animation (and/or holding the card hidden until synonyms resolve on a cold fetch) covers it.
+
+---
+
+# Round 3 — Instrumented Playwright measurements (the real culprits)
+
+**Method this round:** drove the live app (dev server) with Playwright, installed a
+per-frame `requestAnimationFrame` recorder in page context, and sampled real pixel positions
+(`getBoundingClientRect` + computed `transform`/`letter-spacing`) of the focused word, the
+reel card, the chosen reel glyph, and the before/after compression spans through full open and
+commit lifecycles. Numbers below are measured, not inferred. Test doc: the porpoise-article
+text Peter used; limit N=500. Worst-case word per Peter's report: **short red word hard against
+the right margin** (e.g. `eight`, 34px wide, 19px slack; `oceanic`, 51px, 72px slack).
+
+## What's GOOD now (verified smooth — don't touch)
+
+- **Commit word-slide glides.** Committing a *clamped* wide synonym (`oceanic → oceanographic`,
+  the word starts 42px left of home): chosen-glyph screen-x eased
+  `637.3 → 649.5 → 659.2 → 666.2 → 671.0 → 674.1 → 676.1 → 677.3 → 678.1 → 678.6 → 679.1`
+  over ~210ms — clean easeOut, no snap. (So the earlier N2 "transition doesn't arm" worry is
+  **refuted in Chromium** — the `committing` transform does animate.)
+- **Commit after-text FLIP glides** in lockstep: `aftTx −42.2 → −29.9 → −20.1 → −13 → −8.2 →
+  −5.1 → −3.1 → −1.8 → −1.0 → −0.5 → 0`.
+- **Handoff seam is pixel-perfect.** When the reel tears down at 240ms and the real text swaps
+  in, the committed word's real `left` = the reel's final x to **0.0px**. No end-of-commit jump
+  from the swap itself.
+
+## CULPRIT 1 — OPEN is a hard snap, no animation at all. *(High — the dominant jank)*
+
+`openCycleForElement` applies the whole expand+compress layout with `animate:false`
+(`usePopoverLayout.ts:228`), so the reflow the commit now eases is, on open, a **single-frame
+teleport**. Measured on `oceanic` (short word, near right edge): the moment the card exists the
+focused box has *already* gone from natural 51px → **106px** and slid its left edge from the
+natural 679 → **630.9 (−48px)**, with before/after compression fully applied — and **nothing
+changes on any subsequent frame.** One frame, ~48px of horizontal jump. On `eight` it's
+34→68px + ~20px slide, also one frame.
+
+This is why short words near the right edge are worst: that geometry is exactly where the box
+expansion is largest (short natural width, wide synonyms) **and** the left-slide is largest
+(no right slack, so `alignFraction`→high). The snap distance scales with both. The commit
+glides this same distance over 240ms; the open does it in 0ms. **The open and commit are
+wildly asymmetric.** In normal use (Space = accept **and advance**), every accepted word is
+immediately followed by the next word's open-snap — so the felt experience is
+glide-SNAP-glide-SNAP.
+
+**Fix:** animate the open with the same FLIP machinery the commit uses — apply the target
+layout instantly, then invert the moved pieces (word + after-text) with compositor transforms
+and ease to 0. The code already does exactly this in `closeWithAnimation:135-144`; it needs to
+run on the open path too (and `openCycleForElement` should stop passing `animate:false`, or the
+FLIP-on-open should be added alongside it).
+
+## CULPRIT 2 — On commit, the line's LEFT half teleports while the right half glides. *(Medium-High)*
+
+Measured at the commit frame (`oceanic → oceanographic`):
+
+```
+t=6957  before-text letter-spacing: -0.567px   after-text translateX: 0      (pre-commit)
+t=6978  before-text letter-spacing:  normal     after-text translateX: -42.2  (COMMIT FRAME)
+t=7006  before-text letter-spacing:  normal     after-text translateX: -29.9
+ ...    before-text stays normal                 after-text eases → 0 over ~210ms
+```
+
+The **before-text de-compression is dispatched with `animate:false`** (`closeWithAnimation:127`,
+`{ ...lr, lsBeforeEm:0, lsAfterEm:0 }`, no transition), so all characters *left* of the word
+snap to their final position in one frame at t=0, **while the word and the after-text ease over
+240ms.** Each piece is internally correct, but they don't move *together* — the eye catches the
+left side jumping while the right side slides. This is the secondary "it's not quite right"
+jitter on the same short-word-near-edge cases (heavy left-compression = bigger before-text
+snap). The `letter-spacing:0` flat range is even passed to the FLIP block for the after-side but
+the *before*-side is never given an inverted-and-eased transform like the after-side is.
+
+**Fix:** FLIP the before-text too — give `.scas-comp-before` the same invert-translateX +
+ease-to-0 treatment `.scas-comp-after` gets, so the whole line (before + word + after) resolves
+as one coherent eased motion instead of left-snap / right-glide. Generalising the FLIP to *all
+three* spans (before, focused word, after), on *both* open and commit, is the clean fix for
+Culprits 1 and 2 at once.
+
+## CULPRIT 3 — One stretched frame at commit start. *(Low)*
+
+Frame intervals are a steady ~16-17ms except a single **~21ms** frame at the commit transition
+(`t=6957 → 6978`), from the synchronous work bunched there: PM dispatch + `getBoundingClientRect`
+FLIP measurement + forced reflow (`closeWithAnimation:120-142`). Not a stall, but it's a micro-
+hitch right where the eye is. Minor; worth keeping in mind if Culprits 1–2 are fixed and it
+becomes the next thing visible.
+
+## Verdict (cynical)
+
+The commit reflow, taken alone, is now genuinely smooth and seamless — good work. But the
+feature is **not** Apple-crisp yet, for two concrete, measured reasons: (1) **open doesn't
+animate at all** — it hard-snaps, worst exactly on the short-near-the-edge words, and it fires
+on every Space-advance; and (2) **commit animates the word and after-text but snaps the
+before-text**, so the line moves in two pieces instead of one. Both reduce to the same root:
+the FLIP technique is applied to *one span, one direction*. Generalise it to all three spans on
+both open and commit and the whole interaction becomes one coherent eased motion — which is the
+bar this feature needs to hit.
+
+---
+
+# Round 4 — RHS pixel-drift at start/end (instrumented, sub-pixel)
+
+Peter reported residual jitter on the **right-hand side**: pixel drift at the very start and
+end of the commit, "including the central word." Re-instrumented with sub-pixel capture of the
+central reel glyph's left+right edges and the after-text span's actual screen-left, committing
+via a card-click (no Space-advance, to read the real post-swap layout cleanly).
+
+## CULPRIT 4 — After-text snaps ~7px LEFT at teardown when the synonym is NARROWER than the original. *(Medium-High — this is the "end of the 240ms" RHS drift)*
+
+Measured: `whales → calves` (commit a narrower synonym), full precision:
+
+```
+            after-text screen-left   focused-box right   calves glyph right
+dt -18  (pre)   698.266                698.266
+dt   0  (commit) 698.271  (FLIP holds) 672.391  ← box snaps to "whales" width, not "calves"
+dt  48          680.390
+dt 215          672.394
+dt 233 (last)   672.391                672.391
+dt 250 (swap)   — span gone —
+REAL post-swap: after-text left = 665.28   (calves real right = 665.28)
+END POP = 672.391 − 665.28 = 7.11px  (snaps LEFT at the 240ms teardown)
+```
+
+**Root cause.** During the 240ms close the focused element's **text node still holds the
+original word** (`whales`) — the swap to `calves` only runs in the teardown timer at t=240ms
+(`usePopoverLayout.ts:146-153`). The close sets `min-width: targetW` (=`calves` width, ~38.8px,
+`usePopoverLayout.ts:127`), but an element's rendered width is `max(min-width, intrinsic content
+width)`, and the intrinsic content is still `whales` (~45.9px). So **the box can't shrink below
+the original word's width** for the whole animation. The after-text FLIP-eases to the *box*
+right edge (whales-width position, 672.39), then the real swap reflows it to the *committed*
+word's right edge (calves, 665.28) — a hard `originalWidth − committedWidth` snap at the end.
+
+- whales(45.9) → calves(38.8) = **7.1px** (measured 7.11).
+- A long word → short synonym (e.g. `throughout` → `over`) would pop **~40px** — very visible.
+- **Asymmetric:** committing a *wider* synonym is clean. `oceanic(51) → oceanographic(99.6)`:
+  `min-width` 99.6 > original 51, so the box really is 99.6, the after-text eases to the true
+  final spot, and the teardown seam measured **0.00px**. The bug fires **only on narrower
+  synonyms** — i.e. exactly Peter's "short" cases.
+
+**Fix.** Make the focused box actually adopt the committed width during the close instead of
+being floored by the leftover original text. Two clean options:
+1. On the focused decoration during close, set `width:${targetW}px; overflow:hidden` (the text
+   is already `color:transparent`, so clipping the wider original is invisible) — the after-text
+   then flows to its true final x and the teardown is seamless; or
+2. Swap the text to the committed word at the **start** of the close (rendered transparent under
+   the reel) so the box is correctly sized for the whole 240ms, and only clear the decoration at
+   the end.
+
+## What the RHS does NOT do (checked, to scope the fix)
+
+- **Start (RHS) is clean.** The FLIP holds the after-text across the commit frame to within
+  **+0.005px** (698.266 → 698.271) while the box resizes behind it. No start pop on the after-
+  text. The only start-side defect is the single stretched frame from synchronous work
+  (Culprit 3).
+- **Central word start/end seams are 0px** in every case measured (it's stationary for narrow
+  synonyms; for clamped wide ones it glides home to a 0.00px seam — Round 3). The central word's
+  only "start" jump is the OPEN snap (Culprit 1), not the commit.
+
+So the residual RHS drift Peter is seeing decomposes into: **(a)** Culprit 4 — the ~7px+
+after-text snap-left at the 240ms teardown on narrower-synonym commits (the "end" drift); and
+**(b)** Culprit 1/3 at the "start" — the open snap and the one stretched commit-start frame.
+Culprit 4 is new this round and is the most likely thing reading as end-of-animation RHS jitter.

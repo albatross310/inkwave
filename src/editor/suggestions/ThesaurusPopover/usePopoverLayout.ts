@@ -4,7 +4,7 @@ import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
 import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS } from './popoverConstants'
 import type { CycleState, OnHintChange, LineRange } from './popoverConstants'
-import { posOf, measureNaturalLineRight, computeLineCompressionRange } from './popoverGeometry'
+import { posOf, measureNaturalLineRight, computeLineCompressionRange, lineEndPosAfter } from './popoverGeometry'
 import { buildSynonyms } from './popoverFallbacks'
 
 // The in-place expand+compress popover is the experience on every device. The opaque
@@ -168,6 +168,43 @@ export function usePopoverLayout(
     }, REFLOW_COMMIT_MS)
   }
 
+  // SWAP-FIRST commit slide. Replace the word NOW (so the paragraph rewraps to its final layout),
+  // tear the reel down, then slide the WHOLE after-run — the rest of the committed word's visual
+  // line, including any word that just rewrapped up onto it — in from the right as one flush motion.
+  // Lines below snap. Because the inline-block run is built on the FINAL (correctly-wrapped) layout
+  // it fits its line and never wrap-drops; the translateX is purely visual overflow during the
+  // glide. The slide is driven by a decoration independent of the cycle, so it survives teardown.
+  function commitWithSlide(swap: () => void, from: number, replacementLen: number) {
+    clearCloseTimer()
+    // 1. FIRST — the after-run's left edge before the swap = the focused (expanded) box's right.
+    const fe0 = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+    const beforeRight = fe0 ? fe0.getBoundingClientRect().right : null
+    // 2. LAST — clear the reel/decoration, swap the text (committed text shows immediately, in place).
+    onHintChange(null, null)
+    swap()
+    setCycle(null)
+    if (beforeRight === null) return
+    // 3. Measure the committed word + its visual-line end on the FINAL layout.
+    const committedTo = from + replacementLen
+    const wordEl = Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red')).find(el => posOf(el, editor) === from)
+    const pe = wordEl?.closest('p')
+    if (!wordEl || !pe) return
+    const wrect = wordEl.getBoundingClientRect()
+    const lineEnd = lineEndPosAfter(wrect, committedTo, pe, editor)
+    if (lineEnd <= committedTo) return                 // word sits at the line end → nothing to slide
+    const dx = beforeRight - wrect.right               // how far the after-run's left moved (>0 ⇒ in from the right)
+    if (Math.abs(dx) < 0.5) return
+    // 4. INVERT (instant) → reflow → PLAY to 0, through the slide decoration.
+    const slide = { from: committedTo, to: lineEnd, px: dx }
+    onHintChange(null, null, null, false, undefined, slide)
+    void (editor.view.dom.querySelector('.scas-slide-after') as HTMLElement | null)?.offsetWidth
+    onHintChange(null, null, null, true, REFLOW_COMMIT_MS, { ...slide, px: 0 })
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null
+      onHintChange(null, null, null, false, undefined, null)   // drop the slide decoration
+    }, REFLOW_COMMIT_MS + 40)
+  }
+
   // Expand/compress immediately (no deferral). We tried deferring the pass while a touch was
   // held — to avoid rebuilding the DOM under an active gesture — but with no reserved space
   // during the hold, wide synonyms had nowhere to go (they overlapped, then clipped, the
@@ -244,5 +281,5 @@ export function usePopoverLayout(
     })
   }
 
-  return { cycle, setCycle, openCycleForElement, closeWithAnimation }
+  return { cycle, setCycle, openCycleForElement, closeWithAnimation, commitWithSlide }
 }
