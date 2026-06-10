@@ -1,12 +1,15 @@
 // Inkwave service worker.
 //
-// IMPORTANT: HTML/navigations are NETWORK-FIRST. The previous version was cache-first on '/', so
-// after a deploy returning visitors were served the STALE cached index.html — which referenced the
-// old build's hashed asset URLs (now 404) → a white page. The HTML shell must always come from the
-// network so it points at the CURRENT asset hashes. Content-hashed assets (/assets/*) are immutable,
-// so those stay cache-first (fast + offline). Bump CACHE on any caching-behaviour change so the
-// `activate` cleanup purges every older cache.
-const CACHE = 'inkwave-v2'
+// HTML/navigations are NETWORK-FIRST: a deploy changes the hashed asset URLs, and a cache-first
+// HTML shell would serve a stale index.html pointing at the old (now-404) assets → a white page.
+// So the shell always comes from the network (cache is offline fallback only). Content-hashed
+// assets (/assets/*) are immutable → cache-first (fast + offline).
+//
+// SELF-HEAL: when a NEW version activates (an update, not a first install), it purges old caches AND
+// force-reloads every open tab once. That recovers any browser stranded on a stale shell by an
+// earlier (cache-first) worker, with no manual "clear site data" needed. Fresh first installs are
+// NOT reloaded (nothing to recover). Bump CACHE on any change so the update path fires.
+const CACHE = 'inkwave-v3'
 
 self.addEventListener('install', () => {
   // Don't pre-cache '/': it must come from the network so it references the current asset hashes.
@@ -14,11 +17,20 @@ self.addEventListener('install', () => {
 })
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  )
+  event.waitUntil((async () => {
+    const keys = await caches.keys()
+    // A cache under a DIFFERENT name means a previous worker version existed → this is an UPDATE
+    // (a returning browser, possibly stranded on a stale shell), not a first install.
+    const isUpdate = keys.some((k) => k !== CACHE)
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+    await self.clients.claim()
+    if (isUpdate) {
+      const clients = await self.clients.matchAll({ type: 'window' })
+      for (const c of clients) {
+        try { c.navigate(c.url) } catch { /* navigate unsupported / cross-origin — ignore */ }
+      }
+    }
+  })())
 })
 
 self.addEventListener('fetch', (event) => {
