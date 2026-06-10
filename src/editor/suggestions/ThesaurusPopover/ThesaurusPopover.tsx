@@ -251,6 +251,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         t.addEventListener('touchcancel', cleanup)
       }
       openCycleForElement(t)
+      // The open REBUILDS this .scas-red span (PM dispatch destroys it). The browser gave the
+      // pointer an IMPLICIT capture to that span at pointerdown (always for touch; also for pen),
+      // so once it's detached the gesture's pointermove/up events bubble up a now-orphaned tree and
+      // NEVER reach the document-level reel-drag listener — the FIRST press-drag couldn't scroll the
+      // reel (you had to lift and press again on the rebuilt, stable node). Re-capture the pointer to
+      // the editor root (never rebuilt) so events keep flowing and bubble to document as normal.
+      try { edEl.setPointerCapture(e.pointerId) } catch { /* pointer already ended */ }
     }
     document.addEventListener('pointerdown', onPointerDown, { capture: true })
     return () => document.removeEventListener('pointerdown', onPointerDown, { capture: true })
@@ -271,11 +278,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     engagedRef.current = false
     reelRef.current = cycle ? cycle.reelPos : 0
     targetRef.current = cycle ? Math.round(cycle.reelPos) : 0
-    // Do NOT auto-reveal the neighbour rows on open. It used to light them ("the original marker")
-    // for 650ms — but the open fires this twice (placeholder open, then real-synonym load), so the
-    // rows above/below flashed in, faded, and flashed again = the "flicker on first click". Open is
-    // now calm: only the centre word shows; neighbours appear once the reel is actually moving.
-    if (!cycle) { if (movingTimerRef.current) clearTimeout(movingTimerRef.current); setMoving(false) }
+    // Reveal the neighbour rows ONCE, only when the REAL synonyms land — so the writer can see
+    // there are alternatives to scroll to. The flicker came from firing this on BOTH the placeholder
+    // open (synonyms = [word,word,…], all identical) AND the real-synonym load: two reveal+fade
+    // cycles read as a flash. The placeholder has no variety (Set size 1), so it's skipped; only the
+    // real list (size > 1) lights the rows, then they linger and fade to the calm centre-only rest.
+    if (cycle && new Set(cycle.synonyms).size > 1) { setMoving(true); scheduleMovingOff(900) }
+    else if (!cycle) { if (movingTimerRef.current) clearTimeout(movingTimerRef.current); setMoving(false) }
   }, [cycle?.from, cycle?.synonyms]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
