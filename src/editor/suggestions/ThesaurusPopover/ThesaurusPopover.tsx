@@ -261,6 +261,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // Also keyed on cycle.synonyms: when the real synonym list loads it carries the
   // reel position centred on the current word, so resync reelRef to it then.
   useEffect(() => {
+    // Synonyms resolving mid-drag re-run this (cycle.synonyms changed). Don't reset reelRef under
+    // the user's finger — that snapped the reel back and made the FIRST drag on a cold-cache word
+    // (i.e. the original dark-purple word, whose synonyms aren't cached yet) feel dead, requiring a
+    // second drag. While a drag is live, leave the reel alone.
+    if (draggingRef.current && cycle) { setMoving(true); scheduleMovingOff(650); return }
     cancelAnim()
     velRef.current = 0
     engagedRef.current = false
@@ -647,7 +652,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           // Original word dark, secondary/candidate words the lighter purple — a committed
           // secondary word KEEPS this lighter colour (the page text matches it, see
           // .scas-secondary), so the colour never changes between reel, commit and page.
-          color: isOrig ? '#5c2d8a' : '#9b5ccc',
+          color: isOrig ? '#9b5ccc' : '#5c2d8a',   // original = lighter; candidate synonyms = darker
           // On commit keep the chosen word opaque and fade the neighbours to 0 over the glide, so
           // they ease away in step with the reel settling rather than vanishing with the card.
           opacity: committing ? (ring === base ? 1 : 0) : opacity,

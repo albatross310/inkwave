@@ -78,21 +78,21 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #5c2d8a;
+    color: #9b5ccc;   /* unchanged / original word — the LIGHTER purple */
     cursor: pointer;
   }
 
-  /* Focused word (popover open) — lighter purple */
+  /* Focused word (popover open) — transparent in practice (the reel renders the word). */
   .scas-focused {
-    color: #9b5ccc;
+    color: #5c2d8a;
   }
 
   /* A substituted (secondary) word — committed from a synonym, not the original. Rendered the
-     lighter purple so it matches the reel's candidate colour: a committed synonym keeps the colour
-     it had in the reel, and reopening it shows the same colour (no jump). The original word stays
-     the darker #5c2d8a. */
+     DARKER purple so it matches the reel's candidate colour: a committed synonym keeps the colour
+     it had in the reel, and reopening it shows the same colour (no jump). The unchanged original
+     word stays the lighter #9b5ccc. */
   .scas-secondary {
-    color: #9b5ccc;
+    color: #5c2d8a;
   }
 
   /* "tab" hint badge — centred above word */
