@@ -400,3 +400,55 @@ So the residual RHS drift Peter is seeing decomposes into: **(a)** Culprit 4 —
 after-text snap-left at the 240ms teardown on narrower-synonym commits (the "end" drift); and
 **(b)** Culprit 1/3 at the "start" — the open snap and the one stretched commit-start frame.
 Culprit 4 is new this round and is the most likely thing reading as end-of-animation RHS jitter.
+
+---
+
+# Round 5 — Deep profiling: the reel motion is sound; the boundaries aren't
+
+Profiled the parts not yet measured — the reel spin (keyboard glide + drag + fling), rapid
+Space-cycling through a paragraph, and the vertical commit seam — to find where, if anywhere,
+the *motion* jitters versus the *layout boundaries*.
+
+## Verified GOOD (measured) — do not spend time here
+
+- **Keyboard j/k spin:** 568 motion frames, **0 dropped** (max gap 18.3ms, median 16.8ms),
+  and **zero horizontal jiggle** — every word held its x to **<0.01px** across the whole
+  vertical scroll. The deliberate "translateY-only, no scale" design (ThesaurusPopover.tsx:646)
+  is doing its job perfectly.
+- **Drag + fling:** **0 dropped frames** (max 18ms), **horizontal jiggle <0.02px**. Momentum
+  coast is a long browse-glide by design (`FLING_TAU=260ms`). The velocity-spike worry from the
+  static audit (old F6) did **not** manifest as visible jitter in the trace.
+- **Vertical commit seam:** keyboard/gentle commits settle the reel to a whole slot
+  (`reelSettle≈0`), so the centre word has no vertical glide and no teardown pop — the centre
+  word's y held constant through teardown. No vertical jitter in normal use.
+
+**Conclusion: the reel's continuous motion is genuinely smooth — 60fps, no jiggle, no drops.**
+Every jitter we've measured lives at a *layout boundary* (open, commit teardown), never in the
+scroll. That scopes the whole problem: the fixes are all in the expand/reflow/swap code, none in
+the reel renderer.
+
+## New datum — every OPEN costs a ~24-28ms hitch (one dropped frame)
+
+Across a Space-advance run through 5 words (`similar → seem → dolphin → classified → toothed`),
+the **only** two long frames in the entire ~16s trace were **28.4ms and 24.6ms, both landing
+exactly on an OPEN**. So each open isn't just a position snap (Culprit 1) — it also drops a
+frame from the synchronous burst (PM dispatch to clear+remeasure+re-decorate, `getSynonyms`
+resolve, `applyLayout`). In Space-cycling (the core workflow) that means a small stutter on
+*every* word advance, between otherwise-smooth states. Culprit 3 is therefore an **open**-time
+cost too, not just commit-time.
+
+## Consolidated culprit table (priority order)
+
+| # | What | When | Magnitude (measured) | Fix locus |
+|---|------|------|----------------------|-----------|
+| **C1** | Open reflow is an instant snap, no animation | every open / every Space-advance | full reflow in 1 frame (e.g. word 51→106px + slide −48px) | `usePopoverLayout.ts:228` (`animate:false`) — FLIP the open like the commit |
+| **C4** | After-text snaps left at teardown when synonym is **narrower** than original | commit (narrower synonym) | `originalW − committedW`; 7.1px measured (`whales→calves`), ~40px for long→short | box floored by leftover original text — set `width:targetW;overflow:hidden` during close, or swap text at close-start |
+| **C2** | Before-text de-compresses in 1 frame while word+after glide | commit | whole left run snaps at t=0 (befLS −0.567px→normal) | FLIP `.scas-comp-before` too (`closeWithAnimation:127`) |
+| **C3** | One ~24-28ms dropped frame from synchronous work | every open, + commit start | 1 frame hitch | defer/split the open's sync burst; or pre-measure |
+| C5 (minor) | Cold-open 2-stage flash (provisional ×8 → resolved) | open when prefetch cache cold | masked by warm prefetch in normal use | hold card hidden until synonyms resolve on cold fetch |
+
+C1 and C4 are the two the user feels most (start snap; end RHS pop). Both are FLIP-generalisation
+fixes. C2 is the same fix applied to the third span. Landing C1+C2+C4 together — i.e. **FLIP all
+three spans (before, word, after) on BOTH open and commit, and size the box to the committed
+word during close** — would make the entire interaction one coherent eased motion in and out,
+which is the Apple-crisp bar this feature is aiming for. The reel itself already clears that bar.
