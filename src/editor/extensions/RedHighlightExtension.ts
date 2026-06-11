@@ -201,7 +201,7 @@ function buildDecorations(
         const bslide = lineCompressionRange.beforeSlidePx
         const bsx = lineCompressionRange.beforeScaleX ?? 1
         const beforeStyle = bslide !== undefined
-          ? `letter-spacing: -${lsBeforeEm.toFixed(4)}em;display:inline-block;transform-origin:right center;transform:translateX(${bslide.toFixed(2)}px) scaleX(${bsx.toFixed(4)});` +
+          ? `letter-spacing: -${lsBeforeEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${bslide.toFixed(2)}px) scaleX(${bsx.toFixed(4)});` +
             (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
           : `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fwe, fw.from, { class: 'scas-comp-before', style: beforeStyle }))
@@ -215,7 +215,7 @@ function buildDecorations(
         const slide = lineCompressionRange.afterSlidePx
         const asx = lineCompressionRange.afterScaleX ?? 1
         const afterStyle = slide !== undefined
-          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
+          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
             (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
           : `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))
@@ -237,7 +237,7 @@ function buildDecorations(
       // word) so the start matches the cycle's compressed run exactly; eases to scaleX(1).
       decorations.push(Decoration.inline(slideRange.from, slideRange.to, {
         class: 'scas-slide-after',
-        style: `display:inline-block;transform-origin:left center;transform:translateX(${slideRange.px.toFixed(2)}px) scaleX(${sx.toFixed(4)});${tr}`,
+        style: `display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slideRange.px.toFixed(2)}px) scaleX(${sx.toFixed(4)});${tr}`,
       }))
     }
     // Before-run on commit: origin-RIGHT (glued to the committed word) so it de-compresses toward
@@ -247,7 +247,7 @@ function buildDecorations(
       const bsx = b.scaleX ?? 1
       decorations.push(Decoration.inline(b.from, b.to, {
         class: 'scas-slide-before',
-        style: `display:inline-block;transform-origin:right center;transform:translateX(${b.px.toFixed(2)}px) scaleX(${bsx.toFixed(4)});${tr}`,
+        style: `display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${b.px.toFixed(2)}px) scaleX(${bsx.toFixed(4)});${tr}`,
       }))
     }
   }
