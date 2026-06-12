@@ -78,8 +78,18 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   `provenance/snapshots.ts` (OPFS append-only store; snapshot on a resolved kick when
   the contentHash changed — typing/pastes never snapshot), `components/ReceiptPanel.tsx`.
   Offline, no network; `ots:unstamped` until M2. Unit-tested (`hash.test.ts`) +
-  browser-verified (accrues on resolution, persists across reload). Next: M2
-  (OpenTimestamps → Bitcoin).
+  browser-verified (accrues on resolution, persists across reload).
+- **Provenance spine M2 — OpenTimestamps → Bitcoin: DONE.** Each snapshot's bundleHash
+  is stamped to Bitcoin via OpenTimestamps: unstamped → pending (seconds) → confirmed
+  (hours, upgradeable by anyone). `javascript-opentimestamps` is a Node lib that fights the
+  SPA's SSR/prerender bundling (global Buffer, stream-browserify in SSR), so OTS runs in a
+  **stateless relay** — `api/ots.mjs` (Vercel) + `api/_ots-core.mjs`, mirrored in dev by a
+  vite `configureServer` middleware (see vite.config.ts). This is the spec's sanctioned
+  `api/stamp` fallback: it logs nothing and only handles a hash, so verification stays
+  independently Bitcoin-anchored. Client wrapper `provenance/ots.ts` POSTs to `/api/ots`;
+  the ReceiptPanel shows status + a "check Bitcoin" upgrade. `vercel.json` excludes `/api`
+  from the SPA rewrite. Browser-verified to pending. Next: M3 (live-composition signing
+  service — needs Vercel + signing-key/master-secret decisions).
 - **Week 4 — Glyphs, dashboard, certification: NOT STARTED.** No `glyphList.ts`,
   `ParagraphGlyphExtension`, `GlyphDashboard`, or certification PDF/QR. Per the v4 spec's
   out-of-scope list these are later/Phase-2; the spine (M2–M6) comes first.

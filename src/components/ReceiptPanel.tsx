@@ -4,9 +4,16 @@ import type { Snapshot } from '../types/document'
 // Minimal M1 receipt panel: the growing record of tamper-evident snapshots the writer holds.
 // Snapshots accrue on a resolved kick when the content changed. Later milestones add OTS status
 // (M2 → Bitcoin), the signed receipt chain + kick log (M3), and the friction score (M5).
-export function ReceiptPanel({ snapshots }: { snapshots: Snapshot[] }) {
+export function ReceiptPanel({
+  snapshots,
+  onCheckBitcoin,
+}: {
+  snapshots: Snapshot[]
+  onCheckBitcoin?: () => void
+}) {
   const [open, setOpen] = useState(false)
   const n = snapshots.length
+  const pending = snapshots.some((s) => s.ots.status === 'pending')
 
   return (
     <div
@@ -33,6 +40,16 @@ export function ReceiptPanel({ snapshots }: { snapshots: Snapshot[] }) {
             minWidth: 230,
           }}
         >
+          {onCheckBitcoin && pending && (
+            <button
+              type="button"
+              onClick={onCheckBitcoin}
+              className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
+              style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', color: '#9b5ccc' }}
+            >
+              ⏳ check Bitcoin confirmation…
+            </button>
+          )}
           {[...snapshots].reverse().map((s) => (
             <div key={s.id} className="px-2.5 py-1.5 flex items-baseline gap-2"
                  style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}>

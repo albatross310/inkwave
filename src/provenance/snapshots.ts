@@ -9,6 +9,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, TiptapJSON } from '../types/document'
 import { contentHash, bundleHash } from './hash'
+import { stampBundle, upgradeProof } from './ots'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -93,4 +94,54 @@ export async function createSnapshotIfChanged(
   }
   await writeSnapshotsFile(doc.id, [...snaps, snapshot])
   return snapshot
+}
+
+// ─── OTS stamping / upgrading (M2) ──────────────────────────────────────────────
+// Each mutation re-reads the file before writing, so callers that serialise them (the editor's
+// snapshot queue) never lose a concurrent append.
+
+async function patchSnapshot(
+  documentId: string,
+  id: string,
+  ots: Snapshot['ots'],
+): Promise<Snapshot | null> {
+  const snaps = await readSnapshotsFile(documentId)
+  const i = snaps.findIndex((s) => s.id === id)
+  if (i < 0) return null
+  snaps[i] = { ...snaps[i], ots }
+  await writeSnapshotsFile(documentId, snaps)
+  return snaps[i]
+}
+
+/** Stamp one unstamped snapshot's bundleHash → pending. Returns the updated snapshot, or null. */
+export async function stampSnapshot(documentId: string, id: string): Promise<Snapshot | null> {
+  const snaps = await readSnapshotsFile(documentId)
+  const snap = snaps.find((s) => s.id === id)
+  if (!snap || snap.ots.status !== 'unstamped') return null
+  const ots = await stampBundle(snap.bundleHash)
+  if (!ots) return null // relay unreachable — stay unstamped, retry on next drain
+  return patchSnapshot(documentId, id, ots)
+}
+
+/** Stamp every still-unstamped snapshot (drains the backlog on reconnect). */
+export async function drainUnstamped(documentId: string): Promise<void> {
+  const snaps = await readSnapshotsFile(documentId)
+  for (const s of snaps) {
+    if (s.ots.status === 'unstamped') {
+      try { await stampSnapshot(documentId, s.id) } catch { /* stay unstamped; retry later */ }
+    }
+  }
+}
+
+/** Ask the calendars to upgrade every pending proof; promotes to 'confirmed' once Bitcoin has it. */
+export async function upgradePending(documentId: string): Promise<void> {
+  const snaps = await readSnapshotsFile(documentId)
+  for (const s of snaps) {
+    if (s.ots.status === 'pending' && s.ots.proofBase64) {
+      try {
+        const ots = await upgradeProof(s.ots.proofBase64, s.bundleHash)
+        if (ots) await patchSnapshot(documentId, s.id, ots)
+      } catch { /* not ready / offline */ }
+    }
+  }
 }

@@ -2,6 +2,6 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "build/client",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/__spa-fallback.html" }
+    { "source": "/((?!api/).*)", "destination": "/__spa-fallback.html" }
   ]
 }

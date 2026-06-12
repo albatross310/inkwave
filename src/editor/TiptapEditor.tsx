@@ -24,7 +24,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots } from '../provenance/snapshots'
+import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending } from '../provenance/snapshots'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import type { Snapshot } from '../types/document'
 
@@ -362,27 +362,49 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load this document's existing snapshots when it opens / switches.
-  useEffect(() => {
-    let cancelled = false
-    void listSnapshots(doc.id).then((s) => { if (!cancelled) setSnapshots(s) })
-    return () => { cancelled = true }
-  }, [doc.id])
+  // Serialise all snapshot-file mutations through one promise chain (avoids OPFS read-modify-write
+  // races between snapshot creation, OTS stamping, and upgrades).
+  function enqueueSnapshotWork(work: () => Promise<void>) {
+    snapQueueRef.current = snapQueueRef.current
+      .then(work)
+      .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
+  }
+  const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
 
-  // Snapshot trigger: on a resolved kick, take a snapshot if the content hash changed (M1).
-  // Pasted blocks / ordinary typing never resolve a kick, so they never snapshot.
+  // Load existing snapshots when the document opens / switches, then (online) stamp any unstamped
+  // backlog and upgrade pending proofs toward Bitcoin confirmation.
+  useEffect(() => {
+    const docId = doc.id
+    void listSnapshots(docId).then(setSnapshots)
+    enqueueSnapshotWork(async () => {
+      await drainUnstamped(docId)
+      await upgradePending(docId)
+      await refreshSnapshots(docId)
+    })
+  }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Snapshot trigger: on a resolved kick, snapshot if the content hash changed (M1), then anchor it
+  // to Bitcoin via OpenTimestamps (M2 → pending in seconds). Ordinary typing / pastes resolve no
+  // kick, so they never snapshot.
   useEffect(() => {
     if (!editor) return
     const off = scasRef.current!.kicks.on(() => {
-      snapQueueRef.current = snapQueueRef.current
-        .then(async () => {
-          const snap = await createSnapshotIfChanged(docRef.current, 'kick')
-          if (snap) setSnapshots((prev) => [...prev, snap])
-        })
-        .catch((err) => { console.warn('[inkwave] snapshot failed:', err) })
+      enqueueSnapshotWork(async () => {
+        const snap = await createSnapshotIfChanged(docRef.current, 'kick')
+        if (!snap) return
+        setSnapshots((prev) => [...prev, snap])
+        const stamped = await stampSnapshot(snap.documentId, snap.id) // pending proof
+        if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+      })
     })
     return off
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Manual "check Bitcoin" — upgrade pending proofs toward confirmation (also runs on load).
+  function checkBitcoin() {
+    const docId = docRef.current.id
+    enqueueSnapshotWork(async () => { await upgradePending(docId); await refreshSnapshots(docId) })
+  }
 
   // Resample S_v on a wall-clock timer. Verdicts are frozen (locked ∪ liveKicks persist), so this
   // never reflows committed text — it only changes which lemmas can kick on FUTURE commits, and
@@ -470,7 +492,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         <CycleHintPanel active={cycleActive} showHints={showHints} containerRight={containerRight} />
 
-        <ReceiptPanel snapshots={snapshots} />
+        <ReceiptPanel snapshots={snapshots} onCheckBitcoin={checkBitcoin} />
 
         {/* Footer bar. On a phone it docks flush to the bottom (the top of the Safari URL
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
