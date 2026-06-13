@@ -12,7 +12,10 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, bundleReadme } from '../provenance/bundle'
 
-const CLIENT_ID = import.meta.env?.VITE_MS_CLIENT_ID as string | undefined
+// The Azure app (SPA) client id — PUBLIC (it appears in OAuth redirects), so it's committed as the
+// default and overridable via VITE_MS_CLIENT_ID. Redirect URIs registered: https://www.inkwave.studio
+// + http://localhost:5173 (dev). Authority /common + delegated Files.ReadWrite.AppFolder.
+const CLIENT_ID = (import.meta.env?.VITE_MS_CLIENT_ID as string | undefined) || 'be76cc89-ab01-4681-99c0-f37b9f9d2308'
 // Personal + work/school accounts; AppFolder = a single dedicated OneDrive/Apps/Inkwave folder.
 const AUTHORITY = 'https://login.microsoftonline.com/common'
 const SCOPES = ['Files.ReadWrite.AppFolder', 'User.Read']
