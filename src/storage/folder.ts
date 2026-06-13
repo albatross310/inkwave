@@ -9,7 +9,9 @@ import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile } f
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
-const KEY = 'savefile'
+// Per-DOCUMENT save handle, so each document remembers its own file (Open / Open Recent resume the
+// right one). (Older builds used a single 'savefile' key.)
+const keyFor = (docId: string) => `savefile:${docId}`
 
 function idb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -64,17 +66,17 @@ export async function pickSaveFile(doc: InkwaveDocument): Promise<FileSystemFile
     const handle = await (window as unknown as {
       showSaveFilePicker: (o: unknown) => Promise<FileSystemFileHandle>
     }).showSaveFilePicker({ suggestedName: bundleFilename(doc) })
-    await idbSet(KEY, handle)
+    await idbSet(keyFor(doc.id), handle)
     return handle
   } catch {
     return null // cancelled
   }
 }
 
-/** The previously-chosen save file if permission is (re-)granted; else null. */
-export async function getSaveFileHandle(interactive = false): Promise<FileHandle | null> {
+/** This document's save file if write permission is (re-)granted; else null. */
+export async function getSaveFileHandle(docId: string, interactive = false): Promise<FileHandle | null> {
   if (!fileSaveAvailable()) return null
-  const handle = await idbGet<FileHandle>(KEY)
+  const handle = await idbGet<FileHandle>(keyFor(docId))
   if (!handle) return null
   try {
     const opts = { mode: 'readwrite' }
@@ -84,20 +86,24 @@ export async function getSaveFileHandle(interactive = false): Promise<FileHandle
   return null
 }
 
-export async function forgetSaveFile(): Promise<void> {
-  await idbDel(KEY)
+/** Does this document have a linked save file at all (regardless of current permission)? */
+export async function hasSaveFile(docId: string): Promise<boolean> {
+  return !!(await idbGet<FileHandle>(keyFor(docId)))
 }
 
-/** Persist an externally-obtained file handle (e.g. from "Open…") as the save target, so edits
- *  auto-save straight back to that file. */
-export async function setSaveFileHandle(handle: FileSystemFileHandle): Promise<void> {
-  await idbSet(KEY, handle)
+export async function forgetSaveFile(docId: string): Promise<void> {
+  await idbDel(keyFor(docId))
+}
+
+/** Persist an externally-obtained file handle (e.g. from "Open…") as this document's save target. */
+export async function setSaveFileHandle(docId: string, handle: FileSystemFileHandle): Promise<void> {
+  await idbSet(keyFor(docId), handle)
 }
 
 /** Read back the saved file's heartbeat (which device last wrote it, and when) for the multi-device
  *  guard. null if no file / unreadable. */
-export async function readLocalHeartbeat(): Promise<{ session?: string; exportedAt?: string } | null> {
-  const handle = await getSaveFileHandle(false)
+export async function readLocalHeartbeat(docId: string): Promise<{ session?: string; exportedAt?: string } | null> {
+  const handle = await getSaveFileHandle(docId, false)
   if (!handle) return null
   try {
     const text = await (await handle.getFile()).text()
@@ -108,9 +114,9 @@ export async function readLocalHeartbeat(): Promise<{ session?: string; exported
   }
 }
 
-/** Write the current bundle to the chosen file (silent — no prompt). Returns true on success. */
+/** Write the current bundle to the document's chosen file (silent — no prompt). True on success. */
 export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<boolean> {
-  const handle = await getSaveFileHandle(false)
+  const handle = await getSaveFileHandle(doc.id, false)
   if (!handle) return false
   try {
     const writable = await handle.createWritable()
