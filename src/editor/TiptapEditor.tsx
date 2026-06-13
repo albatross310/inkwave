@@ -30,7 +30,7 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, writeBundleToFile } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, type OneDriveFolder } from '../storage/onedrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, oneDriveFilename, setOneDriveFilename, type OneDriveFolder } from '../storage/onedrive'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { useZoomScale } from './useZoomScale'
@@ -520,8 +520,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
   function onFolderPicked(folder: OneDriveFolder) {
     setChosenFolder(folder)
+    void addRecentFolder(folder) // remember the choice (OPFS) for the picker's "Recent folders"
     setFolderPickerOpen(false)
     void syncOneDrive()
+  }
+
+  // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
+  // file stays as it was). Mirrors the Chromium "Save a copy".
+  async function saveAsOneDrive() {
+    const current = (oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(trace|insig)\.json$/, '')
+    const name = window.prompt('Save a copy to OneDrive as:', current)
+    if (!name || !name.trim()) return
+    setOneDriveFilename(docRef.current.id, name.trim())
+    await syncOneDrive()
   }
 
   // Reconnect a prior OneDrive session on load (also completes a sign-in we returned from).
@@ -822,6 +833,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 folderName={fileName}
                 onSyncOneDrive={oneDriveConfigured() ? syncOneDrive : undefined}
                 onChooseOneDriveFolder={chooseOneDriveFolder}
+                onSaveAsOneDrive={saveAsOneDrive}
                 oneDriveAccount={oneDriveAcct}
               />
             </div>

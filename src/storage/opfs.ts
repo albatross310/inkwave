@@ -67,6 +67,17 @@ async function readJson<T>(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Read a small app-level JSON file from the OPFS root (e.g. recent-folder choices). */
+export async function readAppJson<T>(name: string): Promise<T | null> {
+  return readJson<T>(await getRoot(), name)
+}
+
+/** Write a small app-level JSON file to the OPFS root. */
+export async function writeAppJson(name: string, data: unknown): Promise<void> {
+  const write = await writeJson(await getRoot(), name)
+  await write(data)
+}
+
 /** Save the full document to OPFS. */
 export async function saveDocument(doc: InkwaveDocument): Promise<void> {
   const root = await getRoot()
