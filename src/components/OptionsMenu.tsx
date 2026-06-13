@@ -33,7 +33,8 @@ async function openFile(file: File, handle?: FileSystemFileHandle): Promise<void
   const id = (data.document?.id as string | undefined) ?? uuidv4()
   setOneDriveFilename(id, file.name)          // resume OneDrive sync to this file
   if (handle) await setSaveFileHandle(handle) // resume local file sync (Chromium writable handle)
-  await createDocument(title, contentJson, id)
+  // With a writable handle, switch IN PLACE (no reload) so the file's write permission survives.
+  await createDocument(title, contentJson, id, !!handle)
 }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
@@ -53,13 +54,15 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   } catch { /* cancelled / bad file */ }
 }
 
-// Switch the active document by id and reload so the editor loads it cleanly.
-function openDocument(id: string) {
+// Switch the active document by id. inPlace → tell the live editor to swap (no reload, preserves
+// a just-granted file permission); otherwise reload so the editor loads it cleanly.
+function openDocument(id: string, inPlace = false) {
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
-  window.location.reload()
+  if (inPlace) window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
+  else window.location.reload()
 }
 
-async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4()): Promise<void> {
+async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4(), inPlace = false): Promise<void> {
   const now = new Date().toISOString()
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
@@ -67,7 +70,7 @@ async function createDocument(title: string, contentJson: InkwaveDocument['conte
   })
   await saveDocument(doc)
   await upsertMeta({ id: doc.id, title: doc.title, updatedAt: doc.updatedAt })
-  openDocument(doc.id)
+  openDocument(doc.id, inPlace)
 }
 
 export function OptionsMenu({

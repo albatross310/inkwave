@@ -78,6 +78,18 @@ export function Edit() {
     setDoc(updated)
   }
 
+  // Switch documents IN PLACE (no full reload) when asked — used by "Open…" with a writable file
+  // handle, so the just-granted file permission survives (a reload would drop it → no auto-save).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      if (!id) return
+      void loadDocument(id).then((loaded) => { if (loaded) setDoc(migrateDocument(loaded)) })
+    }
+    window.addEventListener('inkwave:open-doc', onOpen as EventListener)
+    return () => window.removeEventListener('inkwave:open-doc', onOpen as EventListener)
+  }, [])
+
   // Before the document loads (and during prerender, where effects never run) render the SHARED
   // empty-editor shell — the same Scroll chrome + an empty .ProseMirror facsimile the live
   // editor uses. So the prerendered landing page is a direct CSS function of the editor, and the
@@ -90,5 +102,7 @@ export function Edit() {
     )
   }
 
-  return <TiptapEditor doc={doc} onDocChange={handleDocChange} />
+  // key={doc.id} → switching documents in place cleanly remounts the editor (sessions, snapshots,
+  // sync reconnect all re-run for the new doc).
+  return <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
 }
