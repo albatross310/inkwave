@@ -768,7 +768,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (!oneDriveConfigured()) return null
           return oneDriveAcct ? (
             <SyncStatus
-              label={lastSync ? '✓ Synced to OneDrive' : '☁ OneDrive — not yet syncing'}
+              label={lastSync ? '✓ Synced to OneDrive' : '☁ not yet syncing'}
               synced={!!lastSync}
               path={oneDrivePath(doc)}
               lastSync={lastSync}
@@ -778,7 +778,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               onClick={lastSync ? undefined : syncOneDrive}
             />
           ) : (
-            <SyncStatus label="☁ OneDrive disconnected" synced={false} onClick={syncOneDrive} />
+            <SyncStatus label="☁ disconnected" synced={false} tooltip="OneDrive — sign in to sync" onClick={syncOneDrive} />
           )
         })()}
 
