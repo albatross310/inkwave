@@ -164,8 +164,10 @@ function slugOf(doc: InkwaveDocument): string {
 }
 
 // Everything (content, snapshots, Bitcoin proofs, signed receipts, readable text header) lives in
-// ONE file. Free tier → `.trace.json`; the paid "Insignia" tier will use `.insig.json` (auth TBD).
-export const TRACE_EXTENSION = 'trace.json'
+// ONE self-contained file with the distinctive `.inkwave` extension — so the OS can associate it
+// with the app (double-click → open in Inkwave) and it's unmistakably an Inkwave record. Still
+// plain text inside (readable header + JSON). Legacy `.trace.json` files still open.
+export const TRACE_EXTENSION = 'inkwave'
 
 export function bundleFilename(doc: InkwaveDocument): string {
   return `${slugOf(doc)}.${TRACE_EXTENSION}`

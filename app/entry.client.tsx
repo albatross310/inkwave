@@ -21,6 +21,25 @@ async function bootstrap() {
 }
 void bootstrap()
 
+// PWA file handling (Chrome/Edge/Brave, installed): double-clicking a .inkwave file launches the app
+// here with the file handle. Open it (and resume syncing back to it). No-op in browsers without it.
+const lq = (window as unknown as { launchQueue?: { setConsumer: (cb: (p: { files?: FileSystemFileHandle[] }) => void) => void } }).launchQueue
+if (lq && typeof lq.setConsumer === 'function') {
+  lq.setConsumer((params) => {
+    const handle = params.files?.[0]
+    if (!handle) return
+    void (async () => {
+      try {
+        // Try for write access so edits save back to the opened file.
+        try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only ok */ }
+        const file = await handle.getFile()
+        const { openInkwaveFile } = await import('../src/storage/openDoc')
+        await openInkwaveFile(file, handle)
+      } catch { /* ignore */ }
+    })()
+  })
+}
+
 // Register the service worker for offline support and PWA install — PRODUCTION ONLY.
 // In dev a cache-first SW poisons the dev server: it serves a stale cached app shell and JS,
 // so live code changes never appear. So in dev we do the opposite — actively unregister any

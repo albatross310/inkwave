@@ -44,7 +44,7 @@ export function oneDriveFilename(docId: string): string | null {
   try { return localStorage.getItem(nameKey(docId)) } catch { return null }
 }
 export function setOneDriveFilename(docId: string, name: string): void {
-  const clean = /\.(trace|insig)\.json$/.test(name) ? name : `${name.replace(/\.json$/, '')}.trace.json`
+  const clean = /\.(inkwave|trace\.json|insig\.json)$/i.test(name) ? name : `${name.replace(/\.(json|inkwave)$/i, '')}.inkwave`
   try { localStorage.setItem(nameKey(docId), clean) } catch { /* private mode */ }
 }
 
