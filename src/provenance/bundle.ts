@@ -169,6 +169,12 @@ function slugOf(doc: InkwaveDocument): string {
 // plain text inside (readable header + JSON). Legacy `.trace.json` files still open.
 export const TRACE_EXTENSION = 'inkwave'
 
+/** The .inkwave filename a title would produce — for showing file names in the recent list. */
+export function inkwaveFileName(title: string): string {
+  const slug = (title || 'untitled').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'untitled'
+  return `${slug}.${TRACE_EXTENSION}`
+}
+
 export function bundleFilename(doc: InkwaveDocument): string {
   return `${slugOf(doc)}.${TRACE_EXTENSION}`
 }
