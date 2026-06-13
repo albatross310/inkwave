@@ -31,10 +31,11 @@ async function openFile(file: File, handle?: FileSystemFileHandle): Promise<void
   const title = (data as { title?: string }).title ?? data.document?.title ?? file.name.replace(/\.(trace|insig)?\.?json$/, '')
   if (!contentJson) throw new Error('not an Inkwave document or export bundle')
   const id = (data.document?.id as string | undefined) ?? uuidv4()
-  setOneDriveFilename(id, file.name)          // resume OneDrive sync to this file
-  if (handle) await setSaveFileHandle(handle) // resume local file sync (Chromium writable handle)
+  setOneDriveFilename(id, file.name)              // resume OneDrive sync to this file
+  if (handle) await setSaveFileHandle(id, handle) // resume local file sync (Chromium writable handle)
   // With a writable handle, switch IN PLACE (no reload) so the file's write permission survives.
   await createDocument(title, contentJson, id, !!handle)
+  if (handle) window.dispatchEvent(new Event('inkwave:save-file-linked')) // re-link even if same doc id
 }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);

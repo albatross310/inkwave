@@ -573,7 +573,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       folderActiveRef.current = true
       setFileName(handle.name)
     } else {
-      const handle = await getSaveFileHandle(true)
+      const handle = await getSaveFileHandle(docRef.current.id, true)
       if (!handle) { folderActiveRef.current = false; setFileName(null); return }
       setFileName(handle.name)
     }
@@ -586,7 +586,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // see where it lives (the File System Access API has no direct "reveal in Explorer"). Cancelling
   // is fine — they've seen the folder.
   async function showInFolder() {
-    const handle = await getSaveFileHandle(false)
+    const handle = await getSaveFileHandle(docRef.current.id, false)
     if (!handle) return
     try {
       await (window as unknown as { showOpenFilePicker: (o: unknown) => Promise<unknown> })
@@ -605,10 +605,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setLastFileSave(Date.now())
   }
 
-  // Reconnect to a previously-chosen save file on load (no prompt if permission persists).
+  // Link THIS document's save file (if any) and sync to it immediately — on load and after "Open…".
+  // Silent re-link only works while the browser still grants write permission (same session, or an
+  // installed PWA); otherwise the writer re-grants on the next manual Save.
+  async function linkSaveFileNow() {
+    const h = await getSaveFileHandle(docRef.current.id, false)
+    if (!h) { folderActiveRef.current = false; return }
+    folderActiveRef.current = true
+    setFileName(h.name)
+    const snaps = await listSnapshots(docRef.current.id)
+    if (await writeBundleToFile(docRef.current, snaps)) setLastFileSave(Date.now())
+  }
   useEffect(() => {
-    void getSaveFileHandle().then((h) => { folderActiveRef.current = !!h; if (h) setFileName(h.name) })
-  }, [])
+    void linkSaveFileNow()
+    const onLinked = () => void linkSaveFileNow() // fired by "Open…" so a same-id open re-links live
+    window.addEventListener('inkwave:save-file-linked', onLinked)
+    return () => window.removeEventListener('inkwave:save-file-linked', onLinked)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if
   // ANOTHER device wrote it recently — i.e. it looks open on another computer. Never locks: the doc
@@ -621,7 +634,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       const hb = oneDriveActiveRef.current
         ? await readRemoteHeartbeat(docRef.current)
         : folderActiveRef.current
-          ? await readLocalHeartbeat()
+          ? await readLocalHeartbeat(docRef.current.id)
           : null
       if (!cancelled) setOtherDevice(!!hb && isOtherDeviceActive(hb.session, hb.exportedAt))
     }
@@ -805,7 +818,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // prompt before a file is linked, so it never just disappears).
             return fileName ? (
               <SyncStatus
-                label={lastFileSave ? '✓ Synced to folder' : '🗀 Saving to folder…'}
+                label={lastFileSave ? '✓ Synced to folder' : '🗀 Syncing to folder…'}
                 synced={!!lastFileSave}
                 path={fileName}
                 lastSync={lastFileSave}
