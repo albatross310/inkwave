@@ -11,32 +11,13 @@ import type { DocumentMeta, InkwaveDocument } from '../types/document'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
-import { parseTraceFile } from '../provenance/bundle'
-import { setOneDriveFilename } from '../storage/onedrive'
-import { setSaveFileHandle } from '../storage/folder'
+import { openInkwaveFile } from '../storage/openDoc'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 
 type ModalKey = 'recent' | 'save'
 const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save' }
-
-// Open a chosen file (Inkwave document or .trace.json export) and RESUME syncing to it:
-// - preserve the document id so it's the same document (OneDrive filename + multi-device heartbeat
-//   line up), and point OneDrive sync at this file's name;
-// - on Chromium, persist the writable file handle so local auto-save writes straight back to it.
-async function openFile(file: File, handle?: FileSystemFileHandle): Promise<void> {
-  const data = parseTraceFile(await file.text())
-  const contentJson = (data as { contentJson?: InkwaveDocument['contentJson'] }).contentJson ?? data.document?.contentJson
-  const title = (data as { title?: string }).title ?? data.document?.title ?? file.name.replace(/\.(trace|insig)?\.?json$/, '')
-  if (!contentJson) throw new Error('not an Inkwave document or export bundle')
-  const id = (data.document?.id as string | undefined) ?? uuidv4()
-  setOneDriveFilename(id, file.name)              // resume OneDrive sync to this file
-  if (handle) await setSaveFileHandle(id, handle) // resume local file sync (Chromium writable handle)
-  // With a writable handle, switch IN PLACE (no reload) so the file's write permission survives.
-  await createDocument(title, contentJson, id, !!handle)
-  if (handle) window.dispatchEvent(new Event('inkwave:save-file-linked')) // re-link even if same doc id
-}
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -45,11 +26,9 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   if (!w.showOpenFilePicker) { fileInput?.click(); return }
   let handle: FileSystemFileHandle
   try {
-    // NB: File System Access rejects multi-dot extensions (".trace.json"), so filter on ".json"
-    // (our files end in .json). A malformed filter would make the picker throw → Open… do nothing.
     ;[handle] = await w.showOpenFilePicker({
       multiple: false,
-      types: [{ description: 'Inkwave record', accept: { 'application/json': ['.json'] } }],
+      types: [{ description: 'Inkwave record', accept: { 'text/plain': ['.inkwave', '.json'] } }],
     })
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') return // user cancelled — fine
@@ -58,19 +37,17 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   }
   // Ask for write access now (in the click gesture) so edits can save back to this file.
   try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only is fine */ }
-  const file = await handle.getFile()
-  await openFile(file, handle)
+  await openInkwaveFile(await handle.getFile(), handle)
 }
 
-// Switch the active document by id. inPlace → tell the live editor to swap (no reload, preserves
-// a just-granted file permission); otherwise reload so the editor loads it cleanly.
-function openDocument(id: string, inPlace = false) {
+// Switch the active document by id — IN PLACE (no reload), so file-write permissions granted this
+// session survive (auto-sync keeps working when switching between recently-opened docs).
+function openDocument(id: string) {
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
-  if (inPlace) window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
-  else window.location.reload()
+  window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
 }
 
-async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4(), inPlace = false): Promise<void> {
+async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4()): Promise<void> {
   const now = new Date().toISOString()
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
@@ -78,7 +55,7 @@ async function createDocument(title: string, contentJson: InkwaveDocument['conte
   })
   await saveDocument(doc)
   await upsertMeta({ id: doc.id, title: doc.title, updatedAt: doc.updatedAt })
-  openDocument(doc.id, inPlace)
+  openDocument(doc.id)
 }
 
 export function OptionsMenu({
@@ -115,7 +92,7 @@ export function OptionsMenu({
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-picking the same file
     if (!file) return
-    try { await openFile(file) } catch { /* ignore a bad file; user can retry */ }
+    try { await openInkwaveFile(file) } catch { /* ignore a bad file; user can retry */ }
   }
 
   useEffect(() => {
@@ -159,7 +136,7 @@ export function OptionsMenu({
   return (
     <div ref={rootRef} className="relative">
       {/* Hidden input: "Open…" clicks it directly so the OS file dialog opens immediately (no drop zone). */}
-      <input ref={fileInputRef} type="file" accept="application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
+      <input ref={fileInputRef} type="file" accept=".inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}
