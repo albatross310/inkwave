@@ -26,9 +26,9 @@ export function Scroll({
   containerRef?: RefObject<HTMLDivElement>
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
 }) {
-  // Parallax the (fixed) background waves: as the page scrolls, drift them SLOWLY — a gentle
-  // vertical parallax + a soft left/right sway — so the background barely moves while the content
-  // moves fast. rAF-throttled; sets --wave-x/--wave-y that the ::before reads (see styles/index.css).
+  // The (fixed) background waves don't scroll with the page. As you scroll we only sway them
+  // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
+  // with no vertical movement. rAF-throttled.
   const surfaceRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -37,9 +37,7 @@ export function Scroll({
     let raf = 0
     const apply = () => {
       raf = 0
-      const y = window.scrollY
-      el.style.setProperty('--wave-y', `${(y * 0.12).toFixed(1)}px`) // slow vertical parallax
-      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // gentle horizontal sway
+      el.style.setProperty('--wave-x', `${(window.scrollY * 0.06).toFixed(1)}px`) // gentle horizontal sway
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()

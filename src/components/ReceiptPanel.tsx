@@ -62,6 +62,11 @@ export function ReceiptPanel({
             className="mt-1.5 bg-white overflow-auto"
             style={{ border: '1px solid rgba(92, 45, 138, 0.4)', borderRadius: 10, maxHeight: '40vh', width: 150 }}
           >
+            {typeof wordCount === 'number' && (
+              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}>
+                {wordCount} word{wordCount === 1 ? '' : 's'}
+              </div>
+            )}
             {onVerifyChain && (
               <button
                 type="button"
@@ -101,11 +106,6 @@ export function ReceiptPanel({
                 </span>
               </button>
             ))}
-            {typeof wordCount === 'number' && (
-              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums">
-                {wordCount} word{wordCount === 1 ? '' : 's'}
-              </div>
-            )}
           </div>
         )}
       </div>
