@@ -11,6 +11,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile } from '../provenance/bundle'
+import { readAppJson, writeAppJson } from './opfs'
 
 // The OneDrive folder the writer chose to sync into. id '' (or null) = the OneDrive root. `path` is
 // a human-readable location ("Documents/Inkwave") for display. Persisted so the choice sticks.
@@ -24,16 +25,38 @@ export function setChosenFolder(folder: OneDriveFolder | null): void {
   try { folder ? localStorage.setItem(FOLDER_KEY, JSON.stringify(folder)) : localStorage.removeItem(FOLDER_KEY) } catch { /* private mode */ }
 }
 
+// Recently-chosen folders (kept in OPFS), surfaced at the top of the picker. Most-recent first, deduped.
+const RECENTS_FILE = 'onedrive-recent-folders.json'
+const MAX_RECENTS = 6
+export async function getRecentFolders(): Promise<OneDriveFolder[]> {
+  return (await readAppJson<OneDriveFolder[]>(RECENTS_FILE)) ?? []
+}
+export async function addRecentFolder(folder: OneDriveFolder): Promise<void> {
+  const list = await getRecentFolders()
+  const next = [folder, ...list.filter((f) => !(f.id === folder.id && f.path === folder.path))].slice(0, MAX_RECENTS)
+  await writeAppJson(RECENTS_FILE, next)
+}
+
+// The pinned per-document OneDrive filename (see stableFilename). Exposed so "Save a copy" can point
+// future syncs at a NEW filename (the copy), leaving the previous file untouched in OneDrive.
+function nameKey(docId: string): string { return `inkwave:onedrive-name:${docId}` }
+export function oneDriveFilename(docId: string): string | null {
+  try { return localStorage.getItem(nameKey(docId)) } catch { return null }
+}
+export function setOneDriveFilename(docId: string, name: string): void {
+  const clean = /\.(trace|insig)\.json$/.test(name) ? name : `${name.replace(/\.json$/, '')}.trace.json`
+  try { localStorage.setItem(nameKey(docId), clean) } catch { /* private mode */ }
+}
+
 // The OneDrive filename is PINNED per-document the first time we sync. The slug is derived from the
 // title, which is re-derived from the text on every edit — so without pinning, each sync would PUT a
 // different name and create a new file every few seconds instead of overwriting the same one.
 function stableFilename(doc: InkwaveDocument): string {
-  const key = `inkwave:onedrive-name:${doc.id}`
   try {
-    const existing = localStorage.getItem(key)
+    const existing = localStorage.getItem(nameKey(doc.id))
     if (existing) return existing
     const name = bundleFilename(doc)
-    localStorage.setItem(key, name)
+    localStorage.setItem(nameKey(doc.id), name)
     return name
   } catch {
     return bundleFilename(doc)

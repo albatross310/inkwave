@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listQuickFolders, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listQuickFolders, getRecentFolders, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
 
 // A small folder browser for OneDrive: drill into folders from the root, then "Sync here" to choose
 // the destination for the .trace.json. Reads folders live via Microsoft Graph (the writer must be
@@ -13,13 +13,22 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
   const [crumbs, setCrumbs] = useState<Crumb[]>([]) // [] = root
   const [folders, setFolders] = useState<DriveFolder[] | null>(null)
   const [quick, setQuick] = useState<DriveFolder[]>([])
+  const [recent, setRecent] = useState<OneDriveFolder[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : null
   const currentPath = crumbs.map((c) => c.name).join('/')
 
-  // Quick-access folders (Documents, Photos, …) — fetched once, shown at the root.
-  useEffect(() => { void listQuickFolders().then(setQuick).catch(() => {}) }, [])
+  // Shortcuts shown at the root: the writer's RECENT choices (from OPFS) if any, else common folders.
+  useEffect(() => {
+    void getRecentFolders().then(setRecent).catch(() => {})
+    void listQuickFolders().then(setQuick).catch(() => {})
+  }, [])
+  // Recent folders are pickable directly (id '' = root). Shown as {id, name=path||'OneDrive (root)'}.
+  const shortcuts: DriveFolder[] = recent.length
+    ? recent.map((f) => ({ id: f.id, name: f.path || 'OneDrive (root)' }))
+    : quick
+  const shortcutsLabel = recent.length ? 'Recent folders' : 'Common folders'
 
   useEffect(() => {
     let cancelled = false
@@ -57,14 +66,15 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
           ))}
         </div>
 
-        {/* Common OneDrive folders (Documents, Photos…). NB: Windows Explorer's "Quick access"
-            pins are a local shell feature with no web/Graph API — these are OneDrive's own folders. */}
-        {crumbs.length === 0 && quick.length > 0 && (
+        {/* Shortcuts at the root: RECENT choices (tracked in OPFS) → pick instantly; otherwise common
+            OneDrive folders → drill in. NB: Windows Explorer "Quick access" pins have no web API. */}
+        {crumbs.length === 0 && shortcuts.length > 0 && (
           <div className="mb-2">
-            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Common folders</div>
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">{shortcutsLabel}</div>
             <div className="flex flex-wrap gap-1.5">
-              {quick.map((f) => (
-                <button key={f.id} type="button" onClick={() => setCrumbs([{ id: f.id, name: f.name }])}
+              {shortcuts.map((f, i) => (
+                <button key={`${f.id}-${i}`} type="button"
+                  onClick={() => (recent.length ? onPick({ id: f.id, path: recent[i].path }) : setCrumbs([{ id: f.id, name: f.name }]))}
                   className="text-xs px-2.5 py-1 rounded-full font-serif hover:bg-stone-50" style={{ border: `1px solid ${INK}40`, color: INK }}>
                   🗁 {f.name}
                 </button>
