@@ -9,13 +9,23 @@ import type { KickEvent, SignedReceipt } from '../types/document'
 import { canonicalize, sha256Hex } from './hash'
 import { POOL } from '../scas/pool'
 
-// Dev placeholder public key (matches api/_provenance-core.mjs DEV_SIGNING_PK). Production publishes
-// the real key at VITE_SIGNING_PK_URL and mirrors it outside Inkwave; pass it explicitly to verify.
+// Dev placeholder public key (matches api/_provenance-core.mjs DEV_SIGNING_PK — used in local dev,
+// where the signing service also runs on dev keys).
 export const DEV_SIGNING_PK = 'd5c5e5b40c2f33cb39f5c37ddc1ac27148addca4b7cdd12c7b89487a784787b4'
 
-/** The configured signing public key (env override → dev placeholder). */
+// The published production signing key — also at /.well-known/inkwave-signing-key.json and committed
+// to the repo, so verification never depends on inkwave.studio being online (v4 spec §8).
+export const PUBLISHED_SIGNING_PK = 'b1fa2bad8ccb7451f2db3ae81851197dad5e5f6fca26297c9d6cc8e697db8b51'
+
+/**
+ * The signing public key the app verifies against: an explicit VITE_SIGNING_PK env override wins;
+ * otherwise production uses the published key and local dev uses the dev placeholder (which matches
+ * the dev signing service). A standalone verifier should pass the published key explicitly.
+ */
 export function signingPublicKeyHex(): string {
-  return (import.meta.env?.VITE_SIGNING_PK as string | undefined) || DEV_SIGNING_PK
+  const env = import.meta.env?.VITE_SIGNING_PK as string | undefined
+  if (env) return env
+  return import.meta.env?.PROD ? PUBLISHED_SIGNING_PK : DEV_SIGNING_PK
 }
 
 // ── byte helpers ─────────────────────────────────────────────────────────────
