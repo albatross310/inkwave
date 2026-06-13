@@ -108,6 +108,12 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             raf = 0
             const sheet = (view.dom as HTMLElement).closest('.scroll-paper') as HTMLElement | null
             const pageH = (sheet ? sheet.clientWidth : 794) * Math.SQRT2
+            if (sheet) {
+              // Drive the sheet's parchment/transparent page-gradient so gaps reveal the real
+              // (fixed) background — its waves then match the surroundings exactly.
+              sheet.classList.add('inkwave-gapped')
+              sheet.style.setProperty('--page-h', `${pageH}px`)
+            }
             const { set, sig } = compute(view, pageH)
             if (sig !== lastSig) { lastSig = sig; view.dispatch(view.state.tr.setMeta(KEY, set)) }
           }

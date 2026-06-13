@@ -13,6 +13,9 @@ import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
 import { openInkwaveFile } from '../storage/openDoc'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
+import { oneDriveFilename } from '../storage/onedrive'
+import { getSaveFileName } from '../storage/folder'
+import { inkwaveFileName } from '../provenance/bundle'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
@@ -232,7 +235,19 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
 
 function RecentPanel() {
   const [recents, setRecents] = useState<DocumentMeta[] | null>(null)
-  useEffect(() => { void listMeta().then(setRecents) }, [])
+  const [names, setNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    void listMeta().then(async (metas) => {
+      setRecents(metas)
+      // Show the FILE NAME, not the content preview: prefer the saved OneDrive/local file name,
+      // else the .inkwave name the title would produce.
+      const map: Record<string, string> = {}
+      for (const m of metas) {
+        map[m.id] = oneDriveFilename(m.id) ?? (await getSaveFileName(m.id)) ?? inkwaveFileName(m.title)
+      }
+      setNames(map)
+    })
+  }, [])
   return (
     <div className="mt-2 flex flex-col gap-1.5 max-h-72 overflow-auto">
       <MenuButton onClick={() => void createDocument('Untitled', emptyTiptapDoc())}>+ New document</MenuButton>
@@ -243,7 +258,7 @@ function RecentPanel() {
           className="w-full text-left px-4 py-2 font-serif hover:bg-stone-50 transition-colors"
           style={{ border: '1px solid #eee', borderRadius: 8 }}
         >
-          <span style={{ color: INK }}>{m.title || 'Untitled'}</span>
+          <span style={{ color: INK }}>{names[m.id] ?? inkwaveFileName(m.title)}</span>
           <span className="block text-xs text-stone-400">{new Date(m.updatedAt).toLocaleString()}</span>
         </button>
       ))}
