@@ -14,6 +14,12 @@ import puppeteer from 'puppeteer-core'
 
 export const config = { maxDuration: 60, api: { bodyParser: false } }
 
+// We don't need GPU/WebGL for a text+SVG document — disabling it makes the Lambda Chromium start
+// faster and more reliably.
+chromium.setGraphicsMode = false
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 const onVercel = () => !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_VERSION)
 
 // Dev-only local Chrome locations; override with PUPPETEER_EXECUTABLE_PATH.
@@ -47,9 +53,16 @@ export async function generatePdf({ html }) {
   const browser = await launch()
   try {
     const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 })
-    // Wait for the web fonts (IM Fell DW Pica / EB Garamond) so wrapping matches the editor exactly.
-    try { await page.evaluate(async () => { if (document.fonts) await document.fonts.ready }) } catch { /* ignore */ }
+    // domcontentloaded, NOT networkidle0: the doc fetches fonts/seal back from the live origin, and
+    // networkidle0 (no connections for 500ms) can stall to its timeout on a keep-alive. We instead
+    // load the DOM, then explicitly wait for fonts with a hard cap so we never hang.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 })
+    // Wait for the web fonts (IM Fell DW Pica / EB Garamond) so wrapping matches the editor — but cap
+    // it: if a font is slow/unreachable, render anyway rather than hang.
+    await Promise.race([
+      page.evaluate(async () => { if (document.fonts) { try { await document.fonts.ready } catch { /* ignore */ } } }).catch(() => {}),
+      sleep(5000),
+    ])
     return await page.pdf({ printBackground: true, preferCSSPageSize: true })
   } finally {
     await browser.close()

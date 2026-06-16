@@ -30,20 +30,25 @@ async function collectCss(): Promise<string> {
 }
 
 async function buildPrintHtml(title: string): Promise<string> {
-  const surface = document.querySelector('.inkwave-editor-surface')
-  if (!surface) throw new Error('editor not ready')
-  const seal = document.querySelector('.print-seal')
+  if (!document.querySelector('.inkwave-editor-surface')) throw new Error('editor not ready')
   const css = await collectCss()
+  // Clone the WHOLE body (minus scripts) so the server render has the identical DOM + ancestor layout
+  // context that the browser's own print uses — the parchment's width/centering depends on that chain.
+  // Anything not meant for print (toolbars, wave background, the sheet panels) is hidden by the
+  // @media print rules already in the CSS, exactly as in a normal browser print. The print-seal lives
+  // in the body too, so it comes along. Serialising only the surface dropped the context and mis-sized
+  // the page (text squashed top-left with huge right/bottom margins).
+  const bodyClone = document.body.cloneNode(true) as HTMLElement
+  bodyClone
+    .querySelectorAll('script,noscript,link[rel="modulepreload"],link[rel="preload"]')
+    .forEach((n) => n.remove())
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     `<base href="${location.origin}/">` +
     FONTS_LINK +
     `<style>${css}</style>` +
     `<title>${escapeHtml(title)}</title>` +
-    '</head><body>' +
-    surface.outerHTML +
-    (seal ? seal.outerHTML : '') +
-    '</body></html>'
+    `</head><body class="${escapeHtml(document.body.className)}">${bodyClone.innerHTML}</body></html>`
   )
 }
 
