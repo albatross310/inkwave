@@ -13,6 +13,7 @@ import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlight
 import { PaginationExtension } from './extensions/PaginationExtension'
 import { gappedPagesEnabled } from './pageView'
 import { exportPdfToNewTab } from './exportPdf'
+import { exportLatexDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange, type SlideRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
@@ -665,6 +666,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const ok = await exportPdfToNewTab(docRef.current.title || 'inkwave')
     if (!ok) printDoc()
   }
+  // Export the document as a .tex source file (walks the live ProseMirror doc).
+  function exportLatex() {
+    const ed = editorRef.current
+    if (!ed) return
+    exportLatexDownload(ed.getJSON() as Parameters<typeof exportLatexDownload>[0], docRef.current.title || 'inkwave')
+  }
   async function onGdriveFileOpen(f: { id: string; name: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
@@ -1169,6 +1176,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
                 onPrint={printDoc}
                 onExportPdf={exportPdf}
+                onExportLatex={exportLatex}
                 googleDriveActive={gdriveActive}
               />
             </div>

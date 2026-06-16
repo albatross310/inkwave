@@ -22,8 +22,8 @@ import { inkwaveFileName } from '../provenance/bundle'
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 
-type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy' }
+type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export'
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -82,6 +82,7 @@ export function OptionsMenu({
   onUploadOneDrive,
   onPrint,
   onExportPdf,
+  onExportLatex,
   googleDriveActive,
 }: {
   paperRight: number
@@ -101,6 +102,7 @@ export function OptionsMenu({
   onUploadOneDrive?: () => void
   onPrint?: () => void
   onExportPdf?: () => void
+  onExportLatex?: () => void
   googleDriveActive?: boolean
 }) {
   const navigate = useNavigate()
@@ -156,7 +158,7 @@ export function OptionsMenu({
     { label: 'Open Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
     { label: 'Save a copy…', run: () => setModal('savecopy') },
-    { label: 'Export PDF', run: () => onExportPdf?.() },
+    { label: 'Export…', run: () => setModal('export') },
     { label: 'Print', run: () => onPrint?.() },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
     { label: 'Verify a record', run: () => navigate('/verify') },
@@ -216,6 +218,7 @@ export function OptionsMenu({
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onDone={() => setModal(null)} />}
+          {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -302,6 +305,23 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
       )}
       {onSaveAsOneDrive && (
         <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>☁ OneDrive<span className="block text-xs text-stone-400">name a new file in OneDrive, then keep it updated</span></MenuButton>
+      )}
+    </div>
+  )
+}
+
+// Export the finished document — a typeset PDF (server-rendered, opens in a new tab) or LaTeX source.
+function ExportPanel({ onExportPdf, onExportLatex, onDone }: {
+  onExportPdf?: () => void; onExportLatex?: () => void; onDone: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-2.5 mt-2">
+      <p className="text-xs text-stone-400 px-1">Choose a format. Both match what you see on the page.</p>
+      {onExportPdf && (
+        <MenuButton onClick={() => { onExportPdf(); onDone() }}>📄 PDF<span className="block text-xs text-stone-400">a finished A4 document — opens in a new tab, selectable text</span></MenuButton>
+      )}
+      {onExportLatex && (
+        <MenuButton onClick={() => { onExportLatex(); onDone() }}>∑ LaTeX<span className="block text-xs text-stone-400">a .tex source file to typeset yourself</span></MenuButton>
       )}
     </div>
   )
