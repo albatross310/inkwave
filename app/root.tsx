@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router'
 import type { LinksFunction } from 'react-router'
+import { FONT_PRELOAD } from './fontPreload'
 
 // The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a
 // side-effect lets the React Router Vite plugin collect it into the document <head> for both
@@ -16,6 +17,16 @@ export const links: LinksFunction = () => [
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
   // which previously raced the external Google fetch and fell back to Georgia. See src/editor/exportPdf.ts.
+  // Preload the latin/latin-ext faces (auto-generated list in app/fontPreload.ts → re-run
+  // scripts/fetch-fonts.mjs to refresh) so the body paints in the serif with no flash. `crossOrigin` is
+  // required on font preloads even same-origin, else the browser double-fetches.
+  ...FONT_PRELOAD.map((href) => ({
+    rel: 'preload',
+    as: 'font',
+    type: 'font/woff2',
+    href,
+    crossOrigin: 'anonymous' as const,
+  })),
   { rel: 'stylesheet', href: '/fonts/inkwave-fonts.css' },
 ]
 
