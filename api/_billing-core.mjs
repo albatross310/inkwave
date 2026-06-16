@@ -26,10 +26,13 @@ export async function getEntitlement(authorization) {
   return { cadence: await isSubscribed(user.userId), userId: user.userId }
 }
 
-/** Upsert a subscription state for a user (called by the provider webhooks). */
+/** Upsert a subscription state for a user (called by the provider webhooks). THROWS on a real
+ *  failure (Supabase unconfigured / upsert rejected) so the webhook returns non-200 — the provider
+ *  retries and the failure shows in its delivery log, instead of silently never flipping the flag. */
 export async function setSubscription(userId, { active, provider, subscriptionId, stripeCustomerId, currentPeriodEnd, email }) {
   const sb = supabaseAdmin()
-  if (!sb || !userId) return
+  if (!sb) throw new Error('supabase not configured')
+  if (!userId) return
   const row = {
     clerk_user_id: userId,
     subscription_active: !!active,
@@ -40,5 +43,6 @@ export async function setSubscription(userId, { active, provider, subscriptionId
   if (stripeCustomerId !== undefined) row.stripe_customer_id = stripeCustomerId
   if (currentPeriodEnd !== undefined) row.current_period_end = currentPeriodEnd
   if (email !== undefined) row.email = email
-  await sb.from('profiles').upsert(row, { onConflict: 'clerk_user_id' })
+  const { error } = await sb.from('profiles').upsert(row, { onConflict: 'clerk_user_id' })
+  if (error) throw new Error(`profiles upsert failed: ${error.message}`)
 }

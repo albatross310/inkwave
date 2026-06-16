@@ -1,24 +1,38 @@
-// POST /api/stripe-webhook — Stripe → Supabase subscription sync. Web Request handler (not the
-// Node req/res style) so we get the RAW body that signature verification needs. Verifies the
-// Stripe signature, then flips the user's `subscription_active` flag. Content never touches this.
+// POST /api/stripe-webhook — Stripe → Supabase subscription sync. Node (req,res) handler (like every
+// other /api function) so it runs correctly on Vercel's Node runtime. We read the RAW request body
+// ourselves (Stripe signature verification needs the exact bytes), then flip the user's
+// `subscription_active` flag. Content never touches this.
 
 import Stripe from 'stripe'
 import { setSubscription } from './_billing-core.mjs'
 
-export default async function handler(request) {
-  if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+// Disable platform body parsing — signature verification must see the raw bytes, not a re-serialized
+// object. (Honored by Vercel's Node runtime; ignored harmlessly by the dev middleware.)
+export const config = { api: { bodyParser: false } }
+
+function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(typeof c === 'string' ? Buffer.from(c) : c))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed') }
   const key = process.env.STRIPE_SECRET_KEY
   const whsec = process.env.STRIPE_WEBHOOK_SECRET
-  if (!key || !whsec) return new Response(JSON.stringify({ error: 'not configured' }), { status: 500 })
+  if (!key || !whsec) { res.statusCode = 500; return res.end(JSON.stringify({ error: 'not configured' })) }
 
   const stripe = new Stripe(key, { apiVersion: '2024-06-20' })
-  const raw = await request.text()
-  const sig = request.headers.get('stripe-signature') || ''
+  const raw = await readRawBody(req)
+  const sig = req.headers['stripe-signature'] || ''
   let event
   try {
     event = await stripe.webhooks.constructEventAsync(raw, sig, whsec)
   } catch {
-    return new Response(JSON.stringify({ error: 'bad signature' }), { status: 400 })
+    res.statusCode = 400; return res.end(JSON.stringify({ error: 'bad signature' }))
   }
 
   try {
@@ -42,7 +56,11 @@ export default async function handler(request) {
       })
     }
   } catch {
-    // Don't fail the webhook on a transient DB error — Stripe retries; the next event repairs it.
+    // A genuine sync failure (Supabase unreachable / misconfigured / schema) → 500 so Stripe RETRIES
+    // and the Dashboard delivery log shows it, instead of silently 200-ing and never flipping the flag.
+    res.statusCode = 500; return res.end(JSON.stringify({ error: 'sync failed' }))
   }
-  return new Response(JSON.stringify({ received: true }), { headers: { 'content-type': 'application/json' } })
+  res.statusCode = 200
+  res.setHeader('content-type', 'application/json')
+  res.end(JSON.stringify({ received: true }))
 }

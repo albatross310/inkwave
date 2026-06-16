@@ -48,21 +48,13 @@ const devApi: PluginOption = {
     server.middlewares.use('/api/stripe-checkout', authedUrl(() => import('./api/stripe-checkout.mjs'), 'createStripeCheckout'))
     // @ts-expect-error - untyped Node-only ESM module
     server.middlewares.use('/api/paypal-subscribe', authedUrl(() => import('./api/paypal-subscribe.mjs'), 'createPaypalSubscription'))
-    // POST webhooks — Web-Request handlers needing the RAW body for signature verification.
-    const webhook = (importer: () => Promise<{ default: (r: Request) => Promise<Response> }>) =>
-      (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
-        let raw = ''
-        req.on('data', (c) => { raw += c })
-        req.on('end', () => { void (async () => {
-          const mod = await importer()
-          const headers: Record<string, string> = {}
-          for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers[k] = v
-          const request = new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers, body: raw || undefined })
-          const response = await mod.default(request)
-          res.statusCode = response.status
-          response.headers.forEach((v, k) => res.setHeader(k, v))
-          res.end(await response.text())
-        })().catch(() => { res.statusCode = 500; res.end(JSON.stringify({ error: 'webhook failed' })) }) })
+    // POST webhooks — Node (req,res) handlers that read the RAW body themselves (for signature
+    // verification). Same signature as the deployed Vercel functions, so dev mirrors prod exactly.
+    type NodeHandler = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void> | void
+    const webhook = (importer: () => Promise<{ default: NodeHandler }>) =>
+      async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+        try { await (await importer()).default(req, res) }
+        catch { res.statusCode = 500; res.end(JSON.stringify({ error: 'webhook failed' })) }
       }
     // @ts-expect-error - untyped Node-only ESM module
     server.middlewares.use('/api/stripe-webhook', webhook(() => import('./api/stripe-webhook.mjs')))
