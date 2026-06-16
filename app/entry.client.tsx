@@ -34,7 +34,7 @@ if (lq && typeof lq.setConsumer === 'function') {
         try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only ok */ }
         const file = await handle.getFile()
         const { openInkwaveFile } = await import('../src/storage/openDoc')
-        await openInkwaveFile(file, handle)
+        await openInkwaveFile(file, { handle })
       } catch { /* ignore */ }
     })()
   })

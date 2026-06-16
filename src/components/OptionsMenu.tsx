@@ -22,8 +22,8 @@ import { inkwaveFileName } from '../provenance/bundle'
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 
-type ModalKey = 'recent' | 'save'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save' }
+type ModalKey = 'recent' | 'save' | 'upload'
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Upload' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -43,7 +43,7 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   }
   // Ask for write access now (in the click gesture) so edits can save back to this file.
   try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only is fine */ }
-  await openInkwaveFile(await handle.getFile(), handle)
+  await openInkwaveFile(await handle.getFile(), { handle })
 }
 
 // Switch the active document by id and reload so the editor loads it cleanly (reliable for New /
@@ -78,6 +78,7 @@ export function OptionsMenu({
   onSyncGoogleDrive,
   onSaveAsGoogleDrive,
   onChooseGoogleDriveFolder,
+  onUploadGoogleDrive,
   googleDriveActive,
 }: {
   paperRight: number
@@ -93,6 +94,7 @@ export function OptionsMenu({
   onSyncGoogleDrive?: () => void
   onSaveAsGoogleDrive?: () => void
   onChooseGoogleDriveFolder?: () => void
+  onUploadGoogleDrive?: () => void
   googleDriveActive?: boolean
 }) {
   const navigate = useNavigate()
@@ -127,7 +129,7 @@ export function OptionsMenu({
 
   const items: Array<{ label: string; run: () => void }> = [
     { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
-    { label: 'Open…', run: () => void openViaPicker(fileInputRef.current) },
+    { label: 'Upload…', run: () => setModal('upload') },
     { label: 'Open Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
@@ -185,6 +187,7 @@ export function OptionsMenu({
       {modal && (
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
+          {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -286,7 +289,7 @@ function OneDriveMini() {
 function ExplorerMini() {
   return <svg viewBox="0 0 24 24" width="14" height="13" aria-hidden="true"><path fill="#ffb900" d="M3 5h6l2 2h10v12H3z" /><path fill="#ffcf4d" d="M3 9h18v10H3z" /></svg>
 }
-const SOURCE_COLOR: Record<string, string> = { gdrive: '#1a73e8', onedrive: '#0364B8', local: '#5c2d8a' }
+const SOURCE_COLOR: Record<string, string> = { gdrive: '#5f6368', onedrive: '#0364B8', local: '#2b2b2b' }
 function SourceTag({ source }: { source: string }) {
   const label = source === 'gdrive' ? 'Google Drive' : source === 'onedrive' ? 'OneDrive' : source === 'local' ? 'This PC' : ''
   if (!label) return null
@@ -295,6 +298,23 @@ function SourceTag({ source }: { source: string }) {
       {source === 'gdrive' ? <DriveMini /> : source === 'onedrive' ? <OneDriveMini /> : <ExplorerMini />}
       {label}
     </span>
+  )
+}
+
+// Open a file and keep syncing to where it lives — no Save needed.
+function UploadPanel({ onComputer, onGoogleDrive, onDone }: { onComputer: () => void; onGoogleDrive?: () => void; onDone: () => void }) {
+  return (
+    <div className="mt-2 flex flex-col gap-2.5">
+      <p className="text-xs text-stone-400 px-1">Open a file — it keeps syncing to where it lives, so you only Save for a new file or a copy.</p>
+      <MenuButton onClick={onComputer}>
+        🗁 This computer<span className="block text-xs text-stone-400">browse files — including your Google Drive &amp; OneDrive folders</span>
+      </MenuButton>
+      {onGoogleDrive && (
+        <MenuButton onClick={() => { onGoogleDrive(); onDone() }}>
+          ▴ Google Drive<span className="block text-xs text-stone-400">pick a file from Drive (including ones shared with you)</span>
+        </MenuButton>
+      )}
+    </div>
   )
 }
 

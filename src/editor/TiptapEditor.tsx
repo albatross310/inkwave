@@ -35,12 +35,13 @@ import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile } from '../storage/gdrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, pickAndDownloadGoogleDriveFile, googleDriveFileId } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
-import { setDocSource } from '../storage/docSource'
+import { setDocSource, getDocSource } from '../storage/docSource'
+import { openInkwaveFile } from '../storage/openDoc'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
@@ -631,6 +632,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (await renameOneDriveFile(docRef.current, name)) await syncOneDrive()
   }
 
+  // Upload: open a file FROM Google Drive (incl. shared with you) and adopt it as the sync target, so
+  // it keeps syncing there with no Save. openInkwaveFile reloads; the resume effect below re-links it.
+  async function uploadFromGoogleDrive() {
+    const f = await pickAndDownloadGoogleDriveFile()
+    if (!f) return
+    await openInkwaveFile(new File([f.text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+  }
+
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
   async function saveAsOneDrive() {
@@ -640,6 +649,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setOneDriveFilename(docRef.current.id, name.trim())
     await syncOneDrive()
   }
+
+  // Resume Google Drive sync when a gdrive-synced doc loads (e.g. opened via Upload) — so it keeps
+  // syncing without the writer hitting Save. Silent: uses the cached/silent token; no token → no-op.
+  useEffect(() => {
+    if (!googleDriveConfigured() || getDocSource(docRef.current.id) !== 'gdrive' || !googleDriveFileId(docRef.current.id)) return
+    void (async () => {
+      const snaps = await listSnapshots(docRef.current.id)
+      const r = await syncToGoogleDrive(docRef.current, snaps)
+      if (r.ok) {
+        gdriveActiveRef.current = true
+        oneDriveActiveRef.current = false
+        setGdriveActive(true)
+        setLastGdriveSync(Date.now())
+        setGdriveUrl(r.webUrl)
+      }
+    })()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reconnect a prior OneDrive session on load (also completes a sign-in we returned from).
   useEffect(() => {
@@ -1084,6 +1110,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onSyncGoogleDrive={googleDriveConfigured() ? syncGoogleDrive : undefined}
                 onSaveAsGoogleDrive={saveAsGoogleDrive}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
+                onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
                 googleDriveActive={gdriveActive}
               />
             </div>

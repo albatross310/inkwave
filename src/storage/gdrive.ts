@@ -278,6 +278,53 @@ export async function listGoogleDriveFolders(): Promise<Array<{ id: string; name
   return d.files ?? []
 }
 
+// ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
+export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
+/** Adopt an opened Drive file as this doc's sync target, so future syncs UPDATE it (no Save needed). */
+export function adoptGoogleDriveFile(docId: string, fileId: string): void {
+  setDriveFileId(docId, fileId)
+  setDocSource(docId, 'gdrive')
+}
+
+/** Open a file FROM Google Drive via the hosted Picker in FILE mode — reaches ANY file you can access
+ *  (including ones SHARED with you), granting drive.file access to just the one you pick. Downloads
+ *  its text. Returns { id, name, text } or null. (The hosted picker is fine here: it's a one-off open,
+ *  not the frequent folder-choosing, and it's the only privacy-preserving way to reach others' files.) */
+export async function pickAndDownloadGoogleDriveFile(): Promise<{ id: string; name: string; text: string } | null> {
+  const API_KEY = import.meta.env?.VITE_GOOGLE_API_KEY as string | undefined
+  if (!CLIENT_ID || !API_KEY) return null
+  const pickerReady = loadPicker()
+  let token = await getDriveToken(false)
+  if (!token) token = await getDriveToken(true)
+  if (!token) return null
+  await pickerReady
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const picker = (window as unknown as { google: { picker: any } }).google.picker
+  const appId = (CLIENT_ID ?? '').split('-')[0]
+  const picked = await new Promise<{ id: string; name: string } | null>((resolve) => {
+    const mime = 'text/plain,application/json,application/octet-stream'
+    const mine = new picker.DocsView().setIncludeFolders(false).setMimeTypes(mime)
+    const shared = new picker.DocsView().setOwnedByMe(false).setIncludeFolders(false).setMimeTypes(mime)
+    const p = new picker.PickerBuilder()
+      .setOAuthToken(token).setDeveloperKey(API_KEY).setAppId(appId)
+      .setOrigin(`${window.location.protocol}//${window.location.host}`)
+      .addView(mine).addView(shared)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .setCallback((data: any) => {
+        if (data.action === 'loaded') return
+        try { p.setVisible(false) } catch { /* gone */ }
+        const doc = data.docs?.[0]
+        resolve(data.action === 'picked' && doc ? { id: doc.id, name: doc.name } : null)
+      })
+      .build()
+    p.setVisible(true)
+  })
+  if (!picked) return null
+  const res = await fetch(`${FILES_API}/${picked.id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return null
+  return { id: picked.id, name: picked.name, text: await res.text() }
+}
+
 export interface SyncResult { ok: boolean; webUrl: string | null }
 
 /** Start sign-in / consent (interactive — call from a click). Returns true if we got a token. */
