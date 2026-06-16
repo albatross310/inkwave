@@ -302,13 +302,14 @@ export async function pickAndDownloadGoogleDriveFile(): Promise<{ id: string; na
   const picker = (window as unknown as { google: { picker: any } }).google.picker
   const appId = (CLIENT_ID ?? '').split('-')[0]
   const picked = await new Promise<{ id: string; name: string } | null>((resolve) => {
-    const mime = 'text/plain,application/json,application/octet-stream'
-    const mine = new picker.DocsView().setIncludeFolders(false).setMimeTypes(mime)
-    const shared = new picker.DocsView().setOwnedByMe(false).setIncludeFolders(false).setMimeTypes(mime)
+    // Match the working folder picker: ONE plain DocsView (no setOwnedByMe/setIncludeFolders/mime
+    // chains, which were erroring → the picker flashed a spinner then closed). DOCS shows your Drive;
+    // navigate to "Shared with me" inside the picker to reach files others sent you.
+    const view = new picker.DocsView(picker.ViewId.DOCS)
     const p = new picker.PickerBuilder()
       .setOAuthToken(token).setDeveloperKey(API_KEY).setAppId(appId)
       .setOrigin(`${window.location.protocol}//${window.location.host}`)
-      .addView(mine).addView(shared)
+      .addView(view)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .setCallback((data: any) => {
         if (data.action === 'loaded') return

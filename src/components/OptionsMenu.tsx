@@ -22,8 +22,8 @@ import { inkwaveFileName } from '../provenance/bundle'
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 
-type ModalKey = 'recent' | 'save' | 'upload'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open' }
+type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy'
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -134,7 +134,9 @@ export function OptionsMenu({
     { label: 'Open…', run: () => setModal('upload') },
     { label: 'Open Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
+    { label: 'Save a copy…', run: () => setModal('savecopy') },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
+    { label: 'Verify a record', run: () => navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
   ]
   if (import.meta.env.DEV) {
@@ -190,6 +192,7 @@ export function OptionsMenu({
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
+          {modal === 'savecopy' && <SaveCopyPanel onExportBundle={onExportBundle} folderAvailable={folderAvailable} onSaveAs={onSaveAs} oneDriveAccount={oneDriveAccount} onSaveAsOneDrive={onSaveAsOneDrive} googleDriveActive={googleDriveActive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -228,11 +231,6 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
           </span>
         </MenuButton>
       )}
-      {folderAvailable && onSaveAs && (
-        <MenuButton onClick={() => { onSaveAs(); onDone() }}>
-          🗋 Save a copy…<span className="block text-xs text-stone-400">save to a new file, then keep that one updated</span>
-        </MenuButton>
-      )}
       {/* OneDrive only on browsers that need it (Firefox/Safari — no File System Access). */}
       {!folderAvailable && onSyncOneDrive && !oneDriveAccount && (
         <MenuButton onClick={() => { onSyncOneDrive(); onDone() }}>
@@ -242,11 +240,6 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
       {!folderAvailable && oneDriveAccount && onChooseOneDriveFolder && (
         <MenuButton onClick={() => { onChooseOneDriveFolder(); onDone() }}>
           🗁 Choose OneDrive folder<span className="block text-xs text-stone-400">signed in as {oneDriveAccount} · syncs as you write</span>
-        </MenuButton>
-      )}
-      {!folderAvailable && oneDriveAccount && onSaveAsOneDrive && (
-        <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>
-          🗋 Save a copy…<span className="block text-xs text-stone-400">save to a new file in OneDrive, then keep that one updated</span>
         </MenuButton>
       )}
       {/* Google Drive — the other cross-platform option for Firefox/Safari. */}
@@ -260,13 +253,31 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
           🗁 Choose Google Drive folder<span className="block text-xs text-stone-400">pick where it syncs · updates as you write</span>
         </MenuButton>
       )}
-      {!folderAvailable && googleDriveActive && onSaveAsGoogleDrive && (
-        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>
-          🗋 Save a copy…<span className="block text-xs text-stone-400">save to a new file in Google Drive, then keep that one updated</span>
-        </MenuButton>
+    </div>
+  )
+}
+
+// Save a copy — a separate file that then stays updated; pick where it goes. (Consolidated here from
+// the per-destination "Save a copy" buttons.)
+function SaveCopyPanel({ onExportBundle, folderAvailable, onSaveAs, oneDriveAccount, onSaveAsOneDrive, googleDriveActive, onSaveAsGoogleDrive, onDone }: {
+  onExportBundle?: () => void; folderAvailable?: boolean; onSaveAs?: () => void
+  oneDriveAccount?: string | null; onSaveAsOneDrive?: () => void
+  googleDriveActive?: boolean; onSaveAsGoogleDrive?: () => void; onDone: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-2.5 mt-2">
+      <p className="text-xs text-stone-400 px-1">Save a separate copy that then keeps updating — pick where it goes.</p>
+      {folderAvailable && onSaveAs && (
+        <MenuButton onClick={() => { onSaveAs(); onDone() }}>🗁 This computer<span className="block text-xs text-stone-400">a new file in a folder, then keep it updated</span></MenuButton>
+      )}
+      {oneDriveAccount && onSaveAsOneDrive && (
+        <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>☁ OneDrive<span className="block text-xs text-stone-400">name a new file in OneDrive, then keep it updated</span></MenuButton>
+      )}
+      {googleDriveActive && onSaveAsGoogleDrive && (
+        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>▴ Google Drive<span className="block text-xs text-stone-400">a new file in Drive, then keep it updated</span></MenuButton>
       )}
       <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
-        ⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
+        ⤓ Download<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
       </MenuButton>
     </div>
   )
