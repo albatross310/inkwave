@@ -33,7 +33,7 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   try {
     ;[handle] = await w.showOpenFilePicker({
       multiple: false,
-      types: [{ description: 'Inkwave record', accept: { 'text/plain': ['.inkwave', '.json'] } }],
+      types: [{ description: 'Inkwave record', accept: { 'text/plain': ['.studio', '.inkwave', '.json'] } }],
     })
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') return // user cancelled — fine
@@ -164,7 +164,7 @@ export function OptionsMenu({
   return (
     <div ref={rootRef} className="relative">
       {/* Hidden input: "Open…" clicks it directly so the OS file dialog opens immediately (no drop zone). */}
-      <input ref={fileInputRef} type="file" accept=".inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
+      <input ref={fileInputRef} type="file" accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}

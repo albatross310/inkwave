@@ -164,12 +164,13 @@ function slugOf(doc: InkwaveDocument): string {
 }
 
 // Everything (content, snapshots, Bitcoin proofs, signed receipts, readable text header) lives in
-// ONE self-contained file with the distinctive `.inkwave` extension — so the OS can associate it
+// ONE self-contained file with the distinctive `.studio` extension — so the OS can associate it
 // with the app (double-click → open in Inkwave) and it's unmistakably an Inkwave record. Still
-// plain text inside (readable header + JSON). Legacy `.trace.json` files still open.
-export const TRACE_EXTENSION = 'inkwave'
+// plain text inside (readable header + JSON). NEW files are `.studio`; old `.inkwave` and legacy
+// `.trace.json` files still open (the open paths accept all of them).
+export const TRACE_EXTENSION = 'studio'
 
-/** The .inkwave filename a title would produce — for showing file names in the recent list. */
+/** The .studio filename a title would produce — for showing file names in the recent list. */
 export function inkwaveFileName(title: string): string {
   const slug = (title || 'untitled').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'untitled'
   return `${slug}.${TRACE_EXTENSION}`

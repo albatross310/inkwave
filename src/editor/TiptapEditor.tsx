@@ -666,7 +666,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
   async function saveAsOneDrive() {
-    const current = (oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(trace|insig)\.json$/, '')
+    const current = (oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/, '')
     const name = window.prompt('Save a copy to OneDrive as:', current)
     if (!name || !name.trim()) return
     setOneDriveFilename(docRef.current.id, name.trim())

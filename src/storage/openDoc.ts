@@ -21,7 +21,7 @@ export async function openInkwaveFile(file: File, handle?: FileSystemFileHandle)
   const title =
     data.document?.title ??
     (data as { title?: string }).title ??
-    file.name.replace(/\.(inkwave|trace\.json|insig\.json|json)$/i, '')
+    file.name.replace(/\.(studio|inkwave|trace\.json|insig\.json|json)$/i, '')
   const id = (data.document?.id as string | undefined) ?? uuidv4()
 
   setOneDriveFilename(id, file.name)              // resume OneDrive sync to this file

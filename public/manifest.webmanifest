@@ -14,7 +14,7 @@
   "file_handlers": [
     {
       "action": "/",
-      "accept": { "text/plain": [".inkwave"] },
+      "accept": { "text/plain": [".studio", ".inkwave"] },
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
