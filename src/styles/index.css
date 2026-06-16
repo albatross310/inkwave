@@ -86,10 +86,10 @@
   .inkwave-sheet::after {
     content: '';
     position: absolute;
-    left: 26px;
-    bottom: 18px;
-    width: 88px;
-    height: 88px;
+    right: 40px;
+    bottom: 28px;
+    width: 176px;
+    height: 176px;
     background: url('/inkwave-logo.svg') center / contain no-repeat;
     opacity: 0.1;
     pointer-events: none;
@@ -301,7 +301,7 @@
      background — browsers drop background images from print unless "Background graphics" is ticked,
      so a background-image seal silently never prints. Foreground <img> content always prints. */
   .print-seal {
-    display: block; position: fixed; left: 26px; bottom: 18px; width: 88px; height: 88px;
+    display: block; position: fixed; right: 40px; bottom: 28px; width: 176px; height: 176px;
     opacity: 0.1; z-index: 9999;
   }
   .print-seal img { width: 100%; height: 100%; object-fit: contain; display: block; }
