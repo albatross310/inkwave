@@ -37,7 +37,7 @@ async function buildPrintHtml(title: string): Promise<string> {
   // the page (text squashed top-left with huge right/bottom margins).
   const bodyClone = document.body.cloneNode(true) as HTMLElement
   bodyClone
-    .querySelectorAll('script,noscript,link[rel="modulepreload"],link[rel="preload"]')
+    .querySelectorAll('script,noscript,link[rel="modulepreload"],link[rel="preload"],.inkwave-export-omit')
     .forEach((n) => n.remove())
   // The self-hosted @font-face (from /fonts/inkwave-fonts.css) is already in `css` via collectCss, and
   // its woff2 URLs are same-origin, resolved by <base href>. No external font <link> needed.
@@ -50,15 +50,23 @@ async function buildPrintHtml(title: string): Promise<string> {
   )
 }
 
-// The placeholder shown in the new tab while Chromium renders (~1–2s, more on a cold start).
-const LOADING_DOC =
-  '<!doctype html><meta charset="utf-8"><title>Preparing PDF…</title>' +
-  '<style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;' +
-  "font-family:'EB Garamond',Georgia,serif;background:#FBF5EC;color:#5c2d8a}" +
-  '.box{text-align:center;font-size:18px}.spin{width:34px;height:34px;margin:0 auto 14px;' +
-  'border:3px solid rgba(92,45,138,.25);border-top-color:#5c2d8a;border-radius:50%;animation:r .8s linear infinite}' +
-  '@keyframes r{to{transform:rotate(360deg)}}</style>' +
-  '<div class="box"><div class="spin"></div>Preparing your PDF…</div>'
+// The placeholder shown in the new tab while Chromium renders: the Inkwave logo + a 5→0 countdown
+// (no spinner). When the PDF arrives the tab navigates to it; if it overruns the countdown holds at ✓.
+// `origin` is injected so the logo (and any URL) is absolute — the tab is about:blank with no base.
+function loadingDoc(origin: string): string {
+  return (
+    '<!doctype html><meta charset="utf-8"><title>Preparing PDF…</title>' +
+    '<style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;' +
+    "font-family:'EB Garamond',Georgia,serif;background:#FBF5EC;color:#5c2d8a}" +
+    '.box{text-align:center}.box img{width:96px;height:96px;display:block;margin:0 auto 16px}' +
+    '.n{font-size:46px;line-height:1;font-variant-numeric:tabular-nums}' +
+    '.cap{margin-top:10px;font-size:15px;color:#9b5ccc}</style>' +
+    `<div class="box"><img src="${origin}/icon-192.png" alt="Inkwave">` +
+    '<div class="n" id="n">5</div><div class="cap">Preparing your PDF…</div></div>' +
+    '<script>(function(){var n=5,e=document.getElementById("n");' +
+    'var t=setInterval(function(){n-=1;if(n<=0){e.textContent="\\u2713";clearInterval(t);}else{e.textContent=String(n);}},1000);})();</script>'
+  )
+}
 
 // Returns true if it produced the PDF; false if the caller should fall back to the print dialog.
 export async function exportPdfToNewTab(title: string): Promise<boolean> {
@@ -66,7 +74,7 @@ export async function exportPdfToNewTab(title: string): Promise<boolean> {
   // Open the tab SYNCHRONOUSLY inside the click gesture, or the popup blocker eats it. We navigate it
   // to the PDF once it's ready (and close it on failure so the fallback dialog isn't doubled up).
   const win = window.open('', '_blank')
-  if (win) { try { win.document.write(LOADING_DOC); win.document.close() } catch { /* ignore */ } }
+  if (win) { try { win.document.write(loadingDoc(location.origin)); win.document.close() } catch { /* ignore */ } }
   // Never hang the loading tab: abort after 45s and fall back to the print dialog.
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 45_000)

@@ -133,7 +133,7 @@ export function CaretGutter(
       // pointerdown's preventDefault doesn't stop the compatibility mousedown, which
       // ProseMirror reads for selection — block it so it can't override our handling.
       onMouseDown={e => e.preventDefault()}
-      className="absolute pointer-events-auto"
+      className="absolute pointer-events-auto inkwave-export-omit"
       style={{ top: 0, bottom: 0, width, cursor: 'text', touchAction: 'none', ...placement }}
     />
   )
