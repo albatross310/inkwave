@@ -1,6 +1,9 @@
 {
   "buildCommand": "pnpm build",
   "outputDirectory": "build/client",
+  "functions": {
+    "api/pdf.mjs": { "memory": 1536, "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/__spa-fallback.html" }
   ],

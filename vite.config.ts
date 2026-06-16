@@ -60,6 +60,10 @@ const devApi: PluginOption = {
     server.middlewares.use('/api/stripe-webhook', webhook(() => import('./api/stripe-webhook.mjs')))
     // @ts-expect-error - untyped Node-only ESM module
     server.middlewares.use('/api/paypal-webhook', webhook(() => import('./api/paypal-webhook.mjs')))
+    // POST /api/pdf — headless-Chromium PDF render (same (req,res) handler as prod). In dev this
+    // needs a local Chrome; without one it returns 500 and the client falls back to the print dialog.
+    // @ts-expect-error - untyped Node-only ESM module
+    server.middlewares.use('/api/pdf', webhook(() => import('./api/pdf.mjs')))
     // GET /api/pubkey — the signing service's actual public key.
     server.middlewares.use('/api/pubkey', async (_req, res) => {
       // @ts-expect-error - untyped Node-only ESM module

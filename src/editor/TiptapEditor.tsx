@@ -12,6 +12,7 @@ import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import { PaginationExtension } from './extensions/PaginationExtension'
 import { gappedPagesEnabled } from './pageView'
+import { exportPdfToNewTab } from './exportPdf'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange, type SlideRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
@@ -658,6 +659,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('afterprint', restore)
     window.print()
   }
+  // Export PDF → server-rendered, selectable-text A4 PDF in a new tab (no print dialog). Falls back to
+  // the browser print dialog if the /api/pdf route is unavailable (e.g. local dev with no Chrome).
+  async function exportPdf() {
+    const ok = await exportPdfToNewTab(docRef.current.title || 'inkwave')
+    if (!ok) printDoc()
+  }
   async function onGdriveFileOpen(f: { id: string; name: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
@@ -1161,7 +1168,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
                 onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
                 onPrint={printDoc}
-                onExportPdf={printDoc}
+                onExportPdf={exportPdf}
                 googleDriveActive={gdriveActive}
               />
             </div>

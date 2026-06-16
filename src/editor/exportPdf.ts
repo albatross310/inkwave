@@ -1,0 +1,86 @@
+// "Export PDF" → a real, selectable-text A4 PDF opened in a NEW TAB, with no print dialog.
+//
+// How: serialise the live editor's surface (incl. the page-gap widgets ProseMirror has rendered) plus
+// the page's own stylesheets into one self-contained HTML document, POST it to /api/pdf (headless
+// Chromium), and open the returned PDF blob in a new tab. Because the server re-uses the EXACT same
+// HTML + CSS (Tailwind + index.css, incl. the @media print rules and the seal), the output matches
+// the editor pixel-for-pixel — same font, wrapping, page breaks and margins as the on-screen pages.
+//
+// Works in every visitor browser (the render is server-side). If the route is unavailable (e.g. local
+// dev with no Chrome), the caller falls back to the browser print dialog.
+
+const FONTS_LINK =
+  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+DW+Pica:ital@0;1&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap">'
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+}
+
+// Inline every same-origin stylesheet's text + any inline <style> blocks, so the server render uses
+// the identical CSS the editor is using right now. Cross-origin sheets (Google Fonts) stay a <link>.
+async function collectCss(): Promise<string> {
+  const hrefs = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))
+    .map((l) => l.href)
+    .filter((h) => h.startsWith(location.origin))
+  const fetched = await Promise.all(
+    hrefs.map((h) => fetch(h).then((r) => (r.ok ? r.text() : '')).catch(() => '')),
+  )
+  const inline = Array.from(document.querySelectorAll('style')).map((s) => s.textContent || '').join('\n')
+  return fetched.join('\n') + '\n' + inline
+}
+
+async function buildPrintHtml(title: string): Promise<string> {
+  const surface = document.querySelector('.inkwave-editor-surface')
+  if (!surface) throw new Error('editor not ready')
+  const seal = document.querySelector('.print-seal')
+  const css = await collectCss()
+  return (
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    `<base href="${location.origin}/">` +
+    FONTS_LINK +
+    `<style>${css}</style>` +
+    `<title>${escapeHtml(title)}</title>` +
+    '</head><body>' +
+    surface.outerHTML +
+    (seal ? seal.outerHTML : '') +
+    '</body></html>'
+  )
+}
+
+// The placeholder shown in the new tab while Chromium renders (~1–2s, more on a cold start).
+const LOADING_DOC =
+  '<!doctype html><meta charset="utf-8"><title>Preparing PDF…</title>' +
+  '<style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;' +
+  "font-family:'EB Garamond',Georgia,serif;background:#FBF5EC;color:#5c2d8a}" +
+  '.box{text-align:center;font-size:18px}.spin{width:34px;height:34px;margin:0 auto 14px;' +
+  'border:3px solid rgba(92,45,138,.25);border-top-color:#5c2d8a;border-radius:50%;animation:r .8s linear infinite}' +
+  '@keyframes r{to{transform:rotate(360deg)}}</style>' +
+  '<div class="box"><div class="spin"></div>Preparing your PDF…</div>'
+
+// Returns true if it produced the PDF; false if the caller should fall back to the print dialog.
+export async function exportPdfToNewTab(title: string): Promise<boolean> {
+  const name = (title || 'inkwave').trim()
+  // Open the tab SYNCHRONOUSLY inside the click gesture, or the popup blocker eats it. We navigate it
+  // to the PDF once it's ready (and close it on failure so the fallback dialog isn't doubled up).
+  const win = window.open('', '_blank')
+  if (win) { try { win.document.write(LOADING_DOC); win.document.close() } catch { /* ignore */ } }
+  try {
+    const html = await buildPrintHtml(name)
+    const res = await fetch('/api/pdf', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ html, title: name }),
+    })
+    if (!res.ok) throw new Error(`pdf route ${res.status}`)
+    const blob = await res.blob()
+    if (blob.type !== 'application/pdf') throw new Error('not a pdf')
+    const url = URL.createObjectURL(blob)
+    if (win) win.location.href = url
+    else window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000) // let the new tab load it first
+    return true
+  } catch {
+    if (win) { try { win.close() } catch { /* ignore */ } }
+    return false
+  }
+}
