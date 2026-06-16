@@ -18,10 +18,17 @@ const devApi: PluginOption = {
       const prov = () => import('./api/_provenance-core.mjs')
       // @ts-expect-error - untyped Node-only ESM module
       const profile = () => import('./api/sync-profile.mjs')
+      // @ts-expect-error - untyped Node-only ESM module
+      const auth = () => import('./api/_auth.mjs')
       if (path === '/api/ots') return (await ots()).handleOts(body)
       if (path === '/api/session') return (await prov()).handleSession(body)
       if (path === '/api/sign') return (await prov()).handleSign(body, authorization)
-      if (path === '/api/sync-profile') return (await profile()).syncProfile(body)
+      if (path === '/api/sync-profile') {
+        // Identity from the verified token, mirroring prod (audit F1).
+        const u = await (await auth()).userFromAuth(authorization)
+        if (!u) throw new Error('invalid session')
+        return (await profile()).syncProfile(u.userId)
+      }
       throw new Error('not found')
     }
     // GET /api/me — the authed caller's cadence entitlement (reads the Clerk token header).

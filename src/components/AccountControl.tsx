@@ -2,21 +2,25 @@ import { SignedIn, SignedOut, useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { authEnabled } from '../auth/config'
-import { useCadenceTier, stripeClientSecret, paypalApproveUrl, refreshEntitlement } from '../auth/entitlement'
+import { useCadenceTier, stripeClientSecret, paypalApproveUrl, refreshEntitlement, getClerkToken } from '../auth/entitlement'
 
-// On sign-in, ping the webhook-free email capture once per user (the server reads the real email
-// from Clerk and upserts it to Supabase). Fails silently if unconfigured. No webhook required.
+// On sign-in, ping the webhook-free email capture once per user. Identity is taken server-side from
+// the verified Clerk session token we send here (the server ignores any body id — audit F1), then it
+// reads the real email from Clerk and upserts it to Supabase. Fails silently if unconfigured.
 function ProfileSync() {
   const { isSignedIn, user } = useUser()
   const sentFor = useRef<string | null>(null)
   useEffect(() => {
     if (!isSignedIn || !user || sentFor.current === user.id) return
     sentFor.current = user.id
-    void fetch('/api/sync-profile', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: user.id }),
-    }).catch(() => {})
+    void (async () => {
+      const token = await getClerkToken()
+      if (!token) return
+      await fetch('/api/sync-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+      }).catch(() => {})
+    })()
   }, [isSignedIn, user])
   return null
 }

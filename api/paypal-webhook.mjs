@@ -4,7 +4,7 @@
 // flag (custom_id = Clerk user id, set at subscription creation). Content never touches this.
 
 import { verifyPaypalWebhook } from './_paypal.mjs'
-import { setSubscription } from './_billing-core.mjs'
+import { setSubscription, alreadyProcessed } from './_billing-core.mjs'
 
 export const config = { api: { bodyParser: false } }
 
@@ -27,13 +27,26 @@ export default async function handler(req, res) {
   if (!ok) { res.statusCode = 400; return res.end(JSON.stringify({ error: 'bad signature' })) }
   try {
     const event = JSON.parse(raw)
+    // Idempotency (audit F4): skip a replay/redelivery.
+    if (await alreadyProcessed(event.id)) {
+      res.statusCode = 200; res.setHeader('content-type', 'application/json')
+      return res.end(JSON.stringify({ received: true, duplicate: true }))
+    }
     const resource = event.resource || {}
     const userId = resource.custom_id
-    if (userId) {
+    const eventAt = event.create_time
+    const planId = process.env.PAYPAL_PLAN_ID
+    // Plan validation (audit F4): only honour OUR plan's subscription.
+    const planOk = !planId || !resource.plan_id || resource.plan_id === planId
+    if (userId && planOk) {
       if (ACTIVATE.has(event.event_type)) {
-        await setSubscription(userId, { active: true, provider: 'paypal', subscriptionId: resource.id })
+        // current_period_end (audit F3) → entitlement self-expires even if a cancel webhook is lost.
+        await setSubscription(userId, {
+          active: true, provider: 'paypal', subscriptionId: resource.id, eventAt,
+          currentPeriodEnd: resource.billing_info?.next_billing_time ?? undefined,
+        })
       } else if (DEACTIVATE.has(event.event_type)) {
-        await setSubscription(userId, { active: false, provider: 'paypal', subscriptionId: resource.id })
+        await setSubscription(userId, { active: false, provider: 'paypal', subscriptionId: resource.id, eventAt })
       }
     }
   } catch {

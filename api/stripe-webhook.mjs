@@ -4,7 +4,7 @@
 // `subscription_active` flag. Content never touches this.
 
 import Stripe from 'stripe'
-import { setSubscription } from './_billing-core.mjs'
+import { setSubscription, alreadyProcessed } from './_billing-core.mjs'
 
 // Disable platform body parsing — signature verification must see the raw bytes, not a re-serialized
 // object. (Honored by Vercel's Node runtime; ignored harmlessly by the dev middleware.)
@@ -36,11 +36,18 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Idempotency (audit F4): skip a replay/redelivery so it can't re-apply a stale change.
+    if (await alreadyProcessed(event.id)) {
+      res.statusCode = 200; res.setHeader('content-type', 'application/json')
+      return res.end(JSON.stringify({ received: true, duplicate: true }))
+    }
+    const eventAt = event.created ? event.created * 1000 : undefined
+    const priceId = process.env.STRIPE_PRICE_ID
     if (event.type === 'checkout.session.completed') {
       const s = event.data.object
       const userId = s.client_reference_id || s.metadata?.clerk_user_id
       if (userId) await setSubscription(userId, {
-        active: true, provider: 'stripe',
+        active: true, provider: 'stripe', eventAt,
         subscriptionId: typeof s.subscription === 'string' ? s.subscription : undefined,
         stripeCustomerId: typeof s.customer === 'string' ? s.customer : undefined,
         email: s.customer_details?.email ?? undefined,
@@ -48,12 +55,19 @@ export default async function handler(req, res) {
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
       const sub = event.data.object
       const userId = sub.metadata?.clerk_user_id
-      const active = event.type !== 'customer.subscription.deleted'
-        && ['active', 'trialing', 'past_due'].includes(sub.status)
-      if (userId) await setSubscription(userId, {
-        active, provider: 'stripe', subscriptionId: sub.id,
-        currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : undefined,
-      })
+      // Price validation (audit F4): only honour OUR plan's subscription. Defense-in-depth today
+      // (price is server-pinned at checkout); a live break the moment a second price is introduced.
+      const subPrice = sub.items?.data?.[0]?.price?.id
+      if (priceId && subPrice && subPrice !== priceId) {
+        // not our product — ignore
+      } else {
+        const active = event.type !== 'customer.subscription.deleted'
+          && ['active', 'trialing', 'past_due'].includes(sub.status)
+        if (userId) await setSubscription(userId, {
+          active, provider: 'stripe', subscriptionId: sub.id, eventAt,
+          currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : undefined,
+        })
+      }
     }
   } catch {
     // A genuine sync failure (Supabase unreachable / misconfigured / schema) → 500 so Stripe RETRIES

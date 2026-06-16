@@ -202,9 +202,16 @@ export function composeTraceFile(bundle: ExportBundle): string {
   ].join('\n')
 }
 
+// Cap the dropped-file size before JSON.parse (audit F7): a real record is well under this, so a
+// huge file is either a mistake or a DoS attempt — reject it cheaply rather than parse it.
+const MAX_TRACE_BYTES = 20_000_000 // 20 MB
+
 /** Read a .trace.json file back into a bundle (hybrid text-header format OR a legacy pure-JSON file). */
 export function parseTraceFile(fileText: string): ExportBundle {
-  const i = fileText.indexOf('INKWAVE RECORD · verify')
+  if (fileText.length > MAX_TRACE_BYTES) throw new Error('file too large to be an Inkwave record')
+  // Anchor on the FULL marker line, not a substring an attacker could plant earlier in the prose
+  // to redirect the JSON slice (audit F7).
+  const i = fileText.indexOf(TRACE_DATA_MARKER)
   const json = i < 0 ? fileText : fileText.slice(fileText.indexOf('{', i))
   return JSON.parse(json) as ExportBundle
 }

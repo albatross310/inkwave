@@ -78,6 +78,14 @@ function countWords(contentJson: TiptapJSON): number {
 }
 
 async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport['contentIntegrity']> {
+  // Genuine receipts = the (separately chain-verified, in checkChains) top-level set, keyed by
+  // signature → exact canonical content. A snapshot's bundleHash anchors WHATEVER receipts it embeds,
+  // so the hash check alone doesn't stop an attacker embedding a fabricated receipt array, honestly
+  // hashing it into bundleHash, and OTS-stamping THAT — yielding a Bitcoin-"verified" record Inkwave
+  // never signed (audit F2). So every receipt a snapshot anchors must be byte-identical to one in the
+  // signed chain. (JCS canonicalization makes this robust to serialization round-trips.)
+  const genuine = new Map<string, string>()
+  for (const r of bundle.receipts) genuine.set(r.signature, canonicalize(r))
   let checked = 0
   for (const s of bundle.snapshots) {
     checked++
@@ -85,6 +93,11 @@ async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport
     if (ch !== s.contentHash) return { ok: false, checked, reason: `snapshot ${s.id}: contentHash mismatch` }
     const bh = await bundleHash(s.contentHash, s.receipts ?? [])
     if (bh !== s.bundleHash) return { ok: false, checked, reason: `snapshot ${s.id}: bundleHash mismatch` }
+    for (const r of s.receipts ?? []) {
+      if (genuine.get(r.signature) !== canonicalize(r)) {
+        return { ok: false, checked, reason: `snapshot ${s.id}: anchors a receipt not in the signed chain` }
+      }
+    }
   }
   return { ok: true, checked }
 }

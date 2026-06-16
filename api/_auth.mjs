@@ -13,7 +13,12 @@ export async function userFromAuth(authorization) {
     : null
   if (!token || !secretKey) return null
   try {
-    const claims = await verifyToken(token, { secretKey })
+    // authorizedParties pins the `azp` (origin) claim so a token minted for a DIFFERENT app in the
+    // same Clerk instance is rejected — not just any signature-valid token (audit F5).
+    const claims = await verifyToken(token, {
+      secretKey,
+      authorizedParties: ['https://inkwave.studio', 'https://www.inkwave.studio'],
+    })
     return claims?.sub ? { userId: claims.sub } : null
   } catch {
     return null // invalid/expired token, or Clerk unreachable → treat as not authenticated

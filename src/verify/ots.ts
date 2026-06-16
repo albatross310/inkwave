@@ -115,16 +115,22 @@ async function applyOp(tag: number, arg: Uint8Array | undefined, msg: Uint8Array
 // edge is either an attestation (0x00) or an op whose result is the message for its own subtree. A
 // branch that hits an unsupported op is recorded as 'unknown' and abandoned (it can't reach a Bitcoin
 // attestation we could check) — it never aborts the other branches.
-async function walk(r: Reader, msg: Uint8Array, out: ProofAttestation[]): Promise<void> {
+// Hard cap on the number of ops walked (audit F7): a legitimate Bitcoin proof is a handful of ops;
+// a crafted proof with a long op chain would otherwise recurse edge→walk per op and overflow the
+// verify tab's stack. The cap bounds both total work and recursion depth. `budget` is shared by ref.
+const MAX_OPS = 2048
+
+async function walk(r: Reader, msg: Uint8Array, out: ProofAttestation[], budget: { ops: number }): Promise<void> {
   let tag = r.byte()
   while (tag === FORK) {
-    await edge(r, r.byte(), msg, out)
+    await edge(r, r.byte(), msg, out, budget)
     tag = r.byte()
   }
-  await edge(r, tag, msg, out)
+  await edge(r, tag, msg, out, budget)
 }
 
-async function edge(r: Reader, tag: number, msg: Uint8Array, out: ProofAttestation[]): Promise<void> {
+async function edge(r: Reader, tag: number, msg: Uint8Array, out: ProofAttestation[], budget: { ops: number }): Promise<void> {
+  if (++budget.ops > MAX_OPS) throw new OtsParseError('proof has too many operations')
   if (tag === ATTESTATION) {
     const atag = r.read(8)
     const payload = r.varbytes()
@@ -146,11 +152,14 @@ async function edge(r: Reader, tag: number, msg: Uint8Array, out: ProofAttestati
     out.push({ kind: 'unknown' }) // unsupported op — abandon this branch only
     return
   }
-  await walk(r, result, out)
+  await walk(r, result, out, budget)
 }
 
 /** Deserialise a detached OTS proof: its file digest (the timestamped message) + all attestations. */
+const MAX_PROOF_BYTES = 100_000 // a real detached OTS proof is well under this; cap a crafted one (audit F7)
+
 export async function parseProof(bytes: Uint8Array): Promise<{ fileDigest: Uint8Array; attestations: ProofAttestation[] }> {
+  if (bytes.length > MAX_PROOF_BYTES) throw new OtsParseError('OTS proof too large')
   const r = new Reader(bytes)
   if (!arrEq(r.read(HEADER_MAGIC.length), HEADER_MAGIC)) throw new OtsParseError('not an OpenTimestamps proof (bad magic)')
   const major = r.varuint()
@@ -160,7 +169,7 @@ export async function parseProof(bytes: Uint8Array): Promise<{ fileDigest: Uint8
   if (!digestLen) throw new OtsParseError(`unsupported file-hash op 0x${opTag.toString(16)}`)
   const fileDigest = r.read(digestLen)
   const attestations: ProofAttestation[] = []
-  await walk(r, fileDigest, attestations)
+  await walk(r, fileDigest, attestations, { ops: 0 })
   return { fileDigest, attestations }
 }
 
@@ -193,7 +202,10 @@ export const defaultFetchBlock: BlockFetcher = async (height) => {
       }
     } catch { /* try the next explorer */ }
   }
-  if (seen.length === 0) return null
+  // Require TWO independent explorers to AGREE before we treat a block as confirmed — a single
+  // explorer could lie about the merkle root to match a forged proof (audit F7). One (or zero)
+  // reachable → null → the caller reports "inconclusive" (never a forgery verdict, never fails a bundle).
+  if (seen.length < 2) return null
   if (seen.some((b) => b.merkleRoot !== seen[0].merkleRoot || b.time !== seen[0].time)) {
     throw new OtsParseError('independent explorers disagree on this block — refusing to trust either')
   }
