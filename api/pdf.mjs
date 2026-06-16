@@ -107,6 +107,25 @@ async function readRaw(req) {
 }
 
 export default async function handler(req, res) {
+  // GET = warm-up (hit by the Vercel cron in vercel.json). Launch + close Chromium so a real export
+  // lands on a warm container and skips the cold-start cost (binary extract + browser launch). If
+  // CRON_SECRET is set, require it — Vercel's cron sends it automatically; keeps randoms from
+  // triggering launches.
+  if (req.method === 'GET') {
+    const secret = process.env.CRON_SECRET
+    if (secret && req.headers.authorization !== `Bearer ${secret}`) { res.statusCode = 401; return res.end('unauthorized') }
+    try {
+      const browser = await launch()
+      await browser.close()
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      res.setHeader('cache-control', 'no-store')
+      return res.end(JSON.stringify({ warm: true }))
+    } catch (e) {
+      res.statusCode = 500
+      return res.end('warm failed: ' + (e && e.message ? e.message : 'error'))
+    }
+  }
   if (req.method !== 'POST') { res.statusCode = 405; return res.end('method not allowed') }
   let body
   try { body = JSON.parse(await readRaw(req)) } catch { res.statusCode = 400; return res.end('bad request') }
