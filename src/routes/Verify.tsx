@@ -72,6 +72,8 @@ export function Verify() {
 
             <Row label="Content integrity" ok={report.contentIntegrity.ok}
                  detail={report.contentIntegrity.ok ? `${report.contentIntegrity.checked} snapshot(s) intact` : report.contentIntegrity.reason} />
+            <Row label="Readable copy" ok={report.textIntegrity.ok}
+                 detail={report.textIntegrity.ok ? report.contentBinding.note : report.textIntegrity.reason} />
             <Row label="Signed chain" ok={report.chain.ok}
                  detail={report.chain.ok ? `${report.chain.verified} receipt(s) across ${report.chain.sessions} session(s) verify` : report.chain.reason} />
             <Row label="Kick consistency" ok={report.kickConsistency.ok}

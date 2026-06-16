@@ -26,6 +26,7 @@ import type { SignedReceipt, TiptapJSON } from '../types/document'
 import { canonicalize, sha256Hex, bundleHash } from '../provenance/hash'
 import { verifyChain, bitmaskToLemmas, PUBLISHED_SIGNING_PK } from '../provenance/receipts'
 import { cadenceDigest, BIN_MS } from '../provenance/cadence'
+import { pmToText } from '../provenance/bundle'
 import { verifyOtsProof, defaultFetchBlock, type BlockFetcher } from './ots'
 
 // A 0.5 s bin holding more than this many inserted chars (~240 chars/sec) is not human typing — it's
@@ -51,6 +52,13 @@ export interface VerifyReport {
     tampered: number; earliestBlockTime: string | null; timeConsistent: boolean; anchoredReceipts: number
     ok: boolean; note: string
   }
+  // The human-readable prose at the top of the .inkwave file must be a faithful rendering of the
+  // bundle's document content — so a tamperer can't show a reader one thing while the signed record
+  // says another. `contentBinding` then surfaces whether that displayed content is itself a SIGNED
+  // state (matches a receipt's signed contentHash), merely a recorded snapshot, or trailing edits
+  // made after the last signed checkpoint.
+  textIntegrity: { ok: boolean; reason?: string }
+  contentBinding: { state: 'signed' | 'snapshot' | 'unsigned'; note: string }
   // Legacy summary the /verify UI still reads — now derived from REAL verification, not the JSON.
   existence: { snapshots: number; confirmed: number; pending: number; unstamped: number }
   overall: boolean
@@ -111,6 +119,26 @@ function checkKickConsistency(bundle: ExportBundle): VerifyReport['kickConsisten
     }
   }
   return { ok: true, checked }
+}
+
+// The readable header is written by composeTraceFile as `pmToText(document.contentJson)`. Re-derive
+// it and require a match: a tamperer cannot alter the prose a human reads without it diverging from
+// the bundle's own content. Absent text (legacy pure-JSON bundle) = nothing to bind, so it passes.
+function checkTextIntegrity(bundle: ExportBundle): VerifyReport['textIntegrity'] {
+  if (bundle.text == null) return { ok: true }
+  return bundle.text === pmToText(bundle.document.contentJson)
+    ? { ok: true }
+    : { ok: false, reason: 'the readable writing does not match the document content (header altered)' }
+}
+
+// Is the displayed/current content a SIGNED state? It's strongest when its hash matches a receipt's
+// signed contentHash (verified in the chain step); next, a recorded snapshot; otherwise it's trailing
+// edits made after the last signed checkpoint (legitimate, but surfaced — not cryptographically attested).
+async function checkContentBinding(bundle: ExportBundle): Promise<VerifyReport['contentBinding']> {
+  const dh = await sha256Hex(canonicalize(bundle.document.contentJson))
+  if (bundle.receipts.some((r) => r.contentHash === dh)) return { state: 'signed', note: 'the readable writing is a signed, verified state' }
+  if (bundle.snapshots.some((s) => s.contentHash === dh)) return { state: 'snapshot', note: 'the readable writing matches a recorded snapshot' }
+  return { state: 'unsigned', note: 'the readable writing includes edits made after the last signed checkpoint' }
 }
 
 function frictionScore(bundle: ExportBundle): VerifyReport['friction'] {
@@ -230,10 +258,13 @@ export async function verifyBundle(
   const friction = frictionScore(bundle)
   const cadence = await verifyCadence(bundle)
   const anchor = await verifyAnchors(bundle, fetchBlock)
+  const textIntegrity = checkTextIntegrity(bundle)
+  const contentBinding = await checkContentBinding(bundle)
   const existence = { snapshots: anchor.snapshots, confirmed: anchor.confirmed, pending: anchor.pending, unstamped: anchor.unstamped }
-  // A bundle fails if content/chain/kick integrity fails, revealed cadence contradicts its signed
-  // digest, OR a Bitcoin proof is forged / its claimed block/time is a lie (anchor.ok). Absent or
-  // merely-unconfirmable anchoring never fails a bundle — plausibility is surfaced, not asserted.
-  const overall = contentIntegrity.ok && chain.ok && kickConsistency.ok && cadence.integrityOk && anchor.ok
-  return { contentIntegrity, chain, kickConsistency, friction, cadence, anchor, existence, overall }
+  // A bundle fails if content/chain/kick integrity fails, the readable header doesn't match the
+  // content, revealed cadence contradicts its signed digest, OR a Bitcoin proof is forged / its
+  // claimed block/time is a lie (anchor.ok). Absent or merely-unconfirmable anchoring, and trailing
+  // unsigned edits, never fail a bundle — plausibility is surfaced, not asserted.
+  const overall = contentIntegrity.ok && chain.ok && kickConsistency.ok && textIntegrity.ok && cadence.integrityOk && anchor.ok
+  return { contentIntegrity, chain, kickConsistency, friction, cadence, anchor, textIntegrity, contentBinding, existence, overall }
 }

@@ -150,15 +150,22 @@ export async function signPeriod({ sessionToken, docId, counter, prevHash, conte
   return { serverTime, signature, lockedSet, lockedSetHash, next: setFor(docId, setVersion + 1) }
 }
 
+const HEX64 = /^[0-9a-f]{64}$/ // every hash the client sends is a lowercase-hex SHA-256
+const isDocId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256
+
 /** Dispatch for the function + dev middleware. */
 export async function handleSession(body) {
-  if (typeof body?.docId !== 'string') throw new Error('bad request')
+  if (!isDocId(body?.docId)) throw new Error('bad request')
   return openSession(body.docId)
 }
 export async function handleSign(body, authorization) {
-  for (const k of ['sessionToken', 'docId', 'prevHash', 'contentHash', 'kicksHash']) {
-    if (typeof body?.[k] !== 'string') throw new Error('bad request')
-  }
+  // Reject anything malformed BEFORE producing a signature — the oracle should sign only well-formed
+  // receipt cores, never arbitrary attacker-shaped input.
+  if (typeof body?.sessionToken !== 'string' || !isDocId(body?.docId)) throw new Error('bad request')
+  if (!HEX64.test(body.prevHash) || !HEX64.test(body.contentHash) || !HEX64.test(body.kicksHash)) throw new Error('bad request')
+  if (!Number.isInteger(body.counter) || body.counter < 0) throw new Error('bad request')
+  if (!Number.isInteger(body.setVersion) || body.setVersion < 0) throw new Error('bad request')
+  if (body.cadenceDigest !== undefined && !(typeof body.cadenceDigest === 'string' && HEX64.test(body.cadenceDigest))) throw new Error('bad request')
   // The oracle signs ONLY for sessions this server opened (and only for the docId they were opened
   // for). A fabricated or cross-doc token is refused before any signature is produced.
   if (!verifySessionToken(body.sessionToken, body.docId)) throw new Error('invalid session')

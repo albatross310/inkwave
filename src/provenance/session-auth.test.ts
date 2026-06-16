@@ -4,8 +4,9 @@ import { openSession, handleSign, verifySessionToken } from '../../api/_provenan
 // The signing oracle must sign ONLY for sessions it actually opened, bound to the right docId —
 // statelessly, via the keyed-MAC token. Closes the 2026-06-13 audit's unauthenticated-oracle gap.
 const DOC = 'auth-test-doc'
+const H = (c: string) => c.repeat(64) // a well-formed 64-hex hash stand-in
 const baseBody = (sessionToken: string, docId = DOC) => ({
-  sessionToken, docId, counter: 0, prevHash: 'p', contentHash: 'c', setVersion: 0, kicksHash: 'k',
+  sessionToken, docId, counter: 0, prevHash: H('a'), contentHash: H('b'), setVersion: 0, kicksHash: H('c'),
 })
 
 describe('session token authentication', () => {
@@ -27,6 +28,14 @@ describe('session token authentication', () => {
     const res = await handleSign(baseBody(sessionToken), undefined)
     expect(typeof res.signature).toBe('string')
     expect(res.signature.length).toBeGreaterThan(0)
+  })
+
+  it('rejects malformed receipt inputs before signing', async () => {
+    const { sessionToken } = await openSession(DOC)
+    await expect(handleSign({ ...baseBody(sessionToken), contentHash: 'not-hex' }, undefined)).rejects.toThrow('bad request')
+    await expect(handleSign({ ...baseBody(sessionToken), counter: -1 }, undefined)).rejects.toThrow('bad request')
+    await expect(handleSign({ ...baseBody(sessionToken), setVersion: 1.5 }, undefined)).rejects.toThrow('bad request')
+    await expect(handleSign({ ...baseBody(sessionToken), cadenceDigest: 'short' }, undefined)).rejects.toThrow('bad request')
   })
 
   it('refuses to sign for a token the server never issued', async () => {

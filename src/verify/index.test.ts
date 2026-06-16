@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { verifyBundle } from './index'
 import type { ExportBundle } from '../provenance/bundle'
+import { pmToText } from '../provenance/bundle'
 import type { KickEvent, SignedReceipt, Snapshot, TiptapJSON } from '../types/document'
 // Real server signing core (Node) — bundles are signed exactly as in production.
 import { openSession, signPeriod } from '../../api/_provenance-core.mjs'
@@ -108,6 +109,23 @@ describe('verifyBundle', () => {
     const r = await verifyBundle(b, DEV_SIGNING_PK)
     expect(r.anchor.tampered).toBe(1)
     expect(r.anchor.ok).toBe(false)
+    expect(r.overall).toBe(false)
+  })
+
+  it('binds the readable header to the content and marks it signed', async () => {
+    const b = await buildValidBundle()
+    b.text = pmToText(b.document.contentJson) // what composeTraceFile writes
+    const r = await verifyBundle(b, DEV_SIGNING_PK)
+    expect(r.textIntegrity.ok).toBe(true)
+    expect(r.contentBinding.state).toBe('signed') // a receipt signs this content's hash
+    expect(r.overall).toBe(true)
+  })
+
+  it('fails when the readable header is altered but the JSON is left intact', async () => {
+    const b = await buildValidBundle()
+    b.text = 'A FORGED OPENING SENTENCE the reader was never meant to see.'
+    const r = await verifyBundle(b, DEV_SIGNING_PK)
+    expect(r.textIntegrity.ok).toBe(false)
     expect(r.overall).toBe(false)
   })
 

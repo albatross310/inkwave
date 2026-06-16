@@ -97,7 +97,10 @@ async function getApp(): Promise<{
     appPromise = import('@azure/msal-browser').then(async (m) => {
       const app = new m.PublicClientApplication({
         auth: { clientId: CLIENT_ID, authority: AUTHORITY, redirectUri: window.location.origin },
-        cache: { cacheLocation: 'localStorage' },
+        // sessionStorage, NOT localStorage: keeps the OneDrive access token out of a persistent,
+        // cross-tab, XSS-readable store. It still survives the same-tab Microsoft redirect (which is
+        // all the redirect flow needs); the cost is a re-auth in a fresh tab, an acceptable trade.
+        cache: { cacheLocation: 'sessionStorage' },
       })
       await app.initialize()
       // Same-window flow: process the auth response when we return from the Microsoft redirect.
