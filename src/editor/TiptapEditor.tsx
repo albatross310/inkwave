@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent, Extension } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
@@ -108,6 +109,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [gdriveActive, setGdriveActive] = useState(false)
   const [lastGdriveSync, setLastGdriveSync] = useState<number | null>(null)
   const [gdriveUrl, setGdriveUrl] = useState<string | null>(null)
+  const zoom = useZoomScale() // counter page zoom so the toolbar stays a constant size (CSS `zoom`)
   const [otherDevice, setOtherDevice] = useState(false) // another device looks active on this doc
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const [wordCount, setWordCount] = useState(0) // live document word count (shown in the record panel)
@@ -986,7 +988,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
+          style={{
+            paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem',
+            // Counter page zoom (desktop only) with CSS `zoom` so the bar stays a constant size, crisp.
+            zoom: !isTouch && zoom !== 1 ? zoom : undefined,
+          }}
         >
           <div
             ref={footerRef}

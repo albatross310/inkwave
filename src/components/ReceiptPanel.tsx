@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Snapshot } from '../types/document'
+import { useZoomScale } from '../editor/useZoomScale'
 
 // The growing record of tamper-evident snapshots + the live-composition receipt chain the writer
 // holds. Saving/syncing lives in the ⋮ menu (not duplicated here); this panel is the record viewer:
@@ -22,6 +23,7 @@ export function ReceiptPanel({
   compact?: boolean // mobile: a small ◈ circle instead of the text pill
 }) {
   const [open, setOpen] = useState(false)
+  const zoom = useZoomScale()
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
@@ -43,7 +45,7 @@ export function ReceiptPanel({
 
       <div
         className="fixed bottom-0 left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
-        style={{ color: '#5c2d8a', padding: '1rem' }}
+        style={{ color: '#5c2d8a', padding: '1rem', zoom: zoom !== 1 ? zoom : undefined }}
       >
         <button
           type="button"

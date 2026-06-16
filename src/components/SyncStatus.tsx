@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useZoomScale } from '../editor/useZoomScale'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -33,6 +34,7 @@ export function SyncStatus({
 }) {
   const [, tick] = useState(0)
   const [open, setOpen] = useState(false)
+  const zoom = useZoomScale()
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export function SyncStatus({
   return (
     <div
       className="fixed bottom-0 right-0 z-40 font-serif select-none flex flex-col items-end"
-      style={{ padding: '1rem' }}
+      style={{ padding: '1rem', zoom: zoom !== 1 ? zoom : undefined }}
       onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) }}
       onMouseLeave={() => { closeTimer.current = setTimeout(() => setOpen(false), 150) }}
     >
