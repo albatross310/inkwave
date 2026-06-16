@@ -13,13 +13,10 @@ export const links: LinksFunction = () => [
   { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png' },
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
-  // Fonts: preconnect + preload the stylesheet so the calm serif identity paints fast.
-  { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-  { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
-  {
-    rel: 'stylesheet',
-    href: 'https://fonts.googleapis.com/css2?family=IM+Fell+DW+Pica:ital@0;1&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap',
-  },
+  // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
+  // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
+  // which previously raced the external Google fetch and fell back to Georgia. See src/editor/exportPdf.ts.
+  { rel: 'stylesheet', href: '/fonts/inkwave-fonts.css' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {

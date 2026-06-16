@@ -9,9 +9,6 @@
 // Works in every visitor browser (the render is server-side). If the route is unavailable (e.g. local
 // dev with no Chrome), the caller falls back to the browser print dialog.
 
-const FONTS_LINK =
-  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+DW+Pica:ital@0;1&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap">'
-
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 }
@@ -42,10 +39,11 @@ async function buildPrintHtml(title: string): Promise<string> {
   bodyClone
     .querySelectorAll('script,noscript,link[rel="modulepreload"],link[rel="preload"]')
     .forEach((n) => n.remove())
+  // The self-hosted @font-face (from /fonts/inkwave-fonts.css) is already in `css` via collectCss, and
+  // its woff2 URLs are same-origin, resolved by <base href>. No external font <link> needed.
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     `<base href="${location.origin}/">` +
-    FONTS_LINK +
     `<style>${css}</style>` +
     `<title>${escapeHtml(title)}</title>` +
     `</head><body class="${escapeHtml(document.body.className)}">${bodyClone.innerHTML}</body></html>`

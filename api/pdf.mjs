@@ -55,14 +55,26 @@ export async function generatePdf({ html }) {
     const page = await browser.newPage()
     // Lay out in PRINT media (matches page.pdf and the @media print width rules) before we measure.
     await page.emulateMediaType('print')
-    // 'load' (NOT domcontentloaded): we MUST wait for the stylesheet to load, otherwise the @font-face
-    // rules aren't even known yet and document.fonts.ready resolves instantly → the page renders in a
-    // fallback font (wrong metrics → wrong wrapping). 'load' also avoids networkidle0's idle-timeout
-    // stall. Then force-load the families the document uses and await fonts.ready, capped so a slow
-    // font never hangs the request.
-    await page.setContent(html, { waitUntil: 'load', timeout: 30000 })
+    // domcontentloaded keeps this FAST and unhangable ('load' blocks on the 1.4MB seal + every font
+    // file and can stall to its timeout). The font correctness instead comes from an EXPLICIT,
+    // bounded wait below: wait for the stylesheets to actually apply (so the @font-face rules exist),
+    // then force-load the families the document uses and await fonts.ready. The whole wait is capped,
+    // so a slow/unreachable resource degrades to a fallback render rather than hanging the request.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 15000 })
     await Promise.race([
       page.evaluate(async () => {
+        // Wait until every <link rel=stylesheet> has applied (cross-origin Google Fonts included —
+        // link.sheet is set + the load event fires even cross-origin), so the @font-face rules exist
+        // before we try to load them.
+        await new Promise((res) => {
+          const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+          let pending = links.filter((l) => !l.sheet).length
+          if (!pending) return res()
+          let done = false
+          const finish = () => { if (!done) { done = true; res() } }
+          links.forEach((l) => { if (!l.sheet) l.addEventListener('load', () => { if (--pending <= 0) finish() }, { once: true }) })
+          setTimeout(finish, 4000)
+        })
         if (!document.fonts) return
         try {
           await Promise.all([
@@ -75,7 +87,7 @@ export async function generatePdf({ html }) {
           await document.fonts.ready
         } catch { /* ignore */ }
       }).catch(() => {}),
-      sleep(8000),
+      sleep(9000),
     ])
     return await page.pdf({ printBackground: true, preferCSSPageSize: true })
   } finally {
