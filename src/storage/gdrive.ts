@@ -170,80 +170,6 @@ export function setChosenGDriveFolder(id: string | null): void {
   try { id ? localStorage.setItem(FOLDER_KEY, id) : localStorage.removeItem(FOLDER_KEY) } catch { /* private mode */ }
 }
 
-// ─── Google Picker (folder chooser) ─────────────────────────────────────────────
-// drive.file can't list the user's existing folders, so we use Google's hosted Picker: it browses
-// the user's Drive in Google's own UI and grants us access to the folder they select.
-type Picker = { setVisible: (v: boolean) => void }
-type PickerNS = {
-  DocsView: new (viewId: unknown) => { setSelectFolderEnabled: (b: boolean) => any; setMimeTypes: (m: string) => any }
-  ViewId: { FOLDERS: unknown }
-  PickerBuilder: new () => { setOAuthToken: (t: string) => any; setDeveloperKey: (k: string) => any; addView: (v: unknown) => any; setCallback: (cb: (d: { action: string; docs?: Array<{ id: string; name: string }> }) => void) => any; build: () => Picker }
-  Action: { PICKED: string; CANCEL: string; LOADED: string }
-}
-
-let pickerLoad: Promise<void> | null = null
-function loadPicker(): Promise<void> {
-  if (pickerLoad) return pickerLoad
-  pickerLoad = new Promise((resolve, reject) => {
-    const w = window as unknown as { google?: { picker?: unknown }; gapi?: { load: (m: string, o: { callback: () => void }) => void } }
-    if (w.google?.picker) return resolve()
-    const s = document.createElement('script')
-    s.src = 'https://apis.google.com/js/api.js'
-    s.async = true
-    s.onload = () => w.gapi!.load('picker', { callback: () => resolve() })
-    s.onerror = () => reject(new Error('Google Picker failed to load'))
-    document.head.appendChild(s)
-  })
-  return pickerLoad
-}
-
-/** Open Google's folder Picker (interactive — call from a click); remembers + returns the choice. */
-export async function pickGoogleDriveFolder(): Promise<{ id: string; name: string } | null> {
-  const API_KEY = import.meta.env?.VITE_GOOGLE_API_KEY as string | undefined
-  if (!CLIENT_ID || !API_KEY) return null
-  // Open the picker as FAST as possible after the click. Warm the picker script in parallel and use
-  // the EXISTING (silent) grant — an interactive sign-in here would burn the click's user-activation,
-  // and Firefox then suppresses the picker iframe's storage-access ("allow cookies") prompt, so the
-  // dialog never appears (the "have to hit F12" symptom is exactly that lost-activation timing).
-  // Interactive fallback only if not connected yet (rare — callers connect Drive first).
-  const pickerReady = loadPicker()
-  let token = await getDriveToken(false)
-  if (!token) token = await getDriveToken(true)
-  if (!token) return null
-  await pickerReady
-  const picker = (window as unknown as { google: { picker: PickerNS } }).google.picker
-  return new Promise((resolve) => {
-    const view = new picker.DocsView(picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder')
-    // appId = the Google Cloud project NUMBER (the numeric prefix of the OAuth client id). REQUIRED
-    // with the drive.file scope so the Picker can grant THIS app access to the folder you select —
-    // without it, selecting a folder silently stalls.
-    const appId = (CLIENT_ID ?? '').split('-')[0]
-    const p = new picker.PickerBuilder()
-      .setOAuthToken(token)
-      .setDeveloperKey(API_KEY)
-      .setAppId(appId)
-      .setOrigin(`${window.location.protocol}//${window.location.host}`)
-      .addView(view)
-      .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
-        // The Picker does NOT reliably auto-dismiss on selection — without this the dim backdrop
-        // just sits there ("goes light, doesn't progress"). Hide + tear it down on every terminal
-        // action. (LOADED fires first when the dialog mounts — ignore it.)
-        const action = data.action
-        if (action === 'loaded' || action === picker.Action.LOADED) return
-        try { p.setVisible(false) } catch { /* already gone */ }
-        const doc = data.docs?.[0]
-        if ((action === picker.Action.PICKED || action === 'picked') && doc) {
-          setChosenGDriveFolder(doc.id)
-          resolve({ id: doc.id, name: doc.name })
-        } else {
-          resolve(null) // cancel, or picked-with-no-doc
-        }
-      })
-      .build()
-    p.setVisible(true)
-  })
-}
-
 // Create a Drive folder (at the writer's root) and return it. drive.file lets us create + then touch
 // folders WE created — so the new folder becomes a valid sync target. Used by the Save-menu "New
 // folder" action (the hosted Picker has no create-folder of its own).
@@ -307,46 +233,6 @@ export async function downloadGoogleDriveFile(id: string): Promise<string | null
 export function adoptGoogleDriveFile(docId: string, fileId: string): void {
   setDriveFileId(docId, fileId)
   setDocSource(docId, 'gdrive')
-}
-
-/** Open a file FROM Google Drive via the hosted Picker in FILE mode — reaches ANY file you can access
- *  (including ones SHARED with you), granting drive.file access to just the one you pick. Downloads
- *  its text. Returns { id, name, text } or null. (The hosted picker is fine here: it's a one-off open,
- *  not the frequent folder-choosing, and it's the only privacy-preserving way to reach others' files.) */
-export async function pickAndDownloadGoogleDriveFile(): Promise<{ id: string; name: string; text: string } | null> {
-  const API_KEY = import.meta.env?.VITE_GOOGLE_API_KEY as string | undefined
-  if (!CLIENT_ID || !API_KEY) return null
-  const pickerReady = loadPicker()
-  let token = await getDriveToken(false)
-  if (!token) token = await getDriveToken(true)
-  if (!token) return null
-  await pickerReady
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const picker = (window as unknown as { google: { picker: any } }).google.picker
-  const appId = (CLIENT_ID ?? '').split('-')[0]
-  const picked = await new Promise<{ id: string; name: string } | null>((resolve) => {
-    // Match the working folder picker: ONE plain DocsView (no setOwnedByMe/setIncludeFolders/mime
-    // chains, which were erroring → the picker flashed a spinner then closed). DOCS shows your Drive;
-    // navigate to "Shared with me" inside the picker to reach files others sent you.
-    const view = new picker.DocsView(picker.ViewId.DOCS)
-    const p = new picker.PickerBuilder()
-      .setOAuthToken(token).setDeveloperKey(API_KEY).setAppId(appId)
-      .setOrigin(`${window.location.protocol}//${window.location.host}`)
-      .addView(view)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .setCallback((data: any) => {
-        if (data.action === 'loaded') return
-        try { p.setVisible(false) } catch { /* gone */ }
-        const doc = data.docs?.[0]
-        resolve(data.action === 'picked' && doc ? { id: doc.id, name: doc.name } : null)
-      })
-      .build()
-    p.setVisible(true)
-  })
-  if (!picked) return null
-  const res = await fetch(`${FILES_API}/${picked.id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
-  if (!res.ok) return null
-  return { id: picked.id, name: picked.name, text: await res.text() }
 }
 
 export interface SyncResult { ok: boolean; webUrl: string | null }
