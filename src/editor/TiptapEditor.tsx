@@ -34,8 +34,8 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, createOneDriveFolder, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, pickGoogleDriveFolder, createGoogleDriveFolder, setChosenGDriveFolder } from '../storage/gdrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, createOneDriveFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, pickGoogleDriveFolder, createGoogleDriveFolder, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
@@ -649,6 +649,20 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     } catch { /* failure surfaces via the sync-status pill */ }
   }
 
+  // "Name this file…" — rename the live synced cloud file in place; future syncs keep the new name.
+  async function nameGoogleDriveFile() {
+    const current = gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)
+    const name = window.prompt('Name this Google Drive file', current)?.trim()
+    if (!name) return
+    if (await renameGoogleDriveFile(docRef.current.id, name)) await syncGoogleDrive()
+  }
+  async function nameOneDriveFile() {
+    const current = oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)
+    const name = window.prompt('Name this OneDrive file', current)?.trim()
+    if (!name) return
+    if (await renameOneDriveFile(docRef.current, name)) await syncOneDrive()
+  }
+
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
   async function saveAsOneDrive() {
@@ -1080,12 +1094,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onSyncOneDrive={oneDriveConfigured() ? syncOneDrive : undefined}
                 onChooseOneDriveFolder={chooseOneDriveFolder}
                 onNewOneDriveFolder={oneDriveConfigured() ? newOneDriveFolder : undefined}
+                onNameOneDriveFile={oneDriveConfigured() ? nameOneDriveFile : undefined}
                 onSaveAsOneDrive={saveAsOneDrive}
                 oneDriveAccount={oneDriveAcct}
                 onSyncGoogleDrive={googleDriveConfigured() ? syncGoogleDrive : undefined}
                 onSaveAsGoogleDrive={saveAsGoogleDrive}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
                 onNewGoogleDriveFolder={googleDriveConfigured() ? newGoogleDriveFolder : undefined}
+                onNameGoogleDriveFile={googleDriveConfigured() ? nameGoogleDriveFile : undefined}
                 googleDriveActive={gdriveActive}
               />
             </div>

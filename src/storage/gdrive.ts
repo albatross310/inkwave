@@ -5,7 +5,7 @@
 // duplicate) on every sync. Gated on VITE_GOOGLE_CLIENT_ID — inert until that's set.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { composeTraceFile, buildExportBundle, bundleFilename } from '../provenance/bundle'
+import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
 
 const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'
@@ -85,6 +85,34 @@ function driveFileId(docId: string): string | null {
 }
 function setDriveFileId(docId: string, id: string): void {
   try { localStorage.setItem(fileKey(docId), id) } catch { /* private mode */ }
+}
+
+// Per-document custom file name (overrides the title-derived bundleFilename). Always ends .inkwave.
+const ensureExt = (name: string) => (name.toLowerCase().endsWith(`.${TRACE_EXTENSION}`) ? name : `${name}.${TRACE_EXTENSION}`)
+const nameKey = (docId: string) => `inkwave:gdrive-name:${docId}`
+export function gDriveFilename(docId: string): string | null {
+  try { return localStorage.getItem(nameKey(docId)) } catch { return null }
+}
+function setGDriveFilename(docId: string, name: string): void {
+  try { localStorage.setItem(nameKey(docId), name) } catch { /* private mode */ }
+}
+
+/** Rename the synced Drive file in place (and remember the name for future syncs). The Drive file id
+ *  is stored, so this PATCHes that exact file; if nothing's synced yet, the name just applies next sync. */
+export async function renameGoogleDriveFile(docId: string, name: string): Promise<boolean> {
+  const clean = ensureExt(name.trim())
+  if (!clean || clean === `.${TRACE_EXTENSION}`) return false
+  setGDriveFilename(docId, clean)
+  const id = driveFileId(docId)
+  if (!id) return true // not synced yet — the next sync creates it with this name
+  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  if (!token) return false
+  const res = await fetch(`${FILES_API}/${id}?fields=id,name`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: clean }),
+  })
+  return res.ok
 }
 
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
@@ -248,7 +276,7 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (!token) return { ok: false, webUrl: null }
   const file = composeTraceFile(buildExportBundle(doc, snapshots))
   try {
-    return { ok: true, webUrl: await uploadDrive(token, doc.id, bundleFilename(doc), file) }
+    return { ok: true, webUrl: await uploadDrive(token, doc.id, gDriveFilename(doc.id) ?? bundleFilename(doc), file) }
   } catch {
     return { ok: false, webUrl: null }
   }

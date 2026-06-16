@@ -10,7 +10,7 @@
 // enters the prerender/SSR graph.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { readAppJson, writeAppJson } from './opfs'
 
 // The OneDrive folder the writer chose to sync into. id '' (or null) = the OneDrive root. `path` is
@@ -252,8 +252,32 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   // proofs + receipts).
   const file = composeTraceFile(buildExportBundle(doc, snapshots))
   try {
-    return { ok: true, webUrl: await putFile(token, bundleFilename(doc), file) }
+    return { ok: true, webUrl: await putFile(token, oneDriveFilename(doc.id) ?? bundleFilename(doc), file) }
   } catch {
     return { ok: false, webUrl: null }
   }
+}
+
+const ensureExt = (name: string) => (name.toLowerCase().endsWith(`.${TRACE_EXTENSION}`) ? name : `${name}.${TRACE_EXTENSION}`)
+
+/** Rename the synced OneDrive file in place (PATCH by its current path) and remember the new name for
+ *  future syncs. If nothing's synced yet, the name just applies on the next sync. */
+export async function renameOneDriveFile(doc: InkwaveDocument, name: string): Promise<boolean> {
+  const clean = ensureExt(name.trim())
+  if (!clean || clean === `.${TRACE_EXTENSION}`) return false
+  const oldName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
+  setOneDriveFilename(doc.id, clean)
+  if (!CLIENT_ID) return true
+  const token = await getSilentToken()
+  if (!token) return false
+  const folder = getChosenFolder()
+  const itemPath = folder?.id
+    ? `${GRAPH}/me/drive/items/${folder.id}:/${encodeURIComponent(oldName)}:`
+    : `${GRAPH}/me/drive/root:/${encodeURIComponent(oldName)}:`
+  const res = await fetch(itemPath, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: clean }),
+  })
+  return res.ok || res.status === 404 // 404 = nothing synced under the old name yet; next sync names it
 }
