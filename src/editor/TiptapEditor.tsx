@@ -590,7 +590,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // make new ones, rename the file). Opens in-page; on pick we target the folder and sync into it.
   function chooseGoogleDriveFolder() { setGdrivePickerOpen(true) }
   async function onGdriveFolderPicked(folderId: string) {
-    setGdrivePickerOpen(false)
+    // The picker shows "Syncing…" while this runs and closes itself when the promise resolves.
     setChosenGDriveFolder(folderId || null) // '' = My Drive root
     clearGoogleDriveFile(docRef.current.id)
     setGdriveUrl(null)
@@ -612,11 +612,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!acct) { await startOneDriveSignIn(); return }
     setFolderPickerOpen(true)
   }
-  function onFolderPicked(folder: OneDriveFolder) {
+  async function onFolderPicked(folder: OneDriveFolder) {
     setChosenFolder(folder)
     void addRecentFolder(folder) // remember the choice (OPFS) for the picker's "Recent folders"
-    setFolderPickerOpen(false)
-    void syncOneDrive()
+    await syncOneDrive() // picker shows "Syncing…" until this resolves, then closes itself
   }
 
   // Inline rename from the pickers' file-name field: rename the live synced file, then re-sync.

@@ -26,9 +26,10 @@ const stripExt = (name: string) => name.replace(/\.(studio|inkwave)$|\.(trace|in
 export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }: {
   currentName?: string
   onRename?: (name: string) => void
-  onPick: (folder: OneDriveFolder) => void
+  onPick: (folder: OneDriveFolder) => void | Promise<void>
   onClose: () => void
 }) {
+  const [syncing, setSyncing] = useState(false)
   const [crumbs, setCrumbs] = useState<Crumb[]>([]) // [] = root
   const [folders, setFolders] = useState<DriveFolder[] | null>(null)
   const [quick, setQuick] = useState<DriveFolder[]>([])
@@ -179,15 +180,19 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
                 onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameVal(stripExt(currentName)); setEditing(false) } }}
                 className="flex-1 text-sm font-sans rounded px-2 py-0.5 outline-none" style={{ border: `1px solid ${ONE}66` }} />
             ) : (
-              <button type="button" onDoubleClick={() => setEditing(true)} title="Double-click to rename"
-                className="font-sans text-stone-600 hover:text-[#0364B8] truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></button>
+              <>
+                <span onDoubleClick={() => setEditing(true)} className="font-sans text-stone-600 truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></span>
+                <button type="button" onClick={() => setEditing(true)} title="Rename file"
+                  className="text-xs font-sans px-1.5 py-0.5 rounded hover:bg-stone-100 whitespace-nowrap" style={{ color: ONE }}>✎ Rename</button>
+              </>
             )}
           </div>
         )}
 
-        <button type="button" onClick={() => onPick({ id: currentId ?? '', path: currentPath })}
-          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition" style={{ background: ONE, borderRadius: 10 }}>
-          Sync here{currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}
+        <button type="button" disabled={syncing}
+          onClick={async () => { setSyncing(true); try { await onPick({ id: currentId ?? '', path: currentPath }) } finally { onClose() } }}
+          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition disabled:opacity-70" style={{ background: ONE, borderRadius: 10 }}>
+          {syncing ? 'Syncing…' : `Sync here${currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}`}
         </button>
       </div>
     </div>,

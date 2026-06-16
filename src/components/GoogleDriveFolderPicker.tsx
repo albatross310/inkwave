@@ -7,17 +7,29 @@ import { listGoogleDriveFolders, createGoogleDriveFolder, getChosenGDriveFolder 
 // app CREATED (it can't enumerate your whole Drive). So it shows those + a New-folder button to make
 // more, lets you sync into one (or My Drive root), and rename the synced file in place. To open a
 // file someone ELSE sent, that's the separate per-file import (Google's file picker), not this.
-const G_BLUE = '#1a73e8'
-const G_HOVER = '#f1f6fe'
+const G_BLUE = '#4285F4'   // Google brand blue (distinct from OneDrive's #0364B8)
+const G_HOVER = '#f5f9ff'
 
 // A small 3-colour Drive triangle mark.
 function DriveMark() {
   return (
     <svg viewBox="0 0 24 24" width="22" height="20" aria-hidden="true" style={{ display: 'block' }}>
-      <path fill="#00ac47" d="M12 3 2 21 12 15z" />
-      <path fill="#1a73e8" d="M12 3 22 21 12 15z" />
-      <path fill="#ffba00" d="M2 21 22 21 12 15z" />
+      <path fill="#34A853" d="M12 3 2 21 12 15z" />
+      <path fill="#4285F4" d="M12 3 22 21 12 15z" />
+      <path fill="#FBBC05" d="M2 21 22 21 12 15z" />
     </svg>
+  )
+}
+
+// The iconic multi-colour "Google" + grey "Drive" wordmark — the treatment that makes it read as
+// Google at a glance (the way the gold wordmark reads as PayPal).
+function GoogleWordmark() {
+  const colors = ['#4285F4', '#EA4335', '#FBBC05', '#4285F4', '#34A853', '#EA4335']
+  return (
+    <span className="font-sans font-semibold text-xl tracking-tight">
+      {'Google'.split('').map((ch, i) => <span key={i} style={{ color: colors[i] }}>{ch}</span>)}
+      <span style={{ color: '#5f6368' }}> Drive</span>
+    </span>
   )
 }
 
@@ -28,9 +40,10 @@ function stripExt(name: string) {
 export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose }: {
   currentName: string
   onRename?: (name: string) => void
-  onPick: (folderId: string) => void // '' = My Drive root
+  onPick: (folderId: string) => void | Promise<void> // '' = My Drive root
   onClose: () => void
 }) {
+  const [syncing, setSyncing] = useState(false)
   const [folders, setFolders] = useState<Array<{ id: string; name: string }> | null>(null)
   const [selected, setSelected] = useState<string>(getChosenGDriveFolder() ?? '')
   const [selectedName, setSelectedName] = useState<string>('My Drive (root)')
@@ -89,7 +102,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <DriveMark />
-            <span className="font-sans font-semibold text-xl tracking-tight" style={{ color: G_BLUE }}>Google Drive</span>
+            <GoogleWordmark />
           </div>
           <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
@@ -125,7 +138,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
           ))}
         </div>
 
-        {/* Inline file name (double-click to rename). */}
+        {/* Inline file name with an explicit Rename button (double-click works too). */}
         {onRename && (
           <div className="flex items-center gap-2 mt-3 text-sm">
             <span className="text-stone-400 text-xs">File:</span>
@@ -134,15 +147,19 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
                 onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameVal(stripExt(currentName)); setEditing(false) } }}
                 className="flex-1 text-sm font-sans rounded px-2 py-0.5 outline-none" style={{ border: `1px solid ${G_BLUE}66` }} />
             ) : (
-              <button type="button" onDoubleClick={() => setEditing(true)} title="Double-click to rename"
-                className="font-sans text-stone-600 hover:text-[#1a73e8] truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></button>
+              <>
+                <span onDoubleClick={() => setEditing(true)} className="font-sans text-stone-600 truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></span>
+                <button type="button" onClick={() => setEditing(true)} title="Rename file"
+                  className="text-xs font-sans px-1.5 py-0.5 rounded hover:bg-stone-100 whitespace-nowrap" style={{ color: G_BLUE }}>✎ Rename</button>
+              </>
             )}
           </div>
         )}
 
-        <button type="button" onClick={() => onPick(selected)}
-          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition" style={{ background: G_BLUE, borderRadius: 10 }}>
-          Sync here — {selectedName}
+        <button type="button" disabled={syncing}
+          onClick={async () => { setSyncing(true); try { await onPick(selected) } finally { onClose() } }}
+          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition disabled:opacity-70" style={{ background: G_BLUE, borderRadius: 10 }}>
+          {syncing ? 'Syncing…' : `Sync here — ${selectedName}`}
         </button>
       </div>
     </div>,
