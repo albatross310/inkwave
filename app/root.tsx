@@ -8,7 +8,10 @@ import type { LinksFunction } from 'react-router'
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/svg+xml', href: '/inkwave-logo.svg' },
+  { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: preconnect + preload the stylesheet so the calm serif identity paints fast.
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },

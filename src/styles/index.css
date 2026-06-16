@@ -86,8 +86,8 @@
   .inkwave-sheet::after {
     content: '';
     position: absolute;
-    left: 44px;
-    bottom: 34px;
+    left: 26px;
+    bottom: 18px;
     width: 88px;
     height: 88px;
     background: url('/inkwave-logo.svg') center / contain no-repeat;
@@ -292,11 +292,14 @@
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; }
   .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
-  /* The faded seal on every printed page (fixed → repeats per page). */
+  /* The faded seal on every printed page (fixed → repeats per page). Uses a real <img>, NOT a CSS
+     background — browsers drop background images from print unless "Background graphics" is ticked,
+     so a background-image seal silently never prints. Foreground <img> content always prints. */
   .print-seal {
-    display: block; position: fixed; left: 22mm; bottom: 16mm; width: 80px; height: 80px;
-    background: url('/inkwave-logo.svg') center / contain no-repeat; opacity: 0.1;
+    display: block; position: fixed; left: 26px; bottom: 18px; width: 88px; height: 88px;
+    opacity: 0.1; z-index: 9999;
   }
+  .print-seal img { width: 100%; height: 100%; object-fit: contain; display: block; }
   /* margin 0 → no browser header/footer text, and the 210mm parchment keeps full width so the text
      column stays its exact on-screen width (~666px) → identical wrapping. All margins come from the
      content (page-1 top padding + the 72px gaps + the A4−144px text area). */
