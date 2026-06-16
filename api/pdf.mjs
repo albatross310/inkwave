@@ -53,15 +53,29 @@ export async function generatePdf({ html }) {
   const browser = await launch()
   try {
     const page = await browser.newPage()
-    // domcontentloaded, NOT networkidle0: the doc fetches fonts/seal back from the live origin, and
-    // networkidle0 (no connections for 500ms) can stall to its timeout on a keep-alive. We instead
-    // load the DOM, then explicitly wait for fonts with a hard cap so we never hang.
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 })
-    // Wait for the web fonts (IM Fell DW Pica / EB Garamond) so wrapping matches the editor — but cap
-    // it: if a font is slow/unreachable, render anyway rather than hang.
+    // Lay out in PRINT media (matches page.pdf and the @media print width rules) before we measure.
+    await page.emulateMediaType('print')
+    // 'load' (NOT domcontentloaded): we MUST wait for the stylesheet to load, otherwise the @font-face
+    // rules aren't even known yet and document.fonts.ready resolves instantly → the page renders in a
+    // fallback font (wrong metrics → wrong wrapping). 'load' also avoids networkidle0's idle-timeout
+    // stall. Then force-load the families the document uses and await fonts.ready, capped so a slow
+    // font never hangs the request.
+    await page.setContent(html, { waitUntil: 'load', timeout: 30000 })
     await Promise.race([
-      page.evaluate(async () => { if (document.fonts) { try { await document.fonts.ready } catch { /* ignore */ } } }).catch(() => {}),
-      sleep(5000),
+      page.evaluate(async () => {
+        if (!document.fonts) return
+        try {
+          await Promise.all([
+            document.fonts.load("400 16px 'EB Garamond'"),
+            document.fonts.load("italic 400 16px 'EB Garamond'"),
+            document.fonts.load("500 16px 'EB Garamond'"),
+            document.fonts.load("400 16px 'IM Fell DW Pica'"),
+            document.fonts.load("italic 400 16px 'IM Fell DW Pica'"),
+          ])
+          await document.fonts.ready
+        } catch { /* ignore */ }
+      }).catch(() => {}),
+      sleep(8000),
     ])
     return await page.pdf({ printBackground: true, preferCSSPageSize: true })
   } finally {
