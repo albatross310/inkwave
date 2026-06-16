@@ -23,7 +23,7 @@ const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 
 type ModalKey = 'recent' | 'save' | 'upload'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Upload' }
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -79,6 +79,7 @@ export function OptionsMenu({
   onSaveAsGoogleDrive,
   onChooseGoogleDriveFolder,
   onUploadGoogleDrive,
+  onUploadOneDrive,
   googleDriveActive,
 }: {
   paperRight: number
@@ -95,6 +96,7 @@ export function OptionsMenu({
   onSaveAsGoogleDrive?: () => void
   onChooseGoogleDriveFolder?: () => void
   onUploadGoogleDrive?: () => void
+  onUploadOneDrive?: () => void
   googleDriveActive?: boolean
 }) {
   const navigate = useNavigate()
@@ -129,7 +131,7 @@ export function OptionsMenu({
 
   const items: Array<{ label: string; run: () => void }> = [
     { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
-    { label: 'Upload…', run: () => setModal('upload') },
+    { label: 'Open…', run: () => setModal('upload') },
     { label: 'Open Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
@@ -187,7 +189,7 @@ export function OptionsMenu({
       {modal && (
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
-          {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onDone={() => setModal(null)} />}
+          {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -302,16 +304,21 @@ function SourceTag({ source }: { source: string }) {
 }
 
 // Open a file and keep syncing to where it lives — no Save needed.
-function UploadPanel({ onComputer, onGoogleDrive, onDone }: { onComputer: () => void; onGoogleDrive?: () => void; onDone: () => void }) {
+function UploadPanel({ onComputer, onGoogleDrive, onOneDrive, onDone }: { onComputer: () => void; onGoogleDrive?: () => void; onOneDrive?: () => void; onDone: () => void }) {
   return (
     <div className="mt-2 flex flex-col gap-2.5">
       <p className="text-xs text-stone-400 px-1">Open a file — it keeps syncing to where it lives, so you only Save for a new file or a copy.</p>
       <MenuButton onClick={onComputer}>
-        🗁 This computer<span className="block text-xs text-stone-400">browse files — including your Google Drive &amp; OneDrive folders</span>
+        🗁 This computer<span className="block text-xs text-stone-400">use Chrome/Edge/Brave to sync via Windows Explorer (incl. your Drive/OneDrive folders)</span>
       </MenuButton>
       {onGoogleDrive && (
         <MenuButton onClick={() => { onGoogleDrive(); onDone() }}>
-          ▴ Google Drive<span className="block text-xs text-stone-400">pick a file from Drive (including ones shared with you)</span>
+          ▴ Google Drive<span className="block text-xs text-stone-400">pick a file from Drive (incl. shared with you) — best on phone</span>
+        </MenuButton>
+      )}
+      {onOneDrive && (
+        <MenuButton onClick={() => { onOneDrive(); onDone() }}>
+          ☁ OneDrive<span className="block text-xs text-stone-400">pick a file from OneDrive — best on phone</span>
         </MenuButton>
       )}
     </div>

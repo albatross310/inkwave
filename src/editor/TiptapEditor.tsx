@@ -34,12 +34,13 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, pickAndDownloadGoogleDriveFile, googleDriveFileId } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
+import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { contentHash } from '../provenance/hash'
@@ -105,6 +106,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [lastSync, setLastSync] = useState<number | null>(null) // ms epoch of last successful OneDrive sync
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [gdrivePickerOpen, setGdrivePickerOpen] = useState(false)
+  const [odOpenerOpen, setOdOpenerOpen] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null) // linked local save file name (Chromium)
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)
@@ -639,6 +641,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!f) return
     await openInkwaveFile(new File([f.text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
   }
+  // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.
+  async function uploadFromOneDrive() {
+    const acct = await oneDriveAccount()
+    if (!acct) { await startOneDriveSignIn(); return }
+    setOdOpenerOpen(true)
+  }
+  async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
+    const text = await downloadOneDriveFile(f.itemId)
+    if (!text) return
+    await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
+  }
 
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
@@ -685,6 +698,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               setFolderPickerOpen(true)
             }
           })
+      } else if (acc && getDocSource(docRef.current.id) === 'onedrive' && oneDriveFilename(docRef.current.id)) {
+        // A OneDrive-synced doc loaded (e.g. opened via Upload) → resume syncing it (no Save needed).
+        void listSnapshots(docRef.current.id)
+          .then((s) => syncToOneDrive(docRef.current, s))
+          .then((r) => { if (r.ok) { oneDriveActiveRef.current = true; setLastSync(Date.now()); setOneDriveUrl(r.webUrl) } })
       }
     })
   }, [])
@@ -1035,6 +1053,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onClose={() => setGdrivePickerOpen(false)}
           />
         )}
+        {odOpenerOpen && (
+          <OneDriveFileOpener onOpen={onOneDriveFileOpen} onClose={() => setOdOpenerOpen(false)} />
+        )}
         {folderPickerOpen && (
           <OneDriveFolderPicker
             currentName={oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)}
@@ -1111,6 +1132,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onSaveAsGoogleDrive={saveAsGoogleDrive}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
                 onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
+                onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
                 googleDriveActive={gdriveActive}
               />
             </div>

@@ -8,7 +8,7 @@ import { parseTraceFile } from '../provenance/bundle'
 import { saveDocument } from './opfs'
 import { upsertMeta } from './indexeddb'
 import { withScasDefaults } from '../scas/state'
-import { setOneDriveFilename } from './onedrive'
+import { setOneDriveFilename, adoptOneDriveFile, type OneDriveFolder } from './onedrive'
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
 
@@ -16,11 +16,12 @@ const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 
 // opts.handle = a writable FSA handle (local file / mounted-cloud folder) → resume local write-back.
 // opts.googleFileId = the Drive file id this came from → adopt it so gdrive sync resumes (no Save).
+// opts.oneDriveFile = the OneDrive folder + name → adopt so onedrive sync resumes (no Save).
 export async function openInkwaveFile(
   file: File,
-  opts: { handle?: FileSystemFileHandle; googleFileId?: string } = {},
+  opts: { handle?: FileSystemFileHandle; googleFileId?: string; oneDriveFile?: { folder: OneDriveFolder; name: string } } = {},
 ): Promise<void> {
-  const { handle, googleFileId } = opts
+  const { handle, googleFileId, oneDriveFile } = opts
   const data = parseTraceFile(await file.text())
   // Accept an export bundle (content under .document) OR a raw saved document (top-level contentJson).
   const contentJson = (data as { contentJson?: typeof data.document.contentJson }).contentJson ?? data.document?.contentJson
@@ -31,9 +32,10 @@ export async function openInkwaveFile(
     file.name.replace(/\.(studio|inkwave|trace\.json|insig\.json|json)$/i, '')
   const id = (data.document?.id as string | undefined) ?? uuidv4()
 
-  if (googleFileId) adoptGoogleDriveFile(id, googleFileId) // resume Google Drive sync to this file
-  else setOneDriveFilename(id, file.name)                  // resume OneDrive sync to this file (by name)
-  if (handle) await setSaveFileHandle(id, handle)          // resume local file sync (writable handle)
+  if (googleFileId) adoptGoogleDriveFile(id, googleFileId)            // resume Google Drive sync
+  else if (oneDriveFile) adoptOneDriveFile(id, oneDriveFile.folder, oneDriveFile.name) // resume OneDrive sync
+  else setOneDriveFilename(id, file.name)                            // resume OneDrive sync (by name)
+  if (handle) await setSaveFileHandle(id, handle)                    // resume local file sync (writable handle)
 
   const now = new Date().toISOString()
   const doc = withScasDefaults({
