@@ -4,9 +4,6 @@
   "functions": {
     "api/pdf.mjs": { "memory": 1536, "maxDuration": 60 }
   },
-  "crons": [
-    { "path": "/api/pdf", "schedule": "*/5 * * * *" }
-  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/__spa-fallback.html" }
   ],
