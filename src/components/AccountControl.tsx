@@ -118,12 +118,12 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
         <button type="button" aria-label="Close" onClick={onClose}
           className="absolute top-3 right-3 text-stone-400 hover:text-[#5c2d8a] text-2xl leading-none z-10">×</button>
         <div className="flex items-center justify-center gap-2">
-          <h2 className="text-2xl text-[#5c2d8a]">Insignia</h2>
+          <h2 className="text-4xl font-bold text-[#5c2d8a]">Insignia</h2>
           <button type="button" aria-label="About Insignia" onClick={() => setInfo((i) => !i)}
             className="w-5 h-5 flex items-center justify-center rounded-full border border-stone-300 text-stone-400 text-xs leading-none hover:text-[#5c2d8a] hover:border-[#5c2d8a]">i</button>
         </div>
         {info && (
-          <p className="text-xs text-stone-500 text-left mt-2 max-w-sm mx-auto leading-relaxed">
+          <p className="text-sm text-stone-500 text-left mt-2 max-w-sm mx-auto leading-relaxed">
             Inkwave already records the provenance of everything you write — a tamper-evident,
             independently-verifiable trail proving the document was composed live, in your browser,
             against constraints you couldn't predict. Insignia adds one more signal to that record:
