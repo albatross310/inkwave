@@ -6,5 +6,6 @@ import { getEntitlement } from './_billing-core.mjs'
 
 export default async function handler(req, res) {
   res.setHeader('content-type', 'application/json')
+  res.setHeader('cache-control', 'no-store') // entitlement is polled right after payment — never cache it
   res.end(JSON.stringify(await getEntitlement(req.headers?.authorization || '')))
 }

@@ -28,7 +28,9 @@ export async function refreshEntitlement(): Promise<boolean> {
   inflight = (async () => {
     try {
       const token = await getClerkToken()
-      const res = await fetch('/api/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      // no-store: this is polled right after payment to catch the entitlement flip — a cached
+      // "not subscribed" must never satisfy the poll.
+      const res = await fetch('/api/me', { cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} })
       const data = (await res.json()) as { cadence?: boolean }
       cached = !!data.cadence
     } catch {
