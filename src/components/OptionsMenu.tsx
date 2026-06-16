@@ -267,10 +267,35 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
   )
 }
 
-const SOURCE_LABEL: Record<string, { text: string; dot: string }> = {
-  gdrive: { text: 'Google Drive', dot: '#4285F4' },
-  onedrive: { text: 'OneDrive', dot: '#0364B8' },
-  local: { text: 'this computer', dot: '#9b9b9b' },
+// Per-source mini logos + a label, shown on each recent file.
+function DriveMini() {
+  return (
+    <svg viewBox="0 0 87.3 78" width="13" height="12" aria-hidden="true">
+      <path fill="#0066da" d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" />
+      <path fill="#00ac47" d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" />
+      <path fill="#ea4335" d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" />
+      <path fill="#00832d" d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" />
+      <path fill="#2684fc" d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" />
+      <path fill="#ffba00" d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" />
+    </svg>
+  )
+}
+function OneDriveMini() {
+  return <svg viewBox="0 0 24 24" width="15" height="13" aria-hidden="true"><path fill="#0364B8" d="M6.6 19A4.6 4.6 0 0 1 5.8 9.9 6 6 0 0 1 17.7 8.8 4.6 4.6 0 0 1 18.2 19H6.6z" /></svg>
+}
+function ExplorerMini() {
+  return <svg viewBox="0 0 24 24" width="14" height="13" aria-hidden="true"><path fill="#ffb900" d="M3 5h6l2 2h10v12H3z" /><path fill="#ffcf4d" d="M3 9h18v10H3z" /></svg>
+}
+const SOURCE_COLOR: Record<string, string> = { gdrive: '#1a73e8', onedrive: '#0364B8', local: '#5c2d8a' }
+function SourceTag({ source }: { source: string }) {
+  const label = source === 'gdrive' ? 'Google Drive' : source === 'onedrive' ? 'OneDrive' : source === 'local' ? 'This PC' : ''
+  if (!label) return null
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-stone-400 whitespace-nowrap">
+      {source === 'gdrive' ? <DriveMini /> : source === 'onedrive' ? <OneDriveMini /> : <ExplorerMini />}
+      {label}
+    </span>
+  )
 }
 
 function RecentPanel() {
@@ -305,15 +330,10 @@ function RecentPanel() {
           style={{ border: '1px solid #eee', borderRadius: 8 }}
         >
           <span className="min-w-0">
-            <span className="block truncate" style={{ color: INK }}>{names[m.id] ?? inkwaveFileName(m.title)}</span>
+            <span className="block truncate" style={{ color: SOURCE_COLOR[sources[m.id]] ?? INK }}>{names[m.id] ?? inkwaveFileName(m.title)}</span>
             <span className="block text-xs text-stone-400">{new Date(m.updatedAt).toLocaleString()}</span>
           </span>
-          {sources[m.id] && SOURCE_LABEL[sources[m.id]] && (
-            <span className="flex items-center gap-1 text-[11px] text-stone-400 whitespace-nowrap">
-              <span className="inline-block w-2 h-2 rounded-full" style={{ background: SOURCE_LABEL[sources[m.id]].dot }} />
-              {SOURCE_LABEL[sources[m.id]].text}
-            </span>
-          )}
+          {sources[m.id] && <SourceTag source={sources[m.id]} />}
         </button>
       ))}
     </div>

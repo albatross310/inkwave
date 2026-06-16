@@ -40,6 +40,7 @@ import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
+import { setDocSource } from '../storage/docSource'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
@@ -513,7 +514,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       void listSnapshots(docRef.current.id)
         .then((snaps) => writeBundleToFile(docRef.current, snaps))
         // A failed write means permission lapsed — stop claiming "synced" and prompt a reconnect.
-        .then((ok) => { if (ok) setLastFileSave(Date.now()); else { folderActiveRef.current = false; setNeedsReconnect(true) } })
+        .then((ok) => { if (ok) { setLastFileSave(Date.now()); setDocSource(docRef.current.id, 'local') } else { folderActiveRef.current = false; setNeedsReconnect(true) } })
         .catch(() => { folderActiveRef.current = false; setNeedsReconnect(true) })
     }
     if (oneDriveActiveRef.current) scheduleOneDriveSync()
@@ -577,9 +578,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       setGdriveActive(true)
       setLastGdriveSync(Date.now())
       setGdriveUrl(r.webUrl)
-      // Fresh connect (from "Sync to Google Drive") → jump straight to the Save panel so the writer
-      // can pick a folder, instead of having to reopen the menu + Save again.
-      if (!wasActive) window.dispatchEvent(new CustomEvent('inkwave:open-save'))
+      // Fresh connect (from "Sync to Google Drive") → open the Google picker straight away so the
+      // writer can pick a folder, instead of having to reopen the menu + Save again.
+      if (!wasActive) setGdrivePickerOpen(true)
     }
   }
 
@@ -654,8 +655,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             if (r.ok) {
               setLastSync(Date.now()); setOneDriveUrl(r.webUrl)
               oneDriveActiveRef.current = true
-              // We just returned from the Microsoft sign-in redirect → jump to the Save panel.
-              window.dispatchEvent(new CustomEvent('inkwave:open-save'))
+              // We just returned from the Microsoft sign-in redirect → open the OneDrive folder picker.
+              setFolderPickerOpen(true)
             }
           })
       }
@@ -1039,14 +1040,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
                 above the main controls (when opened with the STYLE button) */}
             {showStyle && editor && (
-              <div className={`flex items-center px-3 py-1.5 ${showMain ? 'border-b border-stone-200' : ''}`}>
+              <div className={`flex items-center px-4 py-1.5 ${showMain ? 'border-b border-stone-200' : ''}`}>
                 <StyleBar editor={editor} onActivity={armStyleTimer} />
               </div>
             )}
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-3 py-1.5 ${isTouch ? 'justify-between' : 'gap-3'}`}>
+            <div className={`flex items-center px-4 py-1.5 ${isTouch ? 'justify-between' : 'gap-4'}`}>
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
