@@ -261,6 +261,22 @@ export async function createGoogleDriveFolder(name: string): Promise<{ id: strin
   return { id: d.id, name: d.name }
 }
 
+// List the folders this app can see under drive.file — i.e. the folders Inkwave CREATED (or was
+// granted). Flat list (we create folders at the Drive root). Powers the custom Google picker; the
+// privacy-preserving drive.file scope can't enumerate folders the app didn't make.
+export async function listGoogleDriveFolders(): Promise<Array<{ id: string; name: string }>> {
+  if (!CLIENT_ID) return []
+  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  if (!token) return []
+  const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false")
+  const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=name`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return []
+  const d = (await res.json()) as { files?: Array<{ id: string; name: string }> }
+  return d.files ?? []
+}
+
 export interface SyncResult { ok: boolean; webUrl: string | null }
 
 /** Start sign-in / consent (interactive — call from a click). Returns true if we got a token. */

@@ -72,15 +72,11 @@ export function OptionsMenu({
   folderName,
   onSyncOneDrive,
   onChooseOneDriveFolder,
-  onNewOneDriveFolder,
-  onNameOneDriveFile,
   onSaveAsOneDrive,
   oneDriveAccount,
   onSyncGoogleDrive,
   onSaveAsGoogleDrive,
   onChooseGoogleDriveFolder,
-  onNewGoogleDriveFolder,
-  onNameGoogleDriveFile,
   googleDriveActive,
 }: {
   paperRight: number
@@ -91,15 +87,11 @@ export function OptionsMenu({
   folderName?: string | null
   onSyncOneDrive?: () => void
   onChooseOneDriveFolder?: () => void
-  onNewOneDriveFolder?: () => void
-  onNameOneDriveFile?: () => void
   onSaveAsOneDrive?: () => void
   oneDriveAccount?: string | null
   onSyncGoogleDrive?: () => void
   onSaveAsGoogleDrive?: () => void
   onChooseGoogleDriveFolder?: () => void
-  onNewGoogleDriveFolder?: () => void
-  onNameGoogleDriveFile?: () => void
   googleDriveActive?: boolean
 }) {
   const navigate = useNavigate()
@@ -191,7 +183,7 @@ export function OptionsMenu({
 
       {modal && (
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
-          {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onNewOneDriveFolder={onNewOneDriveFolder} onNameOneDriveFile={onNameOneDriveFile} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} onNewGoogleDriveFolder={onNewGoogleDriveFolder} onNameGoogleDriveFile={onNameGoogleDriveFile} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
+          {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -214,10 +206,10 @@ function MenuButton({ onClick, children }: { onClick?: () => void; children: Rea
   )
 }
 
-function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderName, onSyncOneDrive, onChooseOneDriveFolder, onNewOneDriveFolder, onNameOneDriveFile, onSaveAsOneDrive, oneDriveAccount, onSyncGoogleDrive, onSaveAsGoogleDrive, onChooseGoogleDriveFolder, onNewGoogleDriveFolder, onNameGoogleDriveFile, googleDriveActive, onDone }: {
+function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderName, onSyncOneDrive, onChooseOneDriveFolder, onSaveAsOneDrive, oneDriveAccount, onSyncGoogleDrive, onSaveAsGoogleDrive, onChooseGoogleDriveFolder, googleDriveActive, onDone }: {
   onExportBundle?: () => void; onSave?: () => void; onSaveAs?: () => void; folderAvailable?: boolean; folderName?: string | null
-  onSyncOneDrive?: () => void; onChooseOneDriveFolder?: () => void; onNewOneDriveFolder?: () => void; onNameOneDriveFile?: () => void; onSaveAsOneDrive?: () => void; oneDriveAccount?: string | null
-  onSyncGoogleDrive?: () => void; onSaveAsGoogleDrive?: () => void; onChooseGoogleDriveFolder?: () => void; onNewGoogleDriveFolder?: () => void; onNameGoogleDriveFile?: () => void; googleDriveActive?: boolean; onDone: () => void
+  onSyncOneDrive?: () => void; onChooseOneDriveFolder?: () => void; onSaveAsOneDrive?: () => void; oneDriveAccount?: string | null
+  onSyncGoogleDrive?: () => void; onSaveAsGoogleDrive?: () => void; onChooseGoogleDriveFolder?: () => void; googleDriveActive?: boolean; onDone: () => void
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
@@ -246,17 +238,6 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
           🗁 Choose OneDrive folder<span className="block text-xs text-stone-400">signed in as {oneDriveAccount} · syncs as you write</span>
         </MenuButton>
       )}
-      {!folderAvailable && oneDriveAccount && onNewOneDriveFolder && (
-        <button type="button" onClick={() => { onNewOneDriveFolder(); onDone() }}
-          className="self-start text-xs px-2.5 py-1 rounded-full hover:bg-stone-50" style={{ border: '1px solid #0364B866', color: '#0364B8' }}>
-          ＋ New folder
-        </button>
-      )}
-      {!folderAvailable && oneDriveAccount && onNameOneDriveFile && (
-        <MenuButton onClick={() => { onNameOneDriveFile(); onDone() }}>
-          ✎ Name this file…<span className="block text-xs text-stone-400">rename the synced OneDrive file</span>
-        </MenuButton>
-      )}
       {!folderAvailable && oneDriveAccount && onSaveAsOneDrive && (
         <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>
           🗋 Save a copy…<span className="block text-xs text-stone-400">save to a new file in OneDrive, then keep that one updated</span>
@@ -271,17 +252,6 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
       {!folderAvailable && googleDriveActive && onChooseGoogleDriveFolder && (
         <MenuButton onClick={() => { onChooseGoogleDriveFolder(); onDone() }}>
           🗁 Choose Google Drive folder<span className="block text-xs text-stone-400">pick where it syncs · updates as you write</span>
-        </MenuButton>
-      )}
-      {!folderAvailable && googleDriveActive && onNewGoogleDriveFolder && (
-        <button type="button" onClick={() => { onNewGoogleDriveFolder(); onDone() }}
-          className="self-start text-xs px-2.5 py-1 rounded-full hover:bg-stone-50" style={{ border: '1px solid #0364B866', color: '#0364B8' }}>
-          ＋ New folder
-        </button>
-      )}
-      {!folderAvailable && googleDriveActive && onNameGoogleDriveFile && (
-        <MenuButton onClick={() => { onNameGoogleDriveFile(); onDone() }}>
-          ✎ Name this file…<span className="block text-xs text-stone-400">rename the synced Google Drive file</span>
         </MenuButton>
       )}
       {!folderAvailable && googleDriveActive && onSaveAsGoogleDrive && (

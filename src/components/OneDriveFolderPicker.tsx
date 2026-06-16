@@ -21,7 +21,14 @@ function OneDriveCloud() {
 
 type Crumb = { id: string; name: string }
 
-export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: OneDriveFolder) => void; onClose: () => void }) {
+const stripExt = (name: string) => name.replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/i, '')
+
+export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }: {
+  currentName?: string
+  onRename?: (name: string) => void
+  onPick: (folder: OneDriveFolder) => void
+  onClose: () => void
+}) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([]) // [] = root
   const [folders, setFolders] = useState<DriveFolder[] | null>(null)
   const [quick, setQuick] = useState<DriveFolder[]>([])
@@ -60,6 +67,16 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Inline file rename (double-click).
+  const [editing, setEditing] = useState(false)
+  const [nameVal, setNameVal] = useState(stripExt(currentName ?? ''))
+  useEffect(() => { setNameVal(stripExt(currentName ?? '')) }, [currentName])
+  function commitName() {
+    setEditing(false)
+    const n = nameVal.trim()
+    if (n && n !== stripExt(currentName ?? '')) onRename?.(n)
+  }
 
   async function createFolder() {
     const name = newName.trim()
@@ -152,6 +169,21 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
             </button>
           ))}
         </div>
+
+        {/* Inline file name (double-click to rename). */}
+        {onRename && currentName && (
+          <div className="flex items-center gap-2 mt-3 text-sm">
+            <span className="text-stone-400 text-xs">File:</span>
+            {editing ? (
+              <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)} onBlur={commitName}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameVal(stripExt(currentName)); setEditing(false) } }}
+                className="flex-1 text-sm font-sans rounded px-2 py-0.5 outline-none" style={{ border: `1px solid ${ONE}66` }} />
+            ) : (
+              <button type="button" onDoubleClick={() => setEditing(true)} title="Double-click to rename"
+                className="font-sans text-stone-600 hover:text-[#0364B8] truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></button>
+            )}
+          </div>
+        )}
 
         <button type="button" onClick={() => onPick({ id: currentId ?? '', path: currentPath })}
           className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition" style={{ background: ONE, borderRadius: 10 }}>

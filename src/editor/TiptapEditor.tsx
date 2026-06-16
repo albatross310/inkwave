@@ -34,11 +34,12 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, createOneDriveFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, pickGoogleDriveFolder, createGoogleDriveFolder, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile } from '../storage/gdrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
+import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
@@ -101,6 +102,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const oneDriveTrailingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [lastSync, setLastSync] = useState<number | null>(null) // ms epoch of last successful OneDrive sync
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const [gdrivePickerOpen, setGdrivePickerOpen] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null) // linked local save file name (Chromium)
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)
@@ -584,12 +586,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     await syncGoogleDrive()
   }
 
-  // Pick a Google Drive folder (Google's hosted Picker), then sync the file into it (fresh file).
-  // Sync directly with the token the picker already obtained — don't re-request it (avoids a stuck
-  // second consent overlay after the pick).
-  async function chooseGoogleDriveFolder() {
-    const folder = await pickGoogleDriveFolder()
-    if (!folder) return
+  // Pick a Google Drive folder — our OWN picker (lists the folders Inkwave created on drive.file,
+  // make new ones, rename the file). Opens in-page; on pick we target the folder and sync into it.
+  function chooseGoogleDriveFolder() { setGdrivePickerOpen(true) }
+  async function onGdriveFolderPicked(folderId: string) {
+    setGdrivePickerOpen(false)
+    setChosenGDriveFolder(folderId || null) // '' = My Drive root
     clearGoogleDriveFile(docRef.current.id)
     setGdriveUrl(null)
     const snaps = await listSnapshots(docRef.current.id)
@@ -617,49 +619,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void syncOneDrive()
   }
 
-  // "New folder" quick actions (Save menu): create a folder in the cloud, target it, sync into it.
-  async function newGoogleDriveFolder() {
-    const name = window.prompt('Name the new Google Drive folder')?.trim()
-    if (!name) return
-    const folder = await createGoogleDriveFolder(name)
-    if (!folder) return
-    setChosenGDriveFolder(folder.id)
-    clearGoogleDriveFile(docRef.current.id)
-    setGdriveUrl(null)
-    const snaps = await listSnapshots(docRef.current.id)
-    const r = await syncToGoogleDrive(docRef.current, snaps)
-    if (r.ok) {
-      gdriveActiveRef.current = true
-      oneDriveActiveRef.current = false
-      setGdriveActive(true)
-      setLastGdriveSync(Date.now())
-      setGdriveUrl(r.webUrl)
-    }
-  }
-  async function newOneDriveFolder() {
-    const acct = await oneDriveAccount()
-    if (!acct) { await startOneDriveSignIn(); return }
-    const name = window.prompt('Name the new OneDrive folder')?.trim()
-    if (!name) return
-    try {
-      const folder = await createOneDriveFolder(null, name)
-      setChosenFolder({ id: folder.id, path: folder.name })
-      void addRecentFolder({ id: folder.id, path: folder.name })
-      void syncOneDrive()
-    } catch { /* failure surfaces via the sync-status pill */ }
-  }
-
-  // "Name this file…" — rename the live synced cloud file in place; future syncs keep the new name.
-  async function nameGoogleDriveFile() {
-    const current = gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)
-    const name = window.prompt('Name this Google Drive file', current)?.trim()
-    if (!name) return
+  // Inline rename from the pickers' file-name field: rename the live synced file, then re-sync.
+  async function renameGdriveFileNow(name: string) {
     if (await renameGoogleDriveFile(docRef.current.id, name)) await syncGoogleDrive()
   }
-  async function nameOneDriveFile() {
-    const current = oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)
-    const name = window.prompt('Name this OneDrive file', current)?.trim()
-    if (!name) return
+  async function renameOneDriveFileNow(name: string) {
     if (await renameOneDriveFile(docRef.current, name)) await syncOneDrive()
   }
 
@@ -1026,8 +990,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           )
         })()}
 
+        {gdrivePickerOpen && (
+          <GoogleDriveFolderPicker
+            currentName={gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)}
+            onRename={renameGdriveFileNow}
+            onPick={onGdriveFolderPicked}
+            onClose={() => setGdrivePickerOpen(false)}
+          />
+        )}
         {folderPickerOpen && (
-          <OneDriveFolderPicker onPick={onFolderPicked} onClose={() => setFolderPickerOpen(false)} />
+          <OneDriveFolderPicker
+            currentName={oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)}
+            onRename={renameOneDriveFileNow}
+            onPick={onFolderPicked} onClose={() => setFolderPickerOpen(false)} />
         )}
 
         {/* Footer bar. On a phone it docks flush to the bottom (the top of the Safari URL
@@ -1093,15 +1068,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 folderName={fileName}
                 onSyncOneDrive={oneDriveConfigured() ? syncOneDrive : undefined}
                 onChooseOneDriveFolder={chooseOneDriveFolder}
-                onNewOneDriveFolder={oneDriveConfigured() ? newOneDriveFolder : undefined}
-                onNameOneDriveFile={oneDriveConfigured() ? nameOneDriveFile : undefined}
                 onSaveAsOneDrive={saveAsOneDrive}
                 oneDriveAccount={oneDriveAcct}
                 onSyncGoogleDrive={googleDriveConfigured() ? syncGoogleDrive : undefined}
                 onSaveAsGoogleDrive={saveAsGoogleDrive}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
-                onNewGoogleDriveFolder={googleDriveConfigured() ? newGoogleDriveFolder : undefined}
-                onNameGoogleDriveFile={googleDriveConfigured() ? nameGoogleDriveFile : undefined}
                 googleDriveActive={gdriveActive}
               />
             </div>
