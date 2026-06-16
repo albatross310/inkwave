@@ -566,6 +566,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Google Drive: sign in (interactive popup — must be from a click) then sync. Once active,
   // mirrorIfActive() keeps it updated as you write.
   async function syncGoogleDrive() {
+    const wasActive = gdriveActiveRef.current
     const ok = await startGoogleDriveSignIn()
     if (!ok) return
     const snaps = await listSnapshots(docRef.current.id)
@@ -576,6 +577,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       setGdriveActive(true)
       setLastGdriveSync(Date.now())
       setGdriveUrl(r.webUrl)
+      // Fresh connect (from "Sync to Google Drive") → jump straight to the Save panel so the writer
+      // can pick a folder, instead of having to reopen the menu + Save again.
+      if (!wasActive) window.dispatchEvent(new CustomEvent('inkwave:open-save'))
     }
   }
 
@@ -646,7 +650,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         clearOneDriveSyncPending()
         void listSnapshots(docRef.current.id)
           .then((s) => syncToOneDrive(docRef.current, s))
-          .then((r) => { if (r.ok) { setLastSync(Date.now()); setOneDriveUrl(r.webUrl) } })
+          .then((r) => {
+            if (r.ok) {
+              setLastSync(Date.now()); setOneDriveUrl(r.webUrl)
+              oneDriveActiveRef.current = true
+              // We just returned from the Microsoft sign-in redirect → jump to the Save panel.
+              window.dispatchEvent(new CustomEvent('inkwave:open-save'))
+            }
+          })
       }
     })
   }, [])
@@ -1028,14 +1039,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
                 above the main controls (when opened with the STYLE button) */}
             {showStyle && editor && (
-              <div className={`flex items-center px-4 py-2 ${showMain ? 'border-b border-stone-200' : ''}`}>
+              <div className={`flex items-center px-3 py-1.5 ${showMain ? 'border-b border-stone-200' : ''}`}>
                 <StyleBar editor={editor} onActivity={armStyleTimer} />
               </div>
             )}
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-4 py-2 ${isTouch ? 'justify-between' : 'gap-4'}`}>
+            <div className={`flex items-center px-3 py-1.5 ${isTouch ? 'justify-between' : 'gap-3'}`}>
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
