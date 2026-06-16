@@ -12,6 +12,7 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { readAppJson, writeAppJson } from './opfs'
+import { setDocSource } from './docSource'
 
 // The OneDrive folder the writer chose to sync into. id '' (or null) = the OneDrive root. `path` is
 // a human-readable location ("Documents/Inkwave") for display. Persisted so the choice sticks.
@@ -252,7 +253,9 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   // proofs + receipts).
   const file = composeTraceFile(buildExportBundle(doc, snapshots))
   try {
-    return { ok: true, webUrl: await putFile(token, oneDriveFilename(doc.id) ?? bundleFilename(doc), file) }
+    const webUrl = await putFile(token, oneDriveFilename(doc.id) ?? bundleFilename(doc), file)
+    setDocSource(doc.id, 'onedrive')
+    return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }
   }

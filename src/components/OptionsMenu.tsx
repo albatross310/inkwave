@@ -16,6 +16,7 @@ import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { oneDriveFilename } from '../storage/onedrive'
 import { AccountMenuItems } from './AccountControl'
 import { getSaveFileName } from '../storage/folder'
+import { getDocSource } from '../storage/docSource'
 import { inkwaveFileName } from '../provenance/bundle'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
@@ -266,19 +267,31 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
   )
 }
 
+const SOURCE_LABEL: Record<string, { text: string; dot: string }> = {
+  gdrive: { text: 'Google Drive', dot: '#4285F4' },
+  onedrive: { text: 'OneDrive', dot: '#0364B8' },
+  local: { text: 'this computer', dot: '#9b9b9b' },
+}
+
 function RecentPanel() {
   const [recents, setRecents] = useState<DocumentMeta[] | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
+  const [sources, setSources] = useState<Record<string, string>>({})
   useEffect(() => {
     void listMeta().then(async (metas) => {
       setRecents(metas)
       // Show the FILE NAME, not the content preview: prefer the saved OneDrive/local file name,
-      // else the .inkwave name the title would produce.
+      // else the .studio name the title would produce. Also tag each with where it's synced.
       const map: Record<string, string> = {}
+      const src: Record<string, string> = {}
       for (const m of metas) {
-        map[m.id] = oneDriveFilename(m.id) ?? (await getSaveFileName(m.id)) ?? inkwaveFileName(m.title)
+        const local = await getSaveFileName(m.id)
+        map[m.id] = oneDriveFilename(m.id) ?? local ?? inkwaveFileName(m.title)
+        const s = getDocSource(m.id) ?? (local ? 'local' : null)
+        if (s) src[m.id] = s
       }
       setNames(map)
+      setSources(src)
     })
   }, [])
   return (
@@ -288,11 +301,19 @@ function RecentPanel() {
       {recents?.length === 0 && <p className="text-sm text-stone-400 px-1">No documents yet.</p>}
       {recents?.map(m => (
         <button key={m.id} type="button" onClick={() => openDocument(m.id)}
-          className="w-full text-left px-4 py-2 font-serif hover:bg-stone-50 transition-colors"
+          className="w-full text-left px-4 py-2 font-serif hover:bg-stone-50 transition-colors flex items-center justify-between gap-2"
           style={{ border: '1px solid #eee', borderRadius: 8 }}
         >
-          <span style={{ color: INK }}>{names[m.id] ?? inkwaveFileName(m.title)}</span>
-          <span className="block text-xs text-stone-400">{new Date(m.updatedAt).toLocaleString()}</span>
+          <span className="min-w-0">
+            <span className="block truncate" style={{ color: INK }}>{names[m.id] ?? inkwaveFileName(m.title)}</span>
+            <span className="block text-xs text-stone-400">{new Date(m.updatedAt).toLocaleString()}</span>
+          </span>
+          {sources[m.id] && SOURCE_LABEL[sources[m.id]] && (
+            <span className="flex items-center gap-1 text-[11px] text-stone-400 whitespace-nowrap">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ background: SOURCE_LABEL[sources[m.id]].dot }} />
+              {SOURCE_LABEL[sources[m.id]].text}
+            </span>
+          )}
         </button>
       ))}
     </div>

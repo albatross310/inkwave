@@ -6,6 +6,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
+import { setDocSource } from './docSource'
 
 const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'
@@ -292,7 +293,9 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (!token) return { ok: false, webUrl: null }
   const file = composeTraceFile(buildExportBundle(doc, snapshots))
   try {
-    return { ok: true, webUrl: await uploadDrive(token, doc.id, gDriveFilename(doc.id) ?? bundleFilename(doc), file) }
+    const webUrl = await uploadDrive(token, doc.id, gDriveFilename(doc.id) ?? bundleFilename(doc), file)
+    setDocSource(doc.id, 'gdrive')
+    return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }
   }
