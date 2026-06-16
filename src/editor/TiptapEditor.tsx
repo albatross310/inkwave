@@ -44,7 +44,6 @@ import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
 import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
-import { exportDocPdf } from './pdfExport'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
@@ -659,8 +658,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('afterprint', restore)
     window.print()
   }
-  // A real A4 PDF document (selectable text, paginated), not a print-to-PDF of the page.
-  function exportPdf() { void exportDocPdf(docRef.current.title, docRef.current.contentJson) }
   async function onGdriveFileOpen(f: { id: string; name: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
@@ -956,6 +953,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   return (
     <ComplianceContext.Provider value={compliance}>
       <div>
+        {/* Faded seal on every printed/PDF page (hidden on screen; fixed → repeats per print page). */}
+        <div className="print-seal" aria-hidden="true" />
         {otherDevice && !conflictDismissed && (
           <div
             className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif"
@@ -1162,7 +1161,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
                 onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
                 onPrint={printDoc}
-                onExportPdf={exportPdf}
+                onExportPdf={printDoc}
                 googleDriveActive={gdriveActive}
               />
             </div>

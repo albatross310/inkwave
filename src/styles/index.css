@@ -269,20 +269,31 @@
   }
 }
 
-/* ── Print / "Export PDF" ── a clean, paginated copy: just the writing, no chrome or decoration.
-   Both the Print and Export-PDF menu actions call window.print(); choose a printer or "Save as PDF". */
+/* ── Print / "Export PDF" ── a faithful A4 render of the EDITOR's pages, so the PDF matches the
+   screen: same font + line spacing + wrapping (it's the browser laying out the same content), and
+   the page breaks land where the editor's page gaps are. Both Print and Export PDF call
+   window.print(); choose a printer or "Save as PDF". */
+.print-seal { display: none; }
 @media print {
   html, body { background: #fff !important; }
-  /* Hide all floating chrome (toolbar, snapshot/sync pills, scroll-head) + the wavy background. */
+  /* Hide floating chrome + the wavy background + the decorative parchment panels. */
   .fixed { display: none !important; }
   .inkwave-editor-surface::before { display: none !important; }
   .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; }
-  /* Drop the discrete-sheet decoration; let the browser paginate the flowing text. */
-  .inkwave-sheets, .inkwave-sheet, .inkwave-page-gap, .inkwave-sheet-num { display: none !important; }
+  .inkwave-sheets, .inkwave-sheet, .inkwave-sheet-num { display: none !important; }
   .scroll-paper, .scroll-paper.inkwave-gapped { background: #fff !important; box-shadow: none !important; }
-  /* Normalise the writing: black serif, no SCAS red highlight, no hint badges. */
+  /* Break the page exactly where the editor's page gap is (and collapse the gap's reserved space),
+     so the same words land on each page as on screen. */
+  .inkwave-page-gap { break-before: page !important; height: 0 !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; }
+  .inkwave-page-gap-band { display: none !important; }
+  /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; }
   .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
-  @page { margin: 2cm; }
+  /* The faded seal on every printed page (fixed → repeats per page). */
+  .print-seal {
+    display: block; position: fixed; left: 16mm; bottom: 12mm; width: 56px; height: 56px;
+    background: url('/inkwave-logo.svg') center / contain no-repeat; opacity: 0.06;
+  }
+  @page { size: A4; margin: 18mm; }
 }

@@ -117,6 +117,23 @@ export function OptionsMenu({
     return () => window.removeEventListener('inkwave:open-save', open)
   }, [])
 
+  // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open · ⌘/Ctrl+N New ·
+  // ⌘/Ctrl+P Print. (Ctrl+N may be reserved by the browser for a new window and can't always be
+  // intercepted.)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'p') { e.preventDefault(); onPrint?.() }
+      else if (k === 's' && e.shiftKey) { e.preventDefault(); setModal('savecopy') }
+      else if (k === 's') { e.preventDefault(); setModal('save') }
+      else if (k === 'o') { e.preventDefault(); setModal('upload') }
+      else if (k === 'n' && !e.shiftKey) { e.preventDefault(); void createDocument('Untitled', emptyTiptapDoc()) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onPrint]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function onOpenFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-picking the same file
