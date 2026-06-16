@@ -139,13 +139,15 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
           <p className="text-center text-[#5c2d8a] py-10">✓ Payment received — activating Insignia…</p>
         ) : (
           <>
+            {/* PayPal first — its own gold-branded button (PayPal can't embed; opens its popup). */}
+            <button type="button" disabled={busy} onClick={payPaypal} aria-label="Pay with PayPal"
+              className="w-full rounded-md py-2.5 mb-3 font-sans font-bold italic text-lg shadow-sm hover:brightness-95 transition disabled:opacity-50"
+              style={{ backgroundColor: '#ffc439' }}>
+              <span style={{ color: '#003087' }}>Pay</span><span style={{ color: '#009cde' }}>Pal</span>
+            </button>
             {PK
               ? <div ref={cardRef} className="min-h-[18rem]" />
               : <p className="text-xs text-amber-600 text-center py-6">Card checkout needs VITE_STRIPE_PUBLISHABLE_KEY in .env.</p>}
-            <button type="button" disabled={busy} onClick={payPaypal}
-              className="mt-3 w-full rounded-md border border-[#5c2d8a]/40 py-2 text-stone-700 hover:bg-[#5c2d8a] hover:text-white transition-colors disabled:opacity-50">
-              pay with PayPal
-            </button>
           </>
         )}
       </div>
