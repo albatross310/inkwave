@@ -172,9 +172,16 @@ function loadPicker(): Promise<void> {
 export async function pickGoogleDriveFolder(): Promise<{ id: string; name: string } | null> {
   const API_KEY = import.meta.env?.VITE_GOOGLE_API_KEY as string | undefined
   if (!CLIENT_ID || !API_KEY) return null
-  const token = await getDriveToken(true)
+  // Open the picker as FAST as possible after the click. Warm the picker script in parallel and use
+  // the EXISTING (silent) grant — an interactive sign-in here would burn the click's user-activation,
+  // and Firefox then suppresses the picker iframe's storage-access ("allow cookies") prompt, so the
+  // dialog never appears (the "have to hit F12" symptom is exactly that lost-activation timing).
+  // Interactive fallback only if not connected yet (rare — callers connect Drive first).
+  const pickerReady = loadPicker()
+  let token = await getDriveToken(false)
+  if (!token) token = await getDriveToken(true)
   if (!token) return null
-  await loadPicker()
+  await pickerReady
   const picker = (window as unknown as { google: { picker: PickerNS } }).google.picker
   return new Promise((resolve) => {
     const view = new picker.DocsView(picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder')
