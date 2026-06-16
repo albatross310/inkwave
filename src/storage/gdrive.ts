@@ -66,7 +66,11 @@ export async function getDriveToken(interactive: boolean): Promise<string | null
       }
     }
     try {
-      client.requestAccessToken({ prompt: interactive ? '' : 'none' })
+      // 'select_account' on interactive sign-in: always show the account chooser. Without it Google
+      // silently auto-picks the browser's default account, so anyone signed into multiple Google
+      // accounts gets routed to the wrong one (→ 401) with no way to choose. 'none' stays silent for
+      // the background token refresh.
+      client.requestAccessToken({ prompt: interactive ? 'select_account' : 'none' })
     } catch {
       resolve(null)
     }
