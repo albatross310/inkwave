@@ -34,8 +34,8 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, pickGoogleDriveFolder } from '../storage/gdrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, createOneDriveFolder, oneDriveFilename, setOneDriveFilename, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, pickGoogleDriveFolder, createGoogleDriveFolder, setChosenGDriveFolder } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
@@ -617,6 +617,38 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void syncOneDrive()
   }
 
+  // "New folder" quick actions (Save menu): create a folder in the cloud, target it, sync into it.
+  async function newGoogleDriveFolder() {
+    const name = window.prompt('Name the new Google Drive folder')?.trim()
+    if (!name) return
+    const folder = await createGoogleDriveFolder(name)
+    if (!folder) return
+    setChosenGDriveFolder(folder.id)
+    clearGoogleDriveFile(docRef.current.id)
+    setGdriveUrl(null)
+    const snaps = await listSnapshots(docRef.current.id)
+    const r = await syncToGoogleDrive(docRef.current, snaps)
+    if (r.ok) {
+      gdriveActiveRef.current = true
+      oneDriveActiveRef.current = false
+      setGdriveActive(true)
+      setLastGdriveSync(Date.now())
+      setGdriveUrl(r.webUrl)
+    }
+  }
+  async function newOneDriveFolder() {
+    const acct = await oneDriveAccount()
+    if (!acct) { await startOneDriveSignIn(); return }
+    const name = window.prompt('Name the new OneDrive folder')?.trim()
+    if (!name) return
+    try {
+      const folder = await createOneDriveFolder(null, name)
+      setChosenFolder({ id: folder.id, path: folder.name })
+      void addRecentFolder({ id: folder.id, path: folder.name })
+      void syncOneDrive()
+    } catch { /* failure surfaces via the sync-status pill */ }
+  }
+
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
   async function saveAsOneDrive() {
@@ -1047,11 +1079,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 folderName={fileName}
                 onSyncOneDrive={oneDriveConfigured() ? syncOneDrive : undefined}
                 onChooseOneDriveFolder={chooseOneDriveFolder}
+                onNewOneDriveFolder={oneDriveConfigured() ? newOneDriveFolder : undefined}
                 onSaveAsOneDrive={saveAsOneDrive}
                 oneDriveAccount={oneDriveAcct}
                 onSyncGoogleDrive={googleDriveConfigured() ? syncGoogleDrive : undefined}
                 onSaveAsGoogleDrive={saveAsGoogleDrive}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
+                onNewGoogleDriveFolder={googleDriveConfigured() ? newGoogleDriveFolder : undefined}
                 googleDriveActive={gdriveActive}
               />
             </div>

@@ -215,6 +215,24 @@ export async function pickGoogleDriveFolder(): Promise<{ id: string; name: strin
   })
 }
 
+// Create a Drive folder (at the writer's root) and return it. drive.file lets us create + then touch
+// folders WE created — so the new folder becomes a valid sync target. Used by the Save-menu "New
+// folder" action (the hosted Picker has no create-folder of its own).
+const FILES_API = 'https://www.googleapis.com/drive/v3/files'
+export async function createGoogleDriveFolder(name: string): Promise<{ id: string; name: string } | null> {
+  if (!CLIENT_ID) return null
+  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  if (!token) return null
+  const res = await fetch(`${FILES_API}?fields=id,name`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
+  })
+  if (!res.ok) return null
+  const d = (await res.json()) as { id: string; name: string }
+  return { id: d.id, name: d.name }
+}
+
 export interface SyncResult { ok: boolean; webUrl: string | null }
 
 /** Start sign-in / consent (interactive — call from a click). Returns true if we got a token. */
