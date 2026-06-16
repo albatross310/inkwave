@@ -80,6 +80,7 @@ export function OptionsMenu({
   onChooseGoogleDriveFolder,
   onUploadGoogleDrive,
   onUploadOneDrive,
+  onPrint,
   googleDriveActive,
 }: {
   paperRight: number
@@ -97,6 +98,7 @@ export function OptionsMenu({
   onChooseGoogleDriveFolder?: () => void
   onUploadGoogleDrive?: () => void
   onUploadOneDrive?: () => void
+  onPrint?: () => void
   googleDriveActive?: boolean
 }) {
   const navigate = useNavigate()
@@ -135,6 +137,8 @@ export function OptionsMenu({
     { label: 'Open Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
     { label: 'Save a copy…', run: () => setModal('savecopy') },
+    { label: 'Export PDF', run: () => onPrint?.() },
+    { label: 'Print', run: () => onPrint?.() },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
     { label: 'Verify a record', run: () => navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },

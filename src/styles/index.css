@@ -255,3 +255,21 @@
     }
   }
 }
+
+/* ── Print / "Export PDF" ── a clean, paginated copy: just the writing, no chrome or decoration.
+   Both the Print and Export-PDF menu actions call window.print(); choose a printer or "Save as PDF". */
+@media print {
+  html, body { background: #fff !important; }
+  /* Hide all floating chrome (toolbar, snapshot/sync pills, scroll-head) + the wavy background. */
+  .fixed { display: none !important; }
+  .inkwave-editor-surface::before { display: none !important; }
+  .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; }
+  /* Drop the discrete-sheet decoration; let the browser paginate the flowing text. */
+  .inkwave-sheets, .inkwave-sheet, .inkwave-page-gap, .inkwave-sheet-num { display: none !important; }
+  .scroll-paper, .scroll-paper.inkwave-gapped { background: #fff !important; box-shadow: none !important; }
+  /* Normalise the writing: black serif, no SCAS red highlight, no hint badges. */
+  .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
+  .scas-red { background: none !important; color: #1a1a1a !important; }
+  .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
+  @page { margin: 2cm; }
+}

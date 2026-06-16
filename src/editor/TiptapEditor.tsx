@@ -590,23 +590,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
   // "Save a copy" to Google Drive: forget the current Drive file so a fresh one is created, then sync.
+  // "Save a copy" to Google Drive: forget the current file, then open the picker to choose a folder +
+  // name for the NEW copy. The picker's "Sync here" creates a fresh file there (the old one is left
+  // as-is). Same UI as choosing a sync folder — just preceded by clearing the file id.
   async function saveAsGoogleDrive() {
-    if (!(await startGoogleDriveSignIn())) return        // sign in within the click if not already
-    const current = (gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/, '')
-    const name = window.prompt('Save a copy to Google Drive as:', current)?.trim()
-    if (!name) return
-    clearGoogleDriveFile(docRef.current.id)              // a NEW file (don't update the old one)
-    await renameGoogleDriveFile(docRef.current.id, name) // store the new name (no old file → just sets it)
+    if (!(await startGoogleDriveSignIn())) return
+    clearGoogleDriveFile(docRef.current.id) // ensure the picker creates a NEW file
     setGdriveUrl(null)
-    const snaps = await listSnapshots(docRef.current.id)
-    const r = await syncToGoogleDrive(docRef.current, snaps)
-    if (r.ok) {
-      gdriveActiveRef.current = true
-      oneDriveActiveRef.current = false
-      setGdriveActive(true)
-      setLastGdriveSync(Date.now())
-      setGdriveUrl(r.webUrl)
-    }
+    setGdrivePickerOpen(true)
   }
 
   // Pick a Google Drive folder — our OWN picker (lists the folders Inkwave created on drive.file,
@@ -657,6 +648,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!(await startGoogleDriveSignIn())) return
     setGdriveOpenerOpen(true)
   }
+
+  // Print / Export PDF — the print stylesheet renders just the writing; the browser dialog lets the
+  // writer pick a printer or "Save as PDF". Set the title so the PDF gets a sensible filename.
+  function printDoc() {
+    const prev = document.title
+    document.title = (docRef.current.title || 'inkwave').trim()
+    const restore = () => { document.title = prev; window.removeEventListener('afterprint', restore) }
+    window.addEventListener('afterprint', restore)
+    window.print()
+  }
   async function onGdriveFileOpen(f: { id: string; name: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
@@ -676,12 +677,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
   // file stays as it was). Mirrors the Chromium "Save a copy".
+  // "Save a copy" to OneDrive: open the folder picker (choose folder + name) — picking a new
+  // folder/name writes a new file there, leaving the old one. Same UI as choosing a sync folder.
   async function saveAsOneDrive() {
-    const current = (oneDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/, '')
-    const name = window.prompt('Save a copy to OneDrive as:', current)
-    if (!name || !name.trim()) return
-    setOneDriveFilename(docRef.current.id, name.trim())
-    await syncOneDrive()
+    const acct = await oneDriveAccount()
+    if (!acct) { await startOneDriveSignIn(); return }
+    setFolderPickerOpen(true)
   }
 
   // Resume Google Drive sync when a gdrive-synced doc loads (e.g. opened via Upload) — so it keeps
@@ -1157,6 +1158,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
                 onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
                 onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
+                onPrint={printDoc}
                 googleDriveActive={gdriveActive}
               />
             </div>
