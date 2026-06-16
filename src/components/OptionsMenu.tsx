@@ -127,6 +127,7 @@ export function OptionsMenu({
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       const k = e.key.toLowerCase()
       if (k === 'p') { e.preventDefault(); onPrint?.() }
+      else if (k === 'e') { e.preventDefault(); setModal('export') }
       else if (k === 's' && e.shiftKey) { e.preventDefault(); setModal('savecopy') }
       else if (k === 's') { e.preventDefault(); setModal('save') }
       else if (k === 'o') { e.preventDefault(); setModal('upload') }
