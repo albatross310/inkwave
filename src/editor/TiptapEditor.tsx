@@ -38,7 +38,6 @@ import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clear
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
-import { useZoomScale } from './useZoomScale'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
@@ -109,7 +108,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [gdriveActive, setGdriveActive] = useState(false)
   const [lastGdriveSync, setLastGdriveSync] = useState<number | null>(null)
   const [gdriveUrl, setGdriveUrl] = useState<string | null>(null)
-  const zoom = useZoomScale() // counter page zoom so the toolbar stays a constant size
   const [otherDevice, setOtherDevice] = useState(false) // another device looks active on this doc
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const [wordCount, setWordCount] = useState(0) // live document word count (shown in the record panel)
@@ -336,9 +334,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // keyboard) so page scroll doesn't fool it. 150px threshold ignores URL-bar resizes.
   const kbMaxRef = useRef(0)
   useEffect(() => {
+    // Soft keyboards only exist on touch devices. On desktop, browser ZOOM (Ctrl +/−) also shrinks
+    // visualViewport.height — which would falsely read as "keyboard up" and hide the snapshot/sync
+    // pills (and skew the baseline so they never return). So only run this on touch; pinch-zoom on
+    // touch is filtered via visualViewport.scale below.
+    if (!isTouchDevice()) return
     const vv = window.visualViewport
     if (!vv) return
     const onVV = () => {
+      if (vv.scale > 1.01) return // pinch-zoomed: the viewport shrink is zoom, not the keyboard
       kbMaxRef.current = Math.max(kbMaxRef.current, vv.height)
       setKeyboardUp(vv.height < kbMaxRef.current - 150)
     }
@@ -982,13 +986,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{
-            paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem',
-            // Scale the WHOLE bottom bar from its bottom edge so the pill AND its gap stay constant
-            // under zoom (no vertical drift). Desktop only; no transform at 100%.
-            transform: !isTouch && zoom !== 1 ? `scale(${zoom})` : undefined,
-            transformOrigin: 'bottom center',
-          }}
+          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
         >
           <div
             ref={footerRef}
