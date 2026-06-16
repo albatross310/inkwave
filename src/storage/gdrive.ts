@@ -106,7 +106,7 @@ export async function renameGoogleDriveFile(docId: string, name: string): Promis
   setGDriveFilename(docId, clean)
   const id = driveFileId(docId)
   if (!id) return true // not synced yet — the next sync creates it with this name
-  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return false
   const res = await fetch(`${FILES_API}/${id}?fields=id,name`, {
     method: 'PATCH',
@@ -250,7 +250,7 @@ export async function pickGoogleDriveFolder(): Promise<{ id: string; name: strin
 const FILES_API = 'https://www.googleapis.com/drive/v3/files'
 export async function createGoogleDriveFolder(name: string): Promise<{ id: string; name: string } | null> {
   if (!CLIENT_ID) return null
-  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
   const res = await fetch(`${FILES_API}?fields=id,name`, {
     method: 'POST',
@@ -267,7 +267,7 @@ export async function createGoogleDriveFolder(name: string): Promise<{ id: strin
 // privacy-preserving drive.file scope can't enumerate folders the app didn't make.
 export async function listGoogleDriveFolders(): Promise<Array<{ id: string; name: string }>> {
   if (!CLIENT_ID) return []
-  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
   const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false")
   const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=name`, {
@@ -286,7 +286,7 @@ export function googleDriveFileId(docId: string): string | null { return driveFi
 // open via "This computer" (the mounted Drive folder) on desktop.
 export async function listGoogleDriveFiles(): Promise<Array<{ id: string; name: string }>> {
   if (!CLIENT_ID) return []
-  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
   const q = encodeURIComponent("(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false")
   const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
@@ -297,7 +297,7 @@ export async function listGoogleDriveFiles(): Promise<Array<{ id: string; name: 
 
 /** Download a Drive file's text by id (the app has drive.file access to files it created/opened). */
 export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
-  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
   const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return null

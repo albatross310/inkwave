@@ -650,7 +650,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Upload: open a file FROM Google Drive (incl. shared with you) and adopt it as the sync target, so
   // it keeps syncing there with no Save. openInkwaveFile reloads; the resume effect below re-links it.
-  function uploadFromGoogleDrive() { setGdriveOpenerOpen(true) }
+  async function uploadFromGoogleDrive() {
+    // Get the token INSIDE the click (interactive sign-in if needed) so the opener can list silently —
+    // an interactive request from the opener's effect isn't a user gesture and hangs.
+    if (!(await startGoogleDriveSignIn())) return
+    setGdriveOpenerOpen(true)
+  }
   async function onGdriveFileOpen(f: { id: string; name: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
