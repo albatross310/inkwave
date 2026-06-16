@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listQuickFolders, getRecentFolders, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listQuickFolders, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
 
-// A small folder browser for OneDrive: drill into folders from the root, then "Sync here" to choose
-// the destination for the .trace.json. Reads folders live via Microsoft Graph (the writer must be
-// signed in). Returns { id, path } — id '' means the OneDrive root.
-const INK = '#5c2d8a'
+// A small folder browser for OneDrive: drill into folders from the root, create new ones, then
+// "Sync here" to choose the destination for the .trace.json. Reads folders live via Microsoft Graph
+// (the writer must be signed in). Returns { id, path } — id '' means the OneDrive root.
+// Styled to read as OneDrive (Microsoft blue + cloud mark), the way the Insignia PayPal button reads
+// as PayPal.
+const ONE = '#0364B8'        // OneDrive brand blue
+const ONE_HOVER = '#f1f7fc'  // pale blue row hover
+
+// A clean blue cloud — the OneDrive mark, paired with the wordmark below.
+function OneDriveCloud() {
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" style={{ display: 'block' }}>
+      <path fill={ONE} d="M6.6 19A4.6 4.6 0 0 1 5.8 9.9 6 6 0 0 1 17.7 8.8 4.6 4.6 0 0 1 18.2 19H6.6z" />
+    </svg>
+  )
+}
 
 type Crumb = { id: string; name: string }
 
@@ -15,6 +27,10 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
   const [quick, setQuick] = useState<DriveFolder[]>([])
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : null
   const currentPath = crumbs.map((c) => c.name).join('/')
@@ -37,7 +53,7 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
       .then((f) => { if (!cancelled) setFolders(f) })
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
-  }, [currentId])
+  }, [currentId, reload])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -45,23 +61,42 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  async function createFolder() {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true); setError(null)
+    try {
+      await createOneDriveFolder(currentId, name)
+      setCreating(false); setNewName('')
+      setReload((r) => r + 1) // re-list so the new folder shows
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label="Choose OneDrive folder" onMouseDown={(e) => e.stopPropagation()}
-        className="relative bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${INK}bf`, borderRadius: 14 }}>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-serif" style={{ color: INK }}>Choose OneDrive folder</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-[#5c2d8a] text-2xl leading-none">×</button>
+        className="relative bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${ONE}66`, borderRadius: 14 }}>
+        {/* OneDrive-branded header */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <OneDriveCloud />
+            <span className="font-sans font-semibold text-xl tracking-tight" style={{ color: ONE }}>OneDrive</span>
+          </div>
+          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
 
         {/* Breadcrumb */}
-        <div className="text-xs text-stone-500 mb-2 flex flex-wrap items-center gap-1 font-serif">
-          <button type="button" className="hover:underline" style={{ color: INK }} onClick={() => setCrumbs([])}>OneDrive</button>
+        <div className="text-xs text-stone-500 mb-2 flex flex-wrap items-center gap-1 font-sans">
+          <button type="button" className="hover:underline" style={{ color: ONE }} onClick={() => setCrumbs([])}>OneDrive</button>
           {crumbs.map((c, i) => (
             <span key={c.id} className="flex items-center gap-1">
               <span className="text-stone-300">/</span>
-              <button type="button" className="hover:underline" style={{ color: INK }} onClick={() => setCrumbs(crumbs.slice(0, i + 1))}>{c.name}</button>
+              <button type="button" className="hover:underline" style={{ color: ONE }} onClick={() => setCrumbs(crumbs.slice(0, i + 1))}>{c.name}</button>
             </span>
           ))}
         </div>
@@ -75,7 +110,7 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
               {shortcuts.map((f, i) => (
                 <button key={`${f.id}-${i}`} type="button"
                   onClick={() => (recent.length ? onPick({ id: f.id, path: recent[i].path }) : setCrumbs([{ id: f.id, name: f.name }]))}
-                  className="text-xs px-2.5 py-1 rounded-full font-serif hover:bg-stone-50" style={{ border: `1px solid ${INK}40`, color: INK }}>
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f7fc]" style={{ border: `1px solid ${ONE}40`, color: ONE }}>
                   🗁 {f.name}
                 </button>
               ))}
@@ -83,21 +118,43 @@ export function OneDriveFolderPicker({ onPick, onClose }: { onPick: (folder: One
           </div>
         )}
 
-        <div className="border rounded-lg max-h-64 overflow-auto" style={{ borderColor: '#eee' }}>
+        {/* Folder-list header with the New folder control. */}
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[11px] uppercase tracking-wide text-stone-400">Folders</div>
+          {!creating && (
+            <button type="button" onClick={() => setCreating(true)} className="text-xs font-sans hover:underline flex items-center gap-1" style={{ color: ONE }}>
+              <span className="text-sm leading-none">＋</span> New folder
+            </button>
+          )}
+        </div>
+        {creating && (
+          <div className="flex gap-1.5 mb-2">
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Folder name"
+              onKeyDown={(e) => { if (e.key === 'Enter') void createFolder(); if (e.key === 'Escape') { setCreating(false); setNewName('') } }}
+              className="flex-1 text-sm font-sans rounded px-2 py-1 outline-none" style={{ border: `1px solid ${ONE}66` }} />
+            <button type="button" onClick={() => void createFolder()} disabled={!newName.trim() || busy}
+              className="text-xs font-sans text-white px-3 rounded disabled:opacity-50" style={{ background: ONE }}>Create</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName('') }} className="text-xs font-sans text-stone-400 px-2 hover:text-stone-600">Cancel</button>
+          </div>
+        )}
+
+        <div className="border rounded-lg max-h-64 overflow-auto" style={{ borderColor: '#e6eef5' }}>
           {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
           {!error && folders === null && <p className="text-sm text-stone-400 p-3">Loading…</p>}
           {!error && folders?.length === 0 && <p className="text-sm text-stone-400 p-3">No sub-folders here.</p>}
           {folders?.map((f) => (
             <button key={f.id} type="button" onClick={() => setCrumbs([...crumbs, { id: f.id, name: f.name }])}
-              className="w-full text-left px-3 py-2 text-sm font-serif hover:bg-stone-50 border-b last:border-b-0 flex items-center gap-2"
-              style={{ borderColor: '#f0f0f0', color: '#444' }}>
+              className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2"
+              style={{ borderColor: '#f0f4f8', color: '#33414f' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = ONE_HOVER)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
               <span aria-hidden="true">🗁</span>{f.name}
             </button>
           ))}
         </div>
 
         <button type="button" onClick={() => onPick({ id: currentId ?? '', path: currentPath })}
-          className="mt-4 px-4 py-2.5 font-serif text-white" style={{ background: INK, borderRadius: 10 }}>
+          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition" style={{ background: ONE, borderRadius: 10 }}>
           Sync here{currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}
         </button>
       </div>

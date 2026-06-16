@@ -223,6 +223,21 @@ export async function listFolders(parentId: string | null): Promise<DriveFolder[
   return data.value.filter((it) => it.folder).map((it) => ({ id: it.id, name: it.name }))
 }
 
+/** Create a sub-folder in `parentId` (null/'' = OneDrive root) and return it. Auto-renames on clash. */
+export async function createOneDriveFolder(parentId: string | null, name: string): Promise<DriveFolder> {
+  const token = await getSilentToken()
+  if (!token) throw new Error('not signed in')
+  const base = parentId ? `${GRAPH}/me/drive/items/${parentId}/children` : `${GRAPH}/me/drive/root/children`
+  const res = await fetch(base, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, folder: {}, '@microsoft.graph.conflictBehavior': 'rename' }),
+  })
+  if (!res.ok) throw new Error(`Graph create folder failed (${res.status})`)
+  const d = (await res.json()) as { id: string; name: string }
+  return { id: d.id, name: d.name }
+}
+
 export interface SyncResult { ok: boolean; webUrl: string | null }
 
 /**
