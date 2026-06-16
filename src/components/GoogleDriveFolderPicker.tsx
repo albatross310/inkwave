@@ -7,16 +7,19 @@ import { listGoogleDriveFolders, createGoogleDriveFolder, getChosenGDriveFolder 
 // app CREATED (it can't enumerate your whole Drive). So it shows those + a New-folder button to make
 // more, lets you sync into one (or My Drive root), and rename the synced file in place. To open a
 // file someone ELSE sent, that's the separate per-file import (Google's file picker), not this.
-const G_BLUE = '#4285F4'   // Google brand blue (distinct from OneDrive's #0364B8)
-const G_HOVER = '#f5f9ff'
+const G_BLUE = '#4285F4'   // Google brand blue, for input focus + the selected-row tint
+const G_HOVER = '#e8f0fe'  // Google's light-blue selection tint
 
-// A small 3-colour Drive triangle mark.
+// The actual Google Drive logo (the prism of green/blue/yellow), not a flat triangle.
 function DriveMark() {
   return (
-    <svg viewBox="0 0 24 24" width="22" height="20" aria-hidden="true" style={{ display: 'block' }}>
-      <path fill="#34A853" d="M12 3 2 21 12 15z" />
-      <path fill="#4285F4" d="M12 3 22 21 12 15z" />
-      <path fill="#FBBC05" d="M2 21 22 21 12 15z" />
+    <svg viewBox="0 0 87.3 78" width="22" height="20" aria-hidden="true" style={{ display: 'block' }}>
+      <path fill="#0066da" d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" />
+      <path fill="#00ac47" d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" />
+      <path fill="#ea4335" d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" />
+      <path fill="#00832d" d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" />
+      <path fill="#2684fc" d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" />
+      <path fill="#ffba00" d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" />
     </svg>
   )
 }
@@ -111,7 +114,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
         <div className="flex items-center justify-between mb-1.5">
           <div className="text-[11px] uppercase tracking-wide text-stone-400">Your Inkwave folders</div>
           {!creating && (
-            <button type="button" onClick={() => setCreating(true)} className="text-xs font-sans hover:underline flex items-center gap-1" style={{ color: G_BLUE }}>
+            <button type="button" onClick={() => setCreating(true)} className="text-xs font-sans hover:underline flex items-center gap-1 text-[#5f6368]">
               <span className="text-sm leading-none">＋</span> New folder
             </button>
           )}
@@ -122,7 +125,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
               onKeyDown={(e) => { if (e.key === 'Enter') void createFolder(); if (e.key === 'Escape') { setCreating(false); setNewName('') } }}
               className="flex-1 text-sm font-sans rounded px-2 py-1 outline-none" style={{ border: `1px solid ${G_BLUE}66` }} />
             <button type="button" onClick={() => void createFolder()} disabled={!newName.trim() || busy}
-              className="text-xs font-sans text-white px-3 rounded disabled:opacity-50" style={{ background: G_BLUE }}>Create</button>
+              className="text-xs font-sans px-3 rounded bg-[#f1f3f4] text-[#3c4043] hover:bg-[#e8eaed] disabled:opacity-50">Create</button>
             <button type="button" onClick={() => { setCreating(false); setNewName('') }} className="text-xs font-sans text-stone-400 px-2 hover:text-stone-600">Cancel</button>
           </div>
         )}
@@ -138,11 +141,14 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
           ))}
         </div>
 
-        {/* Inline file name with an explicit Rename button (double-click works too). */}
+        {/* Inline file name with an explicit Rename button (double-click works too). While syncing,
+            the name is replaced by "Loading…". */}
         {onRename && (
           <div className="flex items-center gap-2 mt-3 text-sm">
             <span className="text-stone-400 text-xs">File:</span>
-            {editing ? (
+            {syncing ? (
+              <span className="font-sans text-stone-400">Loading…</span>
+            ) : editing ? (
               <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)} onBlur={commitName}
                 onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameVal(stripExt(currentName)); setEditing(false) } }}
                 className="flex-1 text-sm font-sans rounded px-2 py-0.5 outline-none" style={{ border: `1px solid ${G_BLUE}66` }} />
@@ -150,7 +156,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
               <>
                 <span onDoubleClick={() => setEditing(true)} className="font-sans text-stone-600 truncate">{stripExt(currentName)}<span className="text-stone-300">.studio</span></span>
                 <button type="button" onClick={() => setEditing(true)} title="Rename file"
-                  className="text-xs font-sans px-1.5 py-0.5 rounded hover:bg-stone-100 whitespace-nowrap" style={{ color: G_BLUE }}>✎ Rename</button>
+                  className="text-xs font-sans px-1.5 py-0.5 rounded hover:bg-[#f1f3f4] whitespace-nowrap text-[#5f6368]">✎ Rename</button>
               </>
             )}
           </div>
@@ -158,8 +164,8 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
 
         <button type="button" disabled={syncing}
           onClick={async () => { setSyncing(true); try { await onPick(selected) } finally { onClose() } }}
-          className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition disabled:opacity-70" style={{ background: G_BLUE, borderRadius: 10 }}>
-          {syncing ? 'Syncing…' : `Sync here — ${selectedName}`}
+          className="mt-4 px-4 py-2.5 font-sans font-medium rounded-[10px] bg-[#f1f3f4] text-[#3c4043] hover:bg-[#e8eaed] transition disabled:opacity-70">
+          {syncing ? 'Loading…' : `Sync here — ${selectedName}`}
         </button>
       </div>
     </div>,

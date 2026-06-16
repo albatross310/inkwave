@@ -175,7 +175,9 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
         {onRename && currentName && (
           <div className="flex items-center gap-2 mt-3 text-sm">
             <span className="text-stone-400 text-xs">File:</span>
-            {editing ? (
+            {syncing ? (
+              <span className="font-sans text-stone-400">Loading…</span>
+            ) : editing ? (
               <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)} onBlur={commitName}
                 onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') { setNameVal(stripExt(currentName)); setEditing(false) } }}
                 className="flex-1 text-sm font-sans rounded px-2 py-0.5 outline-none" style={{ border: `1px solid ${ONE}66` }} />
@@ -192,7 +194,7 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
         <button type="button" disabled={syncing}
           onClick={async () => { setSyncing(true); try { await onPick({ id: currentId ?? '', path: currentPath }) } finally { onClose() } }}
           className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition disabled:opacity-70" style={{ background: ONE, borderRadius: 10 }}>
-          {syncing ? 'Syncing…' : `Sync here${currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}`}
+          {syncing ? 'Loading…' : `Sync here${currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}`}
         </button>
       </div>
     </div>,
