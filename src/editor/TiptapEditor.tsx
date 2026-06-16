@@ -35,12 +35,13 @@ import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, pickAndDownloadGoogleDriveFile, googleDriveFileId } from '../storage/gdrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
+import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
 import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { contentHash } from '../provenance/hash'
@@ -107,6 +108,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [gdrivePickerOpen, setGdrivePickerOpen] = useState(false)
   const [odOpenerOpen, setOdOpenerOpen] = useState(false)
+  const [gdriveOpenerOpen, setGdriveOpenerOpen] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null) // linked local save file name (Chromium)
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)
@@ -589,9 +591,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // "Save a copy" to Google Drive: forget the current Drive file so a fresh one is created, then sync.
   async function saveAsGoogleDrive() {
-    clearGoogleDriveFile(docRef.current.id)
+    const current = (gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/, '')
+    const name = window.prompt('Save a copy to Google Drive as:', current)?.trim()
+    if (!name) return
+    clearGoogleDriveFile(docRef.current.id)              // a NEW file (don't update the old one)
+    await renameGoogleDriveFile(docRef.current.id, name) // store the new name (no old file → just sets it)
     setGdriveUrl(null)
-    await syncGoogleDrive()
+    const snaps = await listSnapshots(docRef.current.id)
+    const r = await syncToGoogleDrive(docRef.current, snaps)
+    if (r.ok) {
+      gdriveActiveRef.current = true
+      oneDriveActiveRef.current = false
+      setGdriveActive(true)
+      setLastGdriveSync(Date.now())
+      setGdriveUrl(r.webUrl)
+    }
   }
 
   // Pick a Google Drive folder — our OWN picker (lists the folders Inkwave created on drive.file,
@@ -636,10 +650,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Upload: open a file FROM Google Drive (incl. shared with you) and adopt it as the sync target, so
   // it keeps syncing there with no Save. openInkwaveFile reloads; the resume effect below re-links it.
-  async function uploadFromGoogleDrive() {
-    const f = await pickAndDownloadGoogleDriveFile()
-    if (!f) return
-    await openInkwaveFile(new File([f.text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+  function uploadFromGoogleDrive() { setGdriveOpenerOpen(true) }
+  async function onGdriveFileOpen(f: { id: string; name: string }) {
+    const text = await downloadGoogleDriveFile(f.id)
+    if (!text) return
+    await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
   }
   // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.
   async function uploadFromOneDrive() {
@@ -1052,6 +1067,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onPick={onGdriveFolderPicked}
             onClose={() => setGdrivePickerOpen(false)}
           />
+        )}
+        {gdriveOpenerOpen && (
+          <GoogleDriveFileOpener onOpen={onGdriveFileOpen} onClose={() => setGdriveOpenerOpen(false)} />
         )}
         {odOpenerOpen && (
           <OneDriveFileOpener onOpen={onOneDriveFileOpen} onClose={() => setOdOpenerOpen(false)} />

@@ -280,6 +280,29 @@ export async function listGoogleDriveFolders(): Promise<Array<{ id: string; name
 
 // ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
+
+// List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
+// your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
+// open via "This computer" (the mounted Drive folder) on desktop.
+export async function listGoogleDriveFiles(): Promise<Array<{ id: string; name: string }>> {
+  if (!CLIENT_ID) return []
+  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  if (!token) return []
+  const q = encodeURIComponent("(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false")
+  const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return []
+  const d = (await res.json()) as { files?: Array<{ id: string; name: string }> }
+  return d.files ?? []
+}
+
+/** Download a Drive file's text by id (the app has drive.file access to files it created/opened). */
+export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
+  const token = (await getDriveToken(false)) ?? (await getDriveToken(true))
+  if (!token) return null
+  const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return null
+  return res.text()
+}
 /** Adopt an opened Drive file as this doc's sync target, so future syncs UPDATE it (no Save needed). */
 export function adoptGoogleDriveFile(docId: string, fileId: string): void {
   setDriveFileId(docId, fileId)

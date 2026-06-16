@@ -192,7 +192,7 @@ export function OptionsMenu({
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
-          {modal === 'savecopy' && <SaveCopyPanel onExportBundle={onExportBundle} folderAvailable={folderAvailable} onSaveAs={onSaveAs} oneDriveAccount={oneDriveAccount} onSaveAsOneDrive={onSaveAsOneDrive} googleDriveActive={googleDriveActive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onDone={() => setModal(null)} />}
+          {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} oneDriveAccount={oneDriveAccount} onSaveAsOneDrive={onSaveAsOneDrive} googleDriveActive={googleDriveActive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -253,17 +253,21 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
           🗁 Choose Google Drive folder<span className="block text-xs text-stone-400">pick where it syncs · updates as you write</span>
         </MenuButton>
       )}
+      <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
+        ⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
+      </MenuButton>
     </div>
   )
 }
 
 // Save a copy — a separate file that then stays updated; pick where it goes. (Consolidated here from
 // the per-destination "Save a copy" buttons.)
-function SaveCopyPanel({ onExportBundle, folderAvailable, onSaveAs, oneDriveAccount, onSaveAsOneDrive, googleDriveActive, onSaveAsGoogleDrive, onDone }: {
-  onExportBundle?: () => void; folderAvailable?: boolean; onSaveAs?: () => void
+function SaveCopyPanel({ folderAvailable, onSaveAs, oneDriveAccount, onSaveAsOneDrive, googleDriveActive, onSaveAsGoogleDrive, onDone }: {
+  folderAvailable?: boolean; onSaveAs?: () => void
   oneDriveAccount?: string | null; onSaveAsOneDrive?: () => void
   googleDriveActive?: boolean; onSaveAsGoogleDrive?: () => void; onDone: () => void
 }) {
+  const any = (folderAvailable && onSaveAs) || (oneDriveAccount && onSaveAsOneDrive) || (googleDriveActive && onSaveAsGoogleDrive)
   return (
     <div className="flex flex-col gap-2.5 mt-2">
       <p className="text-xs text-stone-400 px-1">Save a separate copy that then keeps updating — pick where it goes.</p>
@@ -274,11 +278,9 @@ function SaveCopyPanel({ onExportBundle, folderAvailable, onSaveAs, oneDriveAcco
         <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>☁ OneDrive<span className="block text-xs text-stone-400">name a new file in OneDrive, then keep it updated</span></MenuButton>
       )}
       {googleDriveActive && onSaveAsGoogleDrive && (
-        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>▴ Google Drive<span className="block text-xs text-stone-400">a new file in Drive, then keep it updated</span></MenuButton>
+        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>▴ Google Drive<span className="block text-xs text-stone-400">name a new file in Drive, then keep it updated</span></MenuButton>
       )}
-      <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
-        ⤓ Download<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
-      </MenuButton>
+      {!any && <p className="text-xs text-stone-400 px-1">Set up a sync destination in “Save” first, then you can save a copy to it.</p>}
     </div>
   )
 }

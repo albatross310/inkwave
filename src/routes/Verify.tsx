@@ -38,6 +38,13 @@ export function Verify() {
     file.text().then(run)
   }
 
+  const [dragOver, setDragOver] = useState(false)
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault(); setDragOver(false)
+    const file = e.dataTransfer?.files?.[0]
+    if (file) void file.text().then(run)
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a' }}>
       <div className="w-full max-w-xl">
@@ -49,12 +56,16 @@ export function Verify() {
         </p>
 
         <label
-          className="block border-2 border-dashed rounded-xl px-4 py-8 text-center cursor-pointer hover:bg-stone-50"
-          style={{ borderColor: `${INK}55` }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragEnter={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          className="block border-2 border-dashed rounded-xl px-4 py-10 text-center cursor-pointer transition-colors"
+          style={{ borderColor: dragOver ? INK : `${INK}55`, background: dragOver ? `${INK}0d` : undefined }}
         >
           <input type="file" accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onFile} />
-          <span style={{ color: INK }}>Choose an export bundle</span>
-          <span className="block text-xs text-stone-400 mt-1">a .json file from the editor's “export bundle”</span>
+          <span style={{ color: INK }}>{dragOver ? 'Drop to verify' : 'Drop a record here, or choose one'}</span>
+          <span className="block text-xs text-stone-400 mt-1">a .studio file (or .inkwave) from the editor</span>
         </label>
 
         {busy && <p className="mt-4 text-stone-500">Verifying…</p>}
