@@ -49,7 +49,7 @@ export function Verify() {
     <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a' }}>
       <div className="w-full max-w-xl">
         <div className="flex items-start gap-4 mb-5">
-          <img src="/inkwave-logo.svg" alt="Inkwave" width={72} height={72} className="rounded-lg shrink-0" />
+          <img src="/fav-128.png" alt="Inkwave" width={72} height={72} className="rounded-lg shrink-0" />
           <div>
             <h1 className="text-2xl mb-1" style={{ color: INK }}>Verify an Inkwave record</h1>
             <p className="text-sm text-stone-500">

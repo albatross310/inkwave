@@ -75,16 +75,21 @@ export async function generatePdf({ html }) {
           links.forEach((l) => { if (!l.sheet) l.addEventListener('load', () => { if (--pending <= 0) finish() }, { once: true }) })
           setTimeout(finish, 4000)
         })
-        if (!document.fonts) return
         try {
-          await Promise.all([
-            document.fonts.load("400 16px 'EB Garamond'"),
-            document.fonts.load("italic 400 16px 'EB Garamond'"),
-            document.fonts.load("500 16px 'EB Garamond'"),
-            document.fonts.load("400 16px 'IM Fell DW Pica'"),
-            document.fonts.load("italic 400 16px 'IM Fell DW Pica'"),
-          ])
-          await document.fonts.ready
+          if (document.fonts) {
+            await Promise.all([
+              document.fonts.load("400 16px 'EB Garamond'"),
+              document.fonts.load("italic 400 16px 'EB Garamond'"),
+              document.fonts.load("500 16px 'EB Garamond'"),
+              document.fonts.load("400 16px 'IM Fell DW Pica'"),
+              document.fonts.load("italic 400 16px 'IM Fell DW Pica'"),
+            ])
+            await document.fonts.ready
+          }
+          // Wait for images (the seal) to finish so they render on the PDF — bounded by the outer race.
+          await Promise.all(Array.from(document.images).map((img) =>
+            img.complete ? null : new Promise((r) => { img.addEventListener('load', r, { once: true }); img.addEventListener('error', r, { once: true }) }),
+          ))
         } catch { /* ignore */ }
       }).catch(() => {}),
       sleep(9000),

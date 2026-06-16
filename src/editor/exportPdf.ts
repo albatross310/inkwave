@@ -67,12 +67,16 @@ export async function exportPdfToNewTab(title: string): Promise<boolean> {
   // to the PDF once it's ready (and close it on failure so the fallback dialog isn't doubled up).
   const win = window.open('', '_blank')
   if (win) { try { win.document.write(LOADING_DOC); win.document.close() } catch { /* ignore */ } }
+  // Never hang the loading tab: abort after 45s and fall back to the print dialog.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 45_000)
   try {
     const html = await buildPrintHtml(name)
     const res = await fetch('/api/pdf', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ html, title: name }),
+      signal: controller.signal,
     })
     if (!res.ok) throw new Error(`pdf route ${res.status}`)
     const blob = await res.blob()

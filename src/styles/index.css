@@ -90,7 +90,7 @@
     bottom: 28px;
     width: 176px;
     height: 176px;
-    background: url('/inkwave-logo.svg') center / contain no-repeat;
+    background: url('/fav-128.png') center / contain no-repeat;
     opacity: 0.1;
     pointer-events: none;
   }
