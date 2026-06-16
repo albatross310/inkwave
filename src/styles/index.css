@@ -275,11 +275,16 @@
    window.print(); choose a printer or "Save as PDF". */
 .print-seal { display: none; }
 @media print {
-  html, body { background: #fff !important; }
+  /* Zero the page box. The default 8px <body> margin pushes the 210mm parchment 8px past the page
+     edge → the rendered content is wider than the sheet, which is exactly what makes Chrome's
+     "Fit to page width" shrink everything down (and centre it → oversized margins all round).
+     With no overflow, the widest element IS the page, so even "Fit to width" lands at ~100% — the
+     copy comes out right whatever Scale the user left in the dialog. (Default/100% is still exact.) */
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; width: 210mm !important; }
   /* Hide floating chrome + the wavy background + the decorative parchment panels. */
   .fixed { display: none !important; }
   .inkwave-editor-surface::before { display: none !important; }
-  .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; }
+  .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; }
   .inkwave-sheets, .inkwave-sheet, .inkwave-sheet-num { display: none !important; }
   .scroll-paper, .scroll-paper.inkwave-gapped { background: #fff !important; box-shadow: none !important; }
   /* Break the page exactly where the editor's page gap is. The gap becomes the next page's TOP
