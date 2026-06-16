@@ -1066,14 +1066,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
                 above the main controls (when opened with the STYLE button) */}
             {showStyle && editor && (
-              <div className={`flex items-center px-4 py-1.5 ${showMain ? 'border-b border-stone-200' : ''}`}>
+              <div className={`flex items-center px-4 py-2 ${showMain ? 'border-b border-stone-200' : ''}`}>
                 <StyleBar editor={editor} onActivity={armStyleTimer} />
               </div>
             )}
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-4 py-1.5 ${isTouch ? 'justify-between' : 'gap-4'}`}>
+            <div className={`flex items-center px-4 py-2 ${isTouch ? 'justify-between' : 'gap-4'}`}>
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}

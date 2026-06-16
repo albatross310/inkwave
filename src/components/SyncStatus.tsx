@@ -92,8 +92,8 @@ export function SyncStatus({
         onClick={() => (onClick && !synced ? onClick() : window.dispatchEvent(new CustomEvent('inkwave:open-save')))}
         title={tooltip}
         className={compact
-          ? 'flex items-center justify-center w-8 h-8 rounded-full bg-white shadow-sm text-base'
-          : 'cursor-pointer rounded-full bg-white/70 hover:bg-white transition-colors text-right leading-tight text-xs px-2 py-0.5 max-w-[6.5rem] max-lg:px-1.5 max-lg:max-w-[4.5rem]'}
+          ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
+          : 'cursor-pointer rounded-full bg-white/70 hover:bg-white transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}
         style={{ color: synced ? '#6b7280' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
       >
         {compact ? (synced ? '☁' : '☁') : label}
