@@ -8,7 +8,7 @@ import type { LinksFunction } from 'react-router'
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/svg+xml', href: '/icons/icon.svg' },
+  { rel: 'icon', type: 'image/svg+xml', href: '/inkwave-logo.svg' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: preconnect + preload the stylesheet so the calm serif identity paints fast.
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },

@@ -48,6 +48,7 @@ export function Verify() {
   return (
     <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a' }}>
       <div className="w-full max-w-xl">
+        <img src="/inkwave-logo.svg" alt="Inkwave" width={64} height={64} className="mb-3 rounded-lg" />
         <h1 className="text-2xl mb-1" style={{ color: INK }}>Verify an Inkwave record</h1>
         <p className="text-sm text-stone-500 mb-5">
           Runs entirely in your browser against Inkwave's published signing key — and, for anchored
