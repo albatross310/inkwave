@@ -591,6 +591,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // "Save a copy" to Google Drive: forget the current Drive file so a fresh one is created, then sync.
   async function saveAsGoogleDrive() {
+    if (!(await startGoogleDriveSignIn())) return        // sign in within the click if not already
     const current = (gDriveFilename(docRef.current.id) ?? bundleFilename(docRef.current)).replace(/\.(studio|inkwave)$|\.(trace|insig)\.json$/, '')
     const name = window.prompt('Save a copy to Google Drive as:', current)?.trim()
     if (!name) return
@@ -1149,10 +1150,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 folderName={fileName}
                 onSyncOneDrive={oneDriveConfigured() ? syncOneDrive : undefined}
                 onChooseOneDriveFolder={chooseOneDriveFolder}
-                onSaveAsOneDrive={saveAsOneDrive}
+                onSaveAsOneDrive={oneDriveConfigured() ? saveAsOneDrive : undefined}
                 oneDriveAccount={oneDriveAcct}
                 onSyncGoogleDrive={googleDriveConfigured() ? syncGoogleDrive : undefined}
-                onSaveAsGoogleDrive={saveAsGoogleDrive}
+                onSaveAsGoogleDrive={googleDriveConfigured() ? saveAsGoogleDrive : undefined}
                 onChooseGoogleDriveFolder={googleDriveConfigured() ? chooseGoogleDriveFolder : undefined}
                 onUploadGoogleDrive={googleDriveConfigured() ? uploadFromGoogleDrive : undefined}
                 onUploadOneDrive={oneDriveConfigured() ? uploadFromOneDrive : undefined}
