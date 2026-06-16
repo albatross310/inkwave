@@ -42,11 +42,12 @@ function stripExt(name: string) {
 
 export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose }: {
   currentName: string
-  onRename?: (name: string) => void
+  onRename?: (name: string) => void | Promise<void>
   onPick: (folderId: string) => void | Promise<void> // '' = My Drive root
   onClose: () => void
 }) {
   const [syncing, setSyncing] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [folders, setFolders] = useState<Array<{ id: string; name: string }> | null>(null)
   const [selected, setSelected] = useState<string>(getChosenGDriveFolder() ?? '')
   const [selectedName, setSelectedName] = useState<string>('My Drive (root)')
@@ -91,10 +92,13 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
   const [editing, setEditing] = useState(false)
   const [nameVal, setNameVal] = useState(stripExt(currentName))
   useEffect(() => { setNameVal(stripExt(currentName)) }, [currentName])
-  function commitName() {
+  async function commitName() {
     setEditing(false)
     const n = nameVal.trim()
-    if (n && n !== stripExt(currentName)) onRename?.(n)
+    if (n && n !== stripExt(currentName)) {
+      setRenaming(true) // show "Loading…" instantly while the rename PATCH + re-sync run
+      try { await onRename?.(n) } finally { setRenaming(false) }
+    }
   }
 
   return createPortal(
@@ -146,7 +150,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
         {onRename && (
           <div className="flex items-center gap-2 mt-3 text-sm">
             <span className="text-stone-400 text-xs">File:</span>
-            {syncing ? (
+            {syncing || renaming ? (
               <span className="font-sans text-stone-400">Loading…</span>
             ) : editing ? (
               <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)} onBlur={commitName}
