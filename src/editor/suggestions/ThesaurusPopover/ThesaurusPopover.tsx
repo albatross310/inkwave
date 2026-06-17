@@ -24,12 +24,15 @@ const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % 
 
 // Commit choreography — a strict 3-event clock, NOTHING else moving in between:
 //   EVENT 1  press        — open: reel out in a flash, no fade/drift (handled at open).
-//   EVENT 2  release (T=0) — the reel rolls back to centre; nothing else happens.
-//   EVENT 3  T=SETTLE_MS   — the action: the reel's neighbour rows are REPLACED in-place by ghosts
-//                            (seamless freeze-frame, fading out), the line reflows, and FADE_MS later
-//                            the cross-out + date fade in. Ghost-out and fade-in never overlap.
+//   EVENT 2  release (T=0) — the reel rolls back to centre (settleTo); nothing else.
+//   EVENT 3  release+RENDER_BUFFER_MS — the action: neighbour rows REPLACED in-place by ghosts
+//                            (seamless freeze-frame, fading out), the line reflows/commits, and
+//                            FADE_MS later the cross-out + date fade in. Ghost-out and fade-in
+//                            never overlap.
+// RENDER_BUFFER_MS: a small beat after the reel settles before the commit DEPLOYS, so the renderer
+// has caught up (the commit reflow then lands in one clean frame instead of a cold-render flash).
 // FADE_MS is mirrored in CSS as the annotations' animation-delay; GHOST_MS as scasReelOut.
-const SETTLE_MS = 250
+const RENDER_BUFFER_MS = 90
 const GHOST_MS = 500
 const FADE_MS = 500
 
@@ -197,9 +200,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // (same tick as the teardown → seamless) and the line reflows/commits.
     cancelAnim()
     settleTo(Math.round(reelRef.current), () => {
-      if (ghostRows && ghostRows.length) { setGhosts(ghostRows); window.setTimeout(() => setGhosts(null), GHOST_MS + 60) }
-      if (!changed) closeWithAnimation(swap)
-      else commitWithSlide(swap, from, replacement.length)
+      // EVENT 3 — deploy after a short render beat (RENDER_BUFFER_MS) so the commit reflow lands in
+      // one clean frame instead of a cold-render flash. The reel just sits centred during the beat.
+      window.setTimeout(() => {
+        if (ghostRows && ghostRows.length) { setGhosts(ghostRows); window.setTimeout(() => setGhosts(null), GHOST_MS + 60) }
+        if (!changed) closeWithAnimation(swap)
+        else commitWithSlide(swap, from, replacement.length)
+      }, RENDER_BUFFER_MS)
     })
   }
 
