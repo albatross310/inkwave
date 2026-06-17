@@ -200,26 +200,25 @@
      paragraph; pointer-events off so it never blocks the word. Hidden on a hinted word (the badge
      owns ::after there) and while focused. STACKED is the default; the inline/off variants are
      switched by data-crossout on the editor root (the settings toggle). */
-  .scas-red[data-scas-old]:not([data-hint])::after {
+  .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
     left: 0;
-    top: 1.05em;
-    font-size: 0.72em;
+    top: 1.25em;      /* sit roughly midway in the 2.5 line-gap, between the word and the line below */
+    font-size: 1em;   /* same size as the word — easy to read */
     line-height: 1;
     white-space: nowrap;
     color: #9b5ccc;
     text-decoration: line-through;
     text-decoration-thickness: 1px;
-    opacity: 0.78;
+    opacity: 0.8;
     pointer-events: none;
   }
   /* Inline mode: the old word trails the new one on the same line. */
-  [data-crossout="inline"] .scas-red[data-scas-old]:not([data-hint])::after {
+  [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;
     top: auto;
     margin-left: 0.3em;
-    font-size: 0.82em;
   }
   /* Off: no cross-out (the word still keeps its purple). */
   [data-crossout="off"] .scas-red[data-scas-old]::after { content: none; }
@@ -245,54 +244,33 @@
     user-select: none;
   }
 
-  /* "⇧+tab" hint badge — both halves anchored at left:50%.
-     ::before shifts left by its own width via transform so their edges share
-     an exact pixel boundary, eliminating sub-pixel gaps. */
+  /* "⇧+tab" hint badge — a single pill (one pseudo only, so the cross-out's ::after stays free for
+     this word too). Centred above the word like the "tab" badge. */
   .scas-red[data-hint="⇧+tab"]::before {
-    content: '⇧';
+    content: '⇧+tab';
     position: absolute;
     top: -4px;
     left: 50%;
-    transform: translateX(-100%);
-    font-size: 11px;
-    font-family: sans-serif;
-    font-weight: 700;
-    color: #111111;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-right: none;
-    border-radius: 2px 0 0 2px;
-    padding: 0 1px 0 3px;
-    line-height: 14px;
-    pointer-events: none;
-    white-space: nowrap;
-    user-select: none;
-  }
-
-  .scas-red[data-hint="⇧+tab"]::after {
-    content: '+tab';
-    position: absolute;
-    top: -4px;
-    left: 50%;
+    transform: translateX(-50%);
     font-size: 9px;
     font-family: sans-serif;
     font-weight: 500;
     color: #6b7280;
     background: #f3f4f6;
     border: 1px solid #d1d5db;
-    border-radius: 0 2px 2px 0;
-    padding: 0 3px 0 1px;
+    border-radius: 2px;
+    padding: 0 3px;
     line-height: 14px;
     pointer-events: none;
     white-space: nowrap;
     user-select: none;
   }
 
-  /* tab / ⇧+tab are keyboard-only — hide the badges on touch/mobile widths
-     (matches the CycleHintPanel's 720px desktop breakpoint). */
+  /* tab / ⇧+tab are keyboard-only — hide the badges (now ::before only) on touch/mobile widths
+     (matches the CycleHintPanel's 720px desktop breakpoint). NB: don't touch ::after here — that's
+     the memory cross-out, which should still show on mobile. */
   @media (max-width: 719px) {
-    .scas-red[data-hint]::before,
-    .scas-red[data-hint]::after {
+    .scas-red[data-hint]::before {
       content: none;
     }
   }
