@@ -188,19 +188,9 @@ function buildDecorations(
     return false
   })
 
-  // ── 2. Hint badges (tab / ⇧+tab on the two nearest red words) ────────────
-  const hintMap = new Map<number, string>()
-  if (hintState.showHints) {
-    // When the popover is open use the focused word as the reference point;
-    // otherwise use the cursor. Either way, hint the neighbours of that point.
-    const ref      = hintState.focusedPos ?? cursorPos
-    const prevWord = [...redWords].reverse().find(rw => rw.from < ref)
-    const nextWord = redWords.find(rw => rw.from > ref)
-    if (prevWord) hintMap.set(prevWord.from, 'tab')
-    if (nextWord) hintMap.set(nextWord.from, '⇧+tab')
-  }
-
   // ── 3. Build decorations ──────────────────────────────────────────────────
+  // (Tab/⇧+tab hint badges were removed — the visual hints feature is gone. Tab navigation still
+  // works from the keyboard; it just no longer paints a per-word badge.)
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
@@ -224,8 +214,6 @@ function buildDecorations(
       const t = hhmm(firstAt)
       if (t) attrs['data-scas-time'] = t
     }
-    const hint = hintMap.get(from)
-    if (hint) attrs['data-hint'] = hint
 
     if (isFocused) {
       const mw = hintState.focusedMinWidth

@@ -21,7 +21,6 @@ import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
-import { CycleHintPanel } from './suggestions/CycleHintPanel'
 import { prefetchSynonyms } from './suggestions/thesaurus'
 import { LimitSelector } from '../components/LimitSelector'
 import { OptionsMenu } from '../components/OptionsMenu'
@@ -130,9 +129,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
-  const [showHints, setShowHints] = useState(true)
   const [cycleActive, setCycleActive] = useState(false)
-  const [containerRight, setContainerRight] = useState(0)
   const [paperRight, setPaperRight] = useState(0)
   // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
   // and returns when the keyboard is dismissed. We detect the keyboard via the visual
@@ -163,15 +160,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   const compliance = useComplianceProvider()
 
-  // Keep showHints in sync with the ref and force a decoration rebuild.
   const editorRef = useRef<ReturnType<typeof useEditor>>(null)
-  useEffect(() => {
-    hintStateRef.current = { ...hintStateRef.current, showHints }
-    const ed = editorRef.current
-    if (ed && !ed.isDestroyed) {
-      ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
-    }
-  }, [showHints])
 
   function handleHintChange(
     pos: number | null,
@@ -410,12 +399,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (keyboardUp) requestAnimationFrame(() => keepCaretRef.current())
   }, [keyboardUp])
 
-  // Track the container's right edge in viewport coords so CycleHintPanel
-  // can sit flush against it at any window size or zoom level.
+  // Track the paper's right edge in viewport coords (used to position the options menu).
   useEffect(() => {
     function update() {
-      if (containerRef.current)
-        setContainerRight(containerRef.current.getBoundingClientRect().right)
       if (paperRef.current)
         setPaperRight(paperRef.current.getBoundingClientRect().right)
     }
@@ -1015,8 +1001,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           )}
         </Scroll>
 
-        <CycleHintPanel active={cycleActive} showHints={showHints} containerRight={containerRight} />
-
         {!keyboardUp && (
           <ReceiptPanel
             snapshots={snapshots}
@@ -1148,15 +1132,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
               />
-              <label className="flex items-center gap-1.5 text-xs text-stone-400 cursor-pointer select-none font-serif">
-                <input
-                  type="checkbox"
-                  checked={showHints}
-                  onChange={e => setShowHints(e.target.checked)}
-                  className="accent-stone-400"
-                />
-                hints
-              </label>
               <button
                 type="button"
                 aria-pressed={styleBarOpen}

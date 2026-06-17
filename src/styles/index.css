@@ -234,9 +234,8 @@
        it hidden through the delay so the ghost and the fade-in never overlap. */
     transition: opacity 0.5s ease-out 0.5s;   /* fades in on commit; transition (not animation) never replays = no wawaa */
   }
-  /* First-written stamp: time of day (24h, four digits), small grey, left-aligned above the word.
-     Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
-  .scas-red[data-scas-time]:not([data-hint])::before {
+  /* First-written stamp: time of day (24h, four digits), small grey, left-aligned above the word. */
+  .scas-red[data-scas-time]::before {
     content: attr(data-scas-time);
     position: absolute;
     left: 0;             /* left-aligned with the word */
@@ -288,75 +287,7 @@
     border-radius: 0;
   }
 
-  /* "tab" hint badge — centred above word */
-  .scas-red[data-hint="tab"]::before {
-    content: 'tab';
-    position: absolute;
-    top: -4px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-family: sans-serif;
-    font-weight: 500;
-    color: #6b7280;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 2px;
-    padding: 0 3px;
-    line-height: 14px;
-    pointer-events: none;
-    white-space: nowrap;
-    user-select: none;
-  }
-
-  /* "⇧+tab" hint badge — a single pill (one pseudo only, so the cross-out's ::after stays free for
-     this word too). Centred above the word like the "tab" badge. */
-  .scas-red[data-hint="⇧+tab"]::before {
-    content: '⇧+tab';
-    position: absolute;
-    top: -4px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-family: sans-serif;
-    font-weight: 500;
-    color: #6b7280;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 2px;
-    padding: 0 3px;
-    line-height: 14px;
-    pointer-events: none;
-    white-space: nowrap;
-    user-select: none;
-  }
-
-  /* On a resolved slot that is ALSO a tab target, the first-written stamp WINS the ::before over the
-     tab/⇧+tab badge (the badge's key hint is still on the CycleHintPanel strip). Higher specificity
-     (two attrs) than the badge rules above, so it overrides them — and it resets the badge's pill. */
-  .scas-red[data-scas-time][data-hint]::before {
-    content: attr(data-scas-time);
-    top: -0.7em;
-    left: 0;
-    transform: none;
-    font-size: 0.5em;
-    font-weight: normal;
-    background: none;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    color: #9ca3af;
-    transition: opacity 0.5s ease-out 0.5s;   /* after the ghost, like the non-hinted stamp */
-  }
-
-  /* tab / ⇧+tab are keyboard-only — hide the badges (now ::before only) on touch/mobile widths
-     (matches the CycleHintPanel's 720px desktop breakpoint). NB: don't touch ::after here — that's
-     the memory cross-out, which should still show on mobile. */
-  @media (max-width: 719px) {
-    .scas-red[data-hint]::before {
-      content: none;
-    }
-  }
+  /* (tab / ⇧+tab hint badges removed — the visual hints feature is gone.) */
 }
 
 /* ── Print / "Export PDF" ── a faithful A4 render of the EDITOR's pages, so the PDF matches the
@@ -386,7 +317,6 @@
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; box-shadow: none !important; }
-  .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
   /* Drop the memory cross-out + first-written stamp too — the printed/PDF document is clean final text. */
   .scas-red[data-scas-old]::after, .scas-red[data-scas-time]::before { content: none !important; }
   /* The faded seal on every printed page (fixed → repeats per page). Uses a real <img>, NOT a CSS
