@@ -44,14 +44,10 @@ export function ActivityGraph({ a }: { a: Analytics }) {
   const maxWords = useMemo(() => Math.max(1, ...a.words.map((p) => p.words)), [a.words])
   const wy = (w: number) => TOP + WORDS_H - (w / maxWords) * WORDS_H
 
-  const maxAct = useMemo(() => Math.max(1, ...a.activity.map((b) => Math.max(b.ins, b.del))), [a.activity])
+  const maxBar = useMemo(() => Math.max(1, ...a.intervals.map((b) => Math.max(b.added, b.removed))), [a.intervals])
   const actMid = ACT_TOP + ACT_H / 2
-  const ah = (n: number) => (n / maxAct) * (ACT_H / 2)
-  const binW = useMemo(() => {
-    if (a.activity.length < 2) return 4
-    const dt = a.activity[1].t - a.activity[0].t || 500
-    return Math.max(0.6, (dt / span) * PLOT_W * 0.9)
-  }, [a.activity, span])
+  const ah = (n: number) => (n / maxBar) * (ACT_H / 2)
+  const barW = 7
 
   const wordsPath = useMemo(() => {
     const pts = a.words.filter((p, i) => i === 0 || i === a.words.length - 1 || inView(p.t))
@@ -138,11 +134,11 @@ export function ActivityGraph({ a }: { a: Analytics }) {
             </g>
           ))}
 
-          {/* activity: chars inserted (up) / deleted (down) per 0.5s */}
-          {a.activity.filter((b) => inView(b.t)).map((b, i) => (
+          {/* per-snapshot words added (up) / deleted (down) — lower bound */}
+          {a.intervals.filter((b) => inView(b.t)).map((b, i) => (
             <g key={i}>
-              {b.ins > 0 && <rect x={xs(b.t) - binW / 2} y={actMid - ah(b.ins)} width={binW} height={ah(b.ins)} fill={ADD} opacity="0.85" />}
-              {b.del > 0 && <rect x={xs(b.t) - binW / 2} y={actMid} width={binW} height={ah(b.del)} fill={DEL} opacity="0.8" />}
+              {b.added > 0 && <rect x={xs(b.t) - barW / 2} y={actMid - ah(b.added)} width={barW} height={ah(b.added)} fill={ADD} opacity="0.85" rx="1" />}
+              {b.removed > 0 && <rect x={xs(b.t) - barW / 2} y={actMid} width={barW} height={ah(b.removed)} fill={DEL} opacity="0.8" rx="1" />}
             </g>
           ))}
         </g>
@@ -150,12 +146,9 @@ export function ActivityGraph({ a }: { a: Analytics }) {
         {/* panel labels + activity baseline */}
         <text x={L} y={TOP - 22} fontSize="11" fill="#b0a898">words</text>
         <line x1={L} y1={actMid} x2={W - R} y2={actMid} stroke="#ddd" />
-        <text x={L} y={ACT_TOP - 6} fontSize="11" fill={ADD}>inserted ▲</text>
-        <text x={L} y={H - BOT + 0} fontSize="11" fill={DEL}>deleted ▼</text>
+        <text x={L} y={ACT_TOP - 6} fontSize="11" fill={ADD}>words added ▲</text>
+        <text x={L} y={H - BOT + 0} fontSize="11" fill={DEL}>words deleted ▼ (per snapshot, ≥ lower bound)</text>
       </svg>
-      {!a.stats.hasCadence && (
-        <p className="text-xs text-stone-400 mt-1">Per-second insert/delete detail needs the paid cadence data (not in this record); the word curve + snapshots are shown.</p>
-      )}
     </div>
   )
 }

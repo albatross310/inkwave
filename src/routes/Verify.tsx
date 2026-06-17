@@ -117,21 +117,20 @@ export function Verify() {
             <ActivityGraph a={analytics} />
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 mt-5">
               <Stat label="Final words" value={analytics.stats.finalWords} />
+              <Stat label="Words added" value={`≥ ${analytics.stats.addedWords}`} hint="lower bound" />
+              <Stat label="Words deleted" value={`≥ ${analytics.stats.deletedWords}`} hint="lower bound" />
+              <Stat label="Churn" value={`${Math.round(analytics.stats.churn * 100)}%`} hint="deleted ÷ added" />
               <Stat label="Kicks" value={analytics.stats.totalKicks} hint={`${analytics.stats.swaps} swapped`} />
               <Stat label="Snapshots" value={analytics.stats.snapshots} />
               <Stat label="Sessions" value={analytics.stats.sessions} hint={`${analytics.stats.periods} period(s)`} />
               {analytics.stats.durationMs != null && <Stat label="Duration" value={fmtDur(analytics.stats.durationMs)} />}
               {analytics.stats.wpm != null && <Stat label="Words / min" value={analytics.stats.wpm} />}
               {analytics.stats.avgDeliberationMs != null && <Stat label="Avg deliberation" value={`${(analytics.stats.avgDeliberationMs / 1000).toFixed(1)}s`} hint="per kick" />}
-              {analytics.stats.hasCadence && <Stat label="Words added" value={`~${analytics.stats.wordsInserted}`} hint={`${analytics.stats.charsInserted} chars`} />}
-              {analytics.stats.hasCadence && <Stat label="Words deleted" value={`~${analytics.stats.wordsDeleted}`} hint={`${analytics.stats.charsDeleted} chars`} />}
-              {analytics.stats.hasCadence && <Stat label="Churn" value={`${Math.round(analytics.stats.churn * 100)}%`} hint="deleted ÷ added" />}
-              {analytics.stats.hasCadence && analytics.stats.pasteSuspectBins > 0 && <Stat label="Paste-speed bins" value={analytics.stats.pasteSuspectBins} hint="above human speed" />}
             </div>
             <p className="mt-3 text-xs text-stone-400">
-              Drawn from the signed, Bitcoin-anchored record. Insert/delete counts are characters (the
-              cadence never stores text); figures marked “~” are word estimates from those counts. Word
-              counts at snapshots are exact.
+              Drawn from the signed, Bitcoin-anchored record. Words added/deleted are LOWER BOUNDS from
+              the snapshot contents — rework between snapshots that cancels out isn't counted. Word counts
+              at snapshots are exact.
             </p>
           </div>
         )}
