@@ -716,7 +716,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           // shifts its edges ~1px as the row's distance-from-centre wobbles, which reads
           // as a left/right jiggle while scrolling. Depth comes from the opacity fade.
           transform: `translateY(${(rel * rowH).toFixed(2)}px)`,
-          willChange: 'transform',
+          // Promote to a compositor layer ONLY while the reel is actually moving (drag or settle).
+          // Unconditional will-change created 7 layers the instant the card mounted — a GPU hitch on
+          // open (the intermittent "frame drop on first click"). At rest/open the rows are static.
+          willChange: (draggingRef.current || rafRef.current !== null) ? 'transform' : undefined,
           // Original word dark, secondary/candidate words the lighter purple — a committed
           // secondary word KEEPS this lighter colour (the page text matches it, see
           // .scas-secondary), so the colour never changes between reel, commit and page.

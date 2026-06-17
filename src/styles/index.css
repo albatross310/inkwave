@@ -259,7 +259,9 @@
   /* On commit the reel card tears down instantly (the real text slides in via a decoration); a ghost
      of the chosen word is left in its place and fades out over 500ms — the visible reel "flash out". */
   .scas-reel-ghost { animation: scasReelOut 500ms ease-out forwards; }   /* GHOST_MS */
-  @keyframes scasReelOut { from { opacity: 1; } to { opacity: 0; } }
+  /* Start at the reel's neighbour-candidate opacity (~0.62, see RedHighlight reel rows) so the ghost
+     matches the words it's replacing, then fade out. */
+  @keyframes scasReelOut { from { opacity: 0.62; } to { opacity: 0; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;
