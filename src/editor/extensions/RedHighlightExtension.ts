@@ -212,10 +212,10 @@ function buildDecorations(
       'data-scas-n': String(seqInPara),
     }
     // The memory cross-out (::after, dark green, beneath) + the first-written stamp (::before, grey,
-    // above): a substituted slot shows its ORIGINAL struck-through and, when known, the time of day it
-    // was first written. CSS draws both; skip while focused (the reel renders the word) so they fade
-    // back in on commit rather than flash.
-    if (secondary && !isFocused) {
+    // above): any slot with a known origin shows its ORIGINAL struck-through and, when known, the time
+    // of day it was first written. Emitted even while focused (CSS hides them via .scas-focused) so the
+    // reappearance on commit is a reliable opacity TRANSITION, not a per-render animation.
+    if (secondary) {
       attrs['data-scas-old'] = dataWord
       const t = hhmm(firstAt)
       if (t) attrs['data-scas-time'] = t

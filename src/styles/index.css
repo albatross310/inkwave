@@ -200,19 +200,23 @@
      paragraph; pointer-events off so it never blocks the word. Hidden on a hinted word (the badge
      owns ::after there) and while focused. STACKED is the default; the inline/off variants are
      switched by data-crossout on the editor root (the settings toggle). */
-  /* Faint sepia watermark behind the whole memory cluster (word + stamp + cross-out): a soft, blurred
-     egg of warmer shading, sitting behind the text (the pseudos paint above it). Offset slightly down
-     so it sits over the cluster's centre of mass. */
+  /* Tea-stain watermark behind the memory cluster (word + stamp + cross-out): a soft, darker warm
+     blot sitting behind the text (the pseudos paint above it), offset down to sit over the cluster's
+     centre of mass. (A precisely-fitted egg around the wider word is a planned follow-up.) */
   .scas-red[data-scas-old] {
-    box-shadow: 0 0.3em 1.5em 0.5em rgba(120, 85, 40, 0.06);
+    box-shadow: 0 0.45em 1.1em 0.45em rgba(110, 74, 38, 0.13);
   }
+  /* Memory cross-out: the ORIGINAL word struck-through, green, centred just beneath the new one.
+     The pseudo is ALWAYS present (even while focused) so the fade is a reliable opacity TRANSITION,
+     not a per-render animation (which replayed on every decoration rebuild and stuck the stamp/word
+     invisible). Hidden instantly while focused; eases back in 0.24s after commit, over 2s. */
   .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
     left: 50%;
-    transform: translateX(-50%) scale(1.15, 0.8);   /* centred, shorter + wider */
+    transform: translateX(-50%) scale(1.075, 0.9);   /* centred, half the earlier shorter+wider squash */
     transform-origin: top center;
-    top: 1.1em;          /* a tad closer to the word */
+    top: 1.175em;        /* half the earlier closening to the word */
     font-size: 0.85em;   /* one size smaller */
     line-height: 1;
     white-space: nowrap;
@@ -221,9 +225,7 @@
     text-decoration-thickness: 1px;
     opacity: 0.6;        /* a bit transparent */
     pointer-events: none;
-    /* Begins only AFTER the reel flash-out (240ms), then eases in over 2s; backwards fill holds it
-       hidden through the delay so it doesn't flash. */
-    animation: scasCrossoutIn 2s ease-out 0.24s backwards;
+    transition: opacity 2s ease-out 0.24s;   /* eases in after the 240ms reel flash-out */
   }
   /* First-written stamp: time of day (24h, four digits) centred in small grey print above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
@@ -241,13 +243,19 @@
     color: #9ca3af;      /* grey */
     opacity: 0.85;
     pointer-events: none;
-    animation: scasTimeIn 1s ease-out 0.24s backwards;   /* after the reel flash-out, in over 1s */
+    transition: opacity 1s ease-out 0.24s;   /* eases in after the reel flash-out, over 1s */
   }
-  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.6; } }
-  @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
-  /* The purple reel flashes IN over the open duration (120ms). (Flash-out on commit is carried by the
-     reel's own 240ms settle; the green/stamp then ease in after that — see animation-delay above.) */
-  .scas-cycle-card { animation: scasReelIn 120ms ease-out; }
+  /* While the word is focused (cycle open) the reel renders it — hide the stamp + cross-out instantly,
+     so they fade back in on commit rather than sit over the reel. */
+  .scas-focused[data-scas-old]::after,
+  .scas-focused[data-scas-time]:not([data-hint])::before {
+    opacity: 0;
+    transition: none;
+  }
+  /* The purple reel flashes IN over the open duration (120ms); the flash-OUT (240ms) is driven from
+     the popover (a .scas-cycle-leaving class on dismiss/commit). */
+  .scas-cycle-card { animation: scasReelIn 120ms ease-out; transition: opacity 240ms ease-out; }
+  .scas-cycle-card.scas-cycle-leaving { opacity: 0; }
   @keyframes scasReelIn { from { opacity: 0; } to { opacity: 1; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {

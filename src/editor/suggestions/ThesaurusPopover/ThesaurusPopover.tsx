@@ -706,7 +706,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           NB: do NOT put a transform on this card to "snap" sub-pixel position — promoting it to a
           GPU layer disables subpixel-antialiasing on the reel text (visible colour/weight shift)
           and nudges horizontal sub-pixel position. Keep it a plain absolutely-positioned box. */}
-      <div className="absolute z-50 select-none scas-cycle-card"
+      <div className={`absolute z-50 select-none scas-cycle-card${committing ? ' scas-cycle-leaving' : ''}`}
         style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
                  fontFamily, fontSize: fsz, overflow: 'hidden',
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
