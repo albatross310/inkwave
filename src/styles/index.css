@@ -203,6 +203,9 @@
   /* A RESOLVED slot (committed from the cycle) reads purple — the "final" colour. */
   .scas-red[data-scas-old] {
     color: #5c2d8a;
+    /* Themeable tea-stain fill behind the crossed-out word (one knob so a future page-colour change
+       can recolour every watermark at once). */
+    --scas-egg: rgba(120, 78, 38, 0.32);
   }
   /* Memory cross-out: the ORIGINAL word struck-through, green, centred just beneath the new one —
      nearly ordinary-looking (no squash) and nearly in the middle of the line-gap. The pseudo is
@@ -212,8 +215,12 @@
   .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
-    left: 0;             /* left-aligned with the word */
+    left: -0.6em;        /* compensates the padding so the text still left-aligns with the word */
     top: 1.4em;          /* nearly in the middle of the gap below */
+    padding: 0.22em 0.6em;
+    /* Themeable tea-stain egg behind the crossed-out word (a soft vector ellipse via gradient). */
+    background: radial-gradient(ellipse 82% 72% at 50% 50%, var(--scas-egg), transparent 75%);
+    background-clip: padding-box;
     font-size: 0.92em;   /* nearly ordinary */
     line-height: 1;
     white-space: nowrap;
@@ -222,9 +229,9 @@
     text-decoration-thickness: 1px;
     opacity: 0.5;        /* less prominent */
     pointer-events: none;
-    transition: opacity 2s ease-out 0.24s;   /* eases in after the reel flash-out */
+    animation: scasCrossoutIn 0.5s ease-out;   /* gentle one-shot fade-in on commit */
   }
-  /* First-written stamp: time of day (24h, four digits) centred in small grey print above the word.
+  /* First-written stamp: time of day (24h, four digits), small grey, left-aligned above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
   .scas-red[data-scas-time]:not([data-hint])::before {
     content: attr(data-scas-time);
@@ -239,15 +246,10 @@
     color: #9ca3af;      /* grey */
     opacity: 0.85;
     pointer-events: none;
-    transition: opacity 1s ease-out 0.24s;   /* eases in after the reel flash-out, over 1s */
+    animation: scasTimeIn 0.5s ease-out;
   }
-  /* While the word is focused (cycle open) the reel renders it — hide the stamp + cross-out instantly,
-     so they fade back in on commit rather than sit over the reel. */
-  .scas-focused[data-scas-old]::after,
-  .scas-focused[data-scas-time]:not([data-hint])::before {
-    opacity: 0;
-    transition: none;
-  }
+  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.5; } }
+  @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
   /* The purple reel flashes IN over the open duration (120ms). */
   .scas-cycle-card { animation: scasReelIn 120ms ease-out; }
   @keyframes scasReelIn { from { opacity: 0; } to { opacity: 1; } }
@@ -261,6 +263,8 @@
     left: auto;
     transform: none;
     top: auto;
+    padding: 0;
+    background: none;
     margin-left: 0.3em;
   }
   /* Off: no cross-out (the word still keeps its purple). */

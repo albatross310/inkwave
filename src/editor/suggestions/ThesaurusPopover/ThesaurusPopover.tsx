@@ -195,7 +195,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       pinCursor(); advanceOrRestore(from, advance)
     }
     // Unchanged commit: no text edit, but still resolve in place + ease the line back to natural.
-    if (!changed) { closeWithAnimation(swap); window.setTimeout(showGhosts, REFLOW_COMMIT_MS); return }
+    // Mount the ghost INSIDE the teardown callback (same render tick as setCycle(null)) so the reel
+    // and ghost never co-exist for a frame — that overlap was the flicker.
+    if (!changed) { closeWithAnimation(() => { swap(); showGhosts() }); return }
     // SWAP-FIRST: replace the word now (paragraph rewraps to its final layout), tear the reel down,
     // then slide the rest of the committed line in from the right as one flush motion. (commitWithSlide.)
     showGhosts()
