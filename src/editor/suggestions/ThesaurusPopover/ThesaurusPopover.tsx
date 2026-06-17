@@ -50,9 +50,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // position to its committed natural-x over REFLOW_COMMIT_MS, in sync with the decoration's
   // left/right de-compression — so the word slides home WITH the surrounding text, not after it.
   const [committing, setCommitting] = useState(false)
-  // A fading clone of the chosen word, left where the reel was on commit (the reel card itself tears
-  // down instantly). Drives the visible reel "flash out". Cleared after the fade.
-  const [ghost, setGhost] = useState<{ top: number; left: number; text: string; fontFamily: string; fontSize: string } | null>(null)
+  // Fading clones of the reel's ABOVE + BELOW neighbours, left at even heights around the committed
+  // word on commit (the reel card itself tears down instantly; the committed word snaps to its final
+  // spot via a decoration). Drives the visible reel "flash out" without overlapping the committed word
+  // (an overlap double-images at zoom → stray lines). Cleared after the fade.
+  const [ghosts, setGhosts] = useState<Array<{ top: number; left: number; text: string; color: string; fontFamily: string; fontSize: string }> | null>(null)
 
   useEffect(() => { onCycleChange(!!cycle); if (!cycle) setCommitting(false) }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -129,15 +131,29 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (advance) requestAnimationFrame(() => { if (!goNext(from, tabCursorRef.current ?? undefined)) restoreCursor() })
     else restoreCursor()
   }
-  // Leave a fading clone of the chosen word where the reel sat (the reel card tears down instantly).
-  function startGhost(text: string) {
+  // Leave fading clones of the reel's above/below neighbours at even heights around the committed
+  // word (the reel card tears down instantly). `chosen` is the committed word; its neighbours in the
+  // synonym ring are the rows that sat just above/below it.
+  function startGhosts(chosen: string) {
     const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
     const cRect = containerEl.current?.getBoundingClientRect()
-    if (!fe || !cRect) return
+    const c = cycle
+    if (!fe || !cRect || !c) return
     const r = fe.getBoundingClientRect()
     const cs = getComputedStyle(fe)
-    setGhost({ top: r.top - cRect.top, left: r.left - cRect.left, text, fontFamily: cs.fontFamily, fontSize: cs.fontSize })
-    window.setTimeout(() => setGhost(null), 520)
+    const rowH = Math.round((parseFloat(cs.fontSize) || 18) * 1.15)   // same row pitch as the reel
+    const mobile = window.innerWidth < 768 ? 1.4 : 1
+    const N = c.synonyms.length
+    const idx = Math.max(0, c.synonyms.indexOf(chosen))
+    const baseTop = r.top - cRect.top
+    const left = r.left - cRect.left
+    const at = (ring: number, top: number) => {
+      const w = c.synonyms[((ring % N) + N) % N]
+      return { top, left, text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#9b5ccc' : '#5c2d8a',
+               fontFamily: cs.fontFamily, fontSize: cs.fontSize }
+    }
+    setGhosts([at(idx - 1, baseTop - rowH), at(idx + 1, baseTop + rowH)])
+    window.setTimeout(() => setGhosts(null), 520)
   }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
@@ -145,7 +161,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
-    startGhost(replacement)   // visible reel flash-out
+    startGhosts(replacement)   // visible reel flash-out (above/below neighbours fade)
     // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
     // this range; otherwise the TRUE time the word first turned purple (firstKickAt); else now.
     let firstCommitAt: string | null = null
@@ -630,16 +646,16 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // A fading ghost of the just-committed word — rendered even after the reel (cycle) tears down.
-  const ghostEl = ghost ? (
-    <div className="absolute scas-reel-ghost"
-      style={{ top: ghost.top, left: ghost.left, fontFamily: ghost.fontFamily, fontSize: ghost.fontSize,
-               color: '#5c2d8a', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 40 }}>
-      {ghost.text}
+  // Fading neighbour ghosts — rendered even after the reel (cycle) tears down on commit.
+  const ghostEls = ghosts ? ghosts.map((g, i) => (
+    <div key={i} className="absolute scas-reel-ghost"
+      style={{ top: g.top, left: g.left, fontFamily: g.fontFamily, fontSize: g.fontSize,
+               color: g.color, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 40 }}>
+      {g.text}
     </div>
-  ) : null
+  )) : null
 
-  if (!cycle || !geom) return ghostEl
+  if (!cycle || !geom) return <>{ghostEls}</>
   rowHRef.current = geom.rowH
   const { fsz, left, rowH, cardH, cardTop, width, fontFamily, slotLefts } = geom
   const reel   = cycle.reelPos
@@ -725,7 +741,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   return (
     <>
-      {ghostEl}
+      {ghostEls}
       {/* Sliding reel card — fully transparent: no border/shadow/background, so the
           word floats directly on the parchment (lines above/below may show through).
           NB: do NOT put a transform on this card to "snap" sub-pixel position — promoting it to a

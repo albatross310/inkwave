@@ -221,7 +221,7 @@
     color: #166534;      /* the original (crossed-out) word reads green */
     text-decoration: line-through;
     text-decoration-thickness: 1px;
-    opacity: 0.85;
+    opacity: 0.5;        /* less prominent */
     pointer-events: none;
     transition: opacity 2s ease-out 0.24s;   /* eases in after the reel flash-out */
   }
