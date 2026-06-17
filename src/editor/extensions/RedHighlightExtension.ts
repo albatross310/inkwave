@@ -138,6 +138,11 @@ function buildDecorations(
   const redWords: RedWord[] = []
   let paragraphIndex = 0
   const debugAll = debugHighlightAll() // temporary: colour every pool word for animation testing
+  // The in-place line-compression now applies INSTANTLY (no transition) and the post-commit slide is
+  // off — the laggy/janky "flash compression" animation is ripped out for master. The static
+  // compression is solid; the animation is being reworked on an experimental branch (per-char
+  // transform FLIP). Flip this to false there to re-enable the transitions below.
+  const ANIMATE_COMPRESSION = false
 
   pmDoc.descendants((node: PMNode, pos: number) => {
     if (node.type.name !== 'paragraph') return true
@@ -225,7 +230,7 @@ function buildDecorations(
 
     if (isFocused) {
       const mw = hintState.focusedMinWidth
-      const trans = hintState.animate ? `transition:min-width ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
+      const trans = (ANIMATE_COMPRESSION && hintState.animate) ? `transition:min-width ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
       // Use the EXACT reserved width (not Math.ceil): ceiling rounds the box up by up to 1px, so on
       // commit the after-text sat ~1px right of where the committed (exact-width) text lands and
       // snapped left at the swap — the end-of-motion twitch, worst on short words. Sub-pixel
@@ -244,7 +249,7 @@ function buildDecorations(
     const fw = redWords.find(rw => rw.from === focusedPos)
     if (fw) {
       const { firstWordEnd: fwe, to: lt, lsBeforeEm, lsAfterEm } = lineCompressionRange
-      const lsTransition = hintState.animate ? `;transition:letter-spacing ${hintState.durationMs}ms ${REFLOW_EASE}` : ';transition:none'
+      const lsTransition = (ANIMATE_COMPRESSION && hintState.animate) ? `;transition:letter-spacing ${hintState.durationMs}ms ${REFLOW_EASE}` : ';transition:none'
       // Apply the span whenever its range exists (even at letter-spacing 0): a 0 span is a
       // visual no-op but must be present so the open/close transition has something to animate.
       if (fwe < fw.from) {
@@ -257,7 +262,7 @@ function buildDecorations(
         const bsx = lineCompressionRange.beforeScaleX ?? 1
         const beforeStyle = bslide !== undefined
           ? `letter-spacing: -${lsBeforeEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${bslide.toFixed(2)}px) scaleX(${bsx.toFixed(4)});` +
-            (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
+            ((ANIMATE_COMPRESSION && hintState.animate) ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
           : `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fwe, fw.from, { class: 'scas-comp-before', style: beforeStyle }))
       }
@@ -271,7 +276,7 @@ function buildDecorations(
         const asx = lineCompressionRange.afterScaleX ?? 1
         const afterStyle = slide !== undefined
           ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
-            (hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
+            ((ANIMATE_COMPRESSION && hintState.animate) ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
           : `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))
       }
@@ -284,7 +289,7 @@ function buildDecorations(
   // Built post-swap on the FINAL layout, so the inline-block fits its line (no wrap-drop); the
   // translateX is purely visual overflow during the transient. Independent of focusedPos.
   const { slideRange } = hintState
-  if (slideRange) {
+  if (slideRange && ANIMATE_COMPRESSION) {
     const tr = hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
     if (slideRange.to > slideRange.from) {
       const sx = slideRange.scaleX ?? 1
