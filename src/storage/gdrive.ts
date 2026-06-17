@@ -7,6 +7,7 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
 import { setDocSource } from './docSource'
+import { readAppJson, writeAppJson } from './opfs'
 
 const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'
@@ -168,6 +169,20 @@ export function getChosenGDriveFolder(): string | null {
 }
 export function setChosenGDriveFolder(id: string | null): void {
   try { id ? localStorage.setItem(FOLDER_KEY, id) : localStorage.removeItem(FOLDER_KEY) } catch { /* private mode */ }
+}
+
+// Recently-chosen Drive folders (OPFS), surfaced at the top of the picker — parity with OneDrive.
+// Most-recent first, deduped by id. id '' = My Drive root.
+export interface GDriveRecent { id: string; name: string }
+const GDRIVE_RECENTS_FILE = 'gdrive-recent-folders.json'
+const GDRIVE_MAX_RECENTS = 6
+export async function getRecentGDriveFolders(): Promise<GDriveRecent[]> {
+  return (await readAppJson<GDriveRecent[]>(GDRIVE_RECENTS_FILE)) ?? []
+}
+export async function addRecentGDriveFolder(folder: GDriveRecent): Promise<void> {
+  const list = await getRecentGDriveFolders()
+  const next = [folder, ...list.filter((f) => f.id !== folder.id)].slice(0, GDRIVE_MAX_RECENTS)
+  await writeAppJson(GDRIVE_RECENTS_FILE, next)
 }
 
 // Create a Drive folder (at the writer's root) and return it. drive.file lets us create + then touch

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFolders, createGoogleDriveFolder, getChosenGDriveFolder } from '../storage/gdrive'
+import { listGoogleDriveFolders, createGoogleDriveFolder, getChosenGDriveFolder, getRecentGDriveFolders, addRecentGDriveFolder, type GDriveRecent } from '../storage/gdrive'
 
 // Custom Google Drive folder picker — the counterpart to OneDriveFolderPicker, Google-coloured.
 // Because Inkwave uses the privacy-preserving `drive.file` scope, this can only see the folders the
@@ -56,6 +56,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [recent, setRecent] = useState<GDriveRecent[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -65,6 +66,15 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
   }, [reload])
+
+  useEffect(() => { void getRecentGDriveFolders().then(setRecent).catch(() => {}) }, [])
+
+  // Pick a folder directly (used by the recent shortcuts): remember it, sync, close — same as the
+  // main button. id '' = My Drive root.
+  async function pick(id: string, name: string) {
+    setSyncing(true)
+    try { await addRecentGDriveFolder({ id, name }); await onPick(id) } finally { onClose() }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -113,6 +123,21 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
           </div>
           <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
+
+        {/* Recent folders (OPFS) → pick instantly. Parity with the OneDrive picker. */}
+        {recent.length > 0 && (
+          <div className="mb-2">
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Recent folders</div>
+            <div className="flex flex-wrap gap-1.5">
+              {recent.map((f) => (
+                <button key={f.id} type="button" disabled={syncing} onClick={() => void pick(f.id, f.name)}
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f3f4] disabled:opacity-60" style={{ border: `1px solid ${G_BLUE}40`, color: '#3c4043' }}>
+                  🗁 {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Folder-list header + New folder. */}
         <div className="flex items-center justify-between mb-1.5">
@@ -167,7 +192,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
         )}
 
         <button type="button" disabled={syncing}
-          onClick={async () => { setSyncing(true); try { await onPick(selected) } finally { onClose() } }}
+          onClick={() => void pick(selected, selectedName)}
           className="mt-4 px-4 py-2.5 font-sans font-medium rounded-[10px] bg-[#f1f3f4] text-[#3c4043] hover:bg-[#e8eaed] transition disabled:opacity-70">
           {syncing ? 'Loading…' : `Sync here — ${selectedName}`}
         </button>
