@@ -258,7 +258,12 @@ function buildDecorations(
         // beforeSlidePx is set (FLIP), render it as a transformable inline-block carrying the invert
         // translateX + scaleX and transition the TRANSFORM (compositor, lag-free) — so the LHS
         // animates instead of snapping. Otherwise a plain inline letter-spacing span.
-        const bslide = lineCompressionRange.beforeSlidePx
+        // The inline-block + transform spans exist ONLY for the FLIP animation. With the animation
+        // ripped out they're harmful: a slot word that falls inside the run inherits inline-block +
+        // the 2.5 line-height, so its box jumps from the font box to the full line box (23→45px) and
+        // shifts up — taking its date/cross-out with it ("the height flashes up on the whole line").
+        // So when not animating, force the plain inline letter-spacing path (no inline-block).
+        const bslide = ANIMATE_COMPRESSION ? lineCompressionRange.beforeSlidePx : undefined
         const bsx = lineCompressionRange.beforeScaleX ?? 1
         const beforeStyle = bslide !== undefined
           ? `letter-spacing: -${lsBeforeEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${bslide.toFixed(2)}px) scaleX(${bsx.toFixed(4)});` +
@@ -272,7 +277,7 @@ function buildDecorations(
         // invert translateX and transition the TRANSFORM — driven by the decoration so PM's
         // reconciler keeps it (a manual DOM style edit gets reverted within a frame). Otherwise
         // it's a plain inline letter-spacing span that transitions letter-spacing.
-        const slide = lineCompressionRange.afterSlidePx
+        const slide = ANIMATE_COMPRESSION ? lineCompressionRange.afterSlidePx : undefined
         const asx = lineCompressionRange.afterScaleX ?? 1
         const afterStyle = slide !== undefined
           ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
