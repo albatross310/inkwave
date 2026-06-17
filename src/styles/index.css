@@ -178,7 +178,7 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #166534;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
+    color: #2e8b57;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
     cursor: pointer;
   }
 
@@ -218,13 +218,14 @@
     left: -0.6em;        /* compensates the padding so the text still left-aligns with the word */
     top: 1.4em;          /* nearly in the middle of the gap below */
     padding: 0.22em 0.6em;
-    /* Themeable tea-stain egg behind the crossed-out word (a soft vector ellipse via gradient). */
-    background: radial-gradient(ellipse 82% 72% at 50% 50%, var(--scas-egg), transparent 75%);
-    background-clip: padding-box;
+    /* Themeable tea-stain egg behind the crossed-out word: a filled vector shape (rounded box → egg,
+       fatter at the bottom). One colour knob (--scas-egg); auto-stretches to the word width. */
+    background: var(--scas-egg);
+    border-radius: 50% / 56% 56% 44% 44%;
     font-size: 0.92em;   /* nearly ordinary */
     line-height: 1;
     white-space: nowrap;
-    color: #166534;      /* the original (crossed-out) word reads green */
+    color: #2e8b57;      /* the original (crossed-out) word reads green (lighter) */
     text-decoration: line-through;
     text-decoration-thickness: 1px;
     opacity: 0.5;        /* less prominent */
@@ -311,6 +312,23 @@
     pointer-events: none;
     white-space: nowrap;
     user-select: none;
+  }
+
+  /* On a resolved slot that is ALSO a tab target, the first-written stamp WINS the ::before over the
+     tab/⇧+tab badge (the badge's key hint is still on the CycleHintPanel strip). Higher specificity
+     (two attrs) than the badge rules above, so it overrides them — and it resets the badge's pill. */
+  .scas-red[data-scas-time][data-hint]::before {
+    content: attr(data-scas-time);
+    top: -0.7em;
+    left: 0;
+    transform: none;
+    font-size: 0.5em;
+    font-weight: normal;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    color: #9ca3af;
   }
 
   /* tab / ⇧+tab are keyboard-only — hide the badges (now ::before only) on touch/mobile widths

@@ -56,7 +56,7 @@ export function Scroll({
           fills the screen edge-to-edge, no shadow. */}
       <div
         ref={paperRef}
-        className={`mx-auto ${phone ? 'w-full max-w-full' : 'w-[210mm]'}`}
+        className={`mx-auto w-full ${phone ? 'max-w-full' : 'max-w-[210mm]'}`}
         style={{
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
