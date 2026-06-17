@@ -56,6 +56,8 @@ export interface ScasState {
                                    // so the word stays purple across S-rotation and reload without
                                    // recomputing membership; cleared when resolved (swap/dismiss) or
                                    // moved to `locked` on delete. Locked lemmas colour via `locked`.
+  kickTimes?: Record<string, number> // lemma → epoch ms it was FIRST kicked (turned purple). The
+                                   // slot's "first-written" stamp; persisted so it survives reload.
 }
 
 // ─── Paragraph metadata ───────────────────────────────────────────────────────

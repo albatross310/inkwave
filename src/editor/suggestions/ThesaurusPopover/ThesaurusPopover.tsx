@@ -35,9 +35,10 @@ interface ThesaurusPopoverProps {
   onHintChange: OnHintChange
   onCycleChange: (active: boolean) => void
   isLockedLemma?: (lemma: string) => boolean
+  firstKickAt?: (word: string) => number | undefined
 }
 
-export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange, isLockedLemma }: ThesaurusPopoverProps) {
+export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange, isLockedLemma, firstKickAt }: ThesaurusPopoverProps) {
   const { recordAccepted, recordIgnored } = useCompliance()
   const tabCursorRef = useRef<number | null>(null)
   const { cycle, setCycle, openCycleForElement, closeWithAnimation, commitWithSlide } = usePopoverLayout(editor, onHintChange, isLockedLemma)
@@ -134,14 +135,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
-        // Preserve the slot's first-written stamp across re-cycles: read any existing
-        // firstCommitAt in this range; only stamp `now` the first time the slot is created.
+        // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt
+        // in this range; otherwise use the TRUE time the word first turned purple (firstKickAt),
+        // falling back to now only if that's unknown (e.g. kicked in a session whose state is gone).
         let firstCommitAt: string | null = null
         editor.state.doc.nodesBetween(from, to, (node) => {
           const m = node.marks.find(mk => mk.type.name === 'scasSlot')
           if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
         })
-        if (!firstCommitAt) firstCommitAt = String(Date.now())
+        if (!firstCommitAt) firstCommitAt = String(firstKickAt?.(word) ?? Date.now())
         // Carry the SCAS-slot mark (anchored to this slot's original word) so the position
         // stays managed: it keeps rendering red/changeable even if the new word is in vocab,
         // and reopening re-offers the original's synonym list. `word` holds the original.

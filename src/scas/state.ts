@@ -12,7 +12,7 @@ import { isImmune, isLocked } from './engine'
 export const DEFAULT_SET_SIZE = 300
 
 export function emptyScasState(): ScasState {
-  return { version: 0, locked: [], satisfied: [], liveKicks: [] }
+  return { version: 0, locked: [], satisfied: [], liveKicks: [], kickTimes: {} }
 }
 
 /** Coerce possibly-missing/partial persisted state into a valid ScasState. */
@@ -25,6 +25,7 @@ export function normalizeScasState(s: Partial<ScasState> | undefined | null): Sc
       ? s.satisfied.filter((e) => e && typeof e.lemma === 'string')
       : [],
     liveKicks: Array.isArray(s.liveKicks) ? [...new Set(s.liveKicks)] : [],
+    kickTimes: s.kickTimes && typeof s.kickTimes === 'object' ? { ...s.kickTimes } : {},
   }
 }
 

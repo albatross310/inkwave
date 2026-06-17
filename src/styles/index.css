@@ -200,22 +200,30 @@
      paragraph; pointer-events off so it never blocks the word. Hidden on a hinted word (the badge
      owns ::after there) and while focused. STACKED is the default; the inline/off variants are
      switched by data-crossout on the editor root (the settings toggle). */
+  /* Faint sepia watermark behind the whole memory cluster (word + stamp + cross-out): a soft, blurred
+     egg of warmer shading, sitting behind the text (the pseudos paint above it). Offset slightly down
+     so it sits over the cluster's centre of mass. */
+  .scas-red[data-scas-old] {
+    box-shadow: 0 0.3em 1.5em 0.5em rgba(120, 85, 40, 0.06);
+  }
   .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
     left: 50%;
-    transform: translateX(-50%);   /* centre the old word under the new one */
-    top: 1.25em;      /* sit roughly midway in the 2.5 line-gap, between the word and the line below */
-    font-size: 1em;   /* same size as the word — easy to read */
+    transform: translateX(-50%) scale(1.15, 0.8);   /* centred, shorter + wider */
+    transform-origin: top center;
+    top: 1.1em;          /* a tad closer to the word */
+    font-size: 0.85em;   /* one size smaller */
     line-height: 1;
     white-space: nowrap;
-    color: #166534;   /* dark green */
+    color: #166534;      /* the original (crossed-out) word reads green */
     text-decoration: line-through;
     text-decoration-thickness: 1px;
-    opacity: 0.8;
+    opacity: 0.6;        /* a bit transparent */
     pointer-events: none;
-    /* On commit (the attr (re)appears) ease in over 2s instead of flashing. */
-    animation: scasCrossoutIn 2s ease-out;
+    /* Begins only AFTER the reel flash-out (240ms), then eases in over 2s; backwards fill holds it
+       hidden through the delay so it doesn't flash. */
+    animation: scasCrossoutIn 2s ease-out 0.24s backwards;
   }
   /* First-written stamp: time of day (24h, four digits) centred in small grey print above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
@@ -224,19 +232,23 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    top: -1.1em;        /* in the line-gap above the word */
-    font-size: 0.6em;   /* small print */
+    top: -0.8em;         /* closer to the word */
+    font-size: 0.42em;   /* substantially smaller */
     line-height: 1;
     font-family: sans-serif;
     letter-spacing: 0.06em;
     white-space: nowrap;
-    color: #9ca3af;     /* grey */
+    color: #9ca3af;      /* grey */
     opacity: 0.85;
     pointer-events: none;
-    animation: scasTimeIn 1s ease-out;   /* comes back in 1s */
+    animation: scasTimeIn 1s ease-out 0.24s backwards;   /* after the reel flash-out, in over 1s */
   }
-  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.8; } }
+  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.6; } }
   @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
+  /* The purple reel flashes IN over the open duration (120ms). (Flash-out on commit is carried by the
+     reel's own 240ms settle; the green/stamp then ease in after that — see animation-delay above.) */
+  .scas-cycle-card { animation: scasReelIn 120ms ease-out; }
+  @keyframes scasReelIn { from { opacity: 0; } to { opacity: 1; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;
@@ -327,7 +339,7 @@
   .inkwave-page-gap-band { display: none !important; }
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
-  .scas-red { background: none !important; color: #1a1a1a !important; }
+  .scas-red { background: none !important; color: #1a1a1a !important; box-shadow: none !important; }
   .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
   /* Drop the memory cross-out + first-written stamp too — the printed/PDF document is clean final text. */
   .scas-red[data-scas-old]::after, .scas-red[data-scas-time]::before { content: none !important; }

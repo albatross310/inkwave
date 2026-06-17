@@ -1010,6 +1010,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               onHintChange={handleHintChange}
               onCycleChange={setCycleActive}
               isLockedLemma={(lemma) => scasRef.current!.lookup().locked.has(lemma)}
+              firstKickAt={(word) => scasRef.current!.firstKickAt(word)}
             />
           )}
         </Scroll>

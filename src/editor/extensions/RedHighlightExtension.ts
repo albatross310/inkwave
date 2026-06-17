@@ -106,9 +106,9 @@ interface RedWord {
   word: string
   dataWord: string   // synonym-lookup key: the slot's original word (= word, unless managed)
   seqInPara: number  // 1-based — kept for data-scas-n (debugging / future use)
-  secondary: boolean // a managed slot whose current text differs from its original — a substituted
-                     // word. Rendered the lighter purple (matches the reel's candidate colour) so a
-                     // committed synonym keeps its colour.
+  secondary: boolean // a managed memory slot with a known origin — show its cross-out + first-written
+                     // stamp. True even when the current text == the original (reverted): the memory
+                     // (and the struck origin below) persists regardless of the current word.
   firstAt: string | null // slot.firstCommitAt (epoch ms, as stored) — when the original was first written
 }
 
@@ -176,7 +176,7 @@ function buildDecorations(
         redWords.push({
           from, to, pIdx, word, seqInPara: ++seqInPara,
           dataWord: slotOriginal ?? word.toLowerCase(),
-          secondary: !!slotOriginal && word.toLowerCase() !== slotOriginal.toLowerCase(),
+          secondary: !!slotOriginal,
           firstAt: (slotMark?.attrs.firstCommitAt as string | null) ?? null,
         })
       }

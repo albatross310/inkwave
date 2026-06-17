@@ -105,6 +105,11 @@ export class ScasController {
     return this.currentSet.has(lemma)
   }
 
+  /** Epoch ms when `word`'s lemma first turned purple (was kicked), or undefined if unknown. */
+  firstKickAt(word: string): number | undefined {
+    return this.state.kickTimes?.[lemmaOf(word)]
+  }
+
   /**
    * Adopt a server-issued exclusion set (M3): the live signing session is authoritative for S_v, so
    * this replaces the locally-derived set. Advancing the version expires stale immunity (same as a
@@ -152,9 +157,17 @@ export class ScasController {
     }
 
     // 2. Fresh kicks — a committed in-S lemma (not immune/locked) becomes an outstanding kick.
+    //    Stamp the moment it FIRST turns purple (kickTimes) — the slot's true "first-written" time,
+    //    persisted with the state so it survives reload (read later via firstKickAt).
     for (const w of words) {
       const v = classifyCommit(st, w.lemma, this.inSv(w.lemma))
-      if (v.kicks && v.trigger === 'in-S') st = recordKick(st, w.lemma)
+      if (v.kicks && v.trigger === 'in-S') {
+        const fresh = !st.liveKicks.includes(w.lemma)
+        st = recordKick(st, w.lemma)
+        if (fresh && !st.kickTimes?.[w.lemma]) {
+          st = { ...st, kickTimes: { ...st.kickTimes, [w.lemma]: Date.now() } }
+        }
+      }
     }
 
     // 3. Deletions — a kicked lemma that vanished (and wasn't resolved via a slot) is a dodge → lock.
