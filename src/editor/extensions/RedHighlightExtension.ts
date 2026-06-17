@@ -19,7 +19,7 @@ function debugHighlightAll(): boolean {
   }
 }
 import type { InkwaveDocument } from '../../types/document'
-import { REFLOW_OPEN_MS, REFLOW_EASE, type LineRange, type SlideRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange, type SlideRange } from '../suggestions/ThesaurusPopover/popoverConstants'
 
 export const RED_HIGHLIGHT_KEY = new PluginKey<DecorationSet>('redHighlight')
 
@@ -138,11 +138,9 @@ function buildDecorations(
   const redWords: RedWord[] = []
   let paragraphIndex = 0
   const debugAll = debugHighlightAll() // temporary: colour every pool word for animation testing
-  // The in-place line-compression now applies INSTANTLY (no transition) and the post-commit slide is
-  // off — the laggy/janky "flash compression" animation is ripped out for master. The static
-  // compression is solid; the animation is being reworked on an experimental branch (per-char
-  // transform FLIP). Flip this to false there to re-enable the transitions below.
-  const ANIMATE_COMPRESSION = false
+  // Compression/slide animation is ripped out for master (shared flag in popoverConstants — also gates
+  // the LOGIC in usePopoverLayout). The static compression applies INSTANTLY; transitions below are
+  // no-ops while it's false.
 
   pmDoc.descendants((node: PMNode, pos: number) => {
     if (node.type.name !== 'paragraph') return true

@@ -26,6 +26,14 @@ export const REFLOW_OPEN_MS   = 120
 export const REFLOW_COMMIT_MS = Math.round(240 * commitSlowFactor())
 export const REFLOW_EASE      = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
+// Master = no compression/slide ANIMATION (it's ripped out — static compression only; see
+// inkwave-line-compression memory). This gates the animation LOGIC too (applyLayout's FLIP-open
+// invert/play + commitWithSlide's slide), not just the CSS transitions — otherwise those still fire
+// extra onHintChange transactions + a forced reflow on open (per-word frame drop) and rebuild the
+// decorations after commit (the annotations' fade-in "wawaa"-replays). Flip true on the experimental
+// animation branch.
+export const ANIMATE_COMPRESSION = false
+
 export interface CycleState {
   word: string
   from: number; to: number

@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { getSynonyms } from '../thesaurus'
 import { getFont } from '../textMetrics'
-import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS } from './popoverConstants'
+import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_OPEN_MS, REFLOW_COMMIT_MS, ANIMATE_COMPRESSION } from './popoverConstants'
 import type { CycleState, OnHintChange, LineRange, SlideRange } from './popoverConstants'
 import { posOf, measureNaturalLineRight, computeLineCompressionRange, lineEndPosAfter } from './popoverGeometry'
 import { buildSynonyms } from './popoverFallbacks'
@@ -83,7 +83,7 @@ export function usePopoverLayout(
     // the word — so its own snap isn't seen), then slide the after-run in from where it sat at
     // natural width and ease the COMPRESSION on with scaleX. So the after-text appears to glide OUT
     // to make room rather than teleporting. (min-width can't transition cheaply — that was the lag.)
-    if (animate && minWidth > naturalWidth && lineRange) {
+    if (ANIMATE_COMPRESSION && animate && minWidth > naturalWidth && lineRange) {
       const naturalAfterLeft  = rect.right                      // after-run's left edge at natural width
       const naturalBeforeRight = rect.left                      // before-run's right edge at natural width
       const fsz = parseFloat(window.getComputedStyle(fe).fontSize) || 18
@@ -237,6 +237,10 @@ export function usePopoverLayout(
     onHintChange(null, null)
     swap()
     setCycle(null)
+    // Animation ripped out → no slide. Stop here: the extra onHintChange invert/play/cleanup
+    // transactions below otherwise keep rebuilding the decorations after commit, which replays the
+    // annotations' fade-in ("wawaa"). The committed text is already in place at natural layout.
+    if (!ANIMATE_COMPRESSION) return
     if (r0 === null) return
     // 3. Measure the committed word on the FINAL (rewrapped) layout.
     const committedTo = from + replacementLen
