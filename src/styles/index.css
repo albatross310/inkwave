@@ -203,12 +203,13 @@
   .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
-    left: 0;
+    left: 50%;
+    transform: translateX(-50%);   /* centre the old word under the new one */
     top: 1.25em;      /* sit roughly midway in the 2.5 line-gap, between the word and the line below */
     font-size: 1em;   /* same size as the word — easy to read */
     line-height: 1;
     white-space: nowrap;
-    color: #9b5ccc;
+    color: #166534;   /* dark green */
     text-decoration: line-through;
     text-decoration-thickness: 1px;
     opacity: 0.8;
@@ -217,6 +218,8 @@
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;
+    left: auto;
+    transform: none;
     top: auto;
     margin-left: 0.3em;
   }
