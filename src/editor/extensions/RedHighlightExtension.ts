@@ -137,10 +137,13 @@ function buildDecorations(
     node.forEach((child: PMNode, offset: number) => {
       if (!child.isText || !child.text) return
       const text = child.text
-      // The slot mark anchors a cycled word's synonym list to its original; it no longer forces
-      // colour — colour is driven entirely by engine state.
+      // The slot mark anchors a cycled word's synonym list to its original. A committed memory slot
+      // also PERSISTS as purple (re-cyclable) even after the engine clears the live kick — that's the
+      // "kicked words keep their memory" behaviour. A LOCKED slot is final → normal colour. Live
+      // engine kicks colour as before. (See scas-memory-slots-design.md.)
       const slotMark = child.marks.find(m => m.type.name === 'scasSlot')
       const slotOriginal = (slotMark?.attrs.original as string | null) ?? null
+      const persistSlot = !!slotMark && !slotMark.attrs.locked
       let match: RegExpExecArray | null
       WORD_RE.lastIndex = 0
       while ((match = WORD_RE.exec(text)) !== null) {
@@ -156,7 +159,7 @@ function buildDecorations(
         }
 
         const lemma = lemmaOf(word)
-        if (!isColoured(lookup, lemma) && !(debugAll && inPool(lemma))) continue
+        if (!isColoured(lookup, lemma) && !persistSlot && !(debugAll && inPool(lemma))) continue
 
         redWords.push({
           from, to, pIdx, word, seqInPara: ++seqInPara,
