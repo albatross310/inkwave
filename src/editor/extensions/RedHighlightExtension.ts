@@ -109,6 +109,16 @@ interface RedWord {
   secondary: boolean // a managed slot whose current text differs from its original — a substituted
                      // word. Rendered the lighter purple (matches the reel's candidate colour) so a
                      // committed synonym keeps its colour.
+  firstAt: string | null // slot.firstCommitAt (epoch ms, as stored) — when the original was first written
+}
+
+// Time-of-day as four digits, 24h, no colon (e.g. 1432) — the slot's first-written stamp.
+function hhmm(raw: string | null): string | null {
+  if (!raw) return null
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms <= 0) return null
+  const d = new Date(ms)
+  return String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0')
 }
 
 function buildDecorations(
@@ -167,6 +177,7 @@ function buildDecorations(
           from, to, pIdx, word, seqInPara: ++seqInPara,
           dataWord: slotOriginal ?? word.toLowerCase(),
           secondary: !!slotOriginal && word.toLowerCase() !== slotOriginal.toLowerCase(),
+          firstAt: (slotMark?.attrs.firstCommitAt as string | null) ?? null,
         })
       }
     })
@@ -190,7 +201,7 @@ function buildDecorations(
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
-  for (const { from, to, dataWord, pIdx, seqInPara, secondary } of redWords) {
+  for (const { from, to, dataWord, pIdx, seqInPara, secondary, firstAt } of redWords) {
     const isFocused = focusedPos !== null && from === focusedPos
     // All coloured words use the one dark purple now — the struck-through old word distinguishes a
     // committed/substituted slot, so the lighter "secondary" tint is no longer needed.
@@ -200,10 +211,15 @@ function buildDecorations(
       'data-para': String(pIdx),
       'data-scas-n': String(seqInPara),
     }
-    // The memory cross-out: a substituted slot (current text ≠ its origin) shows its ORIGINAL word
-    // struck-through beneath the new one (dataWord IS the origin for a slot). CSS draws it; skip while
-    // focused (the reel renders the word) and let the hint badge win the ::after when both apply.
-    if (secondary && !isFocused) attrs['data-scas-old'] = dataWord
+    // The memory cross-out (::after, dark green, beneath) + the first-written stamp (::before, grey,
+    // above): a substituted slot shows its ORIGINAL struck-through and, when known, the time of day it
+    // was first written. CSS draws both; skip while focused (the reel renders the word) so they fade
+    // back in on commit rather than flash.
+    if (secondary && !isFocused) {
+      attrs['data-scas-old'] = dataWord
+      const t = hhmm(firstAt)
+      if (t) attrs['data-scas-time'] = t
+    }
     const hint = hintMap.get(from)
     if (hint) attrs['data-hint'] = hint
 

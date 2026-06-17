@@ -134,12 +134,20 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
+        // Preserve the slot's first-written stamp across re-cycles: read any existing
+        // firstCommitAt in this range; only stamp `now` the first time the slot is created.
+        let firstCommitAt: string | null = null
+        editor.state.doc.nodesBetween(from, to, (node) => {
+          const m = node.marks.find(mk => mk.type.name === 'scasSlot')
+          if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
+        })
+        if (!firstCommitAt) firstCommitAt = String(Date.now())
         // Carry the SCAS-slot mark (anchored to this slot's original word) so the position
         // stays managed: it keeps rendering red/changeable even if the new word is in vocab,
         // and reopening re-offers the original's synonym list. `word` holds the original.
         editor.chain().deleteRange({ from, to }).insertContentAt(from, {
           type: 'text', text: replacement,
-          marks: [{ type: 'scasSlot', attrs: { original: word } }],
+          marks: [{ type: 'scasSlot', attrs: { original: word, firstCommitAt } }],
         }).run()
       }
       pinCursor(); advanceOrRestore(from, advance)

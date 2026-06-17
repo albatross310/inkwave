@@ -214,7 +214,29 @@
     text-decoration-thickness: 1px;
     opacity: 0.8;
     pointer-events: none;
+    /* On commit (the attr (re)appears) ease in over 2s instead of flashing. */
+    animation: scasCrossoutIn 2s ease-out;
   }
+  /* First-written stamp: time of day (24h, four digits) centred in small grey print above the word.
+     Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
+  .scas-red[data-scas-time]:not([data-hint])::before {
+    content: attr(data-scas-time);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: -1.1em;        /* in the line-gap above the word */
+    font-size: 0.6em;   /* small print */
+    line-height: 1;
+    font-family: sans-serif;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    color: #9ca3af;     /* grey */
+    opacity: 0.85;
+    pointer-events: none;
+    animation: scasTimeIn 1s ease-out;   /* comes back in 1s */
+  }
+  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.8; } }
+  @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;
@@ -307,8 +329,8 @@
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; }
   .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
-  /* Drop the memory cross-out too — the printed/PDF document is the clean final text. */
-  .scas-red[data-scas-old]::after { content: none !important; }
+  /* Drop the memory cross-out + first-written stamp too — the printed/PDF document is clean final text. */
+  .scas-red[data-scas-old]::after, .scas-red[data-scas-time]::before { content: none !important; }
   /* The faded seal on every printed page (fixed → repeats per page). Uses a real <img>, NOT a CSS
      background — browsers drop background images from print unless "Background graphics" is ticked,
      so a background-image seal silently never prints. Foreground <img> content always prints. */
