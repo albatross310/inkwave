@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useCompliance } from '../../../scas/compliance'
-import { CYCLE_SIZE, REFLOW_COMMIT_MS, REFLOW_EASE } from './popoverConstants'
+import { CYCLE_SIZE, DELETE_SENTINEL, REFLOW_COMMIT_MS, REFLOW_EASE } from './popoverConstants'
 import type { OnHintChange } from './popoverConstants'
 import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
@@ -22,12 +22,16 @@ import { usePopoverLayout } from './usePopoverLayout'
 // The selected slot for a given continuous position = nearest ring, wrapped into [0,SIZE).
 const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE
 
-// Commit choreography (steady-state / no-animate master): after release, HOLD the reel on the chosen
-// word for a beat, THEN reflow + dissolve the neighbour rows (ghost), and only AFTER the ghost does
-// the cross-out + date fade in. The three phases never overlap. (Ghost duration is mirrored in CSS:
-// scasReelOut + the annotations' animation-delay = GHOST_MS.)
-const COMMIT_PAUSE_MS = 500
-const GHOST_MS = 450
+// Commit choreography — a strict 3-event clock, NOTHING else moving in between:
+//   EVENT 1  press        — open: reel out in a flash, no fade/drift (handled at open).
+//   EVENT 2  release (T=0) — the reel rolls back to centre; nothing else happens.
+//   EVENT 3  T=SETTLE_MS   — the action: the reel's neighbour rows are REPLACED in-place by ghosts
+//                            (seamless freeze-frame, fading out), the line reflows, and FADE_MS later
+//                            the cross-out + date fade in. Ghost-out and fade-in never overlap.
+// FADE_MS is mirrored in CSS as the annotations' animation-delay; GHOST_MS as scasReelOut.
+const SETTLE_MS = 250
+const GHOST_MS = 500
+const FADE_MS = 500
 
 // ── Momentum tuning ──────────────────────────────────────────────────────────
 const MAX_VEL    = 0.060   // slots/ms — capped so a frame never jumps the whole window
@@ -138,42 +142,32 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (advance) requestAnimationFrame(() => { if (!goNext(from, tabCursorRef.current ?? undefined)) restoreCursor() })
     else restoreCursor()
   }
-  // The reel rows just above/below the chosen word — captured (TEXT only) while the cycle is open.
-  // Mounted later at the COMMITTED word's final position (mountNeighbourGhosts) so they don't shoot
-  // back when the line de-compresses.
-  function neighbourGhostText(chosen: string) {
-    const c = cycle; if (!c) return null
+  // EVENT-3 ghosts: a freeze-frame of the reel's neighbour rows (just above/below the chosen word),
+  // captured from the reel's OWN geometry so each ghost sits EXACTLY where the reel drew it. Mounting
+  // it in the same tick the reel tears down makes the swap seamless (no gap) and drift-free (no
+  // shoot-back). Skips the delete sentinel.
+  function captureReelGhosts(chosen: string) {
+    const c = cycle; if (!c || !geom) return null
     const N = c.synonyms.length; const idx = Math.max(0, c.synonyms.indexOf(chosen))
     const mobile = window.innerWidth < 768 ? 1.4 : 1
-    const mk = (ring: number) => { const w = c.synonyms[((ring % N) + N) % N]; return { text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#9b5ccc' : '#5c2d8a' } }
-    return { above: mk(idx - 1), below: mk(idx + 1) }
-  }
-  type GhostText = ReturnType<typeof neighbourGhostText>
-  // Mount the neighbour ghosts at the COMMITTED word's FINAL (post-snap) position, so they fade out
-  // exactly where the reel rows sat relative to the settled word — no horizontal "shoot back" when a
-  // short word committed inside a left-compressed line.
-  function mountNeighbourGhosts(from: number, gt: GhostText) {
-    if (!gt) return
-    const cRect = containerEl.current?.getBoundingClientRect(); if (!cRect) return
-    const wordEl = [...editor.view.dom.querySelectorAll<HTMLElement>('.scas-red')].find(e => posOf(e, editor) === from)
-    if (!wordEl) return
-    const r = wordEl.getBoundingClientRect()
-    const cs = getComputedStyle(wordEl)
-    const rowH = Math.round((parseFloat(cs.fontSize) || 18) * 1.15)
-    const centerY = r.top - cRect.top + r.height / 2
-    const leftPx = r.left - cRect.left
-    const row = (g: { text: string; color: string }, rel: number) =>
-      ({ top: centerY - rowH / 2 + rel * rowH, left: leftPx, rowH, text: g.text, color: g.color, fontFamily: cs.fontFamily, fontSize: cs.fontSize })
-    setGhosts([row(gt.above, -1), row(gt.below, 1)])
-    window.setTimeout(() => setGhosts(null), GHOST_MS + 80)
+    const { left, cardTop, cardH, rowH, slotLefts, fsz, fontFamily } = geom
+    const centreTop = cardTop + (cardH - rowH) / 2
+    const row = (delta: number) => {
+      const slot = (((idx + delta) % N) + N) % N
+      const w = c.synonyms[slot]
+      if (w === DELETE_SENTINEL) return null
+      return { top: centreTop + delta * rowH, left: left + slotLefts[slot], rowH,
+               text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#9b5ccc' : '#5c2d8a',
+               fontFamily, fontSize: `${fsz}px` }
+    }
+    return [row(-1), row(1)].filter(Boolean) as Array<NonNullable<ReturnType<typeof row>>>
   }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
-    cancelAnim()
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
-    const gt = neighbourGhostText(replacement)
+    const ghostRows = captureReelGhosts(replacement)   // freeze-frame target (reel geometry, while open)
     // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
     // this range; otherwise the TRUE time the word first turned purple (firstKickAt); else now.
     let firstCommitAt: string | null = null
@@ -197,16 +191,17 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       }
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // PHASE 1 — hold the reel on the chosen word for COMMIT_PAUSE_MS (the line stays compressed).
-    // PHASE 2 — at the end of the pause, commit: the line reflows/snaps back, and (for a real change)
-    // the neighbour rows dissolve as a ghost at the committed word's final spot.
-    // PHASE 3 — the cross-out + date fade in only AFTER the ghost (CSS animation-delay = GHOST_MS),
-    // so the dissolve and the fade-in never overlap.
+    // EVENT 2 (now) — the reel rolls back to centre. Nothing else.
+    cancelAnim()
+    settleTo(Math.round(reelRef.current))
+    // EVENT 3 (T = SETTLE_MS) — replace the neighbour rows with ghosts (SAME tick as the teardown →
+    // seamless) and reflow/commit. The cross-out + date fade in FADE_MS later (CSS animation-delay),
+    // so the ghost-out and the fade-in never overlap.
     window.setTimeout(() => {
-      if (!changed) { closeWithAnimation(swap); return }
-      commitWithSlide(swap, from, replacement.length)
-      requestAnimationFrame(() => mountNeighbourGhosts(from, gt))
-    }, COMMIT_PAUSE_MS)
+      if (ghostRows && ghostRows.length) { setGhosts(ghostRows); window.setTimeout(() => setGhosts(null), GHOST_MS + 60) }
+      if (!changed) closeWithAnimation(swap)
+      else commitWithSlide(swap, from, replacement.length)
+    }, SETTLE_MS)
   }
 
   // Refs so the once-subscribed input handlers below read live state without
@@ -530,13 +525,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         return
       }
       if (wasDragging && c) {
-        // A gentle release: ease the reel the rest of the way onto the centre slot, THEN commit —
-        // so letting go off-centre shows the vertical settle (not an instant commit from wherever
-        // it happened to be). A faster flick coasts (fling), and also settles + commits when it
-        // stops. (A pre-release pause makes the smoothed velocity stale, so treat it as zero.)
-        const v = e.timeStamp - lastT > 80 ? 0 : velRef.current
-        if (Math.abs(v) <= COMMIT_VEL) { cancelAnim(); settleTo(Math.round(reelRef.current), commitLandedRest) }
-        else fling(v)
+        // Release → commit the nearest slot. acceptSuggestion is the central clock: its EVENT 2
+        // rolls the reel back to centre (the only thing that moves on release), then EVENT 3 fires
+        // a fixed time later. (No separate pre-settle/fling — that double-timed the commit.)
+        cancelAnim()
+        acceptRef.current(c.synonyms[slotAt(Math.round(reelRef.current))], false)
       }
     }
     function onPointerCancel() {
