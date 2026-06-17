@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listOneDriveFiles, getRecentFolders, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
 
 // Open a .studio/.inkwave file FROM OneDrive (for phones, where OneDrive isn't a mounted Explorer
 // folder). Browse folders, pick a file → the caller downloads it, opens it, and adopts it as the
@@ -28,6 +28,10 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
+  const [reload, setReload] = useState(0)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : null
   const currentPath = crumbs.map((c) => c.name).join('/')
@@ -41,7 +45,15 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
       .then(([fo, fi]) => { if (!cancelled) { setFolders(fo); setFiles(fi) } })
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
-  }, [currentId])
+  }, [currentId, reload])
+
+  async function createFolder() {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true)
+    try { await createOneDriveFolder(currentId, name); setCreating(false); setNewName(''); setReload((r) => r + 1) }
+    finally { setBusy(false) }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -92,6 +104,25 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[11px] uppercase tracking-wide text-stone-400">{currentPath || 'OneDrive'}</div>
+          {!creating && (
+            <button type="button" onClick={() => setCreating(true)} className="text-xs font-sans hover:underline flex items-center gap-1" style={{ color: ONE }}>
+              <span className="text-sm leading-none">＋</span> New folder
+            </button>
+          )}
+        </div>
+        {creating && (
+          <div className="flex gap-1.5 mb-2">
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Folder name"
+              onKeyDown={(e) => { if (e.key === 'Enter') void createFolder(); if (e.key === 'Escape') { setCreating(false); setNewName('') } }}
+              className="flex-1 text-sm font-sans rounded px-2 py-1 outline-none" style={{ border: `1px solid ${ONE}66` }} />
+            <button type="button" onClick={() => void createFolder()} disabled={!newName.trim() || busy}
+              className="text-xs font-sans text-white px-3 rounded disabled:opacity-50" style={{ background: ONE }}>Create</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName('') }} className="text-xs font-sans text-stone-400 px-2 hover:text-stone-600">Cancel</button>
           </div>
         )}
 

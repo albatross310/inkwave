@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, type GDriveRecent } from '../storage/gdrive'
+import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, createGoogleDriveFolder, type GDriveRecent } from '../storage/gdrive'
 
 // Open a .studio/.inkwave file FROM Google Drive — folder-navigable (matches the OneDrive opener).
 // drive.file only lets Inkwave see files/folders IT created, so this browses the app's own folders +
@@ -45,6 +45,10 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<GDriveRecent[]>([])
+  const [reload, setReload] = useState(0)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : 'root'
   const currentPath = crumbs.map((c) => c.name).join('/')
@@ -58,7 +62,15 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
       .then(([fo, fi]) => { if (!cancelled) { setFolders(fo); setFiles(fi) } })
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
-  }, [currentId])
+  }, [currentId, reload])
+
+  async function createFolder() {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true)
+    try { await createGoogleDriveFolder(name, currentId); setCreating(false); setNewName(''); setReload((r) => r + 1) }
+    finally { setBusy(false) }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -109,6 +121,25 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[11px] uppercase tracking-wide text-stone-400">{currentPath || 'My Drive'}</div>
+          {!creating && (
+            <button type="button" onClick={() => setCreating(true)} className="text-xs font-sans hover:underline flex items-center gap-1 text-[#5f6368]">
+              <span className="text-sm leading-none">＋</span> New folder
+            </button>
+          )}
+        </div>
+        {creating && (
+          <div className="flex gap-1.5 mb-2">
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Folder name"
+              onKeyDown={(e) => { if (e.key === 'Enter') void createFolder(); if (e.key === 'Escape') { setCreating(false); setNewName('') } }}
+              className="flex-1 text-sm font-sans rounded px-2 py-1 outline-none" style={{ border: `1px solid ${G_BLUE}66` }} />
+            <button type="button" onClick={() => void createFolder()} disabled={!newName.trim() || busy}
+              className="text-xs font-sans px-3 rounded bg-[#f1f3f4] text-[#3c4043] hover:bg-[#e8eaed] disabled:opacity-50">Create</button>
+            <button type="button" onClick={() => { setCreating(false); setNewName('') }} className="text-xs font-sans text-stone-400 px-2 hover:text-stone-600">Cancel</button>
           </div>
         )}
 

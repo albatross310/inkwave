@@ -130,8 +130,11 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
             <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Recent folders</div>
             <div className="flex flex-wrap gap-1.5">
               {recent.map((f) => (
-                <button key={f.id} type="button" disabled={syncing} onClick={() => void pick(f.id, f.name)}
-                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f3f4] disabled:opacity-60" style={{ border: `1px solid ${G_BLUE}40`, color: '#3c4043' }}>
+                <button key={f.id} type="button"
+                  // Select the folder (the main "Sync here" targets it) rather than syncing now, so
+                  // the writer can rename the file first.
+                  onClick={() => { setSelected(f.id); setSelectedName(f.name) }}
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f3f4]" style={{ border: `1px solid ${G_BLUE}40`, color: '#3c4043' }}>
                   🗁 {f.name}
                 </button>
               ))}

@@ -189,14 +189,16 @@ export async function addRecentGDriveFolder(folder: GDriveRecent): Promise<void>
 // folders WE created — so the new folder becomes a valid sync target. Used by the Save-menu "New
 // folder" action (the hosted Picker has no create-folder of its own).
 const FILES_API = 'https://www.googleapis.com/drive/v3/files'
-export async function createGoogleDriveFolder(name: string): Promise<{ id: string; name: string } | null> {
+export async function createGoogleDriveFolder(name: string, parentId?: string): Promise<{ id: string; name: string } | null> {
   if (!CLIENT_ID) return null
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
+  const body: Record<string, unknown> = { name, mimeType: 'application/vnd.google-apps.folder' }
+  if (parentId) body.parents = [parentId] // create inside the browsed folder ('root' = My Drive root)
   const res = await fetch(`${FILES_API}?fields=id,name`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) return null
   const d = (await res.json()) as { id: string; name: string }

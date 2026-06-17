@@ -130,15 +130,11 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
             <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">{shortcutsLabel}</div>
             <div className="flex flex-wrap gap-1.5">
               {shortcuts.map((f, i) => (
-                <button key={`${f.id}-${i}`} type="button" disabled={syncing}
-                  onClick={async () => {
-                    // Recent → pick it directly (sync + close, same as the main button). Common folder
-                    // (no recents yet) → drill in. The bug was calling onPick raw: no feedback, no close.
-                    if (!recent.length) { setCrumbs([{ id: f.id, name: f.name }]); return }
-                    setSyncing(true)
-                    try { await onPick({ id: f.id, path: recent[i].path }) } finally { onClose() }
-                  }}
-                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f7fc] disabled:opacity-60" style={{ border: `1px solid ${ONE}40`, color: ONE }}>
+                <button key={`${f.id}-${i}`} type="button"
+                  // Navigate to the folder (= select it as the sync target) rather than syncing
+                  // immediately, so the writer can rename the file first, then hit "Sync here".
+                  onClick={() => setCrumbs(f.id ? [{ id: f.id, name: f.name }] : [])}
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f7fc]" style={{ border: `1px solid ${ONE}40`, color: ONE }}>
                   🗁 {f.name}
                 </button>
               ))}
