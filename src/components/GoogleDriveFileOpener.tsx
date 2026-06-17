@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFiles } from '../storage/gdrive'
+import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, type GDriveRecent } from '../storage/gdrive'
 
-// Open a .studio/.inkwave file FROM Google Drive — a reliable custom lister (no hosted picker, which
-// was flaking). Shows the files Inkwave can see on drive.file (your own synced files, across
-// devices). Pick one → the caller downloads it, opens it, and keeps syncing to it (no Save). Files
-// OTHERS shared with you aren't visible to drive.file — open those via "This computer" on desktop.
+// Open a .studio/.inkwave file FROM Google Drive — folder-navigable (matches the OneDrive opener).
+// drive.file only lets Inkwave see files/folders IT created, so this browses the app's own folders +
+// files (not your whole Drive). Pick a file → the caller downloads it, opens it, keeps syncing to it,
+// and remembers its folder as a Recent folder. Files OTHERS shared with you aren't visible to
+// drive.file — open those via "This computer" (the mounted Drive folder) on desktop.
 const G_BLUE = '#4285F4'
+const G_HOVER = '#f5f9ff'
 
 function DriveMark() {
   return (
@@ -30,21 +32,33 @@ function GoogleWordmark() {
   )
 }
 
+type Crumb = { id: string; name: string }
+type Item = { id: string; name: string }
+
 export function GoogleDriveFileOpener({ onOpen, onClose }: {
-  onOpen: (f: { id: string; name: string }) => void | Promise<void>
+  onOpen: (f: { id: string; name: string; folderId: string; folderName: string }) => void | Promise<void>
   onClose: () => void
 }) {
-  const [files, setFiles] = useState<Array<{ id: string; name: string }> | null>(null)
+  const [crumbs, setCrumbs] = useState<Crumb[]>([])
+  const [folders, setFolders] = useState<Item[] | null>(null)
+  const [files, setFiles] = useState<Item[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
+  const [recent, setRecent] = useState<GDriveRecent[]>([])
+
+  const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : 'root'
+  const currentPath = crumbs.map((c) => c.name).join('/')
+
+  useEffect(() => { void getRecentGDriveFolders().then(setRecent).catch(() => {}) }, [])
 
   useEffect(() => {
     let cancelled = false
-    listGoogleDriveFiles()
-      .then((f) => { if (!cancelled) setFiles(f) })
+    setFolders(null); setFiles(null); setError(null)
+    Promise.all([listGoogleDriveFolders(currentId), listGoogleDriveFiles(currentId)])
+      .then(([fo, fi]) => { if (!cancelled) { setFolders(fo); setFiles(fi) } })
       .catch((e) => { if (!cancelled) setError((e as Error).message) })
     return () => { cancelled = true }
-  }, [])
+  }, [currentId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -52,9 +66,10 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  async function open(f: { id: string; name: string }) {
+  async function open(file: Item) {
     setOpening(true)
-    try { await onOpen(f) } finally { onClose() }
+    try { await onOpen({ id: file.id, name: file.name, folderId: currentId, folderName: currentPath || 'My Drive (root)' }) }
+    finally { onClose() }
   }
 
   return createPortal(
@@ -71,20 +86,54 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
           <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-2xl leading-none">×</button>
         </div>
 
-        <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1.5">Your Inkwave files</div>
+        <div className="text-xs text-stone-500 mb-2 flex flex-wrap items-center gap-1 font-sans">
+          <button type="button" className="hover:underline" style={{ color: G_BLUE }} onClick={() => setCrumbs([])}>My Drive</button>
+          {crumbs.map((c, i) => (
+            <span key={c.id} className="flex items-center gap-1">
+              <span className="text-stone-300">/</span>
+              <button type="button" className="hover:underline" style={{ color: G_BLUE }} onClick={() => setCrumbs(crumbs.slice(0, i + 1))}>{c.name}</button>
+            </span>
+          ))}
+        </div>
+
+        {/* Recent folders → jump straight there (only at the root view). */}
+        {crumbs.length === 0 && recent.length > 0 && (
+          <div className="mb-2">
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Recent folders</div>
+            <div className="flex flex-wrap gap-1.5">
+              {recent.map((f, i) => (
+                <button key={`${f.id}-${i}`} type="button"
+                  onClick={() => setCrumbs(f.id ? [{ id: f.id, name: f.name }] : [])}
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f5f9ff]" style={{ border: `1px solid ${G_BLUE}40`, color: '#3c4043' }}>
+                  🗁 {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="border rounded-lg max-h-72 overflow-auto" style={{ borderColor: '#e6eef5' }}>
           {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
-          {!error && files === null && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
-          {!error && files?.length === 0 && <p className="text-xs text-stone-400 p-3">No Inkwave files in this Google account yet.</p>}
+          {!error && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
+          {folders?.map((f) => (
+            <button key={f.id} type="button" onClick={() => setCrumbs([...crumbs, { id: f.id, name: f.name }])}
+              className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2"
+              style={{ borderColor: '#f0f4f8', color: '#33414f' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = G_HOVER)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+              <span aria-hidden="true">🗁</span>{f.name}
+            </button>
+          ))}
           {files?.map((f) => (
             <button key={f.id} type="button" disabled={opening} onClick={() => void open(f)}
               className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2 disabled:opacity-50"
-              style={{ borderColor: '#f0f4f8', color: '#33414f' }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f9ff')}
+              style={{ borderColor: '#f0f4f8', color: '#1a73e8' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = G_HOVER)}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
               <span aria-hidden="true">📄</span>{f.name}
             </button>
           ))}
+          {!error && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
         </div>
         <p className="text-xs text-stone-400 mt-3">Pick a file — it opens and keeps syncing back to Drive (no Save needed). For files shared with you, use “This computer” on desktop.</p>
       </div>

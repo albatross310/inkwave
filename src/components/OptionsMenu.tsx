@@ -218,7 +218,7 @@ export function OptionsMenu({
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
-          {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onDone={() => setModal(null)} />}
+          {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
@@ -249,6 +249,9 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
+      <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
+        ⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
+      </MenuButton>
       {/* Chromium (File System Access): native "Save to a folder"; once linked it shows the file name. */}
       {folderAvailable && (
         <MenuButton onClick={onSave ? () => { onSave(); onDone() } : undefined}>
@@ -280,24 +283,24 @@ function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderNa
           🗁 Choose Google Drive folder<span className="block text-xs text-stone-400">pick where it syncs · updates as you write</span>
         </MenuButton>
       )}
-      <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
-        ⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
-      </MenuButton>
     </div>
   )
 }
 
 // Save a copy — a separate file that then stays updated; pick where it goes. (Consolidated here from
 // the per-destination "Save a copy" buttons.)
-function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGoogleDrive, onDone }: {
+function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGoogleDrive, onExportBundle, onDone }: {
   folderAvailable?: boolean; onSaveAs?: () => void
-  onSaveAsOneDrive?: () => void; onSaveAsGoogleDrive?: () => void; onDone: () => void
+  onSaveAsOneDrive?: () => void; onSaveAsGoogleDrive?: () => void; onExportBundle?: () => void; onDone: () => void
 }) {
   // Gated on the destination being CONFIGURED (handler present), not on it being currently active —
   // so you can save a copy to Drive/OneDrive even if you're not syncing there now (it signs in on click).
   return (
     <div className="flex flex-col gap-2.5 mt-2">
       <p className="text-xs text-stone-400 px-1">Save a separate copy that then keeps updating — pick where it goes.</p>
+      {onExportBundle && (
+        <MenuButton onClick={() => { onExportBundle(); onDone() }}>⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span></MenuButton>
+      )}
       {folderAvailable && onSaveAs && (
         <MenuButton onClick={() => { onSaveAs(); onDone() }}>🗁 This computer<span className="block text-xs text-stone-400">a new file in a folder, then keep it updated</span></MenuButton>
       )}

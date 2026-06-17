@@ -37,7 +37,7 @@ import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId } from '../storage/gdrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
@@ -672,9 +672,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!ed) return
     exportLatexDownload(ed.getJSON() as Parameters<typeof exportLatexDownload>[0], docRef.current.title || 'inkwave')
   }
-  async function onGdriveFileOpen(f: { id: string; name: string }) {
+  async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
+    // Remember the file's folder as a Recent folder ('root' → '' to match the picker's root id).
+    void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
   }
   // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.

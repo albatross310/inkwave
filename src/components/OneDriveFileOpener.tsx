@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listOneDriveFiles, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listOneDriveFiles, getRecentFolders, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
 
 // Open a .studio/.inkwave file FROM OneDrive (for phones, where OneDrive isn't a mounted Explorer
 // folder). Browse folders, pick a file → the caller downloads it, opens it, and adopts it as the
@@ -27,9 +27,12 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
   const [files, setFiles] = useState<DriveFolder[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
+  const [recent, setRecent] = useState<OneDriveFolder[]>([])
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : null
   const currentPath = crumbs.map((c) => c.name).join('/')
+
+  useEffect(() => { void getRecentFolders().then(setRecent).catch(() => {}) }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -75,6 +78,22 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
             </span>
           ))}
         </div>
+
+        {/* Recent folders → jump straight there (only at the root view). */}
+        {crumbs.length === 0 && recent.length > 0 && (
+          <div className="mb-2">
+            <div className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Recent folders</div>
+            <div className="flex flex-wrap gap-1.5">
+              {recent.map((f, i) => (
+                <button key={`${f.id}-${i}`} type="button"
+                  onClick={() => setCrumbs([{ id: f.id, name: f.path || 'OneDrive (root)' }])}
+                  className="text-xs px-2.5 py-1 rounded-full font-sans hover:bg-[#f1f7fc]" style={{ border: `1px solid ${ONE}40`, color: ONE }}>
+                  🗁 {f.path || 'OneDrive (root)'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="border rounded-lg max-h-72 overflow-auto" style={{ borderColor: '#e6eef5' }}>
           {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}

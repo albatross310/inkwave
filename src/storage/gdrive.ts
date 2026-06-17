@@ -206,12 +206,16 @@ export async function createGoogleDriveFolder(name: string): Promise<{ id: strin
 // List the folders this app can see under drive.file — i.e. the folders Inkwave CREATED (or was
 // granted). Flat list (we create folders at the Drive root). Powers the custom Google picker; the
 // privacy-preserving drive.file scope can't enumerate folders the app didn't make.
-export async function listGoogleDriveFolders(): Promise<Array<{ id: string; name: string }>> {
+// List app-created folders. With `parentId` ('root' for My Drive root, or a folder id) it lists only
+// that folder's sub-folders — for the folder-navigable opener. Without it, all app folders (flat) —
+// used by the folder picker.
+export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{ id: string; name: string }>> {
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
-  const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false")
-  const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=name`, {
+  let q = "mimeType='application/vnd.google-apps.folder' and trashed=false"
+  if (parentId) q += ` and '${parentId}' in parents`
+  const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=name`, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) return []
@@ -225,12 +229,13 @@ export function googleDriveFileId(docId: string): string | null { return driveFi
 // List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
 // your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
 // open via "This computer" (the mounted Drive folder) on desktop.
-export async function listGoogleDriveFiles(): Promise<Array<{ id: string; name: string }>> {
+export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ id: string; name: string }>> {
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
-  const q = encodeURIComponent("(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false")
-  const res = await fetch(`${FILES_API}?q=${q}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  let q = "(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+  if (parentId) q += ` and '${parentId}' in parents`
+  const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return []
   const d = (await res.json()) as { files?: Array<{ id: string; name: string }> }
   return d.files ?? []

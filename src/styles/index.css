@@ -178,7 +178,7 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #9b5ccc;   /* unchanged / original word — the LIGHTER purple */
+    color: #5c2d8a;   /* the one deeper purple for every SCAS word (matches the reel/cycle colour) */
     cursor: pointer;
   }
 
