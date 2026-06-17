@@ -62,9 +62,9 @@ function loadingDoc(origin: string): string {
     '.n{font-size:46px;line-height:1;font-variant-numeric:tabular-nums}' +
     '.cap{margin-top:10px;font-size:15px;color:#9b5ccc}</style>' +
     `<div class="box"><img src="${origin}/icon-192.png" alt="Inkwave">` +
-    '<div class="n" id="n">5</div><div class="cap">Preparing your PDF…</div></div>' +
-    '<script>(function(){var n=5,e=document.getElementById("n");' +
-    'var t=setInterval(function(){n-=1;if(n<=0){e.textContent="\\u2713";clearInterval(t);}else{e.textContent=String(n);}},1000);})();</script>'
+    '<div class="n" id="n">5</div><div class="cap">Preparing your PDF…</div></div>'
+    // No inline <script> here — a strict CSP (script-src without 'unsafe-inline') would block it. The
+    // opener drives the countdown instead (see exportPdfToNewTab), which is nonce-trusted app code.
   )
 }
 
@@ -74,7 +74,23 @@ export async function exportPdfToNewTab(title: string): Promise<boolean> {
   // Open the tab SYNCHRONOUSLY inside the click gesture, or the popup blocker eats it. We navigate it
   // to the PDF once it's ready (and close it on failure so the fallback dialog isn't doubled up).
   const win = window.open('', '_blank')
-  if (win) { try { win.document.write(loadingDoc(location.origin)); win.document.close() } catch { /* ignore */ } }
+  // Drive the 5→0 countdown from HERE (the opener's nonce-trusted code) by updating the popup's DOM,
+  // rather than an inline <script> in the popup that a strict CSP would block. Same-origin about:blank,
+  // so we can touch its document.
+  let countdown = 0
+  if (win) {
+    try {
+      win.document.write(loadingDoc(location.origin))
+      win.document.close()
+      let n = 5
+      countdown = window.setInterval(() => {
+        n -= 1
+        try { const el = win.document.getElementById('n'); if (el) el.textContent = n <= 0 ? '✓' : String(n) } catch { /* navigated */ }
+        if (n <= 0 && countdown) { clearInterval(countdown); countdown = 0 }
+      }, 1000)
+    } catch { /* ignore */ }
+  }
+  const stopCountdown = () => { if (countdown) { clearInterval(countdown); countdown = 0 } }
   // Never hang the loading tab: abort after 45s and fall back to the print dialog.
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 45_000)
@@ -90,11 +106,13 @@ export async function exportPdfToNewTab(title: string): Promise<boolean> {
     const blob = await res.blob()
     if (blob.type !== 'application/pdf') throw new Error('not a pdf')
     const url = URL.createObjectURL(blob)
+    clearTimeout(timer); stopCountdown()
     if (win) win.location.href = url
     else window.open(url, '_blank')
     setTimeout(() => URL.revokeObjectURL(url), 60_000) // let the new tab load it first
     return true
   } catch {
+    clearTimeout(timer); stopCountdown()
     if (win) { try { win.close() } catch { /* ignore */ } }
     return false
   }
