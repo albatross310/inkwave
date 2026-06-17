@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { verifyBundle, type VerifyReport } from '../verify'
+import { computeAnalytics, type Analytics } from '../verify/analytics'
+import { ActivityGraph } from '../verify/ActivityGraph'
 import { signingPublicKeyHex } from '../provenance/receipts'
 import { parseTraceFile } from '../provenance/bundle'
 
@@ -11,12 +13,13 @@ const LIGHT = '#9b5ccc'
 // against the published signing key — no Inkwave login, nothing sent anywhere.
 export function Verify() {
   const [report, setReport] = useState<VerifyReport | null>(null)
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState<string | null>(null)
 
   async function run(text: string) {
-    setError(null); setReport(null); setTitle(null); setBusy(true)
+    setError(null); setReport(null); setAnalytics(null); setTitle(null); setBusy(true)
     try {
       const bundle = parseTraceFile(text)
       if (bundle.v !== 1 || !Array.isArray(bundle.receipts) || !Array.isArray(bundle.snapshots)) {
@@ -25,6 +28,7 @@ export function Verify() {
       setTitle(bundle.document?.title ?? null)
       // Verify against the published key (dev uses the dev placeholder, matching dev-signed bundles).
       setReport(await verifyBundle(bundle, signingPublicKeyHex()))
+      setAnalytics(computeAnalytics(bundle)) // descriptive, derived from the same signed data
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -47,7 +51,7 @@ export function Verify() {
 
   return (
     <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a' }}>
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-3xl">
         <div className="flex items-start gap-4 mb-5">
           <img src="/fav-128.png" alt="Inkwave" width={72} height={72} className="rounded-lg shrink-0" />
           <div>
@@ -106,9 +110,51 @@ export function Verify() {
             </p>
           </div>
         )}
+
+        {analytics && (analytics.stats.periods > 0 || analytics.stats.snapshots > 0) && (
+          <div className="mt-8">
+            <h2 className="text-lg mb-2" style={{ color: INK }}>Provenance analytics</h2>
+            <ActivityGraph a={analytics} />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 mt-5">
+              <Stat label="Final words" value={analytics.stats.finalWords} />
+              <Stat label="Kicks" value={analytics.stats.totalKicks} hint={`${analytics.stats.swaps} swapped`} />
+              <Stat label="Snapshots" value={analytics.stats.snapshots} />
+              <Stat label="Sessions" value={analytics.stats.sessions} hint={`${analytics.stats.periods} period(s)`} />
+              {analytics.stats.durationMs != null && <Stat label="Duration" value={fmtDur(analytics.stats.durationMs)} />}
+              {analytics.stats.wpm != null && <Stat label="Words / min" value={analytics.stats.wpm} />}
+              {analytics.stats.avgDeliberationMs != null && <Stat label="Avg deliberation" value={`${(analytics.stats.avgDeliberationMs / 1000).toFixed(1)}s`} hint="per kick" />}
+              {analytics.stats.hasCadence && <Stat label="Words added" value={`~${analytics.stats.wordsInserted}`} hint={`${analytics.stats.charsInserted} chars`} />}
+              {analytics.stats.hasCadence && <Stat label="Words deleted" value={`~${analytics.stats.wordsDeleted}`} hint={`${analytics.stats.charsDeleted} chars`} />}
+              {analytics.stats.hasCadence && <Stat label="Churn" value={`${Math.round(analytics.stats.churn * 100)}%`} hint="deleted ÷ added" />}
+              {analytics.stats.hasCadence && analytics.stats.pasteSuspectBins > 0 && <Stat label="Paste-speed bins" value={analytics.stats.pasteSuspectBins} hint="above human speed" />}
+            </div>
+            <p className="mt-3 text-xs text-stone-400">
+              Drawn from the signed, Bitcoin-anchored record. Insert/delete counts are characters (the
+              cadence never stores text); figures marked “~” are word estimates from those counts. Word
+              counts at snapshots are exact.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <div>
+      <div className="text-2xl leading-none" style={{ color: INK }}>{value}</div>
+      <div className="text-xs text-stone-500 mt-1">{label}</div>
+      {hint ? <div className="text-[11px] text-stone-400">{hint}</div> : null}
+    </div>
+  )
+}
+
+function fmtDur(msTotal: number): string {
+  const s = Math.round(msTotal / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60)
+  if (h > 0) return `${h}h ${m % 60}m`
+  if (m > 0) return `${m}m ${s % 60}s`
+  return `${s}s`
 }
 
 function Row({ label, ok, detail }: { label: string; ok?: boolean; detail?: string }) {
