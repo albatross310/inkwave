@@ -152,8 +152,10 @@ function buildDecorations(
         const from = pos + 1 + offset + match.index
         const to   = from + word.length
 
-        // Skip the word under the cursor unless it's already committed (a boundary char follows).
-        if (cursorPos >= from && cursorPos <= to) {
+        // Skip the word under the cursor unless it's already committed (a boundary char follows) —
+        // this stops a word flickering purple as you type it. A persistent memory slot is exempt: it
+        // was committed already, so it must stay purple even with the cursor in it (no black flash).
+        if (!persistSlot && cursorPos >= from && cursorPos <= to) {
           const nextChar = text[match.index + word.length] ?? null
           if (!nextChar || !/[\s.,;:!?)\-'"…]/.test(nextChar)) continue
         }

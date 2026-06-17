@@ -686,6 +686,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
     const text = await downloadOneDriveFile(f.itemId)
     if (!text) return
+    void addRecentFolder(f.folder) // opening from a folder makes it a "Recent folder" too, not just saving
     await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
   }
 
