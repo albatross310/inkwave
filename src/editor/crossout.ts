@@ -29,8 +29,22 @@ export function cycleCrossoutMode(): CrossoutMode {
   return next
 }
 
-/** Mirror the stored mode onto the document root (call on editor mount + after a change). */
+// The tea-stain watermark (egg behind the crossed-out word) on/off — independent of the cross-out
+// mode. Applied as data-egg on the document root; pure CSS.
+const EGG_KEY = 'inkwave:watermark'
+
+export function watermarkEnabled(): boolean {
+  try { return localStorage.getItem(EGG_KEY) !== '0' } catch { return true }  // default on
+}
+
+export function setWatermark(on: boolean): void {
+  try { localStorage.setItem(EGG_KEY, on ? '1' : '0') } catch { /* private mode */ }
+  applyCrossoutMode()
+}
+
+/** Mirror the stored mode + watermark onto the document root (call on editor mount + after a change). */
 export function applyCrossoutMode(): void {
   if (typeof document === 'undefined') return
   document.documentElement.dataset.crossout = crossoutMode()
+  document.documentElement.dataset.egg = watermarkEnabled() ? 'on' : 'off'
 }

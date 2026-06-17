@@ -13,7 +13,7 @@ import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
 import { openInkwaveFile } from '../storage/openDoc'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
-import { crossoutMode, cycleCrossoutMode } from '../editor/crossout'
+import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
 import { oneDriveFilename } from '../storage/onedrive'
 import { AccountMenuItems } from './AccountControl'
 import { getSaveFileName } from '../storage/folder'
@@ -164,6 +164,7 @@ export function OptionsMenu({
     { label: 'Print', run: () => onPrint?.() },
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
     { label: `Old word: ${crossoutMode()}`, run: () => { cycleCrossoutMode() } },
+    { label: `Watermark ${watermarkEnabled() ? '✓' : '✗'}`, run: () => { setWatermark(!watermarkEnabled()) } },
     { label: 'Verify a record', run: () => navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
   ]

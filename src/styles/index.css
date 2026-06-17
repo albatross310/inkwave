@@ -205,7 +205,7 @@
     color: #5c2d8a;
     /* Themeable tea-stain fill behind the crossed-out word (one knob so a future page-colour change
        can recolour every watermark at once). */
-    --scas-egg: rgba(120, 78, 38, 0.32);
+    --scas-egg: rgba(120, 78, 38, 0.16);
   }
   /* Memory cross-out: the ORIGINAL word struck-through, green, centred just beneath the new one —
      nearly ordinary-looking (no squash) and nearly in the middle of the line-gap. The pseudo is
@@ -270,6 +270,13 @@
   }
   /* Off: no cross-out (the word still keeps its purple). */
   [data-crossout="off"] .scas-red[data-scas-old]::after { content: none; }
+  /* Watermark off (settings): strip the egg + its padding/offset — just the struck green word. */
+  [data-egg="off"] .scas-red[data-scas-old]::after {
+    background: none;
+    padding: 0;
+    left: 0;
+    border-radius: 0;
+  }
 
   /* "tab" hint badge — centred above word */
   .scas-red[data-hint="tab"]::before {
