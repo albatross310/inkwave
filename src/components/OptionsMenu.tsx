@@ -301,11 +301,11 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
       {folderAvailable && onSaveAs && (
         <MenuButton onClick={() => { onSaveAs(); onDone() }}>🗁 This computer<span className="block text-xs text-stone-400">a new file in a folder, then keep it updated</span></MenuButton>
       )}
-      {onSaveAsGoogleDrive && (
-        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>▴ Google Drive<span className="block text-xs text-stone-400">name a new file in Drive, then keep it updated</span></MenuButton>
-      )}
       {onSaveAsOneDrive && (
         <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>☁ OneDrive<span className="block text-xs text-stone-400">name a new file in OneDrive, then keep it updated</span></MenuButton>
+      )}
+      {onSaveAsGoogleDrive && (
+        <MenuButton onClick={() => { onSaveAsGoogleDrive(); onDone() }}>▴ Google Drive<span className="block text-xs text-stone-400">name a new file in Drive, then keep it updated</span></MenuButton>
       )}
     </div>
   )
@@ -367,14 +367,14 @@ function UploadPanel({ onComputer, onGoogleDrive, onOneDrive, onDone }: { onComp
       <MenuButton onClick={onComputer}>
         🗁 This computer<span className="block text-xs text-stone-400">use Chrome/Edge/Brave to sync via Windows Explorer (incl. your Drive/OneDrive folders)</span>
       </MenuButton>
-      {onGoogleDrive && (
-        <MenuButton onClick={() => { onGoogleDrive(); onDone() }}>
-          ▴ Google Drive<span className="block text-xs text-stone-400">pick a file from Drive (incl. shared with you) — best on phone</span>
-        </MenuButton>
-      )}
       {onOneDrive && (
         <MenuButton onClick={() => { onOneDrive(); onDone() }}>
           ☁ OneDrive<span className="block text-xs text-stone-400">pick a file from OneDrive — best on phone</span>
+        </MenuButton>
+      )}
+      {onGoogleDrive && (
+        <MenuButton onClick={() => { onGoogleDrive(); onDone() }}>
+          ▴ Google Drive<span className="block text-xs text-stone-400">pick a file from Drive (incl. shared with you) — best on phone</span>
         </MenuButton>
       )}
     </div>
