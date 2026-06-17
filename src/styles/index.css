@@ -178,7 +178,7 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #5c2d8a;   /* the one deeper purple for every SCAS word (matches the reel/cycle colour) */
+    color: #166534;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
     cursor: pointer;
   }
 
@@ -200,32 +200,30 @@
      paragraph; pointer-events off so it never blocks the word. Hidden on a hinted word (the badge
      owns ::after there) and while focused. STACKED is the default; the inline/off variants are
      switched by data-crossout on the editor root (the settings toggle). */
-  /* Tea-stain watermark behind the memory cluster (word + stamp + cross-out): a soft, darker warm
-     blot sitting behind the text (the pseudos paint above it), offset down to sit over the cluster's
-     centre of mass. (A precisely-fitted egg around the wider word is a planned follow-up.) */
+  /* A RESOLVED slot (committed from the cycle) reads purple — the "final" colour. */
   .scas-red[data-scas-old] {
-    box-shadow: 0 0.45em 1.1em 0.45em rgba(110, 74, 38, 0.13);
+    color: #5c2d8a;
   }
-  /* Memory cross-out: the ORIGINAL word struck-through, green, centred just beneath the new one.
-     The pseudo is ALWAYS present (even while focused) so the fade is a reliable opacity TRANSITION,
-     not a per-render animation (which replayed on every decoration rebuild and stuck the stamp/word
-     invisible). Hidden instantly while focused; eases back in 0.24s after commit, over 2s. */
+  /* Memory cross-out: the ORIGINAL word struck-through, green, centred just beneath the new one —
+     nearly ordinary-looking (no squash) and nearly in the middle of the line-gap. The pseudo is
+     ALWAYS present (even while focused) so the fade is a reliable opacity TRANSITION, not a per-render
+     animation (which replayed on every rebuild and stuck it invisible). Hidden instantly while
+     focused; eases back in 0.24s after commit. */
   .scas-red[data-scas-old]::after {
     content: attr(data-scas-old);
     position: absolute;
     left: 50%;
-    transform: translateX(-50%) scale(1.075, 0.9);   /* centred, half the earlier shorter+wider squash */
-    transform-origin: top center;
-    top: 1.175em;        /* half the earlier closening to the word */
-    font-size: 0.85em;   /* one size smaller */
+    transform: translateX(-50%);   /* centred under the word, no squash */
+    top: 1.4em;          /* nearly in the middle of the gap below */
+    font-size: 0.92em;   /* nearly ordinary */
     line-height: 1;
     white-space: nowrap;
     color: #166534;      /* the original (crossed-out) word reads green */
     text-decoration: line-through;
     text-decoration-thickness: 1px;
-    opacity: 0.6;        /* a bit transparent */
+    opacity: 0.85;
     pointer-events: none;
-    transition: opacity 2s ease-out 0.24s;   /* eases in after the 240ms reel flash-out */
+    transition: opacity 2s ease-out 0.24s;   /* eases in after the reel flash-out */
   }
   /* First-written stamp: time of day (24h, four digits) centred in small grey print above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
@@ -234,8 +232,8 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    top: -0.8em;         /* closer to the word */
-    font-size: 0.42em;   /* substantially smaller */
+    top: -0.7em;         /* a tad closer to the word */
+    font-size: 0.5em;    /* a tad bigger */
     line-height: 1;
     font-family: sans-serif;
     letter-spacing: 0.06em;
@@ -252,11 +250,13 @@
     opacity: 0;
     transition: none;
   }
-  /* The purple reel flashes IN over the open duration (120ms); the flash-OUT (240ms) is driven from
-     the popover (a .scas-cycle-leaving class on dismiss/commit). */
-  .scas-cycle-card { animation: scasReelIn 120ms ease-out; transition: opacity 240ms ease-out; }
-  .scas-cycle-card.scas-cycle-leaving { opacity: 0; }
+  /* The purple reel flashes IN over the open duration (120ms). */
+  .scas-cycle-card { animation: scasReelIn 120ms ease-out; }
   @keyframes scasReelIn { from { opacity: 0; } to { opacity: 1; } }
+  /* On commit the reel card tears down instantly (the real text slides in via a decoration); a ghost
+     of the chosen word is left in its place and fades out over 500ms — the visible reel "flash out". */
+  .scas-reel-ghost { animation: scasReelOut 500ms ease-out forwards; }
+  @keyframes scasReelOut { from { opacity: 1; } to { opacity: 0; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
     position: static;

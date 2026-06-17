@@ -50,6 +50,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // position to its committed natural-x over REFLOW_COMMIT_MS, in sync with the decoration's
   // left/right de-compression — so the word slides home WITH the surrounding text, not after it.
   const [committing, setCommitting] = useState(false)
+  // A fading clone of the chosen word, left where the reel was on commit (the reel card itself tears
+  // down instantly). Drives the visible reel "flash out". Cleared after the fade.
+  const [ghost, setGhost] = useState<{ top: number; left: number; text: string; fontFamily: string; fontSize: string } | null>(null)
 
   useEffect(() => { onCycleChange(!!cycle); if (!cycle) setCommitting(false) }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -126,41 +129,53 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (advance) requestAnimationFrame(() => { if (!goNext(from, tabCursorRef.current ?? undefined)) restoreCursor() })
     else restoreCursor()
   }
+  // Leave a fading clone of the chosen word where the reel sat (the reel card tears down instantly).
+  function startGhost(text: string) {
+    const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
+    const cRect = containerEl.current?.getBoundingClientRect()
+    if (!fe || !cRect) return
+    const r = fe.getBoundingClientRect()
+    const cs = getComputedStyle(fe)
+    setGhost({ top: r.top - cRect.top, left: r.left - cRect.left, text, fontFamily: cs.fontFamily, fontSize: cs.fontSize })
+    window.setTimeout(() => setGhost(null), 520)
+  }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
     cancelAnim()
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
+    startGhost(replacement)   // visible reel flash-out
+    // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
+    // this range; otherwise the TRUE time the word first turned purple (firstKickAt); else now.
+    let firstCommitAt: string | null = null
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      const m = node.marks.find(mk => mk.type.name === 'scasSlot')
+      if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
+    })
+    if (!firstCommitAt) firstCommitAt = String(firstKickAt?.(word) ?? Date.now())
+    const slotAttrs = { original: word, firstCommitAt }   // `word` holds the original
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
-        // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt
-        // in this range; otherwise use the TRUE time the word first turned purple (firstKickAt),
-        // falling back to now only if that's unknown (e.g. kicked in a session whose state is gone).
-        let firstCommitAt: string | null = null
-        editor.state.doc.nodesBetween(from, to, (node) => {
-          const m = node.marks.find(mk => mk.type.name === 'scasSlot')
-          if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
-        })
-        if (!firstCommitAt) firstCommitAt = String(firstKickAt?.(word) ?? Date.now())
-        // Carry the SCAS-slot mark (anchored to this slot's original word) so the position
-        // stays managed: it keeps rendering red/changeable even if the new word is in vocab,
-        // and reopening re-offers the original's synonym list. `word` holds the original.
+        // Carry the SCAS-slot mark (anchored to the original word) so the position stays managed:
+        // it keeps rendering changeable, re-offers the original's synonym list, and shows the
+        // origin crossed out below.
         editor.chain().deleteRange({ from, to }).insertContentAt(from, {
           type: 'text', text: replacement,
-          marks: [{ type: 'scasSlot', attrs: { original: word, firstCommitAt } }],
+          marks: [{ type: 'scasSlot', attrs: slotAttrs }],
         }).run()
+      } else {
+        // Resolve IN PLACE: committing without scrolling still makes the word a managed slot — it
+        // goes purple and shows its (same) origin crossed out below. Add the mark without editing.
+        editor.chain().setTextSelection({ from, to }).setMark('scasSlot', slotAttrs).run()
       }
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // Committing the word UNCHANGED (e.g. opened, scrolled away and back, then accepted) — no edit,
-    // but still ease the line back to natural instead of snapping (closeWithAnimation runs the same
-    // de-compress as a dismiss; swap() here only restores the caret). Was an instant snap before.
+    // Unchanged commit: no text edit, but still resolve in place + ease the line back to natural.
     if (!changed) { closeWithAnimation(swap); return }
     // SWAP-FIRST: replace the word now (paragraph rewraps to its final layout), tear the reel down,
-    // then slide the rest of the committed line — including any word that rewrapped up — in from the
-    // right as one flush motion; lines below snap. (See commitWithSlide.)
+    // then slide the rest of the committed line in from the right as one flush motion. (commitWithSlide.)
     commitWithSlide(swap, from, replacement.length)
   }
 
@@ -615,7 +630,16 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (!cycle || !geom) return null
+  // A fading ghost of the just-committed word — rendered even after the reel (cycle) tears down.
+  const ghostEl = ghost ? (
+    <div className="absolute scas-reel-ghost"
+      style={{ top: ghost.top, left: ghost.left, fontFamily: ghost.fontFamily, fontSize: ghost.fontSize,
+               color: '#5c2d8a', whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 40 }}>
+      {ghost.text}
+    </div>
+  ) : null
+
+  if (!cycle || !geom) return ghostEl
   rowHRef.current = geom.rowH
   const { fsz, left, rowH, cardH, cardTop, width, fontFamily, slotLefts } = geom
   const reel   = cycle.reelPos
@@ -701,12 +725,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
   return (
     <>
+      {ghostEl}
       {/* Sliding reel card — fully transparent: no border/shadow/background, so the
           word floats directly on the parchment (lines above/below may show through).
           NB: do NOT put a transform on this card to "snap" sub-pixel position — promoting it to a
           GPU layer disables subpixel-antialiasing on the reel text (visible colour/weight shift)
           and nudges horizontal sub-pixel position. Keep it a plain absolutely-positioned box. */}
-      <div className={`absolute z-50 select-none scas-cycle-card${committing ? ' scas-cycle-leaving' : ''}`}
+      <div className="absolute z-50 select-none scas-cycle-card"
         style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
                  fontFamily, fontSize: fsz, overflow: 'hidden',
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
