@@ -216,9 +216,10 @@ function buildDecorations(
     }
     // The memory cross-out (::after, green, beneath) + first-written stamp (::before, grey, above):
     // any slot with a known origin shows its ORIGINAL struck-through and the time it was first written.
-    // Emitted when NOT focused (the reel renders the focused word); the brief no-delay fade-in plays
-    // once on commit.
-    if (secondary && !isFocused) {
+    // Emitted ALWAYS (even while focused) so the element persists across the focus change — the fade
+    // is a CSS opacity TRANSITION keyed on .scas-focused (hidden while focused → fades in on commit),
+    // which never replays when the decoration rebuilds (unlike a keyframe animation = the "wawaa").
+    if (secondary) {
       attrs['data-scas-old'] = dataWord
       const t = hhmm(firstAt)
       if (t) attrs['data-scas-time'] = t

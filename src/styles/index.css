@@ -232,7 +232,7 @@
     pointer-events: none;
     /* Fades in only AFTER the reel-neighbour ghost finishes (delay = GHOST_MS); backwards fill keeps
        it hidden through the delay so the ghost and the fade-in never overlap. */
-    animation: scasCrossoutIn 0.5s ease-out 0.5s backwards;
+    transition: opacity 0.5s ease-out 0.5s;   /* fades in on commit; transition (not animation) never replays = no wawaa */
   }
   /* First-written stamp: time of day (24h, four digits), small grey, left-aligned above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
@@ -249,10 +249,16 @@
     color: #9ca3af;      /* grey */
     opacity: 0.85;
     pointer-events: none;
-    animation: scasTimeIn 0.5s ease-out 0.5s backwards;   /* after the ghost, like the cross-out */
+    transition: opacity 0.5s ease-out 0.5s;   /* after the ghost, like the cross-out */
   }
-  @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.5; } }
-  @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
+  /* While the word is FOCUSED (cycle open) the reel renders it — hide the stamp + cross-out instantly.
+     On commit (.scas-focused drops) the base rules' opacity transition fades them in (after the 0.5s
+     delay = after the ghost). Because it's a transition on a persisting element, it never replays. */
+  .scas-focused[data-scas-old]::after,
+  .scas-focused[data-scas-time]::before {
+    opacity: 0;
+    transition: none;
+  }
   /* The reel appears INSTANTLY on click (no fade-in) — the snappy version. (A fade-in left the
      focused word transparent while the reel ramped from opacity 0, so the word flashed away for a
      frame.) Fade-OUT on commit is still carried by the ghost below. */
@@ -340,7 +346,7 @@
     border-radius: 0;
     padding: 0;
     color: #9ca3af;
-    animation: scasTimeIn 0.5s ease-out 0.5s backwards;   /* after the ghost, like the non-hinted stamp */
+    transition: opacity 0.5s ease-out 0.5s;   /* after the ghost, like the non-hinted stamp */
   }
 
   /* tab / ⇧+tab are keyboard-only — hide the badges (now ::before only) on touch/mobile widths

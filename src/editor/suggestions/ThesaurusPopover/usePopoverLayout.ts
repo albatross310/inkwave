@@ -137,6 +137,11 @@ export function usePopoverLayout(
     clearCloseTimer()
     const c = cycle
     if (!c || c.overlay) { onHintChange(null, null); setCycle(null); after?.(); return }
+    // No animation → tear down IMMEDIATELY. The REFLOW_COMMIT_MS timer below is only for the
+    // de-compress slide; with it ripped out the timer just left the word focused/transparent for
+    // ~240ms after a dismiss or an unchanged commit ("the purple doesn't come up; a timer before
+    // the word fades"). Snap it shut now.
+    if (!ANIMATE_COMPRESSION) { after?.(); onHintChange(null, null); setCycle(null); return }
     // Ramp the box + compression to the target together (CSS transitions animate both): keep
     // the same compression ranges but with letter-spacing 0, so the spans transition rather than
     // vanish. The reel stays up (the chosen word sits at its natural x, which doesn't move).

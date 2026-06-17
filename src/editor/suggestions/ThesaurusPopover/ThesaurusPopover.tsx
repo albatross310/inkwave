@@ -191,17 +191,16 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       }
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // EVENT 2 (now) — the reel rolls back to centre. Nothing else.
+    // EVENT 2 — the reel rolls back to centre. EVENT 3 fires the MOMENT it lands (settleTo's onRest),
+    // so a click/tab (already centred → dist 0 → instant) commits with no dead timer; only an
+    // off-centre drag-release waits for the roll. At EVENT 3 the neighbour rows are replaced by ghosts
+    // (same tick as the teardown → seamless) and the line reflows/commits.
     cancelAnim()
-    settleTo(Math.round(reelRef.current))
-    // EVENT 3 (T = SETTLE_MS) — replace the neighbour rows with ghosts (SAME tick as the teardown →
-    // seamless) and reflow/commit. The cross-out + date fade in FADE_MS later (CSS animation-delay),
-    // so the ghost-out and the fade-in never overlap.
-    window.setTimeout(() => {
+    settleTo(Math.round(reelRef.current), () => {
       if (ghostRows && ghostRows.length) { setGhosts(ghostRows); window.setTimeout(() => setGhosts(null), GHOST_MS + 60) }
       if (!changed) closeWithAnimation(swap)
       else commitWithSlide(swap, from, replacement.length)
-    }, SETTLE_MS)
+    })
   }
 
   // Refs so the once-subscribed input handlers below read live state without
