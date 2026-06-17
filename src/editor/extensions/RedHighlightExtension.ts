@@ -190,7 +190,7 @@ function buildDecorations(
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
-  for (const { from, to, dataWord, pIdx, seqInPara } of redWords) {
+  for (const { from, to, dataWord, pIdx, seqInPara, secondary } of redWords) {
     const isFocused = focusedPos !== null && from === focusedPos
     // All coloured words use the one dark purple now — the struck-through old word distinguishes a
     // committed/substituted slot, so the lighter "secondary" tint is no longer needed.
@@ -200,6 +200,10 @@ function buildDecorations(
       'data-para': String(pIdx),
       'data-scas-n': String(seqInPara),
     }
+    // The memory cross-out: a substituted slot (current text ≠ its origin) shows its ORIGINAL word
+    // struck-through beneath the new one (dataWord IS the origin for a slot). CSS draws it; skip while
+    // focused (the reel renders the word) and let the hint badge win the ::after when both apply.
+    if (secondary && !isFocused) attrs['data-scas-old'] = dataWord
     const hint = hintMap.get(from)
     if (hint) attrs['data-hint'] = hint
 

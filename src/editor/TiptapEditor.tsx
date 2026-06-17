@@ -12,6 +12,7 @@ import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import { PaginationExtension } from './extensions/PaginationExtension'
 import { gappedPagesEnabled } from './pageView'
+import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
@@ -63,6 +64,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     docRef.current = doc
   }, [doc])
+
+  // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
+  useEffect(() => { applyCrossoutMode() }, [])
 
   // The SCAS engine controller (live state mirrored to doc.scasState for persistence). Created
   // lazily so it survives re-renders; reseated when the active document changes (see effect below).

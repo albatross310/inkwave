@@ -195,6 +195,35 @@
     color: #5c2d8a;
   }
 
+  /* Memory cross-out: a substituted slot shows its ORIGINAL word struck-through just beneath the new
+     one. Absolutely positioned in the airy line-gap (line-height 2.5) so it never reflows the
+     paragraph; pointer-events off so it never blocks the word. Hidden on a hinted word (the badge
+     owns ::after there) and while focused. STACKED is the default; the inline/off variants are
+     switched by data-crossout on the editor root (the settings toggle). */
+  .scas-red[data-scas-old]:not([data-hint])::after {
+    content: attr(data-scas-old);
+    position: absolute;
+    left: 0;
+    top: 1.05em;
+    font-size: 0.72em;
+    line-height: 1;
+    white-space: nowrap;
+    color: #9b5ccc;
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+    opacity: 0.78;
+    pointer-events: none;
+  }
+  /* Inline mode: the old word trails the new one on the same line. */
+  [data-crossout="inline"] .scas-red[data-scas-old]:not([data-hint])::after {
+    position: static;
+    top: auto;
+    margin-left: 0.3em;
+    font-size: 0.82em;
+  }
+  /* Off: no cross-out (the word still keeps its purple). */
+  [data-crossout="off"] .scas-red[data-scas-old]::after { content: none; }
+
   /* "tab" hint badge — centred above word */
   .scas-red[data-hint="tab"]::before {
     content: 'tab';
@@ -297,6 +326,8 @@
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; }
   .scas-red[data-hint]::before, .scas-red[data-hint]::after { content: none !important; }
+  /* Drop the memory cross-out too — the printed/PDF document is the clean final text. */
+  .scas-red[data-scas-old]::after { content: none !important; }
   /* The faded seal on every printed page (fixed → repeats per page). Uses a real <img>, NOT a CSS
      background — browsers drop background images from print unless "Background graphics" is ticked,
      so a background-image seal silently never prints. Foreground <img> content always prints. */
