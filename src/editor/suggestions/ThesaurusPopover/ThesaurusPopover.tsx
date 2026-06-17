@@ -22,6 +22,13 @@ import { usePopoverLayout } from './usePopoverLayout'
 // The selected slot for a given continuous position = nearest ring, wrapped into [0,SIZE).
 const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE
 
+// Commit choreography (steady-state / no-animate master): after release, HOLD the reel on the chosen
+// word for a beat, THEN reflow + dissolve the neighbour rows (ghost), and only AFTER the ghost does
+// the cross-out + date fade in. The three phases never overlap. (Ghost duration is mirrored in CSS:
+// scasReelOut + the annotations' animation-delay = GHOST_MS.)
+const COMMIT_PAUSE_MS = 500
+const GHOST_MS = 450
+
 // ── Momentum tuning ──────────────────────────────────────────────────────────
 const MAX_VEL    = 0.060   // slots/ms — capped so a frame never jumps the whole window
 const FLING_TAU  = 260     // ms; coast distance ≈ v0 · TAU, so larger = more glide / browse
@@ -131,31 +138,34 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (advance) requestAnimationFrame(() => { if (!goNext(from, tabCursorRef.current ?? undefined)) restoreCursor() })
     else restoreCursor()
   }
-  // Capture fading clones of the reel's above/below neighbours at even heights around the committed
-  // word. `chosen` is the committed word; its neighbours in the synonym ring are the rows that sat
-  // just above/below it. Returns the ghost data (read from the DOM NOW, before teardown); the caller
-  // MOUNTS it when the reel actually tears down, so the real reel words don't linger under the ghost.
-  function captureGhosts(chosen: string) {
-    const fe = editor.view.dom.querySelector('.scas-focused') as HTMLElement | null
-    const cRect = containerEl.current?.getBoundingClientRect()
-    const c = cycle
-    if (!fe || !cRect || !c) return null
-    const r = fe.getBoundingClientRect()
-    const cs = getComputedStyle(fe)
-    const rowH = Math.round((parseFloat(cs.fontSize) || 18) * 1.15)   // same row pitch as the reel
+  // The reel rows just above/below the chosen word — captured (TEXT only) while the cycle is open.
+  // Mounted later at the COMMITTED word's final position (mountNeighbourGhosts) so they don't shoot
+  // back when the line de-compresses.
+  function neighbourGhostText(chosen: string) {
+    const c = cycle; if (!c) return null
+    const N = c.synonyms.length; const idx = Math.max(0, c.synonyms.indexOf(chosen))
     const mobile = window.innerWidth < 768 ? 1.4 : 1
-    const N = c.synonyms.length
-    const idx = Math.max(0, c.synonyms.indexOf(chosen))
-    // Anchor to the word's vertical CENTRE (its box top sits ~1.25em above the glyphs at line-height
-    // 2.5) and centre the text in a rowH-tall row — exactly how the reel places its rows.
+    const mk = (ring: number) => { const w = c.synonyms[((ring % N) + N) % N]; return { text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#9b5ccc' : '#5c2d8a' } }
+    return { above: mk(idx - 1), below: mk(idx + 1) }
+  }
+  type GhostText = ReturnType<typeof neighbourGhostText>
+  // Mount the neighbour ghosts at the COMMITTED word's FINAL (post-snap) position, so they fade out
+  // exactly where the reel rows sat relative to the settled word — no horizontal "shoot back" when a
+  // short word committed inside a left-compressed line.
+  function mountNeighbourGhosts(from: number, gt: GhostText) {
+    if (!gt) return
+    const cRect = containerEl.current?.getBoundingClientRect(); if (!cRect) return
+    const wordEl = [...editor.view.dom.querySelectorAll<HTMLElement>('.scas-red')].find(e => posOf(e, editor) === from)
+    if (!wordEl) return
+    const r = wordEl.getBoundingClientRect()
+    const cs = getComputedStyle(wordEl)
+    const rowH = Math.round((parseFloat(cs.fontSize) || 18) * 1.15)
     const centerY = r.top - cRect.top + r.height / 2
-    const left = r.left - cRect.left
-    const at = (ring: number, rel: number) => {
-      const w = c.synonyms[((ring % N) + N) % N]
-      return { top: centerY - rowH / 2 + rel * rowH, left, rowH, text: displayFor(w, mobile),
-               color: w === c.synonyms[0] ? '#9b5ccc' : '#5c2d8a', fontFamily: cs.fontFamily, fontSize: cs.fontSize }
-    }
-    return [at(idx - 1, -1), at(idx + 1, 1)]
+    const leftPx = r.left - cRect.left
+    const row = (g: { text: string; color: string }, rel: number) =>
+      ({ top: centerY - rowH / 2 + rel * rowH, left: leftPx, rowH, text: g.text, color: g.color, fontFamily: cs.fontFamily, fontSize: cs.fontSize })
+    setGhosts([row(gt.above, -1), row(gt.below, 1)])
+    window.setTimeout(() => setGhosts(null), GHOST_MS + 80)
   }
   function acceptSuggestion(replacement: string, advance: boolean) {
     if (!cycle) return
@@ -163,11 +173,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const { from, to, word } = cycle; const wl = to - from
     const changed = replacement !== editor.state.doc.textBetween(from, to)
     recordAccepted()
-    // Capture the neighbour ghosts now (DOM still has the reel); mount them when the reel tears down
-    // so the real reel words don't linger beneath them. commitWithSlide (changed) tears down at once;
-    // closeWithAnimation (unchanged) tears down after the close slide (REFLOW_COMMIT_MS).
-    const gdata = captureGhosts(replacement)
-    const showGhosts = () => { if (gdata) { setGhosts(gdata); window.setTimeout(() => setGhosts(null), 520) } }
+    const gt = neighbourGhostText(replacement)
     // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
     // this range; otherwise the TRUE time the word first turned purple (firstKickAt); else now.
     let firstCommitAt: string | null = null
@@ -180,28 +186,27 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
-        // Carry the SCAS-slot mark (anchored to the original word) so the position stays managed:
-        // it keeps rendering changeable, re-offers the original's synonym list, and shows the
-        // origin crossed out below.
+        // Carry the SCAS-slot mark (anchored to the original word) so the position stays managed.
         editor.chain().deleteRange({ from, to }).insertContentAt(from, {
           type: 'text', text: replacement,
           marks: [{ type: 'scasSlot', attrs: slotAttrs }],
         }).run()
       } else {
-        // Resolve IN PLACE: committing without scrolling still makes the word a managed slot — it
-        // goes purple and shows its (same) origin crossed out below. Add the mark without editing.
+        // Resolve IN PLACE: committing without scrolling still makes the word a managed slot.
         editor.chain().setTextSelection({ from, to }).setMark('scasSlot', slotAttrs).run()
       }
       pinCursor(); advanceOrRestore(from, advance)
     }
-    // Unchanged commit: no text edit, but still resolve in place + ease the line back to natural.
-    // Mount the ghost INSIDE the teardown callback (same render tick as setCycle(null)) so the reel
-    // and ghost never co-exist for a frame — that overlap was the flicker.
-    if (!changed) { closeWithAnimation(() => { swap(); showGhosts() }); return }
-    // SWAP-FIRST: replace the word now (paragraph rewraps to its final layout), tear the reel down,
-    // then slide the rest of the committed line in from the right as one flush motion. (commitWithSlide.)
-    showGhosts()
-    commitWithSlide(swap, from, replacement.length)
+    // PHASE 1 — hold the reel on the chosen word for COMMIT_PAUSE_MS (the line stays compressed).
+    // PHASE 2 — at the end of the pause, commit: the line reflows/snaps back, and (for a real change)
+    // the neighbour rows dissolve as a ghost at the committed word's final spot.
+    // PHASE 3 — the cross-out + date fade in only AFTER the ghost (CSS animation-delay = GHOST_MS),
+    // so the dissolve and the fade-in never overlap.
+    window.setTimeout(() => {
+      if (!changed) { closeWithAnimation(swap); return }
+      commitWithSlide(swap, from, replacement.length)
+      requestAnimationFrame(() => mountNeighbourGhosts(from, gt))
+    }, COMMIT_PAUSE_MS)
   }
 
   // Refs so the once-subscribed input handlers below read live state without

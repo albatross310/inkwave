@@ -230,7 +230,9 @@
     text-decoration-thickness: 1px;
     opacity: 0.5;        /* less prominent */
     pointer-events: none;
-    animation: scasCrossoutIn 0.5s ease-out;   /* gentle one-shot fade-in on commit */
+    /* Fades in only AFTER the reel-neighbour ghost finishes (delay = GHOST_MS); backwards fill keeps
+       it hidden through the delay so the ghost and the fade-in never overlap. */
+    animation: scasCrossoutIn 0.5s ease-out 0.45s backwards;
   }
   /* First-written stamp: time of day (24h, four digits), small grey, left-aligned above the word.
      Shares ::before with the tab/⇧+tab badge, so it yields to the badge while navigating. */
@@ -247,7 +249,7 @@
     color: #9ca3af;      /* grey */
     opacity: 0.85;
     pointer-events: none;
-    animation: scasTimeIn 0.5s ease-out;
+    animation: scasTimeIn 0.5s ease-out 0.45s backwards;   /* after the ghost, like the cross-out */
   }
   @keyframes scasCrossoutIn { from { opacity: 0; } to { opacity: 0.5; } }
   @keyframes scasTimeIn { from { opacity: 0; } to { opacity: 0.85; } }
@@ -256,7 +258,7 @@
      frame.) Fade-OUT on commit is still carried by the ghost below. */
   /* On commit the reel card tears down instantly (the real text slides in via a decoration); a ghost
      of the chosen word is left in its place and fades out over 500ms — the visible reel "flash out". */
-  .scas-reel-ghost { animation: scasReelOut 500ms ease-out forwards; }
+  .scas-reel-ghost { animation: scasReelOut 450ms ease-out forwards; }   /* GHOST_MS */
   @keyframes scasReelOut { from { opacity: 1; } to { opacity: 0; } }
   /* Inline mode: the old word trails the new one on the same line. */
   [data-crossout="inline"] .scas-red[data-scas-old]::after {
@@ -336,6 +338,7 @@
     border-radius: 0;
     padding: 0;
     color: #9ca3af;
+    animation: scasTimeIn 0.5s ease-out 0.45s backwards;   /* after the ghost, like the non-hinted stamp */
   }
 
   /* tab / ⇧+tab are keyboard-only — hide the badges (now ::before only) on touch/mobile widths
