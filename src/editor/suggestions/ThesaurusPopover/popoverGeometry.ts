@@ -121,7 +121,8 @@ export function computeLineCompressionRange(
 
   const SAFETY    = 2   // px: keep the line just inside the margin so it never wraps on a tie
 
-  const MAX_LS_EM = 0.08   // px-per-em cap that still reads without glyphs touching
+  const MAX_LS_EM = 0.10   // px-per-em cap that still reads without glyphs touching (nudged up from
+                           // 0.08 so borderline lines compress a touch more before overflowing/reflowing)
 
   // GENTLE-RIGHT-RATE, EXCESS-LEFT. Spend the line's right slack first (free), then squeeze the
   // after-text — but only at MAX_RIGHT_LS_EM per character, so a word near the right margin with

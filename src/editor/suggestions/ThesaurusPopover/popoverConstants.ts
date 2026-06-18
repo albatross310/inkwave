@@ -7,7 +7,9 @@ export const CARD_PAD_X      = 3
 // characters after it, never gets crammed (the real cause of the "strict" look). Whatever the
 // right can't absorb at this gentle rate compresses the LEFT (before-text, which usually has far
 // more characters to spread it over) up to MAX_LS_EM. Box still fits the widest synonym (no clip).
-export const MAX_RIGHT_LS_EM = 0.04
+// Nudged up from 0.04 (with MAX_LS_EM 0.08→0.10) so borderline lines absorb a touch more of the
+// expansion before it spills past the margin — less overflow / fewer forced reflows, still legible.
+export const MAX_RIGHT_LS_EM = 0.05
 
 
 // Reflow animation (CSS-driven, smooth on phones). The OPEN is snappy; the COMMIT/close settle
