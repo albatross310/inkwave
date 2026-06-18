@@ -19,7 +19,7 @@ function debugHighlightAll(): boolean {
   }
 }
 import type { InkwaveDocument } from '../../types/document'
-import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange, type SlideRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
 
 export const RED_HIGHLIGHT_KEY = new PluginKey<DecorationSet>('redHighlight')
 
@@ -43,11 +43,6 @@ export interface HintState {
   animate: boolean
   // Transition duration for this change (open is snappy, commit/close is a slower settle).
   durationMs: number
-  // Post-commit slide-in (independent of focusedPos, so it survives the cycle teardown): render
-  // [from,to] — the rest of the committed word's visual line, including any word that rewrapped up
-  // onto it — as one inline-block translated by `px`, eased to 0 so the after-text (and the joining
-  // word, flush) slides in from the right while the lines below snap. null = inactive.
-  slideRange: SlideRange | null
 }
 
 const EMPTY_LOOKUP: ScasLookup = {
@@ -69,7 +64,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
   addOptions() {
     return {
       getDoc: () => { throw new Error('RedHighlightExtension: getDoc option is required') },
-      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS, slideRange: null }),
+      getHintState: () => ({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS }),
       getScasLookup: () => EMPTY_LOOKUP,
     }
   },
@@ -240,67 +235,18 @@ function buildDecorations(
       // Apply the span whenever its range exists (even at letter-spacing 0): a 0 span is a
       // visual no-op but must be present so the open/close transition has something to animate.
       if (fwe < fw.from) {
-        // Mirror of the after-run, but transform-origin RIGHT: the before-run's right edge is glued
-        // to the (fixed) focused word, so it compresses/de-compresses toward the word. When
-        // beforeSlidePx is set (FLIP), render it as a transformable inline-block carrying the invert
-        // translateX + scaleX and transition the TRANSFORM (compositor, lag-free) — so the LHS
-        // animates instead of snapping. Otherwise a plain inline letter-spacing span.
-        // The inline-block + transform spans exist ONLY for the FLIP animation. With the animation
-        // ripped out they're harmful: a slot word that falls inside the run inherits inline-block +
-        // the 2.5 line-height, so its box jumps from the font box to the full line box (23→45px) and
-        // shifts up — taking its date/cross-out with it ("the height flashes up on the whole line").
-        // So when not animating, force the plain inline letter-spacing path (no inline-block).
-        const bslide = ANIMATE_COMPRESSION ? lineCompressionRange.beforeSlidePx : undefined
-        const bsx = lineCompressionRange.beforeScaleX ?? 1
-        const beforeStyle = bslide !== undefined
-          ? `letter-spacing: -${lsBeforeEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${bslide.toFixed(2)}px) scaleX(${bsx.toFixed(4)});` +
-            ((ANIMATE_COMPRESSION && hintState.animate) ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
-          : `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}`
+        // Before-run: transform-origin RIGHT conceptually — its right edge is glued to the (fixed)
+        // focused word. Plain inline letter-spacing compression (the FLIP transform path was ripped
+        // out with the flip-book animation; an inline-block here was harmful anyway — a slot word
+        // inside the run inherited the 2.5 line-height and jumped its box 23→45px).
+        const beforeStyle = `letter-spacing: -${lsBeforeEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fwe, fw.from, { class: 'scas-comp-before', style: beforeStyle }))
       }
       if (fw.to < lt) {
-        // The after-run carries a stable class so the FLIP commit (?flip=1) can find it.
-        // When afterSlidePx is set (FLIP), render it as a transformable inline-block carrying the
-        // invert translateX and transition the TRANSFORM — driven by the decoration so PM's
-        // reconciler keeps it (a manual DOM style edit gets reverted within a frame). Otherwise
-        // it's a plain inline letter-spacing span that transitions letter-spacing.
-        const slide = ANIMATE_COMPRESSION ? lineCompressionRange.afterSlidePx : undefined
-        const asx = lineCompressionRange.afterScaleX ?? 1
-        const afterStyle = slide !== undefined
-          ? `letter-spacing: -${lsAfterEm.toFixed(4)}em;display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slide.toFixed(2)}px) scaleX(${asx.toFixed(4)});` +
-            ((ANIMATE_COMPRESSION && hintState.animate) ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none')
-          : `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
+        // After-run: plain inline letter-spacing compression (FLIP transform path ripped out).
+        const afterStyle = `letter-spacing: -${lsAfterEm.toFixed(4)}em${lsTransition}`
         decorations.push(Decoration.inline(fw.to, lt, { class: 'scas-comp-after', style: afterStyle }))
       }
-    }
-  }
-
-  // Post-commit slide-in: render [from,to] (the rest of the committed word's visual line, incl. a
-  // word that rewrapped up onto it) as ONE inline-block translated by px, eased to 0 — so the
-  // after-text and the joining word slide in flush from the right while the lines below snap.
-  // Built post-swap on the FINAL layout, so the inline-block fits its line (no wrap-drop); the
-  // translateX is purely visual overflow during the transient. Independent of focusedPos.
-  const { slideRange } = hintState
-  if (slideRange && ANIMATE_COMPRESSION) {
-    const tr = hintState.animate ? `transition:transform ${hintState.durationMs}ms ${REFLOW_EASE}` : 'transition:none'
-    if (slideRange.to > slideRange.from) {
-      const sx = slideRange.scaleX ?? 1
-      // transform-origin left: scaleX expands from the run's left edge (anchored at the committed
-      // word) so the start matches the cycle's compressed run exactly; eases to scaleX(1).
-      decorations.push(Decoration.inline(slideRange.from, slideRange.to, {
-        class: 'scas-slide-after',
-        style: `display:inline-block;white-space:pre;transform-origin:left center;transform:translateX(${slideRange.px.toFixed(2)}px) scaleX(${sx.toFixed(4)});${tr}`,
-      }))
-    }
-    // Before-run on commit: origin-RIGHT (glued to the committed word) so it de-compresses toward
-    // the word, mirroring the after-run — so the LHS animates on commit instead of snapping.
-    const b = slideRange.before
-    if (b && b.to > b.from) {
-      const bsx = b.scaleX ?? 1
-      decorations.push(Decoration.inline(b.from, b.to, {
-        class: 'scas-slide-before',
-        style: `display:inline-block;white-space:pre;transform-origin:right center;transform:translateX(${b.px.toFixed(2)}px) scaleX(${bsx.toFixed(4)});${tr}`,
-      }))
     }
   }
 

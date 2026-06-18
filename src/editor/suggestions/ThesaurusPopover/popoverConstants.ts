@@ -60,29 +60,6 @@ export type LineRange = {
   alignFraction: number // fraction (beforeShift/exp) the box actually slid left — the reel
                         // aligns each word at this fraction so the original lands on its
                         // natural x for any position (0=left-edge, .5=centred, 1=right-edge)
-  afterSlidePx?: number // OPEN animation: render the after-run as inline-block with
-                        // transform:translateX(this) so it slides on the compositor (driven through
-                        // the decoration so PM's reconciler keeps it). undefined = plain inline span.
-  afterScaleX?: number  // paired with afterSlidePx: horizontal scale (origin-left) animating the
-                        // COMPRESSION as the run slides out on open (starts stretched/de-compressed
-                        // >1, eases to 1) — the mirror of the commit's scaleX. Default 1.
-  beforeSlidePx?: number // LHS analogue of afterSlidePx — the before-run is rendered inline-block,
-                         // transform-origin RIGHT (glued to the fixed word), translated by this so it
-                         // animates on the compositor instead of snapping. undefined = plain span.
-  beforeScaleX?: number  // paired with beforeSlidePx: horizontal scale (origin-right) animating the
-                         // before-run's compression/de-compression. Default 1.
-}
-
-// Post-commit slide-in range (see HintState.slideRange in RedHighlightExtension). `px` is the
-// translateX, `scaleX` the horizontal scale (origin-left) that animates the after-text's
-// de-compression: starting scaled to its compressed width so the slide begins looking exactly like
-// the cycle, easing to 1 (full/de-compressed) — no "extend out" pop. Omitted scaleX = 1.
-export type SlideRange = {
-  from: number; to: number; px: number; scaleX?: number   // after-run (rendered origin-LEFT)
-  // Optional before-run (the text between the line's first word and the committed word) — rendered
-  // origin-RIGHT (glued to the committed word) so its de-compression animates on commit, mirroring
-  // the after-run, instead of snapping (the "LHS doesn't animate on commit").
-  before?: { from: number; to: number; px: number; scaleX?: number }
 }
 
 export type OnHintChange = (
@@ -91,5 +68,4 @@ export type OnHintChange = (
   lineRange?: LineRange | null,
   animate?: boolean,        // false = apply this state instantly (no CSS transition); default true
   durationMs?: number,      // transition duration for this change (open vs commit)
-  slideRange?: SlideRange | null,  // omitted = preserve current; null = clear; set = slide [from,to] by px
 ) => void

@@ -138,11 +138,9 @@ export function computeLineCompressionRange(
   const lsBeforeEm = nBC    > 0 ? Math.min(MAX_LS_EM, beforeComp / nBC    / fsz) : 0
   const lsAfterEm  = nAfter > 0 ? Math.min(MAX_LS_EM, afterComp  / nAfter / fsz) : 0
 
-  // NOTE: we do NOT bail when both letter-spacings are 0. When the line has enough slack the box
-  // expansion needs no compression — but the bare after-text was still pushed right by the wider
-  // box and WILL slide back on commit. Emitting the (zero-spacing) range anyway means the after-
-  // text is always wrapped in a span, which the FLIP commit (?flip=1) needs as a transform handle.
-  // For the default snap path a 0-spacing span is a visual no-op.
+  // NOTE: we do NOT bail when both letter-spacings are 0. Emitting the (zero-spacing) range anyway
+  // keeps the open/close path uniform — a 0-spacing span is a visual no-op, and the box snaps
+  // straight to/from the compressed layout (the flip-book slide that used the span as a handle is gone).
   // Where the word sits inside the reserved box (= how far the box slid left, as a fraction
   // of the expansion): 0.5 ≈ centred, →0 left-edge, →1 right-edge — the left→right continuum.
   const alignFraction = exp > 0 ? Math.min(1, beforeComp / exp) : 0
