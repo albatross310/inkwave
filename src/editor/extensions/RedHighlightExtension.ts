@@ -201,7 +201,7 @@ function buildDecorations(
       WORD_RE.lastIndex = 0
       while ((match = WORD_RE.exec(text)) !== null) {
         const word = match[0]
-        if (word.length < 2) continue
+        if (word.length < 2 && !slotMark) continue
         const from = pos + 1 + offset + match.index
         const to   = from + word.length
 
