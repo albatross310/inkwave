@@ -11,7 +11,7 @@ export async function createPaypalSubscription(authorization, origin) {
   const planId = process.env.PAYPAL_PLAN_ID
   const token = await paypalToken()
   if (!planId || !token) return { status: 500, body: { error: 'paypal not configured' } }
-  const base = origin || 'https://inkwave.studio'
+  const base = origin || 'https://iwsolo.me'
   const r = await fetch(`${paypalBase()}/v1/billing/subscriptions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

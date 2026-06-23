@@ -72,8 +72,8 @@ export function oneDrivePath(doc: InkwaveDocument): string {
 }
 
 // The Azure app (SPA) client id — PUBLIC (it appears in OAuth redirects), so it's committed as the
-// default and overridable via VITE_MS_CLIENT_ID. Redirect URIs registered: https://www.inkwave.studio
-// + http://localhost:5173 (dev). Authority /common + delegated Files.ReadWrite.AppFolder.
+// default and overridable via VITE_MS_CLIENT_ID. Redirect URIs registered: https://iwsolo.me
+// + https://www.iwsolo.me + http://localhost:5173 (dev). Authority /common + delegated Files.ReadWrite.
 const CLIENT_ID = (import.meta.env?.VITE_MS_CLIENT_ID as string | undefined) || 'be76cc89-ab01-4681-99c0-f37b9f9d2308'
 // Personal + work/school accounts. Files.ReadWrite (full drive) so the writer can pick ANY folder
 // to sync into; existing AppFolder-only sessions are re-prompted to consent on the next sync.

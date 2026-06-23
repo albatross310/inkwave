@@ -107,7 +107,7 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     bitcoinAnchored: snapshots.filter((s) => s.ots.status === 'confirmed').length,
     created: doc.createdAt,
     exported: exportedAt,
-    verifyAt: 'https://inkwave.studio/verify',
+    verifyAt: 'https://iwsolo.me/verify',
     note: 'Open this file at the verify link above (or any Inkwave /verify page) to check it — entirely in your browser, against the published signing key and Bitcoin, with no sign-in. The fields below are the cryptographic record; this summary is for humans.',
   }
   return {
@@ -149,7 +149,7 @@ export function bundleReadme(s?: BundleSummary): string {
     '',
     'Files:',
     '  inkwave-*.json     — the self-verifying export bundle. Open it at',
-    '                       https://inkwave.studio/verify to check it (no sign-in).',
+    '                       https://iwsolo.me/verify to check it (no sign-in).',
     '  *.current.json     — the document content (for reloading your work).',
     '  *.snapshots.json   — the dated snapshots with their Bitcoin proofs.',
     '',
@@ -194,7 +194,7 @@ export function composeTraceFile(bundle: ExportBundle): string {
     '══════════════════════════════════════════════════════════════',
     TRACE_DATA_MARKER,
     'Everything below is the structured record that proves the writing above. You don’t need to',
-    'read it — open this file at inkwave.studio/verify to check it.',
+    'read it — open this file at iwsolo.me/verify to check it.',
     '══════════════════════════════════════════════════════════════',
     '',
     JSON.stringify(bundle, null, 2),
