@@ -21,11 +21,27 @@ function debugHighlightAll(): boolean {
 import type { InkwaveDocument } from '../../types/document'
 import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
 
-export const RED_HIGHLIGHT_KEY = new PluginKey<DecorationSet>('redHighlight')
+// Plugin state: the decoration set plus the "reveal" anchors (see SCAS_REVEAL_META).
+interface RedHighlightState {
+  decorations: DecorationSet
+  // Slot start-positions whose cross-out/stamp must start HIDDEN this rebuild (opacity 0, no
+  // transition), then fade in once the anchor is cleared a double-rAF later. Session-scoped,
+  // transient (S_v-style view state) — never persisted, never enters the provenance hash.
+  // ReadonlySet: every update replaces the set wholesale (never mutated in place).
+  reveals: ReadonlySet<number>
+}
+
+export const RED_HIGHLIGHT_KEY = new PluginKey<RedHighlightState>('redHighlight')
 
 // Dispatch a transaction with this meta key to force a hint rebuild without
 // changing the document (e.g. when the popover opens or closes).
 export const SCAS_HINT_META = 'scasHintUpdate'
+
+// A CHANGED commit replaces the word's text, so ProseMirror builds a FRESH decoration element —
+// the cross-out/stamp opacity transition then has no prior value to animate from and would POP in.
+// Dispatch `{ pos }` right after the swap to start that slot hidden; dispatch `{ clear: true }` a
+// double-rAF later so the now-persisted element transitions 0 → visible (after the ghost).
+export const SCAS_REVEAL_META = 'scasRevealUpdate'
 
 const WORD_RE = /[a-zA-Z]+/g
 
@@ -52,6 +68,9 @@ const EMPTY_LOOKUP: ScasLookup = {
   immune: new Set(),
 }
 
+// Shared empty reveal set — avoids allocating a new Set on every rebuild that has no reveals.
+const EMPTY_REVEALS: ReadonlySet<number> = new Set<number>()
+
 interface RedHighlightOptions {
   getDoc: () => InkwaveDocument
   getHintState: () => HintState
@@ -75,17 +94,42 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
       new Plugin({
         key: RED_HIGHLIGHT_KEY,
         state: {
-          init(_, state) {
-            return buildDecorations(state.doc, getDoc(), state.selection.from, getHintState(), getScasLookup())
+          init(_, state): RedHighlightState {
+            return {
+              decorations: buildDecorations(state.doc, getDoc(), state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS),
+              reveals: EMPTY_REVEALS,
+            }
           },
-          apply(tr, old, prev, next) {
-            return !tr.docChanged && tr.selection.eq(prev.selection) && !tr.getMeta(SCAS_HINT_META)
-              ? old
-              : buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup())
+          apply(tr, old, prev, next): RedHighlightState {
+            const revealMeta = tr.getMeta(SCAS_REVEAL_META) as { pos?: number; clear?: boolean } | undefined
+            const rebuild = tr.docChanged || !tr.selection.eq(prev.selection) || !!tr.getMeta(SCAS_HINT_META) || !!revealMeta
+            if (!rebuild) return old
+
+            // Remap the reveal anchors across the edit, then fold in this tr's reveal meta.
+            let reveals = old.reveals
+            if (tr.docChanged && reveals.size) {
+              const mapped = new Set<number>()
+              reveals.forEach(pos => {
+                const m = tr.mapping.mapResult(pos)
+                if (!m.deleted) mapped.add(m.pos)
+              })
+              reveals = mapped
+            }
+            if (revealMeta) {
+              if (revealMeta.clear) reveals = EMPTY_REVEALS
+              else if (typeof revealMeta.pos === 'number') {
+                const next = new Set(reveals); next.add(revealMeta.pos); reveals = next
+              }
+            }
+
+            return {
+              decorations: buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals),
+              reveals,
+            }
           },
         },
         props: {
-          decorations(state) { return RED_HIGHLIGHT_KEY.getState(state) },
+          decorations(state) { return RED_HIGHLIGHT_KEY.getState(state)?.decorations },
         },
       }),
     ]
@@ -122,6 +166,7 @@ function buildDecorations(
   cursorPos: number,
   hintState: HintState,
   lookup: ScasLookup,
+  reveals: ReadonlySet<number>,
 ): DecorationSet {
   // SCAS engine off (un-migrated or non-N-mode) → no decorations.
   if (inkDoc.scasMode !== 'n' || !inkDoc.scasState) return DecorationSet.empty
@@ -194,7 +239,7 @@ function buildDecorations(
     // All coloured words use the one dark purple now — the struck-through old word distinguishes a
     // committed/substituted slot, so the lighter "secondary" tint is no longer needed.
     const attrs: Record<string, string> = {
-      class: `scas-red${isFocused ? ' scas-focused' : ''}`,
+      class: `scas-red${isFocused ? ' scas-focused' : ''}${reveals.has(from) ? ' scas-revealing' : ''}`,
       'data-word': dataWord,
       'data-para': String(pIdx),
       'data-scas-n': String(seqInPara),

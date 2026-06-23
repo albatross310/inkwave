@@ -6,6 +6,7 @@ import { getFont } from '../textMetrics'
 import { CYCLE_SIZE, DELETE_SENTINEL } from './popoverConstants'
 import type { CycleState, OnHintChange, LineRange } from './popoverConstants'
 import { posOf, measureNaturalLineRight, computeLineCompressionRange } from './popoverGeometry'
+import { SCAS_REVEAL_META } from '../../extensions/RedHighlightExtension'
 import { buildSynonyms } from './popoverFallbacks'
 import { lemmaOf } from '../../../scas/engine'
 
@@ -92,10 +93,19 @@ export function usePopoverLayout(
   // de-compress slide (the "flip-book" animation) was ripped out — it never looked crisp, and the
   // extra invert/play/cleanup transactions kept rebuilding the decorations, replaying the
   // annotations' fade-in ("wawaa"). A clean snap is what's left.
-  function commitWithSlide(swap: () => void, _from: number, _replacementLen: number) {
+  function commitWithSlide(swap: () => void, from: number, _replacementLen: number) {
     clearCloseTimer()
     onHintChange(null, null)
     swap()
+    // The swap built a FRESH element for the new word, so its cross-out/stamp would pop in instead
+    // of fading. Mark the slot "revealing" (hidden, no transition) for this rebuild, then clear it
+    // a double-rAF later so the now-persisted element transitions 0 → visible after the ghost.
+    if (!editor.isDestroyed) {
+      editor.view.dispatch(editor.state.tr.setMeta(SCAS_REVEAL_META, { pos: from }))
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_REVEAL_META, { clear: true }))
+      }))
+    }
     setCycle(null)
   }
 

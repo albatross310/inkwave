@@ -254,7 +254,13 @@
      On commit (.scas-focused drops) the base rules' opacity transition fades them in (after the 0.5s
      delay = after the ghost). Because it's a transition on a persisting element, it never replays. */
   .scas-focused[data-scas-old]::after,
-  .scas-focused[data-scas-time]::before {
+  .scas-focused[data-scas-time]::before,
+  /* A CHANGED commit builds a FRESH element with no prior opacity to animate from, so the cross-out
+     + stamp would POP in. SCAS_REVEAL_META marks the slot .scas-revealing for the commit rebuild
+     (start hidden, no transition); clearing it a double-rAF later lets the persisted element
+     transition 0 → visible — same fade path as a focus-commit, never a replaying keyframe. */
+  .scas-revealing[data-scas-old]::after,
+  .scas-revealing[data-scas-time]::before {
     opacity: 0;
     transition: none;
   }
