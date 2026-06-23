@@ -30,11 +30,13 @@ export function About() {
       <div className="mx-auto max-w-2xl px-5 py-12 sm:py-16">
         <Link to="/" className="text-sm text-stone-400 hover:text-[#5c2d8a]">← Back to writing</Link>
 
-        {/* Hero */}
-        <header className="mt-8 flex flex-col items-center text-center">
-          <Seal size={148} className="drop-shadow-sm" />
-          <h1 className="mt-6 text-4xl tracking-tight" style={{ color: INK }}>Inkwave</h1>
-          <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>
+        {/* Hero — seal to the left of the wordmark */}
+        <header className="mt-8 flex items-center gap-6">
+          <Seal size={120} className="shrink-0 drop-shadow-sm" />
+          <div>
+            <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave</h1>
+            <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>
+          </div>
         </header>
 
         <div className="mt-12 space-y-10 text-[1.05rem] leading-relaxed">
