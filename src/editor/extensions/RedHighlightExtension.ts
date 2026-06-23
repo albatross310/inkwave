@@ -29,6 +29,11 @@ interface RedHighlightState {
   // transient (S_v-style view state) — never persisted, never enters the provenance hash.
   // ReadonlySet: every update replaces the set wholesale (never mutated in place).
   reveals: ReadonlySet<number>
+  // Uncommitted (green) words anchored by position → their original word. Remapped through
+  // edits in plugin state — never in the doc — so S_v-driven flagging never enters the
+  // provenance hash. Sticky-green: once a word turns green it stays green while the text is
+  // still that word or a deletion-remnant (startsWith); released on commit, lock, or delete.
+  flagged: Map<number, string>
 }
 
 export const RED_HIGHLIGHT_KEY = new PluginKey<RedHighlightState>('redHighlight')
@@ -95,10 +100,8 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
         key: RED_HIGHLIGHT_KEY,
         state: {
           init(_, state): RedHighlightState {
-            return {
-              decorations: buildDecorations(state.doc, getDoc(), state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS),
-              reveals: EMPTY_REVEALS,
-            }
+            const built = buildDecorations(state.doc, getDoc(), state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, new Map())
+            return { decorations: built.decorations, reveals: EMPTY_REVEALS, flagged: built.flagged }
           },
           apply(tr, old, prev, next): RedHighlightState {
             const revealMeta = tr.getMeta(SCAS_REVEAL_META) as { pos?: number; clear?: boolean } | undefined
@@ -122,10 +125,19 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
               }
             }
 
-            return {
-              decorations: buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals),
-              reveals,
+            // Remap flagged anchors through the edit (positions shift; deleted words drop).
+            let flagged = old.flagged
+            if (tr.docChanged && flagged.size) {
+              const mf = new Map<number, string>()
+              flagged.forEach((orig, pos) => {
+                const m = tr.mapping.mapResult(pos)
+                if (!m.deleted) mf.set(m.pos, orig)
+              })
+              flagged = mf
             }
+
+            const built = buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged)
+            return { decorations: built.decorations, reveals, flagged: built.flagged }
           },
         },
         props: {
@@ -167,9 +179,11 @@ function buildDecorations(
   hintState: HintState,
   lookup: ScasLookup,
   reveals: ReadonlySet<number>,
-): DecorationSet {
+  flagged: Map<number, string>,
+): { decorations: DecorationSet; flagged: Map<number, string> } {
+  const newFlagged = new Map<number, string>()
   // SCAS engine off (un-migrated or non-N-mode) → no decorations.
-  if (inkDoc.scasMode !== 'n' || !inkDoc.scasState) return DecorationSet.empty
+  if (inkDoc.scasMode !== 'n' || !inkDoc.scasState) return { decorations: DecorationSet.empty, flagged: newFlagged }
 
   // ── 1. Collect kicked words (skip the uncommitted word under the cursor) ──────
   // A word is purple iff its lemma is Locked or an outstanding live kick — the frozen verdict
@@ -201,27 +215,48 @@ function buildDecorations(
       WORD_RE.lastIndex = 0
       while ((match = WORD_RE.exec(text)) !== null) {
         const word = match[0]
-        if (word.length < 2 && !slotMark) continue
         const from = pos + 1 + offset + match.index
         const to   = from + word.length
 
-        // Skip the word under the cursor unless it's already committed (a boundary char follows) —
-        // this stops a word flickering purple as you type it. A persistent memory slot is exempt: it
-        // was committed already, so it must stay purple even with the cursor in it (no black flash).
-        if (!persistSlot && cursorPos >= from && cursorPos <= to) {
+        // Sticky-green anchor: a word turns green by lemma, then stays green while the text
+        // is still that word or a deletion-remnant (startsWith). Released on commit/lock/delete.
+        const anchoredOriginal = flagged.get(from)
+        const anchorHeld = anchoredOriginal !== undefined && anchoredOriginal.startsWith(word)
+
+        // Single letters aren't coloured on their own — except a committed slot being deleted
+        // to its last char (slot mark stays) or an anchored green word being deleted down.
+        if (word.length < 2 && !slotMark && !anchorHeld) continue
+
+        // Skip the word under the cursor while being typed (no anchor yet) to avoid flickering.
+        // A committed slot or an already-anchored green word is exempt (no black flash).
+        if (!persistSlot && !anchorHeld && cursorPos >= from && cursorPos <= to) {
           const nextChar = text[match.index + word.length] ?? null
           if (!nextChar || !/[\s.,;:!?)\-'"…]/.test(nextChar)) continue
         }
 
         const lemma = lemmaOf(word)
-        if (!isColoured(lookup, lemma) && !persistSlot && !(debugAll && inPool(lemma))) continue
+        const greenNow = isColoured(lookup, lemma) || (debugAll && inPool(lemma))
+        if (!greenNow && !persistSlot && !anchorHeld) continue
 
-        redWords.push({
-          from, to, pIdx, word, seqInPara: ++seqInPara,
-          dataWord: slotOriginal ?? word.toLowerCase(),
-          secondary: !!slotOriginal,
-          firstAt: (slotMark?.attrs.firstCommitAt as string | null) ?? null,
-        })
+        if (persistSlot) {
+          redWords.push({
+            from, to, pIdx, word, seqInPara: ++seqInPara,
+            dataWord: slotOriginal ?? word.toLowerCase(),
+            secondary: !!slotOriginal,
+            firstAt: (slotMark?.attrs.firstCommitAt as string | null) ?? null,
+          })
+        } else {
+          // Green (uncommitted) word — anchor it so it stays green + offers the full word's
+          // synonyms while being deleted down (sticky-green). Use the original as lookup key.
+          const original = anchoredOriginal ?? word
+          newFlagged.set(from, original)
+          redWords.push({
+            from, to, pIdx, word, seqInPara: ++seqInPara,
+            dataWord: original.toLowerCase(),
+            secondary: false,
+            firstAt: null,
+          })
+        }
       }
     })
 
@@ -295,5 +330,5 @@ function buildDecorations(
     }
   }
 
-  return DecorationSet.create(pmDoc, decorations)
+  return { decorations: DecorationSet.create(pmDoc, decorations), flagged: newFlagged }
 }
