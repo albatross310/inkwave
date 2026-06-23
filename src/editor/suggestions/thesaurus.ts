@@ -99,8 +99,8 @@ export async function getSynonyms(word: string): Promise<string[]> {
  * Datamuse's rate limiter, which would leave some words uncached (the click-lag / mid-drag reset).
  * Fire-and-forget. Words already cached or already queued are skipped.
  */
-const PREFETCH_BATCH = 4
-const PREFETCH_GAP_MS = 80
+const PREFETCH_BATCH = 20
+const PREFETCH_GAP_MS = 30
 const prefetchQueue: string[] = []
 let prefetchDraining = false
 
