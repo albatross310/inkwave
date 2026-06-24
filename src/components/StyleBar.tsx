@@ -3,6 +3,7 @@
 // focus/selection is preserved); "all" applies the selection's style to the whole document.
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 
@@ -10,9 +11,14 @@ const INK = '#5c2d8a'
 const BASE_SIZE = 18
 
 const FONTS = [
-  { label: 'Fell',     css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
-  { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
-  { label: 'Sans',     css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { label: 'Fell',       css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
+  { label: 'Garamond',   css: "'EB Garamond', Georgia, serif" },
+  { label: 'Times',      css: "'Times New Roman', Times, serif" },
+  { label: 'Cambria',    css: "Cambria, Georgia, serif" },
+  { label: 'Georgia',    css: "Georgia, serif" },
+  { label: 'Palatino',   css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+  { label: 'Baskerville',css: "'Baskerville Old Face', Baskerville, 'Book Antiqua', serif" },
+  { label: 'Sans',       css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
 ]
 
 type Align = 'left' | 'center' | 'justify'
@@ -39,7 +45,7 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const [, force] = useState(0)
   const [curLineHeight, setCurLineHeight] = useState(getLineHeight)
   const [fontOpen, setFontOpen] = useState(false)
-  const fontRef = useRef<HTMLDivElement>(null)
+  const fontBtnRef = useRef<HTMLButtonElement>(null)
   const ping = () => onActivity?.()
 
   // Re-render when the selection/content changes so the controls reflect the cursor.
@@ -52,9 +58,11 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
 
   useEffect(() => {
     if (!fontOpen) return
-    const onDown = (e: MouseEvent) => { if (fontRef.current && !fontRef.current.contains(e.target as Node)) setFontOpen(false) }
+    const onDown = () => setFontOpen(false)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFontOpen(false) }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [fontOpen])
 
   const ts = editor.getAttributes('textStyle')
@@ -84,28 +92,68 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const segBtn = (active: boolean) =>
     `flex items-center justify-center rounded px-1.5 py-1 transition-colors ${active ? 'text-[#5c2d8a] bg-[#5c2d8a]/10' : 'text-stone-400 hover:text-[#5c2d8a]'}`
 
+  // Font popup: positioned fixed above the button.
+  function fontPopupStyle(): React.CSSProperties {
+    const br = fontBtnRef.current?.getBoundingClientRect()
+    if (!br) return { position: 'fixed', bottom: 80, left: 10 }
+    return {
+      position: 'fixed',
+      bottom: Math.round(window.innerHeight - br.top + 8),
+      left: Math.max(8, Math.round(br.left)),
+    }
+  }
+
   return (
     <div className="flex items-center gap-2 text-sm text-stone-500 font-serif w-full">
-      {/* Font drop-up */}
-      <div ref={fontRef} className="relative">
-        <button type="button" aria-haspopup="menu" aria-expanded={fontOpen}
-          onClick={() => setFontOpen(o => !o)}
-          className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[4.5rem] text-left">
-          {curFont} <span className="text-[0.6em] align-middle">▴</span>
-        </button>
-        {fontOpen && (
-          <div role="menu" className="absolute bottom-full left-0 mb-2 z-[60] w-28 py-1 bg-white shadow-md"
-            style={{ border: `1px solid ${INK}66`, borderRadius: '8px' }}>
+      {/* Font picker — opens a portal popup */}
+      <button
+        ref={fontBtnRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={fontOpen}
+        onClick={(e) => { e.stopPropagation(); setFontOpen(o => !o) }}
+        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[5.5rem] text-left whitespace-nowrap"
+      >
+        {curFont} <span className="text-[0.6em] align-middle">▴</span>
+      </button>
+
+      {fontOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setFontOpen(false)} />
+          <div
+            role="dialog"
+            aria-label="Choose font"
+            className="z-[99] bg-white shadow-xl py-2"
+            style={{
+              ...fontPopupStyle(),
+              border: `1px solid ${INK}55`,
+              borderRadius: 12,
+              minWidth: 180,
+            }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div className="px-4 pb-1.5 text-[11px] uppercase tracking-wide text-stone-400">Font</div>
             {FONTS.map(f => (
-              <button key={f.label} role="menuitem" type="button" onClick={() => setFont(f.css)}
-                className={`w-full text-left px-3 py-1 hover:bg-stone-100 hover:text-[#5c2d8a] ${f.label === curFont ? 'text-[#5c2d8a]' : 'text-stone-600'}`}
-                style={{ fontFamily: f.css }}>
+              <button
+                key={f.label}
+                role="menuitem"
+                type="button"
+                onClick={() => setFont(f.css)}
+                className="w-full text-left px-4 py-2 text-base transition-colors hover:bg-stone-50"
+                style={{
+                  fontFamily: f.css,
+                  color: f.label === curFont ? INK : '#374151',
+                  fontWeight: f.label === curFont ? 500 : 400,
+                  borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent',
+                }}
+              >
                 {f.label}
               </button>
             ))}
           </div>
-        )}
-      </div>
+        </>,
+        document.body,
+      )}
 
       {/* Size (numeric) */}
       <input
