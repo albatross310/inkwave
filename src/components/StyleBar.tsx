@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
+import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 
 const INK = '#5c2d8a'
 const BASE_SIZE = 18
@@ -30,8 +31,13 @@ function AlignIcon({ a }: { a: Align }) {
   )
 }
 
-export function StyleBar({ editor, onActivity }: { editor: Editor; onActivity?: () => void }) {
+export function StyleBar({ editor, onActivity, onLineHeightChange }: {
+  editor: Editor
+  onActivity?: () => void
+  onLineHeightChange?: (v: number) => void
+}) {
   const [, force] = useState(0)
+  const [curLineHeight, setCurLineHeight] = useState(getLineHeight)
   const [fontOpen, setFontOpen] = useState(false)
   const fontRef = useRef<HTMLDivElement>(null)
   const ping = () => onActivity?.()
@@ -59,6 +65,11 @@ export function StyleBar({ editor, onActivity }: { editor: Editor; onActivity?: 
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize  = (px: number) => { ping(); if (px >= 8 && px <= 120) editor.chain().setMark('textStyle', { fontSize: `${px}px` }).run() }
   const setAlign = (a: Align) => { ping(); editor.chain().setTextAlign(a).run() }
+  const pickLineHeight = (v: number) => {
+    setLineHeight(v)
+    setCurLineHeight(v)
+    onLineHeightChange?.(v)
+  }
 
   // Apply the current selection's style (font / size / align) to the whole document.
   const applyToAll = () => {
@@ -110,6 +121,23 @@ export function StyleBar({ editor, onActivity }: { editor: Editor; onActivity?: 
           <button key={a} type="button" aria-label={`Align ${a}`} aria-pressed={curAlign === a}
             onClick={() => setAlign(a)} className={segBtn(curAlign === a)}>
             <AlignIcon a={a} />
+          </button>
+        ))}
+      </div>
+
+      {/* Line height */}
+      <div className="flex items-center gap-0.5">
+        {LINE_HEIGHTS.map(lh => (
+          <button
+            key={lh.label}
+            type="button"
+            aria-label={`Line height ${lh.label}`}
+            aria-pressed={curLineHeight === lh.value}
+            onClick={() => pickLineHeight(lh.value)}
+            className={segBtn(curLineHeight === lh.value)}
+            style={{ fontStyle: lh.label === 'φ' || lh.label === 'e' ? 'italic' : undefined, minWidth: '1.6rem' }}
+          >
+            {lh.label}
           </button>
         ))}
       </div>

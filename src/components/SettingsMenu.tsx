@@ -1,0 +1,116 @@
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
+import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
+
+const INK = '#5c2d8a'
+
+export function SettingsMenu() {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [, rerender] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+
+  function toggle() { setOpen(o => !o) }
+
+  // Compute popup position: anchored above the button, right-aligned to it.
+  function menuStyle(): React.CSSProperties {
+    const br = btnRef.current?.getBoundingClientRect()
+    if (!br) return { position: 'fixed', bottom: 80, right: 10 }
+    return {
+      position: 'fixed',
+      bottom: Math.round(window.innerHeight - br.top + 8),
+      left: Math.round(br.left),
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={toggle}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+        title="Settings"
+      >
+        <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.43-2.47c.04-.32.07-.65.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
+          </svg>
+        </span>
+      </button>
+
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
+          <div
+            role="dialog"
+            aria-label="Settings"
+            className="z-[91] w-52 bg-white shadow-lg font-serif text-sm text-stone-600"
+            style={{ ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-stone-400">Settings</div>
+
+            {/* Gapped pages */}
+            <Row
+              label="Gapped pages"
+              checked={gappedPagesEnabled()}
+              onChange={() => { setGappedPages(!gappedPagesEnabled()); window.location.reload() }}
+            />
+
+            {/* Old word display */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span>Old word</span>
+              <button
+                type="button"
+                onClick={() => { cycleCrossoutMode(); rerender(n => n + 1) }}
+                className="text-xs px-2 py-0.5 rounded-full hover:bg-stone-100 transition-colors tabular-nums"
+                style={{ color: INK, border: `1px solid ${INK}44` }}
+                title="Cycle old-word display style"
+              >
+                {crossoutMode()}
+              </button>
+            </div>
+
+            {/* Watermark */}
+            <Row
+              label="Watermark"
+              checked={watermarkEnabled()}
+              onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
+            />
+
+            <div className="h-2" />
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function Row({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+  return (
+    <label className="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-stone-50 transition-colors select-none">
+      <span>{label}</span>
+      <span
+        className="w-8 h-4 rounded-full flex items-center transition-colors relative"
+        style={{ background: checked ? INK : '#d1d5db' }}
+      >
+        <span
+          className="absolute w-3 h-3 bg-white rounded-full shadow-sm transition-transform"
+          style={{ left: 2, transform: checked ? 'translateX(16px)' : 'translateX(0)' }}
+        />
+        <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
+      </span>
+    </label>
+  )
+}

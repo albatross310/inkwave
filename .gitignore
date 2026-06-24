@@ -20,3 +20,4 @@ SECURITY-AUDIT-2026-06.md
 
 # Claude Code local worktrees / session data
 .claude/
+.vercel

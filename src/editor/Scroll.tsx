@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
+import { getColWidth, getPageMargin, getParaSpacing, COL_WIDTHS, PAGE_MARGINS, PARA_SPACINGS } from './pageSettings'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -36,6 +37,15 @@ export function Scroll({
   // PaginationExtension); the single tall outer shadow would otherwise bleed continuously down the
   // left/right edges and through the gaps, so we drop it here and let the per-gap caps do the work.
   const gapped = gappedPagesEnabled()
+  const [, rerender] = useState(0)
+  useEffect(() => {
+    const onChanged = () => rerender(n => n + 1)
+    window.addEventListener('inkwave:page-settings-changed', onChanged)
+    return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
+  }, [])
+  const colWidthPx   = COL_WIDTHS.find(c => c.value === getColWidth())?.px ?? 720
+  const marginPx     = PAGE_MARGINS.find(m => m.value === getPageMargin())?.px ?? 64
+  const paraSpacingEm = PARA_SPACINGS.find(p => p.value === getParaSpacing())?.em ?? 0.5
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
@@ -68,9 +78,22 @@ export function Scroll({
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
             by device type, not the viewport breakpoint, so browser zoom never collapses it); a slim
             one on phones where screen real estate is tight. */}
-        <div ref={sheetRef} className={`scroll-paper relative pt-8 pb-24 ${phone ? 'px-4' : 'px-16'}`} style={{ borderRadius: phone ? 0 : '8px' }}>
+        <div
+          ref={sheetRef}
+          className="scroll-paper relative pt-8 pb-24"
+          style={{
+            borderRadius: phone ? 0 : '8px',
+            paddingLeft:  phone ? '1rem' : `${marginPx}px`,
+            paddingRight: phone ? '1rem' : `${marginPx}px`,
+            '--para-spacing': `${paraSpacingEm}em`,
+          } as React.CSSProperties}
+        >
           <PageGuides sheetRef={sheetRef} />
-          <div className={`mx-auto w-full relative ${phone ? 'max-w-full' : 'max-w-[720px]'}`} style={{ zIndex: 1 }} ref={containerRef}>
+          <div
+            className={`mx-auto w-full relative ${phone ? 'max-w-full' : ''}`}
+            style={{ maxWidth: phone ? undefined : `${colWidthPx}px`, zIndex: 1 }}
+            ref={containerRef}
+          >
             {children}
           </div>
         </div>

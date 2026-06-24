@@ -148,7 +148,7 @@
 
 
   .ProseMirror p {
-    margin-bottom: 1.25em;
+    margin-bottom: calc(1.25em + var(--para-spacing, 0.5em));
     /* Isolate each paragraph's layout so the SCAS reflow animation (min-width +
        letter-spacing changing every frame) only re-lays-out the focused paragraph,
        not the whole document. This is what keeps the animation smooth on high-refresh

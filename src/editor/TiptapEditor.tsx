@@ -41,6 +41,9 @@ import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clear
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
+import { SettingsMenu } from '../components/SettingsMenu'
+import { PageMenu } from '../components/PageMenu'
+import { getLineHeight } from './lineHeight'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
@@ -136,6 +139,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
+  const [lineHeight, setLineHeightState] = useState(getLineHeight)
   // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
   // and returns when the keyboard is dismissed. We detect the keyboard via the visual
   // viewport (its visible height shrinks when the keyboard shows) — far more reliable than
@@ -983,7 +987,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           </div>
         )}
         <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch}>
-          <EditorContent editor={editor} />
+          <div style={{ lineHeight }}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
           )}
@@ -1012,9 +1016,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onVerifyChain={verifyReceiptChain}
             wordCount={wordCount}
             compact={isTouch}
-            open={receiptOpen}
-            onOpenChange={setReceiptOpen}
-            hideTrigger
+            open={isTouch ? receiptOpen : undefined}
+            onOpenChange={isTouch ? setReceiptOpen : undefined}
+            hideTrigger={isTouch}
           />
         )}
 
@@ -1022,9 +1026,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
             keyboard is up so it never sits over the writing. */}
         {!keyboardUp && (() => {
-          // ◈ and ☁ live inside the toolbar on both mobile and desktop — hide the fixed-position
-          // triggers and control open state from the toolbar buttons.
-          const syncProps = { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const }
+          // On mobile, ◈ and ☁ live inside the toolbar — hide the fixed-position triggers.
+          // On desktop they stay as floating corner pills.
+          const syncProps = isTouch ? { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const } : {}
           if (fileSaveAvailable()) {
             // Regular browser → local folder. Honest states so the writer is never misled into
             // thinking it's saving when it isn't:
@@ -1112,7 +1116,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
+          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '28px' }}
         >
           <div
             ref={footerRef}
@@ -1123,37 +1127,39 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
-              // Counter page zoom on the pill only — NOT on the outer left-0/right-0 wrapper,
-              // which would compress it and shift it left.
-              zoom: !isTouch && zoom !== 1 ? zoom : undefined,
+              // No zoom counter — the toolbar is position:fixed so it already stays put in
+              // the viewport regardless of browser zoom. Adding CSS zoom here caused the
+              // dropdown to misalign when getBoundingClientRect coords shifted under zoom.
             }}
           >
             {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
                 above the main controls (when opened with the STYLE button) */}
             {showStyle && editor && (
               <div className={`flex items-center px-4 py-2 ${showMain ? 'border-b border-stone-200' : ''}`}>
-                <StyleBar editor={editor} onActivity={armStyleTimer} />
+                <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />
               </div>
             )}
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-2'}`}>
-              {/* ◈ provenance trigger (leftmost) */}
-              <button
-                type="button"
-                onClick={() => setReceiptOpen(o => !o)}
-                className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                style={{ color: '#5c2d8a' }}
-                title="Provenance record"
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
-              </button>
+            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-3'}`}>
+              {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
+              {isTouch && (
+                <button
+                  type="button"
+                  onClick={() => setReceiptOpen(o => !o)}
+                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                  style={{ color: '#5c2d8a' }}
+                  title="Provenance record"
+                >
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
+                </button>
+              )}
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
               />
-              {/* S-in-circle style toggle */}
+              {/* s-in-circle style toggle */}
               <button
                 type="button"
                 aria-pressed={styleBarOpen}
@@ -1161,13 +1167,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"
               >
-                <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] font-medium tracking-normal not-italic">
-                  S
+                <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] italic leading-none">
+                  s
                 </span>
               </button>
               <GuideMenu />
-              {/* ☁ sync trigger (right of guide, left of hamburger) */}
-              {(fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+              <SettingsMenu />
+              <PageMenu />
+              {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
+              {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
                 <button
                   type="button"
                   onClick={() => setSyncOpen(o => !o)}
