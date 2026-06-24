@@ -15,25 +15,25 @@ import {
 const INK = '#5c2d8a'
 const isPhone = isTouchDevice()
 
-// 1 cm = 96px / 2.54
-const CM = 37.795
-// Paragraph spacing is stored in em; base font-size assumed 18 px for the cm display
-const EM_BASE = 18
+// 96 CSS px = 1 inch = 2.54 cm (96 DPI reference)
+const CM = 37.795   // px per cm
+const EM_BASE = 18  // assumed font-size for em ↔ cm
 
-// Presets in cm. Side: "high lower and low higher" (compressed range vs top/bot).
-const SIDE_PRESETS    = [{ l: 'Low', v: 1.8 }, { l: 'Mid', v: 2.6 }, { l: 'High', v: 3.2 }]
-const MARGIN_PRESETS  = [{ l: 'Low', v: 1.2 }, { l: 'Mid', v: 2.4 }, { l: 'High', v: 4.0 }]
+// Presets in cm — Word-Normal inspired: Low=0.5in, Mid=1in, High=1.5in
+const SIDE_PRESETS    = [{ l: 'Low', v: 1.27 }, { l: 'Mid', v: 2.54 }, { l: 'High', v: 3.81 }]
+const MARGIN_PRESETS  = [{ l: 'Low', v: 1.27 }, { l: 'Mid', v: 2.54 }, { l: 'High', v: 3.81 }]
+// Para mode "indent" presets are RELATIVE (extra beyond global). None = same as global margin.
+const INDENT_PRESETS  = [{ l: 'None', v: 0 }, { l: 'Low', v: 1.27 }, { l: 'High', v: 2.54 }]
 const SPACING_PRESETS = [{ l: 'Low', v: 0.4 }, { l: 'Mid', v: 0.8 }, { l: 'High', v: 1.6 }]
 
-// Conversion helpers between internal storage units and cm display
-const pxConv  = { toCm: (px: number) => px / CM,        fromCm: (cm: number) => cm * CM }
-const emConv  = { toCm: (em: number) => em * EM_BASE / CM, fromCm: (cm: number) => cm * CM / EM_BASE }
+const pxConv = { toCm: (px: number) => px / CM,          fromCm: (cm: number) => cm * CM }
+const emConv = { toCm: (em: number) => em * EM_BASE / CM, fromCm: (cm: number) => cm * CM / EM_BASE }
 
 export function PageMenu({ editor }: { editor?: Editor }) {
   const [open, setOpen] = useState(false)
   const [, rerender] = useState(0)
   const btnRef = useRef<HTMLButtonElement>(null)
-  // Capture whether the editor was focused AT THE MOMENT the panel opened (before blur).
+  // Capture editor focus before the panel open click causes blur.
   const parFocusRef = useRef(false)
   const parFocus = parFocusRef.current
 
@@ -65,6 +65,33 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   }
   function applyGlobal(fn: () => void) { fn(); dispatch() }
 
+  // When the global side margin changes, compensate every paragraph that has a per-paragraph
+  // extra paddingLeft so its visual left position stays fixed (avoids the out-of-sync drift).
+  function applyGlobalSide(newPx: number) {
+    const delta = newPx - getSideMarginPx()
+    setSideMarginPx(newPx)
+    if (delta !== 0 && editor) {
+      const { tr } = editor.state
+      let changed = false
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'paragraph') return
+        const lStr = node.attrs.paddingLeft as string | null
+        const rStr = node.attrs.paddingRight as string | null
+        if (!lStr && !rStr) return
+        const l = Math.max(0, Math.round((parseFloat(lStr ?? '') || 0) - delta))
+        const r = Math.max(0, Math.round((parseFloat(rStr ?? '') || 0) - delta))
+        tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          paddingLeft:  l > 0 ? `${l}px` : null,
+          paddingRight: r > 0 ? `${r}px` : null,
+        })
+        changed = true
+      })
+      if (changed) editor.view.dispatch(tr)
+    }
+    dispatch()
+  }
+
   function applyParaPx(key: string, v: number) {
     editor?.chain().setParaStyle({ [key]: `${v}px` } as Record<string, string>).run()
     rerender(n => n + 1)
@@ -73,19 +100,24 @@ export function PageMenu({ editor }: { editor?: Editor }) {
     editor?.chain().setParaStyle({ [key]: `${v}em` } as Record<string, string>).run()
     rerender(n => n + 1)
   }
-  function applySide(px: number) {
-    if (parFocus && editor) {
-      editor.chain().setParaStyle({ paddingLeft: `${px}px`, paddingRight: `${px}px` } as Record<string, string>).run()
-      rerender(n => n + 1)
-    } else { applyGlobal(() => setSideMarginPx(px)) }
+
+  // Para mode "Indent": extra paddingLeft BEYOND the global margin (relative, not absolute).
+  // Para mode "Side" row is hidden — the global margin row is always the absolute reference.
+  const paraExtraLeft = parseFloat(paraAttrs.paddingLeft ?? '') || 0
+
+  function applyIndent(extraPx: number) {
+    editor?.chain().setParaStyle({
+      paddingLeft:  extraPx > 0 ? `${Math.round(extraPx)}px` : null,
+      paddingRight: extraPx > 0 ? `${Math.round(extraPx)}px` : null,
+    } as Record<string, string>).run()
+    rerender(n => n + 1)
   }
 
   const cols        = getColumns()
   const paper       = getPaperSize()
   const orientation = getOrientation()
 
-  const sideVal    = parFocus ? readPx('paddingLeft', getSideMarginPx) : getSideMarginPx()
-  const topVal     = parFocus ? readPx('marginTop',   getTopMarginPx)  : getTopMarginPx()
+  const topVal     = parFocus ? readPx('marginTop', getTopMarginPx)  : getTopMarginPx()
   const botVal     = getBtmMarginPx()
   const spacingVal = readEm('marginBottom', getParaSpacingEm)
 
@@ -119,10 +151,18 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             {/* ── Margins ── */}
             <SectionHead label="Margins" />
 
+            {/* Global side margin — always shown. In para mode it's read-only context. */}
             {!isPhone && (
-              <MRow label={parFocus ? 'Indent' : 'Side'} presets={SIDE_PRESETS} conv={pxConv}
-                value={sideVal} minCm={0} maxCm={8}
-                onChange={px => applySide(px)} />
+              <MRow label="Side" presets={SIDE_PRESETS} conv={pxConv}
+                value={getSideMarginPx()} minCm={0} maxCm={10} readOnly={parFocus}
+                onChange={px => applyGlobalSide(px)} />
+            )}
+
+            {/* Per-paragraph extra indent — only in para mode */}
+            {!isPhone && parFocus && (
+              <MRow label="Indent" presets={INDENT_PRESETS} conv={pxConv}
+                value={paraExtraLeft} minCm={0} maxCm={8}
+                onChange={px => applyIndent(px)} />
             )}
 
             <MRow label="Top" presets={MARGIN_PRESETS} conv={pxConv}
@@ -199,12 +239,13 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
 
 const STEP = 0.2 // cm per arrow click
 
-function MRow({ label, presets, conv, value, minCm, maxCm, onChange }: {
+function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onChange }: {
   label: string
   presets: { l: string; v: number }[]
   conv: { toCm: (v: number) => number; fromCm: (cm: number) => number }
-  value: number   // internal units (px or em)
+  value: number        // internal units (px or em)
   minCm: number; maxCm: number
+  readOnly?: boolean   // show but disable controls (e.g. global side when para mode is active)
   onChange: (internal: number) => void
 }) {
   const snap  = (cm: number) => Math.round(cm / STEP) * STEP
@@ -212,39 +253,52 @@ function MRow({ label, presets, conv, value, minCm, maxCm, onChange }: {
   const displayed = snap(conv.toCm(value))
   const active = presets.find(p => Math.abs(p.v - displayed) < 0.05)
 
-  const dec = (e: React.MouseEvent) => {
-    e.preventDefault()
-    onChange(conv.fromCm(clamp(snap(displayed - STEP))))
-  }
-  const inc = (e: React.MouseEvent) => {
-    e.preventDefault()
-    onChange(conv.fromCm(clamp(snap(displayed + STEP))))
-  }
+  const dec = () => { if (!readOnly) onChange(conv.fromCm(clamp(snap(displayed - STEP)))) }
+  const inc = () => { if (!readOnly) onChange(conv.fromCm(clamp(snap(displayed + STEP)))) }
+
+  const inputStyle: React.CSSProperties = readOnly
+    ? { color: '#9ca3af', cursor: 'default' }
+    : { color: INK }
 
   return (
     <div className="flex items-center px-5 py-2 gap-3">
       <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0 leading-tight whitespace-pre-line">{label}</span>
       <div className="flex gap-1.5 flex-1 min-w-0">
         {presets.map(p => (
-          <Chip key={p.l} label={p.l} active={active?.l === p.l} onClick={() => onChange(conv.fromCm(p.v))} />
+          <Chip key={p.l} label={p.l}
+            active={!readOnly && active?.l === p.l}
+            onClick={() => { if (!readOnly) onChange(conv.fromCm(p.v)) }} />
         ))}
       </div>
-      <div className="flex items-center shrink-0 gap-px">
-        <button type="button" onMouseDown={dec}
-          className="w-5 h-6 flex items-center justify-center text-stone-400 hover:text-[#5c2d8a] border border-stone-200 rounded-l text-base leading-none select-none">
-          −
-        </button>
-        <input
-          type="text" inputMode="decimal"
-          value={displayed.toFixed(1)}
-          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(conv.fromCm(clamp(v))) }}
-          className="w-11 text-center text-xs border-t border-b border-stone-200 py-0.5 focus:outline-none focus:border-[#5c2d8a] bg-white"
-          style={{ color: INK }} />
-        <button type="button" onMouseDown={inc}
-          className="w-5 h-6 flex items-center justify-center text-stone-400 hover:text-[#5c2d8a] border border-stone-200 rounded-r text-base leading-none select-none">
-          +
-        </button>
-        <span className="text-[10px] text-stone-400 ml-1 w-4">cm</span>
+      {/* Spinner: ▲▼ arrows stacked inside the right side of the input box */}
+      <div className="flex items-center shrink-0 gap-1">
+        <div className="flex items-center border border-stone-200 rounded overflow-hidden" style={{ width: 72 }}>
+          <input
+            type="text" inputMode="decimal"
+            value={displayed.toFixed(1)}
+            readOnly={readOnly}
+            onChange={e => {
+              if (readOnly) return
+              const v = parseFloat(e.target.value)
+              if (!isNaN(v)) onChange(conv.fromCm(clamp(v)))
+            }}
+            className="flex-1 min-w-0 text-xs py-0.5 px-1.5 bg-transparent outline-none text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            style={inputStyle}
+          />
+          <div className="flex flex-col border-l border-stone-200 shrink-0" style={{ width: 16 }}>
+            <button type="button" onClick={inc} tabIndex={-1}
+              className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
+              style={{ height: 13, fontSize: 7 }}>
+              ▲
+            </button>
+            <button type="button" onClick={dec} tabIndex={-1}
+              className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
+              style={{ height: 13, fontSize: 7 }}>
+              ▼
+            </button>
+          </div>
+        </div>
+        <span className="text-[10px] text-stone-400 shrink-0">cm</span>
       </div>
     </div>
   )

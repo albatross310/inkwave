@@ -16,16 +16,19 @@ function store(key: string, v: number | string): void {
   try { localStorage.setItem(key, String(v)) } catch { /* private mode */ }
 }
 
+// 1 inch = 96px (96 DPI reference) = 2.54 cm. Default margins mirror Word "Normal" (1 inch all sides).
+const INCH = 96
+
 // Side margins (px) — desktop only; phone is always edge-to-edge
-export function getSideMarginPx(): number { return num(KEYS.sideMargin, 40) }
+export function getSideMarginPx(): number { return num(KEYS.sideMargin, INCH) }
 export function setSideMarginPx(v: number): void { store(KEYS.sideMargin, v) }
 
 // Top margin (px)
-export function getTopMarginPx(): number { return num(KEYS.topMargin, 32) }
+export function getTopMarginPx(): number { return num(KEYS.topMargin, INCH) }
 export function setTopMarginPx(v: number): void { store(KEYS.topMargin, v) }
 
 // Bottom margin (px)
-export function getBtmMarginPx(): number { return num(KEYS.btmMargin, 96) }
+export function getBtmMarginPx(): number { return num(KEYS.btmMargin, INCH) }
 export function setBtmMarginPx(v: number): void { store(KEYS.btmMargin, v) }
 
 // Paragraph spacing (em) — extra bottom margin on each paragraph
