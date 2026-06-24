@@ -46,6 +46,9 @@ export function ReceiptPanel({
 
   const panelOpen = open && (n > 0 || receiptCount > 0 || typeof wordCount === 'number')
 
+  // When the trigger lives in the toolbar, skip rendering entirely while closed.
+  if (hideTrigger && !panelOpen) return null
+
   return (
     <>
       {/* Invisible backdrop catches any outside click reliably (a document listener was missing
@@ -53,8 +56,15 @@ export function ReceiptPanel({
       {panelOpen && <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />}
 
       <div
-        className="fixed bottom-0 left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
-        style={{ color: '#5c2d8a', padding: '1rem', zoom: zoom !== 1 ? zoom : undefined }}
+        className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
+        style={{
+          color: '#5c2d8a',
+          // When the trigger is in the toolbar, anchor the panel above the toolbar instead of at
+          // the screen bottom — otherwise the panel slides under the toolbar.
+          bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 64px)' : 0,
+          padding: hideTrigger ? '0 1rem' : '1rem',
+          zoom: zoom !== 1 ? zoom : undefined,
+        }}
       >
         {!hideTrigger && (
           <button

@@ -1110,11 +1110,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{
-            paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem',
-            // Counter page zoom (desktop only) with CSS `zoom` so the bar stays a constant size, crisp.
-            zoom: !isTouch && zoom !== 1 ? zoom : undefined,
-          }}
+          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '1rem' }}
         >
           <div
             ref={footerRef}
@@ -1125,6 +1121,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
+              // Counter page zoom on the pill only — NOT on the outer left-0/right-0 wrapper,
+              // which would compress it and shift it left.
+              zoom: !isTouch && zoom !== 1 ? zoom : undefined,
             }}
           >
             {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
