@@ -1012,9 +1012,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onVerifyChain={verifyReceiptChain}
             wordCount={wordCount}
             compact={isTouch}
-            open={isTouch ? receiptOpen : undefined}
-            onOpenChange={isTouch ? setReceiptOpen : undefined}
-            hideTrigger={isTouch}
+            open={receiptOpen}
+            onOpenChange={setReceiptOpen}
+            hideTrigger
           />
         )}
 
@@ -1022,9 +1022,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
             keyboard is up so it never sits over the writing. */}
         {!keyboardUp && (() => {
-          // On mobile, ◈ and ☁ live inside the toolbar — pass controlled open state and hide
-          // the fixed-position triggers. The detail panel still opens from bottom-right.
-          const syncProps = isTouch ? { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const } : {}
+          // ◈ and ☁ live inside the toolbar on both mobile and desktop — hide the fixed-position
+          // triggers and control open state from the toolbar buttons.
+          const syncProps = { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const }
           if (fileSaveAvailable()) {
             // Regular browser → local folder. Honest states so the writer is never misled into
             // thinking it's saving when it isn't:
@@ -1138,24 +1138,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-3'}`}>
-              {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
-              {isTouch && (
-                <button
-                  type="button"
-                  onClick={() => setReceiptOpen(o => !o)}
-                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                  style={{ color: '#5c2d8a' }}
-                  title="Provenance record"
-                >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
-                </button>
-              )}
+            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-2'}`}>
+              {/* ◈ provenance trigger (leftmost) */}
+              <button
+                type="button"
+                onClick={() => setReceiptOpen(o => !o)}
+                className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                style={{ color: '#5c2d8a' }}
+                title="Provenance record"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
+              </button>
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
               />
-              {/* S-in-circle (formerly "style" text) */}
+              {/* S-in-circle style toggle */}
               <button
                 type="button"
                 aria-pressed={styleBarOpen}
@@ -1168,8 +1166,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 </span>
               </button>
               <GuideMenu />
-              {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
-              {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+              {/* ☁ sync trigger (right of guide, left of hamburger) */}
+              {(fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
                 <button
                   type="button"
                   onClick={() => setSyncOpen(o => !o)}
