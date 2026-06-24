@@ -14,21 +14,18 @@ import {
 const INK = '#5c2d8a'
 const isPhone = isTouchDevice()
 
-const PX_PRESETS  = [{ l: 'Low', v: 16 }, { l: 'Mid', v: 40 }, { l: 'High', v: 80 }]
-const EM_PRESETS  = [{ l: 'Low', v: 0 },  { l: 'Mid', v: 0.5 }, { l: 'High', v: 1.5 }]
+const PX_PRESETS  = [{ l: 'Low', v: 32 }, { l: 'Mid', v: 80 }, { l: 'High', v: 160 }]
+const EM_PRESETS  = [{ l: 'Low', v: 0 },  { l: 'Mid', v: 1 },   { l: 'High', v: 3 }]
 
 export function PageMenu({ editor }: { editor?: Editor }) {
   const [open, setOpen] = useState(false)
   const [, rerender] = useState(0)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const [parFocus, setParFocus] = useState(false)
-
-  useEffect(() => {
-    if (!editor) return
-    const sync = () => setParFocus(editor.isFocused)
-    editor.on('focus', sync); editor.on('blur', sync); editor.on('selectionUpdate', sync)
-    return () => { editor.off('focus', sync); editor.off('blur', sync); editor.off('selectionUpdate', sync) }
-  }, [editor])
+  // Capture whether the editor was focused AT THE MOMENT the panel opened.
+  // Can't track live — clicking anything in the popup steals focus from the editor
+  // before the onChange handler fires, making live detection always false.
+  const parFocusRef = useRef(false)
+  const parFocus = parFocusRef.current
 
   useEffect(() => {
     if (!open) return
@@ -40,7 +37,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   function menuStyle(): React.CSSProperties {
     const br = btnRef.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: 10 }
-    const left = Math.min(Math.max(8, Math.round(br.left)), window.innerWidth - 648)
+    const left = Math.min(Math.max(8, Math.round(br.left)), window.innerWidth - 392)
     return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), left }
   }
 
@@ -87,7 +84,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   return (
     <>
       <button ref={btnRef} type="button" aria-haspopup="dialog" aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => { parFocusRef.current = Boolean(editor?.isFocused); setOpen(o => !o) }}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif
           ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
         title="Page settings">
@@ -99,7 +96,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
           <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
           <div role="dialog" aria-label="Page settings"
             className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600"
-            style={{ ...menuStyle(), width: 640, border: `1px solid ${INK}55`, borderRadius: 14 }}
+            style={{ ...menuStyle(), width: 384, border: `1px solid ${INK}55`, borderRadius: 14 }}
             onMouseDown={e => e.stopPropagation()}>
 
             {/* Header */}
