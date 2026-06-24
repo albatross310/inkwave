@@ -1,4 +1,4 @@
-// GuideMenu — "guide" toolbar button with a drop-up info panel: the desktop hotkeys
+// GuideMenu — toolbar button (ⓘ circle) with a centred modal: the desktop hotkeys
 // for the word cycle, plus a note about the formatting IME still to be built.
 
 import { Fragment, useEffect, useState } from 'react'
@@ -29,12 +29,15 @@ export function GuideMenu() {
     <div className="relative flex items-center font-serif">
       <button
         type="button"
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}
-        className="uppercase tracking-wide text-xs text-stone-400 hover:text-[#5c2d8a] transition-colors"
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+        title="Guide"
       >
-        guide
+        <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] italic leading-none">
+          i
+        </span>
       </button>
 
       {open && createPortal(

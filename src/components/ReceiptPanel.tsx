@@ -13,6 +13,9 @@ export function ReceiptPanel({
   onVerifyChain,
   wordCount,
   compact,
+  open: externalOpen,
+  onOpenChange,
+  hideTrigger,
 }: {
   snapshots: Snapshot[]
   onCheckBitcoin?: () => void
@@ -21,8 +24,14 @@ export function ReceiptPanel({
   onVerifyChain?: () => void
   wordCount?: number
   compact?: boolean // mobile: a small ◈ circle instead of the text pill
+  open?: boolean   // controlled mode (toolbar trigger)
+  onOpenChange?: (v: boolean) => void
+  hideTrigger?: boolean // suppress the fixed-position trigger (it's in the toolbar instead)
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
+
   const zoom = useZoomScale()
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
@@ -47,21 +56,23 @@ export function ReceiptPanel({
         className="fixed bottom-0 left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
         style={{ color: '#5c2d8a', padding: '1rem', zoom: zoom !== 1 ? zoom : undefined }}
       >
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className={compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:max-w-[8rem]'}
-          style={{ border: '1px solid rgba(92, 45, 138, 0.75)', borderRadius: compact ? 9999 : 12 }}
-          title="Provenance record (held by you)"
-        >
-          {compact ? '◈' : (
-            // Hanging indent: when the label wraps (half-screen), the "· N receipts" line lines up
-            // under "N snapshots" rather than under the ◈.
-            <span className="inline-block pl-[1.2em] [text-indent:-1.2em]">
-              ◈ {n} snapshot{n === 1 ? '' : 's'}{receiptCount > 0 ? ` · ${receiptCount} receipt${receiptCount === 1 ? '' : 's'}` : ''}
-            </span>
-          )}
-        </button>
+        {!hideTrigger && (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            className={compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:max-w-[8rem]'}
+            style={{ border: '1px solid rgba(92, 45, 138, 0.75)', borderRadius: compact ? 9999 : 12 }}
+            title="Provenance record (held by you)"
+          >
+            {compact ? '◈' : (
+              // Hanging indent: when the label wraps (half-screen), the "· N receipts" line lines up
+              // under "N snapshots" rather than under the ◈.
+              <span className="inline-block pl-[1.2em] [text-indent:-1.2em]">
+                ◈ {n} snapshot{n === 1 ? '' : 's'}{receiptCount > 0 ? ` · ${receiptCount} receipt${receiptCount === 1 ? '' : 's'}` : ''}
+              </span>
+            )}
+          </button>
+        )}
 
         {panelOpen && (
           <div

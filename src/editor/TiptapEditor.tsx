@@ -131,6 +131,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [cycleActive, setCycleActive] = useState(false)
   const [paperRight, setPaperRight] = useState(0)
+  // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [syncOpen, setSyncOpen] = useState(false)
   // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
   // and returns when the keyboard is dismissed. We detect the keyboard via the visual
   // viewport (its visible height shrinks when the keyboard shows) — far more reliable than
@@ -1007,6 +1010,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onVerifyChain={verifyReceiptChain}
             wordCount={wordCount}
             compact={isTouch}
+            open={isTouch ? receiptOpen : undefined}
+            onOpenChange={isTouch ? setReceiptOpen : undefined}
+            hideTrigger={isTouch}
           />
         )}
 
@@ -1014,6 +1020,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
             keyboard is up so it never sits over the writing. */}
         {!keyboardUp && (() => {
+          // On mobile, ◈ and ☁ live inside the toolbar — pass controlled open state and hide
+          // the fixed-position triggers. The detail panel still opens from bottom-right.
+          const syncProps = isTouch ? { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const } : {}
           if (fileSaveAvailable()) {
             // Regular browser → local folder. Honest states so the writer is never misled into
             // thinking it's saving when it isn't:
@@ -1025,6 +1034,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   path={fileName}
                   tooltip={fileName ? `Click to re-allow saving to ${fileName}` : 'Click to re-allow saving'}
                   onClick={() => void reconnectFolder()}
+                  {...syncProps}
                 />
               )
             }
@@ -1037,9 +1047,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 tooltip={`Saving to ${fileName}`}
                 onShowInFolder={showInFolder}
                 onChangeFolder={saveAsFile}
+                {...syncProps}
               />
             ) : (
-              <SyncStatus compact={isTouch} label="🗀 Save to a folder" synced={false} onClick={() => void saveToFile()} />
+              <SyncStatus compact={isTouch} label="🗀 Save to a folder" synced={false} onClick={() => void saveToFile()} {...syncProps} />
             )
           }
           // Google Drive (Firefox/Safari) takes the indicator once the writer has connected it.
@@ -1052,6 +1063,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 lastSync={lastGdriveSync}
                 webUrl={gdriveUrl}
                 tooltip="Google Drive"
+                {...syncProps}
               />
             )
           }
@@ -1066,9 +1078,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               webUrl={oneDriveUrl}
               onChangeFolder={chooseOneDriveFolder}
               onClick={lastSync ? undefined : syncOneDrive}
+              {...syncProps}
             />
           ) : (
-            <SyncStatus compact={isTouch} label="☁ disconnected" synced={false} tooltip="OneDrive — sign in to sync" onClick={syncOneDrive} />
+            <SyncStatus compact={isTouch} label="☁ disconnected" synced={false} tooltip="OneDrive — sign in to sync" onClick={syncOneDrive} {...syncProps} />
           )
         })()}
 
@@ -1124,20 +1137,48 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-4 py-2 ${isTouch ? 'justify-between' : 'gap-4'}`}>
+            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-3'}`}>
+              {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
+              {isTouch && (
+                <button
+                  type="button"
+                  onClick={() => setReceiptOpen(o => !o)}
+                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                  style={{ color: '#5c2d8a' }}
+                  title="Provenance record"
+                >
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
+                </button>
+              )}
               <LimitSelector
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
               />
+              {/* S-in-circle (formerly "style" text) */}
               <button
                 type="button"
                 aria-pressed={styleBarOpen}
                 onClick={toggleStyleBar}
-                className={`uppercase tracking-wide text-xs transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                title="Style"
               >
-                style
+                <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] font-medium tracking-normal not-italic">
+                  S
+                </span>
               </button>
               <GuideMenu />
+              {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
+              {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+                <button
+                  type="button"
+                  onClick={() => setSyncOpen(o => !o)}
+                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                  style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
+                  title="Sync status"
+                >
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.5)] text-base">☁</span>
+                </button>
+              )}
               <OptionsMenu
                 paperRight={paperRight}
                 onExportBundle={exportBundle}

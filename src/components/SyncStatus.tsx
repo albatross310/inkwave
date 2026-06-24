@@ -20,6 +20,7 @@ function relativeTime(t: number): string {
 
 export function SyncStatus({
   label, synced, path, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact,
+  open: externalOpen, onOpenChange, hideTrigger,
 }: {
   label: string
   synced: boolean
@@ -31,9 +32,15 @@ export function SyncStatus({
   onChangeFolder?: () => void
   onClick?: () => void // pill action when not synced (connect / sync now)
   compact?: boolean // mobile: a small cloud circle instead of the text pill
+  open?: boolean    // controlled mode (toolbar trigger)
+  onOpenChange?: (v: boolean) => void
+  hideTrigger?: boolean // suppress the fixed-position trigger (it's in the toolbar instead)
 }) {
   const [, tick] = useState(0)
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
+
   const zoom = useZoomScale()
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -42,16 +49,24 @@ export function SyncStatus({
     return () => clearInterval(id)
   }, [])
 
+  // Nothing to render when the trigger is external and the panel is closed.
+  if (hideTrigger && !open) return null
+
   return (
     <div
       className="fixed bottom-0 right-0 z-40 font-serif select-none flex flex-col items-end"
       style={{ padding: '1rem', zoom: zoom !== 1 ? zoom : undefined }}
-      onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) }}
-      onMouseLeave={() => { closeTimer.current = setTimeout(() => setOpen(false), 150) }}
+      onMouseEnter={!hideTrigger ? () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) } : undefined}
+      onMouseLeave={!hideTrigger ? () => { closeTimer.current = setTimeout(() => setOpen(false), 150) } : undefined}
     >
+      {/* Backdrop to dismiss when triggered from the toolbar */}
+      {hideTrigger && open && (
+        <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />
+      )}
+
       {/* Detail panel — opens UPWARD, fixed width, path wraps inside it. */}
       {open && (
-        <div className="mb-2 w-64 max-lg:w-[7.7rem] bg-white shadow-lg rounded-xl p-3 text-stone-600" style={{ border: `1px solid ${INK}40` }}>
+        <div className="relative z-40 mb-2 w-64 max-lg:w-[7.7rem] bg-white shadow-lg rounded-xl p-3 text-stone-600" style={{ border: `1px solid ${INK}40` }}>
           <div className="text-xs text-stone-400 mb-1.5">
             {synced && lastSync ? `synced ${relativeTime(lastSync)}` : 'not syncing yet — your work is still saved on this device'}
           </div>
@@ -87,17 +102,19 @@ export function SyncStatus({
 
       {/* Right-anchored trigger. Mobile: a small cloud circle. Desktop: a pill whose label wraps to
           ~2 lines (a narrow width) so it never collides with the centred toolbar on a half-screen. */}
-      <button
-        type="button"
-        onClick={() => (onClick && !synced ? onClick() : window.dispatchEvent(new CustomEvent('inkwave:open-save')))}
-        title={tooltip}
-        className={compact
-          ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
-          : 'cursor-pointer rounded-full bg-white/70 hover:bg-white transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}
-        style={{ color: synced ? '#6b7280' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
-      >
-        {compact ? (synced ? '☁' : '☁') : label}
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          onClick={() => (onClick && !synced ? onClick() : window.dispatchEvent(new CustomEvent('inkwave:open-save')))}
+          title={tooltip}
+          className={compact
+            ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
+            : 'cursor-pointer rounded-full bg-white/70 hover:bg-white transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}
+          style={{ color: synced ? '#6b7280' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
+        >
+          {compact ? '☁' : label}
+        </button>
+      )}
     </div>
   )
 }
