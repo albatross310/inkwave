@@ -6,7 +6,7 @@ import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
 import TextAlign from '@tiptap/extension-text-align'
 import { FontSize } from './extensions/FontSize'
-import { LineHeight } from './extensions/LineHeight'
+import { ParagraphStyle } from './extensions/ParagraphStyle'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
@@ -202,7 +202,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       FontFamily,
       FontSize,
       TextAlign.configure({ types: ['paragraph'] }),
-      LineHeight,
+      ParagraphStyle,
       // Single Enter = hard break (stay in paragraph).
       // Double Enter (Shift+Enter) = new paragraph.
       Extension.create({
@@ -1174,7 +1174,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   s
                 </span>
               </button>
-              <PageMenu />
+              <PageMenu editor={editor ?? undefined} />
               <SettingsMenu />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
               {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (

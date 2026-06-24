@@ -68,8 +68,9 @@ export function Scroll({
           fills the screen edge-to-edge, no shadow. */}
       <div
         ref={paperRef}
-        className={`mx-auto w-full ${phone ? 'max-w-full' : 'max-w-[210mm]'}`}
+        className="mx-auto w-full"
         style={{
+          maxWidth: phone ? undefined : getPaperSize() === 'letter' ? '216mm' : getPaperSize() === 'scroll' ? undefined : '210mm',
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
           // the whole parchment on every reel frame.
@@ -116,10 +117,18 @@ export function Scroll({
 // Recomputed on any size change (typing, resize, zoom). Purely visual overlay (no content reflow).
 function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   const [marks, setMarks] = useState<Array<{ y: number; n: number; rule: boolean }>>([])
-  const gapped = gappedPagesEnabled() // gapped mode draws real sheets + numbers itself
-  const paperSize = getPaperSize()
+  const gapped = gappedPagesEnabled()
+  const [paperSize, setPaperSizeState] = useState(getPaperSize)
+
+  // Re-read paper size whenever page settings change
   useEffect(() => {
-    if (gapped || paperSize === 'scroll') return
+    const handler = () => setPaperSizeState(getPaperSize())
+    window.addEventListener('inkwave:page-settings-changed', handler)
+    return () => window.removeEventListener('inkwave:page-settings-changed', handler)
+  }, [])
+
+  useEffect(() => {
+    if (gapped || paperSize === 'scroll') { setMarks([]); return }
     const el = sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
@@ -132,7 +141,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {
         const bottom = i * pageH
-        next.push({ y: Math.min(bottom, total - 2), n: i, rule: bottom < total }) // rule only at real breaks
+        next.push({ y: Math.min(bottom, total - 2), n: i, rule: bottom < total })
       }
       setMarks(next)
     }
@@ -140,7 +149,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     ro.observe(el)
     recompute()
     return () => ro.disconnect()
-  }, [sheetRef])
+  }, [sheetRef, paperSize, gapped])
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
