@@ -148,9 +148,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
   const [keyboardUp, setKeyboardUp] = useState(false)
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
-  const [styleBarOpen, setStyleBarOpen] = useState(false)
   const [selectionEmpty, setSelectionEmpty] = useState(true)
-  const styleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
   const containerRef = useRef<HTMLDivElement>(null)
@@ -326,19 +324,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { editor.off('selectionUpdate', onSel); editor.off('transaction', upd) }
   }, [editor])
 
-  // Scrolling down closes the style bar only when it was opened via the STYLE button
-  // (not when it's showing because text is selected — that would hide formatting controls
-  // mid-selection and is more annoying than useful).
-  useEffect(() => {
-    let lastY = window.scrollY
-    const onScroll = () => {
-      const y = window.scrollY
-      if (y > lastY + 4 && selectionEmpty) setStyleBarOpen(false)
-      lastY = y
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [selectionEmpty])
 
   // Detect the on-screen keyboard from the visual viewport: when it's up, the visible height
   // drops well below the LARGEST height seen (its no-keyboard height). Comparing to the
@@ -942,26 +927,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
-  // A button-opened style bar auto-closes after π seconds of inactivity; each style
-  // interaction (via onActivity) restarts the timer. Bars shown because text is
-  // selected stay put (driven by the selection, not this flag).
-  function armStyleTimer() {
-    if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
-    styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
-  }
-  function toggleStyleBar() {
-    const next = !styleBarOpen
-    setStyleBarOpen(next)
-    if (next) { armStyleTimer() }
-    else if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }
+  // The style bar is always shown with the main row — stable toolbar height, no
+  // show/hide animation that makes the pill jump. The 's' button now applies the
+  // current cursor's formatting to all text in the document (like "apply to all").
+  function applyStyleToAll() {
+    if (!editor) return
+    const { from, to } = editor.state.selection
+    const ts = editor.getAttributes('textStyle')
+    const paraAttrs = editor.getAttributes('paragraph')
+    const chain = editor.chain().selectAll()
+    if (ts.fontFamily) chain.setFontFamily(ts.fontFamily)
+    if (ts.fontSize) chain.setMark('textStyle', { fontSize: ts.fontSize })
+    if (paraAttrs.lineHeight) chain.setLineHeight(paraAttrs.lineHeight)
+    chain.setTextSelection({ from, to }).run()
+    editor.commands.focus()
   }
 
-  // The style bar pops up whenever text is selected (flush above the keyboard) or when
-  // opened with the STYLE button. The main row hides while the editor is focused on touch
-  // (typing or selecting), so a selection brings up the style bar alone.
-  const showStyle  = !!editor && (styleBarOpen || !selectionEmpty)
+  const showStyle  = !!editor && showMain
   const showMain   = !isTouch || !keyboardUp
-  const barVisible = showStyle || showMain
+  const barVisible = showMain
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
 
@@ -1134,11 +1118,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // dropdown to misalign when getBoundingClientRect coords shifted under zoom.
             }}
           >
-            {/* Flat style sub-bar — flush above the keyboard (when text is selected) or
-                above the main controls (when opened with the STYLE button) */}
-            {showStyle && editor && (
-              <div className={`flex items-center px-4 py-2 ${showMain ? 'border-b border-stone-200' : ''}`}>
-                <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />
+            {/* Style bar — always shown with the main row (stable toolbar height) */}
+            {showStyle && (
+              <div className="flex items-center px-4 py-2 border-b border-stone-200">
+                <StyleBar editor={editor} onLineHeightChange={setLineHeightState} />
               </div>
             )}
 
@@ -1162,13 +1145,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onChange={handleLimitChange}
               />
               <GuideMenu />
-              {/* s-in-circle style toggle */}
+              {/* s-in-circle: apply current cursor style to all text */}
               <button
                 type="button"
-                aria-pressed={styleBarOpen}
-                onClick={toggleStyleBar}
-                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                title="Style"
+                onClick={applyStyleToAll}
+                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif text-stone-400 hover:text-[#5c2d8a]"
+                title="Apply style to all"
               >
                 <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] italic leading-none">
                   s

@@ -38,9 +38,8 @@ function AlignIcon({ a }: { a: Align }) {
   )
 }
 
-export function StyleBar({ editor, onActivity, onLineHeightChange }: {
+export function StyleBar({ editor, onLineHeightChange }: {
   editor: Editor
-  onActivity?: () => void
   onLineHeightChange?: (v: number) => void
 }) {
   const [, force] = useState(0)
@@ -50,7 +49,10 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const fontBtnRef = useRef<HTMLButtonElement>(null)
   const sizeBtnRef = useRef<HTMLButtonElement>(null)
   const lhBtnRef   = useRef<HTMLButtonElement>(null)
-  const ping = () => onActivity?.()
+  // Manual size input: local string so user can type freely; committed on Enter / blur
+  const [sizeStr, setSizeStr] = useState('')
+  const [sizeFocused, setSizeFocused] = useState(false)
+  const ping = () => {}
 
   useEffect(() => {
     const upd = () => force(n => n + 1)
@@ -139,12 +141,25 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         document.body,
       )}
 
-      {/* Font size drop-up */}
-      <button ref={sizeBtnRef} type="button" aria-haspopup="dialog" aria-expanded={sizeOpen}
-        onClick={e => { e.stopPropagation(); setSizeOpen(o => !o); setFontOpen(false); setLhOpen(false) }}
-        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors w-14 text-center whitespace-nowrap">
-        {curSize} <span className="text-[0.6em] align-middle">▴</span>
-      </button>
+      {/* Font size: direct input + drop-up */}
+      <div className="flex items-center rounded border border-stone-300 hover:border-stone-400 transition-colors"
+        style={{ minWidth: 60 }}>
+        <input
+          type="text" inputMode="numeric"
+          value={sizeFocused ? sizeStr : String(curSize)}
+          onFocus={() => { setSizeStr(String(curSize)); setSizeFocused(true) }}
+          onBlur={() => { setSizeFocused(false); const v = parseInt(sizeStr, 10); if (v >= 4 && v <= 200) setSize(v) }}
+          onChange={e => setSizeStr(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const v = parseInt(sizeStr, 10); if (v >= 4 && v <= 200) { setSize(v); (e.target as HTMLInputElement).blur() } } }}
+          onClick={e => e.stopPropagation()}
+          className="w-9 text-center text-sm py-0.5 bg-transparent outline-none text-stone-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <button ref={sizeBtnRef} type="button" aria-haspopup="dialog" aria-expanded={sizeOpen}
+          onClick={e => { e.stopPropagation(); setSizeOpen(o => !o); setFontOpen(false); setLhOpen(false) }}
+          className="pr-1.5 text-stone-400 hover:text-stone-600 text-[0.6em] leading-none">
+          ▴
+        </button>
+      </div>
 
       {sizeOpen && createPortal(
         <>

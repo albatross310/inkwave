@@ -14,8 +14,8 @@ import {
 const INK = '#5c2d8a'
 const isPhone = isTouchDevice()
 
-const PX_PRESETS  = [{ l: 'Low', v: 32 }, { l: 'Mid', v: 80 }, { l: 'High', v: 160 }]
-const EM_PRESETS  = [{ l: 'Low', v: 0 },  { l: 'Mid', v: 1 },   { l: 'High', v: 3 }]
+const PX_PRESETS  = [{ l: 'Low', v: 48 }, { l: 'Mid', v: 80 }, { l: 'High', v: 128 }]
+const EM_PRESETS  = [{ l: 'Low', v: 0.25 }, { l: 'Mid', v: 1 }, { l: 'High', v: 2 }]
 
 export function PageMenu({ editor }: { editor?: Editor }) {
   const [open, setOpen] = useState(false)
@@ -86,7 +86,8 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   return (
     <>
       <button ref={btnRef} type="button" aria-haspopup="dialog" aria-expanded={open}
-        onClick={() => { parFocusRef.current = Boolean(editor?.isFocused); setOpen(o => !o) }}
+        onMouseDown={() => { parFocusRef.current = Boolean(editor?.isFocused) }}
+        onClick={() => setOpen(o => !o)}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif
           ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
         title="Page settings">
@@ -199,7 +200,9 @@ function MRow({ label, unit, presets, value, min, max, step, decimals = 0, onCha
         ))}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <input type="number" min={min} max={max} step={step} value={fmt(value)}
+        {/* type="text" to prevent browser scroll-to-increment on type="number" inputs,
+            which would silently change margin values when scrolling near the panel */}
+        <input type="text" inputMode="decimal" value={fmt(value)}
           onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(clamp(v)) }}
           className="w-16 text-center text-xs border border-stone-200 rounded py-0.5 focus:outline-none focus:border-[#5c2d8a]"
           style={{ color: INK }} />

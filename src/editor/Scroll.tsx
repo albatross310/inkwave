@@ -98,8 +98,8 @@ export function Scroll({
             className="mx-auto w-full relative"
             style={{
               zIndex: 1,
-              columnCount: columns > 1 ? columns : undefined,
-              columnGap: columns > 1 ? '2em' : undefined,
+              columnCount: columns > 1 && !gapped ? columns : undefined,
+              columnGap: columns > 1 && !gapped ? '2em' : undefined,
             }}
             ref={containerRef}
           >

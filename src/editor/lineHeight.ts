@@ -3,9 +3,10 @@ const KEY = 'inkwave:lineHeight'
 
 export const LINE_HEIGHTS = [
   { label: '1.2', value: 1.2 },
-  { label: 'φ', value: 1.618 },   // golden ratio
+  { label: 'φ', value: 1.618 },
   { label: '2', value: 2 },
-  { label: 'e', value: 2.718 },   // natural log base
+  { label: 'e', value: 2.718 },
+  { label: 'π', value: 3.14159 },
 ]
 
 const DEFAULT = LINE_HEIGHTS[1].value  // φ as default
