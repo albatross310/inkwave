@@ -62,7 +62,7 @@ export function ReceiptPanel({
           // When the trigger is in the toolbar, anchor the panel above the toolbar instead of at
           // the screen bottom — otherwise the panel slides under the toolbar.
           bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 80px)' : 0,
-          padding: hideTrigger ? '0 1rem' : '1rem',
+          padding: hideTrigger ? '0 1rem' : '28px',
           zoom: zoom !== 1 ? zoom : undefined,
         }}
       >

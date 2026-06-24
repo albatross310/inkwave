@@ -6,6 +6,7 @@ import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
 import TextAlign from '@tiptap/extension-text-align'
 import { FontSize } from './extensions/FontSize'
+import { LineHeight } from './extensions/LineHeight'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
@@ -201,6 +202,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       FontFamily,
       FontSize,
       TextAlign.configure({ types: ['paragraph'] }),
+      LineHeight,
       // Single Enter = hard break (stay in paragraph).
       // Double Enter (Shift+Enter) = new paragraph.
       Extension.create({
@@ -945,7 +947,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // selected stay put (driven by the selection, not this flag).
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
-    styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 3141.5)
+    styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
   }
   function toggleStyleBar() {
     const next = !styleBarOpen
@@ -1159,6 +1161,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 value={doc.scasLimitN}
                 onChange={handleLimitChange}
               />
+              <GuideMenu />
               {/* s-in-circle style toggle */}
               <button
                 type="button"
@@ -1171,7 +1174,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   s
                 </span>
               </button>
-              <GuideMenu />
               <PageMenu />
               <SettingsMenu />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}

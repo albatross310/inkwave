@@ -1,6 +1,5 @@
-// StyleBar — a flat row of formatting controls that sits flush above the main toolbar.
-// Everything acts on the current selection (commands run without .focus() so the editor's
-// focus/selection is preserved); "all" applies the selection's style to the whole document.
+// StyleBar — formatting controls above the main toolbar.
+// Acts on the current selection; "all" applies to the whole document.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -11,15 +10,17 @@ const INK = '#5c2d8a'
 const BASE_SIZE = 18
 
 const FONTS = [
-  { label: 'Fell',       css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
-  { label: 'Garamond',   css: "'EB Garamond', Georgia, serif" },
-  { label: 'Times',      css: "'Times New Roman', Times, serif" },
-  { label: 'Cambria',    css: "Cambria, Georgia, serif" },
-  { label: 'Georgia',    css: "Georgia, serif" },
-  { label: 'Palatino',   css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
-  { label: 'Baskerville',css: "'Baskerville Old Face', Baskerville, 'Book Antiqua', serif" },
-  { label: 'Sans',       css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { label: 'Fell',        css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
+  { label: 'Garamond',    css: "'EB Garamond', Georgia, serif" },
+  { label: 'Times',       css: "'Times New Roman', Times, serif" },
+  { label: 'Cambria',     css: "Cambria, Georgia, serif" },
+  { label: 'Georgia',     css: "Georgia, serif" },
+  { label: 'Palatino',    css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+  { label: 'Baskerville', css: "'Baskerville Old Face', Baskerville, 'Book Antiqua', serif" },
+  { label: 'Sans',        css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
 ]
+
+const FONT_SIZES = [8, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72]
 
 type Align = 'left' | 'center' | 'justify'
 
@@ -43,14 +44,14 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   onLineHeightChange?: (v: number) => void
 }) {
   const [, force] = useState(0)
-  const [curLineHeight, setCurLineHeight] = useState(getLineHeight)
   const [fontOpen, setFontOpen] = useState(false)
+  const [sizeOpen, setSizeOpen] = useState(false)
   const [lhOpen, setLhOpen] = useState(false)
   const fontBtnRef = useRef<HTMLButtonElement>(null)
-  const lhBtnRef = useRef<HTMLButtonElement>(null)
+  const sizeBtnRef = useRef<HTMLButtonElement>(null)
+  const lhBtnRef   = useRef<HTMLButtonElement>(null)
   const ping = () => onActivity?.()
 
-  // Re-render when the selection/content changes so the controls reflect the cursor.
   useEffect(() => {
     const upd = () => force(n => n + 1)
     editor.on('selectionUpdate', upd)
@@ -59,95 +60,77 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   }, [editor])
 
   useEffect(() => {
-    if (!fontOpen && !lhOpen) return
-    const onDown = () => { setFontOpen(false); setLhOpen(false) }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setFontOpen(false); setLhOpen(false) } }
+    if (!fontOpen && !sizeOpen && !lhOpen) return
+    const onDown = () => { setFontOpen(false); setSizeOpen(false); setLhOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDown() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [fontOpen, lhOpen])
+  }, [fontOpen, sizeOpen, lhOpen])
 
   const ts = editor.getAttributes('textStyle')
+  const paraAttrs = editor.getAttributes('paragraph')
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
   const curSize = parseInt(ts.fontSize ?? '', 10) || BASE_SIZE
   const curAlign: Align = (['left', 'center', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
+  // Line height: read from paragraph attribute (set per selection) or global default
+  const curLH = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
+  const curLHLabel = LINE_HEIGHTS.find(lh => lh.value === curLH)?.label ?? curLH.toString()
 
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
-  const setSize  = (px: number) => { ping(); if (px >= 8 && px <= 120) editor.chain().setMark('textStyle', { fontSize: `${px}px` }).run() }
-  const setAlign = (a: Align) => { ping(); editor.chain().setTextAlign(a).run() }
+  const setSize  = (px: number) => { ping(); editor.chain().setMark('textStyle', { fontSize: `${px}px` }).run(); setSizeOpen(false) }
+  const setAlign = (a: Align)   => { ping(); editor.chain().setTextAlign(a).run() }
+
   const pickLineHeight = (v: number) => {
-    setLineHeight(v)
-    setCurLineHeight(v)
-    onLineHeightChange?.(v)
+    setLineHeight(v)             // persist global default
+    onLineHeightChange?.(v)      // update CSS var fallback
+    editor.chain().setLineHeight(v.toString()).run()  // apply to selected paragraphs
+    setLhOpen(false)
+    ping()
   }
 
-  // Apply the current selection's style (font / size / align) to the whole document.
   const applyToAll = () => {
     ping()
     const { from, to } = editor.state.selection
     const chain = editor.chain().selectAll()
     if (ts.fontFamily) chain.setFontFamily(ts.fontFamily)
     if (ts.fontSize)   chain.setMark('textStyle', { fontSize: ts.fontSize })
-    chain.setTextAlign(curAlign).setTextSelection({ from, to }).run()
+    chain.setTextAlign(curAlign)
+    if (paraAttrs.lineHeight) chain.setLineHeight(paraAttrs.lineHeight)
+    chain.setTextSelection({ from, to }).run()
   }
 
   const segBtn = (active: boolean) =>
     `flex items-center justify-center rounded px-1.5 py-1 transition-colors ${active ? 'text-[#5c2d8a] bg-[#5c2d8a]/10' : 'text-stone-400 hover:text-[#5c2d8a]'}`
 
-  // Popup positioning helper — fixed above the triggering button.
   function popupAbove(ref: React.RefObject<HTMLButtonElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: 10 }
-    return {
-      position: 'fixed',
-      bottom: Math.round(window.innerHeight - br.top + 8),
-      left: Math.max(8, Math.round(br.left)),
-    }
+    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), left: Math.max(8, Math.round(br.left)) }
   }
 
   return (
     <div className="flex items-center gap-2 text-sm text-stone-500 font-serif w-full">
-      {/* Font picker — opens a portal popup */}
-      <button
-        ref={fontBtnRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={fontOpen}
-        onClick={(e) => { e.stopPropagation(); setFontOpen(o => !o) }}
-        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[5.5rem] text-left whitespace-nowrap"
-      >
+
+      {/* Font drop-up */}
+      <button ref={fontBtnRef} type="button" aria-haspopup="dialog" aria-expanded={fontOpen}
+        onClick={e => { e.stopPropagation(); setFontOpen(o => !o); setSizeOpen(false); setLhOpen(false) }}
+        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[5.5rem] text-left whitespace-nowrap">
         {curFont} <span className="text-[0.6em] align-middle">▴</span>
       </button>
 
       {fontOpen && createPortal(
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setFontOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Choose font"
-            className="z-[99] bg-white shadow-xl py-1.5"
-            style={{
-              ...popupAbove(fontBtnRef),
-              border: `1px solid ${INK}55`,
-              borderRadius: 12,
-              width: 136,
-            }}
-            onMouseDown={e => e.stopPropagation()}
-          >
+          <div role="dialog" aria-label="Choose font" className="z-[99] bg-white shadow-xl py-1.5"
+            style={{ ...popupAbove(fontBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 136 }}
+            onMouseDown={e => e.stopPropagation()}>
             {FONTS.map(f => (
-              <button
-                key={f.label}
-                role="menuitem"
-                type="button"
-                onClick={() => setFont(f.css)}
+              <button key={f.label} type="button" onClick={() => setFont(f.css)}
                 className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50 truncate"
-                style={{
-                  fontFamily: f.css,
-                  color: f.label === curFont ? INK : '#374151',
+                style={{ fontFamily: f.css, color: f.label === curFont ? INK : '#374151',
                   fontWeight: f.label === curFont ? 500 : 400,
-                  borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent',
-                }}
-              >
+                  borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent' }}>
                 {f.label}
               </button>
             ))}
@@ -156,13 +139,32 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         document.body,
       )}
 
-      {/* Size (numeric) */}
-      <input
-        type="number" min={8} max={120} value={curSize}
-        onChange={e => setSize(parseInt(e.target.value, 10))}
-        aria-label="Font size"
-        className="w-14 rounded border border-stone-300 px-2 py-0.5 text-center text-stone-500 focus:outline-none focus:border-stone-400"
-      />
+      {/* Font size drop-up */}
+      <button ref={sizeBtnRef} type="button" aria-haspopup="dialog" aria-expanded={sizeOpen}
+        onClick={e => { e.stopPropagation(); setSizeOpen(o => !o); setFontOpen(false); setLhOpen(false) }}
+        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors w-14 text-center whitespace-nowrap">
+        {curSize} <span className="text-[0.6em] align-middle">▴</span>
+      </button>
+
+      {sizeOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setSizeOpen(false)} />
+          <div role="dialog" aria-label="Font size" className="z-[99] bg-white shadow-xl py-1.5"
+            style={{ ...popupAbove(sizeBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 72 }}
+            onMouseDown={e => e.stopPropagation()}>
+            {FONT_SIZES.map(sz => (
+              <button key={sz} type="button" onClick={() => setSize(sz)}
+                className="w-full text-left px-3 py-1 text-sm transition-colors hover:bg-stone-50"
+                style={{ color: sz === curSize ? INK : '#374151',
+                  fontWeight: sz === curSize ? 500 : 400,
+                  borderLeft: sz === curSize ? `2px solid ${INK}` : '2px solid transparent' }}>
+                {sz}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
 
       {/* Alignment */}
       <div className="flex items-center gap-0.5">
@@ -174,48 +176,26 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         ))}
       </div>
 
-      {/* Line spacing — drop-up */}
-      <button
-        ref={lhBtnRef}
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={lhOpen}
-        onClick={(e) => { e.stopPropagation(); setLhOpen(o => !o); setFontOpen(false) }}
-        className={`rounded border px-2 py-0.5 text-xs transition-colors whitespace-nowrap ${lhOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
-        style={{ fontStyle: 'italic' }}
-        title="Line spacing"
-      >
-        {LINE_HEIGHTS.find(lh => lh.value === curLineHeight)?.label ?? '·'} <span className="not-italic text-[0.6em] align-middle">▴</span>
+      {/* Line spacing drop-up */}
+      <button ref={lhBtnRef} type="button" aria-haspopup="dialog" aria-expanded={lhOpen}
+        onClick={e => { e.stopPropagation(); setLhOpen(o => !o); setFontOpen(false); setSizeOpen(false) }}
+        className={`rounded border px-2 py-0.5 text-xs transition-colors whitespace-nowrap italic ${lhOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        title="Line spacing">
+        {curLHLabel} <span className="not-italic text-[0.6em] align-middle">▴</span>
       </button>
 
       {lhOpen && createPortal(
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setLhOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Line spacing"
-            className="z-[99] bg-white shadow-xl py-1.5"
-            style={{
-              ...popupAbove(lhBtnRef),
-              border: `1px solid ${INK}55`,
-              borderRadius: 12,
-              width: 110,
-            }}
-            onMouseDown={e => e.stopPropagation()}
-          >
+          <div role="dialog" aria-label="Line spacing" className="z-[99] bg-white shadow-xl py-1.5"
+            style={{ ...popupAbove(lhBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 90 }}
+            onMouseDown={e => e.stopPropagation()}>
             {LINE_HEIGHTS.map(lh => (
-              <button
-                key={lh.label}
-                type="button"
-                onClick={() => { pickLineHeight(lh.value); setLhOpen(false) }}
-                className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
-                style={{
-                  fontStyle: 'italic',
-                  color: lh.value === curLineHeight ? INK : '#374151',
-                  fontWeight: lh.value === curLineHeight ? 500 : 400,
-                  borderLeft: lh.value === curLineHeight ? `2px solid ${INK}` : '2px solid transparent',
-                }}
-              >
+              <button key={lh.label} type="button" onClick={() => pickLineHeight(lh.value)}
+                className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50 italic"
+                style={{ color: lh.value === curLH ? INK : '#374151',
+                  fontWeight: lh.value === curLH ? 500 : 400,
+                  borderLeft: lh.value === curLH ? `2px solid ${INK}` : '2px solid transparent' }}>
                 {lh.label}
               </button>
             ))}
