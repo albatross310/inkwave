@@ -9,21 +9,31 @@ import {
   getParaSpacingEm, setParaSpacingEm,
   getColumns, setColumns,
   getPaperSize, setPaperSize, type PaperSize,
+  getOrientation, setOrientation, type Orientation,
 } from '../editor/pageSettings'
 
 const INK = '#5c2d8a'
 const isPhone = isTouchDevice()
 
-const PX_PRESETS  = [{ l: 'Low', v: 48 }, { l: 'Mid', v: 80 }, { l: 'High', v: 128 }]
-const EM_PRESETS  = [{ l: 'Low', v: 0.25 }, { l: 'Mid', v: 1 }, { l: 'High', v: 2 }]
+// 1 cm = 96px / 2.54
+const CM = 37.795
+// Paragraph spacing is stored in em; base font-size assumed 18 px for the cm display
+const EM_BASE = 18
+
+// Presets in cm. Side: "high lower and low higher" (compressed range vs top/bot).
+const SIDE_PRESETS    = [{ l: 'Low', v: 1.8 }, { l: 'Mid', v: 2.6 }, { l: 'High', v: 3.2 }]
+const MARGIN_PRESETS  = [{ l: 'Low', v: 1.2 }, { l: 'Mid', v: 2.4 }, { l: 'High', v: 4.0 }]
+const SPACING_PRESETS = [{ l: 'Low', v: 0.4 }, { l: 'Mid', v: 0.8 }, { l: 'High', v: 1.6 }]
+
+// Conversion helpers between internal storage units and cm display
+const pxConv  = { toCm: (px: number) => px / CM,        fromCm: (cm: number) => cm * CM }
+const emConv  = { toCm: (em: number) => em * EM_BASE / CM, fromCm: (cm: number) => cm * CM / EM_BASE }
 
 export function PageMenu({ editor }: { editor?: Editor }) {
   const [open, setOpen] = useState(false)
   const [, rerender] = useState(0)
   const btnRef = useRef<HTMLButtonElement>(null)
-  // Capture whether the editor was focused AT THE MOMENT the panel opened.
-  // Can't track live — clicking anything in the popup steals focus from the editor
-  // before the onChange handler fires, making live detection always false.
+  // Capture whether the editor was focused AT THE MOMENT the panel opened (before blur).
   const parFocusRef = useRef(false)
   const parFocus = parFocusRef.current
 
@@ -53,10 +63,8 @@ export function PageMenu({ editor }: { editor?: Editor }) {
     rerender(n => n + 1)
     window.dispatchEvent(new CustomEvent('inkwave:page-settings-changed'))
   }
-
   function applyGlobal(fn: () => void) { fn(); dispatch() }
 
-  // Para-mode helpers
   function applyParaPx(key: string, v: number) {
     editor?.chain().setParaStyle({ [key]: `${v}px` } as Record<string, string>).run()
     rerender(n => n + 1)
@@ -65,22 +73,20 @@ export function PageMenu({ editor }: { editor?: Editor }) {
     editor?.chain().setParaStyle({ [key]: `${v}em` } as Record<string, string>).run()
     rerender(n => n + 1)
   }
-  // Side margins: set both sides symmetrically
-  function applySide(v: number) {
+  function applySide(px: number) {
     if (parFocus && editor) {
-      editor.chain().setParaStyle({ paddingLeft: `${v}px`, paddingRight: `${v}px` } as Record<string, string>).run()
+      editor.chain().setParaStyle({ paddingLeft: `${px}px`, paddingRight: `${px}px` } as Record<string, string>).run()
       rerender(n => n + 1)
-    } else { applyGlobal(() => setSideMarginPx(v)) }
+    } else { applyGlobal(() => setSideMarginPx(px)) }
   }
 
-  const cols  = getColumns()
-  const paper = getPaperSize()
+  const cols        = getColumns()
+  const paper       = getPaperSize()
+  const orientation = getOrientation()
 
-  // In para mode: Side (indent), Top (margin-top), Para spacing (margin-bottom) — hide Bot
-  // In doc mode: Side, Top, Bot, Para spacing
-  const sideVal  = parFocus ? readPx('paddingLeft', getSideMarginPx) : getSideMarginPx()
-  const topVal   = parFocus ? readPx('marginTop',   getTopMarginPx)  : getTopMarginPx()
-  const botVal   = getBtmMarginPx()
+  const sideVal    = parFocus ? readPx('paddingLeft', getSideMarginPx) : getSideMarginPx()
+  const topVal     = parFocus ? readPx('marginTop',   getTopMarginPx)  : getTopMarginPx()
+  const botVal     = getBtmMarginPx()
   const spacingVal = readEm('marginBottom', getParaSpacingEm)
 
   return (
@@ -114,29 +120,29 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             <SectionHead label="Margins" />
 
             {!isPhone && (
-              <MRow label={parFocus ? 'Indent' : 'Side'} unit="px" presets={PX_PRESETS}
-                value={sideVal} min={0} max={200} step={4}
-                onChange={applySide} />
+              <MRow label={parFocus ? 'Indent' : 'Side'} presets={SIDE_PRESETS} conv={pxConv}
+                value={sideVal} minCm={0} maxCm={8}
+                onChange={px => applySide(px)} />
             )}
 
-            <MRow label="Top" unit="px" presets={PX_PRESETS}
-              value={topVal} min={0} max={300} step={8}
-              onChange={v => parFocus ? applyParaPx('marginTop', v) : applyGlobal(() => setTopMarginPx(v))} />
+            <MRow label="Top" presets={MARGIN_PRESETS} conv={pxConv}
+              value={topVal} minCm={0} maxCm={12}
+              onChange={px => parFocus ? applyParaPx('marginTop', px) : applyGlobal(() => setTopMarginPx(px))} />
 
             {!parFocus && (
-              <MRow label="Bot" unit="px" presets={PX_PRESETS}
-                value={botVal} min={0} max={400} step={8}
-                onChange={v => applyGlobal(() => setBtmMarginPx(v))} />
+              <MRow label="Bot" presets={MARGIN_PRESETS} conv={pxConv}
+                value={botVal} minCm={0} maxCm={12}
+                onChange={px => applyGlobal(() => setBtmMarginPx(px))} />
             )}
 
-            <MRow label={'Para\nspacing'} unit="em" presets={EM_PRESETS}
-              value={spacingVal} min={0} max={4} step={0.1} decimals={1}
-              onChange={v => parFocus ? applyParaEm('marginBottom', v) : applyGlobal(() => setParaSpacingEm(v))} />
+            <MRow label={'Para\nspacing'} presets={SPACING_PRESETS} conv={emConv}
+              value={spacingVal} minCm={0} maxCm={4}
+              onChange={em => parFocus ? applyParaEm('marginBottom', em) : applyGlobal(() => setParaSpacingEm(em))} />
 
             {/* ── Layout ── */}
             <SectionHead label="Layout" />
 
-            <div className="flex items-center px-5 py-2.5 gap-4">
+            <div className="flex items-center px-5 py-2 gap-4">
               <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0">Columns</span>
               <div className="flex gap-2">
                 {[1, 2, 3].map(n => (
@@ -146,12 +152,22 @@ export function PageMenu({ editor }: { editor?: Editor }) {
               </div>
             </div>
 
-            <div className="flex items-center px-5 py-2.5 gap-4">
+            <div className="flex items-center px-5 py-2 gap-4">
               <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0">Paper</span>
               <div className="flex gap-2">
                 {(['a4', 'letter', 'scroll'] as PaperSize[]).map(ps => (
                   <Chip key={ps} label={ps === 'a4' ? 'A4' : ps === 'letter' ? 'Letter' : 'Scroll'}
                     active={paper === ps} onClick={() => applyGlobal(() => setPaperSize(ps))} />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center px-5 py-2 gap-4">
+              <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0">Orient</span>
+              <div className="flex gap-2">
+                {(['portrait', 'landscape'] as Orientation[]).map(o => (
+                  <Chip key={o} label={o === 'portrait' ? 'Portrait' : 'Landscape'}
+                    active={orientation === o} onClick={() => applyGlobal(() => setOrientation(o))} />
                 ))}
               </div>
             </div>
@@ -181,32 +197,54 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   )
 }
 
-function MRow({ label, unit, presets, value, min, max, step, decimals = 0, onChange }: {
-  label: string; unit: string
+const STEP = 0.2 // cm per arrow click
+
+function MRow({ label, presets, conv, value, minCm, maxCm, onChange }: {
+  label: string
   presets: { l: string; v: number }[]
-  value: number; min: number; max: number; step: number; decimals?: number
-  onChange: (v: number) => void
+  conv: { toCm: (v: number) => number; fromCm: (cm: number) => number }
+  value: number   // internal units (px or em)
+  minCm: number; maxCm: number
+  onChange: (internal: number) => void
 }) {
-  const fmt   = (v: number) => decimals > 0 ? v.toFixed(decimals) : String(Math.round(v))
-  const clamp = (v: number) => Math.max(min, Math.min(max, v))
-  const active = presets.find(p => Math.abs(p.v - value) < 0.001)
+  const snap  = (cm: number) => Math.round(cm / STEP) * STEP
+  const clamp = (cm: number) => Math.max(minCm, Math.min(maxCm, cm))
+  const displayed = snap(conv.toCm(value))
+  const active = presets.find(p => Math.abs(p.v - displayed) < 0.05)
+
+  const dec = (e: React.MouseEvent) => {
+    e.preventDefault()
+    onChange(conv.fromCm(clamp(snap(displayed - STEP))))
+  }
+  const inc = (e: React.MouseEvent) => {
+    e.preventDefault()
+    onChange(conv.fromCm(clamp(snap(displayed + STEP))))
+  }
 
   return (
-    <div className="flex items-center px-5 py-2 gap-4">
+    <div className="flex items-center px-5 py-2 gap-3">
       <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0 leading-tight whitespace-pre-line">{label}</span>
-      <div className="flex gap-2 flex-1">
+      <div className="flex gap-1.5 flex-1 min-w-0">
         {presets.map(p => (
-          <Chip key={p.l} label={p.l} active={active?.l === p.l} onClick={() => onChange(p.v)} />
+          <Chip key={p.l} label={p.l} active={active?.l === p.l} onClick={() => onChange(conv.fromCm(p.v))} />
         ))}
       </div>
-      <div className="flex items-center gap-1 shrink-0">
-        {/* type="text" to prevent browser scroll-to-increment on type="number" inputs,
-            which would silently change margin values when scrolling near the panel */}
-        <input type="text" inputMode="decimal" value={fmt(value)}
-          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(clamp(v)) }}
-          className="w-16 text-center text-xs border border-stone-200 rounded py-0.5 focus:outline-none focus:border-[#5c2d8a]"
+      <div className="flex items-center shrink-0 gap-px">
+        <button type="button" onMouseDown={dec}
+          className="w-5 h-6 flex items-center justify-center text-stone-400 hover:text-[#5c2d8a] border border-stone-200 rounded-l text-base leading-none select-none">
+          −
+        </button>
+        <input
+          type="text" inputMode="decimal"
+          value={displayed.toFixed(1)}
+          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(conv.fromCm(clamp(v))) }}
+          className="w-11 text-center text-xs border-t border-b border-stone-200 py-0.5 focus:outline-none focus:border-[#5c2d8a] bg-white"
           style={{ color: INK }} />
-        <span className="text-[10px] text-stone-400 w-5">{unit}</span>
+        <button type="button" onMouseDown={inc}
+          className="w-5 h-6 flex items-center justify-center text-stone-400 hover:text-[#5c2d8a] border border-stone-200 rounded-r text-base leading-none select-none">
+          +
+        </button>
+        <span className="text-[10px] text-stone-400 ml-1 w-4">cm</span>
       </div>
     </div>
   )

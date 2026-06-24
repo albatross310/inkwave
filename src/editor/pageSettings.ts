@@ -42,3 +42,12 @@ export function getPaperSize(): PaperSize {
   try { return (localStorage.getItem(KEYS.paperSize) as PaperSize) || 'a4' } catch { return 'a4' }
 }
 export function setPaperSize(v: PaperSize): void { store(KEYS.paperSize, v) }
+
+// Page orientation — portrait or landscape
+export type Orientation = 'portrait' | 'landscape'
+export function getOrientation(): Orientation {
+  try { return (localStorage.getItem('inkwave:orientation') as Orientation) || 'portrait' } catch { return 'portrait' }
+}
+export function setOrientation(v: Orientation): void {
+  try { localStorage.setItem('inkwave:orientation', v) } catch { /* private mode */ }
+}

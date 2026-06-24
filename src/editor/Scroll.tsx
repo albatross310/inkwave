@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
-import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize } from './pageSettings'
+import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation } from './pageSettings'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -70,7 +70,14 @@ export function Scroll({
         ref={paperRef}
         className="mx-auto w-full"
         style={{
-          maxWidth: phone ? undefined : getPaperSize() === 'letter' ? '216mm' : getPaperSize() === 'scroll' ? undefined : '210mm',
+          maxWidth: (() => {
+            if (phone) return undefined
+            const ps = getPaperSize()
+            if (ps === 'scroll') return undefined
+            const landscape = getOrientation() === 'landscape'
+            if (ps === 'letter') return landscape ? '279mm' : '216mm'
+            return landscape ? '297mm' : '210mm' // a4
+          })(),
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
           // the whole parchment on every reel frame.

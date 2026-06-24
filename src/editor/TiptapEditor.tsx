@@ -148,6 +148,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
   const [keyboardUp, setKeyboardUp] = useState(false)
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
+  const [styleBarOpen, setStyleBarOpen] = useState(true)
   const [selectionEmpty, setSelectionEmpty] = useState(true)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
@@ -927,24 +928,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
-  // The style bar is always shown with the main row — stable toolbar height, no
-  // show/hide animation that makes the pill jump. The 's' button now applies the
-  // current cursor's formatting to all text in the document (like "apply to all").
-  function applyStyleToAll() {
-    if (!editor) return
-    const { from, to } = editor.state.selection
-    const ts = editor.getAttributes('textStyle')
-    const paraAttrs = editor.getAttributes('paragraph')
-    const chain = editor.chain().selectAll()
-    if (ts.fontFamily) chain.setFontFamily(ts.fontFamily)
-    if (ts.fontSize) chain.setMark('textStyle', { fontSize: ts.fontSize })
-    if (paraAttrs.lineHeight) chain.setLineHeight(paraAttrs.lineHeight)
-    chain.setTextSelection({ from, to }).run()
-    editor.commands.focus()
-  }
-
   const showMain   = !isTouch || !keyboardUp
-  const showStyle  = !!editor && showMain
   const barVisible = showMain
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
@@ -1113,15 +1097,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
-              // No zoom counter — the toolbar is position:fixed so it already stays put in
-              // the viewport regardless of browser zoom. Adding CSS zoom here caused the
-              // dropdown to misalign when getBoundingClientRect coords shifted under zoom.
+              // Counter browser zoom so the pill stays a constant physical size.
+              // Popup menus use getBoundingClientRect which already returns visual-viewport
+              // coordinates, so their positions remain aligned.
+              zoom: zoom,
             }}
           >
-            {/* Style bar — always shown with the main row (stable toolbar height) */}
-            {showStyle && (
-              <div className="flex items-center px-4 py-2 border-b border-stone-200">
-                <StyleBar editor={editor} onLineHeightChange={setLineHeightState} />
+            {/* Style bar — always in the DOM when the main row is visible so the pill
+                height never changes. Opacity/pointer-events toggle the visibility;
+                minHeight reserves space during the brief window before editor loads. */}
+            {showMain && (
+              <div className="flex items-center px-4 py-2 border-b border-stone-200"
+                style={{
+                  minHeight: 44,
+                  opacity: styleBarOpen ? 1 : 0,
+                  pointerEvents: (editor && styleBarOpen) ? 'auto' : 'none',
+                }}>
+                {editor && <StyleBar editor={editor} onLineHeightChange={setLineHeightState} />}
               </div>
             )}
 
@@ -1145,12 +1137,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onChange={handleLimitChange}
               />
               <GuideMenu />
-              {/* s-in-circle: apply current cursor style to all text */}
+              {/* s-in-circle: toggle the style bar */}
               <button
                 type="button"
-                onClick={applyStyleToAll}
-                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif text-stone-400 hover:text-[#5c2d8a]"
-                title="Apply style to all"
+                aria-pressed={styleBarOpen}
+                onClick={() => setStyleBarOpen(o => !o)}
+                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                title="Style"
               >
                 <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] italic leading-none">
                   s

@@ -219,11 +219,6 @@ export function StyleBar({ editor, onLineHeightChange }: {
         document.body,
       )}
 
-      {/* Apply to whole document */}
-      <button type="button" onClick={applyToAll}
-        className="ml-auto rounded border border-stone-300 px-2 py-0.5 text-xs uppercase tracking-wide text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] transition-colors whitespace-nowrap">
-        all
-      </button>
     </div>
   )
 }
