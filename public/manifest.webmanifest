@@ -1,7 +1,7 @@
 {
-  "name": "Inkwave Studio",
+  "name": "Inkwave Solo",
   "short_name": "Inkwave",
-  "description": "A calm writing environment for serious intellectual work.",
+  "description": "A calm writing surface for serious thinking.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FBF5EC",

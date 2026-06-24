@@ -34,7 +34,7 @@ export function About() {
         <header className="mt-8 flex items-center gap-6">
           <Seal size={120} className="shrink-0 drop-shadow-sm" />
           <div>
-            <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave</h1>
+            <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave Solo</h1>
             <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>
           </div>
         </header>
