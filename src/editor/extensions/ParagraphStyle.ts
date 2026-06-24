@@ -21,6 +21,7 @@ export interface ParagraphStyleAttrs {
   marginTop: string | null
   paddingLeft: string | null
   paddingRight: string | null
+  textIndent: string | null
 }
 
 function attr(cssProp: string) {
@@ -45,6 +46,7 @@ export const ParagraphStyle = Extension.create({
         marginTop:    attr('marginTop'),
         paddingLeft:  attr('paddingLeft'),
         paddingRight: attr('paddingRight'),
+        textIndent:   attr('textIndent'),
       },
     }]
   },

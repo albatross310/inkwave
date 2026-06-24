@@ -126,10 +126,11 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   const [marks, setMarks] = useState<Array<{ y: number; n: number; rule: boolean }>>([])
   const gapped = gappedPagesEnabled()
   const [paperSize, setPaperSizeState] = useState(getPaperSize)
+  const [orientation, setOrientationState] = useState(getOrientation)
 
-  // Re-read paper size whenever page settings change
+  // Re-read paper size and orientation whenever page settings change
   useEffect(() => {
-    const handler = () => setPaperSizeState(getPaperSize())
+    const handler = () => { setPaperSizeState(getPaperSize()); setOrientationState(getOrientation()) }
     window.addEventListener('inkwave:page-settings-changed', handler)
     return () => window.removeEventListener('inkwave:page-settings-changed', handler)
   }, [])
@@ -142,8 +143,11 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       const w = el.clientWidth
       const total = el.scrollHeight
       if (!w || !total) return setMarks([])
-      // A4: h = w × √2 ≈ 1.414 · Letter: h = w × (11/8.5) ≈ 1.294
-      const pageH = w * (paperSize === 'letter' ? 11 / 8.5 : Math.SQRT2)
+      // Portrait A4: h/w = √2. Portrait Letter: h/w = 11/8.5. Landscape inverts the ratio.
+      const landscape = orientation === 'landscape'
+      const pageH = w * (paperSize === 'letter'
+        ? (landscape ? 8.5 / 11 : 11 / 8.5)
+        : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
       const count = Math.max(1, Math.ceil(total / pageH))
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {
@@ -156,7 +160,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     ro.observe(el)
     recompute()
     return () => ro.disconnect()
-  }, [sheetRef, paperSize, gapped])
+  }, [sheetRef, paperSize, orientation, gapped])
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">

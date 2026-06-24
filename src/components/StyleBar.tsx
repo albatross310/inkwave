@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
+import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 
 const INK = '#5c2d8a'
 const BASE_SIZE = 18
@@ -23,6 +24,16 @@ const FONTS = [
 const FONT_SIZES = [8, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72]
 
 type Align = 'left' | 'center' | 'right' | 'justify'
+
+function IndentFirstLineIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <line x1="5" y1="3.5" x2="12" y2="3.5" />
+      <line x1="2" y1="7" x2="12" y2="7" />
+      <line x1="2" y1="10.5" x2="10" y2="10.5" />
+    </svg>
+  )
+}
 
 function AlignIcon({ a }: { a: Align }) {
   const lines: Record<Align, Array<[number, number]>> = {
@@ -201,6 +212,24 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         </>,
         document.body,
       )}
+
+      {/* First-line indent toggle */}
+      {(() => {
+        const indented = !!(paraAttrs.textIndent as string | null)
+        return (
+          <button type="button" aria-pressed={indented}
+            onClick={() => {
+              ping()
+              editor.chain().setParaStyle({
+                textIndent: indented ? null : '1.5em',
+              } as Partial<ParagraphStyleAttrs>).run()
+            }}
+            className={`rounded border px-2 py-0.5 transition-colors ${indented ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+            title="Indent first line">
+            <IndentFirstLineIcon />
+          </button>
+        )
+      })()}
 
       {/* Line spacing drop-up */}
       <button ref={lhBtnRef} type="button" aria-haspopup="dialog" aria-expanded={lhOpen}

@@ -9,6 +9,7 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import { getPaperSize, getOrientation } from '../pageSettings'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
@@ -203,7 +204,10 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const recompute = () => {
             raf = 0
             ensureSheet()
-            const pageH = (sheet ? sheet.clientWidth : 794) * Math.SQRT2
+            const landscape = getOrientation() === 'landscape'
+            const letter    = getPaperSize() === 'letter'
+            const pageH = (sheet ? sheet.clientWidth : 794) *
+              (letter ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
             if (sheet) {
               sheet.classList.add('inkwave-gapped')
               sheet.style.paddingTop = `${MARGIN_TOP}px` // page-1 top margin matches the rest

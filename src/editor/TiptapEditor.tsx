@@ -1104,15 +1104,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
               // Counter browser zoom so the pill stays a constant physical size.
-              // Popup menus use getBoundingClientRect which already returns visual-viewport
-              // coordinates, so their positions remain aligned.
-              zoom: zoom,
+              // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
+              // the pill to drift up/down on zoom. transform does not affect the offset.
+              transform: `scale(${zoom})`,
+              transformOrigin: 'bottom center',
             }}
           >
-            {/* Style bar — shown when styleBarOpen; retreats after 5s of inactivity */}
-            {showMain && styleBarOpen && editor && (
-              <div className="flex items-center px-4 py-2 border-b border-stone-200">
-                <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />
+            {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM */}
+            {showMain && (
+              <div style={{
+                overflow: 'hidden',
+                maxHeight: (styleBarOpen && editor) ? '60px' : '0',
+                opacity: (styleBarOpen && editor) ? 1 : 0,
+                pointerEvents: (styleBarOpen && editor) ? 'auto' : 'none',
+                transition: 'max-height 220ms ease, opacity 160ms ease',
+              }}>
+                <div className="flex items-center px-4 py-2 border-b border-stone-200">
+                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />}
+                </div>
               </div>
             )}
 

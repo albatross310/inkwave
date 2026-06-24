@@ -248,9 +248,12 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
   conv: { toCm: (v: number) => number; fromCm: (cm: number) => number }
   value: number        // internal units (px or em)
   minCm: number; maxCm: number
-  readOnly?: boolean   // show but disable controls (e.g. global side when para mode is active)
+  readOnly?: boolean
   onChange: (internal: number) => void
 }) {
+  const [inputStr, setInputStr] = useState('')
+  const [inputFocused, setInputFocused] = useState(false)
+
   const snap  = (cm: number) => Math.round(cm / STEP) * STEP
   const clamp = (cm: number) => Math.max(minCm, Math.min(maxCm, cm))
   const displayed = snap(conv.toCm(value))
@@ -278,12 +281,23 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
         <div className="flex items-center border border-stone-200 rounded overflow-hidden" style={{ width: 72 }}>
           <input
             type="text" inputMode="decimal"
-            value={displayed.toFixed(1)}
+            value={inputFocused ? inputStr : displayed.toFixed(1)}
             readOnly={readOnly}
+            onFocus={() => { if (!readOnly) { setInputStr(displayed.toFixed(1)); setInputFocused(true) } }}
+            onBlur={() => {
+              setInputFocused(false)
+              if (!readOnly) { const v = parseFloat(inputStr); if (!isNaN(v)) onChange(conv.fromCm(clamp(v))) }
+            }}
             onChange={e => {
               if (readOnly) return
-              const v = parseFloat(e.target.value)
-              if (!isNaN(v)) onChange(conv.fromCm(clamp(v)))
+              if (inputFocused) setInputStr(e.target.value)
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                const v = parseFloat(inputStr)
+                if (!isNaN(v)) { onChange(conv.fromCm(clamp(v))); (e.target as HTMLInputElement).blur() }
+              }
             }}
             className="flex-1 min-w-0 text-xs py-0.5 px-1.5 bg-transparent outline-none text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
             style={inputStyle}
