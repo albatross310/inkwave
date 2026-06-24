@@ -52,22 +52,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
-        <a
-          href="/"
-          aria-label="Inkwave home"
-          style={{
-            position: 'fixed', top: 12, right: 14, zIndex: 45,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            width: 40, height: 40,
-            borderRadius: '50%',
-            background: 'rgba(255,255,255,0.85)',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
-            pointerEvents: 'auto',
-          }}
-        >
-          <img src="/inkflow-logo.svg" width={34} height={34} alt="" style={{ display: 'block' }} />
-        </a>
-        <ScrollRestoration />
+<ScrollRestoration />
         <Scripts />
       </body>
     </html>

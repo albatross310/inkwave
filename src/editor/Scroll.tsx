@@ -162,12 +162,27 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => ro.disconnect()
   }, [sheetRef, paperSize, orientation, gapped])
 
+  const logoSize = 32
+
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
+      {/* Logo at top-right of every page (n=1: top=0, n>1: top=bottom of prev page) */}
+      {marks.map(({ n }) => {
+        const pageTop = n === 1 ? 0 : (marks[n - 2]?.y ?? 0)
+        return (
+          <img
+            key={`logo-${n}`}
+            src="/inkflow-logo.svg"
+            width={logoSize}
+            height={logoSize}
+            alt=""
+            style={{ position: 'absolute', right: 10, top: pageTop + 8, width: logoSize, height: logoSize, opacity: 0.82 }}
+          />
+        )
+      })}
       {marks.map(({ y, n, rule }) => (
         <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
           {rule && <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />}
-          {/* Page number out in the right margin, solid + readable (non-gapped page-guide mode). */}
           <div className="font-serif" style={{ position: 'absolute', right: 14, top: rule ? 4 : -26, fontSize: '1rem', color: '#9b5ccc' }}>
             {n}
           </div>
