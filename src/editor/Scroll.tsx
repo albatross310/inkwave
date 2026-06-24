@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
-import { getColWidth, getPageMargin, getParaSpacing, COL_WIDTHS, PAGE_MARGINS, PARA_SPACINGS } from './pageSettings'
+import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize } from './pageSettings'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -43,9 +43,11 @@ export function Scroll({
     window.addEventListener('inkwave:page-settings-changed', onChanged)
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
-  const colWidthPx   = COL_WIDTHS.find(c => c.value === getColWidth())?.px ?? 720
-  const marginPx     = PAGE_MARGINS.find(m => m.value === getPageMargin())?.px ?? 64
-  const paraSpacingEm = PARA_SPACINGS.find(p => p.value === getParaSpacing())?.em ?? 0.5
+  const sideMarginPx  = getSideMarginPx()
+  const topMarginPx   = getTopMarginPx()
+  const btmMarginPx   = getBtmMarginPx()
+  const paraSpacingEm = getParaSpacingEm()
+  const columns       = getColumns()
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
@@ -83,15 +85,21 @@ export function Scroll({
           className="scroll-paper relative pt-8 pb-24"
           style={{
             borderRadius: phone ? 0 : '8px',
-            paddingLeft:  phone ? '1rem' : `${marginPx}px`,
-            paddingRight: phone ? '1rem' : `${marginPx}px`,
+            paddingLeft:  phone ? 0 : `${sideMarginPx}px`,
+            paddingRight: phone ? 0 : `${sideMarginPx}px`,
+            paddingTop:   `${topMarginPx}px`,
+            paddingBottom:`${btmMarginPx}px`,
             '--para-spacing': `${paraSpacingEm}em`,
           } as React.CSSProperties}
         >
           <PageGuides sheetRef={sheetRef} />
           <div
-            className={`mx-auto w-full relative ${phone ? 'max-w-full' : ''}`}
-            style={{ maxWidth: phone ? undefined : `${colWidthPx}px`, zIndex: 1 }}
+            className="mx-auto w-full relative"
+            style={{
+              zIndex: 1,
+              columnCount: columns > 1 ? columns : undefined,
+              columnGap: columns > 1 ? '2em' : undefined,
+            }}
             ref={containerRef}
           >
             {children}
@@ -109,15 +117,17 @@ export function Scroll({
 function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   const [marks, setMarks] = useState<Array<{ y: number; n: number; rule: boolean }>>([])
   const gapped = gappedPagesEnabled() // gapped mode draws real sheets + numbers itself
+  const paperSize = getPaperSize()
   useEffect(() => {
-    if (gapped) return
+    if (gapped || paperSize === 'scroll') return
     const el = sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
       const w = el.clientWidth
       const total = el.scrollHeight
       if (!w || !total) return setMarks([])
-      const pageH = w * Math.SQRT2 // A4 portrait: height = width × √2
+      // A4: h = w × √2 ≈ 1.414 · Letter: h = w × (11/8.5) ≈ 1.294
+      const pageH = w * (paperSize === 'letter' ? 11 / 8.5 : Math.SQRT2)
       const count = Math.max(1, Math.ceil(total / pageH))
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {

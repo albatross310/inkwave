@@ -45,7 +45,9 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const [, force] = useState(0)
   const [curLineHeight, setCurLineHeight] = useState(getLineHeight)
   const [fontOpen, setFontOpen] = useState(false)
+  const [lhOpen, setLhOpen] = useState(false)
   const fontBtnRef = useRef<HTMLButtonElement>(null)
+  const lhBtnRef = useRef<HTMLButtonElement>(null)
   const ping = () => onActivity?.()
 
   // Re-render when the selection/content changes so the controls reflect the cursor.
@@ -57,13 +59,13 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   }, [editor])
 
   useEffect(() => {
-    if (!fontOpen) return
-    const onDown = () => setFontOpen(false)
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFontOpen(false) }
+    if (!fontOpen && !lhOpen) return
+    const onDown = () => { setFontOpen(false); setLhOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setFontOpen(false); setLhOpen(false) } }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [fontOpen])
+  }, [fontOpen, lhOpen])
 
   const ts = editor.getAttributes('textStyle')
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
@@ -92,9 +94,9 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const segBtn = (active: boolean) =>
     `flex items-center justify-center rounded px-1.5 py-1 transition-colors ${active ? 'text-[#5c2d8a] bg-[#5c2d8a]/10' : 'text-stone-400 hover:text-[#5c2d8a]'}`
 
-  // Font popup: positioned fixed above the button.
-  function fontPopupStyle(): React.CSSProperties {
-    const br = fontBtnRef.current?.getBoundingClientRect()
+  // Popup positioning helper — fixed above the triggering button.
+  function popupAbove(ref: React.RefObject<HTMLButtonElement | null>): React.CSSProperties {
+    const br = ref.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: 10 }
     return {
       position: 'fixed',
@@ -123,23 +125,22 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
           <div
             role="dialog"
             aria-label="Choose font"
-            className="z-[99] bg-white shadow-xl py-2"
+            className="z-[99] bg-white shadow-xl py-1.5"
             style={{
-              ...fontPopupStyle(),
+              ...popupAbove(fontBtnRef),
               border: `1px solid ${INK}55`,
               borderRadius: 12,
-              minWidth: 180,
+              width: 136,
             }}
             onMouseDown={e => e.stopPropagation()}
           >
-            <div className="px-4 pb-1.5 text-[11px] uppercase tracking-wide text-stone-400">Font</div>
             {FONTS.map(f => (
               <button
                 key={f.label}
                 role="menuitem"
                 type="button"
                 onClick={() => setFont(f.css)}
-                className="w-full text-left px-4 py-2 text-base transition-colors hover:bg-stone-50"
+                className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50 truncate"
                 style={{
                   fontFamily: f.css,
                   color: f.label === curFont ? INK : '#374151',
@@ -173,22 +174,55 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         ))}
       </div>
 
-      {/* Line height */}
-      <div className="flex items-center gap-0.5">
-        {LINE_HEIGHTS.map(lh => (
-          <button
-            key={lh.label}
-            type="button"
-            aria-label={`Line height ${lh.label}`}
-            aria-pressed={curLineHeight === lh.value}
-            onClick={() => pickLineHeight(lh.value)}
-            className={segBtn(curLineHeight === lh.value)}
-            style={{ fontStyle: lh.label === 'φ' || lh.label === 'e' ? 'italic' : undefined, minWidth: '1.6rem' }}
+      {/* Line spacing — drop-up */}
+      <button
+        ref={lhBtnRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={lhOpen}
+        onClick={(e) => { e.stopPropagation(); setLhOpen(o => !o); setFontOpen(false) }}
+        className={`rounded border px-2 py-0.5 text-xs transition-colors whitespace-nowrap ${lhOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        style={{ fontStyle: 'italic' }}
+        title="Line spacing"
+      >
+        {LINE_HEIGHTS.find(lh => lh.value === curLineHeight)?.label ?? '·'} <span className="not-italic text-[0.6em] align-middle">▴</span>
+      </button>
+
+      {lhOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setLhOpen(false)} />
+          <div
+            role="dialog"
+            aria-label="Line spacing"
+            className="z-[99] bg-white shadow-xl py-1.5"
+            style={{
+              ...popupAbove(lhBtnRef),
+              border: `1px solid ${INK}55`,
+              borderRadius: 12,
+              width: 110,
+            }}
+            onMouseDown={e => e.stopPropagation()}
           >
-            {lh.label}
-          </button>
-        ))}
-      </div>
+            {LINE_HEIGHTS.map(lh => (
+              <button
+                key={lh.label}
+                type="button"
+                onClick={() => { pickLineHeight(lh.value); setLhOpen(false) }}
+                className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
+                style={{
+                  fontStyle: 'italic',
+                  color: lh.value === curLineHeight ? INK : '#374151',
+                  fontWeight: lh.value === curLineHeight ? 500 : 400,
+                  borderLeft: lh.value === curLineHeight ? `2px solid ${INK}` : '2px solid transparent',
+                }}
+              >
+                {lh.label}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
 
       {/* Apply to whole document */}
       <button type="button" onClick={applyToAll}

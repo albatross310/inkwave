@@ -987,7 +987,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           </div>
         )}
         <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch}>
-          <div style={{ lineHeight }}><EditorContent editor={editor} /></div>
+          <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
           )}
@@ -1142,7 +1142,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Main toolbar row */}
             {showMain && (
-            <div className={`flex items-center px-3 py-1 ${isTouch ? 'justify-between' : 'gap-3'}`}>
+            <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
@@ -1172,8 +1172,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 </span>
               </button>
               <GuideMenu />
-              <SettingsMenu />
               <PageMenu />
+              <SettingsMenu />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
               {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
                 <button
