@@ -29,9 +29,11 @@ export function PageMenu({ editor }: { editor?: Editor }) {
 
   useEffect(() => {
     if (!open) return
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => setOpen(false)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll) }
   }, [open])
 
   function menuStyle(): React.CSSProperties {

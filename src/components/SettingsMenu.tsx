@@ -13,8 +13,10 @@ export function SettingsMenu() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => setOpen(false)
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll) }
   }, [open])
 
   function toggle() { setOpen(o => !o) }

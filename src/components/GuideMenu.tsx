@@ -17,12 +17,14 @@ const KEYS: Array<{ k: string; d: string }> = [
 export function GuideMenu() {
   const [open, setOpen] = useState(false)
 
-  // Close on Escape. Outside-click is handled by the (portaled) backdrop's onMouseDown.
+  // Close on Escape or scroll. Outside-click is handled by the (portaled) backdrop's onMouseDown.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => setOpen(false)
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll) }
   }, [open])
 
   return (

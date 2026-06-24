@@ -56,8 +56,8 @@ export function SyncStatus({
     <div
       className="fixed right-0 z-40 font-serif select-none flex flex-col items-end"
       style={{
-        bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 80px)' : 0,
-        padding: hideTrigger ? '0 1rem' : '28px',
+        bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 80px)' : '38px',
+        padding: hideTrigger ? '0 1rem' : '0 28px',
         zoom: zoom !== 1 ? zoom : undefined,
       }}
       onMouseEnter={!hideTrigger ? () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) } : undefined}
