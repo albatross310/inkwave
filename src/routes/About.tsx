@@ -6,21 +6,22 @@ import { Link } from 'react-router'
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
 
-// The wave-seal logo, served from /public. WebP first (≈1/6 the bytes), PNG fallback.
-// Everything outside the circle is transparent, so it sits on any background.
-function Seal({ size, className }: { size: number; className?: string }) {
+function AppIcon({ size }: { size: number }) {
+  const r = Math.round(size * 0.22)
   return (
-    <picture>
-      <source srcSet="/inkwave-seal-512.webp" type="image/webp" />
-      <img
-        src="/inkwave-seal-512.png"
-        alt="The Inkwave seal — a great wave, painted, within a circle"
-        width={size}
-        height={size}
-        className={className}
-        style={{ width: size, height: size }}
-      />
-    </picture>
+    <div
+      className="shrink-0 drop-shadow-sm"
+      style={{
+        width: size, height: size,
+        borderRadius: r,
+        background: '#ffffff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.13)',
+        overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <img src="/inkflow-logo.svg" width={size} height={size} alt="Inkwave logo" style={{ display: 'block' }} />
+    </div>
   )
 }
 
@@ -30,9 +31,9 @@ export function About() {
       <div className="mx-auto max-w-2xl px-5 py-12 sm:py-16">
         <Link to="/" className="text-sm text-stone-400 hover:text-[#5c2d8a]">← Back to writing</Link>
 
-        {/* Hero — seal to the left of the wordmark */}
+        {/* Hero — app icon to the left of the wordmark */}
         <header className="mt-8 flex items-center gap-6">
-          <Seal size={120} className="shrink-0 drop-shadow-sm" />
+          <AppIcon size={120} />
           <div>
             <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave Solo</h1>
             <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>

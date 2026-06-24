@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <defs>
+    <linearGradient id="ink" x1="229.7" y1="141.3" x2="770.3" y2="858.7" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2A0D3E"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="cream" x1="111.2" y1="275.5" x2="888.8" y2="724.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FBFDFF"/>
+      <stop offset="1" stop-color="#AFD0E7"/>
+    </linearGradient>
+    <clipPath id="inner"><circle cx="500" cy="500" r="375"/></clipPath>
+    <clipPath id="disc"><circle cx="500" cy="500" r="449"/></clipPath>
+  </defs>
+
+  <!-- field (sunset gradient) fills the whole circle -->
+  <circle cx="500" cy="500" r="449" fill="url(#cream)"/>
+
+  <!-- ocean blue fills the entire inner disc -->
+  <g clip-path="url(#inner)"><circle cx="500" cy="500" r="375" fill="#1A7FB5"/></g>
+
+  <!-- field restored above the omega centerline -->
+  <g clip-path="url(#inner)">
+    <path d="M 143.2 294
+             C 61 437, 104 694, 258 696
+             C 356 696, 452 628, 510 535
+             C 542 615, 558 689, 658 696
+             C 845 696, 938 429, 856.8 294
+             L 1100 294 L 1100 -80 L -100 -80 L -100 294 Z" fill="url(#cream)"/>
+  </g>
+
+  <!-- omega: dark (purple->black), thinned 7% off the bottom, merging tangentially into the circle -->
+  <g clip-path="url(#disc)">
+    <path d="M 143.2 294
+             C 61 437, 104 694, 258 696
+             C 356 696, 452 628, 510 535
+             C 542 615, 558 689, 658 696
+             C 845 696, 938 429, 856.8 294"
+          fill="none" stroke="url(#ink)" stroke-width="74"
+          stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="6"/>
+  </g>
+
+  <!-- small circle -->
+  <circle cx="522" cy="380" r="37.6" fill="url(#ink)"/>
+
+  <!-- main dark region: full circle ring (thinned 7% from the outside) -->
+  <circle cx="500" cy="500" r="412" fill="none" stroke="url(#ink)" stroke-width="74"/>
+</svg>
