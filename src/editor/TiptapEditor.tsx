@@ -943,8 +943,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editor.commands.focus()
   }
 
-  const showStyle  = !!editor && showMain
   const showMain   = !isTouch || !keyboardUp
+  const showStyle  = !!editor && showMain
   const barVisible = showMain
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
