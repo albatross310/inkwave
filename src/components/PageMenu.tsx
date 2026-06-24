@@ -19,11 +19,12 @@ const isPhone = isTouchDevice()
 const CM = 37.795   // px per cm
 const EM_BASE = 18  // assumed font-size for em ↔ cm
 
-// Presets in cm — Word-Normal inspired: Low=0.5in, Mid=1in, High=1.5in
-const SIDE_PRESETS    = [{ l: 'Low', v: 1.27 }, { l: 'Mid', v: 2.54 }, { l: 'High', v: 3.81 }]
-const MARGIN_PRESETS  = [{ l: 'Low', v: 1.27 }, { l: 'Mid', v: 2.54 }, { l: 'High', v: 3.81 }]
+// Presets in cm — snapped to 0.2 cm steps so the active state highlights correctly.
+// Near Word-Normal: Low≈Narrow(0.5in), Mid≈Normal(1in), High≈Wide(1.5in).
+const SIDE_PRESETS    = [{ l: 'Low', v: 1.2 }, { l: 'Mid', v: 2.6 }, { l: 'High', v: 4.0 }]
+const MARGIN_PRESETS  = [{ l: 'Low', v: 1.2 }, { l: 'Mid', v: 2.6 }, { l: 'High', v: 4.0 }]
 // Para mode "indent" presets are RELATIVE (extra beyond global). None = same as global margin.
-const INDENT_PRESETS  = [{ l: 'None', v: 0 }, { l: 'Low', v: 1.27 }, { l: 'High', v: 2.54 }]
+const INDENT_PRESETS  = [{ l: 'None', v: 0 }, { l: 'Low', v: 1.2 }, { l: 'High', v: 2.6 }]
 const SPACING_PRESETS = [{ l: 'Low', v: 0.4 }, { l: 'Mid', v: 0.8 }, { l: 'High', v: 1.6 }]
 
 const pxConv = { toCm: (px: number) => px / CM,          fromCm: (cm: number) => cm * CM }
@@ -143,18 +144,20 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
               <span className="text-[11px] uppercase tracking-wide text-stone-400">Page</span>
-              {parFocus && editor && (
+              {parFocus && editor ? (
                 <span className="text-[11px] italic" style={{ color: INK }}>↳ selected paragraph</span>
+              ) : (
+                <span className="text-[11px] text-stone-400 italic">changes apply to all text</span>
               )}
             </div>
 
             {/* ── Margins ── */}
             <SectionHead label="Margins" />
 
-            {/* Global side margin — always shown. In para mode it's read-only context. */}
+            {/* Global side margin — always editable; applyGlobalSide compensates per-para overrides. */}
             {!isPhone && (
               <MRow label="Side" presets={SIDE_PRESETS} conv={pxConv}
-                value={getSideMarginPx()} minCm={0} maxCm={10} readOnly={parFocus}
+                value={getSideMarginPx()} minCm={0} maxCm={10}
                 onChange={px => applyGlobalSide(px)} />
             )}
 

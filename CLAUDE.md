@@ -170,8 +170,9 @@ src/
   is the single most important behavioural invariant — preserve it.
 - **`infinite` mode** returns a `Proxy`-backed `FULL_VOCAB` whose `.has()` always returns
   true, avoiding a 30k-entry Set. Default N for a fresh doc is `'infinite'`.
-- **Enter = hard break (stay in paragraph); Shift+Enter = new paragraph.** Inverted from
-  the usual editor default, set in `TiptapEditor.tsx` via the `enterBehavior` extension.
+- **Enter = new paragraph; Shift+Enter = hard break.** Standard Tiptap/StarterKit
+  behaviour (the inverted `enterBehavior` extension was removed so paragraph spacing works
+  on Enter-separated text, not only pasted content).
 - **The word-cycle replaced the original dropdown popover.** Don't reintroduce a dropdown.
   Cycle slots: index 0 = the original word, 1–6 = synonyms (cycled if Datamuse returns
   fewer), 7 = ⌫ delete sentinel. j decrements index, k increments; current sits in the

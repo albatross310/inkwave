@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useZoomScale } from './useZoomScale'
-import { useEditor, EditorContent, Extension } from '@tiptap/react'
+import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
@@ -148,7 +148,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
   const [keyboardUp, setKeyboardUp] = useState(false)
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
-  const [styleBarOpen, setStyleBarOpen] = useState(true)
+  const [styleBarOpen, setStyleBarOpen] = useState(false)
+  const styleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function armStyleTimer() {
+    if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
+    styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
+  }
+  function clearStyleTimer() {
+    if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }
+  }
   const [selectionEmpty, setSelectionEmpty] = useState(true)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
@@ -201,17 +210,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       FontSize,
       TextAlign.configure({ types: ['paragraph'] }),
       ParagraphStyle,
-      // Single Enter = hard break (stay in paragraph).
-      // Double Enter (Shift+Enter) = new paragraph.
-      Extension.create({
-        name: 'enterBehavior',
-        addKeyboardShortcuts() {
-          return {
-            'Enter':       () => this.editor.commands.setHardBreak(),
-            'Shift-Enter': () => this.editor.chain().splitBlock().run(),
-          }
-        },
-      }),
+      // Standard Enter = new paragraph; Shift+Enter = hard break (via StarterKit's HardBreak).
       RedHighlightExtension.configure({
         getDoc: () => docRef.current,
         getHintState: () => hintStateRef.current,
@@ -404,6 +403,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => window.removeEventListener('resize', update)
   }, [])
 
+
+  // Show the style bar briefly when the editor first loads, then auto-retreat.
+  useEffect(() => {
+    if (!editor) return
+    setStyleBarOpen(true)
+    armStyleTimer()
+  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Warm the synonym cache as soon as the editor is ready (existing red words).
   useEffect(() => {
@@ -1103,17 +1109,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               zoom: zoom,
             }}
           >
-            {/* Style bar — always in the DOM when the main row is visible so the pill
-                height never changes. Opacity/pointer-events toggle the visibility;
-                minHeight reserves space during the brief window before editor loads. */}
-            {showMain && (
-              <div className="flex items-center px-4 py-2 border-b border-stone-200"
-                style={{
-                  minHeight: 44,
-                  opacity: styleBarOpen ? 1 : 0,
-                  pointerEvents: (editor && styleBarOpen) ? 'auto' : 'none',
-                }}>
-                {editor && <StyleBar editor={editor} onLineHeightChange={setLineHeightState} />}
+            {/* Style bar — shown when styleBarOpen; retreats after 5s of inactivity */}
+            {showMain && styleBarOpen && editor && (
+              <div className="flex items-center px-4 py-2 border-b border-stone-200">
+                <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />
               </div>
             )}
 
@@ -1137,11 +1136,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onChange={handleLimitChange}
               />
               <GuideMenu />
-              {/* s-in-circle: toggle the style bar */}
+              {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
               <button
                 type="button"
                 aria-pressed={styleBarOpen}
-                onClick={() => setStyleBarOpen(o => !o)}
+                onClick={() => { const next = !styleBarOpen; setStyleBarOpen(next); if (next) armStyleTimer(); else clearStyleTimer() }}
                 className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"
               >

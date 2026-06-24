@@ -22,12 +22,13 @@ const FONTS = [
 
 const FONT_SIZES = [8, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72]
 
-type Align = 'left' | 'center' | 'justify'
+type Align = 'left' | 'center' | 'right' | 'justify'
 
 function AlignIcon({ a }: { a: Align }) {
   const lines: Record<Align, Array<[number, number]>> = {
     left:    [[2, 12], [2, 8], [2, 11]],
     center:  [[2, 12], [4, 10], [3, 11]],
+    right:   [[2, 12], [6, 12], [4, 12]],
     justify: [[2, 12], [2, 12], [2, 12]],
   }
   const ys = [3.5, 7, 10.5]
@@ -38,21 +39,24 @@ function AlignIcon({ a }: { a: Align }) {
   )
 }
 
-export function StyleBar({ editor, onLineHeightChange }: {
+export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   editor: Editor
+  onActivity?: () => void
   onLineHeightChange?: (v: number) => void
 }) {
   const [, force] = useState(0)
   const [fontOpen, setFontOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
   const [lhOpen, setLhOpen] = useState(false)
-  const fontBtnRef = useRef<HTMLButtonElement>(null)
-  const sizeBtnRef = useRef<HTMLButtonElement>(null)
-  const lhBtnRef   = useRef<HTMLButtonElement>(null)
+  const [alignOpen, setAlignOpen] = useState(false)
+  const fontBtnRef  = useRef<HTMLButtonElement>(null)
+  const sizeBtnRef  = useRef<HTMLButtonElement>(null)
+  const lhBtnRef    = useRef<HTMLButtonElement>(null)
+  const alignBtnRef = useRef<HTMLButtonElement>(null)
   // Manual size input: local string so user can type freely; committed on Enter / blur
   const [sizeStr, setSizeStr] = useState('')
   const [sizeFocused, setSizeFocused] = useState(false)
-  const ping = () => {}
+  const ping = () => onActivity?.()
 
   useEffect(() => {
     const upd = () => force(n => n + 1)
@@ -62,26 +66,26 @@ export function StyleBar({ editor, onLineHeightChange }: {
   }, [editor])
 
   useEffect(() => {
-    if (!fontOpen && !sizeOpen && !lhOpen) return
-    const onDown = () => { setFontOpen(false); setSizeOpen(false); setLhOpen(false) }
+    if (!fontOpen && !sizeOpen && !lhOpen && !alignOpen) return
+    const onDown = () => { setFontOpen(false); setSizeOpen(false); setLhOpen(false); setAlignOpen(false) }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onDown() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [fontOpen, sizeOpen, lhOpen])
+  }, [fontOpen, sizeOpen, lhOpen, alignOpen])
 
   const ts = editor.getAttributes('textStyle')
   const paraAttrs = editor.getAttributes('paragraph')
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
   const curSize = parseInt(ts.fontSize ?? '', 10) || BASE_SIZE
-  const curAlign: Align = (['left', 'center', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
+  const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   // Line height: read from paragraph attribute (set per selection) or global default
   const curLH = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
   const curLHLabel = LINE_HEIGHTS.find(lh => lh.value === curLH)?.label ?? curLH.toString()
 
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize  = (px: number) => { ping(); editor.chain().setMark('textStyle', { fontSize: `${px}px` }).run(); setSizeOpen(false) }
-  const setAlign = (a: Align)   => { ping(); editor.chain().setTextAlign(a).run() }
+  const setAlign = (a: Align)   => { ping(); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
 
   const pickLineHeight = (v: number) => {
     setLineHeight(v)             // persist global default
@@ -90,20 +94,6 @@ export function StyleBar({ editor, onLineHeightChange }: {
     setLhOpen(false)
     ping()
   }
-
-  const applyToAll = () => {
-    ping()
-    const { from, to } = editor.state.selection
-    const chain = editor.chain().selectAll()
-    if (ts.fontFamily) chain.setFontFamily(ts.fontFamily)
-    if (ts.fontSize)   chain.setMark('textStyle', { fontSize: ts.fontSize })
-    chain.setTextAlign(curAlign)
-    if (paraAttrs.lineHeight) chain.setLineHeight(paraAttrs.lineHeight)
-    chain.setTextSelection({ from, to }).run()
-  }
-
-  const segBtn = (active: boolean) =>
-    `flex items-center justify-center rounded px-1.5 py-1 transition-colors ${active ? 'text-[#5c2d8a] bg-[#5c2d8a]/10' : 'text-stone-400 hover:text-[#5c2d8a]'}`
 
   function popupAbove(ref: React.RefObject<HTMLButtonElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
@@ -165,31 +155,52 @@ export function StyleBar({ editor, onLineHeightChange }: {
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setSizeOpen(false)} />
           <div role="dialog" aria-label="Font size" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(sizeBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 72 }}
+            style={{ ...popupAbove(sizeBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 96 }}
             onMouseDown={e => e.stopPropagation()}>
-            {FONT_SIZES.map(sz => (
-              <button key={sz} type="button" onClick={() => setSize(sz)}
-                className="w-full text-left px-3 py-1 text-sm transition-colors hover:bg-stone-50"
-                style={{ color: sz === curSize ? INK : '#374151',
-                  fontWeight: sz === curSize ? 500 : 400,
-                  borderLeft: sz === curSize ? `2px solid ${INK}` : '2px solid transparent' }}>
-                {sz}
+            <div className="grid grid-cols-2">
+              {FONT_SIZES.map(sz => (
+                <button key={sz} type="button" onClick={() => setSize(sz)}
+                  className="text-center px-2 py-1 text-sm transition-colors hover:bg-stone-50"
+                  style={{ color: sz === curSize ? INK : '#374151',
+                    fontWeight: sz === curSize ? 600 : 400,
+                    background: sz === curSize ? `${INK}12` : undefined }}>
+                  {sz}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
+
+      {/* Alignment drop-up */}
+      <button ref={alignBtnRef} type="button" aria-haspopup="dialog" aria-expanded={alignOpen}
+        onClick={e => { e.stopPropagation(); setAlignOpen(o => !o); setFontOpen(false); setSizeOpen(false); setLhOpen(false) }}
+        className={`rounded border px-2 py-0.5 transition-colors font-serif flex items-center gap-1 ${alignOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        title="Alignment">
+        a<span className="text-[0.6em] align-middle">▴</span>
+      </button>
+
+      {alignOpen && createPortal(
+        <>
+          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setAlignOpen(false)} />
+          <div role="dialog" aria-label="Alignment" className="z-[99] bg-white shadow-xl py-1.5"
+            style={{ ...popupAbove(alignBtnRef), border: `1px solid ${INK}55`, borderRadius: 12, width: 124 }}
+            onMouseDown={e => e.stopPropagation()}>
+            {(['left', 'center', 'right', 'justify'] as const).map(a => (
+              <button key={a} type="button" onClick={() => setAlign(a)}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
+                style={{ color: a === curAlign ? INK : '#374151',
+                  fontWeight: a === curAlign ? 500 : 400,
+                  borderLeft: a === curAlign ? `2px solid ${INK}` : '2px solid transparent' }}>
+                <AlignIcon a={a} />
+                <span className="capitalize">{a}</span>
               </button>
             ))}
           </div>
         </>,
         document.body,
       )}
-
-      {/* Alignment */}
-      <div className="flex items-center gap-0.5">
-        {(['left', 'center', 'justify'] as const).map(a => (
-          <button key={a} type="button" aria-label={`Align ${a}`} aria-pressed={curAlign === a}
-            onClick={() => setAlign(a)} className={segBtn(curAlign === a)}>
-            <AlignIcon a={a} />
-          </button>
-        ))}
-      </div>
 
       {/* Line spacing drop-up */}
       <button ref={lhBtnRef} type="button" aria-haspopup="dialog" aria-expanded={lhOpen}
