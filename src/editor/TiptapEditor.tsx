@@ -40,6 +40,7 @@ import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignI
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
+import { VerifyModal } from '../components/VerifyModal'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
@@ -134,6 +135,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [verifyOpen, setVerifyOpen] = useState(false)
   // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
   // and returns when the keyboard is dismissed. We detect the keyboard via the visual
   // viewport (its visible height shrinks when the keyboard shows) — far more reliable than
@@ -1198,11 +1200,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onExportPdf={exportPdf}
                 onExportLatex={exportLatex}
                 googleDriveActive={gdriveActive}
+                onVerifyRecord={() => setVerifyOpen(true)}
               />
             </div>
             )}
           </div>
         </div>
+        {verifyOpen && (
+          <VerifyModal
+            doc={docRef.current}
+            snapshots={snapshots}
+            onClose={() => setVerifyOpen(false)}
+          />
+        )}
       </div>
     </ComplianceContext.Provider>
   )

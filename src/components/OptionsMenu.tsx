@@ -85,6 +85,7 @@ export function OptionsMenu({
   onExportPdf,
   onExportLatex,
   googleDriveActive,
+  onVerifyRecord,
 }: {
   paperRight: number
   onExportBundle?: () => void
@@ -105,6 +106,7 @@ export function OptionsMenu({
   onExportPdf?: () => void
   onExportLatex?: () => void
   googleDriveActive?: boolean
+  onVerifyRecord?: () => void
 }) {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -165,7 +167,7 @@ export function OptionsMenu({
     { label: `Gapped pages ${gappedPagesEnabled() ? '✓' : '✗'}`, run: () => { setGappedPages(!gappedPagesEnabled()); window.location.reload() } },
     { label: `Old word: ${crossoutMode()}`, run: () => { cycleCrossoutMode() } },
     { label: `Watermark ${watermarkEnabled() ? '✓' : '✗'}`, run: () => { setWatermark(!watermarkEnabled()) } },
-    { label: 'Verify a record', run: () => navigate('/verify') },
+    { label: 'Verify a record', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
   ]
   if (import.meta.env.DEV) {
