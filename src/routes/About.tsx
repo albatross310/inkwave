@@ -25,7 +25,7 @@ export function About() {
 
         {/* Hero — app icon to the left of the wordmark */}
         <header className="mt-8 flex items-center gap-6">
-          <AppIcon size={120} />
+          <AppIcon size={160} />
           <div>
             <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave Solo</h1>
             <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>
