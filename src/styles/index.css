@@ -86,7 +86,7 @@
   .inkwave-sheet::after {
     content: '';
     position: absolute;
-    right: 140px;
+    right: 0px;
     bottom: -12px;
     width: 229px;
     height: 229px;
