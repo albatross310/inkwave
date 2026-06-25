@@ -86,8 +86,8 @@
   .inkwave-sheet::after {
     content: '';
     position: absolute;
-    right: 40px;
-    bottom: 28px;
+    right: 70px;
+    bottom: 58px;
     width: 176px;
     height: 176px;
     background: url('/inkwave-watermark-256.png') center / contain no-repeat;

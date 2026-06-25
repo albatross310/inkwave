@@ -176,7 +176,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
             width={logoSize}
             height={logoSize}
             alt=""
-            style={{ position: 'absolute', right: 50, top: pageTop + 48, width: logoSize, height: logoSize, opacity: 0.82 }}
+            style={{ position: 'absolute', right: 35, top: pageTop + 18, width: logoSize, height: logoSize, opacity: 0.82 }}
           />
         )
       })}

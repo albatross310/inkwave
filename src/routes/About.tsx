@@ -7,21 +7,13 @@ const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
 
 function AppIcon({ size }: { size: number }) {
-  const r = Math.round(size * 0.22)
   return (
-    <div
-      className="shrink-0 drop-shadow-sm"
-      style={{
-        width: size, height: size,
-        borderRadius: r,
-        background: '#ffffff',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.13)',
-        overflow: 'hidden',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <img src="/inkflow-logo.svg" width={size} height={size} alt="Inkwave logo" style={{ display: 'block' }} />
-    </div>
+    <img
+      src="/inkwave-logo-colour-512.png"
+      width={size} height={size}
+      alt="Inkwave logo"
+      style={{ display: 'block', borderRadius: '50%', boxShadow: '0 2px 12px rgba(0,0,0,0.25)' }}
+    />
   )
 }
 
