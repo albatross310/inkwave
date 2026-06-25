@@ -86,10 +86,10 @@
   .inkwave-sheet::after {
     content: '';
     position: absolute;
-    right: 70px;
-    bottom: 58px;
-    width: 352px;
-    height: 352px;
+    right: 140px;
+    bottom: -12px;
+    width: 229px;
+    height: 229px;
     background: url('/inkwave-watermark-256.png') center / contain no-repeat;
     opacity: 0.08;
     pointer-events: none;
