@@ -172,7 +172,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
         return (
           <img
             key={`logo-${n}`}
-            src="/inkwave-logo-colour-512.png?v=4"
+            src="/inkwave-logo-v5.png"
             width={logoSize}
             height={logoSize}
             alt=""
