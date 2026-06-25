@@ -176,7 +176,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
             width={logoSize}
             height={logoSize}
             alt=""
-            style={{ position: 'absolute', right: 50, top: pageTop + 8, width: logoSize, height: logoSize, opacity: 0.82 }}
+            style={{ position: 'absolute', right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }}
           />
         )
       })}
@@ -184,7 +184,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
         <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
           {rule && <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />}
           <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>
-            {n}
+            {n + 1}
           </div>
         </div>
       ))}
