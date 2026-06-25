@@ -81,8 +81,8 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(80, 50, 10, 0.22), 0 2px 6px rgba(80, 50, 10, 0.18);
   }
-  /* A very faded Inkwave seal in each page's bottom-left margin. The logo's own cream backing blends
-     into the parchment, so at this opacity only a ghost of the mark shows. */
+  /* A very faded Inkwave seal in each page's bottom-left margin. The mark's own cream disc blends
+     into the parchment, so at this opacity only a ghost of the inked ring + brushstroke shows. */
   .inkwave-sheet::after {
     content: '';
     position: absolute;
@@ -90,8 +90,8 @@
     bottom: 28px;
     width: 176px;
     height: 176px;
-    background: url('/fav-128.png') center / contain no-repeat;
-    opacity: 0.1;
+    background: url('/inkwave-watermark-256.png') center / contain no-repeat;
+    opacity: 0.08;
     pointer-events: none;
   }
   /* The gap widget reserves the space between sheets; the band is an invisible marker (positioned by
