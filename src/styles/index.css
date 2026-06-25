@@ -88,8 +88,8 @@
     position: absolute;
     right: 70px;
     bottom: 58px;
-    width: 176px;
-    height: 176px;
+    width: 352px;
+    height: 352px;
     background: url('/inkwave-watermark-256.png') center / contain no-repeat;
     opacity: 0.08;
     pointer-events: none;
