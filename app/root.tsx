@@ -9,11 +9,11 @@ import { FONT_PRELOAD } from './fontPreload'
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=9' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=9' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=9' },
-  { rel: 'shortcut icon', href: '/fav-32.png?v=9' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=9' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=10' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=10' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=10' },
+  { rel: 'shortcut icon', href: '/fav-32.png?v=10' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=10' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
