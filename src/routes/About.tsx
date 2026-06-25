@@ -9,7 +9,7 @@ const LIGHT = '#9b5ccc'
 function AppIcon({ size }: { size: number }) {
   return (
     <img
-      src="/inkwave-logo-colour-512.png"
+      src="/inkwave-logo-colour-512.png?v=2"
       width={size} height={size}
       alt="Inkwave logo"
       style={{ display: 'block', borderRadius: '50%', boxShadow: '0 2px 12px rgba(0,0,0,0.25)' }}

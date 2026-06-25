@@ -172,7 +172,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
         return (
           <img
             key={`logo-${n}`}
-            src="/inkflow-logo.svg"
+            src="/inkflow-logo.svg?v=2"
             width={logoSize}
             height={logoSize}
             alt=""

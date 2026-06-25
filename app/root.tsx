@@ -9,10 +9,10 @@ import { FONT_PRELOAD } from './fontPreload'
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
+  { rel: 'icon', href: '/favicon.ico?v=3', sizes: 'any' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=3' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=3' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=3' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,

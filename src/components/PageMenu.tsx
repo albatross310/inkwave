@@ -130,7 +130,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif
           ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
         title="Page settings">
-        <span className="flex items-center justify-center w-7 h-7 rounded-full border-[1.5px] border-current text-[13px] italic leading-none">p</span>
+        <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">P</span>
       </button>
 
       {open && createPortal(
