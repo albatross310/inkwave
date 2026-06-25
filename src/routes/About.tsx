@@ -12,7 +12,7 @@ function AppIcon({ size }: { size: number }) {
       src="/inkwave-logo-v5.png"
       width={size} height={size}
       alt="Inkwave logo"
-      style={{ display: 'block', borderRadius: '50%', boxShadow: '0 2px 12px rgba(0,0,0,0.25)' }}
+      style={{ display: 'block', filter: 'drop-shadow(0 2px 12px rgba(0,0,0,0.25))' }}
     />
   )
 }
