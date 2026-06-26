@@ -4,11 +4,11 @@ import { useEffect } from 'react'
 import { FONT_PRELOAD } from './fontPreload'
 
 const TAB_TITLES = [
-  'IW: writing that remembers',
-  'IW: a mnemonic environment',
-  'IW: a calm place to write',
-  'IW: writing with memory',
-  'IW: every word intentional',
+  'iω: writing that remembers',
+  'iω: a mnemonic environment',
+  'iω: a calm place to write',
+  'iω: writing with memory',
+  'iω: every word intentional',
 ]
 
 // The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a
@@ -18,11 +18,11 @@ const TAB_TITLES = [
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=11' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=11' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=11' },
-  { rel: 'shortcut icon', href: '/fav-32.png?v=11' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=11' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=14' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=14' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=14' },
+  { rel: 'shortcut icon', href: '/fav-32.png?v=14' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=14' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
