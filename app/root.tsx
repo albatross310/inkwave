@@ -1,6 +1,15 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router'
 import type { LinksFunction } from 'react-router'
+import { useEffect } from 'react'
 import { FONT_PRELOAD } from './fontPreload'
+
+const TAB_TITLES = [
+  'IW: writing that remembers',
+  'IW: a mnemonic environment',
+  'IW: a calm place to write',
+  'IW: writing with memory',
+  'IW: every word intentional',
+]
 
 // The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a
 // side-effect lets the React Router Vite plugin collect it into the document <head> for both
@@ -61,5 +70,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
+    document.title = pick
+  }, [])
   return <Outlet />
 }
