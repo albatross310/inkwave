@@ -2,18 +2,18 @@ import { Edit } from '../../src/routes/Edit'
 
 export function meta() {
   return [
-    { title: 'Inkwave Solo — Calm Writing for Serious Thinking' },
+    { title: 'Inkwave: writing that remembers' },
     {
       name: 'description',
       content:
         'A distraction-free writing surface for academic and philosophical writing. Words that stray from your vocabulary glow purple — cycle synonyms until every sentence is yours. No sign-up, no dashboard.',
     },
     { tagName: 'link', rel: 'canonical', href: 'https://iwsolo.me/' },
-    { property: 'og:title', content: 'Inkwave Solo — Calm Writing for Serious Thinking' },
+    { property: 'og:title', content: 'Inkwave Solo — writing that remembers' },
     { property: 'og:description', content: 'Calm, focused writing for STEM and philosophy students. Words that stray glow — cycle synonyms to own every sentence. No sign-up.' },
     { property: 'og:url', content: 'https://iwsolo.me/' },
     { property: 'og:type', content: 'website' },
-    { name: 'twitter:title', content: 'Inkwave Solo — Calm Writing for Serious Thinking' },
+    { name: 'twitter:title', content: 'Inkwave Solo — writing that remembers' },
     { name: 'twitter:description', content: 'Calm academic writing. Words that stray glow — cycle synonyms to own every sentence. No sign-up, no dashboard.' },
     {
       'script:ld+json': {
