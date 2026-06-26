@@ -18,11 +18,11 @@ const TAB_TITLES = [
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=14' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=14' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=14' },
-  { rel: 'shortcut icon', href: '/fav-32.png?v=14' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=14' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=15' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=15' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=15' },
+  { rel: 'shortcut icon', href: '/fav-32.png?v=15' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=15' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
