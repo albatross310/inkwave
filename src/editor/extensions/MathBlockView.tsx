@@ -88,8 +88,11 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
         const greek = handleMathKey(e as any, greekRef.current)
         if (greek) { e.preventDefault(); mf.executeCommand(['insert', greek]); return }
 
+        // Escape: exit text mode if in it, otherwise commit
         if (e.key === 'Escape') {
-          e.preventDefault(); e.stopPropagation(); commit(mf.value); return
+          e.preventDefault(); e.stopPropagation()
+          if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
+          commit(mf.value); return
         }
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
@@ -102,10 +105,10 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           return
         }
 
-        // Tab — toggle text mode
-        if (e.code === 'Tab') {
-          e.preventDefault(); e.stopPropagation()
-          mf.executeCommand(['switchMode', mf.mode === 'text' ? 'math' : 'text'])
+        // Space in math mode → \ (text space), stay in math mode
+        if (e.key === ' ' && mf.mode === 'math') {
+          e.preventDefault()
+          mf.executeCommand(['insert', '\\ '])
           return
         }
 
