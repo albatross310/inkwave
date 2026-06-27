@@ -14,8 +14,8 @@ const CYCLE: Array<{ k: string; d: string }> = [
 ]
 
 const MATH: Array<{ k: string; d: string }> = [
-  { k: 'Ctrl+=',        d: 'inline math' },
-  { k: 'Ctrl+⇧+=',      d: 'block math' },
+  { k: 'Alt+=',          d: 'inline math' },
+  { k: 'Alt+⇧+=',        d: 'block math' },
   { k: 'Σ button',      d: 'choose or manage symbols' },
   { k: 'Enter / Esc',   d: 'confirm inline' },
   { k: 'Ctrl+Enter',    d: 'confirm block' },

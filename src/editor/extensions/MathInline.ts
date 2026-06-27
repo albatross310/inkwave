@@ -48,8 +48,7 @@ export const MathInline = Node.create({
 
   addKeyboardShortcuts() {
     return {
-      // Ctrl-= is the physical =/+ key with Ctrl held.
-      'Ctrl-=': () => this.editor.commands.insertMathInline(),
+      'Alt-=': () => this.editor.commands.insertMathInline(),
     }
   },
 

@@ -51,7 +51,7 @@ export const MathBlock = Node.create({
 
   addKeyboardShortcuts() {
     return {
-      'Ctrl-Shift-=': () => this.editor.commands.insertMathBlock(),
+      'Alt-Shift-=': () => this.editor.commands.insertMathBlock(),
     }
   },
 })
