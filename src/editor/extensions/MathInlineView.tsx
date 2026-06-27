@@ -98,20 +98,15 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
         }
 
-        // " exits text mode
-        if (e.key === '"' && mf.mode === 'text') {
-          e.preventDefault(); e.stopImmediatePropagation()
-          mf.executeCommand(['switchMode', 'math']); return
-        }
-
-        // Space: 1st = MathLive native; 2nd+ = text space (math mode only)
-        if (e.key === ' ' && mf.mode === 'math') {
+        // Space: 1st = MathLive native (commits shortcuts like pi→π)
+        //        2nd+ = insert thin space \, (visible gap in math mode)
+        if (e.key === ' ') {
           spaceCount++
           if (spaceCount > 1) {
             e.preventDefault(); e.stopImmediatePropagation()
-            mf.executeCommand(['insert', '\\ ']); return
+            mf.executeCommand(['insert', '\\,']); return
           }
-        } else if (e.key !== ' ') {
+        } else {
           spaceCount = 0
         }
 
@@ -151,12 +146,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       }, { capture: true })
 
       mf.addEventListener('keyup', (e: KeyboardEvent) => {
-        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false); return }
-        // " exit fallback: if shadow DOM re-inserted " and left us in text mode, clean up
-        if (e.key === '"' && mf.mode === 'text') {
-          mf.executeCommand(['deleteBackward'])
-          mf.executeCommand(['switchMode', 'math'])
-        }
+        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false) }
       }, { capture: true })
 
       mf.addEventListener('input', () => setLocalLatex(mf.value))

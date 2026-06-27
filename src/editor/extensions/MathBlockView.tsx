@@ -116,22 +116,14 @@ mf.style.cssText = [
           return
         }
 
-        // " exits text mode
-        if (e.key === '"' && mf.mode === 'text') {
-          e.preventDefault(); e.stopImmediatePropagation()
-          mf.executeCommand(['switchMode', 'math'])
-          return
-        }
-
-        // Space: only intercept in math mode. 1st = MathLive native; 2nd+ = text space
-        if (e.key === ' ' && mf.mode === 'math') {
+        // Space: 1st = MathLive native; 2nd+ = thin space \,
+        if (e.key === ' ') {
           spaceCount++
           if (spaceCount > 1) {
             e.preventDefault(); e.stopImmediatePropagation()
-            mf.executeCommand(['insert', '\\ '])
-            return
+            mf.executeCommand(['insert', '\\,']); return
           }
-        } else if (e.key !== ' ') {
+        } else {
           spaceCount = 0
         }
 
@@ -181,12 +173,7 @@ mf.style.cssText = [
       }, { capture: true })
 
       mf.addEventListener('keyup', (e: KeyboardEvent) => {
-        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false); return }
-        // " exit fallback: if shadow DOM re-inserted " and left us in text mode, clean up
-        if (e.key === '"' && mf.mode === 'text') {
-          mf.executeCommand(['deleteBackward'])
-          mf.executeCommand(['switchMode', 'math'])
-        }
+        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false) }
       }, { capture: true })
 
       mf.addEventListener('input', () => setLocalLatex(mf.value))
