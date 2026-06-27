@@ -14,10 +14,13 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
   useEffect(() => { setLocalLatex(latex) }, [latex])
 
   useEffect(() => {
-    if (editing && inputRef.current) {
-      inputRef.current.focus()
-      inputRef.current.select()
-    }
+    if (!editing) return
+    // Defer past ProseMirror's own focus handling so the input wins.
+    const id = requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+    return () => cancelAnimationFrame(id)
   }, [editing])
 
   useEffect(() => {

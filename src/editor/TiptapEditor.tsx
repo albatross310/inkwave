@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, useCallback, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
@@ -1163,29 +1164,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   S
                 </span>
               </button>
-              {/* Σ-in-circle: insert inline math (or block math on an empty paragraph) */}
-              <button
-                type="button"
-                onClick={() => {
-                  if (!editor) return
-                  const { $from } = editor.state.selection
-                  const node = $from.node()
-                  if (node.type.name === 'paragraph' && node.textContent === '') {
-                    editor.chain()
-                      .deleteRange({ from: $from.before(), to: $from.after() })
-                      .insertMathBlock()
-                      .run()
-                  } else {
-                    editor.commands.insertMathInline()
-                  }
-                }}
-                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors text-stone-400 hover:text-[#5c2d8a]"
-                title="Insert math (Ctrl+=)"
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>
-                  Σ
-                </span>
-              </button>
+              {/* Σ-in-circle: math menu popup */}
+              <MathMenuButton editor={editor} />
               <PageMenu editor={editor ?? undefined} />
               <SettingsMenu />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
@@ -1241,4 +1221,99 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 function deriveTitle(text: string): string {
   const first = text.trim().split('\n')[0]?.trim() ?? ''
   return first.slice(0, 80)
+}
+
+// ─── Math menu popup ─────────────────────────────────────────────────────────
+
+const MATH_ITEMS = [
+  { label: 'Inline math',  hint: 'Ctrl+=',       action: (e: Editor) => e.commands.insertMathInline() },
+  { label: 'Block math',   hint: 'Ctrl+⇧+=',     action: (e: Editor) => e.commands.insertMathBlock()  },
+] as const
+
+function MathMenuButton({ editor }: { editor: Editor | null }) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+
+  const openMenu = useCallback(() => {
+    if (!btnRef.current) return
+    const r = btnRef.current.getBoundingClientRect()
+    setPos({ x: r.left + r.width / 2, y: r.top })
+    setOpen(true)
+  }, [])
+
+  // Close on outside click or scroll
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, { passive: true })
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close) }
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={openMenu}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+        title="Insert math"
+      >
+        <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>
+          Σ
+        </span>
+      </button>
+
+      {open && createPortal(
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: pos.x,
+            top: pos.y - 8,
+            transform: 'translate(-50%, -100%)',
+            background: 'white',
+            border: '1px solid rgba(92,45,138,0.25)',
+            borderRadius: '8px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+            padding: '4px',
+            zIndex: 200,
+            minWidth: '160px',
+          }}
+        >
+          {MATH_ITEMS.map(item => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                if (!editor) return
+                item.action(editor)
+              }}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: '5px',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                gap: '16px',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span style={{ fontSize: '0.9rem', color: '#3a3330' }}>{item.label}</span>
+              <span style={{ fontSize: '0.7rem', color: '#a89d96', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{item.hint}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
 }

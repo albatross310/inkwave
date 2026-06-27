@@ -47,10 +47,18 @@ export const GREEK_UPPER: Record<string, string> = {
   y: '\\Psi ',
 }
 
-// Convert (x)/(y) shorthand → \frac{x}{y}. Applied on commit so typing isn't disrupted.
-// Handles simple non-nested cases. Nested fractions require standard \frac{}{} syntax.
+// Convert x//y → \frac{x}{y}. Strips one layer of outer parens per side:
+//   (x)//(y)     → \frac{x}{y}        single parens removed
+//   ((x))//((y)) → \frac{(x)}{(y)}    double parens → one layer stripped, inner kept
+// Applied on commit so typing is never interrupted.
+const FRAC_RE = /(\(\([^()]+\)\)|\([^()]+\)|[^\s/(]+)\s*\/\/\s*(\(\([^()]+\)\)|\([^()]+\)|[^\s/)]+)/g
+
 export function applyShorthands(latex: string): string {
-  return latex.replace(/\(([^()]+)\)\/\(([^()]+)\)/g, '\\frac{$1}{$2}')
+  return latex.replace(
+    FRAC_RE,
+    (_m, a: string, b: string) =>
+      `\\frac{${a.replace(/^\((.+)\)$/, '$1')}}{${b.replace(/^\((.+)\)$/, '$1')}}`,
+  )
 }
 
 // Given a React keyboard event inside a math input, returns the LaTeX string to insert

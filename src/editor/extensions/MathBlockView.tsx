@@ -40,10 +40,12 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
   useEffect(() => { setLocalLatex(latex) }, [latex])
 
   useEffect(() => {
-    if (editing && textareaRef.current) {
-      textareaRef.current.focus()
-      textareaRef.current.select()
-    }
+    if (!editing) return
+    const id = requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.select()
+    })
+    return () => cancelAnimationFrame(id)
   }, [editing])
 
   useEffect(() => {
@@ -142,14 +144,21 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                   const el = textareaRef.current!
                   const { value, cursor } = insertAtCursor(el, greek)
                   setLocalLatex(value)
-                  requestAnimationFrame(() => {
-                    el.selectionStart = el.selectionEnd = cursor
-                  })
+                  requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = cursor })
                   return
                 }
                 if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
                   e.preventDefault()
                   commit()
+                  return
+                }
+                // Plain Enter → insert LaTeX line-break \\ then newline
+                if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                  e.preventDefault()
+                  const el = textareaRef.current!
+                  const { value, cursor } = insertAtCursor(el, '\\\\\n')
+                  setLocalLatex(value)
+                  requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = cursor })
                   return
                 }
                 e.stopPropagation()

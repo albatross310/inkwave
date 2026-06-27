@@ -1,4 +1,4 @@
-import { Node, mergeAttributes, nodeInputRule } from '@tiptap/core'
+import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { MathInlineView } from './MathInlineView'
 
@@ -11,7 +11,7 @@ declare module '@tiptap/core' {
 }
 
 // Inline math node — renders KaTeX when not focused; shows a text input when selected.
-// Triggered by: Ctrl-= keyboard shortcut, Σ toolbar button, or the $...$ input rule.
+// Triggered by: Ctrl-= keyboard shortcut or Σ toolbar button.
 export const MathInline = Node.create({
   name: 'mathInline',
   group: 'inline',
@@ -53,14 +53,4 @@ export const MathInline = Node.create({
     }
   },
 
-  addInputRules() {
-    // Converts $latex$ → inline math node on closing $.
-    return [
-      nodeInputRule({
-        find: /(?<!\$)\$([^$\n]+)\$(?!\$)$/,
-        type: this.type,
-        getAttributes: (match) => ({ latex: match[1] }),
-      }),
-    ]
-  },
 })

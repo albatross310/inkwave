@@ -15,23 +15,28 @@ const CYCLE_KEYS: Array<{ k: string; d: string }> = [
 ]
 
 const MATH_KEYS: Array<{ k: string; d: string }> = [
-  { k: 'Ctrl +=',        d: 'insert inline math' },
-  { k: 'Σ button',       d: 'inline math; block math on empty line' },
-  { k: '$…$',            d: 'inline math shorthand' },
-  { k: '$$',             d: 'block math shorthand' },
-  { k: 'Enter / Esc',    d: 'confirm equation' },
-  { k: 'Ctrl+Enter',     d: 'confirm block equation' },
+  { k: 'Ctrl+=',       d: 'insert inline math' },
+  { k: 'Ctrl+⇧+=',    d: 'insert block math' },
+  { k: 'Σ button',     d: 'choose inline or block from popup' },
+  { k: 'Enter / Esc',  d: 'confirm inline equation' },
+  { k: 'Ctrl+Enter',   d: 'confirm block equation' },
+  { k: 'Enter',        d: 'new line in block (inserts \\\\)' },
 ]
 
 const GREEK_KEYS: Array<{ k: string; d: string }> = [
   { k: 'CapsLock + a–z',  d: 'lowercase Greek (α β γ …)' },
   { k: 'CapsLock + ⇧',    d: 'uppercase Greek where distinct (Γ Δ Θ …)' },
   { k: 'q → θ,  f → φ',  d: 'key assignments follow standard convention' },
-  { k: '(x)/(y)',          d: 'shorthand → \\frac{x}{y} on confirm' },
+]
+
+const FRAC_KEYS: Array<{ k: string; d: string }> = [
+  { k: 'x // y',          d: '→ \\frac{x}{y}' },
+  { k: '(x+1) // (y-2)',  d: '→ \\frac{x+1}{y-2}  (parens stripped)' },
+  { k: '((x)) // ((y))',  d: '→ \\frac{(x)}{(y)}  (double parens kept)' },
 ]
 
 const BLOCK_ALIGN: Array<{ k: string; d: string }> = [
-  { k: '= button',  d: 'align at equals (use & before =)' },
+  { k: '= button',  d: 'align at equals (use & before each =)' },
   { k: '⊙ button',  d: 'centred display' },
   { k: '◁ button',  d: 'left aligned' },
 ]
@@ -107,6 +112,7 @@ export function GuideMenu() {
 
             <Section title="Math mode" rows={MATH_KEYS} />
             <Section title="Greek keyboard (in math mode)" rows={GREEK_KEYS} />
+            <Section title="Fraction shorthand (on confirm)" rows={FRAC_KEYS} />
             <Section title="Block equation alignment" rows={BLOCK_ALIGN} />
 
             <div className="mt-3 pt-3 border-t border-stone-100 text-sm text-stone-400 leading-snug">

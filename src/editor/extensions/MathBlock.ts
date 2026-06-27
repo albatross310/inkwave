@@ -1,4 +1,4 @@
-import { Node, mergeAttributes, nodeInputRule } from '@tiptap/core'
+import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { MathBlockView } from './MathBlockView'
 
@@ -14,6 +14,7 @@ declare module '@tiptap/core' {
 //   'aligned' (default) — wraps in \begin{aligned}…\end{aligned}; use & for = alignment
 //   'center'            — standard KaTeX displayMode: centered
 //   'left'              — display mode, CSS text-align: left
+// Triggered by: Ctrl-Shift-= or Σ toolbar button.
 export const MathBlock = Node.create({
   name: 'mathBlock',
   group: 'block',
@@ -48,14 +49,9 @@ export const MathBlock = Node.create({
     }
   },
 
-  addInputRules() {
-    // $$ at start of otherwise empty paragraph triggers a block math node.
-    return [
-      nodeInputRule({
-        find: /^\$\$([^$]*)$/,
-        type: this.type,
-        getAttributes: (match) => ({ latex: match[1].trim(), align: 'aligned' }),
-      }),
-    ]
+  addKeyboardShortcuts() {
+    return {
+      'Ctrl-Shift-=': () => this.editor.commands.insertMathBlock(),
+    }
   },
 })
