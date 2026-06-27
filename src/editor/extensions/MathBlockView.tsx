@@ -118,8 +118,10 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       mf.style.cssText = [
         // width:max-content prevents the host expanding to fill the flex container
         // so justify-content:center actually centres it.
+        // font-size:1.21em matches KaTeX's default block display scale (KaTeX applies 1.21×
+        // internally; without this the formula appears ~17% smaller than the KaTeX render).
         'display:inline-block;width:max-content;background:transparent;border:none;',
-        'outline:none;font-size:1.0em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
+        'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
@@ -322,14 +324,32 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         />
 
         {/* MathLive: absolutely overlaid on top of the KaTeX area so the block's
-            layout height is always driven by the KaTeX div above. */}
-        <div ref={mlContainer} style={{
-          display: active ? 'flex' : 'none',
-          position: 'absolute',
-          inset: 0,
-          justifyContent: align === 'left' ? 'flex-start' : 'center',
-          alignItems: 'center',
-        }} />
+            layout height is always driven by the KaTeX div above.
+            onClick handles clicks in the padding area around the formula (while active)
+            so that clicking left/right of any formula line moves the cursor correctly. */}
+        <div ref={mlContainer}
+          onClick={e => {
+            const mf = mfRef.current
+            if (!mf) return
+            const mfRect = mf.getBoundingClientRect()
+            // If click landed on the formula itself, let MathLive handle it.
+            if (e.clientX >= mfRect.left && e.clientX <= mfRect.right
+              && e.clientY >= mfRect.top  && e.clientY <= mfRect.bottom) return
+            let tx = e.clientX
+            let bias: -1 | 0 | 1 = 0
+            if (e.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
+            else if (e.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, e.clientY))
+            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
+            if (offset >= 0) { mf.position = offset; mf.focus() }
+          }}
+          style={{
+            display: active ? 'flex' : 'none',
+            position: 'absolute',
+            inset: 0,
+            justifyContent: align === 'left' ? 'flex-start' : 'center',
+            alignItems: 'center',
+          }} />
 
         {/* Greek mode indicator */}
         {greekOn && (
