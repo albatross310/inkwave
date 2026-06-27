@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
+import { LimitSelector } from './LimitSelector'
 
 const INK = '#5c2d8a'
 
-export function SettingsMenu() {
+interface SettingsMenuProps {
+  limitN: number | 'infinite'
+  onLimitChange: (v: number | 'infinite') => void
+}
+
+export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const [, rerender] = useState(0)
@@ -61,6 +67,12 @@ export function SettingsMenu() {
             onMouseDown={e => e.stopPropagation()}
           >
             <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-stone-400">Settings</div>
+
+            {/* Vocab limit */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span>Vocab limit</span>
+              <LimitSelector value={limitN} onChange={onLimitChange} />
+            </div>
 
             {/* Gapped pages */}
             <Row

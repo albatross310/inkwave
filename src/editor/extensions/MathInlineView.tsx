@@ -9,12 +9,21 @@ import { loadMathLive } from './mathLiveLoader'
 
 const INK = '#5c2d8a'
 
+// MathLive stores some commands KaTeX doesn't know — map them so display never goes blank
+const MATHLIVE_MACROS: Record<string, string> = {
+  '\\imaginaryI':   'i',
+  '\\imaginaryJ':   'j',
+  '\\exponentialE': 'e',
+  '\\differentialD': 'd',
+  '\\doubleprime':  '\'\'',
+}
+
 function renderFull(src: string): string {
   if (!src.trim()) return ''
   try {
     return katex.renderToString(
       applyCustomSymbols(applyShorthandsLive(src), getSymbols()),
-      { throwOnError: true, displayMode: false, output: 'htmlAndMathml' },
+      { throwOnError: false, displayMode: false, output: 'htmlAndMathml', macros: MATHLIVE_MACROS },
     )
   } catch { return '' }
 }
@@ -101,12 +110,6 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           return
         }
 
-        // Space in math mode → \ (text space) and stay in math mode
-        if (e.key === ' ' && mf.mode === 'math') {
-          e.preventDefault()
-          mf.executeCommand(['insert', '\\ '])
-          return
-        }
 
         // Backtick — small caps
         if (e.code === 'Backquote' && !e.shiftKey) {

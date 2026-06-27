@@ -11,13 +11,21 @@ const INK = '#5c2d8a'
 
 type Align = 'aligned' | 'center' | 'left'
 
+const MATHLIVE_MACROS: Record<string, string> = {
+  '\\imaginaryI':   'i',
+  '\\imaginaryJ':   'j',
+  '\\exponentialE': 'e',
+  '\\differentialD': 'd',
+  '\\doubleprime':  '\'\'',
+}
+
 function renderDisplay(latex: string, align: Align): string {
   if (!latex.trim()) return ''
   try {
     const src     = applyCustomSymbols(applyShorthandsLive(latex), getSymbols())
     const wrapped = align === 'aligned' && !/\\begin\{/.test(src)
       ? `\\begin{aligned}\n${src}\n\\end{aligned}` : src
-    return katex.renderToString(wrapped, { throwOnError: true, displayMode: true, output: 'htmlAndMathml' })
+    return katex.renderToString(wrapped, { throwOnError: false, displayMode: true, output: 'htmlAndMathml', macros: MATHLIVE_MACROS })
   } catch { return '' }
 }
 
@@ -70,7 +78,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
-        'display:block;width:100%;background:transparent;border:none;',
+        'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
@@ -109,13 +117,6 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
         if (e.key === '"' && mf.mode === 'text') {
           e.preventDefault()
           mf.executeCommand(['switchMode', 'math'])
-          return
-        }
-
-        // Space in math mode → \ (text space), stay in math mode
-        if (e.key === ' ' && mf.mode === 'math') {
-          e.preventDefault()
-          mf.executeCommand(['insert', '\\ '])
           return
         }
 
@@ -204,7 +205,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
         style={{
           margin: '0.5em 0', padding: '0.4em 0.5em',
           position: 'relative', cursor: 'text',
-          textAlign: active ? 'left' : align === 'left' ? 'left' : 'center',
+          textAlign: align === 'left' ? 'left' : 'center',
           minHeight: '1.8em',
           // Only show border/background when active or selected
           border: `1px solid ${active || selected ? `${INK}55` : 'transparent'}`,

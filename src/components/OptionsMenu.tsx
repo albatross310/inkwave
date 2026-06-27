@@ -194,7 +194,7 @@ export function OptionsMenu({
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}
-        className="flex items-center justify-center w-9 h-9 rounded-full text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-100 transition-colors"
+        className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-stone-400 hover:text-[#5c2d8a] transition-colors"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" />

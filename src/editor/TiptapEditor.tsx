@@ -1155,11 +1155,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
                 </button>
               )}
-              <LimitSelector
-                value={doc.scasLimitN}
-                onChange={handleLimitChange}
-              />
               <GuideMenu />
+              {/* Σ-in-circle: math menu popup */}
+              <MathMenuButton editor={editor} />
               {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
               <button
                 type="button"
@@ -1172,10 +1170,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   S
                 </span>
               </button>
-              {/* Σ-in-circle: math menu popup */}
-              <MathMenuButton editor={editor} />
               <PageMenu editor={editor ?? undefined} />
-              <SettingsMenu />
+              <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
               {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
                 <button
