@@ -40,32 +40,45 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
   const greekRef         = useRef(false)
   const pendingCursorRef = useRef<'start' | 'end'>('start')
   const arrowDirRef      = useRef<'start' | 'end'>('start')
+  // Set to true only when an arrow key fired immediately before a NodeSelection is created —
+  // used to distinguish keyboard navigation (should auto-enter) from mouse clicks near the
+  // node (which ProseMirror may also turn into a NodeSelection, but shouldn't auto-enter).
+  const keyboardNavRef   = useRef(false)
+  // Saved click coords from KaTeX mode, replayed into MathLive's shadow DOM on mount.
+  const pendingClickRef  = useRef<{ clientX: number; clientY: number } | null>(null)
 
   useEffect(() => {
     if (!active) { setLocalLatex(latex) }
   }, [latex, active])
 
-  // Track which arrow direction navigated onto this node so we can place the cursor correctly
+  // Track arrow direction and flag keyboard navigation for the selected→active guard.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') arrowDirRef.current = 'start'
-      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   arrowDirRef.current = 'end'
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { arrowDirRef.current = 'start'; keyboardNavRef.current = true }
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { arrowDirRef.current = 'end';   keyboardNavRef.current = true }
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
   }, [])
 
-  // Activate immediately when ProseMirror arrow-navigates onto this node (creates NodeSelection)
+  // Only auto-enter when ProseMirror creates the NodeSelection via arrow-key navigation.
+  // Mouse clicks on or near the node also create NodeSelections but should NOT auto-enter
+  // (those are handled by onClick; clicks below/above the box otherwise reopen it).
   useEffect(() => {
-    if (selected && !active) {
+    if (selected && !active && keyboardNavRef.current) {
+      keyboardNavRef.current = false
       pendingCursorRef.current = arrowDirRef.current
       setActive(true)
     }
+    if (!selected) keyboardNavRef.current = false
   }, [selected, active])
 
   const displayHtml = useMemo(() => renderFull(localLatex), [localLatex])
 
-  const commit = useCallback((src: string) => {
+  // overrideCursor=true: keyboard exit (Esc/Enter) — place cursor after this node.
+  // overrideCursor=false: blur from clicking elsewhere — let ProseMirror keep the
+  //   click-positioned selection so the user's cursor lands where they clicked.
+  const commit = useCallback((src: string, overrideCursor = true) => {
     greekRef.current = false; setGreekOn(false)
     const def = parseDefinition(src.trim())
     if (def) {
@@ -76,12 +89,18 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
     const processed = applyShorthands(src)
     updateAttributes({ latex: processed })
     setLocalLatex(processed); setActive(false); setMlReady(false)
-    // Place cursor just after this node as a text selection so ProseMirror doesn't
-    // restore a NodeSelection (which would re-trigger selected→active and reopen the box)
-    const pos = typeof getPos === 'function' ? getPos() : null
-    if (pos != null) {
-      editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+    if (overrideCursor) {
+      // Place cursor just after this node as TextSelection so ProseMirror doesn't restore
+      // a NodeSelection (which would re-trigger selected→active and reopen the box).
+      const pos = typeof getPos === 'function' ? getPos() : null
+      if (pos != null) {
+        editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+      } else {
+        editor.commands.focus()
+      }
     } else {
+      // User clicked somewhere else — their click already positioned the ProseMirror cursor.
+      // Just ensure the editor has focus without overriding the selection.
       editor.commands.focus()
     }
   }, [updateAttributes, editor, getPos, node])
@@ -103,7 +122,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
         'display:inline-block;background:transparent;border:none;',
-        'outline:none;font-size:inherit;font-family:inherit;',
+        'outline:none;font-size:1.21em;font-family:inherit;',
         'position:absolute;top:50%;transform:translateY(-50%);',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
@@ -126,10 +145,10 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         if (e.key === 'Escape') {
           e.preventDefault(); e.stopImmediatePropagation()
           if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
-          commit(mf.value); return
+          commit(mf.value, true); return
         }
         if (e.key === 'Enter') {
-          e.preventDefault(); e.stopPropagation(); commit(mf.value); return
+          e.preventDefault(); e.stopPropagation(); commit(mf.value, true); return
         }
 
         // Space: 1st = MathLive native (commits shortcuts like pi→π)
@@ -188,7 +207,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.addEventListener('blur', (e: FocusEvent) => {
         const rel = (e as any).relatedTarget as Element | null
         if (rel?.closest('[data-math-inline-box]')) return
-        if (!cancelled) commit(mf.value)
+        // Don't override cursor: user clicked somewhere else, ProseMirror already placed it.
+        if (!cancelled) commit(mf.value, false)
       })
 
       mlContainer.current.appendChild(mf)
@@ -200,7 +220,31 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       requestAnimationFrame(() => {
         if (!cancelled) {
           mf.focus()
-          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+          const click = pendingClickRef.current
+          pendingClickRef.current = null
+          let placed = false
+          if (click) {
+            // Replay the KaTeX click into MathLive's shadow DOM for precise cursor placement.
+            // Works best for simple math where KaTeX and MathLive share the same coordinates.
+            try {
+              const sr = (mf as any).shadowRoot as ShadowRoot | null
+              const target = sr?.elementFromPoint(click.clientX, click.clientY)
+              if (target) {
+                target.dispatchEvent(new PointerEvent('pointerdown', {
+                  bubbles: true, cancelable: true, composed: true,
+                  clientX: click.clientX, clientY: click.clientY, button: 0, buttons: 1,
+                }))
+                target.dispatchEvent(new PointerEvent('pointerup', {
+                  bubbles: true, cancelable: true, composed: true,
+                  clientX: click.clientX, clientY: click.clientY, button: 0,
+                }))
+                placed = true
+              }
+            } catch (_) { /* shadow DOM not accessible */ }
+          }
+          if (!placed) {
+            mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+          }
         }
       })
     })
@@ -216,11 +260,20 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
       <span
         data-math-inline-box=""
+        onMouseDown={e => {
+          // When already active, prevent the browser from moving focus away from the
+          // math-field when the user clicks in the padding area. Without this, the
+          // click blurs MathLive → commits → onClick re-activates → oscillation.
+          if (active) e.preventDefault()
+        }}
         onClick={e => {
-          // Position cursor at the start/end based on which half of the box was clicked
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-          pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
-          if (!active) setActive(true)
+          const xRatio = (e.clientX - rect.left) / rect.width
+          pendingCursorRef.current = xRatio > 0.5 ? 'end' : 'start'
+          if (!active) {
+            pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
+            setActive(true)
+          }
         }}
         style={{
           display: 'inline-grid', alignItems: 'center',

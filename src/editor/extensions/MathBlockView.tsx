@@ -46,6 +46,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
   const greekRef         = useRef(false)
   const pendingCursorRef = useRef<'start' | 'end'>('start')
   const arrowDirRef      = useRef<'start' | 'end'>('start')
+  const keyboardNavRef   = useRef(false)
 
   useEffect(() => {
     if (!active) setLocalLatex(latex)
@@ -53,23 +54,25 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') arrowDirRef.current = 'start'
-      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   arrowDirRef.current = 'end'
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { arrowDirRef.current = 'start'; keyboardNavRef.current = true }
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { arrowDirRef.current = 'end';   keyboardNavRef.current = true }
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
   }, [])
 
   useEffect(() => {
-    if (selected && !active) {
+    if (selected && !active && keyboardNavRef.current) {
+      keyboardNavRef.current = false
       pendingCursorRef.current = arrowDirRef.current
       setActive(true)
     }
+    if (!selected) keyboardNavRef.current = false
   }, [selected, active])
 
   const displayHtml = useMemo(() => renderDisplay(localLatex, align), [localLatex, align])
 
-  const commit = useCallback((src: string) => {
+  const commit = useCallback((src: string, overrideCursor = true) => {
     greekRef.current = false; setGreekOn(false)
     const def = parseDefinition(src.trim())
     if (def) {
@@ -80,9 +83,13 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
     const processed = applyShorthands(src)
     updateAttributes({ latex: processed })
     setLocalLatex(processed); setActive(false); setMlReady(false)
-    const pos = typeof getPos === 'function' ? getPos() : null
-    if (pos != null) {
-      editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+    if (overrideCursor) {
+      const pos = typeof getPos === 'function' ? getPos() : null
+      if (pos != null) {
+        editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+      } else {
+        editor.commands.focus()
+      }
     } else {
       editor.commands.focus()
     }
@@ -130,10 +137,10 @@ mf.style.cssText = [
         if (e.key === 'Escape') {
           e.preventDefault(); e.stopImmediatePropagation()
           if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
-          commit(mf.value); return
+          commit(mf.value, true); return
         }
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-          e.preventDefault(); e.stopPropagation(); commit(mf.value); return
+          e.preventDefault(); e.stopPropagation(); commit(mf.value, true); return
         }
 
         // Enter in block math → LaTeX line break
@@ -208,7 +215,7 @@ mf.style.cssText = [
       mf.addEventListener('blur', (e: FocusEvent) => {
         const rel = (e as any).relatedTarget as Element | null
         if (blockRef.current?.contains(rel)) return
-        if (!cancelled) commit(mf.value)
+        if (!cancelled) commit(mf.value, false)
       })
 
       mlContainer.current.appendChild(mf)
@@ -239,6 +246,9 @@ mf.style.cssText = [
       {/* Block — invisible when not in use; just the placeholder text */}
       <div
         ref={blockRef}
+        onMouseDown={e => {
+          if (active) e.preventDefault()
+        }}
         onClick={e => {
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
           pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
