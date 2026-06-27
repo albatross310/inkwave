@@ -1170,6 +1170,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   S
                 </span>
               </button>
+              {/* R-in-circle: references placeholder */}
+              <button
+                type="button"
+                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif text-stone-400 hover:text-[#5c2d8a]"
+                title="References (coming soon)"
+                onClick={() => {}}
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
+                  R
+                </span>
+              </button>
               <PageMenu editor={editor ?? undefined} />
               <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
               {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}

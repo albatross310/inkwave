@@ -6,10 +6,9 @@ const INK = '#5c2d8a'
 
 // Each section is an array of { k: shortcut, d: description }.
 const CYCLE: Array<{ k: string; d: string }> = [
-  { k: 'j / k',       d: 'next / prev synonym' },
+  { k: '`',            d: 'prev synonym / next red word' },
+  { k: '~',            d: 'next synonym / prev red word' },
   { k: 'space',        d: 'accept' },
-  { k: 'tab',          d: 'go back one word' },
-  { k: '⇧+tab',        d: 'go forward one word' },
   { k: 'esc',          d: 'dismiss' },
 ]
 

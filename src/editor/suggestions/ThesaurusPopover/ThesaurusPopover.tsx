@@ -348,20 +348,18 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   useEffect(() => {
     if (!editor) return
     function onKeyDown(e: KeyboardEvent) {
+      // Never intercept keys when a math field is active
+      if (document.activeElement?.tagName === 'MATH-FIELD') return
+
       if (cycle) {
-        // Don't intercept anything when a math popup (or any input/textarea) has focus.
+        // Don't intercept anything when any input/textarea has focus.
         const active = document.activeElement
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
         e.stopPropagation()
         if (e.key === 'Escape') { e.preventDefault(); cancelAnim(); closeCycle(); return }
-        if (e.key === 'j') { e.preventDefault(); nudge(-1); return }
-        if (e.key === 'k') { e.preventDefault(); nudge(+1); return }
-        if (e.key === 'Tab') {
-          e.preventDefault(); recordIgnored()
-          const found = e.shiftKey ? goNext(cycle.from) : goPrev(cycle.from)
-          if (!found) { onHintChange(null, null); setCycle(null); restoreCursor() }
-          return
-        }
+        // ` = prev synonym, ~ (shift+`) = next synonym
+        if (e.key === '`') { e.preventDefault(); nudge(-1); return }
+        if (e.key === '~') { e.preventDefault(); nudge(+1); return }
         if (e.key === ' ') {
           e.preventDefault()
           const sel = rafRef.current !== null ? targetRef.current : reelRef.current
@@ -371,14 +369,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         if (e.key === 'Enter') { e.preventDefault(); return }
         e.preventDefault(); return
       }
-      if (e.key === 'Tab') {
-        // Don't steal Tab when a math popup (or any other form input) has focus.
+      // ` = next red word, ~ = prev red word (mirrors synonym nav direction)
+      if (e.key === '`' || e.key === '~') {
         const active = document.activeElement
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
         e.preventDefault()
         if (tabCursorRef.current === null) tabCursorRef.current = editor.state.selection.from
         const cur = editor.state.selection.from
-        if (e.shiftKey) {
+        if (e.key === '~') {
           const reds = redWords()
           const t = reds.find(el => parseInt(el.dataset.para ?? '0', 10) === paragraphIndex && posOf(el, editor) >= cur)
                ?? reds.find(el => posOf(el, editor) > cur)
