@@ -283,8 +283,13 @@ mf.style.cssText = [
           }}
         />
 
-        {/* MathLive mounts here when active — margin matches .katex-display { margin: 1em 0 } */}
-        <div ref={mlContainer} style={{ display: active ? 'block' : 'none', margin: '1em 0', textAlign: align === 'left' ? 'left' : 'center' }} />
+        {/* MathLive mounts here when active — flex centres the math-field regardless of its display type;
+            margin matches .katex-display { margin: 1em 0 } so there's no vertical shift on activation */}
+        <div ref={mlContainer} style={{
+          display: active ? 'flex' : 'none',
+          justifyContent: align === 'left' ? 'flex-start' : 'center',
+          margin: '1em 0',
+        }} />
 
         {/* Greek mode indicator */}
         {greekOn && (
