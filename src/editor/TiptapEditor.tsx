@@ -1403,7 +1403,14 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
                     return (
                       <button key={o.value} type="button" title={o.title}
                         onMouseDown={e => e.preventDefault()}
-                        onClick={() => editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()}
+                        onClick={() => {
+                          // Dispatch custom event so the active math block picks it up
+                          // even when ProseMirror's selection has moved to the math-field.
+                          window.dispatchEvent(new CustomEvent('inkwave-math-align', { detail: { align: o.value } }))
+                          // Also try via Tiptap selection (fallback for when no block is active)
+                          editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()
+                          setOpen(false)
+                        }}
                         style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(155,92,204,0.22)'}`, borderRadius: '4px', background: active ? 'rgba(155,92,204,0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                       >{o.label}</button>
                     )

@@ -99,6 +99,19 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
 
   const displayHtml = useMemo(() => renderDisplay(localLatex, align), [localLatex, align])
 
+  // Alignment from the sigma menu: the menu fires a custom event so it works even
+  // when ProseMirror's selection is not on this node (math-field has focus instead).
+  // Only the active or ProseMirror-selected block responds — not all blocks on the page.
+  useEffect(() => {
+    if (!active && !selected) return
+    const handler = (e: Event) => {
+      const a = (e as CustomEvent<{ align: string }>).detail.align
+      updateAttributes({ align: a })
+    }
+    window.addEventListener('inkwave-math-align', handler)
+    return () => window.removeEventListener('inkwave-math-align', handler)
+  }, [active, selected, updateAttributes])
+
   const commit = useCallback((src: string, overrideCursor = true) => {
     greekRef.current = false; setGreekOn(false)
     const def = parseDefinition(src.trim())
@@ -392,7 +405,17 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
             When MathLive grows (new lines typed), the grid row expands naturally
             rather than overflowing a fixed absolute container. */}
         <div style={{ display: 'grid' }}>
-          <div style={{ gridArea: '1/1', visibility: active && mlReady ? 'hidden' : 'visible' }}
+          {/* For left alignment: flex-column + align-items:flex-start makes the
+              .katex-display block size to content width (not fill), so the formula
+              appears at the left edge. For center/aligned the block fills the grid
+              cell naturally and .katex-display { text-align:center } centres it. */}
+          <div style={{
+            gridArea: '1/1',
+            visibility: active && mlReady ? 'hidden' : 'visible',
+            ...(align === 'left'
+              ? { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }
+              : {}),
+          }}
             dangerouslySetInnerHTML={{
               __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
             }}
