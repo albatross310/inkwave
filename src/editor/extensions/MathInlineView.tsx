@@ -15,6 +15,7 @@ const MATHLIVE_MACROS: Record<string, string> = {
   '\\exponentialE':  'e',
   '\\differentialD': 'd',
   '\\doubleprime':   '\'\'',
+  '\\displaylines':  '\\begin{gathered}#1\\end{gathered}',
 }
 
 function renderFull(src: string): string {

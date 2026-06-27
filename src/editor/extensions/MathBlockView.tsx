@@ -12,27 +12,21 @@ const INK = '#5c2d8a'
 type Align = 'aligned' | 'center' | 'left'
 
 const MATHLIVE_MACROS: Record<string, string> = {
-  '\\imaginaryI':   'i',
-  '\\imaginaryJ':   'j',
-  '\\exponentialE': 'e',
+  '\\imaginaryI':    'i',
+  '\\imaginaryJ':    'j',
+  '\\exponentialE':  'e',
   '\\differentialD': 'd',
-  '\\doubleprime':  '\'\'',
+  '\\doubleprime':   '\'\'',
+  // MathLive stores multi-line equations as \displaylines{...}; KaTeX needs gathered
+  '\\displaylines':  '\\begin{gathered}#1\\end{gathered}',
 }
 
 function renderDisplay(latex: string, align: Align): string {
   if (!latex.trim()) return ''
   try {
     const src = applyCustomSymbols(applyShorthandsLive(latex), getSymbols())
-    let wrapped = src
-    if (!/\\begin\{/.test(src)) {
-      const hasBreaks = /\\\\/.test(src)
-      if (align === 'aligned') {
-        wrapped = `\\begin{aligned}\n${src}\n\\end{aligned}`
-      } else if (hasBreaks) {
-        // gathered centres each line without needing & markers
-        wrapped = `\\begin{gathered}\n${src}\n\\end{gathered}`
-      }
-    }
+    const wrapped = align === 'aligned' && !/\\begin\{/.test(src)
+      ? `\\begin{aligned}\n${src}\n\\end{aligned}` : src
     return katex.renderToString(wrapped, { throwOnError: false, displayMode: true, output: 'htmlAndMathml', macros: MATHLIVE_MACROS })
   } catch { return '' }
 }
