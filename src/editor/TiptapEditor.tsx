@@ -1158,6 +1158,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               <GuideMenu />
               {/* Σ-in-circle: math menu popup */}
               <MathMenuButton editor={editor} />
+              {/* R-in-circle: references placeholder */}
+              <button
+                type="button"
+                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif text-stone-400 hover:text-[#5c2d8a]"
+                title="References (coming soon)"
+                onClick={() => {}}
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
+                  R
+                </span>
+              </button>
               {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
               <button
                 type="button"
@@ -1168,17 +1179,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
                   S
-                </span>
-              </button>
-              {/* R-in-circle: references placeholder */}
-              <button
-                type="button"
-                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif text-stone-400 hover:text-[#5c2d8a]"
-                title="References (coming soon)"
-                onClick={() => {}}
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
-                  R
                 </span>
               </button>
               <PageMenu editor={editor ?? undefined} />
