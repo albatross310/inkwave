@@ -95,9 +95,9 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
-        'display:inline;background:transparent;border:none;',
+        'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:inherit;font-family:inherit;',
-        'padding:2px 0;',
+        'position:absolute;top:50%;transform:translateY(-50%);',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
@@ -239,8 +239,12 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           }}
         />
 
-        {/* MathLive mounts here when active */}
-        <span ref={mlContainer} style={{ gridArea: '1/1', display: active ? 'inline' : 'none' }} />
+        {/* MathLive mounts here when active.
+            height:0 + overflow:visible: container contributes nothing to the grid row height
+            (so the row stays at the KaTeX holder's height and surrounding text never reflows).
+            The math-field is position:absolute with top:50%+translateY(-50%) to center it
+            on the same midline as the KaTeX content. */}
+        <span ref={mlContainer} style={{ gridArea: '1/1', display: active ? 'block' : 'none', height: 0, overflow: 'visible', position: 'relative' }} />
 
         {greekOn && (
           <span style={{ position: 'absolute', top: '-0.75rem', right: '0.1rem', fontSize: '0.55rem', color: INK, fontFamily: 'ui-monospace,monospace', opacity: 0.8 }}>Gk</span>
