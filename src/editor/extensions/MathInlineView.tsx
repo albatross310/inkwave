@@ -9,13 +9,13 @@ import { loadMathLive } from './mathLiveLoader'
 
 const INK = '#5c2d8a'
 
-// MathLive stores some commands KaTeX doesn't know — map them so display never goes blank
+// MathLive stores some commands KaTeX doesn't know — map them so the fallback never goes blank
 const MATHLIVE_MACROS: Record<string, string> = {
-  '\\imaginaryI':   'i',
-  '\\imaginaryJ':   'j',
-  '\\exponentialE': 'e',
+  '\\imaginaryI':    'i',
+  '\\imaginaryJ':    'j',
+  '\\exponentialE':  'e',
   '\\differentialD': 'd',
-  '\\doubleprime':  '\'\'',
+  '\\doubleprime':   '\'\'',
 }
 
 function renderFull(src: string): string {
@@ -39,30 +39,40 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
   const mlContainer = useRef<HTMLSpanElement>(null)
   const mfRef       = useRef<any>(null)
   const greekRef    = useRef(false)
+  // track if we mounted with active=true (new empty node) so we can focus once ready
+  const startActiveRef = useRef(latex === '')
 
-  useEffect(() => {
-    if (!active) setLocalLatex(latex)
-  }, [latex, active])
-
+  // KaTeX fallback — only used while MathLive hasn't loaded yet
   const displayHtml = useMemo(() => renderFull(localLatex), [localLatex])
+
+  // When latex prop changes externally (not while we're editing), push it into MathLive
+  useEffect(() => {
+    if (active) return
+    setLocalLatex(latex)
+    if (mfRef.current) mfRef.current.value = latex
+  }, [latex, active])
 
   const commit = useCallback((src: string) => {
     greekRef.current = false; setGreekOn(false)
     const def = parseDefinition(src.trim())
     if (def) {
       setSymbol(def.key, def.latex)
-      setLocalLatex(''); setActive(false); setMlReady(false)
+      if (mfRef.current) { mfRef.current.value = ''; mfRef.current.readOnly = true }
+      setLocalLatex(''); setActive(false)
       editor.commands.focus(); return
     }
     const processed = applyShorthands(src)
     updateAttributes({ latex: processed })
-    setLocalLatex(processed); setActive(false); setMlReady(false)
+    setLocalLatex(processed)
+    if (mfRef.current) { mfRef.current.value = processed; mfRef.current.readOnly = true }
+    setActive(false)
     editor.commands.focus()
   }, [updateAttributes, editor])
 
-  // ── Mount / unmount MathLive ───────────────────────────────────────────────
+  // ── Mount MathLive ONCE and keep it mounted (toggling readOnly instead of unmounting) ──
+  // This eliminates the KaTeX→MathLive visual shift on click because the same renderer
+  // is used for both display and edit modes.
   useEffect(() => {
-    if (!active) { setMlReady(false); return }
     if (!mlContainer.current) return
 
     let cancelled = false
@@ -74,7 +84,9 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
 
       const mf = document.createElement('math-field') as any
       mf.value = localLatex
+      mf.readOnly = !startActiveRef.current  // editable only if new empty node
       mf.mathVirtualKeyboardPolicy = 'manual'
+      mf.menuItems = []  // hide built-in menu toggle (it shifts math left)
       mf.style.cssText = [
         'display:inline;background:transparent;border:none;',
         'outline:none;font-size:inherit;font-family:inherit;',
@@ -83,6 +95,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       ].join('')
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (mf.readOnly) return  // don't intercept in display mode
+
         // CapsLock hold → Greek mode while held; e.preventDefault() stops OS toggle
         if (e.code === 'CapsLock') {
           e.preventDefault()
@@ -94,7 +108,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         const greek = handleMathKey(e as any, greekRef.current)
         if (greek) { e.preventDefault(); mf.executeCommand(['insert', greek]); return }
 
-        // Escape: exit text mode if in it, otherwise commit
+        // Escape: exit text mode first, then commit
         if (e.key === 'Escape') {
           e.preventDefault(); e.stopPropagation()
           if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
@@ -104,8 +118,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
         }
 
-        // " exits text mode — stopImmediatePropagation so MathLive shadow handler
-        // never sees it and can't re-insert the " or toggle back
+        // " exits text mode; stopImmediatePropagation prevents shadow-DOM re-toggle
         if (e.key === '"' && mf.mode === 'text') {
           e.preventDefault(); e.stopImmediatePropagation()
           mf.executeCommand(['switchMode', 'math'])
@@ -113,16 +126,15 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         }
 
         // Space: 1st = MathLive native (commits shortcuts like pi→π)
-        //        2nd+ = text space (\ ); triple tap = two spaces
-        if (e.key === ' ') {
+        //        2nd = text space (\ ); 3rd = second text space; etc.
+        if (e.key === ' ' && mf.mode === 'math') {
           spaceCount++
           if (spaceCount > 1) {
-            e.preventDefault()
+            e.preventDefault(); e.stopImmediatePropagation()
             mf.executeCommand(['insert', '\\ '])
             return
           }
-          // first space: fall through to MathLive
-        } else {
+        } else if (e.key !== ' ') {
           spaceCount = 0
         }
 
@@ -134,17 +146,16 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           return
         }
 
-        // / types normally; // converts to \frac
+        // / types normally; // → \frac
         if (e.key === '/') {
           if (lastKeyWasSlash) {
             e.preventDefault()
-            mf.executeCommand(['deleteBackward'])  // remove the literal /
+            mf.executeCommand(['deleteBackward'])
             mf.executeCommand(['insert', '\\frac{#@}{#?}'])
             lastKeyWasSlash = false
             return
           }
           lastKeyWasSlash = true
-          // fall through — first / types as a literal slash
         } else {
           lastKeyWasSlash = false
         }
@@ -164,17 +175,19 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         if (e.ctrlKey || e.metaKey || e.altKey) e.stopPropagation()
       }, { capture: true })
 
-      // CapsLock released → exit Greek mode
       mf.addEventListener('keyup', (e: KeyboardEvent) => {
-        if (e.code === 'CapsLock') {
-          greekRef.current = false
-          setGreekOn(false)
+        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false); return }
+        // " exit fallback: if shadow DOM still inserted " and left us in text mode, clean up
+        if (e.key === '"' && mf.mode === 'text') {
+          mf.executeCommand(['deleteBackward'])
+          mf.executeCommand(['switchMode', 'math'])
         }
       }, { capture: true })
 
       mf.addEventListener('input', () => setLocalLatex(mf.value))
 
       mf.addEventListener('blur', (e: FocusEvent) => {
+        if (mf.readOnly) return
         const rel = (e as any).relatedTarget as Element | null
         if (rel?.closest('[data-math-inline-box]')) return
         if (!cancelled) commit(mf.value)
@@ -183,7 +196,10 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       mlContainer.current.appendChild(mf)
       mfRef.current = mf
       setMlReady(true)
-      requestAnimationFrame(() => { if (!cancelled) mf.focus() })
+
+      if (startActiveRef.current) {
+        requestAnimationFrame(() => { if (!cancelled) mf.focus() })
+      }
     })
 
     return () => {
@@ -193,17 +209,24 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       }
       mfRef.current = null
     }
-  }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Toggle readOnly when active state changes (after MathLive is mounted)
+  useEffect(() => {
+    if (!mfRef.current) return
+    if (active) {
+      mfRef.current.readOnly = false
+      requestAnimationFrame(() => mfRef.current?.focus())
+    } else {
+      mfRef.current.readOnly = true
+    }
+  }, [active])
 
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
-      {/*
-        inline-grid with both children at gridArea 1/1 makes them overlap.
-        KaTeX stays in layout (visibility:hidden) when MathLive is active so the
-        box never collapses or shifts when switching between display and edit modes.
-      */}
       <span
         data-math-inline-box=""
+        onClick={() => { if (!active) setActive(true) }}
         style={{
           display: 'inline-grid', alignItems: 'center',
           position: 'relative',
@@ -214,26 +237,19 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           border: `1px solid ${active ? INK + '66' : 'rgba(155,92,204,0.22)'}`,
         }}
       >
-        {/* KaTeX — always in layout; invisible when MathLive has taken over */}
-        <span
-          onClick={() => setActive(true)}
-          style={{
-            gridArea: '1/1',
-            visibility: active && mlReady ? 'hidden' : 'visible',
-            pointerEvents: active && mlReady ? 'none' : 'auto',
-          }}
-          dangerouslySetInnerHTML={{
-            __html: displayHtml || '<em style="opacity:0.4;font-size:0.85em">math</em>',
-          }}
-        />
+        {/* KaTeX fallback — only visible while MathLive bundle is loading */}
+        {!mlReady && (
+          <span
+            style={{ gridArea: '1/1' }}
+            dangerouslySetInnerHTML={{
+              __html: displayHtml || '<em style="opacity:0.4;font-size:0.85em">math</em>',
+            }}
+          />
+        )}
 
-        {/* MathLive mounts here — overlaps KaTeX via shared grid area */}
-        <span
-          ref={mlContainer}
-          style={{ gridArea: '1/1', display: active ? 'inline' : 'none' }}
-        />
+        {/* MathLive — mounted once; readOnly toggles between display and edit */}
+        <span ref={mlContainer} style={{ gridArea: '1/1', display: 'inline' }} />
 
-        {/* Greek mode indicator */}
         {greekOn && (
           <span style={{ position: 'absolute', top: '-0.75rem', right: '0.1rem', fontSize: '0.55rem', color: INK, fontFamily: 'ui-monospace,monospace', opacity: 0.8 }}>Gk</span>
         )}

@@ -1250,6 +1250,59 @@ const MATH_ITEMS = [
 
 const INK = '#5c2d8a'
 
+// MathLive inline shortcuts reference — type sequence then space to expand
+// [sequence, rendered symbol or name, description]
+const ML_SHORTCUT_SECTIONS: { title: string; rows: [string, string, string][] }[] = [
+  { title: 'Greek (+ space)', rows: [
+    ['alpha',   'α', ''], ['beta',    'β', ''], ['gamma',  'γ', ''], ['delta',  'δ', ''],
+    ['epsilon', 'ε', ''], ['zeta',    'ζ', ''], ['eta',    'η', ''], ['theta',  'θ', ''],
+    ['iota',    'ι', ''], ['kappa',   'κ', ''], ['lambda', 'λ', ''], ['mu',     'μ', ''],
+    ['nu',      'ν', ''], ['xi',      'ξ', ''], ['pi',     'π', ''], ['rho',    'ρ', ''],
+    ['sigma',   'σ', ''], ['tau',     'τ', ''], ['phi',    'φ', ''], ['chi',    'χ', ''],
+    ['psi',     'ψ', ''], ['omega',   'ω', ''],
+    ['Gamma',   'Γ', ''], ['Delta',   'Δ', ''], ['Theta',  'Θ', ''], ['Lambda', 'Λ', ''],
+    ['Xi',      'Ξ', ''], ['Pi',      'Π', ''], ['Sigma',  'Σ', ''], ['Phi',    'Φ', ''],
+    ['Psi',     'Ψ', ''], ['Omega',   'Ω', ''],
+  ]},
+  { title: 'Common symbols', rows: [
+    ['oo',   '∞',  'infinity'],       ['+-',  '±',  'plus-minus'],
+    ['xx',   '×',  'times'],          ['÷',   '÷',  'divide'],
+    ['~~',   '≈',  'approx'],         ['!=',  '≠',  'not equal'],
+    ['<=',   '≤',  'less or equal'],  ['>=',  '≥',  'greater or equal'],
+    ['<<',   '≪',  'much less'],      ['>>',  '≫',  'much greater'],
+    ['...',  '…',  'ellipsis'],       ['°',   '°',  'degree'],
+    ['ii',   'i',  'imaginary i'],    ['ee',  'e',  "Euler's e"],
+  ]},
+  { title: 'Arrows', rows: [
+    ['->',   '→',  ''],  ['<-',   '←',  ''],
+    ['=>',   '⇒',  ''],  ['<=>',  '⟺',  'iff'],
+    ['|->',  '↦',  'maps to'], ['uarr', '↑', ''], ['darr', '↓', ''],
+  ]},
+  { title: 'Sets & logic', rows: [
+    ['in',   '∈',  ''],  ['!in',  '∉',  ''],
+    ['uu',   '∪',  'union'],          ['nn',  '∩',  'intersect'],
+    ['sub',  '⊂',  'subset'],         ['sup', '⊃',  'superset'],
+    ['AA',   '∀',  'for all'],        ['EE',  '∃',  'exists'],
+    ['!',    '¬',  'not'],
+  ]},
+  { title: 'Calculus', rows: [
+    ['sum',   '∑',  ''],  ['int',   '∫',  ''],  ['prod',  '∏',  ''],
+    ['del',   '∂',  ''],  ['nabla', '∇',  ''],
+    ['lim',   'lim',''],  ['sqrt',  '√',  ''],
+  ]},
+  { title: 'Fractions & accents', rows: [
+    ['1/2',  '½',  ''],   ['1/3',  '⅓',  ''],  ['2/3',  '⅔',  ''],
+    ['1/4',  '¼',  ''],   ['3/4',  '¾',  ''],
+    ['bar',  'x̄',  'overline'],  ['hat', 'x̂', ''],
+    ['vec',  'x⃗',  ''],  ['dot',  'ẋ',  ''],
+  ]},
+  { title: 'Functions (expand on space)', rows: [
+    ['sin','sin',''], ['cos','cos',''], ['tan','tan',''], ['log','log',''],
+    ['ln','ln',''],   ['exp','exp',''], ['det','det',''], ['max','max',''],
+    ['min','min',''], ['gcd','gcd',''],
+  ]},
+]
+
 const ALIGN_OPTS = [
   { value: 'aligned', label: '=',  title: 'Align at =' },
   { value: 'center',  label: '⊙', title: 'Centre'     },
@@ -1358,37 +1411,50 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
               <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
               <div style={{ display: 'flex', gap: '2px' }}>
                 <div style={{ flex: 1 }}>{btn('Symbols', '…', () => { setView('symbols'); reload() })}</div>
-                <button type="button" title="Math shortcuts" onClick={() => setView('info')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.85rem', padding: '4px 8px', borderRadius: '5px' }}>ℹ</button>
+                <button type="button" title="Shortcuts" onClick={() => setView('info')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.7rem', padding: '4px 8px', borderRadius: '5px', fontFamily: 'ui-monospace,monospace' }}>shortcuts</button>
               </div>
             </>
           )}
 
           {view === 'info' && (
-            <div style={{ padding: '6px 4px 4px', minWidth: '220px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 6px', borderBottom: `1px solid ${INK}18` }}>
+            <div style={{ padding: '6px 4px 4px', minWidth: '320px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 8px', borderBottom: `1px solid ${INK}18` }}>
                 <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.8rem', padding: '0 2px' }}>←</button>
-                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>math shortcuts</span>
+                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>shortcuts</span>
               </div>
-              {([
-                ['Alt+=',          'insert inline math'],
-                ['Alt+⇧+=',        'insert block math'],
-                ['hold CapsLock',  'Greek mode while held (Gk)'],
-                ['a–z in Gk',      'α β γ δ …'],
-                ['⇧+a–z in Gk',    'Δ Φ Γ Λ …'],
-                ['Tab',            'text mode (\\text{})'],
-                ['`',              'small caps (\\textsc{})'],
-                ['/',              'literal slash'],
-                ['//',             'fraction (\\frac)'],
-                ['"name = \\cmd',  'define symbol'],
-                ['Ctrl+Q/E/L',     'block align'],
-                ['Ctrl+C',         'copy raw LaTeX'],
-              ] as [string, string][]).map(([k, d]) => (
-                <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '10px', padding: '2px 10px', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.7rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                  <span style={{ fontSize: '0.78rem', color: '#4a4035' }}>{d}</span>
+              <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '4px 0' }}>
+                {ML_SHORTCUT_SECTIONS.map(({ title, rows }) => (
+                  <div key={title} style={{ marginBottom: '10px' }}>
+                    <div style={{ padding: '4px 10px 2px', fontSize: '0.58rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{title}</div>
+                    {rows.map(([k, sym, d]) => (
+                      <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '8px', padding: '1px 10px', alignItems: 'center' }}>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.68rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                        <span style={{ fontSize: '0.85rem', color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
+                        <span style={{ fontSize: '0.72rem', color: '#a89d96' }}>{d}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <div style={{ borderTop: `1px solid ${INK}12`, marginTop: '4px', padding: '8px 10px 4px' }}>
+                  <div style={{ fontSize: '0.62rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Inkwave keys</div>
+                  {([
+                    ['hold CapsLock', 'Gk', 'Greek mode while held'],
+                    ['//',  '\\frac',  'fraction'],
+                    ['`',   '\\textsc','small caps'],
+                    ['"',   '\\text', 'enter/exit text mode'],
+                    ['space space', '·', 'text space'],
+                    ['"name=\\cmd', '', 'define custom symbol'],
+                    ['Ctrl+Q/E/L', '', 'block alignment'],
+                  ] as [string, string, string][]).map(([k, sym, d]) => (
+                    <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '8px', padding: '1px 0', alignItems: 'center' }}>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.68rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontSize: '0.78rem', color: INK, minWidth: '1.2em', textAlign: 'center', fontFamily: 'ui-monospace,monospace' }}>{sym}</span>
+                      <span style={{ fontSize: '0.72rem', color: '#a89d96' }}>{d}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           )}
 

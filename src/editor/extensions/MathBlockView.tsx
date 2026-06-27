@@ -78,6 +78,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
       const mf = document.createElement('math-field') as any
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
+      mf.menuItems = []  // hide built-in menu toggle (it shifts math left when shown)
       mf.style.cssText = [
         'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
@@ -114,23 +115,22 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           return
         }
 
-        // " exits text mode — stopImmediatePropagation so MathLive shadow handler
-        // never sees it and can't re-insert the " or toggle back
+        // " exits text mode
         if (e.key === '"' && mf.mode === 'text') {
           e.preventDefault(); e.stopImmediatePropagation()
           mf.executeCommand(['switchMode', 'math'])
           return
         }
 
-        // Space: 1st = MathLive native, 2nd+ = text space (\ )
-        if (e.key === ' ') {
+        // Space: only intercept in math mode. 1st = MathLive native; 2nd+ = text space
+        if (e.key === ' ' && mf.mode === 'math') {
           spaceCount++
           if (spaceCount > 1) {
-            e.preventDefault()
+            e.preventDefault(); e.stopImmediatePropagation()
             mf.executeCommand(['insert', '\\ '])
             return
           }
-        } else {
+        } else if (e.key !== ' ') {
           spaceCount = 0
         }
 
@@ -179,11 +179,12 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
         if (e.ctrlKey || e.metaKey || e.altKey) e.stopPropagation()
       }, { capture: true })
 
-      // CapsLock released → exit Greek mode
       mf.addEventListener('keyup', (e: KeyboardEvent) => {
-        if (e.code === 'CapsLock') {
-          greekRef.current = false
-          setGreekOn(false)
+        if (e.code === 'CapsLock') { greekRef.current = false; setGreekOn(false); return }
+        // " exit fallback: if shadow DOM re-inserted " and left us in text mode, clean up
+        if (e.key === '"' && mf.mode === 'text') {
+          mf.executeCommand(['deleteBackward'])
+          mf.executeCommand(['switchMode', 'math'])
         }
       }, { capture: true })
 

@@ -198,6 +198,12 @@
     border: none;
     background: transparent;
   }
+  /* Hide MathLive's built-in menu and keyboard toggle buttons — they push math left */
+  math-field::part(menu-toggle),
+  math-field::part(virtual-keyboard-toggle),
+  math-field::part(keyboard-toggle) {
+    display: none !important;
+  }
 
   .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
