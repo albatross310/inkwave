@@ -1,6 +1,7 @@
 import 'katex/dist/katex.min.css'
 import katex from 'katex'
 import { NodeViewWrapper } from '@tiptap/react'
+import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp } from './mathUtils'
@@ -33,24 +34,29 @@ function renderLatex(latex: string, align: Align): string {
 export function MathBlockView({ node, updateAttributes, selected, editor }: NodeViewProps) {
   const latex: string = node.attrs.latex
   const align: Align = node.attrs.align ?? 'aligned'
+  const [popupOpen, setPopupOpen] = useState(latex === '')
   const [localLatex, setLocalLatex] = useState(latex)
-  const [editing, setEditing] = useState(latex === '')
+  const blockRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
 
   useEffect(() => { setLocalLatex(latex) }, [latex])
 
   useEffect(() => {
-    if (!editing) return
-    const id = requestAnimationFrame(() => {
-      textareaRef.current?.focus()
-      textareaRef.current?.select()
-    })
-    return () => cancelAnimationFrame(id)
-  }, [editing])
+    if (latex === '' && !popupOpen) setPopupOpen(true)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (selected && !latex) setEditing(true)
-  }, [selected, latex])
+    if (popupOpen && blockRef.current) {
+      setAnchorRect(blockRef.current.getBoundingClientRect())
+    }
+  }, [popupOpen])
+
+  useEffect(() => {
+    if (!popupOpen) return
+    const id = requestAnimationFrame(() => textareaRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [popupOpen])
 
   const rendered = useMemo(() => renderLatex(localLatex, align), [localLatex, align])
 
@@ -58,33 +64,49 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
     const processed = applyShorthands(localLatex)
     updateAttributes({ latex: processed })
     setLocalLatex(processed)
-    setEditing(false)
+    setPopupOpen(false)
     editor.commands.focus()
   }
 
+  const openPopup = () => {
+    setAnchorRect(blockRef.current?.getBoundingClientRect() ?? null)
+    setPopupOpen(true)
+  }
+
+  // Position popup below the block, left-aligned with it.
+  const popupTop  = anchorRect ? anchorRect.bottom + 6 : 0
+  const popupLeft = anchorRect ? anchorRect.left       : 0
+  const popupW    = anchorRect ? Math.max(anchorRect.width, 280) : 280
+
   return (
     <NodeViewWrapper>
+      {/* Always-rendered block equation */}
       <div
+        ref={blockRef}
+        onClick={openPopup}
         style={{
           margin: '1em 0',
-          padding: '0.75em 1em',
-          border: `1px solid ${selected ? 'rgba(155,92,204,0.4)' : 'rgba(155,92,204,0.15)'}`,
+          padding: '0.6em 1em',
+          border: `1px solid ${popupOpen || selected ? 'rgba(155,92,204,0.35)' : 'rgba(155,92,204,0.12)'}`,
           borderRadius: '4px',
-          background: 'rgba(155,92,204,0.03)',
+          background: 'rgba(155,92,204,0.02)',
+          cursor: 'text',
+          textAlign: align === 'left' ? 'left' : 'center',
+          minHeight: '2.5em',
           position: 'relative',
         }}
       >
-        {/* Alignment toggle buttons */}
+        {/* Alignment buttons — visible when selected or popup open */}
         <div
           style={{
             position: 'absolute',
-            top: '0.4rem',
-            right: '0.5rem',
+            top: '0.3rem',
+            right: '0.4rem',
             display: 'flex',
             gap: '2px',
-            opacity: selected || editing ? 1 : 0,
+            opacity: selected || popupOpen ? 1 : 0,
             transition: 'opacity 0.15s',
-            pointerEvents: selected || editing ? 'auto' : 'none',
+            pointerEvents: selected || popupOpen ? 'auto' : 'none',
           }}
         >
           {ALIGN_OPTIONS.map(opt => (
@@ -92,17 +114,14 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
               key={opt.value}
               type="button"
               title={opt.title}
-              onMouseDown={e => {
-                e.preventDefault()
-                updateAttributes({ align: opt.value })
-              }}
+              onMouseDown={e => { e.preventDefault(); updateAttributes({ align: opt.value }) }}
               style={{
-                fontSize: '0.7rem',
+                fontSize: '0.68rem',
                 padding: '1px 5px',
-                border: `1px solid ${align === opt.value ? '#9b5ccc' : 'rgba(155,92,204,0.3)'}`,
+                border: `1px solid ${align === opt.value ? '#9b5ccc' : 'rgba(155,92,204,0.25)'}`,
                 borderRadius: '3px',
-                background: align === opt.value ? 'rgba(155,92,204,0.12)' : 'transparent',
-                color: align === opt.value ? '#5c2d8a' : '#9ca3af',
+                background: align === opt.value ? 'rgba(155,92,204,0.10)' : 'transparent',
+                color: align === opt.value ? '#5c2d8a' : '#b0a0b8',
                 cursor: 'pointer',
                 fontFamily: 'ui-monospace, monospace',
                 lineHeight: '1.4',
@@ -113,29 +132,40 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           ))}
         </div>
 
-        {/* Rendered equation */}
-        {!editing && (
-          <div
-            onClick={() => setEditing(true)}
-            style={{
-              cursor: 'text',
-              textAlign: align === 'left' ? 'left' : 'center',
-              minHeight: '2em',
-            }}
-            dangerouslySetInnerHTML={{
-              __html: rendered || '<em style="opacity:0.35;font-size:0.9em">Click to enter equation…</em>',
-            }}
-          />
-        )}
+        <div
+          dangerouslySetInnerHTML={{
+            __html: rendered || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
+          }}
+        />
+      </div>
 
-        {/* LaTeX textarea */}
-        {editing && (
-          <>
+      {/* Floating LaTeX editor popup */}
+      {popupOpen && createPortal(
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 190 }}
+            onMouseDown={commit}
+          />
+          <div
+            onMouseDown={e => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              left: popupLeft,
+              top: popupTop,
+              width: popupW,
+              zIndex: 200,
+              background: 'white',
+              border: '1px solid rgba(155,92,204,0.35)',
+              borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+              padding: '8px 10px',
+            }}
+          >
             <textarea
               ref={textareaRef}
               value={localLatex}
+              rows={3}
               onChange={e => setLocalLatex(e.target.value)}
-              onBlur={commit}
               onKeyDown={e => {
                 if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
                 const greek = handleMathKey(e)
@@ -150,7 +180,6 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                 if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
                   e.preventDefault(); commit(); return
                 }
-                // Plain Enter → insert LaTeX line-break \\ then newline
                 if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                   e.preventDefault()
                   const el = textareaRef.current!
@@ -162,34 +191,37 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                 e.stopPropagation()
               }}
               onKeyUp={e => { if (e.code === 'CapsLock') capsUp() }}
-              placeholder={
-                align === 'aligned'
-                  ? 'x &= 1 \\\\\ny &= 2'
-                  : 'LaTeX…'
-              }
-              rows={3}
+              placeholder={align === 'aligned' ? 'x &= 1\ny &= 2' : 'LaTeX…'}
               style={{
                 width: '100%',
                 fontFamily: 'ui-monospace, monospace',
                 fontSize: '0.85em',
-                padding: '6px 8px',
-                border: '1px solid #9b5ccc',
-                borderRadius: '3px',
+                border: 'none',
                 outline: 'none',
-                background: 'rgba(155,92,204,0.04)',
-                color: '#1a1a1a',
                 resize: 'vertical',
+                color: '#1a1a1a',
+                background: 'transparent',
               }}
             />
             {localLatex && (
               <div
-                style={{ marginTop: '0.5em', opacity: 0.7, textAlign: align === 'left' ? 'left' : 'center' }}
+                style={{
+                  marginTop: '6px',
+                  paddingTop: '6px',
+                  borderTop: '1px solid rgba(155,92,204,0.15)',
+                  textAlign: align === 'left' ? 'left' : 'center',
+                  opacity: 0.75,
+                }}
                 dangerouslySetInnerHTML={{ __html: rendered }}
               />
             )}
-          </>
-        )}
-      </div>
+            <div style={{ marginTop: '4px', fontSize: '0.68rem', color: '#b0a0b8', textAlign: 'right' }}>
+              Ctrl+Enter or click outside to confirm
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
     </NodeViewWrapper>
   )
 }
