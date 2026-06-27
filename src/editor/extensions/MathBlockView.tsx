@@ -78,8 +78,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
       const mf = document.createElement('math-field') as any
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
-      mf.menuItems = []  // hide built-in menu toggle (it shifts math left when shown)
-      mf.style.cssText = [
+mf.style.cssText = [
         'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
         '--caret-color:#5c2d8a;',
