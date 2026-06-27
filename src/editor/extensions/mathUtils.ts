@@ -1,50 +1,57 @@
 // Shared utilities for math input modes (used by MathInlineView + MathBlockView).
 
-// Lowercase Greek: maps physical key (a-z) → LaTeX command (with trailing space).
-// Activated when CapsLock is on without Shift.
+// CapsLock hold state — tracked by keydown/keyup in each math input so Greek mode
+// behaves as a held modifier rather than a toggle. Module-level because only one
+// math input is ever focused at a time.
+let capsHeld = false
+export function capsDown() { capsHeld = true }
+export function capsUp()   { capsHeld = false }
+
+// Lowercase Greek: physical key (a-z) → Unicode character.
+// KaTeX accepts Unicode Greek natively, so π renders identically to \pi.
 export const GREEK_LOWER: Record<string, string> = {
-  a: '\\alpha ',
-  b: '\\beta ',
-  c: '\\chi ',
-  d: '\\delta ',
-  e: '\\epsilon ',
-  f: '\\phi ',
-  g: '\\gamma ',
-  h: '\\eta ',
-  i: '\\iota ',
-  j: '\\varphi ',
-  k: '\\kappa ',
-  l: '\\lambda ',
-  m: '\\mu ',
-  n: '\\nu ',
-  o: 'o',
-  p: '\\pi ',
-  q: '\\theta ',
-  r: '\\rho ',
-  s: '\\sigma ',
-  t: '\\tau ',
-  u: '\\upsilon ',
-  v: '\\varepsilon ',
-  w: '\\omega ',
-  x: '\\xi ',
-  y: '\\psi ',
-  z: '\\zeta ',
+  a: 'α',
+  b: 'β',
+  c: 'χ',
+  d: 'δ',
+  e: 'ε',
+  f: 'φ',
+  g: 'γ',
+  h: 'η',
+  i: 'ι',
+  j: 'ϕ',  // variant phi (ϕ vs φ)
+  k: 'κ',
+  l: 'λ',
+  m: 'μ',
+  n: 'ν',
+  o: 'ο',
+  p: 'π',
+  q: 'θ',
+  r: 'ρ',
+  s: 'σ',
+  t: 'τ',
+  u: 'υ',
+  v: 'ϵ',  // variant epsilon (ϵ vs ε)
+  w: 'ω',
+  x: 'ξ',
+  y: 'ψ',
+  z: 'ζ',
 }
 
-// Uppercase Greek: maps key → LaTeX command. Only letters with distinct uppercase glyphs.
-// Activated when CapsLock is on WITH Shift (which reverses capslock → lowercase e.key).
+// Uppercase Greek: only letters with distinct uppercase glyphs.
+// Hold CapsLock + Shift to get uppercase.
 export const GREEK_UPPER: Record<string, string> = {
-  d: '\\Delta ',
-  f: '\\Phi ',
-  g: '\\Gamma ',
-  l: '\\Lambda ',
-  p: '\\Pi ',
-  q: '\\Theta ',
-  s: '\\Sigma ',
-  u: '\\Upsilon ',
-  w: '\\Omega ',
-  x: '\\Xi ',
-  y: '\\Psi ',
+  d: 'Δ',
+  f: 'Φ',
+  g: 'Γ',
+  l: 'Λ',
+  p: 'Π',
+  q: 'Θ',
+  s: 'Σ',
+  u: 'Υ',
+  w: 'Ω',
+  x: 'Ξ',
+  y: 'Ψ',
 }
 
 // Convert x//y → \frac{x}{y}. Strips one layer of outer parens per side:
@@ -61,13 +68,14 @@ export function applyShorthands(latex: string): string {
   )
 }
 
-// Given a React keyboard event inside a math input, returns the LaTeX string to insert
-// when CapsLock is on, or null if the key should pass through normally.
+// Given a React keyboard event inside a math input, returns the Greek character to insert
+// when CapsLock is held, or null if the key should pass through normally.
+// Call capsDown()/capsUp() from onKeyDown/onKeyUp when e.code === 'CapsLock'.
 export function handleMathKey(e: React.KeyboardEvent): string | null {
-  if (!e.getModifierState('CapsLock')) return null
+  if (!capsHeld) return null
   if (!/^Key[A-Z]$/.test(e.code)) return null
   const base = e.code.slice(3).toLowerCase() // 'KeyA' → 'a'
-  // Shift+CapsLock reverses case: e.key is lowercase → user wants uppercase Greek.
+  // With CapsLock held, Shift gives uppercase Greek; no-Shift gives lowercase.
   return e.shiftKey ? (GREEK_UPPER[base] ?? null) : (GREEK_LOWER[base] ?? null)
 }
 

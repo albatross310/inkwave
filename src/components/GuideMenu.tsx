@@ -24,9 +24,10 @@ const MATH_KEYS: Array<{ k: string; d: string }> = [
 ]
 
 const GREEK_KEYS: Array<{ k: string; d: string }> = [
-  { k: 'CapsLock + a–z',  d: 'lowercase Greek (α β γ …)' },
-  { k: 'CapsLock + ⇧',    d: 'uppercase Greek where distinct (Γ Δ Θ …)' },
-  { k: 'q → θ,  f → φ',  d: 'key assignments follow standard convention' },
+  { k: 'hold CapsLock',   d: 'Greek mode (hold, not toggle)' },
+  { k: '+ a–z',           d: 'lowercase: α β γ δ ε φ γ η ι κ λ μ ν ξ π θ ρ σ τ υ ω ψ ζ' },
+  { k: '+ ⇧',             d: 'uppercase: Γ Δ Θ Λ Π Σ Φ Υ Ξ Ψ Ω' },
+  { k: 'q → θ,  f → φ',  d: 'inserts the Unicode character, not \\theta' },
 ]
 
 const FRAC_KEYS: Array<{ k: string; d: string }> = [

@@ -3,7 +3,7 @@ import katex from 'katex'
 import { NodeViewWrapper } from '@tiptap/react'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
-import { handleMathKey, insertAtCursor, applyShorthands } from './mathUtils'
+import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp } from './mathUtils'
 
 export function MathInlineView({ node, updateAttributes, selected, editor }: NodeViewProps) {
   const latex: string = node.attrs.latex
@@ -57,25 +57,20 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           onChange={e => setLocalLatex(e.target.value)}
           onBlur={commit}
           onKeyDown={e => {
-            // CapsLock → Greek letter substitution
+            if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
             const greek = handleMathKey(e)
             if (greek) {
               e.preventDefault()
               const el = inputRef.current!
               const { value, cursor } = insertAtCursor(el, greek)
               setLocalLatex(value)
-              requestAnimationFrame(() => {
-                el.selectionStart = el.selectionEnd = cursor
-              })
+              requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = cursor })
               return
             }
-            if (e.key === 'Enter' || e.key === 'Escape') {
-              e.preventDefault()
-              commit()
-              return
-            }
+            if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); commit(); return }
             e.stopPropagation()
           }}
+          onKeyUp={e => { if (e.code === 'CapsLock') capsUp() }}
           placeholder="LaTeX…"
           style={{
             fontFamily: 'ui-monospace, monospace',

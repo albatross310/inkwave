@@ -3,7 +3,7 @@ import katex from 'katex'
 import { NodeViewWrapper } from '@tiptap/react'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
-import { handleMathKey, insertAtCursor, applyShorthands } from './mathUtils'
+import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp } from './mathUtils'
 
 type Align = 'aligned' | 'center' | 'left'
 
@@ -137,7 +137,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
               onChange={e => setLocalLatex(e.target.value)}
               onBlur={commit}
               onKeyDown={e => {
-                // CapsLock → Greek
+                if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
                 const greek = handleMathKey(e)
                 if (greek) {
                   e.preventDefault()
@@ -148,9 +148,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                   return
                 }
                 if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
-                  e.preventDefault()
-                  commit()
-                  return
+                  e.preventDefault(); commit(); return
                 }
                 // Plain Enter → insert LaTeX line-break \\ then newline
                 if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -163,6 +161,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                 }
                 e.stopPropagation()
               }}
+              onKeyUp={e => { if (e.code === 'CapsLock') capsUp() }}
               placeholder={
                 align === 'aligned'
                   ? 'x &= 1 \\\\\ny &= 2'
