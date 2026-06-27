@@ -22,6 +22,7 @@ import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/p
 import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { MathInline } from './extensions/MathInline'
 import { MathBlock } from './extensions/MathBlock'
+import { MathPasteHandler } from './extensions/MathPasteHandler'
 import { LineNumbers } from './extensions/LineNumbers'
 import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -222,6 +223,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }),
       MathInline,
       MathBlock,
+      MathPasteHandler,
       LineNumbers,
     ],
     content: doc.contentJson,
@@ -1235,15 +1237,21 @@ function deriveTitle(text: string): string {
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from './extensions/mathSymbols'
 
 const MATH_ITEMS = [
-  { label: 'Inline math',  hint: 'Ctrl+=',   action: (e: Editor) => e.commands.insertMathInline() },
-  { label: 'Block math',   hint: 'Ctrl+⇧+=', action: (e: Editor) => e.commands.insertMathBlock()  },
+  { label: 'Inline math',  hint: 'Alt+=',    action: (e: Editor) => e.commands.insertMathInline() },
+  { label: 'Block math',   hint: 'Alt+⇧+=',  action: (e: Editor) => e.commands.insertMathBlock()  },
 ] as const
 
 const INK = '#5c2d8a'
 
+const ALIGN_OPTS = [
+  { value: 'aligned', label: '=',  title: 'Align at =' },
+  { value: 'center',  label: '⊙', title: 'Centre'     },
+  { value: 'left',    label: '◁',  title: 'Left'       },
+] as const
+
 function MathMenuButton({ editor }: { editor: Editor | null }) {
   const [open, setOpen]           = useState(false)
-  const [view, setView]           = useState<'menu' | 'symbols'>('menu')
+  const [view, setView]           = useState<'menu' | 'symbols' | 'info'>('menu')
   const [symbols, setSymbols]     = useState<MathSymbol[]>([])
   const [newKey, setNewKey]       = useState('')
   const [newLatex, setNewLatex]   = useState('')
@@ -1324,8 +1332,57 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
             <>
               {MATH_ITEMS.map(item => btn(item.label, item.hint, () => { setOpen(false); if (editor) item.action(editor) }))}
               <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
-              {btn('Symbols', '…', () => { setView('symbols'); reload() })}
+              {/* Alignment — relevant when cursor is in a block math */}
+              <div style={{ padding: '2px 8px 4px' }}>
+                <div style={{ fontSize: '0.6rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>block alignment</div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {ALIGN_OPTS.map(o => {
+                    const cur = editor?.getAttributes('mathBlock').align
+                    const active = cur === o.value
+                    return (
+                      <button key={o.value} type="button" title={o.title}
+                        onClick={() => editor?.chain().focus().updateAttributes('mathBlock', { align: o.value }).run()}
+                        style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(155,92,204,0.22)'}`, borderRadius: '4px', background: active ? 'rgba(155,92,204,0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                      >{o.label}</button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
+              <div style={{ display: 'flex', gap: '2px' }}>
+                <div style={{ flex: 1 }}>{btn('Symbols', '…', () => { setView('symbols'); reload() })}</div>
+                <button type="button" title="Math shortcuts" onClick={() => setView('info')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.85rem', padding: '4px 8px', borderRadius: '5px' }}>ℹ</button>
+              </div>
             </>
+          )}
+
+          {view === 'info' && (
+            <div style={{ padding: '6px 4px 4px', minWidth: '220px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 6px', borderBottom: `1px solid ${INK}18` }}>
+                <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.8rem', padding: '0 2px' }}>←</button>
+                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>math shortcuts</span>
+              </div>
+              {([
+                ['Alt+=',          'insert inline math'],
+                ['Alt+⇧+=',        'insert block math'],
+                ['CapsLock',       'toggle Greek mode (Gk)'],
+                ['a–z in Gk',      'α β γ δ …'],
+                ['⇧+a–z in Gk',    'Δ Φ Γ Λ …'],
+                ['Tab',            'text mode (\\text{})'],
+                ['`',              'small caps (\\textsc{})'],
+                ['/',              'inline fraction'],
+                ['//',             'fraction'],
+                ['"name = \\cmd',  'define symbol'],
+                ['Ctrl+Q/E/L',     'block align'],
+                ['Ctrl+C',         'copy raw LaTeX'],
+              ] as [string, string][]).map(([k, d]) => (
+                <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '10px', padding: '2px 10px', alignItems: 'center' }}>
+                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.7rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                  <span style={{ fontSize: '0.78rem', color: '#4a4035' }}>{d}</span>
+                </div>
+              ))}
+            </div>
           )}
 
           {view === 'symbols' && (

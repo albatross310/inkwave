@@ -1,30 +1,11 @@
-// Shared math-mode utilities. Uses a KBEvent interface so functions accept
-// both React.KeyboardEvent and native DOM KeyboardEvent (needed for MathLive).
+// Shared math-mode utilities for MathLive views.
+// Greek mode is a component-local toggle (CapsLock tap-to-toggle) — not module-level,
+// so the OS CapsLock state is never affected. handleMathKey takes greekMode as param.
 
 interface KBEvent {
   code: string
   key: string
   shiftKey: boolean
-  getModifierState(key: string): boolean
-}
-
-// ── CapsLock state machine ────────────────────────────────────────────────────
-// Module-level — safe because only one math input is active at a time.
-let capsHeld         = false
-let capsStateOnEntry: boolean | null = null
-
-export function capsDown() { capsHeld = true }
-export function capsUp()   { capsHeld = false }
-
-export function initCapsTracking(e: KBEvent) {
-  if (capsStateOnEntry === null && e.code !== 'CapsLock') {
-    capsStateOnEntry = e.getModifierState('CapsLock')
-  }
-}
-
-export function resetCapsTracking() {
-  capsStateOnEntry = null
-  capsHeld = false
 }
 
 // ── Greek maps ────────────────────────────────────────────────────────────────
@@ -42,8 +23,10 @@ export const GREEK_UPPER: Record<string, string> = {
   q: 'Θ', s: 'Σ', u: 'Υ', w: 'Ω', x: 'Ξ', y: 'Ψ',
 }
 
-export function handleMathKey(e: KBEvent): string | null {
-  if (!capsHeld) return null
+// Returns the Greek character to insert, or null.
+// greekMode is passed by the component (component-local ref, not module state).
+export function handleMathKey(e: KBEvent, greekMode: boolean): string | null {
+  if (!greekMode) return null
   if (!/^Key[A-Z]$/.test(e.code)) return null
   const base = e.code.slice(3).toLowerCase()
   return e.shiftKey ? (GREEK_UPPER[base] ?? null) : (GREEK_LOWER[base] ?? null)

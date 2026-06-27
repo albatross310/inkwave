@@ -25,17 +25,16 @@ const MATH: Array<{ k: string; d: string }> = [
 ]
 
 const GREEK: Array<{ k: string; d: string }> = [
-  { k: 'hold CapsLock', d: 'Greek mode' },
-  { k: '+ a–z',          d: 'lowercase Greek' },
-  { k: '+ Shift + a–z',  d: 'uppercase Greek' },
-  { k: 'Tab',            d: 'normal text font (\\text{…}); second Tab closes' },
-  { k: '`',              d: 'small caps (second ` closes)' },
+  { k: 'CapsLock',        d: 'toggle Greek mode (Gk shows in box)' },
+  { k: 'a–z',             d: 'lowercase Greek (α β γ δ …)' },
+  { k: 'Shift + a–z',     d: 'uppercase Greek (Δ Φ Γ Λ …)' },
+  { k: 'Tab',             d: 'text mode (\\text{}); second Tab exits' },
+  { k: '`',               d: 'small caps (\\textsc{})' },
 ]
 
 const FRAC: Array<{ k: string; d: string }> = [
-  { k: 'x // y',          d: 'fraction' },
-  { k: '(x+1) // (y-2)',  d: 'fraction (parens stripped)' },
-  { k: '((x)) // ((y))',  d: 'fraction (parens kept)' },
+  { k: '/',               d: 'inline fraction (stays small)' },
+  { k: '//',              d: 'fraction (adapts to display context)' },
 ]
 
 const ALIGN: Array<{ k: string; d: string }> = [
