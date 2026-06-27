@@ -77,10 +77,11 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
       ].join('')
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
+        // CapsLock hold → Greek mode while held; e.preventDefault() stops OS toggle
         if (e.code === 'CapsLock') {
           e.preventDefault()
-          greekRef.current = !greekRef.current
-          setGreekOn(greekRef.current)
+          greekRef.current = true
+          setGreekOn(true)
           return
         }
 
@@ -116,20 +117,20 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           return
         }
 
-        // / → \tfrac,  // → \frac
+        // / types normally; // converts to \frac
         if (e.key === '/') {
-          e.preventDefault()
           if (lastKeyWasSlash) {
-            mf.executeCommand('undo')
+            e.preventDefault()
+            mf.executeCommand(['deleteBackward'])  // remove the literal /
             mf.executeCommand(['insert', '\\frac{#@}{#?}'])
             lastKeyWasSlash = false
-          } else {
-            mf.executeCommand(['insert', '\\tfrac{#@}{#?}'])
-            lastKeyWasSlash = true
+            return
           }
-          return
+          lastKeyWasSlash = true
+          // fall through — first / types as a literal slash
+        } else {
+          lastKeyWasSlash = false
         }
-        lastKeyWasSlash = false
 
         // Block alignment shortcuts
         if (e.ctrlKey && !e.metaKey) {
@@ -151,6 +152,14 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
         }
 
         if (e.ctrlKey || e.metaKey || e.altKey) e.stopPropagation()
+      }, { capture: true })
+
+      // CapsLock released → exit Greek mode
+      mf.addEventListener('keyup', (e: KeyboardEvent) => {
+        if (e.code === 'CapsLock') {
+          greekRef.current = false
+          setGreekOn(false)
+        }
       }, { capture: true })
 
       mf.addEventListener('input', () => setLocalLatex(mf.value))

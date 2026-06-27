@@ -25,11 +25,11 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
   const [active,     setActive]     = useState(latex === '')
   const [localLatex, setLocalLatex] = useState(latex)
   const [mlReady,    setMlReady]    = useState(false)
-  const [greekOn,    setGreekOn]    = useState(false)  // CapsLock toggle indicator
+  const [greekOn,    setGreekOn]    = useState(false)
 
   const mlContainer = useRef<HTMLSpanElement>(null)
   const mfRef       = useRef<any>(null)
-  const greekRef    = useRef(false)  // for use inside keydown closure
+  const greekRef    = useRef(false)
 
   useEffect(() => {
     if (!active) setLocalLatex(latex)
@@ -73,31 +73,29 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       ].join('')
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
-        // CapsLock: tap to toggle Greek mode — e.preventDefault() keeps OS state unchanged
+        // CapsLock hold → Greek mode while held; e.preventDefault() stops OS toggle
         if (e.code === 'CapsLock') {
           e.preventDefault()
-          greekRef.current = !greekRef.current
-          setGreekOn(greekRef.current)
+          greekRef.current = true
+          setGreekOn(true)
           return
         }
 
-        // Greek mode: letter keys → Greek characters
         const greek = handleMathKey(e as any, greekRef.current)
         if (greek) { e.preventDefault(); mf.executeCommand(['insert', greek]); return }
 
-        // Escape / Enter → commit
         if (e.key === 'Escape' || e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
         }
 
-        // Tab — toggle text mode (switchMode is cleaner than inserting \text{#?})
+        // Tab — toggle text mode
         if (e.code === 'Tab') {
           e.preventDefault(); e.stopPropagation()
           mf.executeCommand(['switchMode', mf.mode === 'text' ? 'math' : 'text'])
           return
         }
 
-        // Backtick — small caps (insert \textsc{} in text mode or wrap)
+        // Backtick — small caps
         if (e.code === 'Backquote' && !e.shiftKey) {
           e.preventDefault()
           if (mf.mode === 'text') mf.executeCommand(['insert', '\\textsc{#?}'])
@@ -105,21 +103,20 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           return
         }
 
-        // / → \tfrac (inline/text-style fraction that stays small)
-        // // → \frac (regular fraction; adapts to context)
+        // / types normally; // converts to \frac
         if (e.key === '/') {
-          e.preventDefault()
           if (lastKeyWasSlash) {
-            mf.executeCommand('undo')  // undo the \tfrac from first /
+            e.preventDefault()
+            mf.executeCommand(['deleteBackward'])  // remove the literal /
             mf.executeCommand(['insert', '\\frac{#@}{#?}'])
             lastKeyWasSlash = false
-          } else {
-            mf.executeCommand(['insert', '\\tfrac{#@}{#?}'])
-            lastKeyWasSlash = true
+            return
           }
-          return
+          lastKeyWasSlash = true
+          // fall through — first / types as a literal slash
+        } else {
+          lastKeyWasSlash = false
         }
-        lastKeyWasSlash = false
 
         // Ctrl+C → copy raw LaTeX with HTML marker so paste recreates a math node
         if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
@@ -134,6 +131,14 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         }
 
         if (e.ctrlKey || e.metaKey || e.altKey) e.stopPropagation()
+      }, { capture: true })
+
+      // CapsLock released → exit Greek mode
+      mf.addEventListener('keyup', (e: KeyboardEvent) => {
+        if (e.code === 'CapsLock') {
+          greekRef.current = false
+          setGreekOn(false)
+        }
       }, { capture: true })
 
       mf.addEventListener('input', () => setLocalLatex(mf.value))
@@ -161,10 +166,16 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
 
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
+      {/*
+        inline-grid with both children at gridArea 1/1 makes them overlap.
+        KaTeX stays in layout (visibility:hidden) when MathLive is active so the
+        box never collapses or shifts when switching between display and edit modes.
+      */}
       <span
         data-math-inline-box=""
         style={{
-          display: 'inline-flex', alignItems: 'center',
+          display: 'inline-grid', alignItems: 'center',
+          position: 'relative',
           padding: '2px 4px 2px 6px', borderRadius: '5px',
           verticalAlign: 'middle', cursor: 'text',
           transition: 'background 0.1s, border-color 0.1s',
@@ -172,21 +183,28 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           border: `1px solid ${active ? INK + '66' : 'rgba(155,92,204,0.22)'}`,
         }}
       >
-        {/* KaTeX — shown until MathLive is ready */}
+        {/* KaTeX — always in layout; invisible when MathLive has taken over */}
         <span
           onClick={() => setActive(true)}
-          style={{ display: active && mlReady ? 'none' : 'inline' }}
+          style={{
+            gridArea: '1/1',
+            visibility: active && mlReady ? 'hidden' : 'visible',
+            pointerEvents: active && mlReady ? 'none' : 'auto',
+          }}
           dangerouslySetInnerHTML={{
             __html: displayHtml || '<em style="opacity:0.4;font-size:0.85em">math</em>',
           }}
         />
 
-        {/* MathLive mounts here when active */}
-        <span ref={mlContainer} style={{ display: active ? 'inline' : 'none' }} />
+        {/* MathLive mounts here — overlaps KaTeX via shared grid area */}
+        <span
+          ref={mlContainer}
+          style={{ gridArea: '1/1', display: active ? 'inline' : 'none' }}
+        />
 
         {/* Greek mode indicator */}
         {greekOn && (
-          <span style={{ fontSize: '0.6rem', color: INK, fontFamily: 'ui-monospace,monospace', padding: '0 0 0 4px', opacity: 0.7 }}>Gk</span>
+          <span style={{ position: 'absolute', top: '-0.75rem', right: '0.1rem', fontSize: '0.55rem', color: INK, fontFamily: 'ui-monospace,monospace', opacity: 0.8 }}>Gk</span>
         )}
       </span>
     </NodeViewWrapper>
