@@ -48,6 +48,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
   const pendingClickRef  = useRef<{ clientX: number; clientY: number } | null>(null)
   const arrowDirRef      = useRef<'start' | 'end'>('start')
   const keyboardNavRef   = useRef(false)
+  const exitDirRef       = useRef<'before' | 'after'>('after')
 
   useEffect(() => {
     if (!active) setLocalLatex(latex)
@@ -86,8 +87,11 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
     setLocalLatex(processed); setActive(false); setMlReady(false)
     if (overrideCursor) {
       const pos = typeof getPos === 'function' ? getPos() : null
+      const dir = exitDirRef.current
+      exitDirRef.current = 'after'
       if (pos != null) {
-        editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+        const target = dir === 'before' ? pos : pos + node.nodeSize
+        editor.chain().focus().setTextSelection(target).run()
       } else {
         editor.commands.focus()
       }
@@ -144,6 +148,11 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         }
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation(); commit(mf.value, true); return
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault(); e.stopImmediatePropagation()
+          exitDirRef.current = e.shiftKey ? 'before' : 'after'
+          commit(mf.value, true); return
         }
 
         // Enter in block math → LaTeX line break
@@ -219,6 +228,20 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         const rel = (e as any).relatedTarget as Element | null
         if (blockRef.current?.contains(rel)) return
         if (!cancelled) commit(mf.value, false)
+      })
+
+      mf.addEventListener('move-out', (e: any) => {
+        if (cancelled) return
+        const dir: string = e.detail?.direction ?? 'forward'
+        const isUp = dir === 'upward', isDown = dir === 'downward'
+        exitDirRef.current = (dir === 'backward' || isUp) ? 'before' : 'after'
+        commit(mf.value, true)
+        if (isUp || isDown) {
+          const key = isUp ? 'ArrowUp' : 'ArrowDown'
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+          }))
+        }
       })
 
       mlContainer.current.appendChild(mf)

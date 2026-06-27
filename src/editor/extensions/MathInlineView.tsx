@@ -40,6 +40,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
   const greekRef         = useRef(false)
   const pendingCursorRef = useRef<'start' | 'end'>('start')
   const arrowDirRef      = useRef<'start' | 'end'>('start')
+  // 'before': exit left/up → cursor before the node; 'after': exit right/down/Tab → cursor after
+  const exitDirRef       = useRef<'before' | 'after'>('after')
   // Set to true only when an arrow key fired immediately before a NodeSelection is created —
   // used to distinguish keyboard navigation (should auto-enter) from mouse clicks near the
   // node (which ProseMirror may also turn into a NodeSelection, but shouldn't auto-enter).
@@ -90,18 +92,17 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
     updateAttributes({ latex: processed })
     setLocalLatex(processed); setActive(false); setMlReady(false)
     if (overrideCursor) {
-      // Place cursor just after this node as TextSelection so ProseMirror doesn't restore
-      // a NodeSelection (which would re-trigger selected→active and reopen the box).
       const pos = typeof getPos === 'function' ? getPos() : null
+      const dir = exitDirRef.current
+      exitDirRef.current = 'after'
       if (pos != null) {
-        editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+        const target = dir === 'before' ? pos : pos + node.nodeSize
+        editor.chain().focus().setTextSelection(target).run()
       } else {
         editor.commands.focus()
       }
     } else {
-      // Blur from clicking elsewhere — the click already transferred focus to the editor's
-      // contenteditable (or another element). Don't call focus() which would reset the selection
-      // and require a second click to place the cursor where the user clicked.
+      // Blur from clicking elsewhere — the click already transferred focus naturally.
     }
   }, [updateAttributes, editor, getPos, node])
 
@@ -121,9 +122,10 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
+        // font-size 1.0em → matches the outer box's 0.826em scaling (same as KaTeX).
+        // At 1.21em, the formula was 21% larger than KaTeX, causing a 16px width overflow on fractions.
         'display:inline-block;width:max-content;background:transparent;border:none;',
-        'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
-        'padding:1.5px 0;', // keeps formula from clipping (removed from global CSS to avoid affecting block layout)
+        'outline:none;font-size:1.0em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
         'position:absolute;top:50%;left:0;transform:translateY(-50%);',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
@@ -150,6 +152,11 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         }
         if (e.key === 'Enter') {
           e.preventDefault(); e.stopPropagation(); commit(mf.value, true); return
+        }
+        if (e.key === 'Tab') {
+          e.preventDefault(); e.stopImmediatePropagation()
+          exitDirRef.current = e.shiftKey ? 'before' : 'after'
+          commit(mf.value, true); return
         }
 
         // Space: 1st = MathLive native (commits shortcuts like pi→π)
@@ -208,8 +215,23 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.addEventListener('blur', (e: FocusEvent) => {
         const rel = (e as any).relatedTarget as Element | null
         if (rel?.closest('[data-math-inline-box]')) return
-        // Don't override cursor: user clicked somewhere else, ProseMirror already placed it.
         if (!cancelled) commit(mf.value, false)
+      })
+
+      // Arrow keys that try to leave the math field
+      mf.addEventListener('move-out', (e: any) => {
+        if (cancelled) return
+        const dir: string = e.detail?.direction ?? 'forward'
+        const isUp = dir === 'upward', isDown = dir === 'downward'
+        exitDirRef.current = (dir === 'backward' || isUp) ? 'before' : 'after'
+        commit(mf.value, true)
+        // Up/Down: after exiting, also move one visual line in ProseMirror
+        if (isUp || isDown) {
+          const key = isUp ? 'ArrowUp' : 'ArrowDown'
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+          }))
+        }
       })
 
       mlContainer.current.appendChild(mf)
