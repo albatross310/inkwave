@@ -119,14 +119,26 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       if (cancelled || !mlContainer.current) return
 
       const mf = document.createElement('math-field') as any
+      // default-mode='inline-math' (set BEFORE value) forces TEXTSTYLE rendering — limits
+      // sit beside big operators (∑ ∫ lim) exactly as KaTeX inline does, instead of the
+      // displaystyle limits-above/below that ballooned the field height 2–3×. Must precede
+      // `value`; defaultMode only governs how the (initially empty) field renders its content.
+      mf.setAttribute('default-mode', 'inline-math')
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
-        // font-size 1.0em → matches the outer box's 0.826em scaling (same as KaTeX).
-        // At 1.21em, the formula was 21% larger than KaTeX, causing a 16px width overflow on fractions.
+        // font-size 1.21em matches KaTeX's intrinsic 1.21em self-scaling (KaTeX renders at
+        // 1.21em of the 0.826em box = 1.0em of the document base, i.e. body-text size). With
+        // inline-math mode the two engines now share textstyle metrics, so 1.21em gives
+        // pixel-exact width on the common cases (x, x², a/b, √) — vs the old 1.0em which
+        // rendered every formula at 0.826× and visibly shrank on click. The prior "1.21em
+        // overflowed fractions" note predates the visibility:hidden grid box-sizing (the box
+        // is now driven by the hidden KaTeX holder, so a wider field cannot reflow the line).
         'display:inline-block;width:max-content;background:transparent;border:none;',
-        'outline:none;font-size:1.0em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
-        'position:absolute;top:50%;left:0;transform:translateY(-50%);',
+        'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
+        // left:-1px + translateY(-50% - 1px) zero out the constant residual offsets measured
+        // between MathLive's .ML__base and KaTeX's glyph box (ML sits ~1px right / ~1px low).
+        'position:absolute;top:50%;left:-1px;transform:translateY(calc(-50% - 1px));',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
@@ -248,19 +260,23 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       requestAnimationFrame(() => {
         if (!cancelled) {
           mf.focus()
-          const click = pendingClickRef.current
-          pendingClickRef.current = null
-          if (click) {
-            const mfRect = mf.getBoundingClientRect()
-            let tx = click.clientX
-            let bias: -1 | 0 | 1 = 0
-            if (click.clientX < mfRect.left)  { tx = mfRect.left  + 2; bias = -1 }
-            if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
-            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
-            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
-            if (offset >= 0) { mf.position = offset; return }
-          }
-          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+          requestAnimationFrame(() => {
+            if (!cancelled) {
+              const click = pendingClickRef.current
+              pendingClickRef.current = null
+              if (click) {
+                const mfRect = mf.getBoundingClientRect()
+                let tx = click.clientX
+                let bias: -1 | 0 | 1 = 0
+                if (click.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
+                else if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+                const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
+                const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
+                if (offset >= 0) { mf.position = offset; return }
+              }
+              mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+            }
+          })
         }
       })
     })
@@ -278,15 +294,13 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         data-math-inline-box=""
         onMouseDown={e => {
           // When already active, prevent the browser from moving focus away from the
-          // math-field when the user clicks in the padding area. Without this, the
-          // click blurs MathLive → commits → onClick re-activates → oscillation.
-          if (active) e.preventDefault()
-        }}
-        onClick={e => {
-          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-          const xRatio = (e.clientX - rect.left) / rect.width
-          pendingCursorRef.current = xRatio > 0.5 ? 'end' : 'start'
+          // always prevent so the math-field keeps focus while active, and ProseMirror
+          // doesn't steal it when the formula is inactive.
+          e.preventDefault()
           if (!active) {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+            const xRatio = (e.clientX - rect.left) / rect.width
+            pendingCursorRef.current = xRatio > 0.5 ? 'end' : 'start'
             pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
             setActive(true)
           }

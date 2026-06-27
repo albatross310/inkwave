@@ -257,23 +257,29 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       REMOVE_SHORTCUTS.forEach(k => delete sc[k])
       mf.inlineShortcuts = sc
       setMlReady(true)
+      // Focus in the first RAF so the shadow DOM renders.
+      // Cursor placement waits for the second RAF so getOffsetFromPoint
+      // sees fully-laid-out formula dimensions (not zeros from an unrendered field).
       requestAnimationFrame(() => {
         if (!cancelled) {
           mf.focus()
-          const click = pendingClickRef.current
-          pendingClickRef.current = null
-          if (click) {
-            const mfRect = mf.getBoundingClientRect()
-            // Clamp X: clicks left/right of the formula go to line start/end.
-            let tx = click.clientX
-            let bias: -1 | 0 | 1 = 0
-            if (click.clientX < mfRect.left)  { tx = mfRect.left  + 2; bias = -1 }
-            if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
-            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
-            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
-            if (offset >= 0) { mf.position = offset; return }
-          }
-          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+          requestAnimationFrame(() => {
+            if (!cancelled) {
+              const click = pendingClickRef.current
+              pendingClickRef.current = null
+              if (click) {
+                const mfRect = mf.getBoundingClientRect()
+                let tx = click.clientX
+                let bias: -1 | 0 | 1 = 0
+                if (click.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
+                else if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+                const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
+                const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
+                if (offset >= 0) { mf.position = offset; return }
+              }
+              mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+            }
+          })
         }
       })
     })
@@ -293,12 +299,10 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       <div
         ref={blockRef}
         onMouseDown={e => {
-          if (active) e.preventDefault()
-        }}
-        onClick={e => {
-          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-          pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
+          e.preventDefault()  // always prevent ProseMirror from stealing focus
           if (!active) {
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+            pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
             pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
             setActive(true)
           }
@@ -346,7 +350,9 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           style={{
             display: active ? 'flex' : 'none',
             position: 'absolute',
-            inset: 0,
+            // Offset by blockRef's own padding so this overlay covers exactly the
+            // content box — the same area KaTeX renders inside.
+            top: '0.4em', bottom: '0.4em', left: '0.5em', right: '0.5em',
             justifyContent: align === 'left' ? 'flex-start' : 'center',
             alignItems: 'center',
           }} />
