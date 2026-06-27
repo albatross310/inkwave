@@ -1409,8 +1409,7 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
                 </div>
               </div>
               <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
-              {btn('Symbols', '…', () => { setView('symbols'); reload() })}
-              {btn('Shortcuts', '↗', () => setView('info'))}
+              {btn('Shortcuts', '', () => setView('info'))}
             </>
           )}
 
