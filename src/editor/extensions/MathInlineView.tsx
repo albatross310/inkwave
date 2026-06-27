@@ -28,7 +28,7 @@ function renderFull(src: string): string {
   } catch { return '' }
 }
 
-export function MathInlineView({ node, updateAttributes, selected, editor }: NodeViewProps) {
+export function MathInlineView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const latex: string = node.attrs.latex
 
   const [active,     setActive]     = useState(latex === '')
@@ -76,8 +76,15 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
     const processed = applyShorthands(src)
     updateAttributes({ latex: processed })
     setLocalLatex(processed); setActive(false); setMlReady(false)
-    editor.commands.focus()
-  }, [updateAttributes, editor])
+    // Place cursor just after this node as a text selection so ProseMirror doesn't
+    // restore a NodeSelection (which would re-trigger selected→active and reopen the box)
+    const pos = typeof getPos === 'function' ? getPos() : null
+    if (pos != null) {
+      editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+    } else {
+      editor.commands.focus()
+    }
+  }, [updateAttributes, editor, getPos, node])
 
   // ── Mount / unmount MathLive on activation ────────────────────────────────
   useEffect(() => {

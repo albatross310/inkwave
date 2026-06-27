@@ -31,7 +31,7 @@ function renderDisplay(latex: string, align: Align): string {
   } catch { return '' }
 }
 
-export function MathBlockView({ node, updateAttributes, selected, editor }: NodeViewProps) {
+export function MathBlockView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const latex: string = node.attrs.latex
   const align: Align  = node.attrs.align ?? 'aligned'
 
@@ -80,8 +80,13 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
     const processed = applyShorthands(src)
     updateAttributes({ latex: processed })
     setLocalLatex(processed); setActive(false); setMlReady(false)
-    editor.commands.focus()
-  }, [updateAttributes, editor])
+    const pos = typeof getPos === 'function' ? getPos() : null
+    if (pos != null) {
+      editor.chain().focus().setTextSelection(pos + node.nodeSize).run()
+    } else {
+      editor.commands.focus()
+    }
+  }, [updateAttributes, editor, getPos, node])
 
   // ── Mount / unmount MathLive ───────────────────────────────────────────────
   useEffect(() => {
@@ -101,7 +106,6 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
 mf.style.cssText = [
         'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
-        'padding:2px 0;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
