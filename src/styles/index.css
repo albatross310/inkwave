@@ -198,6 +198,8 @@
   math-field::part(container) {
     border: none;
     background: transparent;
+    padding: 0 !important;
+    margin: 0 !important;
   }
   /* Hide MathLive's built-in menu and keyboard toggle buttons — they push math left */
   math-field::part(menu-toggle),

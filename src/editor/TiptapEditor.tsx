@@ -1402,7 +1402,8 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
                     const active = cur === o.value
                     return (
                       <button key={o.value} type="button" title={o.title}
-                        onClick={() => editor?.chain().focus().updateAttributes('mathBlock', { align: o.value }).run()}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()}
                         style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(155,92,204,0.22)'}`, borderRadius: '4px', background: active ? 'rgba(155,92,204,0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                       >{o.label}</button>
                     )

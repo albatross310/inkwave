@@ -99,9 +99,9 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         editor.commands.focus()
       }
     } else {
-      // User clicked somewhere else — their click already positioned the ProseMirror cursor.
-      // Just ensure the editor has focus without overriding the selection.
-      editor.commands.focus()
+      // Blur from clicking elsewhere — the click already transferred focus to the editor's
+      // contenteditable (or another element). Don't call focus() which would reset the selection
+      // and require a second click to place the cursor where the user clicked.
     }
   }, [updateAttributes, editor, getPos, node])
 
@@ -121,9 +121,9 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
-        'display:inline-block;background:transparent;border:none;',
-        'outline:none;font-size:1.21em;font-family:inherit;',
-        'position:absolute;top:50%;transform:translateY(-50%);',
+        'display:inline-block;width:max-content;background:transparent;border:none;',
+        'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
+        'position:absolute;top:50%;left:0;transform:translateY(-50%);',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
@@ -216,6 +216,11 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       if (Array.isArray(mf.keybindings)) {
         mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
       }
+      // Remove 2-letter shortcuts that conflict with common variable products (s·h, c·h, t·h…)
+      const REMOVE_SHORTCUTS = ['sh', 'ch', 'th', 'tg', 'cth', 'ctg', 'cotg', 'lb', 'sech']
+      const sc = { ...mf.inlineShortcuts }
+      REMOVE_SHORTCUTS.forEach(k => delete sc[k])
+      mf.inlineShortcuts = sc
       setMlReady(true)
       requestAnimationFrame(() => {
         if (!cancelled) {

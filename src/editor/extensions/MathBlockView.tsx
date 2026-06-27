@@ -92,7 +92,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         editor.commands.focus()
       }
     } else {
-      editor.commands.focus()
+      // Blur from clicking elsewhere — let the click transfer focus naturally.
     }
   }, [updateAttributes, editor, getPos, node])
 
@@ -111,8 +111,10 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       const mf = document.createElement('math-field') as any
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
-mf.style.cssText = [
-        'display:inline-block;background:transparent;border:none;',
+      mf.style.cssText = [
+        // width:max-content prevents the host expanding to fill the flex container
+        // so justify-content:center actually centres it.
+        'display:inline-block;width:max-content;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
@@ -224,6 +226,11 @@ mf.style.cssText = [
       if (Array.isArray(mf.keybindings)) {
         mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
       }
+      // Remove 2-letter shortcuts that conflict with common variable products (s·h, c·h, t·h…)
+      const REMOVE_SHORTCUTS = ['sh', 'ch', 'th', 'tg', 'cth', 'ctg', 'cotg', 'lb', 'sech']
+      const sc = { ...mf.inlineShortcuts }
+      REMOVE_SHORTCUTS.forEach(k => delete sc[k])
+      mf.inlineShortcuts = sc
       setMlReady(true)
       requestAnimationFrame(() => {
         if (!cancelled) {
