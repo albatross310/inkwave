@@ -181,18 +181,23 @@
     pointer-events: none;
   }
 
-  /* Blinking cursor inside a rendered math node, tracking the source caret position. */
-  .math-cursor {
-    display: inline-block;
-    width: 2px;
-    height: 1.2em;
-    background: #5c2d8a;
-    margin: 0 4px;
-    vertical-align: -0.2em;
-    animation: mathBlink 1s step-start infinite;
-    border-radius: 1px;
+  /* MathLive field — strip default chrome, match Inkwave purple theme */
+  math-field {
+    --hue: 270;
+    --caret-color: #5c2d8a;
+    --selection-background-color: rgba(155,92,204,0.25);
+    --selection-color: inherit;
+    --contains-highlight-background-color: rgba(155,92,204,0.08);
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
   }
-  @keyframes mathBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  math-field::part(container) {
+    border: none;
+    background: transparent;
+  }
 
   .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
