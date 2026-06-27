@@ -16,7 +16,7 @@ import { PaginationExtension } from './extensions/PaginationExtension'
 import { gappedPagesEnabled } from './pageView'
 import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
-import { exportLatexDownload } from './exportLatex'
+import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
@@ -669,6 +669,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!ed) return
     exportLatexDownload(ed.getJSON() as Parameters<typeof exportLatexDownload>[0], docRef.current.title || 'inkwave')
   }
+  // Export block equations as a numbered plain-text list.
+  function exportEquations() {
+    const ed = editorRef.current
+    if (!ed) return
+    exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
+  }
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
@@ -1199,6 +1205,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onPrint={printDoc}
                 onExportPdf={exportPdf}
                 onExportLatex={exportLatex}
+                onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
               />

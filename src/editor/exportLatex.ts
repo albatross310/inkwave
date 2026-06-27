@@ -9,9 +9,9 @@
 // packages (present in TeX Live / Overleaf).
 //
 // Scope: paragraphs, headings, bold/italic/underline/strike/code, links, bullet/ordered lists,
-// blockquotes, code blocks, rules, per-block text alignment. SCAS highlighting is editor-only (a
-// decoration, not stored) so it never reaches the document. Math is STUBBED (see isMath) ready for a
-// KaTeX node; figures will need a bundle (a .tex can't carry image binaries).
+// blockquotes, code blocks, rules, per-block text alignment, mathInline ($…$) and mathBlock
+// (equation*/align* environments). SCAS highlighting is editor-only and never reaches the document.
+// Figures will need a bundle (a .tex can't carry image binaries).
 
 export interface PMNode {
   type: string
@@ -49,14 +49,25 @@ function rawText(node: PMNode): string {
   return (node.content ?? []).map(rawText).join('')
 }
 
-// ── Math (STUB) ──────────────────────────────────────────────────────────────────────────────────
-// Math isn't in the editor yet. A KaTeX extension typically adds nodes named inlineMath/blockMath
-// with the source in attrs.latex. This emits that source RAW (never escaped). Tune the attr/type
-// names to the chosen extension when math lands.
+// ── Math ─────────────────────────────────────────────────────────────────────────────────────────
+// mathInline → $…$  |  mathBlock → equation*/align*/left-aligned depending on .attrs.align
 function isMath(n: PMNode): boolean { return /math/i.test(n.type) }
 function isDisplayMath(n: PMNode): boolean { return /block|display/i.test(n.type) }
 function mathSource(n: PMNode): string {
   return String(n.attrs?.latex ?? n.attrs?.formula ?? n.attrs?.content ?? rawText(n) ?? '')
+}
+function mathBlockLatex(n: PMNode): string {
+  const src = mathSource(n)
+  const align = String(n.attrs?.align ?? 'aligned')
+  if (align === 'aligned') {
+    // Use align* so equals signs line up; the source already uses & markers.
+    const body = /\\begin\{/.test(src) ? src : src
+    return `\\begin{align*}\n${body}\n\\end{align*}\n\n`
+  }
+  if (align === 'left') {
+    return `\\begin{flalign*}\n${src} &\n\\end{flalign*}\n\n`
+  }
+  return `\\begin{equation*}\n${src}\n\\end{equation*}\n\n`
 }
 
 function applyMarks(text: string, marks?: PMNode['marks']): string {
@@ -140,7 +151,8 @@ function block(node: PMNode): string {
     case 'horizontalRule':
       return '\\begin{center}\\noindent\\rule{0.5\\textwidth}{0.4pt}\\end{center}\n\n'
     default:
-      if (isMath(node)) return `\\[${mathSource(node)}\\]\n\n` // display-math stub
+      if (isDisplayMath(node)) return mathBlockLatex(node)
+      if (isMath(node)) return `$${mathSource(node)}$\n\n`
       // Unknown container: recurse so we never silently drop text.
       return (node.content ?? []).map(block).join('')
   }
@@ -214,6 +226,7 @@ export function documentToLatex(doc: PMNode, style: LatexStyle = DEFAULT_STYLE):
     '\\usepackage{anyfontsize}', // allow the exact (non-standard) editor size below
     geometry, // page margins matched to the editor
     '\\usepackage[document]{ragged2e}', // editor text is left-aligned / ragged-right, not justified
+    '\\usepackage{amsmath}',  // align*, equation*, flalign*
     '\\usepackage[normalem]{ulem}',
     '\\usepackage{hyperref}',
     '\\usepackage{titlesec}',
@@ -236,6 +249,49 @@ export function documentToLatex(doc: PMNode, style: LatexStyle = DEFAULT_STYLE):
 
 function safeName(title?: string): string {
   return (title ?? 'inkwave').trim().replace(/[^\w.-]+/g, '_').slice(0, 80) || 'inkwave'
+}
+
+// ── Equations list export ─────────────────────────────────────────────────────────────────────────
+// Walk the doc, number every top-level block (matching LineNumbers.ts), and collect mathBlock nodes.
+// Returns a plain-text list: "  3   x^2 + y^2 = z^2"
+
+export interface EquationEntry { lineNum: number; source: string }
+
+export function extractEquations(doc: PMNode): EquationEntry[] {
+  const entries: EquationEntry[] = []
+  let lineNum = 0
+  for (const node of doc.content ?? []) {
+    lineNum++
+    if (isDisplayMath(node)) {
+      entries.push({ lineNum, source: mathSource(node) })
+    }
+  }
+  return entries
+}
+
+export function exportEquationsDownload(doc: PMNode, title?: string): void {
+  const entries = extractEquations(doc)
+  if (!entries.length) {
+    alert('No block equations in this document.')
+    return
+  }
+  const maxLen = String(entries[entries.length - 1].lineNum).length
+  const lines = [
+    `Equations — ${title || 'Inkwave document'}`,
+    '',
+    ...entries.map(({ lineNum, source }) =>
+      `${String(lineNum).padStart(maxLen)}  ${source.replace(/\n/g, ' ')}`
+    ),
+  ]
+  const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${safeName(title)}-equations.txt`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 // Trigger a .tex download of the document. `title` is used for the FILENAME only — there's no title

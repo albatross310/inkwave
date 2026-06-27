@@ -82,6 +82,7 @@ export function OptionsMenu({
   onPrint,
   onExportPdf,
   onExportLatex,
+  onExportEquations,
   googleDriveActive,
   onVerifyRecord,
 }: {
@@ -103,6 +104,7 @@ export function OptionsMenu({
   onPrint?: () => void
   onExportPdf?: () => void
   onExportLatex?: () => void
+  onExportEquations?: () => void
   googleDriveActive?: boolean
   onVerifyRecord?: () => void
 }) {
@@ -219,7 +221,7 @@ export function OptionsMenu({
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
-          {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onDone={() => setModal(null)} />}
+          {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -315,8 +317,8 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
 }
 
 // Export the finished document — a typeset PDF (server-rendered, opens in a new tab) or LaTeX source.
-function ExportPanel({ onExportPdf, onExportLatex, onDone }: {
-  onExportPdf?: () => void; onExportLatex?: () => void; onDone: () => void
+function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onDone }: {
+  onExportPdf?: () => void; onExportLatex?: () => void; onExportEquations?: () => void; onDone: () => void
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
@@ -326,6 +328,9 @@ function ExportPanel({ onExportPdf, onExportLatex, onDone }: {
       )}
       {onExportLatex && (
         <MenuButton onClick={() => { onExportLatex(); onDone() }}>∑ LaTeX<span className="block text-xs text-stone-400">a .tex source file to typeset yourself</span></MenuButton>
+      )}
+      {onExportEquations && (
+        <MenuButton onClick={() => { onExportEquations(); onDone() }}>≡ Equations<span className="block text-xs text-stone-400">block equations as a numbered list (.txt)</span></MenuButton>
       )}
     </div>
   )
