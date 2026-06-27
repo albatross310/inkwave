@@ -1377,6 +1377,7 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
         ref={btnRef}
         type="button"
         onClick={openMenu}
+        onMouseDown={e => e.preventDefault()}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
         title="Insert math"
       >
@@ -1385,7 +1386,7 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
 
       {open && createPortal(
         <div
-          onMouseDown={e => e.stopPropagation()}
+          onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: `1px solid ${INK}44`, borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '160px' }}
         >
           {view === 'menu' && (

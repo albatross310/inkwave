@@ -209,12 +209,12 @@
   /* Gap cursor: ProseMirror shows this between block nodes. Render as a vertical blinking bar
      instead of the default horizontal dash, so it looks like a normal text cursor. */
   .ProseMirror-gapcursor::after {
-    border-top: none;
-    width: 2px;
-    height: 1.1em;
-    top: -1.1em;
-    background: #5c2d8a;
-    border-radius: 1px;
+    border-top: none !important;
+    width: 2px !important;
+    height: 1.1em !important;
+    top: -1.1em !important;
+    background: #5c2d8a !important;
+    border-radius: 1px !important;
   }
 
   .ProseMirror p.is-editor-empty:first-child::before {

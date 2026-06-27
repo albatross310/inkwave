@@ -222,29 +222,13 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
           mf.focus()
           const click = pendingClickRef.current
           pendingClickRef.current = null
-          let placed = false
           if (click) {
-            // Replay the KaTeX click into MathLive's shadow DOM for precise cursor placement.
-            // Works best for simple math where KaTeX and MathLive share the same coordinates.
-            try {
-              const sr = (mf as any).shadowRoot as ShadowRoot | null
-              const target = sr?.elementFromPoint(click.clientX, click.clientY)
-              if (target) {
-                target.dispatchEvent(new PointerEvent('pointerdown', {
-                  bubbles: true, cancelable: true, composed: true,
-                  clientX: click.clientX, clientY: click.clientY, button: 0, buttons: 1,
-                }))
-                target.dispatchEvent(new PointerEvent('pointerup', {
-                  bubbles: true, cancelable: true, composed: true,
-                  clientX: click.clientX, clientY: click.clientY, button: 0,
-                }))
-                placed = true
-              }
-            } catch (_) { /* shadow DOM not accessible */ }
+            // Use MathLive's own coordinate→offset API. The saved KaTeX click coords map
+            // well since both renderers share the same midline (absolute + translateY(-50%)).
+            const offset: number = mf.getOffsetFromPoint(click.clientX, click.clientY)
+            if (offset >= 0) { mf.position = offset; return }
           }
-          if (!placed) {
-            mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
-          }
+          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
         }
       })
     })
@@ -279,7 +263,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
           display: 'inline-grid', alignItems: 'center',
           position: 'relative',
           padding: '2px 4px 2px 6px', borderRadius: '5px',
-          verticalAlign: 'middle', cursor: 'text',
+          verticalAlign: 'baseline', cursor: 'text',
+          fontSize: '0.826em',
           transition: 'background 0.1s, border-color 0.1s',
           background: active ? 'rgba(155,92,204,0.08)' : selected ? 'rgba(155,92,204,0.10)' : 'rgba(155,92,204,0.04)',
           border: `1px solid ${active ? INK + '66' : 'rgba(155,92,204,0.22)'}`,

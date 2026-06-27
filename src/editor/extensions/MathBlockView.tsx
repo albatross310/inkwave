@@ -45,6 +45,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
   const mfRef            = useRef<any>(null)
   const greekRef         = useRef(false)
   const pendingCursorRef = useRef<'start' | 'end'>('start')
+  const pendingClickRef  = useRef<{ clientX: number; clientY: number } | null>(null)
   const arrowDirRef      = useRef<'start' | 'end'>('start')
   const keyboardNavRef   = useRef(false)
 
@@ -227,6 +228,12 @@ mf.style.cssText = [
       requestAnimationFrame(() => {
         if (!cancelled) {
           mf.focus()
+          const click = pendingClickRef.current
+          pendingClickRef.current = null
+          if (click) {
+            const offset: number = mf.getOffsetFromPoint(click.clientX, click.clientY)
+            if (offset >= 0) { mf.position = offset; return }
+          }
           mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
         }
       })
@@ -252,7 +259,10 @@ mf.style.cssText = [
         onClick={e => {
           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
           pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
-          if (!active) setActive(true)
+          if (!active) {
+            pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
+            setActive(true)
+          }
         }}
         style={{
           margin: '0.5em 0', padding: '0.4em 0.5em',
@@ -273,8 +283,8 @@ mf.style.cssText = [
           }}
         />
 
-        {/* MathLive mounts here when active */}
-        <div ref={mlContainer} style={{ display: active ? 'block' : 'none' }} />
+        {/* MathLive mounts here when active — margin matches .katex-display { margin: 1em 0 } */}
+        <div ref={mlContainer} style={{ display: active ? 'block' : 'none', margin: '1em 0', textAlign: align === 'left' ? 'left' : 'center' }} />
 
         {/* Greek mode indicator */}
         {greekOn && (
