@@ -1409,11 +1409,8 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
                 </div>
               </div>
               <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
-              <div style={{ display: 'flex', gap: '2px' }}>
-                <div style={{ flex: 1 }}>{btn('Symbols', '…', () => { setView('symbols'); reload() })}</div>
-                <button type="button" title="Shortcuts" onClick={() => setView('info')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.7rem', padding: '4px 8px', borderRadius: '5px', fontFamily: 'ui-monospace,monospace' }}>shortcuts</button>
-              </div>
+              {btn('Symbols', '…', () => { setView('symbols'); reload() })}
+              {btn('Shortcuts', '↗', () => setView('info'))}
             </>
           )}
 
