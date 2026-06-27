@@ -123,6 +123,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
       mf.style.cssText = [
         'display:inline-block;width:max-content;background:transparent;border:none;',
         'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
+        'padding:1.5px 0;', // keeps formula from clipping (removed from global CSS to avoid affecting block layout)
         'position:absolute;top:50%;left:0;transform:translateY(-50%);',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',

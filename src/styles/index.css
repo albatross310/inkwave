@@ -192,7 +192,7 @@
     outline: none !important;
     box-shadow: none !important;
     background: transparent !important;
-    padding: 1.5px 0 !important; /* equalises height with KaTeX's 2px padding (MathLive content is 1px taller) */
+    padding: 0 !important;
     vertical-align: middle !important; /* prevents baseline descender space inflating line box beyond KaTeX holder height */
   }
   math-field::part(container) {

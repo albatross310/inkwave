@@ -115,7 +115,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         // width:max-content prevents the host expanding to fill the flex container
         // so justify-content:center actually centres it.
         'display:inline-block;width:max-content;background:transparent;border:none;',
-        'outline:none;font-size:1.1em;font-family:inherit;',
+        'outline:none;font-size:1.0em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
