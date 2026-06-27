@@ -6,6 +6,17 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp, capsToggleCase } from './mathUtils'
 
+function renderKatex(src: string): string {
+  if (!src.trim()) return ''
+  try {
+    return katex.renderToString(applyShorthands(src), {
+      throwOnError: false,
+      displayMode: false,
+      output: 'htmlAndMathml',
+    })
+  } catch { return '' }
+}
+
 export function MathInlineView({ node, updateAttributes, selected, editor }: NodeViewProps) {
   const latex: string = node.attrs.latex
   const [popupOpen, setPopupOpen] = useState(latex === '')
@@ -16,37 +27,22 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
 
   useEffect(() => { setLocalLatex(latex) }, [latex])
 
-  // Auto-open popup when inserted fresh (empty latex).
   useEffect(() => {
     if (latex === '' && !popupOpen) setPopupOpen(true)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Position popup when opening.
   useEffect(() => {
-    if (popupOpen && spanRef.current) {
-      setAnchorRect(spanRef.current.getBoundingClientRect())
-    }
+    if (popupOpen && spanRef.current) setAnchorRect(spanRef.current.getBoundingClientRect())
   }, [popupOpen])
 
-  // Focus input when popup opens.
   useEffect(() => {
     if (!popupOpen) return
     const id = requestAnimationFrame(() => inputRef.current?.focus())
     return () => cancelAnimationFrame(id)
   }, [popupOpen])
 
-  const rendered = useMemo(() => {
-    if (!localLatex.trim()) return ''
-    try {
-      return katex.renderToString(localLatex, {
-        throwOnError: false,
-        displayMode: false,
-        output: 'htmlAndMathml',
-      })
-    } catch {
-      return ''
-    }
-  }, [localLatex])
+  // Apply shorthands live for rendering only — textarea keeps raw source.
+  const rendered = useMemo(() => renderKatex(localLatex), [localLatex])
 
   const commit = () => {
     const processed = applyShorthands(localLatex)
@@ -57,11 +53,11 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
   }
 
   const popupY = anchorRect ? anchorRect.bottom + 6 : 0
-  const popupX = anchorRect ? anchorRect.left : 0
+  const popupX = anchorRect ? anchorRect.left       : 0
 
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
-      {/* Always-rendered equation — click to open LaTeX popup */}
+      {/* Always-rendered equation in the editor — click to open popup */}
       <span
         ref={spanRef}
         onClick={() => {
@@ -73,19 +69,20 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           cursor: 'text',
           padding: '0 2px',
           borderRadius: '2px',
-          background: selected ? 'rgba(155,92,204,0.12)' : 'transparent',
-          outline: popupOpen ? '1px solid rgba(155,92,204,0.4)' : 'none',
+          background: selected ? 'rgba(155,92,204,0.10)' : 'transparent',
+          outline: popupOpen ? '1px solid rgba(155,92,204,0.35)' : 'none',
           transition: 'background 0.1s',
         }}
-        dangerouslySetInnerHTML={{
+      >
+        <span dangerouslySetInnerHTML={{
           __html: rendered || '<em style="opacity:0.4;font-size:0.85em">math</em>',
-        }}
-      />
+        }} />
+        {popupOpen && <span className="math-cursor" aria-hidden="true" />}
+      </span>
 
-      {/* LaTeX edit popup */}
+      {/* Floating LaTeX source popup */}
       {popupOpen && createPortal(
         <>
-          {/* Backdrop — click outside closes */}
           <div
             style={{ position: 'fixed', inset: 0, zIndex: 190 }}
             onMouseDown={commit}
@@ -102,7 +99,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
               borderRadius: '6px',
               boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
               padding: '6px 8px',
-              minWidth: '200px',
+              minWidth: '180px',
             }}
           >
             <input
@@ -111,12 +108,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
               onChange={e => setLocalLatex(e.target.value)}
               onKeyDown={e => {
                 if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
-                if (e.key === 'Tab') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  capsToggleCase()
-                  return
-                }
+                if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); capsToggleCase(); return }
                 const greek = handleMathKey(e)
                 if (greek) {
                   e.preventDefault()
@@ -141,12 +133,6 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
                 background: 'transparent',
               }}
             />
-            {localLatex && (
-              <div
-                style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(155,92,204,0.15)', fontSize: '0.85em', opacity: 0.7 }}
-                dangerouslySetInnerHTML={{ __html: rendered }}
-              />
-            )}
           </div>
         </>,
         document.body,

@@ -37,9 +37,9 @@ const FRAC_KEYS: Array<{ k: string; d: string }> = [
 ]
 
 const BLOCK_ALIGN: Array<{ k: string; d: string }> = [
-  { k: '= button',  d: 'align at equals (use & before each =)' },
-  { k: '⊙ button',  d: 'centred display' },
-  { k: '◁ button',  d: 'left aligned' },
+  { k: 'Ctrl+Q  / =',  d: 'align at equals (use & before each =)' },
+  { k: 'Ctrl+E  / ⊙',  d: 'centred display' },
+  { k: 'Ctrl+L  / ◁',  d: 'left aligned' },
 ]
 
 function Section({ title, rows }: { title: string; rows: Array<{ k: string; d: string }> }) {

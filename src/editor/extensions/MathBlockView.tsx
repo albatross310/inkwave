@@ -8,35 +8,34 @@ import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp, capsT
 
 type Align = 'aligned' | 'center' | 'left'
 
-const ALIGN_OPTIONS: { value: Align; label: string; title: string }[] = [
-  { value: 'aligned', label: '=',  title: 'Align at equals (use & before =)' },
-  { value: 'center',  label: '⊙', title: 'Centre' },
-  { value: 'left',    label: '◁',  title: 'Left align' },
+const ALIGN_OPTIONS: { value: Align; label: string; title: string; shortcut: string }[] = [
+  { value: 'aligned', label: '=',  title: 'Align at equals',  shortcut: 'Ctrl+Q' },
+  { value: 'center',  label: '⊙', title: 'Centre',           shortcut: 'Ctrl+E' },
+  { value: 'left',    label: '◁',  title: 'Left align',       shortcut: 'Ctrl+L' },
 ]
 
 function renderLatex(latex: string, align: Align): string {
   if (!latex.trim()) return ''
   try {
-    let src = latex
-    if (align === 'aligned' && !/\\begin\{/.test(latex)) {
-      src = `\\begin{aligned}\n${latex}\n\\end{aligned}`
+    const src = applyShorthands(latex)
+    let wrapped = src
+    if (align === 'aligned' && !/\\begin\{/.test(src)) {
+      wrapped = `\\begin{aligned}\n${src}\n\\end{aligned}`
     }
-    return katex.renderToString(src, {
+    return katex.renderToString(wrapped, {
       throwOnError: false,
       displayMode: true,
       output: 'htmlAndMathml',
     })
-  } catch {
-    return ''
-  }
+  } catch { return '' }
 }
 
 export function MathBlockView({ node, updateAttributes, selected, editor }: NodeViewProps) {
   const latex: string = node.attrs.latex
-  const align: Align = node.attrs.align ?? 'aligned'
-  const [popupOpen, setPopupOpen] = useState(latex === '')
+  const align: Align  = node.attrs.align ?? 'aligned'
+  const [popupOpen, setPopupOpen]   = useState(latex === '')
   const [localLatex, setLocalLatex] = useState(latex)
-  const blockRef = useRef<HTMLDivElement>(null)
+  const blockRef    = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
 
@@ -47,9 +46,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (popupOpen && blockRef.current) {
-      setAnchorRect(blockRef.current.getBoundingClientRect())
-    }
+    if (popupOpen && blockRef.current) setAnchorRect(blockRef.current.getBoundingClientRect())
   }, [popupOpen])
 
   useEffect(() => {
@@ -58,6 +55,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
     return () => cancelAnimationFrame(id)
   }, [popupOpen])
 
+  // Apply shorthands live for rendering; textarea keeps raw source.
   const rendered = useMemo(() => renderLatex(localLatex, align), [localLatex, align])
 
   const commit = () => {
@@ -73,7 +71,6 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
     setPopupOpen(true)
   }
 
-  // Position popup below the block, left-aligned with it.
   const popupTop  = anchorRect ? anchorRect.bottom + 6 : 0
   const popupLeft = anchorRect ? anchorRect.left       : 0
   const popupW    = anchorRect ? Math.max(anchorRect.width, 280) : 280
@@ -96,7 +93,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           position: 'relative',
         }}
       >
-        {/* Alignment buttons — visible when selected or popup open */}
+        {/* Alignment buttons */}
         <div
           style={{
             position: 'absolute',
@@ -113,7 +110,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
             <button
               key={opt.value}
               type="button"
-              title={opt.title}
+              title={`${opt.title} (${opt.shortcut})`}
               onMouseDown={e => { e.preventDefault(); updateAttributes({ align: opt.value }) }}
               style={{
                 fontSize: '0.68rem',
@@ -132,14 +129,13 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           ))}
         </div>
 
-        <div
-          dangerouslySetInnerHTML={{
-            __html: rendered || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
-          }}
-        />
+        <div dangerouslySetInnerHTML={{
+          __html: rendered || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
+        }} />
+        {popupOpen && <span className="math-cursor" style={{ display: 'inline-block', marginTop: '0.3em' }} aria-hidden="true" />}
       </div>
 
-      {/* Floating LaTeX editor popup */}
+      {/* Floating LaTeX source popup */}
       {popupOpen && createPortal(
         <>
           <div
@@ -168,12 +164,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
               onChange={e => setLocalLatex(e.target.value)}
               onKeyDown={e => {
                 if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
-                if (e.key === 'Tab') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  capsToggleCase()
-                  return
-                }
+                if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); capsToggleCase(); return }
                 const greek = handleMathKey(e)
                 if (greek) {
                   e.preventDefault()
@@ -186,6 +177,13 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                 if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
                   e.preventDefault(); commit(); return
                 }
+                // Alignment shortcuts
+                if (e.ctrlKey && !e.shiftKey && !e.metaKey) {
+                  if (e.key === 'q' || e.key === 'Q') { e.preventDefault(); updateAttributes({ align: 'aligned' }); return }
+                  if (e.key === 'e' || e.key === 'E') { e.preventDefault(); updateAttributes({ align: 'center' });  return }
+                  if (e.key === 'l' || e.key === 'L') { e.preventDefault(); updateAttributes({ align: 'left' });    return }
+                }
+                // Plain Enter → LaTeX line break
                 if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                   e.preventDefault()
                   const el = textareaRef.current!
@@ -209,21 +207,6 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
                 background: 'transparent',
               }}
             />
-            {localLatex && (
-              <div
-                style={{
-                  marginTop: '6px',
-                  paddingTop: '6px',
-                  borderTop: '1px solid rgba(155,92,204,0.15)',
-                  textAlign: align === 'left' ? 'left' : 'center',
-                  opacity: 0.75,
-                }}
-                dangerouslySetInnerHTML={{ __html: rendered }}
-              />
-            )}
-            <div style={{ marginTop: '4px', fontSize: '0.68rem', color: '#b0a0b8', textAlign: 'right' }}>
-              Ctrl+Enter or click outside to confirm
-            </div>
           </div>
         </>,
         document.body,
