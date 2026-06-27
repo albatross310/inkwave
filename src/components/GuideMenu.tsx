@@ -27,7 +27,8 @@ const GREEK: Array<{ k: string; d: string }> = [
   { k: 'hold CapsLock',  d: 'Greek mode while held (Gk shows in box)' },
   { k: 'a–z',             d: 'lowercase Greek (α β γ δ …)' },
   { k: 'Shift + a–z',     d: 'uppercase Greek (Δ Φ Γ Λ …)' },
-  { k: 'Tab',             d: 'text mode (\\text{}); second Tab exits' },
+  { k: '"',               d: 'toggle text mode (\\text{}); " again to exit' },
+  { k: 'Esc',             d: 'exit text mode (or close the math box)' },
   { k: '`',               d: 'small caps (\\textsc{})' },
 ]
 

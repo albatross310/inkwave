@@ -36,12 +36,32 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
   const [mlReady,    setMlReady]    = useState(false)
   const [greekOn,    setGreekOn]    = useState(false)
 
-  const mlContainer = useRef<HTMLSpanElement>(null)
-  const greekRef    = useRef(false)
+  const mlContainer      = useRef<HTMLSpanElement>(null)
+  const greekRef         = useRef(false)
+  const pendingCursorRef = useRef<'start' | 'end'>('start')
+  const arrowDirRef      = useRef<'start' | 'end'>('start')
 
   useEffect(() => {
     if (!active) { setLocalLatex(latex) }
   }, [latex, active])
+
+  // Track which arrow direction navigated onto this node so we can place the cursor correctly
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') arrowDirRef.current = 'start'
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   arrowDirRef.current = 'end'
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Activate immediately when ProseMirror arrow-navigates onto this node (creates NodeSelection)
+  useEffect(() => {
+    if (selected && !active) {
+      pendingCursorRef.current = arrowDirRef.current
+      setActive(true)
+    }
+  }, [selected, active])
 
   const displayHtml = useMemo(() => renderFull(localLatex), [localLatex])
 
@@ -77,9 +97,15 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       mf.style.cssText = [
         'display:inline;background:transparent;border:none;',
         'outline:none;font-size:inherit;font-family:inherit;',
+        'padding:2px 0;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
+
+      // Remove MathLive's own " binding so we can use it as a text-mode toggle ourselves
+      if (Array.isArray(mf.keybindings)) {
+        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
+      }
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.code === 'CapsLock') {
@@ -89,8 +115,14 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         const greek = handleMathKey(e as any, greekRef.current)
         if (greek) { e.preventDefault(); mf.executeCommand(['insert', greek]); return }
 
+        // " toggles text / math mode (we own this key; MathLive's binding is removed above)
+        if (e.key === '"') {
+          e.preventDefault(); e.stopImmediatePropagation()
+          mf.executeCommand(['switchMode', mf.mode === 'text' ? 'math' : 'text']); return
+        }
+
         if (e.key === 'Escape') {
-          e.preventDefault(); e.stopPropagation()
+          e.preventDefault(); e.stopImmediatePropagation()
           if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
           commit(mf.value); return
         }
@@ -159,7 +191,12 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
 
       mlContainer.current.appendChild(mf)
       setMlReady(true)
-      requestAnimationFrame(() => { if (!cancelled) mf.focus() })
+      requestAnimationFrame(() => {
+        if (!cancelled) {
+          mf.focus()
+          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+        }
+      })
     })
 
     return () => {
@@ -173,7 +210,12 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
       <span
         data-math-inline-box=""
-        onClick={() => { if (!active) setActive(true) }}
+        onClick={e => {
+          // Position cursor at the start/end based on which half of the box was clicked
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+          pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
+          if (!active) setActive(true)
+        }}
         style={{
           display: 'inline-grid', alignItems: 'center',
           position: 'relative',
@@ -184,10 +226,12 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           border: `1px solid ${active ? INK + '66' : 'rgba(155,92,204,0.22)'}`,
         }}
       >
-        {/* KaTeX — always in layout via visibility:hidden so the box doesn't shift when MathLive mounts */}
+        {/* KaTeX — always in layout via visibility:hidden so the box doesn't shift when MathLive mounts.
+            padding:2px 0 matches MathLive's own padding so both occupy the same grid-cell height. */}
         <span
           style={{
             gridArea: '1/1',
+            padding: '2px 0',
             visibility: active && mlReady ? 'hidden' : 'visible',
             pointerEvents: active && mlReady ? 'none' : 'auto',
           }}

@@ -40,14 +40,32 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
   const [mlReady,    setMlReady]    = useState(false)
   const [greekOn,    setGreekOn]    = useState(false)
 
-  const blockRef    = useRef<HTMLDivElement>(null)
-  const mlContainer = useRef<HTMLDivElement>(null)
-  const mfRef       = useRef<any>(null)
-  const greekRef    = useRef(false)
+  const blockRef         = useRef<HTMLDivElement>(null)
+  const mlContainer      = useRef<HTMLDivElement>(null)
+  const mfRef            = useRef<any>(null)
+  const greekRef         = useRef(false)
+  const pendingCursorRef = useRef<'start' | 'end'>('start')
+  const arrowDirRef      = useRef<'start' | 'end'>('start')
 
   useEffect(() => {
     if (!active) setLocalLatex(latex)
   }, [latex, active])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') arrowDirRef.current = 'start'
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   arrowDirRef.current = 'end'
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  useEffect(() => {
+    if (selected && !active) {
+      pendingCursorRef.current = arrowDirRef.current
+      setActive(true)
+    }
+  }, [selected, active])
 
   const displayHtml = useMemo(() => renderDisplay(localLatex, align), [localLatex, align])
 
@@ -83,9 +101,14 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
 mf.style.cssText = [
         'display:inline-block;background:transparent;border:none;',
         'outline:none;font-size:1.1em;font-family:inherit;',
+        'padding:2px 0;',
         '--caret-color:#5c2d8a;',
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
+
+      if (Array.isArray(mf.keybindings)) {
+        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
+      }
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
         // CapsLock hold → Greek mode while held; e.preventDefault() stops OS toggle
@@ -99,9 +122,13 @@ mf.style.cssText = [
         const greek = handleMathKey(e as any, greekRef.current)
         if (greek) { e.preventDefault(); mf.executeCommand(['insert', greek]); return }
 
-        // Escape: exit text mode if in it, otherwise commit
+        if (e.key === '"') {
+          e.preventDefault(); e.stopImmediatePropagation()
+          mf.executeCommand(['switchMode', mf.mode === 'text' ? 'math' : 'text']); return
+        }
+
         if (e.key === 'Escape') {
-          e.preventDefault(); e.stopPropagation()
+          e.preventDefault(); e.stopImmediatePropagation()
           if (mf.mode === 'text') { mf.executeCommand(['switchMode', 'math']); return }
           commit(mf.value); return
         }
@@ -187,7 +214,12 @@ mf.style.cssText = [
       mlContainer.current.appendChild(mf)
       mfRef.current = mf
       setMlReady(true)
-      requestAnimationFrame(() => { if (!cancelled) mf.focus() })
+      requestAnimationFrame(() => {
+        if (!cancelled) {
+          mf.focus()
+          mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
+        }
+      })
     })
 
     return () => {
@@ -204,7 +236,11 @@ mf.style.cssText = [
       {/* Block — invisible when not in use; just the placeholder text */}
       <div
         ref={blockRef}
-        onClick={() => { if (!active) setActive(true) }}
+        onClick={e => {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+          pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
+          if (!active) setActive(true)
+        }}
         style={{
           margin: '0.5em 0', padding: '0.4em 0.5em',
           position: 'relative', cursor: 'text',
