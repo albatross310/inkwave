@@ -114,6 +114,18 @@ export function OptionsMenu({
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [installPrompt, setInstallPrompt] = useState<any>(null)
+
+  useEffect(() => {
+    const onPrompt = (e: Event) => { e.preventDefault(); setInstallPrompt(e) }
+    const onInstalled = () => setInstallPrompt(null)
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
 
   // Clicking the sync pill (SyncStatus) opens this Save menu.
   useEffect(() => {
@@ -166,6 +178,16 @@ export function OptionsMenu({
     { label: 'Verify a record', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
   ]
+  if (installPrompt) {
+    items.push({
+      label: 'Install app…',
+      run: async () => {
+        installPrompt.prompt()
+        const { outcome } = await (installPrompt as any).userChoice
+        if (outcome === 'accepted') setInstallPrompt(null)
+      },
+    })
+  }
   if (import.meta.env.DEV) {
     const on = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'
     items.push({
