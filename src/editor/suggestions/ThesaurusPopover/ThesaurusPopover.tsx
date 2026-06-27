@@ -349,6 +349,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (!editor) return
     function onKeyDown(e: KeyboardEvent) {
       if (cycle) {
+        // Don't intercept anything when a math popup (or any input/textarea) has focus.
+        const active = document.activeElement
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
         e.stopPropagation()
         if (e.key === 'Escape') { e.preventDefault(); cancelAnim(); closeCycle(); return }
         if (e.key === 'j') { e.preventDefault(); nudge(-1); return }
@@ -369,6 +372,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         e.preventDefault(); return
       }
       if (e.key === 'Tab') {
+        // Don't steal Tab when a math popup (or any other form input) has focus.
+        const active = document.activeElement
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
         e.preventDefault()
         if (tabCursorRef.current === null) tabCursorRef.current = editor.state.selection.from
         const cur = editor.state.selection.from

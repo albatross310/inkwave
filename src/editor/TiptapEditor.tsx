@@ -1232,24 +1232,35 @@ function deriveTitle(text: string): string {
 
 // ─── Math menu popup ─────────────────────────────────────────────────────────
 
+import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from './extensions/mathSymbols'
+
 const MATH_ITEMS = [
-  { label: 'Inline math',  hint: 'Ctrl+=',       action: (e: Editor) => e.commands.insertMathInline() },
-  { label: 'Block math',   hint: 'Ctrl+⇧+=',     action: (e: Editor) => e.commands.insertMathBlock()  },
+  { label: 'Inline math',  hint: 'Ctrl+=',   action: (e: Editor) => e.commands.insertMathInline() },
+  { label: 'Block math',   hint: 'Ctrl+⇧+=', action: (e: Editor) => e.commands.insertMathBlock()  },
 ] as const
 
+const INK = '#5c2d8a'
+
 function MathMenuButton({ editor }: { editor: Editor | null }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]           = useState(false)
+  const [view, setView]           = useState<'menu' | 'symbols'>('menu')
+  const [symbols, setSymbols]     = useState<MathSymbol[]>([])
+  const [newKey, setNewKey]       = useState('')
+  const [newLatex, setNewLatex]   = useState('')
   const btnRef = useRef<HTMLButtonElement>(null)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const [pos, setPos]             = useState({ x: 0, y: 0 })
+
+  const reload = () => setSymbols(getSymbols())
 
   const openMenu = useCallback(() => {
     if (!btnRef.current) return
     const r = btnRef.current.getBoundingClientRect()
     setPos({ x: r.left + r.width / 2, y: r.top })
+    reload()
+    setView('menu')
     setOpen(true)
   }, [])
 
-  // Close on outside click or scroll
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
@@ -1257,6 +1268,40 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
     window.addEventListener('scroll', close, { passive: true })
     return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close) }
   }, [open])
+
+  // Listen for symbol changes from the math input boxes.
+  useEffect(() => {
+    const handler = () => reload()
+    window.addEventListener('inkwave-symbols-changed', handler)
+    return () => window.removeEventListener('inkwave-symbols-changed', handler)
+  }, [])
+
+  const addSymbol = () => {
+    if (!newKey.trim() || !newLatex.trim()) return
+    saveSymbol(newKey.trim(), newLatex.trim())
+    setNewKey('')
+    setNewLatex('')
+    reload()
+  }
+
+  const removeSymbol = (key: string) => {
+    deleteSymbol(key)
+    reload()
+  }
+
+  const btn = (label: string, hint: string, onClick: () => void) => (
+    <button
+      key={label}
+      type="button"
+      onClick={onClick}
+      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '6px 10px', borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', gap: '16px', textAlign: 'left' }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    >
+      <span style={{ fontSize: '0.9rem', color: '#3a3330' }}>{label}</span>
+      <span style={{ fontSize: '0.7rem', color: '#a89d96', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{hint}</span>
+    </button>
+  )
 
   return (
     <>
@@ -1267,57 +1312,82 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
         title="Insert math"
       >
-        <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>
-          Σ
-        </span>
+        <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>Σ</span>
       </button>
 
       {open && createPortal(
         <div
           onMouseDown={e => e.stopPropagation()}
-          style={{
-            position: 'fixed',
-            left: pos.x,
-            top: pos.y - 8,
-            transform: 'translate(-50%, -100%)',
-            background: 'white',
-            border: '1px solid rgba(92,45,138,0.25)',
-            borderRadius: '8px',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
-            padding: '4px',
-            zIndex: 200,
-            minWidth: '160px',
-          }}
+          style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: `1px solid ${INK}44`, borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '160px' }}
         >
-          {MATH_ITEMS.map(item => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => {
-                setOpen(false)
-                if (!editor) return
-                item.action(editor)
-              }}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                width: '100%',
-                padding: '6px 10px',
-                borderRadius: '5px',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                gap: '16px',
-                textAlign: 'left',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              <span style={{ fontSize: '0.9rem', color: '#3a3330' }}>{item.label}</span>
-              <span style={{ fontSize: '0.7rem', color: '#a89d96', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{item.hint}</span>
-            </button>
-          ))}
+          {view === 'menu' && (
+            <>
+              {MATH_ITEMS.map(item => btn(item.label, item.hint, () => { setOpen(false); if (editor) item.action(editor) }))}
+              <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
+              {btn('Symbols', '…', () => { setView('symbols'); reload() })}
+            </>
+          )}
+
+          {view === 'symbols' && (
+            <div style={{ padding: '6px 4px 4px' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 6px', borderBottom: `1px solid ${INK}18` }}>
+                <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.8rem', padding: '0 2px' }}>←</button>
+                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>symbols</span>
+              </div>
+
+              {/* User-defined symbols */}
+              <div style={{ maxHeight: '180px', overflowY: 'auto', padding: '4px 0' }}>
+                {symbols.length === 0 && (
+                  <div style={{ padding: '6px 10px', fontSize: '0.8rem', color: '#c0b8b0', fontStyle: 'italic' }}>none yet</div>
+                )}
+                {symbols.map(s => (
+                  <div key={s.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 8px', gap: '8px' }}>
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', color: INK }}>{s.key}</span>
+                    <span style={{ fontSize: '0.75rem', color: '#7a6e65', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.latex}</span>
+                    <button type="button" onClick={() => removeSymbol(s.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0b8b0', fontSize: '0.85rem', padding: '0 2px' }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Presets */}
+              <div style={{ borderTop: `1px solid ${INK}12`, padding: '4px 0' }}>
+                <div style={{ padding: '2px 8px', fontSize: '0.62rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.06em' }}>presets</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '4px 8px' }}>
+                  {PRESETS.map(p => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      title={p.latex}
+                      onClick={() => { saveSymbol(p.key, p.latex); reload() }}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', border: `1px solid ${symbols.some(s => s.key === p.key) ? INK : 'rgba(155,92,204,0.2)'}`, borderRadius: '4px', background: symbols.some(s => s.key === p.key) ? 'rgba(155,92,204,0.10)' : 'transparent', color: symbols.some(s => s.key === p.key) ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                    >{p.key}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add new */}
+              <div style={{ borderTop: `1px solid ${INK}12`, padding: '6px 8px 2px', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <input
+                  value={newKey}
+                  onChange={e => setNewKey(e.target.value)}
+                  placeholder="key"
+                  onKeyDown={e => { if (e.key === 'Enter') addSymbol() }}
+                  style={{ width: '56px', fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
+                />
+                <span style={{ color: '#b0a898', fontSize: '0.8rem' }}>=</span>
+                <input
+                  value={newLatex}
+                  onChange={e => setNewLatex(e.target.value)}
+                  placeholder="LaTeX"
+                  onKeyDown={e => { if (e.key === 'Enter') addSymbol() }}
+                  style={{ flex: 1, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
+                />
+                <button type="button" onClick={addSymbol}
+                  style={{ background: INK, color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '0.78rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>+</button>
+              </div>
+            </div>
+          )}
         </div>,
         document.body,
       )}
