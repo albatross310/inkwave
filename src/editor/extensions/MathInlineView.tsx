@@ -4,7 +4,7 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
-import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp } from './mathUtils'
+import { handleMathKey, insertAtCursor, applyShorthands, capsDown, capsUp, capsToggleCase } from './mathUtils'
 
 export function MathInlineView({ node, updateAttributes, selected, editor }: NodeViewProps) {
   const latex: string = node.attrs.latex
@@ -111,6 +111,12 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
               onChange={e => setLocalLatex(e.target.value)}
               onKeyDown={e => {
                 if (e.code === 'CapsLock') { capsDown(); e.preventDefault(); return }
+                if (e.key === 'Tab') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  capsToggleCase()
+                  return
+                }
                 const greek = handleMathKey(e)
                 if (greek) {
                   e.preventDefault()

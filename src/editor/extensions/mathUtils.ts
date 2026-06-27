@@ -3,9 +3,13 @@
 // CapsLock hold state — tracked by keydown/keyup in each math input so Greek mode
 // behaves as a held modifier rather than a toggle. Module-level because only one
 // math input is ever focused at a time.
-let capsHeld = false
-export function capsDown() { capsHeld = true }
-export function capsUp()   { capsHeld = false }
+// capsUppercase: toggled by Tab while CapsLock is held (Tab = shift between lower/upper Greek).
+// Resets to false when CapsLock is released.
+let capsHeld     = false
+let capsUppercase = false
+export function capsDown()       { capsHeld = true }
+export function capsUp()         { capsHeld = false; capsUppercase = false }
+export function capsToggleCase() { if (capsHeld) capsUppercase = !capsUppercase }
 
 // Lowercase Greek: physical key (a-z) → Unicode character.
 // KaTeX accepts Unicode Greek natively, so π renders identically to \pi.
@@ -71,12 +75,12 @@ export function applyShorthands(latex: string): string {
 // Given a React keyboard event inside a math input, returns the Greek character to insert
 // when CapsLock is held, or null if the key should pass through normally.
 // Call capsDown()/capsUp() from onKeyDown/onKeyUp when e.code === 'CapsLock'.
+// Call capsToggleCase() when Tab is pressed while capsHeld (Tab toggles lower/upper Greek).
 export function handleMathKey(e: React.KeyboardEvent): string | null {
   if (!capsHeld) return null
   if (!/^Key[A-Z]$/.test(e.code)) return null
   const base = e.code.slice(3).toLowerCase() // 'KeyA' → 'a'
-  // With CapsLock held, Shift gives uppercase Greek; no-Shift gives lowercase.
-  return e.shiftKey ? (GREEK_UPPER[base] ?? null) : (GREEK_LOWER[base] ?? null)
+  return capsUppercase ? (GREEK_UPPER[base] ?? null) : (GREEK_LOWER[base] ?? null)
 }
 
 // Insert `text` at the current cursor position of a controlled input/textarea.
