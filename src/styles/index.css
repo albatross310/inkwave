@@ -156,6 +156,24 @@
     contain: layout;
   }
 
+  /* Global line numbers — widget spans injected by LineNumbers extension.
+     Positioned in the right margin; right-aligned so 1, 10, 100 share a column edge.
+     The paragraph's `contain: layout` makes it the absolute-positioning context;
+     paint overflows into the margin (no `contain: paint`). */
+  .inkwave-line-num {
+    position: absolute;
+    right: -2.8rem;
+    top: 0;
+    width: 2.2rem;
+    text-align: right;
+    font-size: 0.68rem;
+    color: #c4b9ae;
+    font-family: ui-monospace, 'Cascadia Code', 'Courier New', monospace;
+    line-height: var(--inkwave-lh, 1.618);
+    user-select: none;
+    pointer-events: none;
+  }
+
   .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     float: left;

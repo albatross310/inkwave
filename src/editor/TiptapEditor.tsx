@@ -19,6 +19,9 @@ import { exportLatexDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
+import { MathInline } from './extensions/MathInline'
+import { MathBlock } from './extensions/MathBlock'
+import { LineNumbers } from './extensions/LineNumbers'
 import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
@@ -216,6 +219,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         getHintState: () => hintStateRef.current,
         getScasLookup: () => scasRef.current!.lookup(),
       }),
+      MathInline,
+      MathBlock,
+      LineNumbers,
     ],
     content: doc.contentJson,
     editorProps: {
@@ -1155,6 +1161,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
                   S
+                </span>
+              </button>
+              {/* Σ-in-circle: insert inline math (or block math on an empty paragraph) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!editor) return
+                  const { $from } = editor.state.selection
+                  const node = $from.node()
+                  if (node.type.name === 'paragraph' && node.textContent === '') {
+                    editor.chain()
+                      .deleteRange({ from: $from.before(), to: $from.after() })
+                      .insertMathBlock()
+                      .run()
+                  } else {
+                    editor.commands.insertMathInline()
+                  }
+                }}
+                className="flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors text-stone-400 hover:text-[#5c2d8a]"
+                title="Insert math (Ctrl+=)"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>
+                  Σ
                 </span>
               </button>
               <PageMenu editor={editor ?? undefined} />
