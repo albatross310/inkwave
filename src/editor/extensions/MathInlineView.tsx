@@ -94,6 +94,13 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
         }
 
+        // " exits text mode (mirrors MathLive's " to enter text mode)
+        if (e.key === '"' && mf.mode === 'text') {
+          e.preventDefault()
+          mf.executeCommand(['switchMode', 'math'])
+          return
+        }
+
         // Space in math mode → \ (text space) and stay in math mode
         if (e.key === ' ' && mf.mode === 'math') {
           e.preventDefault()

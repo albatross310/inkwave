@@ -105,6 +105,13 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           return
         }
 
+        // " exits text mode (mirrors MathLive's " to enter text mode)
+        if (e.key === '"' && mf.mode === 'text') {
+          e.preventDefault()
+          mf.executeCommand(['switchMode', 'math'])
+          return
+        }
+
         // Space in math mode → \ (text space), stay in math mode
         if (e.key === ' ' && mf.mode === 'math') {
           e.preventDefault()
