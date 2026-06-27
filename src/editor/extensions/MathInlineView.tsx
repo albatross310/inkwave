@@ -102,11 +102,6 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
 
-      // Remove MathLive's own " binding so we can use it as a text-mode toggle ourselves
-      if (Array.isArray(mf.keybindings)) {
-        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
-      }
-
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.code === 'CapsLock') {
           e.preventDefault(); greekRef.current = true; setGreekOn(true); return
@@ -190,6 +185,10 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
       })
 
       mlContainer.current.appendChild(mf)
+      // Must be after appendChild — setting keybindings before DOM connection crashes the element
+      if (Array.isArray(mf.keybindings)) {
+        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
+      }
       setMlReady(true)
       requestAnimationFrame(() => {
         if (!cancelled) {

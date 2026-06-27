@@ -106,10 +106,6 @@ mf.style.cssText = [
         '--selection-background-color:rgba(155,92,204,0.25);',
       ].join('')
 
-      if (Array.isArray(mf.keybindings)) {
-        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
-      }
-
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
         // CapsLock hold → Greek mode while held; e.preventDefault() stops OS toggle
         if (e.code === 'CapsLock') {
@@ -213,6 +209,9 @@ mf.style.cssText = [
 
       mlContainer.current.appendChild(mf)
       mfRef.current = mf
+      if (Array.isArray(mf.keybindings)) {
+        mf.keybindings = mf.keybindings.filter((kb: any) => kb.key !== '"')
+      }
       setMlReady(true)
       requestAnimationFrame(() => {
         if (!cancelled) {
