@@ -67,6 +67,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
 
     let cancelled = false
     let lastKeyWasSlash = false
+    let spaceCount = 0
 
     loadMathLive().then(() => {
       if (cancelled || !mlContainer.current) return
@@ -103,13 +104,27 @@ export function MathInlineView({ node, updateAttributes, selected, editor }: Nod
           e.preventDefault(); e.stopPropagation(); commit(mf.value); return
         }
 
-        // " exits text mode (mirrors MathLive's " to enter text mode)
+        // " exits text mode — stopImmediatePropagation so MathLive shadow handler
+        // never sees it and can't re-insert the " or toggle back
         if (e.key === '"' && mf.mode === 'text') {
-          e.preventDefault()
+          e.preventDefault(); e.stopImmediatePropagation()
           mf.executeCommand(['switchMode', 'math'])
           return
         }
 
+        // Space: 1st = MathLive native (commits shortcuts like pi→π)
+        //        2nd+ = text space (\ ); triple tap = two spaces
+        if (e.key === ' ') {
+          spaceCount++
+          if (spaceCount > 1) {
+            e.preventDefault()
+            mf.executeCommand(['insert', '\\ '])
+            return
+          }
+          // first space: fall through to MathLive
+        } else {
+          spaceCount = 0
+        }
 
         // Backtick — small caps
         if (e.code === 'Backquote' && !e.shiftKey) {

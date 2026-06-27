@@ -70,6 +70,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
 
     let cancelled = false
     let lastKeyWasSlash = false
+    let spaceCount = 0
 
     loadMathLive().then(() => {
       if (cancelled || !mlContainer.current) return
@@ -113,11 +114,24 @@ export function MathBlockView({ node, updateAttributes, selected, editor }: Node
           return
         }
 
-        // " exits text mode (mirrors MathLive's " to enter text mode)
+        // " exits text mode — stopImmediatePropagation so MathLive shadow handler
+        // never sees it and can't re-insert the " or toggle back
         if (e.key === '"' && mf.mode === 'text') {
-          e.preventDefault()
+          e.preventDefault(); e.stopImmediatePropagation()
           mf.executeCommand(['switchMode', 'math'])
           return
+        }
+
+        // Space: 1st = MathLive native, 2nd+ = text space (\ )
+        if (e.key === ' ') {
+          spaceCount++
+          if (spaceCount > 1) {
+            e.preventDefault()
+            mf.executeCommand(['insert', '\\ '])
+            return
+          }
+        } else {
+          spaceCount = 0
         }
 
         // Backtick — small caps
