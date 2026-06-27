@@ -52,6 +52,7 @@ import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
+import { InstallPromptBanner } from '../components/InstallPromptBanner'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
 import { setDocSource, getDocSource } from '../storage/docSource'
@@ -152,6 +153,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // editor focus, whose blur doesn't fire on iOS when the keyboard is dismissed (which left
   // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
   const [keyboardUp, setKeyboardUp] = useState(false)
+  // PWA install prompt — captured here so both OptionsMenu and InstallPromptBanner can use it.
+  const [installPrompt, setInstallPrompt] = useState<any>(null)
+  useEffect(() => {
+    const onPrompt = (e: Event) => { e.preventDefault(); setInstallPrompt(e) }
+    const onInstalled = () => setInstallPrompt(null)
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
+
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
   const [styleBarOpen, setStyleBarOpen] = useState(false)
   const styleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1197,6 +1211,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               )}
               <OptionsMenu
                 paperRight={paperRight}
+                installPrompt={installPrompt}
                 onExportBundle={exportBundle}
                 onSave={saveRecord}
                 onSaveAs={fileSaveAvailable() ? saveAsFile : undefined}
@@ -1218,6 +1233,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
               />
+              <InstallPromptBanner installPrompt={installPrompt} />
             </div>
             )}
           </div>

@@ -65,6 +65,7 @@ async function createDocument(title: string, contentJson: InkwaveDocument['conte
 
 export function OptionsMenu({
   paperRight,
+  installPrompt,
   onExportBundle,
   onSave,
   onSaveAs,
@@ -87,6 +88,7 @@ export function OptionsMenu({
   onVerifyRecord,
 }: {
   paperRight: number
+  installPrompt?: any
   onExportBundle?: () => void
   onSave?: () => void
   onSaveAs?: () => void
@@ -114,19 +116,6 @@ export function OptionsMenu({
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [installPrompt, setInstallPrompt] = useState<any>(null)
-
-  useEffect(() => {
-    const onPrompt = (e: Event) => { e.preventDefault(); setInstallPrompt(e) }
-    const onInstalled = () => setInstallPrompt(null)
-    window.addEventListener('beforeinstallprompt', onPrompt)
-    window.addEventListener('appinstalled', onInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt)
-      window.removeEventListener('appinstalled', onInstalled)
-    }
-  }, [])
-
   // Clicking the sync pill (SyncStatus) opens this Save menu.
   useEffect(() => {
     const open = () => { setMenuOpen(false); setModal('save') }
@@ -184,7 +173,7 @@ export function OptionsMenu({
       run: async () => {
         installPrompt.prompt()
         const { outcome } = await (installPrompt as any).userChoice
-        if (outcome === 'accepted') setInstallPrompt(null)
+        if (outcome === 'accepted') { /* parent clears prompt via appinstalled event */ }
       },
     })
   }
