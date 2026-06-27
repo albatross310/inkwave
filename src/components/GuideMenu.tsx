@@ -28,7 +28,7 @@ const GREEK: Array<{ k: string; d: string }> = [
   { k: 'hold CapsLock', d: 'Greek mode' },
   { k: '+ a–z',          d: 'lowercase Greek' },
   { k: '+ Shift + a–z',  d: 'uppercase Greek' },
-  { k: 'hold Tab',        d: 'normal letters while in Greek mode' },
+  { k: 'Tab',            d: 'normal text font (\\text{…}); second Tab closes' },
   { k: '`',              d: 'small caps (second ` closes)' },
 ]
 
