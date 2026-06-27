@@ -11,6 +11,30 @@ const INK = '#5c2d8a'
 
 type Align = 'aligned' | 'center' | 'left'
 
+// Snap the click to the center of the nearest KaTeX leaf glyph so that
+// getOffsetFromPoint maps clicks inside the formula to the right character.
+// Without this, clicks on wide atoms (fractions, large operators) map poorly
+// because MathLive's geometry doesn't perfectly match KaTeX's glyph box.
+function nearestKaTeXCenter(
+  container: HTMLElement | null,
+  cx: number,
+  cy: number,
+): { x: number; y: number } | null {
+  const root = container?.querySelector('.katex-html')
+  if (!root) return null
+  let best: { x: number; y: number } | null = null
+  let bestDist = Infinity
+  for (const span of (root as Element).querySelectorAll('span')) {
+    if (span.querySelector('span')) continue  // skip non-leaf containers
+    const r = span.getBoundingClientRect()
+    if (r.width < 0.5) continue
+    const sx = r.left + r.width / 2, sy = r.top + r.height / 2
+    const dist = (cx - sx) ** 2 + (cy - sy) ** 2
+    if (dist < bestDist) { bestDist = dist; best = { x: sx, y: sy } }
+  }
+  return best
+}
+
 const MATHLIVE_MACROS: Record<string, string> = {
   '\\imaginaryI':    'i',
   '\\imaginaryJ':    'j',
@@ -48,7 +72,8 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
   const pendingClickRef  = useRef<{ clientX: number; clientY: number } | null>(null)
   const arrowDirRef      = useRef<'start' | 'end'>('start')
   const keyboardNavRef   = useRef(false)
-  const exitDirRef       = useRef<'before' | 'after'>('after')
+  const exitDirRef         = useRef<'before' | 'after'>('after')
+  const pendingPointerIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!active) setLocalLatex(latex)
@@ -257,23 +282,50 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       REMOVE_SHORTCUTS.forEach(k => delete sc[k])
       mf.inlineShortcuts = sc
       setMlReady(true)
-      // Focus in the first RAF so the shadow DOM renders.
-      // Cursor placement waits for the second RAF so getOffsetFromPoint
-      // sees fully-laid-out formula dimensions (not zeros from an unrendered field).
+      // First RAF: focus (shadow DOM renders) + transfer pointer capture for drag-select.
+      // Second RAF: accurate cursor placement — getOffsetFromPoint needs a fully-laid-out
+      // field; the first RAF gives MathLive one frame to compute glyph geometry.
       requestAnimationFrame(() => {
         if (!cancelled) {
           mf.focus()
+          // Snapshot click now (before second RAF consumes pendingClickRef) for capture.
+          const clickForCapture = pendingClickRef.current
+          // Transfer pointer capture so the user can drag-select in one gesture:
+          // setPointerCapture routes pointermove/pointerup to mf; the synthetic
+          // pointerdown anchors MathLive's selection at the original click position.
+          const pid = pendingPointerIdRef.current
+          if (pid != null && clickForCapture) {
+            pendingPointerIdRef.current = null
+            try {
+              mf.setPointerCapture(pid)
+              mf.dispatchEvent(new PointerEvent('pointerdown', {
+                clientX: clickForCapture.clientX, clientY: clickForCapture.clientY,
+                bubbles: false, cancelable: false,
+                pointerId: pid, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1,
+              }))
+            } catch { /* pointer may have been released already */ }
+          }
           requestAnimationFrame(() => {
             if (!cancelled) {
               const click = pendingClickRef.current
               pendingClickRef.current = null
               if (click) {
                 const mfRect = mf.getBoundingClientRect()
-                let tx = click.clientX
+                let tx = click.clientX, ty = click.clientY
                 let bias: -1 | 0 | 1 = 0
-                if (click.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
-                else if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
-                const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
+                if (click.clientX < mfRect.left) {
+                  tx = mfRect.left + 2; bias = -1
+                  ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, ty))
+                } else if (click.clientX > mfRect.right) {
+                  tx = mfRect.right - 2; bias = 1
+                  ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, ty))
+                } else {
+                  // Click landed on the formula — snap to the nearest KaTeX glyph centre
+                  // so getOffsetFromPoint maps to the right character even for fractions.
+                  const snapped = nearestKaTeXCenter(blockRef.current, click.clientX, click.clientY)
+                  if (snapped) { tx = snapped.x; ty = snapped.y }
+                  else ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, ty))
+                }
                 const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
                 if (offset >= 0) { mf.position = offset; return }
               }
@@ -304,13 +356,28 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
             pendingCursorRef.current = (e.clientX - rect.left) > rect.width / 2 ? 'end' : 'start'
             pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
+            pendingPointerIdRef.current = (e.nativeEvent as PointerEvent).pointerId ?? 1
             setActive(true)
           }
+        }}
+        onClick={e => {
+          // Handle whitespace clicks while active: clicks outside the formula area
+          // (left/right margin, above/below) move the cursor to the nearest line end.
+          const mf = mfRef.current
+          if (!active || !mf) return
+          const mfRect = mf.getBoundingClientRect()
+          if (e.clientX >= mfRect.left && e.clientX <= mfRect.right
+            && e.clientY >= mfRect.top  && e.clientY <= mfRect.bottom) return
+          let tx = e.clientX, bias: -1 | 0 | 1 = 0
+          if (e.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
+          else if (e.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+          const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, e.clientY))
+          const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
+          if (offset >= 0) { mf.position = offset; mf.focus() }
         }}
         style={{
           margin: '0.5em 0', padding: '0.4em 0.5em',
           position: 'relative', cursor: 'text',
-          textAlign: align === 'left' ? 'left' : 'center',
           minHeight: '1.8em',
           // Only show border/background when active or selected
           border: `1px solid ${active || selected ? `${INK}55` : 'transparent'}`,
@@ -319,43 +386,24 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           transition: 'border-color 0.12s, background 0.12s',
         }}
       >
-        {/* KaTeX — always in layout (visibility:hidden when MathLive is ready) so the
-            block height never changes during the KaTeX ↔ MathLive swap */}
-        <div style={{ visibility: active && mlReady ? 'hidden' : 'visible' }}
-          dangerouslySetInnerHTML={{
-            __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
-          }}
-        />
-
-        {/* MathLive: absolutely overlaid on top of the KaTeX area so the block's
-            layout height is always driven by the KaTeX div above.
-            onClick handles clicks in the padding area around the formula (while active)
-            so that clicking left/right of any formula line moves the cursor correctly. */}
-        <div ref={mlContainer}
-          onClick={e => {
-            const mf = mfRef.current
-            if (!mf) return
-            const mfRect = mf.getBoundingClientRect()
-            // If click landed on the formula itself, let MathLive handle it.
-            if (e.clientX >= mfRect.left && e.clientX <= mfRect.right
-              && e.clientY >= mfRect.top  && e.clientY <= mfRect.bottom) return
-            let tx = e.clientX
-            let bias: -1 | 0 | 1 = 0
-            if (e.clientX < mfRect.left)       { tx = mfRect.left  + 2; bias = -1 }
-            else if (e.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
-            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, e.clientY))
-            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
-            if (offset >= 0) { mf.position = offset; mf.focus() }
-          }}
-          style={{
+        {/* CSS Grid stack — KaTeX and MathLive share gridArea 1/1 so they occupy
+            exactly the same box. KaTeX (visibility:hidden when active) always drives
+            the grid row height; MathLive overlays at the same centering reference.
+            When MathLive grows (new lines typed), the grid row expands naturally
+            rather than overflowing a fixed absolute container. */}
+        <div style={{ display: 'grid' }}>
+          <div style={{ gridArea: '1/1', visibility: active && mlReady ? 'hidden' : 'visible' }}
+            dangerouslySetInnerHTML={{
+              __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
+            }}
+          />
+          <div ref={mlContainer} style={{
+            gridArea: '1/1',
             display: active ? 'flex' : 'none',
-            position: 'absolute',
-            // Offset by blockRef's own padding so this overlay covers exactly the
-            // content box — the same area KaTeX renders inside.
-            top: '0.4em', bottom: '0.4em', left: '0.5em', right: '0.5em',
             justifyContent: align === 'left' ? 'flex-start' : 'center',
             alignItems: 'center',
           }} />
+        </div>
 
         {/* Greek mode indicator */}
         {greekOn && (
