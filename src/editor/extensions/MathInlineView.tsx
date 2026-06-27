@@ -251,9 +251,13 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
           const click = pendingClickRef.current
           pendingClickRef.current = null
           if (click) {
-            // Use MathLive's own coordinate→offset API. The saved KaTeX click coords map
-            // well since both renderers share the same midline (absolute + translateY(-50%)).
-            const offset: number = mf.getOffsetFromPoint(click.clientX, click.clientY)
+            const mfRect = mf.getBoundingClientRect()
+            let tx = click.clientX
+            let bias: -1 | 0 | 1 = 0
+            if (click.clientX < mfRect.left)  { tx = mfRect.left  + 2; bias = -1 }
+            if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
+            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
             if (offset >= 0) { mf.position = offset; return }
           }
           mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])

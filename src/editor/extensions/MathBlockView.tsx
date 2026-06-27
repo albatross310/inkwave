@@ -261,7 +261,14 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           const click = pendingClickRef.current
           pendingClickRef.current = null
           if (click) {
-            const offset: number = mf.getOffsetFromPoint(click.clientX, click.clientY)
+            const mfRect = mf.getBoundingClientRect()
+            // Clamp X: clicks left/right of the formula go to line start/end.
+            let tx = click.clientX
+            let bias: -1 | 0 | 1 = 0
+            if (click.clientX < mfRect.left)  { tx = mfRect.left  + 2; bias = -1 }
+            if (click.clientX > mfRect.right) { tx = mfRect.right - 2; bias =  1 }
+            const ty = Math.max(mfRect.top + 1, Math.min(mfRect.bottom - 1, click.clientY))
+            const offset: number = mf.getOffsetFromPoint(tx, ty, { bias })
             if (offset >= 0) { mf.position = offset; return }
           }
           mf.executeCommand([pendingCursorRef.current === 'end' ? 'moveToMathfieldEnd' : 'moveToMathfieldStart'])
@@ -306,19 +313,22 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           transition: 'border-color 0.12s, background 0.12s',
         }}
       >
-        {/* KaTeX — shown when not editing */}
-        <div style={{ display: active && mlReady ? 'none' : 'block' }}
+        {/* KaTeX — always in layout (visibility:hidden when MathLive is ready) so the
+            block height never changes during the KaTeX ↔ MathLive swap */}
+        <div style={{ visibility: active && mlReady ? 'hidden' : 'visible' }}
           dangerouslySetInnerHTML={{
             __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
           }}
         />
 
-        {/* MathLive mounts here when active — flex centres the math-field regardless of its display type;
-            margin matches .katex-display { margin: 1em 0 } so there's no vertical shift on activation */}
+        {/* MathLive: absolutely overlaid on top of the KaTeX area so the block's
+            layout height is always driven by the KaTeX div above. */}
         <div ref={mlContainer} style={{
           display: active ? 'flex' : 'none',
+          position: 'absolute',
+          inset: 0,
           justifyContent: align === 'left' ? 'flex-start' : 'center',
-          margin: '1em 0',
+          alignItems: 'center',
         }} />
 
         {/* Greek mode indicator */}
