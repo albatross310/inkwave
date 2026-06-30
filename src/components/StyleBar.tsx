@@ -42,7 +42,7 @@ const HIGHLIGHT_COLORS = [
 ]
 
 type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
-type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha' | 'upper-roman'
+type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha' | 'upper-roman' | 'taskList'
 type Align = 'left' | 'center' | 'right' | 'justify'
 
 const CHAR_FMT_LABELS: Record<CharFmt, string> = { bold: 'B', italic: 'i', underline: 'U', strike: 'S' }
@@ -59,7 +59,7 @@ const ALIGN_LABELS: Record<Align, string> = {
   left: 'Left', center: 'Centre', right: 'Right', justify: 'Justify',
 }
 const LIST_TYPE_LABELS: Record<ListType, string> = {
-  bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.', 'upper-roman': 'I.',
+  bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.', 'upper-roman': 'I.', taskList: '☐',
 }
 
 function useLongPress(onShortPress: () => void, onLongPress: () => void) {
@@ -132,7 +132,7 @@ export function StyleBar({ editor, onActivity, phone }: {
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
   const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   const curHlColor = (editor.getAttributes('highlight') as { color?: string }).color ?? null
-  const listActive = editor.isActive('bulletList') || editor.isActive('orderedList')
+  const listActive = editor.isActive('bulletList') || editor.isActive('orderedList') || editor.isActive('taskList')
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
@@ -161,6 +161,7 @@ export function StyleBar({ editor, onActivity, phone }: {
   function applyAlign(a: Align) { ping(); setLastAlign(a); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
   function applyListType(type: ListType) {
     ping(); setLastListType(type); setListOpen(false)
+    if (type === 'taskList') { editor.chain().focus().toggleTaskList().run(); return }
     if (type === 'bulletList') { editor.chain().focus().toggleBulletList().run(); return }
     const inOrdered = editor.isActive('orderedList')
     const cur = (editor.getAttributes('orderedList') as { listType?: string }).listType ?? 'decimal'
@@ -288,9 +289,9 @@ export function StyleBar({ editor, onActivity, phone }: {
       {/* H — tap=last colour, hold=picker */}
       <button ref={hlBtnRef} type="button" {...hlPress}
         onClick={e => { e.stopPropagation(); hlPress.onClick() }}
-        className={pill(hlOpen, !!curHlColor)}
+        className={pill(hlOpen, !!lastHlColor)}
         style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem',
-          background: curHlColor ?? undefined, color: (hlOpen || curHlColor) ? (hlOpen ? INK : '#374151') : '#6b7280' }}
+          background: lastHlColor ?? undefined, color: (hlOpen || lastHlColor) ? (hlOpen ? INK : '#374151') : '#6b7280' }}
         title="Highlight (hold for colours)">
         H
       </button>
@@ -351,12 +352,15 @@ export function StyleBar({ editor, onActivity, phone }: {
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {([
             { type: 'bulletList'  as ListType, label: 'Bullets',  preview: '•' },
+            { type: 'taskList'    as ListType, label: 'Checkboxes', preview: '☐' },
             { type: 'decimal'     as ListType, label: 'Numbered', preview: '1.' },
             { type: 'lower-roman' as ListType, label: 'Roman',    preview: 'i.' },
             { type: 'lower-alpha' as ListType, label: 'Alphabet',  preview: 'a.' },
             { type: 'upper-roman' as ListType, label: 'Roman caps', preview: 'I.' },
           ]).map(item => {
-            const active = item.type === 'bulletList'
+            const active = item.type === 'taskList'
+              ? editor.isActive('taskList')
+              : item.type === 'bulletList'
               ? editor.isActive('bulletList')
               : editor.isActive('orderedList') &&
                 ((editor.getAttributes('orderedList') as { listType?: string }).listType ?? 'decimal') === item.type

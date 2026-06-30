@@ -133,6 +133,10 @@ export class ScasController {
   }
 
   lookup(): ScasLookup {
+    if (this.setSize === 0) {
+      // Infinite mode: no words are in S_v — return an empty lookup so no words are highlighted.
+      return { version: this.state.version, locked: new Set(), liveKicks: new Set(), immune: new Set() }
+    }
     return buildLookup(this.state)
   }
 
@@ -141,6 +145,7 @@ export class ScasController {
    * removed) lock deleted nudged lemmas. Returns true if the state changed.
    */
   processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean): boolean {
+    if (this.setSize === 0) return false // Infinite mode: no constraint encounters
     const words = scanCommitted(pmDoc, cursorPos)
     const before = this.state
     let st = this.state

@@ -28,6 +28,8 @@ import { MathBlock } from './extensions/MathBlock'
 import { MathPasteHandler } from './extensions/MathPasteHandler'
 import { TabIndent } from './extensions/TabIndent'
 import { LineNumbers } from './extensions/LineNumbers'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
 import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
@@ -77,12 +79,12 @@ import type { Snapshot, SignedReceipt, WordNudgeEvent } from '../types/document'
 const RESAMPLE_INTERVAL_MS = 30_000
 
 // ─── Toolbar slot customisation ───
-type SlotId = 'bib' | 'guide' | 'math' | 'receipt'
+type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page'
 const SLOT_KEY = 'inkwave-toolbar-slots'
 const DEFAULT_SLOTS: [SlotId, SlotId] = ['bib', 'guide']
-const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt']
+const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page']
 const SLOT_LABELS: Record<SlotId, string> = {
-  bib: '‟ References', guide: 'ⓘ Info', math: 'Σ Math', receipt: 'R Provenance',
+  bib: '‟ References', guide: 'ⓘ Info', math: 'Σ Math', receipt: 'R Provenance', page: 'P Page',
 }
 
 function loadToolbarSlots(): [SlotId, SlotId] {
@@ -241,6 +243,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Toolbar customisation slots
   const [toolbarSlots, setToolbarSlots] = useState<[SlotId, SlotId]>(loadToolbarSlots)
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
+  const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
   function updateSlots(newSlots: [SlotId, SlotId]) {
@@ -350,6 +353,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       LineNumbers,
       CitationNode,
       CiteSuggestion,
+      TaskList,
+      TaskItem.configure({ nested: true }),
     ],
     content: doc.contentJson,
     editorProps: {
@@ -1378,7 +1383,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : '28px' }}
+          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px` }}
         >
           <div
             ref={footerRef}
@@ -1436,6 +1441,88 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
                 </button>
               )}
+              {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
+              <div className="relative" ref={toolbarPickerRef}>
+                <button type="button"
+                  onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
+                  className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                  title="Customise toolbar"
+                >
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
+                    <svg viewBox="0 0 16 17" width="15" height="15" fill="currentColor" aria-hidden="true">
+                      <path d="M8 1.5 L14.5 15 Q8 11.5 1.5 15 Z" />
+                    </svg>
+                  </span>
+                </button>
+                {toolbarPickerOpen && (() => {
+                  const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
+                  return (
+                    <div className="absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120]"
+                      onMouseDown={e => e.stopPropagation()}>
+                      {/* + add more opps */}
+                      <div className="flex items-center">
+                        <button type="button"
+                          onClick={() => setOppsOpen(o => !o)}
+                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#5c2d8a] transition-colors"
+                          title="More options coming">
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
+                        </button>
+                        {oppsOpen && (
+                          <span className="pr-3 text-xs italic text-stone-400 whitespace-nowrap">New opps coming</span>
+                        )}
+                      </div>
+                      {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
+                      {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+                        <>
+                          <div className="w-px h-6 bg-stone-100 mx-1" />
+                          <button type="button"
+                            onClick={() => { setSyncOpen(o => !o); setToolbarPickerOpen(false) }}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
+                            title="Sync status">
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.5)] text-base">☁</span>
+                          </button>
+                        </>
+                      )}
+                      {/* divider if there are available slots */}
+                      {available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
+                      {available.map(id => (
+                        <div key={id}
+                          draggable
+                          onDragStart={() => { dragIdRef.current = id }}
+                          onDragEnd={() => { dragIdRef.current = null }}
+                          onClick={() => {
+                            // guide/math/page manage their own open state (portaled panels) — don't
+                            // close the picker here or the component unmounts and the panel disappears.
+                            if (id !== 'guide' && id !== 'math' && id !== 'page') setToolbarPickerOpen(false)
+                          }}
+                        >
+                          {id === 'guide' && <GuideMenu />}
+                          {id === 'math' && <MathMenuButton editor={editor} />}
+                          {id === 'bib' && (
+                            <button type="button"
+                              onClick={() => { setBibPanelOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Bibliography / citations"
+                            >
+                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
+                            </button>
+                          )}
+                          {id === 'receipt' && (
+                            <button type="button"
+                              onClick={() => { setReceiptOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Provenance record"
+                            >
+                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
+                            </button>
+                          )}
+                          {id === 'page' && <PageMenu editor={editor ?? undefined} />}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}</div>
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
@@ -1475,58 +1562,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                       <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
                     </button>
                   )}
+                  {slotId === 'page' && <PageMenu editor={editor ?? undefined} />}
                 </div>
               ))}
-              {/* ▲-in-circle: manage toolbar slots — thin popup shows only the 2 off-toolbar buttons */}
-              <div className="relative" ref={toolbarPickerRef}>
-                <button type="button"
-                  onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
-                  className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                  title="Customise toolbar"
-                >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
-                    <svg viewBox="0 0 16 17" width="15" height="15" fill="currentColor" aria-hidden="true">
-                      <path d="M8 1.5 L14.5 15 Q8 11.5 1.5 15 Z" />
-                    </svg>
-                  </span>
-                </button>
-                {toolbarPickerOpen && (() => {
-                  const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
-                  return (
-                    <div className="absolute bottom-full right-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120]"
-                      onMouseDown={e => e.stopPropagation()}>
-                      {available.map(id => (
-                        <div key={id}
-                          draggable
-                          onDragStart={() => { dragIdRef.current = id }}
-                          onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => setToolbarPickerOpen(false)}
-                        >
-                          {id === 'guide' && <GuideMenu />}
-                          {id === 'math' && <MathMenuButton editor={editor} />}
-                          {id === 'bib' && (
-                            <button type="button"
-                              onClick={() => { setBibPanelOpen(o => !o) }}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Bibliography / citations"
-                            >
-                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
-                            </button>
-                          )}
-                          {id === 'receipt' && (
-                            <button type="button"
-                              onClick={() => { setReceiptOpen(o => !o) }}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Provenance record"
-                            >
-                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}</div>
               {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
               <button
                 type="button"
@@ -1539,20 +1577,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   S
                 </span>
               </button>
-              <PageMenu editor={editor ?? undefined} />
               <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
-              {/* Mobile-only: ☁ sync trigger (right of guide, left of hamburger) */}
-              {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
-                <button
-                  type="button"
-                  onClick={() => setSyncOpen(o => !o)}
-                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                  style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
-                  title="Sync status"
-                >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.5)] text-base">☁</span>
-                </button>
-              )}
               <OptionsMenu
                 paperRight={paperRight}
                 installPrompt={installPrompt}

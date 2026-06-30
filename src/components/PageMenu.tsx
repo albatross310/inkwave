@@ -43,17 +43,16 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    const onScroll = () => setOpen(false)
     document.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll) }
+    return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
   function menuStyle(): React.CSSProperties {
     const br = btnRef.current?.getBoundingClientRect()
-    if (!br) return { position: 'fixed', bottom: 80, left: 10 }
-    const left = Math.min(Math.max(8, Math.round(br.left)), window.innerWidth - 392)
-    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), left }
+    if (!br) return { position: 'fixed', bottom: 80, right: 16 }
+    // Shift 24px right from the button's left edge so it sits inset from the right edge
+    const right = Math.max(8, Math.round(window.innerWidth - br.right) - 24)
+    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), right }
   }
 
   const paraAttrs = (parFocus && editor) ? (editor.getAttributes('paragraph') as Record<string, string>) : {}
@@ -152,7 +151,6 @@ export function PageMenu({ editor }: { editor?: Editor }) {
 
       {open && createPortal(
         <>
-          <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
           <div role="dialog" aria-label="Page settings"
             className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600"
             style={{ ...menuStyle(), width: 384, border: `1px solid ${INK}55`, borderRadius: 14 }}
@@ -161,18 +159,25 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
               <span className="text-[11px] uppercase tracking-wide text-stone-400">Page</span>
-              {parFocus && editor ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] italic" style={{ color: INK }}>↳ paragraph</span>
-                  <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
-                    className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
-                    style={{ background: `${INK}18`, color: INK, border: `1px solid ${INK}44` }}>
-                    Apply to all
-                  </button>
-                </div>
-              ) : (
-                <span className="text-[11px] text-stone-400 italic">changes apply to all text</span>
-              )}
+              <div className="flex items-center gap-2">
+                {parFocus && editor ? (
+                  <>
+                    <span className="text-[11px] italic" style={{ color: INK }}>↳ paragraph</span>
+                    <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
+                      className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
+                      style={{ background: `${INK}18`, color: INK, border: `1px solid ${INK}44` }}>
+                      Apply to all
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-[11px] text-stone-400 italic">changes apply to all text</span>
+                )}
+                <button type="button" onClick={() => setOpen(false)} onMouseDown={e => e.preventDefault()}
+                  className="ml-1 text-stone-400 hover:text-stone-600 transition-colors leading-none"
+                  style={{ fontSize: 18, lineHeight: 1 }} title="Close (Esc)">
+                  ×
+                </button>
+              </div>
             </div>
 
             {/* ── Margins ── */}
