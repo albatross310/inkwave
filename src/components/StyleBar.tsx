@@ -94,6 +94,8 @@ export function StyleBar({ editor, onActivity, phone }: {
   const [lastHlColor,  setLastHlColor]  = useState<string | null>('#fef08a')
   const [lastListType, setLastListType] = useState<ListType>('bulletList')
   const [lastAlign,    setLastAlign]    = useState<Align>('left')
+  const [lastFont,     setLastFont]     = useState<string>('')
+  const [lastSize,     setLastSize]     = useState<number>(0)
 
   const fontBtnRef  = useRef<HTMLButtonElement>(null)
   const sizeBtnRef  = useRef<HTMLDivElement>(null)
@@ -133,9 +135,10 @@ export function StyleBar({ editor, onActivity, phone }: {
   const listActive = editor.isActive('bulletList') || editor.isActive('orderedList')
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  const setFont = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
+  const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize = (pt: number) => {
     ping()
+    setLastSize(pt)
     editor.chain().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
     setSizeOpen(false)
   }

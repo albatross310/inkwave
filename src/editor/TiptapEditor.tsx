@@ -257,7 +257,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     updateSlots([toolbarSlots[1], toolbarSlots[0]])
   }
 
-  const dragSlotRef = useRef<0 | 1 | null>(null)
+  const dragIdRef = useRef<SlotId | null>(null)
 
   useEffect(() => {
     if (!toolbarPickerOpen) return
@@ -1436,14 +1436,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
                 </button>
               )}
-              {/* Customisable slots — drag to reorder, ▲ to manage */}
+              {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
                   draggable
-                  onDragStart={() => { dragSlotRef.current = slotIdx as 0 | 1 }}
+                  onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}
-                  onDrop={e => { e.preventDefault(); if (dragSlotRef.current !== null && dragSlotRef.current !== slotIdx) swapSlots(); dragSlotRef.current = null }}
-                  onDragEnd={() => { dragSlotRef.current = null }}
+                  onDrop={e => {
+                    e.preventDefault()
+                    const from = dragIdRef.current; dragIdRef.current = null
+                    if (!from || from === slotId) return
+                    const [s1, s2] = toolbarSlots
+                    const newSlots: [SlotId, SlotId] = slotIdx === 0
+                      ? [from, s2 === from ? s1 : s2]
+                      : [s1 === from ? s2 : s1, from]
+                    updateSlots(newSlots)
+                    setToolbarPickerOpen(false)
+                  }}
+                  onDragEnd={() => { dragIdRef.current = null }}
                 >
                   {slotId === 'guide' && <GuideMenu />}
                   {slotId === 'math' && <MathMenuButton editor={editor} />}
@@ -1467,36 +1477,52 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   )}
                 </div>
               ))}
-              {/* ▲-in-circle: manage toolbar slots */}
+              {/* ▲-in-circle: manage toolbar slots — thin popup shows only the 2 off-toolbar buttons */}
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
-                  onClick={() => setToolbarPickerOpen(o => !o)}
+                  onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
                   className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                   title="Customise toolbar"
                 >
                   <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[13px] leading-none">▲</span>
                 </button>
-                {toolbarPickerOpen && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white shadow-xl rounded-lg py-1 z-[120] min-w-[148px]"
-                    onMouseDown={e => e.stopPropagation()}>
-                    <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-stone-400">Toolbar buttons</div>
-                    {ALL_SLOTS.map(id => {
-                      const inToolbar = toolbarSlots.includes(id)
-                      return (
-                        <button key={id} type="button"
-                          onClick={() => { if (!inToolbar) addToSlots(id); setToolbarPickerOpen(false) }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-stone-50 transition-colors"
-                          style={{ color: inToolbar ? '#5c2d8a' : '#6b7280', fontWeight: inToolbar ? 500 : 400, cursor: inToolbar ? 'default' : 'pointer' }}
+                {toolbarPickerOpen && (() => {
+                  const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
+                  return (
+                    <div className="absolute bottom-full right-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120]"
+                      onMouseDown={e => e.stopPropagation()}>
+                      {available.map(id => (
+                        <div key={id}
+                          draggable
+                          onDragStart={() => { dragIdRef.current = id }}
+                          onDragEnd={() => { dragIdRef.current = null }}
+                          onClick={() => setToolbarPickerOpen(false)}
                         >
-                          <span className="w-4 text-center text-xs">{inToolbar ? '✓' : ''}</span>
-                          {SLOT_LABELS[id]}
-                        </button>
-                      )
-                    })}
-                    <div className="px-3 pt-1 pb-1.5 text-[10px] text-stone-400 border-t border-stone-100 mt-1">drag buttons to reorder</div>
-                  </div>
-                )}
-              </div>
+                          {id === 'guide' && <GuideMenu />}
+                          {id === 'math' && <MathMenuButton editor={editor} />}
+                          {id === 'bib' && (
+                            <button type="button"
+                              onClick={() => { setBibPanelOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Bibliography / citations"
+                            >
+                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
+                            </button>
+                          )}
+                          {id === 'receipt' && (
+                            <button type="button"
+                              onClick={() => { setReceiptOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Provenance record"
+                            >
+                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}</div>
               {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
               <button
                 type="button"
