@@ -15,24 +15,24 @@ const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 
 // ── Summary panel ─────────────────────────────────────────────────────────────
-// Sits above its button. On wide screens always open. On narrow/phone collapses to
-// a thin strip (max-height) and flashes open for 1s when flashKey changes.
-// Bullet prefix (• or -) rendered as a dash for compact spacing.
-function SummaryPanel({ text, align, isWide, flashKey }: {
-  text: string; align: 'left' | 'right'; isWide: boolean; flashKey: string
+// Collapses to a 6px-wide vertical strip (width-collapse). On wide screens always
+// open. On narrow/phone flashes open for 1s when flashKey changes (not on mount).
+function SummaryPanel({ text, isWide, flashKey }: {
+  text: string; isWide: boolean; flashKey: string
 }) {
   const [hovered, setHovered] = useState(false)
   const [flashing, setFlashing] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
+  const isFirstRender = useRef(true)
 
   useEffect(() => {
+    // Skip the initial mount — only flash when flashKey actually increments
+    if (isFirstRender.current) { isFirstRender.current = false; return }
     if (isWide) return
     setFlashing(true)
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setFlashing(false), 1000)
     return () => clearTimeout(timer.current)
-  // flashKey increments only for this specific panel on the right nav action
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flashKey, isWide])
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -44,31 +44,27 @@ function SummaryPanel({ text, align, isWide, flashKey }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
+        width: expanded ? '150px' : '6px',
+        minHeight: 36,
+        overflow: 'hidden',
         background: '#ede5f7',
         border: '1px solid rgba(92,45,138,0.22)',
         borderRadius: 8,
-        padding: expanded ? '6px 9px' : '0 9px',
-        fontSize: '0.75rem',
-        lineHeight: 1.45,
+        padding: expanded ? '5px 7px' : 0,
+        fontSize: '0.72rem',
+        lineHeight: 1.4,
         color: INK,
-        maxWidth: 170,
-        maxHeight: expanded ? '200px' : '5px',
-        overflow: 'hidden',
         cursor: expanded ? 'default' : 'pointer',
         userSelect: 'none',
         pointerEvents: 'auto',
-        transition: 'max-height 220ms ease, padding 220ms ease',
-        textAlign: align,
-        marginBottom: 4,
+        transition: 'width 220ms ease, padding 220ms ease',
+        flexShrink: 0,
+        textAlign: 'left',
       }}
     >
-      {lines.map((line, i) => (
-        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
-          {(line.startsWith('-') || line.startsWith('•'))
-            ? <><span style={{ flexShrink: 0 }}>-</span><span>{line.slice(1).trim()}</span></>
-            : <span>{line}</span>}
-        </div>
-      ))}
+      <div style={{ width: 136 }}>
+        {lines.map((line, i) => <div key={i}>{line}</div>)}
+      </div>
     </div>
   )
 }
@@ -135,7 +131,7 @@ function NavSide({
               position: 'absolute', bottom: '100%', marginBottom: 5,
               [side]: 0, zIndex: 1, pointerEvents: 'none',
             }}>
-              <SummaryPanel text={versionSummary} align={side} isWide={isWide} flashKey={verFlashKey} />
+              <SummaryPanel text={versionSummary} isWide={isWide} flashKey={verFlashKey} />
             </div>
           )}
           <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
@@ -148,7 +144,7 @@ function NavSide({
             position: 'absolute', top: '100%', marginTop: 5,
             [side]: 0, zIndex: 1, pointerEvents: 'none',
           }}>
-            <SummaryPanel text={summary} align={side} isWide={isWide} flashKey={snapFlashKey} />
+            <SummaryPanel text={summary} isWide={isWide} flashKey={snapFlashKey} />
           </div>
         )}
       </div>
@@ -280,6 +276,8 @@ export function SnapshotView() {
   const [leftVerFlash,   setLeftVerFlash]   = useState(0)
   const [rightVerFlash,  setRightVerFlash]  = useState(0)
 
+  // Load snapshots + set status on every navigation. Stays lean so it doesn't cancel
+  // the background generation (which lives in its own effect below).
   useEffect(() => {
     let cancelled = false
     if (!docId || !snapId) { setStatus('missing'); return }
@@ -288,48 +286,50 @@ export function SnapshotView() {
       if (cancelled) return
       setAllSnapshots(snaps)
       setStatus(snaps.some((s) => s.id === snapId) ? 'ready' : 'missing')
-
-      // Background: prerender all adjacent-pair diff summaries (bullets)
-      if (!cancelled && snaps.length > 1) {
-        void (async () => {
-          for (let i = 1; i < snaps.length; i++) {
-            if (cancelled) break
-            if (snaps[i].diffSummary) continue
-            const before = pmToText(snaps[i - 1].contentJson)
-            const after  = pmToText(snaps[i].contentJson)
-            if (!before.trim() && !after.trim()) continue
-            const ds = await summariseDiff(before, after)
-            if (ds && !cancelled) {
-              await patchSnapshotDiffSummary(docId!, snaps[i].id, ds)
-              setAllSnapshots((prev) => prev.map((s, j) => j === i ? { ...s, diffSummary: ds } : s))
-            }
-          }
-        })()
-      }
-
-      // Background: prerender version summaries (compare versionSnap to prev versionSnap)
-      if (!cancelled && snaps.length > 1) {
-        void (async () => {
-          const grps = groupByVersion(snaps)
-          const verSnaps = grps.map((g) => g.versionSnap).filter(Boolean) as Snapshot[]
-          for (let i = 1; i < verSnaps.length; i++) {
-            if (cancelled) break
-            const vs = verSnaps[i]
-            if (vs.versionSummary) continue
-            const vs2 = await summariseVersionDiff(
-              pmToText(verSnaps[i - 1].contentJson),
-              pmToText(vs.contentJson),
-            )
-            if (vs2 && !cancelled) {
-              await patchSnapshotVersionSummary(docId!, vs.id, vs2)
-              setAllSnapshots((prev) => prev.map((s) => s.id === vs.id ? { ...s, versionSummary: vs2 } : s))
-            }
-          }
-        })()
-      }
     })()
     return () => { cancelled = true }
   }, [docId, snapId])
+
+  // Background-generate any missing diff + version summaries. Keyed on [docId] so
+  // snapshot navigation never cancels an in-progress generation run.
+  useEffect(() => {
+    if (!docId) return
+    let cancelled = false
+    void (async () => {
+      const snaps = await listSnapshots(docId)
+      if (cancelled || snaps.length < 2) return
+
+      // Fill missing diff summaries. Check .bullets to regenerate old-format records.
+      for (let i = 1; i < snaps.length; i++) {
+        if (snaps[i].diffSummary?.bullets) continue
+        const before = pmToText(snaps[i - 1].contentJson)
+        const after  = pmToText(snaps[i].contentJson)
+        if (!before.trim() && !after.trim()) continue
+        const ds = await summariseDiff(before, after)
+        if (ds && !cancelled) {
+          await patchSnapshotDiffSummary(docId, snaps[i].id, ds)
+          setAllSnapshots((prev) => prev.map((s, j) => j === i ? { ...s, diffSummary: ds } : s))
+        }
+      }
+
+      // Fill missing version summaries
+      const grps = groupByVersion(snaps)
+      const verSnaps = grps.map((g) => g.versionSnap).filter(Boolean) as Snapshot[]
+      for (let i = 1; i < verSnaps.length; i++) {
+        const vs = verSnaps[i]
+        if (vs.versionSummary) continue
+        const vs2 = await summariseVersionDiff(
+          pmToText(verSnaps[i - 1].contentJson),
+          pmToText(vs.contentJson),
+        )
+        if (vs2 && !cancelled) {
+          await patchSnapshotVersionSummary(docId, vs.id, vs2)
+          setAllSnapshots((prev) => prev.map((s) => s.id === vs.id ? { ...s, versionSummary: vs2 } : s))
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [docId])
 
   const groups = useMemo(() => groupByVersion(allSnapshots), [allSnapshots])
 
