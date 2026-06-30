@@ -82,13 +82,14 @@ export interface Snapshot {
   id: string
   documentId: string
   createdAt: string                 // writer's local clock — ordering only, never authority
-  trigger: 'kick' | 'manual'
+  trigger: 'kick' | 'manual' | 'paragraph'
   wordCount: number
   contentHash: string               // sha256Hex(JCS(contentJson))
   contentJson: TiptapJSON           // held by the writer; never transmitted
   receipts?: SignedReceipt[]        // the live-composition (+cadence) chain for this span (M3)
   bundleHash: string                // sha256Hex(JCS({ v:1, contentHash, receipts: receipts ?? [] }))
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
+  summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
 }
 
 export interface OtsProofState {

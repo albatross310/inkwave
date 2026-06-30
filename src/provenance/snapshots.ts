@@ -75,6 +75,7 @@ export async function createSnapshotIfChanged(
   doc: InkwaveDocument,
   trigger: Snapshot['trigger'],
   receipts: SignedReceipt[] = [],
+  summary?: string,
 ): Promise<Snapshot | null> {
   const cHash = await contentHash(doc.contentJson)
   const snaps = await readSnapshotsFile(doc.id)
@@ -94,9 +95,24 @@ export async function createSnapshotIfChanged(
     receipts,
     bundleHash: await bundleHash(cHash, receipts),
     ots: { status: 'unstamped' },
+    ...(summary ? { summary } : {}),
   }
   await writeSnapshotsFile(doc.id, [...snaps, snapshot])
   return snapshot
+}
+
+/** Patch a snapshot's summary field after an async AI call resolves. */
+export async function patchSnapshotSummary(
+  documentId: string,
+  id: string,
+  summary: string,
+): Promise<Snapshot | null> {
+  const snaps = await readSnapshotsFile(documentId)
+  const i = snaps.findIndex((s) => s.id === id)
+  if (i < 0) return null
+  snaps[i] = { ...snaps[i], summary }
+  await writeSnapshotsFile(documentId, snaps)
+  return snaps[i]
 }
 
 // ─── OTS stamping / upgrading (M2) ──────────────────────────────────────────────

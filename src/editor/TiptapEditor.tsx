@@ -35,7 +35,8 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending } from '../provenance/snapshots'
+import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary } from '../provenance/snapshots'
+import { summariseParagraph, summariseBullets } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
@@ -92,6 +93,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Document content size last seen by onTransaction — a drop means content was deleted, which
   // gates the ban-credit lock detection (so a not-yet-committed word isn't mistaken for a delete).
   const prevDocSizeRef = useRef(-1)
+
+  // Paragraph snapshot tracking: count of top-level paragraphs seen last transaction; buffer of
+  // short-para (<70 word) texts waiting to group into a single snapshot.
+  const prevParaCountRef = useRef(0)
+  const shortParaBufferRef = useRef<string[]>([])
 
   // Snapshots (the provenance record). Loaded per document; appended when a resolved kick changes
   // the content. createSnapshotIfChanged is serialised through a promise chain so rapid kicks can't
@@ -309,6 +315,63 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         if (node.type.name === 'paragraph') pIdx++
       })
       setCurrentParagraphIndex(Math.max(0, pIdx - 1))
+
+      // ── Paragraph snapshot: fire when Enter creates a new top-level paragraph ──
+      if (transaction.docChanged) {
+        // Collect all top-level paragraphs so we can extract the just-completed one.
+        const allParas: string[] = []
+        e.state.doc.forEach((node) => {
+          if (node.type.name === 'paragraph') allParas.push(node.textContent)
+        })
+        const paraCount = allParas.length
+        const prev = prevParaCountRef.current
+        prevParaCountRef.current = paraCount
+
+        // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
+        if (paraCount === prev + 1 && pIdx >= 2) {
+          // pIdx-1 is the 0-based current (new empty) paragraph; pIdx-2 is the just-completed one.
+          const completedText = (allParas[pIdx - 2] ?? '').trim()
+          if (completedText.length > 0) {
+            const wordCount = completedText.match(/[\p{L}\p{N}]+/gu)?.length ?? 0
+
+            const takeParaSnapshot = (summaryFn: () => Promise<string>) => {
+              enqueueSnapshotWork(async () => {
+                const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
+                if (!snap) return
+                setSnapshots((prev) => [...prev, snap])
+                const stamped = await stampSnapshot(snap.documentId, snap.id)
+                if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+                mirrorIfActive()
+                // Async summary — patch when it resolves (does not block the snapshot chain).
+                summaryFn().then((summary) => {
+                  if (!summary) return
+                  enqueueSnapshotWork(async () => {
+                    const patched = await patchSnapshotSummary(docRef.current.id, snap.id, summary)
+                    if (patched) setSnapshots((prev) => prev.map((s) => (s.id === patched.id ? patched : s)))
+                  })
+                }).catch(() => {})
+              })
+            }
+
+            if (wordCount >= 70) {
+              // Flush any buffered short paras first.
+              if (shortParaBufferRef.current.length > 0) {
+                const flushed = [...shortParaBufferRef.current]
+                shortParaBufferRef.current = []
+                takeParaSnapshot(() => summariseBullets(flushed))
+              }
+              takeParaSnapshot(() => summariseParagraph(completedText))
+            } else {
+              shortParaBufferRef.current.push(completedText)
+              if (shortParaBufferRef.current.length >= 3) {
+                const group = [...shortParaBufferRef.current]
+                shortParaBufferRef.current = []
+                takeParaSnapshot(() => summariseBullets(group))
+              }
+            }
+          }
+        }
+      }
     },
   })
 
@@ -506,6 +569,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     })
     return off
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Manual "save version" — snapshot at any time regardless of kick/paragraph triggers.
+  function saveVersion() {
+    enqueueSnapshotWork(async () => {
+      const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [])
+      if (!snap) return
+      setSnapshots((prev) => [...prev, snap])
+      const stamped = await stampSnapshot(snap.documentId, snap.id)
+      if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+      mirrorIfActive()
+    })
+  }
 
   // Manual "check Bitcoin" — upgrade pending proofs toward confirmation (also runs on load).
   function checkBitcoin() {
@@ -1016,6 +1091,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           <ReceiptPanel
             snapshots={snapshots}
             onCheckBitcoin={checkBitcoin}
+            onSaveVersion={saveVersion}
             receiptCount={receipts.length}
             chainStatus={chainStatus}
             onVerifyChain={verifyReceiptChain}

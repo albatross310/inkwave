@@ -4,11 +4,11 @@ import { useEffect } from 'react'
 import { FONT_PRELOAD } from './fontPreload'
 
 const TAB_TITLES = [
-  'iω: writing that remembers',
-  'iω: a mnemonic environment',
-  'iω: a calm place to write',
-  'iω: writing with memory',
-  'iω: every word intentional',
+  'Inkwave Solo: writing that remembers',
+  'Inkwave Solo: a mnemonic environment',
+  'Inkwave Solo: a calm place to write',
+  'Inkwave Solo: writing with memory',
+  'Inkwave Solo: every word intentional',
 ]
 
 // The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a

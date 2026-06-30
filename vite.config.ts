@@ -78,6 +78,8 @@ const devApi: PluginOption = {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ alg: 'Ed25519', keyId: 'inkwave-signing-v1', publicKeyHex: await publicKeyHex() }))
     })
+    // POST /api/summarise — Anthropic paragraph-summary relay (key stays server-side).
+    server.middlewares.use('/api/summarise', webhook(() => import('./api/summarise.mjs')))
     for (const path of ['/api/ots', '/api/session', '/api/sign', '/api/sync-profile']) {
       server.middlewares.use(path, (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed') }

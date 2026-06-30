@@ -49,8 +49,11 @@ function renderDisplay(latex: string, align: Align): string {
   if (!latex.trim()) return ''
   try {
     const src = applyCustomSymbols(applyShorthandsLive(latex), getSymbols())
-    const wrapped = align === 'aligned' && !/\\begin\{/.test(src)
-      ? `\\begin{aligned}\n${src}\n\\end{aligned}` : src
+    // Strip trailing \\ — MathLive shows an empty last row for it, KaTeX suppresses it;
+    // strip here so the two renders stay visually identical after commit.
+    const cleaned = src.replace(/\s*\\\\\s*$/, '')
+    const wrapped = align === 'aligned' && !/\\begin\{/.test(cleaned)
+      ? `\\begin{aligned}\n${cleaned}\n\\end{aligned}` : cleaned
     return katex.renderToString(wrapped, { throwOnError: false, displayMode: true, output: 'htmlAndMathml', macros: MATHLIVE_MACROS })
   } catch { return '' }
 }
@@ -154,8 +157,8 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       mf.value = localLatex
       mf.mathVirtualKeyboardPolicy = 'manual'
       mf.style.cssText = [
-        // width:max-content prevents the host expanding to fill the flex container
-        // so justify-content:center actually centres it.
+        // display:inline-block; width:max-content — the parent column-flex's align-items
+        // shrink-wraps it to content width then centres or left-aligns it.
         // font-size:1.21em matches KaTeX's default block display scale (KaTeX applies 1.21×
         // internally; without this the formula appears ~17% smaller than the KaTeX render).
         'display:inline-block;width:max-content;background:transparent;border:none;',
@@ -310,13 +313,19 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           if (pid != null && clickForCapture) {
             pendingPointerIdRef.current = null
             try {
-              mf.setPointerCapture(pid)
+              // Dispatch BEFORE setPointerCapture: MathLive's shadow-DOM pointerdown
+              // handler must fire first so it anchors its selection start position.
+              // composed:true lets the event cross the shadow boundary; bubbles:true
+              // means it propagates up through the shadow root's event tree.
               mf.dispatchEvent(new PointerEvent('pointerdown', {
                 clientX: clickForCapture.clientX, clientY: clickForCapture.clientY,
-                bubbles: false, cancelable: false,
+                bubbles: true, cancelable: true, composed: true,
                 pointerId: pid, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1,
               }))
-            } catch { /* pointer may have been released already */ }
+              // Transfer capture AFTER: routes subsequent pointermove/pointerup to mf
+              // so the user's drag extends the selection MathLive just anchored.
+              mf.setPointerCapture(pid)
+            } catch { /* pointer already released — quick click, not a drag */ }
           }
           requestAnimationFrame(() => {
             if (!cancelled) {
@@ -357,6 +366,25 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       mfRef.current = null
     }
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Center formula lines inside MathLive's shadow DOM.
+  // MathLive renders \displaylines rows left-aligned within the math-field box;
+  // injecting text-align:center on .ML__vlist (the table cell that governs inline
+  // content position within each row) centres every line at the same horizontal
+  // midpoint as KaTeX's text-align:center on .katex-display.
+  useEffect(() => {
+    const mf = mfRef.current
+    if (!mf || !mlReady) return
+    const shadow = mf.shadowRoot
+    if (!shadow) return
+    let styleEl = shadow.querySelector('#iw-align') as HTMLStyleElement | null
+    if (!styleEl) {
+      styleEl = document.createElement('style')
+      styleEl.id = 'iw-align'
+      shadow.insertBefore(styleEl, shadow.firstChild)
+    }
+    styleEl.textContent = align === 'left' ? '' : '.ML__vlist { text-align: center; }'
+  }, [align, mlReady])
 
   return (
     <NodeViewWrapper>
@@ -420,11 +448,17 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
               __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
             }}
           />
+          {/* flex-direction:column flips the axes: align-items now controls the
+              HORIZONTAL cross-axis, which (a) forces the math-field to shrink-wrap
+              to its content width regardless of flex-basis and (b) positions it
+              left or center. justify-content:center keeps it vertically centred in
+              the grid cell (matching the hidden KaTeX formula's vertical position). */}
           <div ref={mlContainer} style={{
             gridArea: '1/1',
             display: active ? 'flex' : 'none',
-            justifyContent: align === 'left' ? 'flex-start' : 'center',
-            alignItems: 'center',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: align === 'left' ? 'flex-start' : 'center',
           }} />
         </div>
 
