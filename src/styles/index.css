@@ -164,6 +164,23 @@
     contain: layout;
   }
 
+  /* Lists — Tailwind preflight zeroes out padding and list-style on ul/ol.
+     Restore them inside the editor so bullets and indentation work correctly. */
+  .ProseMirror ul,
+  .ProseMirror ol {
+    padding-inline-start: 1.5em;
+    margin-bottom: calc(var(--para-spacing, 0.5em));
+  }
+  .ProseMirror ul {
+    list-style-type: disc;
+  }
+  .ProseMirror ol {
+    list-style-type: decimal;
+  }
+  .ProseMirror li > p {
+    margin-bottom: 0.25em;
+  }
+
   /* Equation numbers — rendered as "(N)" in the right margin of math blocks.
      data-eq-num is set by Decoration.node only on mathBlock nodes. */
   .ProseMirror > [data-eq-num] {

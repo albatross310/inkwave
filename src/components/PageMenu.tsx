@@ -277,6 +277,7 @@ function SectionHead({ label }: { label: string }) {
 function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
+      onMouseDown={e => e.preventDefault()}
       className="px-3 py-0.5 rounded-full text-xs transition-colors whitespace-nowrap"
       style={{ background: active ? INK : 'transparent', color: active ? 'white' : '#6b7280', border: `1px solid ${active ? INK : '#d1d5db'}` }}>
       {label}
@@ -347,12 +348,12 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
             style={inputStyle}
           />
           <div className="flex flex-col border-l border-stone-200 shrink-0" style={{ width: 16 }}>
-            <button type="button" onClick={inc} tabIndex={-1}
+            <button type="button" onClick={inc} onMouseDown={e => e.preventDefault()} tabIndex={-1}
               className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
               style={{ height: 13, fontSize: 7 }}>
               ▲
             </button>
-            <button type="button" onClick={dec} tabIndex={-1}
+            <button type="button" onClick={dec} onMouseDown={e => e.preventDefault()} tabIndex={-1}
               className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
               style={{ height: 13, fontSize: 7 }}>
               ▼

@@ -5,6 +5,11 @@ import { createPortal } from 'react-dom'
 const INK = '#5c2d8a'
 
 // Each section is an array of { k: shortcut, d: description }.
+const CITATIONS: Array<{ k: string; d: string }> = [
+  { k: '@',  d: 'in-text citation autocomplete' },
+  { k: 'R',  d: 'bibliography / references panel' },
+]
+
 const CYCLE: Array<{ k: string; d: string }> = [
   { k: '`',            d: 'prev synonym / next red word' },
   { k: '~',            d: 'next synonym / prev red word' },
@@ -128,6 +133,7 @@ export function GuideMenu() {
             {/* 3-column layout — scrollable horizontally on narrow screens */}
             <div style={{ display: 'flex', gap: '24px', overflowX: 'auto' }}>
               <Col sections={[
+                { title: 'Citations', rows: CITATIONS },
                 { title: 'Word cycle', rows: CYCLE },
                 { title: 'Fractions (on confirm)', rows: FRAC },
               ]} />

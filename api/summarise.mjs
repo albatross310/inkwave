@@ -57,8 +57,8 @@ export default async function handler(req, res) {
       const before = body.before.slice(0, 1500)
       const after = body.after.slice(0, 1500)
       const bullets = await callClaude(apiKey,
-        `List up to 4 bullet points (using - ) describing the EDITING CHANGES made to the document from BEFORE to AFTER. Describe additions, deletions, and restructuring at a high level — e.g. "- 2 new points added", "- Opening rewritten", "- Section on X removed". Do NOT describe what the content is about. Max 10 words per bullet. Output ONLY the bullet list.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
-        160,
+        `List up to 3 bullet points (using - ) describing the EDITING CHANGES made to the document from BEFORE to AFTER. Describe additions, deletions, and restructuring at a high level — e.g. "- 2 new points added", "- Opening rewritten", "- Section on X removed". Do NOT describe what the content is about. Use telegraphic style: omit articles (a, an, the) and conjunctions where meaning is clear. Max 50 words total. Output ONLY the bullet list.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
+        80,
         DIFF_MODEL,
       )
       res.setHeader('content-type', 'application/json')
@@ -70,8 +70,8 @@ export default async function handler(req, res) {
       const verBefore = body.verBefore.slice(0, 2000)
       const verAfter = body.verAfter.slice(0, 2000)
       const versionBullets = await callClaude(apiKey,
-        `List up to 5 bullet points (using - ) describing the high-level EDITORIAL CHANGES between these two versions of a document. Focus on what was added, removed, or restructured — e.g. "- New argument added in section 2", "- Introduction expanded", "- Conclusion removed". Do NOT summarise the content itself. Max 12 words per bullet. Output ONLY the bullet list.\n\nVERSION BEFORE:\n${verBefore}\n\nVERSION AFTER:\n${verAfter}`,
-        200,
+        `List up to 4 bullet points (using - ) describing the high-level EDITORIAL CHANGES between these two versions of a document. Focus on what was added, removed, or restructured — e.g. "- New argument added in section 2", "- Introduction expanded", "- Conclusion removed". Do NOT summarise the content itself. Use telegraphic style: omit articles (a, an, the) where meaning is clear. Max 50 words total. Output ONLY the bullet list.\n\nVERSION BEFORE:\n${verBefore}\n\nVERSION AFTER:\n${verAfter}`,
+        90,
         DIFF_MODEL,
       )
       res.setHeader('content-type', 'application/json')

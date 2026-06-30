@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries } from '../provenance/snapshots'
-import { pmToText } from '../provenance/bundle'
+import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
+import { loadDocument } from '../storage/opfs'
 import { diffWords, diffStats } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
@@ -564,7 +565,18 @@ export function SnapshotView() {
       {/* Fixed purple Verify button — bottom right, opens the verifier for this document */}
       <button
         type="button"
-        onClick={() => navigate('/verify')}
+        onClick={async () => {
+          if (!docId) { navigate('/verify'); return }
+          try {
+            const doc = await loadDocument(docId)
+            if (!doc) { navigate('/verify'); return }
+            const bundle = buildExportBundle(doc, allSnapshots)
+            const bundleText = composeTraceFile(bundle)
+            navigate('/verify', { state: { bundleText } })
+          } catch {
+            navigate('/verify')
+          }
+        }}
         style={{
           position: 'fixed', bottom: 16, right: 16, zIndex: 55,
           background: '#5c2d8a', color: '#fff',

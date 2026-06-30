@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router'
+import { useState, useEffect } from 'react'
+import { Link, useLocation } from 'react-router'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
 import { ActivityGraph } from '../verify/ActivityGraph'
@@ -12,6 +12,7 @@ const LIGHT = '#9b5ccc'
 // Open verification page (M5). Drop in an Inkwave export bundle; everything runs in YOUR browser
 // against the published signing key — no Inkwave login, nothing sent anywhere.
 export function Verify() {
+  const loc = useLocation()
   const [report, setReport] = useState<VerifyReport | null>(null)
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -35,6 +36,12 @@ export function Verify() {
       setBusy(false)
     }
   }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const bundleText = (loc.state as { bundleText?: string } | null)?.bundleText
+    if (bundleText) run(bundleText)
+  }, [])
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]

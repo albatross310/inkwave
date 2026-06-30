@@ -42,7 +42,7 @@ const HIGHLIGHT_COLORS = [
 ]
 
 type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
-type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha'
+type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha' | 'upper-roman'
 type Align = 'left' | 'center' | 'right' | 'justify'
 
 const CHAR_FMT_LABELS: Record<CharFmt, string> = { bold: 'B', italic: 'i', underline: 'U', strike: 'S' }
@@ -59,7 +59,7 @@ const ALIGN_LABELS: Record<Align, string> = {
   left: 'Left', center: 'Centre', right: 'Right', justify: 'Justify',
 }
 const LIST_TYPE_LABELS: Record<ListType, string> = {
-  bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.',
+  bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.', 'upper-roman': 'I.',
 }
 
 function useLongPress(onShortPress: () => void, onLongPress: () => void) {
@@ -328,7 +328,8 @@ export function StyleBar({ editor, onActivity, phone }: {
             { type: 'bulletList'  as ListType, label: 'Bullets',  preview: '•' },
             { type: 'decimal'     as ListType, label: 'Numbered', preview: '1.' },
             { type: 'lower-roman' as ListType, label: 'Roman',    preview: 'i.' },
-            { type: 'lower-alpha' as ListType, label: 'Alphabet', preview: 'a.' },
+            { type: 'lower-alpha' as ListType, label: 'Alphabet',  preview: 'a.' },
+            { type: 'upper-roman' as ListType, label: 'Roman caps', preview: 'I.' },
           ]).map(item => {
             const active = item.type === 'bulletList'
               ? editor.isActive('bulletList')
