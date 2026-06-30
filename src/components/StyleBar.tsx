@@ -88,14 +88,17 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   const ts = editor.getAttributes('textStyle')
   const paraAttrs = editor.getAttributes('paragraph')
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
-  const curSize = parseInt(ts.fontSize ?? '', 10) || BASE_SIZE
+  const rawFontSize = ts.fontSize ?? ''
+  const curSize = rawFontSize.endsWith('em')
+    ? Math.round(parseFloat(rawFontSize) * BASE_SIZE)
+    : parseInt(rawFontSize, 10) || BASE_SIZE
   const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   // Line height: read from paragraph attribute (set per selection) or global default
   const curLH = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
   const curLHLabel = LINE_HEIGHTS.find(lh => lh.value === curLH)?.label ?? curLH.toString()
 
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
-  const setSize  = (px: number) => { ping(); editor.chain().setMark('textStyle', { fontSize: `${px}px` }).run(); setSizeOpen(false) }
+  const setSize  = (px: number) => { ping(); const em = +(px / BASE_SIZE).toFixed(4); editor.chain().setMark('textStyle', { fontSize: `${em}em` }).run(); setSizeOpen(false) }
   const setAlign = (a: Align)   => { ping(); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
 
   const pickLineHeight = (v: number) => {

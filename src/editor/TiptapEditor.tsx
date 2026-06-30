@@ -402,12 +402,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     if (!editor) return
     const upd = () => setSelectionEmpty(editor.state.selection.empty)
-    // A real selection change re-arms the style bar after a scroll dismissed it.
-    const onSel = () => { const empty = editor.state.selection.empty; setSelectionEmpty(empty) }
+    const onSel = () => setSelectionEmpty(editor.state.selection.empty)
+    // Also track native browser selection changes — iOS long-press doesn't always fire
+    // Tiptap's selectionUpdate, so we read the DOM selection directly.
+    const onNativeSel = () => {
+      const sel = document.getSelection()
+      const pm = editor.view.dom
+      if (sel && !sel.isCollapsed && pm.contains(sel.anchorNode)) {
+        setSelectionEmpty(false)
+      } else {
+        setSelectionEmpty(editor.state.selection.empty)
+      }
+    }
     upd()
     editor.on('selectionUpdate', onSel)
     editor.on('transaction', upd)
-    return () => { editor.off('selectionUpdate', onSel); editor.off('transaction', upd) }
+    document.addEventListener('selectionchange', onNativeSel)
+    return () => {
+      editor.off('selectionUpdate', onSel)
+      editor.off('transaction', upd)
+      document.removeEventListener('selectionchange', onNativeSel)
+    }
   }, [editor])
 
 
@@ -570,10 +585,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return off
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Manual "save version" — snapshot at any time regardless of kick/paragraph triggers.
+  // Manual "save version" — always creates a snapshot regardless of whether content changed.
   function saveVersion() {
     enqueueSnapshotWork(async () => {
-      const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [])
+      const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
       if (!snap) return
       setSnapshots((prev) => [...prev, snap])
       const stamped = await stampSnapshot(snap.documentId, snap.id)
@@ -1204,6 +1219,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           <div
             ref={footerRef}
             className={`pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
+            onPointerDown={isTouch ? (e) => {
+              // Prevent the toolbar from stealing focus from the editor on iOS.
+              // Without this, tapping a toolbar button dismisses the text selection
+              // before the click handler fires, making formatting impossible.
+              const pm = editor?.view.dom
+              if (pm && (pm === document.activeElement || pm.contains(document.activeElement))) {
+                e.preventDefault()
+              }
+            } : undefined}
             style={{
               border: '1px solid rgba(92, 45, 138, 0.75)',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',

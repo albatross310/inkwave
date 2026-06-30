@@ -1,45 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Snapshot } from '../types/document'
+import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
 
-// ── Time-of-day period labels ──────────────────────────────────────────────────
-function getPeriod(createdAt: string): string {
+// ── Time-of-day period label (short) ─────────────────────────────────────────
+function getShortPeriod(createdAt: string): string {
   const h = new Date(createdAt).getHours()
-  if (h >= 5  && h < 8)  return 'early morning'
-  if (h >= 8  && h < 12) return 'morning'
-  if (h >= 12 && h < 17) return 'afternoon'
-  if (h >= 17 && h < 20) return 'evening'
-  return 'night'
+  if (h >= 5  && h < 8)  return 'E. Morn'
+  if (h >= 8  && h < 12) return 'Morn'
+  if (h >= 12 && h < 17) return 'Arvo'
+  if (h >= 17 && h < 20) return 'Eve'
+  return 'Night'
 }
 
-/** Precompute a display label for every snapshot: period name, plus s1/s2/s3 suffix
- *  when multiple snapshots share the same period on the same calendar day. */
-function computePeriodLabels(snapshots: Snapshot[]): Map<string, string> {
-  const groups = new Map<string, Snapshot[]>()
-  for (const s of snapshots) {
-    const key = `${s.createdAt.slice(0, 10)}-${getPeriod(s.createdAt)}`
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(s)
+// ── Version + snapshot-within-version label ───────────────────────────────────
+// Format: "v1s3" (version 1, 3rd snapshot in that version) or "s2" (pre-version draft).
+function computeVersionLabel(snap: Snapshot, groups: SnapshotGroup[]): string {
+  for (const group of groups) {
+    const i = group.items.findIndex(s => s.id === snap.id)
+    if (i >= 0) return group.label ? `${group.label}s${i + 1}` : `s${i + 1}`
   }
-  const labels = new Map<string, string>()
-  for (const [, group] of groups) {
-    const period = getPeriod(group[0].createdAt)
-    const sorted = [...group].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
-    if (sorted.length === 1) {
-      labels.set(sorted[0].id, period)
-    } else {
-      sorted.forEach((s, i) => labels.set(s.id, `${period} s${i + 1}`))
-    }
-  }
-  return labels
+  return ''
 }
 
-// The growing record of tamper-evident snapshots + the live-composition receipt chain the writer
-// holds. Saving/syncing lives in the ⋮ menu (not duplicated here); this panel is the record viewer:
-// verify the chain, nudge Bitcoin confirmation, and list the dated snapshots.
+// The growing record of tamper-evident snapshots + the live-composition receipt chain.
 export function ReceiptPanel({
   snapshots,
   onCheckBitcoin,
@@ -73,7 +60,7 @@ export function ReceiptPanel({
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
-  const periodLabels = useMemo(() => computePeriodLabels(snapshots), [snapshots])
+  const groups = useMemo(() => groupByVersion(snapshots), [snapshots])
 
   useEffect(() => {
     if (!open) return
@@ -159,46 +146,48 @@ export function ReceiptPanel({
                 ⏳ check Bitcoin…
               </button>
             )}
-            {[...snapshots].reverse().map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => window.open(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, '_blank', 'noopener')}
-                className="w-full px-2.5 py-1 flex flex-col items-start text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
-                title={s.summary ?? `bundle ${s.bundleHash}`}
-              >
-                {/* Row 1: period label · wordcount · OTS status */}
-                <div className="flex items-baseline gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
-                  <span className="tabular-nums" style={{ color: LIGHT }}>
-                    {periodLabels.get(s.id) ?? getPeriod(s.createdAt)}
-                  </span>
-                  <span className="text-stone-500">{s.wordCount}w</span>
-                  <span className="ml-auto text-stone-400" title={`bundle ${s.bundleHash}`}>
-                    {s.ots.status === 'confirmed' ? '⛓' : s.ots.status === 'pending' ? '⏳' : '·'} ↗
-                  </span>
-                </div>
-                {/* Row 2: AI summary or trigger type */}
-                <div
-                  className="text-stone-400 w-full"
-                  style={{
-                    fontSize: '0.68rem',
-                    lineHeight: '1.3',
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 1,
-                    WebkitBoxOrient: 'vertical',
-                    marginTop: '1px',
-                    minHeight: '0.9em',
-                  }}
+            {[...snapshots].reverse().map((s) => {
+              const vLabel = computeVersionLabel(s, groups)
+              const period = getShortPeriod(s.createdAt)
+              const otsIcon = s.ots.status === 'confirmed' ? 'Ⓑ' : s.ots.status === 'pending' ? '⏳' : '·'
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => window.open(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, '_blank', 'noopener')}
+                  className="w-full px-2.5 py-1 flex flex-col items-start text-left hover:bg-stone-50"
+                  style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
+                  title={s.summary ?? `bundle ${s.bundleHash}`}
                 >
-                  {s.summary
-                    ? s.summary
-                    : <span style={{ opacity: 0.4 }}>{s.trigger === 'kick' ? 'kick' : s.trigger === 'paragraph' ? 'para' : 'version'}</span>
-                  }
-                </div>
-              </button>
-            ))}
+                  {/* Row 1: v1s3 · Arvo · wordcount · OTS */}
+                  <div className="flex items-baseline gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
+                    <span style={{ color: INK, fontWeight: 500 }}>{vLabel}</span>
+                    <span style={{ color: LIGHT }}>{period}</span>
+                    <span className="text-stone-500">{s.wordCount}w</span>
+                    <span className="ml-auto text-stone-400" title={`bundle ${s.bundleHash}`}>{otsIcon}</span>
+                  </div>
+                  {/* Row 2: AI summary or trigger type */}
+                  <div
+                    className="text-stone-400 w-full"
+                    style={{
+                      fontSize: '0.68rem',
+                      lineHeight: '1.3',
+                      overflow: 'hidden',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 1,
+                      WebkitBoxOrient: 'vertical',
+                      marginTop: '1px',
+                      minHeight: '0.9em',
+                    }}
+                  >
+                    {s.summary
+                      ? s.summary
+                      : <span style={{ opacity: 0.4 }}>{s.trigger === 'kick' ? 'kick' : s.trigger === 'paragraph' ? 'para' : 'version'}</span>
+                    }
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

@@ -98,19 +98,20 @@ export function countWords(contentJson: TiptapJSON): number {
 
 /**
  * Take a snapshot IF the content has changed since the last one. Returns the new Snapshot, or null
- * if the content hash is unchanged (so repeated triggers on the same text don't pile up). Offline,
- * no network — OTS stamping (M2) and receipts (M3) layer on later.
+ * if the content hash is unchanged (so repeated triggers on the same text don't pile up). Pass
+ * `force: true` for manual "save version" so the user always gets a marker even on unchanged content.
  */
 export async function createSnapshotIfChanged(
   doc: InkwaveDocument,
   trigger: Snapshot['trigger'],
   receipts: SignedReceipt[] = [],
   summary?: string,
+  force = false,
 ): Promise<Snapshot | null> {
   const cHash = await contentHash(doc.contentJson)
   const snaps = await readSnapshotsFile(doc.id)
   const last = snaps[snaps.length - 1]
-  if (last && last.contentHash === cHash) return null
+  if (!force && last && last.contentHash === cHash) return null
 
   // bundleHash commits to content AND the live-composition receipt chain, so the OTS proof (M2)
   // anchors the whole signed record to Bitcoin.
