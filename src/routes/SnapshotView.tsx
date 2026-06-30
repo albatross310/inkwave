@@ -14,11 +14,11 @@ const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 
-// ── Summary bar ──────────────────────────────────────────────────────────────
-// Collapses to a 6px-wide vertical strip; expands horizontally on hover.
-// On narrow/phone: also flashes open for 1s whenever flashKey changes (i.e. on each navigation).
-// Wide screens: always expanded.
-function SummaryBar({ text, align, isWide, flashKey }: {
+// ── Summary panel ─────────────────────────────────────────────────────────────
+// Sits above its button. On wide screens always open. On narrow/phone collapses to
+// a thin strip (max-height) and flashes open for 1s when flashKey changes.
+// Bullet prefix (• or -) rendered as a dash for compact spacing.
+function SummaryPanel({ text, align, isWide, flashKey }: {
   text: string; align: 'left' | 'right'; isWide: boolean; flashKey: string
 }) {
   const [hovered, setHovered] = useState(false)
@@ -31,61 +31,58 @@ function SummaryBar({ text, align, isWide, flashKey }: {
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setFlashing(false), 1000)
     return () => clearTimeout(timer.current)
-  // flashKey changes on each navigation — that's what triggers the pop-out
+  // flashKey increments only for this specific panel on the right nav action
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flashKey, isWide])
   useEffect(() => () => clearTimeout(timer.current), [])
 
   const expanded = isWide || hovered || flashing
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
-  // Bar expands from the button outward (rightward on left side, leftward on right side)
-  const radius = align === 'left' ? '0 8px 8px 0' : '8px 0 0 8px'
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width: expanded ? '150px' : '6px',
-        minHeight: 40,
-        overflow: 'hidden',
         background: '#ede5f7',
         border: '1px solid rgba(92,45,138,0.22)',
-        borderRadius: radius,
-        padding: expanded ? '6px 8px' : 0,
+        borderRadius: 8,
+        padding: expanded ? '6px 9px' : '0 9px',
         fontSize: '0.75rem',
         lineHeight: 1.45,
         color: INK,
+        maxWidth: 170,
+        maxHeight: expanded ? '200px' : '5px',
+        overflow: 'hidden',
         cursor: expanded ? 'default' : 'pointer',
         userSelect: 'none',
         pointerEvents: 'auto',
-        transition: 'width 220ms ease, padding 220ms ease',
-        flexShrink: 0,
+        transition: 'max-height 220ms ease, padding 220ms ease',
+        textAlign: align,
+        marginBottom: 4,
       }}
     >
-      <div style={{ width: 136 }}>
-        {lines.map((line, i) => (
-          <div key={i} style={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
-            {line.startsWith('•')
-              ? <><span style={{ flexShrink: 0 }}>•</span><span>{line.slice(1).trim()}</span></>
-              : <span>{line}</span>}
-          </div>
-        ))}
-      </div>
+      {lines.map((line, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+          {(line.startsWith('-') || line.startsWith('•'))
+            ? <><span style={{ flexShrink: 0 }}>-</span><span>{line.slice(1).trim()}</span></>
+            : <span>{line}</span>}
+        </div>
+      ))}
     </div>
   )
 }
 
 // ── Nav side ─────────────────────────────────────────────────────────────────
-// Buttons always visible at the screen edge. Each button has a SummaryBar beside it
-// (to the right of left buttons, to the left of right buttons) that collapses to a
-// thin 6px vertical strip and can be expanded by hover or auto-flashes for 1s on nav.
+// Buttons always visible. Each button has a summary panel above it that collapses
+// to a thin strip. Panels flash open individually based on which nav action fired.
 function NavSide({
   side, snapDir,
   onSnap, snapDisabled,
   onVer, verDisabled,
   hasVersions, isPhone, isWide,
-  summary, versionSummary, flashKey,
+  summary, versionSummary,
+  snapFlashKey, verFlashKey,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
@@ -94,7 +91,8 @@ function NavSide({
   hasVersions: boolean; isPhone: boolean; isWide: boolean
   summary: string | null
   versionSummary: string | null
-  flashKey: string
+  snapFlashKey: string
+  verFlashKey: string
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
   const bracketVer = snapDir === 'back' ? '<<' : '>>'
@@ -115,29 +113,14 @@ function NavSide({
     letterSpacing: '-0.04em',
   })
 
-  // One row: button + summary bar side by side. Button always on the edge side.
-  const NavRow = ({ btn, title, btnDisabled, onBtn, rowSummary }: {
-    btn: string; title: string; btnDisabled: boolean; onBtn: () => void; rowSummary: string | null
-  }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
-      {side === 'left' && (
-        <button type="button" style={{ ...btnStyle(btnDisabled), pointerEvents: 'auto' }}
-          onClick={btnDisabled ? undefined : onBtn} title={title}
-          onMouseEnter={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
-          onMouseLeave={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
-        >{btn}</button>
-      )}
-      {rowSummary && (
-        <SummaryBar text={rowSummary} align={side} isWide={isWide} flashKey={flashKey} />
-      )}
-      {side === 'right' && (
-        <button type="button" style={{ ...btnStyle(btnDisabled), pointerEvents: 'auto' }}
-          onClick={btnDisabled ? undefined : onBtn} title={title}
-          onMouseEnter={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
-          onMouseLeave={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
-        >{btn}</button>
-      )}
-    </div>
+  // Buttons are the anchor — panels are absolutely positioned so buttons never shift.
+  // Ver panel floats ABOVE the ver button; snap panel floats BELOW the snap button.
+  const Btn = ({ btn, title, disabled, onBtn }: { btn: string; title: string; disabled: boolean; onBtn: () => void }) => (
+    <button type="button" style={{ ...btnStyle(disabled), pointerEvents: 'auto' }}
+      onClick={disabled ? undefined : onBtn} title={title}
+      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+      onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
+    >{btn}</button>
   )
 
   return (
@@ -146,21 +129,29 @@ function NavSide({
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
       {showVer && (
-        <NavRow
-          btn={bracketVer}
-          title={snapDir === 'back' ? 'Previous version' : 'Next version'}
-          btnDisabled={verDisabled}
-          onBtn={onVer}
-          rowSummary={versionSummary}
-        />
+        <div style={{ position: 'relative' }}>
+          {versionSummary && (
+            <div style={{
+              position: 'absolute', bottom: '100%', marginBottom: 5,
+              [side]: 0, zIndex: 1, pointerEvents: 'none',
+            }}>
+              <SummaryPanel text={versionSummary} align={side} isWide={isWide} flashKey={verFlashKey} />
+            </div>
+          )}
+          <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
+        </div>
       )}
-      <NavRow
-        btn={bracket}
-        title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'}
-        btnDisabled={snapDisabled}
-        onBtn={onSnap}
-        rowSummary={summary}
-      />
+      <div style={{ position: 'relative' }}>
+        <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
+        {summary && (
+          <div style={{
+            position: 'absolute', top: '100%', marginTop: 5,
+            [side]: 0, zIndex: 1, pointerEvents: 'none',
+          }}>
+            <SummaryPanel text={summary} align={side} isWide={isWide} flashKey={snapFlashKey} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -282,8 +273,12 @@ export function SnapshotView() {
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [showDiff, setShowDiff] = useState(true)
-  // Track which direction the user navigated last — determines which adjacent snapshot is the diff ref.
   const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
+  // Flash counters: each increments only when that specific panel should pop open (1s)
+  const [leftSnapFlash,  setLeftSnapFlash]  = useState(0)
+  const [rightSnapFlash, setRightSnapFlash] = useState(0)
+  const [leftVerFlash,   setLeftVerFlash]   = useState(0)
+  const [rightVerFlash,  setRightVerFlash]  = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -346,10 +341,10 @@ export function SnapshotView() {
     navigate(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, { replace: true })
   }, [navigate])
 
-  const goBack  = useCallback(() => { if (idx > 0) { setNavDir('back'); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo])
-  const goFwd   = useCallback(() => { if (idx < allSnapshots.length - 1) { setNavDir('fwd'); goTo(allSnapshots[idx + 1]) } }, [idx, allSnapshots, goTo])
-  const goVerBack = useCallback(() => { if (groupIdx > 0) { setNavDir('back'); goTo(groups[groupIdx - 1].items[0]) } }, [groupIdx, groups, goTo])
-  const goVerFwd  = useCallback(() => { if (groupIdx >= 0 && groupIdx < groups.length - 1) { setNavDir('fwd'); goTo(groups[groupIdx + 1].items[0]) } }, [groupIdx, groups, goTo])
+  const goBack    = useCallback(() => { if (idx > 0) { setNavDir('back'); setLeftSnapFlash(n => n + 1); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo])
+  const goFwd     = useCallback(() => { if (idx < allSnapshots.length - 1) { setNavDir('fwd'); setRightSnapFlash(n => n + 1); goTo(allSnapshots[idx + 1]) } }, [idx, allSnapshots, goTo])
+  const goVerBack = useCallback(() => { if (groupIdx > 0) { setNavDir('back'); setLeftVerFlash(n => n + 1); goTo(groups[groupIdx - 1].items[0]) } }, [groupIdx, groups, goTo])
+  const goVerFwd  = useCallback(() => { if (groupIdx >= 0 && groupIdx < groups.length - 1) { setNavDir('fwd'); setRightVerFlash(n => n + 1); goTo(groups[groupIdx + 1].items[0]) } }, [groupIdx, groups, goTo])
 
   const canBack    = idx > 0
   const canFwd     = idx >= 0 && idx < allSnapshots.length - 1
@@ -430,10 +425,10 @@ export function SnapshotView() {
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Sticky header */}
+      {/* Fixed header — position:fixed so overscroll / rubber-band at page top doesn't move it */}
       <div
-        className="sticky top-0 z-50 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 bg-white/95 backdrop-blur"
-        style={{ borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem' }}
+        className="z-50 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 bg-white/95 backdrop-blur"
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem' }}
       >
         <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
@@ -478,6 +473,9 @@ export function SnapshotView() {
         </button>
       </div>
 
+      {/* Spacer to clear the fixed header */}
+      <div style={{ height: 52 }} />
+
       {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
       {status === 'missing' && (
         <p className="text-center text-stone-500 mt-20">
@@ -506,7 +504,7 @@ export function SnapshotView() {
             onVer={goVerBack} verDisabled={!canVerBack}
             hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
             summary={leftSummary} versionSummary={leftVersionSummary}
-            flashKey={snapId ?? ''}
+            snapFlashKey={String(leftSnapFlash)} verFlashKey={String(leftVerFlash)}
           />
           <NavSide
             side="right" snapDir="fwd"
@@ -514,7 +512,7 @@ export function SnapshotView() {
             onVer={goVerFwd} verDisabled={!canVerFwd}
             hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
             summary={rightSummary} versionSummary={rightVersionSummary}
-            flashKey={snapId ?? ''}
+            snapFlashKey={String(rightSnapFlash)} verFlashKey={String(rightVerFlash)}
           />
         </>
       )}

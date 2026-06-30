@@ -57,7 +57,7 @@ export default async function handler(req, res) {
       const before = body.before.slice(0, 1500)
       const after = body.after.slice(0, 1500)
       const bullets = await callClaude(apiKey,
-        `List up to 4 bullet points (using • ) of what changed going from BEFORE to AFTER. Be concise, max 10 words per bullet. Focus on content changes, not style. Output ONLY the bullet list, nothing else.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
+        `List up to 4 bullet points (using - ) of what changed going from BEFORE to AFTER. Be concise, max 10 words per bullet. Focus on content changes, not style. Output ONLY the bullet list, nothing else.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
         160,
         DIFF_MODEL,
       )
@@ -70,7 +70,7 @@ export default async function handler(req, res) {
       const verBefore = body.verBefore.slice(0, 2000)
       const verAfter = body.verAfter.slice(0, 2000)
       const versionBullets = await callClaude(apiKey,
-        `List up to 5 bullet points (using • ) summarising how VERSION AFTER differs from VERSION BEFORE. Focus on the most significant content additions, removals, or restructuring. Max 12 words per bullet. Output ONLY the bullet list.\n\nVERSION BEFORE:\n${verBefore}\n\nVERSION AFTER:\n${verAfter}`,
+        `List up to 5 bullet points (using - ) summarising how VERSION AFTER differs from VERSION BEFORE. Focus on the most significant content additions, removals, or restructuring. Max 12 words per bullet. Output ONLY the bullet list.\n\nVERSION BEFORE:\n${verBefore}\n\nVERSION AFTER:\n${verAfter}`,
         200,
         DIFF_MODEL,
       )
