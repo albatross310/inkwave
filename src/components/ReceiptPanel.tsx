@@ -51,7 +51,7 @@ function getShortPeriod(createdAt: string): string {
 function computeVersionLabel(snap: Snapshot, groups: SnapshotGroup[]): string {
   for (const group of groups) {
     const i = group.items.findIndex(s => s.id === snap.id)
-    if (i >= 0) return group.label ? `${group.label}s${i + 1}` : `s${i + 1}`
+    if (i >= 0) return group.label ? `${group.label}.${i + 1}` : `0.${i + 1}`
   }
   return ''
 }
