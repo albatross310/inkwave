@@ -1,8 +1,8 @@
 // StyleBar — formatting controls above the main toolbar.
-// Acts on the current selection.
 //
-// All buttons use onMouseDown with e.preventDefault() (via the container) so the editor
-// never loses focus or selection when the user clicks a format button.
+// All buttons use the container's onMouseDown preventDefault to keep the editor's
+// selection alive while clicking. Long-press (≥350ms) opens the option popup;
+// short tap applies the last-used option.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -11,8 +11,9 @@ import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 
 const INK = '#5c2d8a'
-const BASE_SIZE = 18   // editor root px (matches .ProseMirror { font-size: 1.125rem })
+const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 1.125rem })
 const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
+const HOLD_MS = 350        // ms before a press becomes a long-press
 
 const FONTS = [
   { label: 'Fell',        css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
@@ -28,40 +29,61 @@ const FONTS = [
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 
 const HIGHLIGHT_COLORS = [
-  { label: 'Yellow', color: '#fef08a' },
-  { label: 'Green',  color: '#bbf7d0' },
-  { label: 'Blue',   color: '#bae6fd' },
-  { label: 'Pink',   color: '#fbcfe8' },
-  { label: 'Orange', color: '#fed7aa' },
-  { label: 'Clear',  color: null },
+  { label: 'Yellow',   color: '#fef08a' },
+  { label: 'Green',    color: '#bbf7d0' },
+  { label: 'Teal',     color: '#99f6e4' },
+  { label: 'Blue',     color: '#bae6fd' },
+  { label: 'Purple',   color: '#e9d5ff' },
+  { label: 'Pink',     color: '#fbcfe8' },
+  { label: 'Red',      color: '#fca5a5' },
+  { label: 'Orange',   color: '#fed7aa' },
+  { label: 'Peach',    color: '#fde68a' },
+  { label: 'Lavender', color: '#c7d2fe' },
+  { label: 'Sage',     color: '#d1fae5' },
+  { label: 'Clear',    color: null },
 ]
 
+type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
+type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha'
 type Align = 'left' | 'center' | 'right' | 'justify'
 
-function BulletListIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-      <circle cx="2.5" cy="3.5" r="1" fill="currentColor" stroke="none" />
-      <circle cx="2.5" cy="7"   r="1" fill="currentColor" stroke="none" />
-      <circle cx="2.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
-      <line x1="5" y1="3.5" x2="12" y2="3.5" />
-      <line x1="5" y1="7"   x2="12" y2="7" />
-      <line x1="5" y1="10.5" x2="10" y2="10.5" />
-    </svg>
-  )
+const CHAR_FMT_LABELS: Record<CharFmt, string> = {
+  bold: 'B', italic: 'i', underline: 'U', strike: 'S',
+}
+const CHAR_FMT_STYLES: Record<CharFmt, React.CSSProperties> = {
+  bold: { fontWeight: 700 },
+  italic: { fontStyle: 'italic' },
+  underline: { textDecoration: 'underline' },
+  strike: { textDecoration: 'line-through' },
+}
+const CHAR_FMT_NAMES: Record<CharFmt, string> = {
+  bold: 'Bold', italic: 'Italic', underline: 'Underline', strike: 'Strikethrough',
 }
 
-function OrderedListIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
-      <text x="0.5" y="4.5"  fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">1.</text>
-      <text x="0.5" y="8"    fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">2.</text>
-      <text x="0.5" y="11.5" fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">3.</text>
-      <line x1="5" y1="3.5" x2="12" y2="3.5" />
-      <line x1="5" y1="7"   x2="12" y2="7" />
-      <line x1="5" y1="10.5" x2="10" y2="10.5" />
-    </svg>
-  )
+const LIST_TYPE_LABELS: Record<ListType, string> = {
+  bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.',
+}
+
+// Hook: distinguishes short tap (click) from long press (hold ≥ HOLD_MS).
+function useLongPress(
+  onShortPress: () => void,
+  onLongPress: () => void,
+) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const firedRef = useRef(false)
+  return {
+    onPointerDown: () => {
+      firedRef.current = false
+      timerRef.current = setTimeout(() => {
+        firedRef.current = true
+        onLongPress()
+      }, HOLD_MS)
+    },
+    onClick: () => {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+      if (!firedRef.current) onShortPress()
+    },
+  }
 }
 
 export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
@@ -71,26 +93,26 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
   phone?: boolean
 }) {
   const [, force] = useState(0)
-  const [fontOpen,  setFontOpen]  = useState(false)
-  const [sizeOpen,  setSizeOpen]  = useState(false)
-  const [boldOpen,  setBoldOpen]  = useState(false)
-  const [hlOpen,    setHlOpen]    = useState(false)
+  const [fontOpen, setFontOpen] = useState(false)
+  const [sizeOpen, setSizeOpen] = useState(false)
+  const [fmtOpen,  setFmtOpen]  = useState(false)
+  const [hlOpen,   setHlOpen]   = useState(false)
   const [alignOpen, setAlignOpen] = useState(false)
   const [listOpen,  setListOpen]  = useState(false)
-  const [paraOpen,  setParaOpen]  = useState(false)
   const [pageOpen,  setPageOpen]  = useState(false)
+
+  // Last-used state for single-tap behaviour
+  const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
+  const [lastHlColor,  setLastHlColor]  = useState<string | null>('#fef08a')
+  const [lastListType, setLastListType] = useState<ListType>('bulletList')
 
   const fontBtnRef  = useRef<HTMLButtonElement>(null)
   const sizeBtnRef  = useRef<HTMLDivElement>(null)
-  const boldBtnRef  = useRef<HTMLButtonElement>(null)
+  const fmtBtnRef   = useRef<HTMLButtonElement>(null)
   const hlBtnRef    = useRef<HTMLButtonElement>(null)
   const alignBtnRef = useRef<HTMLButtonElement>(null)
   const listBtnRef  = useRef<HTMLButtonElement>(null)
-  const paraBtnRef  = useRef<HTMLButtonElement>(null)
   const pageBtnRef  = useRef<HTMLButtonElement>(null)
-
-  const [sizeStr,     setSizeStr]     = useState('')
-  const [sizeFocused, setSizeFocused] = useState(false)
 
   const ping = () => onActivity?.()
 
@@ -102,32 +124,38 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
   }, [editor])
 
   const closeAll = () => {
-    setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setHlOpen(false)
-    setAlignOpen(false); setListOpen(false); setParaOpen(false); setPageOpen(false)
+    setFontOpen(false); setSizeOpen(false); setFmtOpen(false); setHlOpen(false)
+    setAlignOpen(false); setListOpen(false); setPageOpen(false)
   }
 
-  // Close all popups on outside click / Escape.
   useEffect(() => {
-    const anyOpen = fontOpen || sizeOpen || boldOpen || hlOpen || alignOpen || listOpen || paraOpen || pageOpen
+    const anyOpen = fontOpen || sizeOpen || fmtOpen || hlOpen || alignOpen || listOpen || pageOpen
     if (!anyOpen) return
     const onDown = () => closeAll()
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeAll() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [fontOpen, sizeOpen, boldOpen, hlOpen, alignOpen, listOpen, paraOpen, pageOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fontOpen, sizeOpen, fmtOpen, hlOpen, alignOpen, listOpen, pageOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ts = editor.getAttributes('textStyle')
+  // ── Derived state ──────────────────────────────────────────────────────────
+  const ts       = editor.getAttributes('textStyle')
   const paraAttrs = editor.getAttributes('paragraph')
-  const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
-  const rawFontSize = ts.fontSize ?? ''
-  const curSizePx = rawFontSize.endsWith('em')
-    ? parseFloat(rawFontSize) * BASE_SIZE
-    : parseInt(rawFontSize, 10) || BASE_SIZE
-  const curSize = Math.round(curSizePx / PT_TO_PX)
-  const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
-  const curLH = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
+  const curFont  = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
+  const rawSize  = ts.fontSize ?? ''
+  const curSizePx = rawSize.endsWith('em')
+    ? parseFloat(rawSize) * BASE_SIZE
+    : parseInt(rawSize, 10) || BASE_SIZE
+  const curSize  = Math.round(curSizePx / PT_TO_PX)
+  const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(
+    a => editor.isActive({ textAlign: a }),
+  ) ?? 'left'
+  const curLH    = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
+  const indented = !!(paraAttrs.textIndent as string | null)
+  const curHlColor = (editor.getAttributes('highlight') as { color?: string }).color ?? null
+  const listActive = editor.isActive('bulletList') || editor.isActive('orderedList')
 
+  // ── Formatters ─────────────────────────────────────────────────────────────
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize  = (pt: number) => {
     ping()
@@ -138,43 +166,88 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
   const setAlign = (a: Align) => { ping(); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
 
   const pickLineHeight = (v: number) => {
-    setLineHeight(v)
-    onLineHeightChange?.(v)
+    setLineHeight(v); onLineHeightChange?.(v)
     editor.chain().setLineHeight(v.toString()).run()
-    setParaOpen(false)
-    ping()
+    setPageOpen(false); ping()
   }
 
-  // Popup positioned above its anchor button.
+  function applyFmt(fmt: CharFmt) {
+    ping(); setLastFmt(fmt)
+    switch (fmt) {
+      case 'bold':      editor.chain().toggleBold().run(); break
+      case 'italic':    editor.chain().toggleItalic().run(); break
+      case 'underline': editor.chain().toggleUnderline().run(); break
+      case 'strike':    editor.chain().toggleStrike().run(); break
+    }
+  }
+
+  function applyHighlight(color: string | null) {
+    ping()
+    if (color) { setLastHlColor(color); editor.chain().setHighlight({ color }).run() }
+    else editor.chain().unsetHighlight().run()
+    setHlOpen(false)
+  }
+
+  function applyListType(type: ListType) {
+    ping(); setLastListType(type); setListOpen(false)
+    if (type === 'bulletList') {
+      editor.chain().focus().toggleBulletList().run()
+      return
+    }
+    // Ordered list with sub-type
+    const inOrdered  = editor.isActive('orderedList')
+    const curType    = (editor.getAttributes('orderedList') as { listType?: string }).listType ?? 'decimal'
+    if (inOrdered && curType === type) {
+      editor.chain().focus().toggleOrderedList().run()
+    } else if (inOrdered) {
+      editor.chain().focus().updateAttributes('orderedList', { listType: type }).run()
+    } else {
+      editor.chain().focus().toggleOrderedList().run()
+      if (type !== 'decimal') editor.chain().focus().updateAttributes('orderedList', { listType: type }).run()
+    }
+  }
+
+  // ── Long-press handlers ────────────────────────────────────────────────────
+  const fmtPress = useLongPress(
+    () => { applyFmt(lastFmt) },
+    () => { setFmtOpen(true) },
+  )
+  const hlPress = useLongPress(
+    () => { applyHighlight(lastHlColor) },
+    () => { setHlOpen(true) },
+  )
+  const listPress = useLongPress(
+    () => { applyListType(lastListType) },
+    () => { setListOpen(true) },
+  )
+
+  // ── Popup positioning ──────────────────────────────────────────────────────
   function popupAbove(ref: React.RefObject<HTMLElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: 10 }
     const vh = window.visualViewport?.height ?? window.innerHeight
     return { position: 'fixed', bottom: Math.max(8, Math.round(vh - br.top + 8)), left: Math.max(8, Math.round(br.left)) }
   }
+  const ps = (width: number): React.CSSProperties =>
+    ({ border: `1px solid ${INK}55`, borderRadius: 12, width })
 
-  // Shared popup container style.
-  function popupStyle(width: number): React.CSSProperties {
-    return { border: `1px solid ${INK}55`, borderRadius: 12, width }
-  }
-
-  const boldActive  = editor.isActive('bold') || editor.isActive('italic') || editor.isActive('underline') || editor.isActive('strike')
-  const listActive  = editor.isActive('bulletList') || editor.isActive('orderedList')
-  const indented    = !!(paraAttrs.textIndent as string | null)
-  const curHlColor  = (editor.getAttributes('highlight') as { color?: string }).color ?? null
+  // Current B icon — reflects last used format
+  const fmtIcon = CHAR_FMT_LABELS[lastFmt]
+  const fmtStyle = CHAR_FMT_STYLES[lastFmt]
 
   return (
-    // onMouseDown with preventDefault prevents buttons from stealing focus and deselecting text.
-    // The input's own click stops propagation so it can still receive focus for typing.
+    // onMouseDown with check prevents all buttons from stealing editor focus/selection.
+    // The size container's inner click is stopped at source.
     <div
       className="flex items-center gap-1.5 text-sm text-stone-500 font-serif w-full"
       onMouseDown={e => { if (!(e.target as Element).closest('input')) e.preventDefault() }}
+      onMouseEnter={() => onActivity?.()}
     >
 
-      {/* ── Font drop-up ── */}
+      {/* ── Font ── */}
       <button ref={fontBtnRef} type="button" aria-haspopup="dialog" aria-expanded={fontOpen}
-        onClick={e => { e.stopPropagation(); setFontOpen(o => !o); setSizeOpen(false); setBoldOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false); setParaOpen(false); setPageOpen(false) }}
-        className="rounded border border-stone-300 px-2 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[5.5rem] text-left whitespace-nowrap">
+        onClick={e => { e.stopPropagation(); closeAll(); setFontOpen(o => !o) }}
+        className="rounded border border-stone-300 px-1.5 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[4.8rem] text-left whitespace-nowrap text-xs">
         {curFont}
       </button>
 
@@ -182,7 +255,7 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setFontOpen(false)} />
           <div role="dialog" aria-label="Choose font" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(fontBtnRef), ...popupStyle(136) }}
+            style={{ ...popupAbove(fontBtnRef), ...ps(136) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
             {FONTS.map(f => (
               <button key={f.label} type="button" onClick={() => setFont(f.css)}
@@ -198,74 +271,60 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         document.body,
       )}
 
-      {/* ── Size: text input + click-container opens picker ── */}
+      {/* ── Size — display only, click to open picker ── */}
       <div ref={sizeBtnRef}
-        className="flex items-center rounded border border-stone-300 hover:border-stone-400 transition-colors cursor-pointer"
-        style={{ minWidth: 48 }}
+        className="flex items-center justify-center rounded border border-stone-300 hover:border-stone-400 transition-colors cursor-pointer px-1.5 py-0.5"
+        style={{ minWidth: 36 }}
         onClick={e => { e.stopPropagation(); closeAll(); setSizeOpen(o => !o) }}>
-        <input
-          type="text" inputMode="numeric"
-          value={sizeFocused ? sizeStr : String(curSize)}
-          onFocus={() => { setSizeStr(String(curSize)); setSizeFocused(true) }}
-          onBlur={() => { setSizeFocused(false); const v = parseInt(sizeStr, 10); if (v >= 4 && v <= 200) setSize(v) }}
-          onChange={e => setSizeStr(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const v = parseInt(sizeStr, 10); if (v >= 4 && v <= 200) { setSize(v); (e.target as HTMLInputElement).blur() } } }}
-          onClick={e => e.stopPropagation()}
-          onMouseDown={e => e.stopPropagation()}
-          className="w-10 text-center text-sm py-0.5 bg-transparent outline-none text-stone-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-        />
+        <span className="text-xs text-stone-500 select-none">{curSize}</span>
       </div>
 
       {sizeOpen && createPortal(
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setSizeOpen(false)} />
-          <div role="dialog" aria-label="Font size" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(sizeBtnRef), ...popupStyle(96) }}
+          <div role="dialog" aria-label="Font size" className="z-[99] bg-white shadow-xl py-1.5 overflow-y-auto"
+            style={{ ...popupAbove(sizeBtnRef), ...ps(64), maxHeight: 280 }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
-            <div className="grid grid-cols-2">
-              {FONT_SIZES.map(sz => (
-                <button key={sz} type="button" onClick={() => setSize(sz)}
-                  className="text-center px-2 py-1 text-sm transition-colors hover:bg-stone-50"
-                  style={{ color: sz === curSize ? INK : '#374151',
-                    fontWeight: sz === curSize ? 600 : 400,
-                    background: sz === curSize ? `${INK}12` : undefined }}>
-                  {sz}
-                </button>
-              ))}
-            </div>
+            {FONT_SIZES.map(sz => (
+              <button key={sz} type="button" onClick={() => setSize(sz)}
+                className="w-full text-center px-2 py-1 text-sm transition-colors hover:bg-stone-50"
+                style={{ color: sz === curSize ? INK : '#374151',
+                  fontWeight: sz === curSize ? 600 : 400,
+                  background: sz === curSize ? `${INK}12` : undefined }}>
+                {sz}
+              </button>
+            ))}
           </div>
         </>,
         document.body,
       )}
 
-      {/* ── B drop-up: Bold / Italic / Underline / Strikethrough ── */}
-      <button ref={boldBtnRef} type="button" aria-haspopup="dialog" aria-expanded={boldOpen}
-        onClick={e => { e.stopPropagation(); setBoldOpen(o => !o); setFontOpen(false); setSizeOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false); setParaOpen(false); setPageOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors font-bold ${boldActive || boldOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
-        title="Character formatting">
-        B
+      {/* ── B/I/U/S — tap=last format, hold=picker ── */}
+      <button ref={fmtBtnRef} type="button"
+        {...fmtPress}
+        aria-haspopup="dialog" aria-expanded={fmtOpen}
+        onClick={e => { e.stopPropagation(); fmtPress.onClick() }}
+        className={`rounded border px-1.5 py-0.5 transition-colors ${fmtOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        style={{ ...fmtStyle, minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
+        title="Character formatting (hold for options)">
+        {fmtIcon}
       </button>
 
-      {boldOpen && createPortal(
+      {fmtOpen && createPortal(
         <>
-          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setBoldOpen(false)} />
+          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setFmtOpen(false)} />
           <div role="dialog" aria-label="Character formatting" className="z-[99] bg-white shadow-xl py-1"
-            style={{ ...popupAbove(boldBtnRef), ...popupStyle(130) }}
+            style={{ ...popupAbove(fmtBtnRef), ...ps(140) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
-            {[
-              { key: 'bold',      label: 'Bold',          style: { fontWeight: 700 },                              cmd: () => editor.chain().toggleBold().run() },
-              { key: 'italic',    label: 'Italic',        style: { fontStyle: 'italic' },                          cmd: () => editor.chain().toggleItalic().run() },
-              { key: 'underline', label: 'Underline',     style: { textDecoration: 'underline' },                  cmd: () => editor.chain().toggleUnderline().run() },
-              { key: 'strike',    label: 'Strikethrough', style: { textDecoration: 'line-through' },               cmd: () => editor.chain().toggleStrike().run() },
-            ].map(item => {
-              const active = editor.isActive(item.key)
+            {(['bold', 'italic', 'underline', 'strike'] as CharFmt[]).map(fmt => {
+              const active = editor.isActive(fmt)
               return (
-                <button key={item.key} type="button"
-                  onClick={() => { ping(); item.cmd(); }}
+                <button key={fmt} type="button"
+                  onClick={() => { applyFmt(fmt); setFmtOpen(false) }}
                   className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
-                  style={{ ...item.style, color: active ? INK : '#374151',
+                  style={{ ...CHAR_FMT_STYLES[fmt], color: active ? INK : '#374151',
                     borderLeft: active ? `2px solid ${INK}` : '2px solid transparent' }}>
-                  {item.label}
+                  {CHAR_FMT_NAMES[fmt]}
                 </button>
               )
             })}
@@ -274,12 +333,16 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         document.body,
       )}
 
-      {/* ── Highlight drop-up ── */}
-      <button ref={hlBtnRef} type="button" aria-haspopup="dialog" aria-expanded={hlOpen}
-        onClick={e => { e.stopPropagation(); setHlOpen(o => !o); setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setAlignOpen(false); setListOpen(false); setParaOpen(false); setPageOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors ${curHlColor || hlOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
-        title="Highlight"
-        style={curHlColor ? { background: curHlColor, borderColor: `${INK}88` } : {}}>
+      {/* ── H — tap=last colour, hold=picker ── */}
+      <button ref={hlBtnRef} type="button"
+        {...hlPress}
+        aria-haspopup="dialog" aria-expanded={hlOpen}
+        onClick={e => { e.stopPropagation(); hlPress.onClick() }}
+        className={`rounded border px-1.5 py-0.5 transition-colors ${hlOpen ? 'border-[#5c2d8a]' : curHlColor ? 'border-stone-400' : 'border-stone-300 hover:border-stone-400'}`}
+        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem',
+          background: curHlColor ?? undefined,
+          color: hlOpen ? INK : curHlColor ? '#374151' : '#6b7280' }}
+        title="Highlight (hold for colours)">
         H
       </button>
 
@@ -287,27 +350,18 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setHlOpen(false)} />
           <div role="dialog" aria-label="Highlight colour" className="z-[99] bg-white shadow-xl p-2"
-            style={{ ...popupAbove(hlBtnRef), ...popupStyle(148) }}
+            style={{ ...popupAbove(hlBtnRef), ...ps(156) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
             <div className="grid grid-cols-3 gap-1.5">
               {HIGHLIGHT_COLORS.map(h => (
                 <button key={h.label} type="button"
-                  onClick={() => {
-                    ping()
-                    if (h.color) {
-                      editor.chain().setHighlight({ color: h.color }).run()
-                    } else {
-                      editor.chain().unsetHighlight().run()
-                    }
-                    setHlOpen(false)
-                  }}
-                  className="rounded py-1 text-xs text-center transition-colors hover:opacity-80 border"
+                  onClick={() => applyHighlight(h.color)}
+                  className="rounded py-1 text-[0.68rem] text-center transition-opacity hover:opacity-80 border"
                   style={{
                     background: h.color ?? '#f3f4f6',
-                    borderColor: curHlColor === h.color ? INK : 'transparent',
+                    borderColor: curHlColor === h.color ? INK : (h.color ? 'transparent' : '#d1d5db'),
                     color: '#374151',
-                  }}
-                  title={h.label}>
+                  }}>
                   {h.label}
                 </button>
               ))}
@@ -317,10 +371,11 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         document.body,
       )}
 
-      {/* ── A: Alignment drop-up ── */}
+      {/* ── A — Alignment ── */}
       <button ref={alignBtnRef} type="button" aria-haspopup="dialog" aria-expanded={alignOpen}
-        onClick={e => { e.stopPropagation(); setAlignOpen(o => !o); setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setHlOpen(false); setListOpen(false); setParaOpen(false); setPageOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors font-serif ${alignOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        onClick={e => { e.stopPropagation(); closeAll(); setAlignOpen(o => !o) }}
+        className={`rounded border px-1.5 py-0.5 transition-colors font-serif ${alignOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
         title="Alignment">
         A
       </button>
@@ -329,7 +384,7 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setAlignOpen(false)} />
           <div role="dialog" aria-label="Alignment" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(alignBtnRef), ...popupStyle(118) }}
+            style={{ ...popupAbove(alignBtnRef), ...ps(110) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
             {(['left', 'center', 'right', 'justify'] as const).map(a => (
               <button key={a} type="button" onClick={() => setAlign(a)}
@@ -345,33 +400,41 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         document.body,
       )}
 
-      {/* ── L: Lists drop-up ── */}
-      <button ref={listBtnRef} type="button" aria-haspopup="dialog" aria-expanded={listOpen}
-        onClick={e => { e.stopPropagation(); setListOpen(o => !o); setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setHlOpen(false); setAlignOpen(false); setParaOpen(false); setPageOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors font-serif ${listActive || listOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
-        title="Lists">
-        L
+      {/* ── L — tap=last list, hold=picker (•/1./i./a.) ── */}
+      <button ref={listBtnRef} type="button"
+        {...listPress}
+        aria-haspopup="dialog" aria-expanded={listOpen}
+        onClick={e => { e.stopPropagation(); listPress.onClick() }}
+        className={`rounded border px-1.5 py-0.5 transition-colors ${listActive || listOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
+        title="Lists (hold for types)">
+        {LIST_TYPE_LABELS[lastListType]}
       </button>
 
       {listOpen && createPortal(
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setListOpen(false)} />
-          <div role="dialog" aria-label="Lists" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(listBtnRef), ...popupStyle(136) }}
+          <div role="dialog" aria-label="List type" className="z-[99] bg-white shadow-xl py-1.5"
+            style={{ ...popupAbove(listBtnRef), ...ps(148) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
-            {[
-              { label: 'Bullets',   icon: <BulletListIcon />, type: 'bulletList',   cmd: () => editor.chain().focus().toggleBulletList().run() },
-              { label: 'Numbered',  icon: <OrderedListIcon />, type: 'orderedList',  cmd: () => editor.chain().focus().toggleOrderedList().run() },
-            ].map(item => {
-              const active = editor.isActive(item.type)
+            {([
+              { type: 'bulletList'   as ListType, label: 'Bullets',   preview: '•' },
+              { type: 'decimal'      as ListType, label: 'Numbered',  preview: '1.' },
+              { type: 'lower-roman'  as ListType, label: 'Roman',     preview: 'i.' },
+              { type: 'lower-alpha'  as ListType, label: 'Alphabet',  preview: 'a.' },
+            ]).map(item => {
+              const active = item.type === 'bulletList'
+                ? editor.isActive('bulletList')
+                : editor.isActive('orderedList') &&
+                  ((editor.getAttributes('orderedList') as { listType?: string }).listType ?? 'decimal') === item.type
               return (
                 <button key={item.type} type="button"
-                  onClick={() => { ping(); item.cmd(); setListOpen(false) }}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
+                  onClick={() => applyListType(item.type)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-stone-50"
                   style={{ color: active ? INK : '#374151',
                     fontWeight: active ? 500 : 400,
                     borderLeft: active ? `2px solid ${INK}` : '2px solid transparent' }}>
-                  {item.icon}
+                  <span className="w-5 text-center tabular-nums" style={{ color: INK, opacity: 0.8 }}>{item.preview}</span>
                   <span>{item.label}</span>
                 </button>
               )
@@ -381,45 +444,11 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         document.body,
       )}
 
-      {/* ── ¶: Paragraph panel (line spacing) — translucent ── */}
-      <button ref={paraBtnRef} type="button" aria-haspopup="dialog" aria-expanded={paraOpen}
-        onClick={e => { e.stopPropagation(); setParaOpen(o => !o); setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false); setPageOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors italic ${paraOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
-        title="Paragraph spacing">
-        ¶
-      </button>
-
-      {paraOpen && createPortal(
-        <>
-          <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setParaOpen(false)} />
-          <div role="dialog" aria-label="Paragraph spacing" className="z-[99] shadow-xl py-1"
-            style={{
-              ...popupAbove(paraBtnRef),
-              width: 76,
-              border: `1px solid ${INK}44`,
-              borderRadius: 10,
-              background: 'rgba(255,255,255,0.88)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-            }}
-            onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
-            {LINE_HEIGHTS.map(lh => (
-              <button key={lh.label} type="button" onClick={() => pickLineHeight(lh.value)}
-                className="w-full text-center px-2 py-1 text-sm transition-colors hover:bg-white/60 italic"
-                style={{ color: lh.value === curLH ? INK : '#6b7280',
-                  fontWeight: lh.value === curLH ? 600 : 400 }}>
-                {lh.label}
-              </button>
-            ))}
-          </div>
-        </>,
-        document.body,
-      )}
-
-      {/* ── P: Page panel (indent first line) ── */}
+      {/* ── P — Page panel: indent + line height ── */}
       <button ref={pageBtnRef} type="button" aria-haspopup="dialog" aria-expanded={pageOpen}
-        onClick={e => { e.stopPropagation(); setPageOpen(o => !o); setFontOpen(false); setSizeOpen(false); setBoldOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false); setParaOpen(false) }}
-        className={`rounded border px-2 py-0.5 transition-colors font-serif ${indented || pageOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        onClick={e => { e.stopPropagation(); closeAll(); setPageOpen(o => !o) }}
+        className={`rounded border px-1.5 py-0.5 transition-colors font-serif ${indented || pageOpen ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
         title="Page settings">
         P
       </button>
@@ -428,8 +457,9 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         <>
           <div className="fixed inset-0 z-[98]" aria-hidden="true" onMouseDown={() => setPageOpen(false)} />
           <div role="dialog" aria-label="Page settings" className="z-[99] bg-white shadow-xl py-1.5"
-            style={{ ...popupAbove(pageBtnRef), ...popupStyle(148) }}
+            style={{ ...popupAbove(pageBtnRef), ...ps(156) }}
             onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}>
+            <div className="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-stone-400">Indent</div>
             <button type="button"
               onClick={() => {
                 ping()
@@ -442,8 +472,18 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
               style={{ color: indented ? INK : '#374151',
                 fontWeight: indented ? 500 : 400,
                 borderLeft: indented ? `2px solid ${INK}` : '2px solid transparent' }}>
-              Indent first line
+              First line indent
             </button>
+            <div className="px-3 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-stone-400">Line spacing</div>
+            {LINE_HEIGHTS.map(lh => (
+              <button key={lh.label} type="button" onClick={() => pickLineHeight(lh.value)}
+                className="w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-stone-50 italic"
+                style={{ color: lh.value === curLH ? INK : '#374151',
+                  fontWeight: lh.value === curLH ? 500 : 400,
+                  borderLeft: lh.value === curLH ? `2px solid ${INK}` : '2px solid transparent' }}>
+                {lh.label}
+              </button>
+            ))}
           </div>
         </>,
         document.body,
@@ -453,7 +493,7 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
       {phone && (
         <button type="button"
           onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
-          className="rounded border px-2 py-0.5 text-xs transition-colors border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap"
+          className="rounded border px-1.5 py-0.5 text-xs transition-colors border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap"
           title="Select all">
           All
         </button>

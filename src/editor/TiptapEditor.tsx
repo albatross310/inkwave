@@ -15,6 +15,7 @@ import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import { PaginationExtension } from './extensions/PaginationExtension'
+import { ListStyle } from './extensions/ListStyle'
 import { gappedPagesEnabled } from './pageView'
 import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
@@ -246,6 +247,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       StarterKit,
       Highlight.configure({ multicolor: true }),
       Underline,
+      ListStyle,
       PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
       ScasSlotMark,
       TextStyle,
