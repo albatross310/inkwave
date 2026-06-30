@@ -14,58 +14,78 @@ const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 
-// ── Summary box ──────────────────────────────────────────────────────────────
-// Opaque purple background. Collapses to a thin strip on narrow screens; hover expands.
-// Renders lines starting with • as a proper bullet list.
-function SummaryBox({ text, align, isWide }: { text: string; align: 'left' | 'right'; isWide: boolean }) {
+// ── Summary bar ──────────────────────────────────────────────────────────────
+// Collapses to a 6px-wide vertical strip; expands horizontally on hover.
+// On narrow/phone: also flashes open for 1s whenever flashKey changes (i.e. on each navigation).
+// Wide screens: always expanded.
+function SummaryBar({ text, align, isWide, flashKey }: {
+  text: string; align: 'left' | 'right'; isWide: boolean; flashKey: string
+}) {
   const [hovered, setHovered] = useState(false)
-  const expanded = isWide || hovered
+  const [flashing, setFlashing] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    if (isWide) return
+    setFlashing(true)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setFlashing(false), 1000)
+    return () => clearTimeout(timer.current)
+  // flashKey changes on each navigation — that's what triggers the pop-out
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flashKey, isWide])
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const expanded = isWide || hovered || flashing
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  // Bar expands from the button outward (rightward on left side, leftward on right side)
+  const radius = align === 'left' ? '0 8px 8px 0' : '8px 0 0 8px'
+
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: '#ede5f7',
-        border: '1px solid rgba(92, 45, 138, 0.25)',
-        borderRadius: 8,
-        padding: expanded ? '7px 10px' : '0 10px',
-        fontSize: '0.8rem',
-        lineHeight: 1.5,
-        color: INK,
-        maxWidth: 170,
-        maxHeight: expanded ? '240px' : '6px',
+        width: expanded ? '150px' : '6px',
+        minHeight: 40,
         overflow: 'hidden',
+        background: '#ede5f7',
+        border: '1px solid rgba(92,45,138,0.22)',
+        borderRadius: radius,
+        padding: expanded ? '6px 8px' : 0,
+        fontSize: '0.75rem',
+        lineHeight: 1.45,
+        color: INK,
         cursor: expanded ? 'default' : 'pointer',
-        transition: 'max-height 200ms ease, padding 200ms ease',
-        marginBottom: 6,
         userSelect: 'none',
-        textAlign: align,
-        zIndex: 46,
-        position: 'relative',
+        pointerEvents: 'auto',
+        transition: 'width 220ms ease, padding 220ms ease',
+        flexShrink: 0,
       }}
     >
-      {lines.map((line, i) => (
-        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
-          {line.startsWith('•') ? (
-            <><span style={{ flexShrink: 0 }}>•</span><span>{line.slice(1).trim()}</span></>
-          ) : <span>{line}</span>}
-        </div>
-      ))}
+      <div style={{ width: 136 }}>
+        {lines.map((line, i) => (
+          <div key={i} style={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+            {line.startsWith('•')
+              ? <><span style={{ flexShrink: 0 }}>•</span><span>{line.slice(1).trim()}</span></>
+              : <span>{line}</span>}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-// ── Nav side: thin bar (narrow/phone) or floating squares (wide) ─────────────
-// Wide (≥1024px): floating squares at a fixed offset, summary boxes above each button.
-// Narrow/phone: a tall thin purple strip flush at the edge; hover (desktop) or tap (phone)
-// expands it to reveal the buttons. No s/v labels anywhere.
+// ── Nav side ─────────────────────────────────────────────────────────────────
+// Buttons always visible at the screen edge. Each button has a SummaryBar beside it
+// (to the right of left buttons, to the left of right buttons) that collapses to a
+// thin 6px vertical strip and can be expanded by hover or auto-flashes for 1s on nav.
 function NavSide({
   side, snapDir,
   onSnap, snapDisabled,
   onVer, verDisabled,
   hasVersions, isPhone, isWide,
-  summary, versionSummary,
+  summary, versionSummary, flashKey,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
@@ -74,13 +94,12 @@ function NavSide({
   hasVersions: boolean; isPhone: boolean; isWide: boolean
   summary: string | null
   versionSummary: string | null
+  flashKey: string
 }) {
-  const [open, setOpen] = useState(false)
-
-  const bracket      = snapDir === 'back' ? '<'  : '>'
-  const bracketVer   = snapDir === 'back' ? '<<' : '>>'
-  const btnSize      = isPhone ? 34 : 44
-  const showVer      = hasVersions && !isPhone
+  const bracket    = snapDir === 'back' ? '<'  : '>'
+  const bracketVer = snapDir === 'back' ? '<<' : '>>'
+  const btnSize    = isPhone ? 34 : 44
+  const showVer    = hasVersions && !isPhone
 
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -96,87 +115,52 @@ function NavSide({
     letterSpacing: '-0.04em',
   })
 
-  // ── Wide: floating squares with summary boxes above each button ──────────
-  if (isWide) {
-    const align = side
-    return (
-      <div style={{
-        position: 'fixed', [side]: 10, top: '50%', transform: 'translateY(-50%)',
-        zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
-        alignItems: side === 'left' ? 'flex-start' : 'flex-end',
-      }}>
-        {showVer && (
-          <div style={{ display: 'flex', flexDirection: 'column', pointerEvents: 'auto',
-            alignItems: side === 'right' ? 'flex-end' : 'flex-start' }}>
-            {versionSummary && !verDisabled && (
-              <SummaryBox text={versionSummary} align={align} isWide={isWide} />
-            )}
-            <button type="button" style={btnStyle(verDisabled)}
-              onClick={verDisabled ? undefined : onVer}
-              onMouseEnter={e => { if (!verDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
-              onMouseLeave={e => { if (!verDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
-              title={snapDir === 'back' ? 'Previous version' : 'Next version'}
-            >{bracketVer}</button>
-          </div>
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', pointerEvents: 'auto',
-          alignItems: side === 'right' ? 'flex-end' : 'flex-start' }}>
-          {summary && !snapDisabled && <SummaryBox text={summary} align={align} isWide={isWide} />}
-          <button type="button" style={btnStyle(snapDisabled)}
-            onClick={snapDisabled ? undefined : onSnap}
-            onMouseEnter={e => { if (!snapDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
-            onMouseLeave={e => { if (!snapDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
-            title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'}
-          >{bracket}</button>
-        </div>
-      </div>
-    )
-  }
-
-  // ── Narrow / phone: thin bar that expands on hover/tap ───────────────────
-  const STRIP = 6
-  const expandedW = btnSize + 14
-  const numButtons = (showVer ? 2 : 1)
-  const stripH = numButtons * (btnSize + 8) + 20
-  const radius = side === 'left' ? '0 10px 10px 0' : '10px 0 0 10px'
+  // One row: button + summary bar side by side. Button always on the edge side.
+  const NavRow = ({ btn, title, btnDisabled, onBtn, rowSummary }: {
+    btn: string; title: string; btnDisabled: boolean; onBtn: () => void; rowSummary: string | null
+  }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
+      {side === 'left' && (
+        <button type="button" style={{ ...btnStyle(btnDisabled), pointerEvents: 'auto' }}
+          onClick={btnDisabled ? undefined : onBtn} title={title}
+          onMouseEnter={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+          onMouseLeave={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
+        >{btn}</button>
+      )}
+      {rowSummary && (
+        <SummaryBar text={rowSummary} align={side} isWide={isWide} flashKey={flashKey} />
+      )}
+      {side === 'right' && (
+        <button type="button" style={{ ...btnStyle(btnDisabled), pointerEvents: 'auto' }}
+          onClick={btnDisabled ? undefined : onBtn} title={title}
+          onMouseEnter={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+          onMouseLeave={e => { if (!btnDisabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
+        >{btn}</button>
+      )}
+    </div>
+  )
 
   return (
-    <div
-      style={{ position: 'fixed', [side]: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 45 }}
-      onMouseEnter={() => !isPhone && setOpen(true)}
-      onMouseLeave={() => !isPhone && setOpen(false)}
-    >
-      <div style={{
-        width: open ? expandedW : STRIP,
-        minHeight: stripH,
-        overflow: 'hidden',
-        transition: 'width 220ms ease',
-        background: 'rgba(140, 90, 200, 0.22)',
-        borderRadius: radius,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        padding: open ? '7px' : 0,
-        cursor: open ? 'default' : 'pointer',
-        pointerEvents: 'auto',
-      }}
-        onClick={() => isPhone && !open && setOpen(true)}
-      >
-        {showVer && (
-          <button type="button"
-            style={{ ...btnStyle(verDisabled), opacity: open ? 1 : 0, transition: 'opacity 150ms ease' }}
-            onClick={(e) => { e.stopPropagation(); if (!verDisabled) { onVer(); if (isPhone) setOpen(false) } }}
-            title={snapDir === 'back' ? 'Previous version' : 'Next version'}
-          >{bracketVer}</button>
-        )}
-        <button type="button"
-          style={{ ...btnStyle(snapDisabled), opacity: open ? 1 : 0, transition: 'opacity 150ms ease' }}
-          onClick={(e) => { e.stopPropagation(); if (!snapDisabled) { onSnap(); if (isPhone) setOpen(false) } }}
-          title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'}
-        >{bracket}</button>
-      </div>
+    <div style={{
+      position: 'fixed', [side]: 10, top: '50%', transform: 'translateY(-50%)',
+      zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
+    }}>
+      {showVer && (
+        <NavRow
+          btn={bracketVer}
+          title={snapDir === 'back' ? 'Previous version' : 'Next version'}
+          btnDisabled={verDisabled}
+          onBtn={onVer}
+          rowSummary={versionSummary}
+        />
+      )}
+      <NavRow
+        btn={bracket}
+        title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'}
+        btnDisabled={snapDisabled}
+        onBtn={onSnap}
+        rowSummary={summary}
+      />
     </div>
   )
 }
@@ -410,14 +394,10 @@ export function SnapshotView() {
 
   const versionLabel = groupIdx >= 0 ? groups[groupIdx].label || 'draft' : ''
 
-  // "2.3/4.7 (6/19)" = version 2, snapshot 3 within it / version 4 total, last has 7 snaps (6 of 19 overall)
   const snapInGroup = groupIdx >= 0
     ? groups[groupIdx].items.findIndex((s) => s.id === snapId) + 1
     : 0
   const lastGroup = groups[groups.length - 1]
-  const posLabel = allSnapshots.length > 1
-    ? `${groupIdx + 1}.${snapInGroup} / ${groups.length}.${lastGroup?.items.length ?? 1} (${idx + 1}/${allSnapshots.length})`
-    : null
 
   // Direction-sensitive diff reference: the snapshot we just navigated away from
   const snapRefIdx = navDir === 'back' ? idx + 1 : idx - 1
@@ -463,14 +443,16 @@ export function SnapshotView() {
 
         {snapshot && (
           <span className="text-stone-400" style={{ fontSize: '0.85rem' }}>
-            {snapshot.wordCount}w
-            {snapshot.summary && <> · <em>{snapshot.summary}</em></>}
-            {' · '}{snapshot.ots.status}
+            {snapshot.wordCount}w · {snapshot.ots.status}
           </span>
         )}
 
-        {posLabel && (
-          <span className="text-stone-400 tabular-nums" style={{ fontSize: '0.85rem' }}>{posLabel}</span>
+        {allSnapshots.length > 1 && (
+          <span className="text-stone-400 tabular-nums" style={{ fontSize: '0.85rem' }}>
+            {`${groupIdx + 1}.${snapInGroup} / ${groups.length}.${lastGroup?.items.length ?? 1}`}
+            {'   '}
+            {`(${idx + 1}/${allSnapshots.length})`}
+          </span>
         )}
 
         {status === 'ready' && (
@@ -524,6 +506,7 @@ export function SnapshotView() {
             onVer={goVerBack} verDisabled={!canVerBack}
             hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
             summary={leftSummary} versionSummary={leftVersionSummary}
+            flashKey={snapId ?? ''}
           />
           <NavSide
             side="right" snapDir="fwd"
@@ -531,6 +514,7 @@ export function SnapshotView() {
             onVer={goVerFwd} verDisabled={!canVerFwd}
             hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
             summary={rightSummary} versionSummary={rightVersionSummary}
+            flashKey={snapId ?? ''}
           />
         </>
       )}
