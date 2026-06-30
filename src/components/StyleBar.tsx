@@ -265,6 +265,14 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
         document.body,
       )}
 
+      {/* Select all — especially useful on phone where long-press select-all is unreliable */}
+      <button type="button"
+        onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
+        className="rounded border px-2 py-0.5 text-xs transition-colors border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap"
+        title="Select all">
+        Select all
+      </button>
+
     </div>
   )
 }

@@ -1260,7 +1260,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
               transform: `scale(${zoom})`,
-              transformOrigin: 'bottom center',
+              transformOrigin: 'bottom right',
             }}
           >
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.

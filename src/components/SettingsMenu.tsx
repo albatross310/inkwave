@@ -27,14 +27,15 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
 
   function toggle() { setOpen(o => !o) }
 
-  // Compute popup position: anchored above the button, right-aligned to it.
+  // Compute popup position: anchored above the button, right-aligned to button's right edge.
+  // Clamps so the panel never overflows off-screen on phone.
   function menuStyle(): React.CSSProperties {
     const br = btnRef.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, right: 10 }
     return {
       position: 'fixed',
       bottom: Math.round(window.innerHeight - br.top + 8),
-      left: Math.round(br.left),
+      right: Math.max(8, Math.round(window.innerWidth - br.right)),
     }
   }
 
@@ -100,6 +101,16 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               label="Watermark"
               checked={watermarkEnabled()}
               onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
+            />
+
+            {/* SCAS testing mode — highlights all exclusion-set words, not just the ones in your text */}
+            <Row
+              label="SCAS test mode"
+              checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
+              onChange={() => {
+                try { localStorage.setItem('inkwave:debugHighlightAll', localStorage.getItem('inkwave:debugHighlightAll') === '1' ? '0' : '1') } catch { /* private mode */ }
+                window.location.reload()
+              }}
             />
 
             <div className="h-2" />

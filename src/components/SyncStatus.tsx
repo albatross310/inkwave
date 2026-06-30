@@ -63,8 +63,8 @@ export function SyncStatus({
       onMouseEnter={!hideTrigger ? () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) } : undefined}
       onMouseLeave={!hideTrigger ? () => { closeTimer.current = setTimeout(() => setOpen(false), 150) } : undefined}
     >
-      {/* Backdrop to dismiss when triggered from the toolbar */}
-      {hideTrigger && open && (
+      {/* Backdrop to dismiss panel (both hover and click-opened paths) */}
+      {open && (
         <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />
       )}
 
@@ -109,7 +109,11 @@ export function SyncStatus({
       {!hideTrigger && (
         <button
           type="button"
-          onClick={() => (onClick && !synced ? onClick() : window.dispatchEvent(new CustomEvent('inkwave:open-save')))}
+          onClick={() => {
+            if (onClick && !synced) { onClick(); return }
+            // When synced: click toggles the detail panel (in addition to hover)
+            setOpen(!open)
+          }}
           title={tooltip}
           className={compact
             ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
