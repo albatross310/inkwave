@@ -120,34 +120,38 @@ function NavSide({
   )
 
   return (
+    // 16px inset keeps the collapsed 6px bar visible and away from the very edge
     <div style={{
-      position: 'fixed', [side]: 10, top: '50%', transform: 'translateY(-50%)',
+      position: 'fixed', [side]: 16, top: '50%', transform: 'translateY(-50%)',
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
-      {showVer && (
-        <div style={{ position: 'relative' }}>
-          {versionSummary && (
-            <div style={{
-              position: 'absolute', bottom: '100%', marginBottom: 5,
-              [side]: 0, zIndex: 1, pointerEvents: 'none',
-            }}>
-              <SummaryPanel text={versionSummary} isWide={isWide} flashKey={verFlashKey} />
-            </div>
-          )}
-          <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
-        </div>
-      )}
+      {/* Snapshot section: snap panel ABOVE the < button */}
       <div style={{ position: 'relative' }}>
-        <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
         {summary && (
           <div style={{
-            position: 'absolute', top: '100%', marginTop: 5,
+            position: 'absolute', bottom: '100%', marginBottom: 5,
             [side]: 0, zIndex: 1, pointerEvents: 'none',
           }}>
             <SummaryPanel text={summary} isWide={isWide} flashKey={snapFlashKey} />
           </div>
         )}
+        <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
       </div>
+
+      {/* Version section: << button, ver panel BELOW */}
+      {showVer && (
+        <div style={{ position: 'relative' }}>
+          <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
+          {versionSummary && (
+            <div style={{
+              position: 'absolute', top: '100%', marginTop: 5,
+              [side]: 0, zIndex: 1, pointerEvents: 'none',
+            }}>
+              <SummaryPanel text={versionSummary} isWide={isWide} flashKey={verFlashKey} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

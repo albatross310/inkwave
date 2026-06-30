@@ -76,6 +76,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     docRef.current = doc
   }, [doc])
 
+  // Keep the browser tab title in sync with the document name.
+  useEffect(() => {
+    if (doc.title) document.title = `Inkwave Solo: ${doc.title}`
+  }, [doc.title])
+
   // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
   useEffect(() => { applyCrossoutMode() }, [])
 
@@ -1274,7 +1279,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
                 <div className="flex items-center px-4 py-2 border-b border-stone-200">
-                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} />}
+                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} phone={isTouch} />}
                 </div>
               </div>
             )}

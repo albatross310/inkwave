@@ -74,21 +74,33 @@ export function SyncStatus({
           <div className="text-xs text-stone-400 mb-1.5">
             {synced && lastSync ? `synced ${relativeTime(lastSync)}` : 'not syncing yet — your work is still saved on this device'}
           </div>
-          {path && (
-            <div className="text-xs text-stone-600 bg-stone-50 rounded-lg px-2 py-1.5 mb-2 break-words" style={{ wordBreak: 'break-word' }}>
-              {path}
-            </div>
-          )}
+          {path && (() => {
+            const rawName = path.split(/[\\/]/).pop() ?? path
+            const displayName = rawName.replace(/\.(inkwave|studio|json)$/i, '') + '.studio'
+            const canReveal = !!(onShowInFolder || webUrl)
+            return (
+              <div className="mb-2">
+                {canReveal ? (
+                  <button type="button" title={path}
+                    onClick={() => onShowInFolder ? onShowInFolder() : window.open(webUrl!, '_blank')}
+                    className="text-xs text-left bg-stone-50 rounded-lg px-2 py-1.5 w-full hover:bg-stone-100 transition-colors"
+                    style={{ color: INK, border: `1px solid ${INK}22`, wordBreak: 'break-word' }}>
+                    {displayName}
+                  </button>
+                ) : (
+                  <div className="text-xs text-stone-600 bg-stone-50 rounded-lg px-2 py-1.5" title={path}
+                    style={{ wordBreak: 'break-word' }}>
+                    {displayName}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
             {webUrl && (
               <a href={webUrl} target="_blank" rel="noreferrer" className="underline hover:text-[#5c2d8a]" style={{ color: INK }}>
                 Open in folder ↗
               </a>
-            )}
-            {onShowInFolder && (
-              <button type="button" onClick={onShowInFolder} className="underline hover:text-[#5c2d8a]" style={{ color: INK }}>
-                Show in folder
-              </button>
             )}
             {onChangeFolder && (
               <button type="button" onClick={onChangeFolder} className="underline hover:text-[#5c2d8a]" style={{ color: INK }}>

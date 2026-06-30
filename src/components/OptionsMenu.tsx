@@ -212,18 +212,25 @@ export function OptionsMenu({
         </svg>
       </button>
 
-      {menuOpen && (
-        <div role="menu" className="z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif" style={menuStyle}>
-          {items.map(it => (
-            <button key={it.label} role="menuitem" type="button"
-              onClick={() => { setMenuOpen(false); it.run() }}
-              className="w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
-            >
-              {it.label}
-            </button>
-          ))}
-          <AccountMenuItems onClose={() => setMenuOpen(false)} />
-        </div>
+      {menuOpen && createPortal(
+        <>
+          {/* Backdrop — dismiss on outside click; sits below the menu in the portal layer */}
+          <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
+          {/* Menu rendered in document.body so position:fixed is relative to the viewport,
+              not the pill's CSS-transform context (which would break the coordinates). */}
+          <div role="menu" className="z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif" style={menuStyle}>
+            {items.map(it => (
+              <button key={it.label} role="menuitem" type="button"
+                onClick={() => { setMenuOpen(false); it.run() }}
+                className="w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+              >
+                {it.label}
+              </button>
+            ))}
+            <AccountMenuItems onClose={() => setMenuOpen(false)} />
+          </div>
+        </>,
+        document.body,
       )}
 
       {modal && (
