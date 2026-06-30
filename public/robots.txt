@@ -3,4 +3,4 @@ Allow: /
 Disallow: /api/
 Disallow: /login
 
-Sitemap: https://iwsolo.me/sitemap.xml
+Sitemap: https://inkwave.me/sitemap.xml

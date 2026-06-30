@@ -51,12 +51,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="robots" content="index, follow" />
         <meta name="application-name" content="Inkwave Solo" />
         <meta property="og:site_name" content="Inkwave Solo" />
-        <meta property="og:image" content="https://iwsolo.me/inkwave-seal-512.webp" />
+        <meta property="og:image" content="https://inkwave.me/inkwave-seal-512.webp" />
         <meta property="og:image:width" content="512" />
         <meta property="og:image:height" content="512" />
         <meta property="og:image:alt" content="The Inkwave seal — a great wave within a circle" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:image" content="https://iwsolo.me/inkwave-seal-512.webp" />
+        <meta name="twitter:image" content="https://inkwave.me/inkwave-seal-512.webp" />
         <Meta />
         <Links />
       </head>
