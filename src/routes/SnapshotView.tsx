@@ -51,7 +51,7 @@ function SummaryPanel({ text, isWide, flashKey }: {
         border: expanded ? '1px solid rgba(92,45,138,0.22)' : 'none',
         borderRadius: 8,
         padding: expanded ? '5px 7px' : 0,
-        fontSize: '0.75rem',
+        fontSize: '1rem',
         lineHeight: 1.45,
         color: INK,
         cursor: expanded ? 'default' : 'pointer',
