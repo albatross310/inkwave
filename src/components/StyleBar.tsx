@@ -112,7 +112,10 @@ export function StyleBar({ editor, onActivity, onLineHeightChange }: {
   function popupAbove(ref: React.RefObject<HTMLButtonElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: 10 }
-    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), left: Math.max(8, Math.round(br.left)) }
+    // On iOS, window.innerHeight doesn't shrink when the keyboard is up, but
+    // visualViewport.height does. Using the wrong one places the popup off-screen above.
+    const vh = window.visualViewport?.height ?? window.innerHeight
+    return { position: 'fixed', bottom: Math.max(8, Math.round(vh - br.top + 8)), left: Math.max(8, Math.round(br.left)) }
   }
 
   return (

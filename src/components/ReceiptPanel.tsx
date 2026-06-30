@@ -6,18 +6,48 @@ import { useZoomScale } from '../editor/useZoomScale'
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
 
-// ── Time-of-day period label (short) ─────────────────────────────────────────
+// ── Bitcoin coin icon ─────────────────────────────────────────────────────────
+function BitcoinIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 22 22"
+      aria-hidden="true"
+      style={{ display: 'inline-block', verticalAlign: '-0.18em', flexShrink: 0 }}
+    >
+      {/* Dark-gold coin */}
+      <circle cx="11" cy="11" r="10" fill="#B8860B" />
+      <circle cx="11" cy="11" r="10" fill="none" stroke="#7A5800" strokeWidth="2" />
+      {/* Vertical bar of the B */}
+      <rect x="6.5" y="4" width="2.8" height="14" rx="0.7" fill="white" />
+      {/* Top bump (D-shape) */}
+      <path d="M9 4 h3.5 a3.3 3.3 0 0 1 0 6.6 h-3.5 z" fill="white" />
+      {/* Bottom bump (slightly wider) */}
+      <path d="M9 10.6 h4 a3.7 3.7 0 0 1 0 7.4 h-4 z" fill="white" />
+      {/* Top double-tick marks */}
+      <rect x="7" y="2.2" width="1.4" height="2" rx="0.4" fill="white" />
+      <rect x="9.8" y="2.2" width="1.4" height="2" rx="0.4" fill="white" />
+      {/* Bottom double-tick marks */}
+      <rect x="7" y="17.8" width="1.4" height="2" rx="0.4" fill="white" />
+      <rect x="9.8" y="17.8" width="1.4" height="2" rx="0.4" fill="white" />
+    </svg>
+  )
+}
+
+// ── Time-of-day period label with date ────────────────────────────────────────
 function getShortPeriod(createdAt: string): string {
-  const h = new Date(createdAt).getHours()
-  if (h >= 5  && h < 8)  return 'E. Morn'
-  if (h >= 8  && h < 12) return 'Morn'
-  if (h >= 12 && h < 17) return 'Arvo'
-  if (h >= 17 && h < 20) return 'Eve'
-  return 'Night'
+  const d = new Date(createdAt)
+  const h = d.getHours()
+  const p = h >= 5 && h < 8 ? 'E. Morn.'
+    : h >= 8 && h < 12 ? 'Morn.'
+    : h >= 12 && h < 17 ? 'Arvo.'
+    : h >= 17 && h < 20 ? 'Eve.'
+    : 'Night.'
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${p} ${dd}/${mm}`
 }
 
 // ── Version + snapshot-within-version label ───────────────────────────────────
-// Format: "v1s3" (version 1, 3rd snapshot in that version) or "s2" (pre-version draft).
 function computeVersionLabel(snap: Snapshot, groups: SnapshotGroup[]): string {
   for (const group of groups) {
     const i = group.items.findIndex(s => s.id === snap.id)
@@ -26,7 +56,6 @@ function computeVersionLabel(snap: Snapshot, groups: SnapshotGroup[]): string {
   return ''
 }
 
-// The growing record of tamper-evident snapshots + the live-composition receipt chain.
 export function ReceiptPanel({
   snapshots,
   onCheckBitcoin,
@@ -56,6 +85,8 @@ export function ReceiptPanel({
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
 
+  const [saving, setSaving] = useState(false)
+
   const zoom = useZoomScale()
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
@@ -69,9 +100,19 @@ export function ReceiptPanel({
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
+  // Clear saving indicator once a new snapshot appears
+  useEffect(() => { if (saving && n > 0) setSaving(false) }, [n, saving])
+
   const panelOpen = open && (n > 0 || receiptCount > 0 || typeof wordCount === 'number')
 
   if (hideTrigger && !panelOpen) return null
+
+  const handleSaveVersion = () => {
+    if (!onSaveVersion) return
+    setSaving(true)
+    onSaveVersion()
+    // Panel stays open — new entry appears in the list once async work completes
+  }
 
   return (
     <>
@@ -105,18 +146,19 @@ export function ReceiptPanel({
         {panelOpen && (
           <div
             className="mb-1.5 bg-white overflow-auto"
-            style={{ border: `1px solid rgba(92, 45, 138, 0.4)`, borderRadius: 10, maxHeight: '40vh', width: 200 }}
+            style={{ border: `1px solid rgba(92, 45, 138, 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
           >
-            {/* Manual "Save version" — always at top */}
+            {/* Save version — stays open so the new entry appears in-place */}
             {onSaveVersion && (
               <button
                 type="button"
-                onClick={() => { onSaveVersion(); setOpen(false) }}
-                className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium"
+                onClick={handleSaveVersion}
+                disabled={saving}
+                className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium disabled:opacity-50"
                 style={{ borderBottom: `1px solid rgba(92, 45, 138, 0.12)`, color: INK, fontSize: '0.78rem' }}
                 title="Save a named version of this document now"
               >
-                ⊕ save version
+                {saving ? '⊕ saving…' : '⊕ save version'}
               </button>
             )}
 
@@ -146,10 +188,15 @@ export function ReceiptPanel({
                 ⏳ check Bitcoin…
               </button>
             )}
+
             {[...snapshots].reverse().map((s) => {
               const vLabel = computeVersionLabel(s, groups)
               const period = getShortPeriod(s.createdAt)
-              const otsIcon = s.ots.status === 'confirmed' ? 'Ⓑ' : s.ots.status === 'pending' ? '⏳' : '·'
+              const otsIcon = s.ots.status === 'confirmed'
+                ? <BitcoinIcon size={13} />
+                : s.ots.status === 'pending' ? <span>⏳</span>
+                : <span style={{ opacity: 0.3 }}>·</span>
+
               return (
                 <button
                   key={s.id}
@@ -159,12 +206,12 @@ export function ReceiptPanel({
                   style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
                   title={s.summary ?? `bundle ${s.bundleHash}`}
                 >
-                  {/* Row 1: v1s3 · Arvo · wordcount · OTS */}
-                  <div className="flex items-baseline gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
-                    <span style={{ color: INK, fontWeight: 500 }}>{vLabel}</span>
+                  {/* Row 1: v1s3 · Arvo. 30/06 · wordcount · OTS */}
+                  <div className="flex items-center gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
+                    <span style={{ color: INK, fontWeight: 600 }}>{vLabel}</span>
                     <span style={{ color: LIGHT }}>{period}</span>
-                    <span className="text-stone-500">{s.wordCount}w</span>
-                    <span className="ml-auto text-stone-400" title={`bundle ${s.bundleHash}`}>{otsIcon}</span>
+                    <span className="text-stone-400">{s.wordCount}w</span>
+                    <span className="ml-auto flex items-center">{otsIcon}</span>
                   </div>
                   {/* Row 2: AI summary or trigger type */}
                   <div

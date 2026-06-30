@@ -1055,7 +1055,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Show toolbar when: not a touch device, OR keyboard is down, OR text is selected
   // (so the style bar is reachable for formatting even while the keyboard is up).
-  const showMain   = !isTouch || !keyboardUp || !selectionEmpty
+  // styleBarOpen keeps the toolbar alive while the user is actively formatting
+  // (selection may collapse mid-action without this — disappears on every button tap)
+  const showMain   = !isTouch || !keyboardUp || !selectionEmpty || styleBarOpen
   const barVisible = showMain
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
@@ -1104,21 +1106,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           )}
         </Scroll>
 
-        {!keyboardUp && (
-          <ReceiptPanel
-            snapshots={snapshots}
-            onCheckBitcoin={checkBitcoin}
-            onSaveVersion={saveVersion}
-            receiptCount={receipts.length}
-            chainStatus={chainStatus}
-            onVerifyChain={verifyReceiptChain}
-            wordCount={wordCount}
-            compact={isTouch}
-            open={isTouch ? receiptOpen : undefined}
-            onOpenChange={isTouch ? setReceiptOpen : undefined}
-            hideTrigger={isTouch}
-          />
-        )}
+        {/* ReceiptPanel: always in the tree on phone (no !keyboardUp guard) so the panel
+            stays mounted during and after async save-version work. The trigger is hidden
+            on touch (lives in toolbar) and when keyboard is up (visually inaccessible). */}
+        <ReceiptPanel
+          snapshots={snapshots}
+          onCheckBitcoin={checkBitcoin}
+          onSaveVersion={saveVersion}
+          receiptCount={receipts.length}
+          chainStatus={chainStatus}
+          onVerifyChain={verifyReceiptChain}
+          wordCount={wordCount}
+          compact={isTouch}
+          open={isTouch ? receiptOpen : undefined}
+          onOpenChange={isTouch ? setReceiptOpen : undefined}
+          hideTrigger={isTouch || keyboardUp}
+        />
 
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
