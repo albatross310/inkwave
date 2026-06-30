@@ -81,19 +81,6 @@
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(80, 50, 10, 0.22), 0 2px 6px rgba(80, 50, 10, 0.18);
   }
-  /* A very faded Inkwave seal in each page's bottom-left margin. The mark's own cream disc blends
-     into the parchment, so at this opacity only a ghost of the inked ring + brushstroke shows. */
-  .inkwave-sheet::after {
-    content: '';
-    position: absolute;
-    right: 0px;
-    bottom: -12px;
-    width: 229px;
-    height: 229px;
-    background: url('/inkwave-watermark-256.png') center / contain no-repeat;
-    opacity: 0.08;
-    pointer-events: none;
-  }
   /* The gap widget reserves the space between sheets; the band is an invisible marker (positioned by
      the extension at the gap offset) that the paint() pass measures to lay the panels around. */
   /* display:block so the inline <span> still reserves the full vertical gap (see gapEl for why it's
@@ -102,17 +89,26 @@
      the page, not the editor's text I-beam. */
   .inkwave-page-gap { display: block; position: relative; user-select: none; cursor: default; }
   .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; }
-  /* Page number, pinned to each sheet's bottom margin (a footer) — never in the gap. */
+  /* Page number + logo, pinned to each sheet's bottom margin (a footer) — never in the gap. */
   .inkwave-sheet-num {
     position: absolute;
-    bottom: 26px;
+    bottom: 22px;
     left: 0;
     right: 0;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     font-family: 'EB Garamond', Georgia, serif;
     color: #9b5ccc;
     font-size: 0.9rem;
     user-select: none;
+  }
+  .inkwave-sheet-num img {
+    width: 22px;
+    height: 22px;
+    opacity: 0.75;
+    flex-shrink: 0;
   }
 
   /* On a phone: just the paper, no background. Drop the aqua + waves and the surface padding so the

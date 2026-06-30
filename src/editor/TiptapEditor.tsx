@@ -230,6 +230,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // ── Citation / bibliography state ─────────────────────────────────────────
   const [bibPanelOpen, setBibPanelOpen] = useState(false)
+  const bibBtnRef = useRef<HTMLButtonElement>(null)
   const [zoteroSetupOpen, setZoteroSetupOpen] = useState(false)
   const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
 
@@ -1309,7 +1310,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 label={lastFileSave ? '✓ Synced to folder' : '🗀 Sync pending'}
                 synced={!!lastFileSave}
                 path={fileName}
-                displayName={doc.title || fileName}
                 lastSync={lastFileSave}
                 tooltip={`Saving to ${fileName}`}
                 onShowInFolder={showInFolder}
@@ -1402,7 +1402,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
               transform: `scale(${zoom})`,
-              transformOrigin: 'bottom right',
+              transformOrigin: 'bottom center',
             }}
           >
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
@@ -1458,7 +1458,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   {slotId === 'guide' && <GuideMenu />}
                   {slotId === 'math' && <MathMenuButton editor={editor} />}
                   {slotId === 'bib' && (
-                    <button type="button"
+                    <button ref={bibBtnRef} type="button"
                       onClick={() => setBibPanelOpen(o => !o)}
                       className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                       title="Bibliography / citations"
@@ -1484,7 +1484,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                   title="Customise toolbar"
                 >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[13px] leading-none">▲</span>
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
+                    <svg viewBox="0 0 16 17" width="15" height="15" fill="currentColor" aria-hidden="true">
+                      <path d="M8 1.5 L14.5 15 Q8 11.5 1.5 15 Z" />
+                    </svg>
+                  </span>
                 </button>
                 {toolbarPickerOpen && (() => {
                   const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
@@ -1590,6 +1594,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           <BibPanel
             doc={docRef.current}
             citationStyle={citationStyle}
+            btnRef={bibBtnRef}
             onStyleChange={s => {
               setCitationStyle(s)
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }

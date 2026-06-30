@@ -13,8 +13,8 @@ import { getPaperSize, getOrientation } from '../pageSettings'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
-const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
-const MARGIN_BOTTOM = 72 // px parchment margin at the bottom of every page (page numbers sit here)
+export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
+export const MARGIN_BOTTOM = 72 // px parchment margin at the bottom of every page (page numbers sit here)
 
 export interface PaginationOptions { enabled: boolean }
 
@@ -191,6 +191,12 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               d.className = 'inkwave-sheet'
               const f = document.createElement('div')
               f.className = 'inkwave-sheet-num'
+              const logo = document.createElement('img')
+              logo.src = '/inkwave-logo-v7.png'
+              logo.alt = ''
+              f.appendChild(logo)
+              const num = document.createElement('span')
+              f.appendChild(num)
               d.appendChild(f)
               layer.appendChild(d)
             }
@@ -198,7 +204,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               const d = layer!.children[i] as HTMLElement
               d.style.top = `${s.top}px`
               d.style.height = `${s.height}px`
-              ;(d.firstChild as HTMLElement).textContent = String(i + 1)
+              const numSpan = (d.firstChild as HTMLElement).querySelector('span')
+              if (numSpan) numSpan.textContent = String(i + 1)
             })
           }
           const schedulePaint = () => { if (!paintRaf) paintRaf = requestAnimationFrame(paint) }

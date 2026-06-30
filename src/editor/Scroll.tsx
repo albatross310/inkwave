@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
 import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation } from './pageSettings'
+import { MARGIN_BOTTOM } from './extensions/PaginationExtension'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -151,7 +152,8 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       const count = Math.max(1, Math.ceil(total / pageH))
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {
-        const bottom = i * pageH
+        // Align with gapped-page-mode break: content ends at pageH - MARGIN_BOTTOM, not pageH
+        const bottom = i * pageH - MARGIN_BOTTOM
         next.push({ y: Math.min(bottom, total - 2), n: i, rule: bottom < total })
       }
       setMarks(next)

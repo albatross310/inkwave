@@ -116,6 +116,21 @@ export function PageMenu({ editor }: { editor?: Editor }) {
     rerender(n => n + 1)
   }
 
+  // Copy all style attrs from the currently-focused paragraph to every other paragraph.
+  function applyToAll() {
+    if (!editor) return
+    const currentAttrs = editor.getAttributes('paragraph')
+    const { tr } = editor.state
+    let changed = false
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'paragraph') return
+      tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...currentAttrs })
+      changed = true
+    })
+    if (changed) editor.view.dispatch(tr)
+    rerender(n => n + 1)
+  }
+
   const cols        = getColumns()
   const paper       = getPaperSize()
   const orientation = getOrientation()
@@ -147,7 +162,14 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
               <span className="text-[11px] uppercase tracking-wide text-stone-400">Page</span>
               {parFocus && editor ? (
-                <span className="text-[11px] italic" style={{ color: INK }}>↳ selected paragraph</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] italic" style={{ color: INK }}>↳ paragraph</span>
+                  <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
+                    className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
+                    style={{ background: `${INK}18`, color: INK, border: `1px solid ${INK}44` }}>
+                    Apply to all
+                  </button>
+                </div>
               ) : (
                 <span className="text-[11px] text-stone-400 italic">changes apply to all text</span>
               )}

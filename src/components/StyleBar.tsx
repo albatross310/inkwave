@@ -98,7 +98,7 @@ export function StyleBar({ editor, onActivity, phone }: {
   const [lastSize,     setLastSize]     = useState<number>(0)
 
   const fontBtnRef  = useRef<HTMLButtonElement>(null)
-  const sizeBtnRef  = useRef<HTMLDivElement>(null)
+  const sizeBtnRef  = useRef<HTMLButtonElement>(null)
   const fmtBtnRef   = useRef<HTMLButtonElement>(null)
   const hlBtnRef    = useRef<HTMLButtonElement>(null)
   const alignBtnRef = useRef<HTMLButtonElement>(null)
@@ -169,6 +169,14 @@ export function StyleBar({ editor, onActivity, phone }: {
     else { editor.chain().focus().toggleOrderedList().run(); if (type !== 'decimal') editor.chain().focus().updateAttributes('orderedList', { listType: type }).run() }
   }
 
+  const fontPress  = useLongPress(
+    () => { if (lastFont) setFont(lastFont); else { closeAll(); setFontOpen(true) } },
+    () => { closeAll(); setFontOpen(true) },
+  )
+  const sizePress  = useLongPress(
+    () => { if (lastSize) setSize(lastSize); else { closeAll(); setSizeOpen(true) } },
+    () => { closeAll(); setSizeOpen(true) },
+  )
   const fmtPress   = useLongPress(() => applyFmt(lastFmt),          () => setFmtOpen(true))
   const hlPress    = useLongPress(() => applyHighlight(lastHlColor), () => setHlOpen(true))
   const listPress  = useLongPress(() => applyListType(lastListType), () => setListOpen(true))
@@ -182,20 +190,33 @@ export function StyleBar({ editor, onActivity, phone }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
-  const pill = (open: boolean, hl = false): string =>
-    `rounded border px-1.5 py-0.5 transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`
+  // Desktop: pill-shaped outlined buttons. Phone: rectangular flush buttons filling bar height.
+  const pill = (open: boolean, hl = false): string => {
+    if (phone) {
+      return `flex-1 flex items-center justify-center self-stretch transition-colors text-sm ${open || hl ? `text-[${INK}] bg-stone-50` : 'text-stone-500'}`
+    }
+    return `rounded border px-2 py-1 transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`
+  }
+
+  const phoneFontSizeClass = `flex-1 flex items-center justify-center self-stretch text-xs text-stone-500 transition-colors`
+  const deskFontClass = `rounded border border-stone-300 px-2 py-1 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs`
+  const deskSizeClass = `flex items-center justify-center rounded border border-stone-300 hover:border-stone-400 transition-colors cursor-pointer px-2 py-1`
 
   return (
     <div
-      className="flex items-center gap-1.5 text-sm text-stone-500 font-serif w-full"
+      className={phone
+        ? 'flex items-stretch text-sm text-stone-500 font-serif w-full divide-x divide-stone-100'
+        : 'flex items-center gap-1.5 text-sm text-stone-500 font-serif w-full'
+      }
       onMouseDown={e => { if (!(e.target as Element).closest('input')) e.preventDefault() }}
       onMouseEnter={() => onActivity?.()}
     >
-      {/* Font */}
-      <button ref={fontBtnRef} type="button"
-        onClick={e => { e.stopPropagation(); closeAll(); setFontOpen(o => !o) }}
-        className="rounded border border-stone-300 px-1.5 py-0.5 text-stone-500 hover:border-stone-400 transition-colors min-w-[4.8rem] text-left whitespace-nowrap text-xs">
-        {curFont}
+      {/* Font — short-press applies last font, long-press opens picker */}
+      <button ref={fontBtnRef} type="button" {...fontPress}
+        onClick={e => { e.stopPropagation(); fontPress.onClick() }}
+        className={phone ? phoneFontSizeClass : deskFontClass + ' min-w-[3.5rem]'}
+        title="Font (hold to change)">
+        {curFont.slice(0, 3)}
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
@@ -215,13 +236,14 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
-      {/* Size — display only */}
-      <div ref={sizeBtnRef}
-        className="flex items-center justify-center rounded border border-stone-300 hover:border-stone-400 transition-colors cursor-pointer px-1.5 py-0.5"
-        style={{ minWidth: 36 }}
-        onClick={e => { e.stopPropagation(); closeAll(); setSizeOpen(o => !o) }}>
-        <span className="text-xs text-stone-500 select-none">{curSize}</span>
-      </div>
+      {/* Size — short-press applies last size, long-press opens picker */}
+      <button ref={sizeBtnRef} type="button" {...sizePress}
+        onClick={e => { e.stopPropagation(); sizePress.onClick() }}
+        className={phone ? phoneFontSizeClass : deskSizeClass}
+        style={phone ? {} : { minWidth: 40 }}
+        title="Font size (hold to change)">
+        <span className="text-xs select-none">{curSize}</span>
+      </button>
       {sizeOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
         <div className="z-[99] bg-white shadow-xl py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
@@ -242,7 +264,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={fmtBtnRef} type="button" {...fmtPress}
         onClick={e => { e.stopPropagation(); fmtPress.onClick() }}
         className={pill(fmtOpen)}
-        style={{ ...CHAR_FMT_STYLES[lastFmt], minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ ...CHAR_FMT_STYLES[lastFmt], minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
         title="Character formatting (hold for options)">
         {CHAR_FMT_LABELS[lastFmt]}
       </button>
@@ -267,7 +289,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={hlBtnRef} type="button" {...hlPress}
         onClick={e => { e.stopPropagation(); hlPress.onClick() }}
         className={pill(hlOpen, !!curHlColor)}
-        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem',
+        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem',
           background: curHlColor ?? undefined, color: (hlOpen || curHlColor) ? (hlOpen ? INK : '#374151') : '#6b7280' }}
         title="Highlight (hold for colours)">
         H
@@ -294,7 +316,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={alignBtnRef} type="button" {...alignPress}
         onClick={e => { e.stopPropagation(); alignPress.onClick() }}
         className={pill(alignOpen) + ' font-serif'}
-        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
         title="Alignment (hold for options)">
         A
       </button>
@@ -319,7 +341,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={listBtnRef} type="button" {...listPress}
         onClick={e => { e.stopPropagation(); listPress.onClick() }}
         className={pill(listOpen, listActive)}
-        style={{ minWidth: 26, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
         title="Lists (hold for types)">
         {LIST_TYPE_LABELS[lastListType]}
       </button>
@@ -353,13 +375,16 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
-      {phone && (
-        <button type="button"
-          onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
-          className="rounded border px-1.5 py-0.5 text-xs border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap">
-          All
-        </button>
-      )}
+      {/* ∀ — select all (always visible on both phone and desktop) */}
+      <button type="button"
+        onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
+        title="Select all"
+        className={phone
+          ? `flex-1 flex items-center justify-center self-stretch text-stone-500 text-base`
+          : `rounded border px-2 py-1 text-sm border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap`
+        }>
+        ∀
+      </button>
     </div>
   )
 }
