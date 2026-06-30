@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { listSnapshots, groupByVersion } from '../provenance/snapshots'
+import { listSnapshots, groupByVersion, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { loadDocument } from '../storage/opfs'
 import { pmToText } from '../provenance/bundle'
 import { diffWords, diffStats } from '../provenance/diff'
@@ -9,7 +9,6 @@ import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
 
 const INK = '#5c2d8a'
-const LIGHT = '#9b5ccc'
 const NAV_BG = 'rgba(140, 90, 200, 0.20)'
 const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
@@ -31,6 +30,49 @@ async function fetchDiffSummary(before: string, after: string): Promise<DiffSumm
   }
 }
 
+// Summary box: opaque purple background. On narrow screens (window < 1024px) collapses to a
+// thin coloured strip; hover expands it over the document content. On wide screens always open.
+function SummaryBox({ text, align }: { text: string; align: 'left' | 'right' }) {
+  const [hovered, setHovered] = useState(false)
+  const [isWide, setIsWide] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const handler = (e: MediaQueryListEvent) => setIsWide(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  const expanded = isWide || hovered
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: '#ede5f7',
+        border: '1px solid rgba(92, 45, 138, 0.25)',
+        borderRadius: 8,
+        padding: expanded ? '7px 10px' : '0 10px',
+        fontSize: '0.8rem',
+        lineHeight: 1.5,
+        color: INK,
+        maxWidth: 170,
+        maxHeight: expanded ? '200px' : '6px',
+        overflow: 'hidden',
+        cursor: expanded ? 'default' : 'pointer',
+        transition: 'max-height 200ms ease, padding 200ms ease',
+        marginBottom: 6,
+        userSelect: 'none',
+        textAlign: align,
+        zIndex: 46,
+        position: 'relative',
+      }}
+    >
+      {text}
+    </div>
+  )
+}
+
 // Read-only viewer for a past snapshot. Navigation:
 //   ← / → buttons (+ keyboard / swipe) move between snapshots chronologically.
 //   ⬆v / ⬇v buttons (desktop only, second square) jump between saved versions.
@@ -43,7 +85,7 @@ export function SnapshotView() {
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [current, setCurrent] = useState<InkwaveDocument | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
-  const [showDiff, setShowDiff] = useState(false)
+  const [showDiff, setShowDiff] = useState(true)
 
   useEffect(() => {
     let cancelled = false
@@ -54,6 +96,26 @@ export function SnapshotView() {
       setAllSnapshots(snaps)
       setCurrent(doc)
       setStatus(snaps.some((s) => s.id === snapId) ? 'ready' : 'missing')
+
+      // Prerender ALL diff summaries for adjacent pairs in the background.
+      // Store them on the snapshot so they load instantly on next open.
+      if (!cancelled && snaps.length > 1) {
+        void (async () => {
+          for (let i = 1; i < snaps.length; i++) {
+            if (cancelled) break
+            if (snaps[i].diffSummary) continue  // already cached
+            const before = pmToText(snaps[i - 1].contentJson)
+            const after = pmToText(snaps[i].contentJson)
+            if (!before.trim() && !after.trim()) continue
+            const ds = await fetchDiffSummary(before, after)
+            if (ds && !cancelled) {
+              await patchSnapshotDiffSummary(docId!, snaps[i].id, ds)
+              // Update in-memory state so summaries appear without reload
+              setAllSnapshots((prev) => prev.map((s, j) => j === i ? { ...s, diffSummary: ds } : s))
+            }
+          }
+        })()
+      }
     })()
     return () => { cancelled = true }
   }, [docId, snapId])
@@ -123,23 +185,13 @@ export function SnapshotView() {
   const versionLabel = groupIdx >= 0 ? groups[groupIdx].label || 'draft' : ''
   const posLabel = allSnapshots.length > 1 ? `${idx + 1} / ${allSnapshots.length}` : null
 
-  // ── Diff summaries ────────────────────────────────────────────────────────────
-  const [summary, setSummary] = useState<DiffSummary | null>(null)
-  const summaryKey = useRef('')
-  useEffect(() => {
-    if (idx <= 0 || !snapshot) { setSummary(null); return }
-    const prev = allSnapshots[idx - 1]
-    const key = `${prev.id}→${snapshot.id}`
-    if (summaryKey.current === key) return
-    summaryKey.current = key
-    setSummary(null)
-    const before = pmToText(prev.contentJson)
-    const after = pmToText(snapshot.contentJson)
-    if (!before.trim() && !after.trim()) return
-    void fetchDiffSummary(before, after).then((s) => {
-      if (summaryKey.current === key) setSummary(s)
-    })
-  }, [idx, snapshot, allSnapshots])
+  // ── Diff summaries (read from stored snapshot.diffSummary) ───────────────────
+  // Left arrow: current snapshot's own diffSummary.backward (from prev → current transition)
+  // Right arrow: next snapshot's diffSummary.forward (from current → next transition)
+  const leftSummary = snapshot?.diffSummary?.backward ?? null
+  const rightSummary = (idx >= 0 && idx < allSnapshots.length - 1)
+    ? allSnapshots[idx + 1]?.diffSummary?.forward ?? null
+    : null
 
   // ── Floating nav squares ─────────────────────────────────────────────────────
   // Purple/greyish-purple background. Labels: <s / s> for snapshot, <<v / v>> for version.
@@ -194,19 +246,6 @@ export function SnapshotView() {
     </button>
   )
 
-  const summaryBoxStyle: React.CSSProperties = {
-    background: 'rgba(140, 90, 200, 0.12)',
-    border: '1px solid rgba(140, 90, 200, 0.22)',
-    borderRadius: 8,
-    padding: '5px 8px',
-    fontSize: '0.63rem',
-    lineHeight: 1.45,
-    color: INK,
-    maxWidth: 140,
-    pointerEvents: 'none',
-    marginBottom: 6,
-  }
-
   const floatSide = (side: 'left' | 'right'): React.CSSProperties => ({
     position: 'fixed',
     [side]: 10,
@@ -229,17 +268,17 @@ export function SnapshotView() {
     >
       {/* Sticky read-only banner */}
       <div
-        className="sticky top-0 z-50 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 bg-white/95 backdrop-blur text-sm"
-        style={{ borderBottom: `1px solid ${INK}33` }}
+        className="sticky top-0 z-50 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 bg-white/95 backdrop-blur"
+        style={{ borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem' }}
       >
-        <span style={{ color: INK }}>
+        <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
             ? `${versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
             : 'Snapshot'} · read-only
         </span>
 
         {snapshot && (
-          <span className="text-stone-400 text-xs">
+          <span className="text-stone-400" style={{ fontSize: '0.85rem' }}>
             {snapshot.wordCount}w
             {snapshot.summary && <> · <em>{snapshot.summary}</em></>}
             {' · '}{snapshot.ots.status}
@@ -247,16 +286,30 @@ export function SnapshotView() {
         )}
 
         {posLabel && (
-          <span className="text-stone-400 text-xs tabular-nums">{posLabel}</span>
+          <span className="text-stone-400 tabular-nums" style={{ fontSize: '0.85rem' }}>{posLabel}</span>
         )}
 
         {status === 'ready' && current && (
-          <label className="flex items-center gap-1.5 text-xs text-stone-500 cursor-pointer select-none ml-auto flex-shrink-0">
+          <label className="flex items-center gap-1.5 text-stone-500 cursor-pointer select-none ml-auto flex-shrink-0" style={{ fontSize: '0.85rem' }}>
             <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} className="accent-[#5c2d8a]" />
-            Changes since here
+            Show changes
           </label>
         )}
-        <Link to="/" className="text-xs underline flex-shrink-0" style={{ color: LIGHT }}>← editor</Link>
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          style={{
+            fontSize: '0.85rem',
+            background: `rgba(92, 45, 138, 0.08)`,
+            border: `1px solid rgba(92, 45, 138, 0.35)`,
+            color: INK,
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.16)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.08)')}
+        >
+          ← editor
+        </button>
       </div>
 
       {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
@@ -303,9 +356,9 @@ export function SnapshotView() {
               </div>
             )}
             <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column' }}>
-              {/* Summary for going backward (not-yet tense) — above the back arrow */}
-              {summary?.backward && canBack && (
-                <div style={summaryBoxStyle}>{summary.backward}</div>
+              {/* Backward summary (not-yet tense): what the prev snapshot hadn't added yet — above left arrow, desktop only */}
+              {!isPhone && leftSummary && canBack && (
+                <SummaryBox text={leftSummary} align="left" />
               )}
               <NavSquare dir="back" type="snap" onClick={goBack} disabled={!canBack} title="Previous snapshot (←)" />
             </div>
@@ -319,9 +372,9 @@ export function SnapshotView() {
               </div>
             )}
             <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-              {/* Summary for going forward (past tense) — above the forward arrow */}
-              {summary?.forward && canFwd && (
-                <div style={{ ...summaryBoxStyle, textAlign: 'right' }}>{summary.forward}</div>
+              {/* Forward summary (past tense): what the next snapshot added — above right arrow, desktop only */}
+              {!isPhone && rightSummary && canFwd && (
+                <SummaryBox text={rightSummary} align="right" />
               )}
               <NavSquare dir="fwd" type="snap" onClick={goFwd} disabled={!canFwd} title="Next snapshot (→)" />
             </div>

@@ -152,6 +152,20 @@ export async function patchSnapshotSummary(
   return snaps[i]
 }
 
+/** Patch a snapshot's diffSummary field (the AI diff vs its predecessor). */
+export async function patchSnapshotDiffSummary(
+  documentId: string,
+  id: string,
+  diffSummary: { forward: string; backward: string },
+): Promise<Snapshot | null> {
+  const snaps = await readSnapshotsFile(documentId)
+  const i = snaps.findIndex((s) => s.id === id)
+  if (i < 0) return null
+  snaps[i] = { ...snaps[i], diffSummary }
+  await writeSnapshotsFile(documentId, snaps)
+  return snaps[i]
+}
+
 // ─── OTS stamping / upgrading (M2) ──────────────────────────────────────────────
 // Each mutation re-reads the file before writing, so callers that serialise them (the editor's
 // snapshot queue) never lose a concurrent append.

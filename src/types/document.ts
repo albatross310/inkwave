@@ -91,6 +91,7 @@ export interface Snapshot {
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
   summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
   nudgeWord?: { from: string; to: string }  // old→new word for 'word-nudge' trigger snapshots
+  diffSummary?: { forward: string; backward: string }  // AI diff vs previous snapshot (stored, loads instantly)
 }
 
 export interface OtsProofState {
