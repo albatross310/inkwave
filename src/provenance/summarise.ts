@@ -23,7 +23,7 @@ export function summariseBullets(texts: string[]): Promise<string> {
 export async function summariseDiff(
   before: string,
   after: string,
-): Promise<{ forward: string; backward: string } | null> {
+): Promise<{ bullets: string } | null> {
   try {
     const r = await fetch('/api/summarise', {
       method: 'POST',
@@ -31,7 +31,25 @@ export async function summariseDiff(
       body: JSON.stringify({ before, after }),
     })
     if (!r.ok) return null
-    return await r.json() as { forward: string; backward: string }
+    return await r.json() as { bullets: string }
+  } catch {
+    return null
+  }
+}
+
+export async function summariseVersionDiff(
+  verBefore: string,
+  verAfter: string,
+): Promise<string | null> {
+  try {
+    const r = await fetch('/api/summarise', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verBefore, verAfter }),
+    })
+    if (!r.ok) return null
+    const { versionBullets } = await r.json() as { versionBullets: string }
+    return versionBullets ?? null
   } catch {
     return null
   }

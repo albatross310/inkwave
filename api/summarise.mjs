@@ -52,24 +52,30 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'object' && req.body ? req.body : JSON.parse(req.body || '{}')
 
-    // Diff-summary mode: two Claude calls in parallel, forward and backward.
+    // Snapshot diff-summary mode: bullet points of what changed between two snapshots.
     if (typeof body.before === 'string' && typeof body.after === 'string') {
       const before = body.before.slice(0, 1500)
       const after = body.after.slice(0, 1500)
-      const [forward, backward] = await Promise.all([
-        callClaude(apiKey,
-          `In max 50 words, describe in past tense what changed going from the BEFORE text to the AFTER text. Focus on content added or changed. Start with a verb, e.g. "Added…". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
-          120,
-          DIFF_MODEL,
-        ),
-        callClaude(apiKey,
-          `In max 50 words, describe what hadn't happened yet in the BEFORE text compared to the AFTER text. Use the "hadn't yet" / "not yet" tense. Start with "Hadn't". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
-          120,
-          DIFF_MODEL,
-        ),
-      ])
+      const bullets = await callClaude(apiKey,
+        `List up to 4 bullet points (using • ) of what changed going from BEFORE to AFTER. Be concise, max 10 words per bullet. Focus on content changes, not style. Output ONLY the bullet list, nothing else.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
+        160,
+        DIFF_MODEL,
+      )
       res.setHeader('content-type', 'application/json')
-      return res.end(JSON.stringify({ forward, backward }))
+      return res.end(JSON.stringify({ bullets }))
+    }
+
+    // Version diff-summary mode: bullet points comparing two full versions.
+    if (typeof body.verBefore === 'string' && typeof body.verAfter === 'string') {
+      const verBefore = body.verBefore.slice(0, 2000)
+      const verAfter = body.verAfter.slice(0, 2000)
+      const versionBullets = await callClaude(apiKey,
+        `List up to 5 bullet points (using • ) summarising how VERSION AFTER differs from VERSION BEFORE. Focus on the most significant content additions, removals, or restructuring. Max 12 words per bullet. Output ONLY the bullet list.\n\nVERSION BEFORE:\n${verBefore}\n\nVERSION AFTER:\n${verAfter}`,
+        200,
+        DIFF_MODEL,
+      )
+      res.setHeader('content-type', 'application/json')
+      return res.end(JSON.stringify({ versionBullets }))
     }
 
     const prompt = buildPrompt(body)

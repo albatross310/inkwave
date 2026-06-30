@@ -152,11 +152,25 @@ export async function patchSnapshotSummary(
   return snaps[i]
 }
 
+/** Patch a snapshot's versionSummary field (AI bullet comparison of the full version). */
+export async function patchSnapshotVersionSummary(
+  documentId: string,
+  id: string,
+  versionSummary: string,
+): Promise<Snapshot | null> {
+  const snaps = await readSnapshotsFile(documentId)
+  const i = snaps.findIndex((s) => s.id === id)
+  if (i < 0) return null
+  snaps[i] = { ...snaps[i], versionSummary }
+  await writeSnapshotsFile(documentId, snaps)
+  return snaps[i]
+}
+
 /** Patch a snapshot's diffSummary field (the AI diff vs its predecessor). */
 export async function patchSnapshotDiffSummary(
   documentId: string,
   id: string,
-  diffSummary: { forward: string; backward: string },
+  diffSummary: { bullets: string },
 ): Promise<Snapshot | null> {
   const snaps = await readSnapshotsFile(documentId)
   const i = snaps.findIndex((s) => s.id === id)
