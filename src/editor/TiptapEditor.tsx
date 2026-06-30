@@ -60,7 +60,7 @@ import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
-import type { Snapshot, SignedReceipt, KickEvent } from '../types/document'
+import type { Snapshot, SignedReceipt, WordNudgeEvent } from '../types/document'
 
 // Wall-clock resample cadence for the rotating exclusion set S_v (v4 spec §4.2: 20–60 s).
 const RESAMPLE_INTERVAL_MS = 30_000
@@ -109,7 +109,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // chain; null while opening or when the service is unreachable (then the controller falls back to
   // locally-derived S_v — composition degrades visibly rather than blocking writing).
   const sessionRef = useRef<SessionRunner | null>(null)
-  const periodKicksRef = useRef<KickEvent[]>([]) // kicks resolved during the current signing period
+  const periodKicksRef = useRef<WordNudgeEvent[]>([]) // word nudges resolved during the current signing period
   // Insignia (paid) keystroke-cadence tap — accumulates per-0.5s insert/delete COUNTS (never chars).
   // Created lazily only for active subscribers; stays null (inert) for the free tier.
   const cadenceTapRef = useRef<CadenceTap | null>(null)
@@ -570,11 +570,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // kick, so they never snapshot.
   useEffect(() => {
     if (!editor) return
-    const off = scasRef.current!.kicks.on((event) => {
+    const off = scasRef.current!.nudges.on((event) => {
       periodKicksRef.current.push(event) // buffer for the next signed period (M3)
       enqueueSnapshotWork(async () => {
         // Anchor the receipt chain so far into the snapshot's bundleHash (so OTS commits to it).
-        const snap = await createSnapshotIfChanged(docRef.current, 'kick', sessionRef.current?.receipts ?? [])
+        const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
+        const snap = await createSnapshotIfChanged(docRef.current, 'word-nudge', sessionRef.current?.receipts ?? [], undefined, false, nudgeWord)
         if (!snap) return
         setSnapshots((prev) => [...prev, snap])
         const stamped = await stampSnapshot(snap.documentId, snap.id) // pending proof
@@ -1053,12 +1054,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
-  // Show toolbar when: not a touch device, OR keyboard is down, OR text is selected
-  // (so the style bar is reachable for formatting even while the keyboard is up).
-  // styleBarOpen keeps the toolbar alive while the user is actively formatting
-  // (selection may collapse mid-action without this — disappears on every button tap)
-  const showMain   = !isTouch || !keyboardUp || !selectionEmpty || styleBarOpen
-  const barVisible = showMain
+  // On phone with keyboard up + text selected: show ONLY the style bar (not the full toolbar).
+  // styleBarOpen keeps the main row alive while the user is actively formatting.
+  const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty
+  const showMainRow = !isTouch || !keyboardUp || styleBarOpen
+  // Style bar auto-expands on phone text selection (no S button toggle needed in that case).
+  const styleBarExpanded = (selectionOnPhone || styleBarOpen) && !!editor
+  const barVisible = showMainRow || selectionOnPhone
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
 
@@ -1101,7 +1103,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               onHintChange={handleHintChange}
               onCycleChange={setCycleActive}
               isLockedLemma={(lemma) => scasRef.current!.lookup().locked.has(lemma)}
-              firstKickAt={(word) => scasRef.current!.firstKickAt(word)}
+              firstNudgeAt={(word) => scasRef.current!.firstNudgeAt(word)}
             />
           )}
         </Scroll>
@@ -1244,13 +1246,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               transformOrigin: 'bottom center',
             }}
           >
-            {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM */}
-            {showMain && (
+            {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
+                Auto-expands on phone text-selection even when the main toolbar row is hidden. */}
+            {(showMainRow || selectionOnPhone) && (
               <div style={{
                 overflow: 'hidden',
-                maxHeight: (styleBarOpen && editor) ? '60px' : '0',
-                opacity: (styleBarOpen && editor) ? 1 : 0,
-                pointerEvents: (styleBarOpen && editor) ? 'auto' : 'none',
+                maxHeight: styleBarExpanded ? '60px' : '0',
+                opacity: styleBarExpanded ? 1 : 0,
+                pointerEvents: styleBarExpanded ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
                 <div className="flex items-center px-4 py-2 border-b border-stone-200">
@@ -1260,7 +1263,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             )}
 
             {/* Main toolbar row */}
-            {showMain && (
+            {showMainRow && (
             <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (

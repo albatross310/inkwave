@@ -24,7 +24,11 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
     }
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
     const parsed = JSON.parse(await file.text())
-    return Array.isArray(parsed) ? (parsed as Snapshot[]) : []
+    if (!Array.isArray(parsed)) return []
+    // Normalise legacy 'kick' trigger to 'word-nudge' on read (stored data backward compat)
+    return (parsed as Snapshot[]).map((s) =>
+      (s.trigger as string) === 'kick' ? { ...s, trigger: 'word-nudge' as const } : s
+    )
   } catch {
     return []
   }
@@ -107,6 +111,7 @@ export async function createSnapshotIfChanged(
   receipts: SignedReceipt[] = [],
   summary?: string,
   force = false,
+  nudgeWord?: { from: string; to: string },
 ): Promise<Snapshot | null> {
   const cHash = await contentHash(doc.contentJson)
   const snaps = await readSnapshotsFile(doc.id)
@@ -127,6 +132,7 @@ export async function createSnapshotIfChanged(
     bundleHash: await bundleHash(cHash, receipts),
     ots: { status: 'unstamped' },
     ...(summary ? { summary } : {}),
+    ...(nudgeWord ? { nudgeWord } : {}),
   }
   await writeSnapshotsFile(doc.id, [...snaps, snapshot])
   return snapshot

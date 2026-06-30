@@ -5,7 +5,7 @@
 // fixed, unspliceable sequence per session.
 
 import * as ed from '@noble/ed25519'
-import type { KickEvent, SignedReceipt } from '../types/document'
+import type { WordNudgeEvent, SignedReceipt } from '../types/document'
 import { canonicalize, sha256Hex } from './hash'
 import { POOL } from '../scas/pool'
 
@@ -53,9 +53,11 @@ export function bitmaskToLemmas(lockedSetBase64: string): Set<string> {
   return out
 }
 
-export function kicksHash(kicks: KickEvent[]): Promise<string> {
-  return sha256Hex(canonicalize(kicks))
+export function nudgesHash(nudges: WordNudgeEvent[]): Promise<string> {
+  return sha256Hex(canonicalize(nudges))
 }
+/** @deprecated use nudgesHash */
+export const kicksHash = nudgesHash
 
 /** The genesis prevHash for receipt 0 of a session. */
 export function genesisPrevHash(sessionToken: string): Promise<string> {
@@ -78,7 +80,7 @@ async function signedCore(r: SignedReceipt): Promise<string> {
     contentHash: r.contentHash,
     setVersion: r.setVersion,
     lockedSetHash: r.lockedSetHash,
-    kicksHash: await kicksHash(r.kicks),
+    kicksHash: await nudgesHash(r.kicks),
     serverTime: r.serverTime,
     ...(r.cadenceDigest ? { cadenceDigest: r.cadenceDigest } : {}),
   })

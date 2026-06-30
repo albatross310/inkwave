@@ -8,7 +8,7 @@ const bundle = {
   v: 1,
   document: { id: 'd', title: 't', contentJson: doc('alpha gamma delta epsilon') },
   snapshots: [
-    { id: 's1', documentId: 'd', createdAt: '2026-06-17T00:00:10.000Z', trigger: 'kick', wordCount: 3, contentHash: '', contentJson: doc('alpha beta gamma'), bundleHash: '', ots: { status: 'confirmed' } },
+    { id: 's1', documentId: 'd', createdAt: '2026-06-17T00:00:10.000Z', trigger: 'word-nudge', wordCount: 3, contentHash: '', contentJson: doc('alpha beta gamma'), bundleHash: '', ots: { status: 'confirmed' } },
     { id: 's2', documentId: 'd', createdAt: '2026-06-17T00:00:20.000Z', trigger: 'manual', wordCount: 4, contentHash: '', contentJson: doc('alpha gamma delta epsilon'), bundleHash: '', ots: { status: 'confirmed' } },
   ],
   receipts: [
@@ -31,14 +31,14 @@ describe('computeAnalytics', () => {
     expect(a.stats.finalWords).toBe(4)
   })
 
-  it('counts kicks, swaps and snapshots from receipts', () => {
-    expect(a.stats.totalKicks).toBe(2)
+  it('counts word nudges, swaps and snapshots from receipts', () => {
+    expect(a.stats.totalNudges).toBe(2)
     expect(a.stats.swaps).toBe(1)
-    expect(a.stats.kicksByResponse).toEqual({ swapped: 1, dismissed: 1 })
+    expect(a.stats.nudgesByResponse).toEqual({ swapped: 1, dismissed: 1 })
     expect(a.stats.snapshots).toBe(2)
     expect(a.stats.sessions).toBe(1)
     expect(a.stats.periods).toBe(2)
-    expect(a.kicks.map((k) => `${k.old}->${k.replacement ?? ''}`)).toEqual(['big->large', 'cat->'])
+    expect(a.nudges.map((k) => `${k.old}->${k.replacement ?? ''}`)).toEqual(['big->large', 'cat->'])
   })
 
   it('derives duration, deliberation and the words timeline', () => {

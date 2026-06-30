@@ -10,6 +10,26 @@ import { DocView } from '../components/DocView'
 
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
+const NAV_BG = 'rgba(140, 90, 200, 0.20)'
+const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
+const NAV_FG = 'rgba(92, 45, 138, 0.85)'
+const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
+
+interface DiffSummary { forward: string; backward: string }
+
+async function fetchDiffSummary(before: string, after: string): Promise<DiffSummary | null> {
+  try {
+    const r = await fetch('/api/summarise', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ before, after }),
+    })
+    if (!r.ok) return null
+    return await r.json() as DiffSummary
+  } catch {
+    return null
+  }
+}
 
 // Read-only viewer for a past snapshot. Navigation:
 //   ← / → buttons (+ keyboard / swipe) move between snapshots chronologically.
@@ -103,41 +123,89 @@ export function SnapshotView() {
   const versionLabel = groupIdx >= 0 ? groups[groupIdx].label || 'draft' : ''
   const posLabel = allSnapshots.length > 1 ? `${idx + 1} / ${allSnapshots.length}` : null
 
+  // ── Diff summaries ────────────────────────────────────────────────────────────
+  const [summary, setSummary] = useState<DiffSummary | null>(null)
+  const summaryKey = useRef('')
+  useEffect(() => {
+    if (idx <= 0 || !snapshot) { setSummary(null); return }
+    const prev = allSnapshots[idx - 1]
+    const key = `${prev.id}→${snapshot.id}`
+    if (summaryKey.current === key) return
+    summaryKey.current = key
+    setSummary(null)
+    const before = pmToText(prev.contentJson)
+    const after = pmToText(snapshot.contentJson)
+    if (!before.trim() && !after.trim()) return
+    void fetchDiffSummary(before, after).then((s) => {
+      if (summaryKey.current === key) setSummary(s)
+    })
+  }, [idx, snapshot, allSnapshots])
+
   // ── Floating nav squares ─────────────────────────────────────────────────────
-  // Positioned in the pale-blue wave area (sides of the viewport). Desktop: two stacked
-  // squares per side (version above, snapshot below). Mobile: one square per side.
+  // Purple/greyish-purple background. Labels: <s / s> for snapshot, <<v / v>> for version.
   const squareBase: React.CSSProperties = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: 44, height: 44, borderRadius: 10,
-    background: 'rgba(130,130,130,0.22)',
+    background: NAV_BG,
     backdropFilter: 'blur(6px)',
     WebkitBackdropFilter: 'blur(6px)',
-    border: '1px solid rgba(255,255,255,0.35)',
-    color: 'rgba(60,60,60,0.75)',
-    fontSize: '1.1rem', cursor: 'pointer',
+    border: '1px solid rgba(140,90,200,0.25)',
+    color: NAV_FG,
+    cursor: 'pointer',
     transition: 'background 0.15s',
     userSelect: 'none',
   }
   const squareDisabled: React.CSSProperties = {
     ...squareBase,
-    background: 'rgba(130,130,130,0.08)',
-    color: 'rgba(130,130,130,0.25)',
+    background: NAV_BG_DIS,
+    color: NAV_FG_DIS,
     cursor: 'default',
-    border: '1px solid rgba(255,255,255,0.15)',
+    border: '1px solid rgba(140,90,200,0.10)',
   }
 
-  const NavSquare = ({ label, onClick, disabled, title }: { label: string; onClick: () => void; disabled: boolean; title: string }) => (
+  // Arrow label content: angle brackets + small letter inside
+  const ArrowLabel = ({ dir, type }: { dir: 'back' | 'fwd'; type: 'snap' | 'ver' }) => {
+    const brackets = type === 'ver'
+      ? (dir === 'back' ? '<<' : '>>')
+      : (dir === 'back' ? '<' : '>')
+    const letter = type === 'snap' ? 's' : 'v'
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: 1, gap: 1 }}>
+        {dir === 'back' && <span style={{ fontSize: '1.05rem', letterSpacing: type === 'ver' ? '-0.12em' : undefined }}>{brackets}</span>}
+        <span style={{ fontSize: '0.58rem', color: 'inherit', opacity: 0.8 }}>{letter}</span>
+        {dir === 'fwd' && <span style={{ fontSize: '1.05rem', letterSpacing: type === 'ver' ? '-0.12em' : undefined }}>{brackets}</span>}
+      </span>
+    )
+  }
+
+  const NavSquare = ({ dir, type, onClick, disabled, title }: {
+    dir: 'back' | 'fwd'; type: 'snap' | 'ver';
+    onClick: () => void; disabled: boolean; title: string
+  }) => (
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
       title={title}
       style={disabled ? squareDisabled : squareBase}
-      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(130,130,130,0.38)' }}
-      onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(130,130,130,0.22)' }}
+      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+      onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
     >
-      {label}
+      <ArrowLabel dir={dir} type={type} />
     </button>
   )
+
+  const summaryBoxStyle: React.CSSProperties = {
+    background: 'rgba(140, 90, 200, 0.12)',
+    border: '1px solid rgba(140, 90, 200, 0.22)',
+    borderRadius: 8,
+    padding: '5px 8px',
+    fontSize: '0.63rem',
+    lineHeight: 1.45,
+    color: INK,
+    maxWidth: 140,
+    pointerEvents: 'none',
+    marginBottom: 6,
+  }
 
   const floatSide = (side: 'left' | 'right'): React.CSSProperties => ({
     position: 'fixed',
@@ -148,6 +216,7 @@ export function SnapshotView() {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
+    alignItems: side === 'left' ? 'flex-start' : 'flex-end',
     pointerEvents: 'none', // container is pass-through; buttons below re-enable
   })
 
@@ -226,29 +295,35 @@ export function SnapshotView() {
       {/* ── Floating navigation squares ── */}
       {allSnapshots.length > 1 && status === 'ready' && (
         <>
-          {/* Left side */}
+          {/* Left side — goes backward (older) */}
           <div style={floatSide('left')}>
-            {/* Version jump (desktop only) */}
             {!isPhone && hasVersions && (
               <div style={{ pointerEvents: 'auto' }}>
-                <NavSquare label="↑v" onClick={goVerBack} disabled={!canVerBack} title="Previous version" />
+                <NavSquare dir="back" type="ver" onClick={goVerBack} disabled={!canVerBack} title="Previous version" />
               </div>
             )}
-            {/* Snapshot step */}
-            <div style={{ pointerEvents: 'auto' }}>
-              <NavSquare label="←" onClick={goBack} disabled={!canBack} title="Previous snapshot (←)" />
+            <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {/* Summary for going backward (not-yet tense) — above the back arrow */}
+              {summary?.backward && canBack && (
+                <div style={summaryBoxStyle}>{summary.backward}</div>
+              )}
+              <NavSquare dir="back" type="snap" onClick={goBack} disabled={!canBack} title="Previous snapshot (←)" />
             </div>
           </div>
 
-          {/* Right side */}
+          {/* Right side — goes forward (newer) */}
           <div style={floatSide('right')}>
             {!isPhone && hasVersions && (
               <div style={{ pointerEvents: 'auto' }}>
-                <NavSquare label="↓v" onClick={goVerFwd} disabled={!canVerFwd} title="Next version" />
+                <NavSquare dir="fwd" type="ver" onClick={goVerFwd} disabled={!canVerFwd} title="Next version" />
               </div>
             )}
-            <div style={{ pointerEvents: 'auto' }}>
-              <NavSquare label="→" onClick={goFwd} disabled={!canFwd} title="Next snapshot (→)" />
+            <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              {/* Summary for going forward (past tense) — above the forward arrow */}
+              {summary?.forward && canFwd && (
+                <div style={{ ...summaryBoxStyle, textAlign: 'right' }}>{summary.forward}</div>
+              )}
+              <NavSquare dir="fwd" type="snap" onClick={goFwd} disabled={!canFwd} title="Next snapshot (→)" />
             </div>
           </div>
         </>

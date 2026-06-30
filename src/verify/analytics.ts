@@ -12,22 +12,29 @@ import { pmToText } from '../provenance/bundle'
 export interface IntervalBar { t: number; added: number; removed: number } // per snapshot interval, words
 export interface WordPoint { t: number; words: number }
 export interface SnapshotMark { t: number; words: number; trigger: string }
-export interface KickMark { t: number; old: string; replacement?: string; response: string; setVersion: number }
+export interface NudgeMark { t: number; old: string; replacement?: string; response: string; setVersion: number }
+
+// Backward-compat alias
+export type KickMark = NudgeMark
 
 export interface ProvenanceStats {
   finalWords: number
   addedWords: number // ≥ lower bound (snapshot diffs)
   deletedWords: number // ≥ lower bound
   churn: number // deletedWords ÷ addedWords (0..1+)
-  totalKicks: number
+  totalNudges: number
   swaps: number
-  kicksByResponse: Record<string, number>
+  nudgesByResponse: Record<string, number>
   snapshots: number
   sessions: number
   periods: number
   durationMs: number | null
   avgDeliberationMs: number | null
   wpm: number | null // final words ÷ active minutes
+  /** @deprecated use totalNudges */
+  totalKicks: number
+  /** @deprecated use nudgesByResponse */
+  kicksByResponse: Record<string, number>
 }
 
 export interface Analytics {
@@ -35,9 +42,11 @@ export interface Analytics {
   words: WordPoint[] // cumulative word count over time (0 start + each snapshot)
   intervals: IntervalBar[] // per-snapshot added/deleted (lower bound)
   snapshots: SnapshotMark[]
-  kicks: KickMark[]
+  nudges: NudgeMark[]
   tMin: number
   tMax: number
+  /** @deprecated use nudges */
+  kicks: NudgeMark[]
 }
 
 const ms = (iso: string): number => { const t = Date.parse(iso); return Number.isFinite(t) ? t : 0 }
@@ -76,20 +85,20 @@ export function computeAnalytics(bundle: ExportBundle): Analytics {
     prevText = curText
   }
 
-  // ── kicks (old → new), at their period's signed time ──
-  const kicks: KickMark[] = []
-  const kicksByResponse: Record<string, number> = {}
+  // ── word nudges (old → new), at their period's signed time ──
+  const nudges: NudgeMark[] = []
+  const nudgesByResponse: Record<string, number> = {}
   let deliberationSum = 0, deliberationN = 0
   for (const r of receipts) {
     const t = ms(r.serverTime)
     for (const k of r.kicks) {
-      kicks.push({ t, old: k.lemma, replacement: k.replacement, response: k.response, setVersion: k.setVersion })
-      kicksByResponse[k.response] = (kicksByResponse[k.response] ?? 0) + 1
+      nudges.push({ t, old: k.lemma, replacement: k.replacement, response: k.response, setVersion: k.setVersion })
+      nudgesByResponse[k.response] = (nudgesByResponse[k.response] ?? 0) + 1
       if (Number.isFinite(k.deliberationMs)) { deliberationSum += k.deliberationMs; deliberationN++ }
     }
   }
 
-  const allT = [...snapshots.map((s) => s.t), ...kicks.map((k) => k.t)].filter((t) => t > 0)
+  const allT = [...snapshots.map((s) => s.t), ...nudges.map((k) => k.t)].filter((t) => t > 0)
   const tMin = allT.length ? Math.min(...allT) : 0
   const tMax = allT.length ? Math.max(...allT) : 0
   const words: WordPoint[] = [{ t: tMin, words: 0 }, ...snapshots.map((s) => ({ t: s.t, words: s.words }))]
@@ -103,16 +112,19 @@ export function computeAnalytics(bundle: ExportBundle): Analytics {
     addedWords,
     deletedWords,
     churn: addedWords > 0 ? Math.round((deletedWords / addedWords) * 100) / 100 : 0,
-    totalKicks: kicks.length,
-    swaps: kicks.filter((k) => k.replacement).length,
-    kicksByResponse,
+    totalNudges: nudges.length,
+    swaps: nudges.filter((k) => k.replacement).length,
+    nudgesByResponse,
     snapshots: snaps.length,
     sessions: new Set(receipts.map((r) => r.sessionToken)).size,
     periods: receipts.length,
     durationMs,
     avgDeliberationMs: deliberationN > 0 ? Math.round(deliberationSum / deliberationN) : null,
     wpm,
+    // backward-compat aliases
+    totalKicks: nudges.length,
+    kicksByResponse: nudgesByResponse,
   }
 
-  return { stats, words, intervals, snapshots, kicks, tMin, tMax }
+  return { stats, words, intervals, snapshots, nudges, tMin, tMax, kicks: nudges }
 }

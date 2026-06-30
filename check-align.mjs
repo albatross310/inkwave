@@ -1,65 +1,48 @@
 import { chromium } from '@playwright/test'
 const browser = await chromium.launch({ headless: true })
-const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
-await page.goto('http://localhost:5173/')
-await page.waitForLoadState('networkidle')
-await page.waitForSelector('.ProseMirror')
-await page.click('.ProseMirror')
-await page.keyboard.press('Control+A'); await page.keyboard.press('Delete')
-await page.waitForTimeout(100)
-await page.keyboard.press('Alt+Shift+Equal')
-await page.waitForTimeout(800)
-await page.keyboard.type('a = bdd')
-await page.keyboard.press('Enter')
-await page.keyboard.type('elementary = dearwatson')
-await page.keyboard.press('Escape')
-await page.waitForTimeout(500)
 
-// Activate MathLive  
-const blockBox = await page.locator('.katex-display').boundingBox()
-if (blockBox) await page.mouse.click(blockBox.x + blockBox.width / 2, blockBox.y + blockBox.height / 2)
-await page.waitForTimeout(2000)
+async function measure(label, alignButton) {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+  await page.goto('http://localhost:5173/')
+  await page.waitForLoadState('networkidle')
+  await page.click('.ProseMirror')
+  await page.keyboard.press('Control+A'); await page.keyboard.press('Delete')
+  await page.waitForTimeout(100)
+  await page.keyboard.press('Alt+Shift+Equal'); await page.waitForTimeout(600)
+  await page.keyboard.type('a = bdd')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('elementary = dearwatson')
+  await page.keyboard.press('Escape'); await page.waitForTimeout(400)
 
-const mlCheck = await page.evaluate(() => {
-  const mf = document.querySelector('math-field')
-  if (!mf || !mf.shadowRoot) return { error: 'no mf' }
-  const mfR = mf.getBoundingClientRect()
-  
-  // Walk up to find the grid
-  let el = mf.parentElement
-  while (el && !el.style.display.includes('grid')) el = el.parentElement
-  const gL = el ? el.getBoundingClientRect().left : 0
-  
-  const injectedStyle = mf.shadowRoot.querySelector('#iw-align')
-  
-  // Measure each vlist cell
-  const vlists = [...mf.shadowRoot.querySelectorAll('.ML__vlist')]
-  const rowData = vlists.map(function(v) {
-    const vR = v.getBoundingClientRect()
-    const textAlign = getComputedStyle(v).textAlign
-    const contentSpans = [...v.querySelectorAll('span[style*="inline-block"]')]
-    return {
-      vlistW: +(vR.width).toFixed(1),
-      textAlign: textAlign,
-      spans: contentSpans.slice(0,3).map(function(s) {
-        const r = s.getBoundingClientRect()
-        return {
-          w: +r.width.toFixed(1),
-          left: +(r.left - gL).toFixed(1),
-          center: +(((r.left + r.right)/2) - gL).toFixed(1),
-        }
-      }),
-    }
-  })
-  
-  return {
-    mfLeft: +(mfR.left - gL).toFixed(1),
-    mfW: +mfR.width.toFixed(1),
-    gridW: el ? +el.getBoundingClientRect().width.toFixed(1) : 'n/a',
-    styleInjected: !!injectedStyle,
-    styleContent: injectedStyle ? injectedStyle.textContent.slice(0, 80) : null,
-    rowData: rowData,
+  // Set alignment via sigma button if not default
+  if (alignButton) {
+    await page.evaluate((btn) => {
+      window.dispatchEvent(new CustomEvent('inkwave-math-align', { detail: { align: btn } }))
+    }, alignButton)
+    await page.waitForTimeout(300)
   }
-})
-console.log(JSON.stringify(mlCheck, null, 2))
+
+  const katex = await page.evaluate(() => {
+    const grid = document.querySelector('[style*="display: grid"]')
+    const gL = grid?.getBoundingClientRect().left ?? 0
+    const gW = grid?.getBoundingClientRect().width ?? 0
+    const spans = [...document.querySelectorAll('.katex-display span')].filter(s => !s.querySelector('span') && s.getBoundingClientRect().width > 3)
+    const lineGroups = {}
+    spans.forEach(s => {
+      const r = s.getBoundingClientRect()
+      const y = Math.round(r.top)
+      if (!lineGroups[y]) lineGroups[y] = { left: r.left - gL, right: r.right - gL }
+      else { lineGroups[y].left = Math.min(lineGroups[y].left, r.left - gL); lineGroups[y].right = Math.max(lineGroups[y].right, r.right - gL) }
+    })
+    return { gridW: gW, lines: Object.values(lineGroups).slice(0,4).map(l => ({ left: +l.left.toFixed(1), right: +l.right.toFixed(1), center: +((l.left+l.right)/2).toFixed(1) })) }
+  })
+  console.log(`\n=== ${label} (align=${alignButton||'aligned'}) ===`)
+  console.log('KaTeX gridW:', katex.gridW)
+  katex.lines.forEach((l, i) => console.log(`  line${i+1}: left=${l.left} right=${l.right} center=${l.center}`))
+  await page.close()
+}
+
+await measure('ALIGNED (default)', null)
+await measure('CENTER', 'center')
+await measure('LEFT', 'left')
 await browser.close()

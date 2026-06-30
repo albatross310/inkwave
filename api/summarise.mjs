@@ -1,12 +1,35 @@
 // Vercel serverless function: paragraph-summary relay. POST a JSON body:
 //   { text: string }          → { summary: string }  (single paragraph, 5-10 words)
 //   { texts: string[] }       → { summary: string }  (2-3 short paras, groups sep by semicolons)
+//   { before: string, after: string }
+//                             → { forward: string, backward: string }
+//                               forward  = past tense, ≤50 words ("Added a discussion of…")
+//                               backward = negative-yet tense ("Hadn't yet added…")
 // Calls Claude Sonnet. API key stays server-side; the client only sees the summary text.
 
 import { rateLimit, clientIp } from './_ratelimit.mjs'
 
 const MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS = 80
+
+async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+  if (!r.ok) throw new Error(`anthropic ${r.status}`)
+  const data = await r.json()
+  return data.content?.[0]?.text?.trim() ?? ''
+}
 
 function buildPrompt(body) {
   if (Array.isArray(body.texts) && body.texts.length > 0) {
@@ -27,23 +50,27 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'object' && req.body ? req.body : JSON.parse(req.body || '{}')
+
+    // Diff-summary mode: two Claude calls in parallel, forward and backward.
+    if (typeof body.before === 'string' && typeof body.after === 'string') {
+      const before = body.before.slice(0, 1500)
+      const after = body.after.slice(0, 1500)
+      const [forward, backward] = await Promise.all([
+        callClaude(apiKey,
+          `In max 50 words, describe in past tense what changed going from the BEFORE text to the AFTER text. Focus on content added or changed. Start with a verb, e.g. "Added…". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
+          120,
+        ),
+        callClaude(apiKey,
+          `In max 50 words, describe what hadn't happened yet in the BEFORE text compared to the AFTER text. Use the "hadn't yet" / "not yet" tense. Start with "Hadn't". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
+          120,
+        ),
+      ])
+      res.setHeader('content-type', 'application/json')
+      return res.end(JSON.stringify({ forward, backward }))
+    }
+
     const prompt = buildPrompt(body)
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-    if (!r.ok) throw new Error(`anthropic ${r.status}`)
-    const data = await r.json()
-    const summary = data.content?.[0]?.text?.trim() ?? ''
+    const summary = await callClaude(apiKey, prompt)
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ summary }))
   } catch (err) {

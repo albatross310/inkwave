@@ -9,8 +9,8 @@
 // Wiring this runner into the editor's live loop (driving the SCAS controller off `current.lemmas`
 // and calling closePeriod on the resample timer) is the remaining M3 integration step.
 
-import type { KickEvent, SignedReceipt, KeylogBin } from '../types/document'
-import { kicksHash, genesisPrevHash, chainHash, bitmaskToLemmas } from './receipts'
+import type { WordNudgeEvent, SignedReceipt, KeylogBin } from '../types/document'
+import { nudgesHash, genesisPrevHash, chainHash, bitmaskToLemmas } from './receipts'
 import { cadenceDigest } from './cadence'
 
 interface IssuedSet {
@@ -72,8 +72,8 @@ export class SessionRunner {
    * period, the kicks resolved this period) and advance to the next server-issued set. Returns the
    * new receipt, or null if the service is unreachable (the period stays open, retried next tick).
    */
-  async closePeriod(contentHash: string, kicks: KickEvent[], cadence?: KeylogBin[], authToken?: string): Promise<SignedReceipt | null> {
-    const kh = await kicksHash(kicks)
+  async closePeriod(contentHash: string, kicks: WordNudgeEvent[], cadence?: KeylogBin[], authToken?: string): Promise<SignedReceipt | null> {
+    const kh = await nudgesHash(kicks)
     // Paid (Insignia) tier: the server signs only the DIGEST (it never sees the bins); the writer
     // keeps the bins on the receipt for later, at-their-discretion analysis. Empty cadence → no
     // digest. When a digest is sent, the authToken (Clerk) lets the server enforce the subscription.

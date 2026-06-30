@@ -39,7 +39,7 @@ export interface InkwaveDocument {
 // The client-side overlay on top of S_v membership: which lemmas are Locked (ban-credit
 // outstanding) and which are Satisfied (immune until the next resample). `S_v` itself is a
 // pure function of the seed and is NOT stored here. The verifier replays this overlay from
-// the logged kick events; it is never folded into the seed derivation. See v4 spec §4.3/§8.
+// the logged word-nudge events; it is never folded into the seed derivation. See v4 spec §4.3/§8.
 
 export type ScasMode = 'n'
 
@@ -52,11 +52,11 @@ export interface ScasState {
   version: number                  // current S-version v
   locked: string[]                 // ban-credit set B (lemmas) — state "Locked"
   satisfied: SatisfiedEntry[]      // resolved-in-place lemmas, immune for their version
-  liveKicks: string[]              // outstanding, unresolved in-S kicks (lemmas). Frozen at commit
-                                   // so the word stays purple across S-rotation and reload without
-                                   // recomputing membership; cleared when resolved (swap/dismiss) or
-                                   // moved to `locked` on delete. Locked lemmas colour via `locked`.
-  kickTimes?: Record<string, number> // lemma → epoch ms it was FIRST kicked (turned purple). The
+  liveKicks: string[]              // outstanding, unresolved in-S word nudges (lemmas). Frozen at
+                                   // commit so the word stays purple across S-rotation and reload
+                                   // without recomputing membership; cleared when resolved (swap/
+                                   // dismiss) or moved to `locked` on delete.
+  kickTimes?: Record<string, number> // lemma → epoch ms it was FIRST nudged (turned purple). The
                                    // slot's "first-written" stamp; persisted so it survives reload.
 }
 
@@ -82,7 +82,7 @@ export interface Snapshot {
   id: string
   documentId: string
   createdAt: string                 // writer's local clock — ordering only, never authority
-  trigger: 'kick' | 'manual' | 'paragraph'
+  trigger: 'word-nudge' | 'kick' | 'manual' | 'paragraph'  // 'kick' kept for backward compat reading
   wordCount: number
   contentHash: string               // sha256Hex(JCS(contentJson))
   contentJson: TiptapJSON           // held by the writer; never transmitted
@@ -90,6 +90,7 @@ export interface Snapshot {
   bundleHash: string                // sha256Hex(JCS({ v:1, contentHash, receipts: receipts ?? [] }))
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
   summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
+  nudgeWord?: { from: string; to: string }  // old→new word for 'word-nudge' trigger snapshots
 }
 
 export interface OtsProofState {
@@ -99,8 +100,9 @@ export interface OtsProofState {
   bitcoinTime?: string              // block time — the durable authoritative timestamp
 }
 
-// One kick (constraint encounter) and how it was resolved — the no-silent-dodging evidence.
-export interface KickEvent {
+// One word nudge (constraint encounter) and how it was resolved — the no-silent-dodging evidence.
+// Stored in signed receipts as `kicks` for protocol stability; the TypeScript name is WordNudgeEvent.
+export interface WordNudgeEvent {
   lemma: string
   commitIndex: number               // order within the document (for state-machine replay)
   setVersion: number
@@ -109,6 +111,9 @@ export interface KickEvent {
   replacement?: string              // lemma swapped to (response 'swapped' / 'credit-discharged')
   deliberationMs: number            // selectable → resolved
 }
+
+// Backward-compat alias (used in protocol field names and some legacy paths).
+export type KickEvent = WordNudgeEvent
 
 // One per signing period, hash-chained into one fixed sequence per session (M3). Defined now so
 // the Snapshot/bundle types are complete; the signing service that populates it arrives in M3.
@@ -120,7 +125,7 @@ export interface SignedReceipt {
   contentHash: string
   setVersion: number
   lockedSetHash: string
-  kicks: KickEvent[]
+  kicks: WordNudgeEvent[]           // field name kept as 'kicks' for signed-protocol stability
   serverTime: string
   cadenceDigest?: string
   signature: string

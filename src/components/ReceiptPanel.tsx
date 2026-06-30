@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Snapshot } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
@@ -86,12 +86,16 @@ export function ReceiptPanel({
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
 
   const [saving, setSaving] = useState(false)
+  const [toastPhase, setToastPhase] = useState<'hidden' | 'show' | 'fade'>('hidden')
+  const toastTimers = useRef<{ show?: ReturnType<typeof setTimeout>; fade?: ReturnType<typeof setTimeout> }>({})
+  const prevN = useRef(snapshots.length)
 
   const zoom = useZoomScale()
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
   const groups = useMemo(() => groupByVersion(snapshots), [snapshots])
+  const versionCount = groups.filter(g => g.label !== '').length
 
   useEffect(() => {
     if (!open) return
@@ -100,8 +104,23 @@ export function ReceiptPanel({
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  // Clear saving indicator once a new snapshot appears
-  useEffect(() => { if (saving && n > 0) setSaving(false) }, [n, saving])
+  // Clear saving indicator and show toast when a new manual snapshot appears
+  useEffect(() => {
+    const wasManualSave = saving
+    if (saving && n > prevN.current) {
+      setSaving(false)
+      // Check if the new snapshot is a manual one (version save)
+      const newest = snapshots[snapshots.length - 1]
+      if (wasManualSave && newest?.trigger === 'manual') {
+        clearTimeout(toastTimers.current.show)
+        clearTimeout(toastTimers.current.fade)
+        setToastPhase('show')
+        toastTimers.current.show = setTimeout(() => setToastPhase('fade'), 700)
+        toastTimers.current.fade = setTimeout(() => setToastPhase('hidden'), 1000)
+      }
+    }
+    prevN.current = n
+  }, [n, saving, snapshots])
 
   const panelOpen = open && (n > 0 || receiptCount > 0 || typeof wordCount === 'number')
 
@@ -137,10 +156,32 @@ export function ReceiptPanel({
           >
             {compact ? '◈' : (
               <span className="inline-block pl-[1.2em] [text-indent:-1.2em]">
-                ◈ {n} snapshot{n === 1 ? '' : 's'}{receiptCount > 0 ? ` · ${receiptCount} receipt${receiptCount === 1 ? '' : 's'}` : ''}
+                ◈ {n} snapshot{n === 1 ? '' : 's'}{versionCount > 0 ? ` · ${versionCount} version${versionCount === 1 ? '' : 's'}` : ''}
               </span>
             )}
           </button>
+        )}
+
+        {/* "version saved" toast — 0.7s display + 0.3s fade */}
+        {toastPhase !== 'hidden' && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '2.8rem',
+              left: 0,
+              background: 'rgba(92, 45, 138, 0.85)',
+              color: '#fff',
+              fontSize: '0.75rem',
+              padding: '4px 10px',
+              borderRadius: 8,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+              opacity: toastPhase === 'show' ? 1 : 0,
+              transition: toastPhase === 'fade' ? 'opacity 300ms ease' : 'none',
+            }}
+          >
+            version saved
+          </div>
         )}
 
         {panelOpen && (
@@ -213,7 +254,7 @@ export function ReceiptPanel({
                     <span className="text-stone-400">{s.wordCount}w</span>
                     <span className="ml-auto flex items-center">{otsIcon}</span>
                   </div>
-                  {/* Row 2: AI summary or trigger type */}
+                  {/* Row 2: nudgeWord pair, AI summary, or trigger label */}
                   <div
                     className="text-stone-400 w-full"
                     style={{
@@ -227,9 +268,13 @@ export function ReceiptPanel({
                       minHeight: '0.9em',
                     }}
                   >
-                    {s.summary
-                      ? s.summary
-                      : <span style={{ opacity: 0.4 }}>{s.trigger === 'kick' ? 'kick' : s.trigger === 'paragraph' ? 'para' : 'version'}</span>
+                    {s.summary ? s.summary
+                      : (s.trigger === 'word-nudge' || s.trigger === 'kick') && s.nudgeWord
+                        ? <span>{s.nudgeWord.from} <span style={{ color: LIGHT }}>→</span> {s.nudgeWord.to}</span>
+                        : <span style={{ opacity: 0.4 }}>
+                            {(s.trigger === 'word-nudge' || s.trigger === 'kick') ? 'word nudge'
+                              : s.trigger === 'paragraph' ? 'para' : 'version'}
+                          </span>
                     }
                   </div>
                 </button>

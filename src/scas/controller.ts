@@ -5,7 +5,7 @@
 //   • a committed in-S lemma  → recordKick (turns purple, frozen)
 //   • a completed substitution → resolve the ORIGINAL lemma (satisfied, or discharged if it was
 //     locked) — inferred from the ScasSlotMark the popover writes, so no coupling to the popover
-//   • a deleted kicked lemma   → lock (ban-credit) — inferred from a kicked lemma disappearing
+//   • a deleted nudged lemma   → lock (ban-credit) — inferred from a nudged lemma disappearing
 // The editor wires onTransaction → processDoc, persists the new state, and forces a decoration
 // rebuild; the RedHighlightExtension renders purely from the lookup this controller exposes.
 
@@ -23,7 +23,7 @@ import {
   isLocked,
 } from './engine'
 import { buildLookup, type ScasLookup } from './state'
-import { KickEmitter } from '../provenance/kicks'
+import { WordNudgeEmitter } from '../provenance/wordNudges'
 
 const WORD_RE = /[a-zA-Z]+/g
 const BOUNDARY_RE = /[\s.,;:!?)\-'"…]/
@@ -37,7 +37,7 @@ interface ScannedWord {
 /**
  * Collect the document's *committed* words. A word is committed unless it is the one under the
  * cursor still being typed (no trailing boundary yet) — matching the renderer's definition, so a
- * kick fires exactly when the word turns red.
+ * word nudge fires exactly when the word turns red.
  */
 function scanCommitted(pmDoc: PMNode, cursorPos: number): ScannedWord[] {
   const out: ScannedWord[] = []
@@ -76,13 +76,13 @@ function scanCommitted(pmDoc: PMNode, cursorPos: number): ScannedWord[] {
 
 export class ScasController {
   state: ScasState
-  /** Emits a KickEvent on each resolution (swap / discharge / delete→credit). */
-  readonly kicks = new KickEmitter()
+  /** Emits a WordNudgeEvent on each resolution (swap / discharge / delete→credit). */
+  readonly nudges = new WordNudgeEmitter()
   private seedRef: string
   private docId: string
   private setSize: number
   private currentSet: Set<string>
-  private commitIndex = 0 // monotonic order of resolved kicks (for state-machine replay)
+  private commitIndex = 0 // monotonic order of resolved word nudges (for state-machine replay)
 
   constructor(state: ScasState, seedRef: string, docId: string, setSize: number) {
     this.state = state
@@ -105,8 +105,8 @@ export class ScasController {
     return this.currentSet.has(lemma)
   }
 
-  /** Epoch ms when `word`'s lemma first turned purple (was kicked), or undefined if unknown. */
-  firstKickAt(word: string): number | undefined {
+  /** Epoch ms when `word`'s lemma first turned purple (was nudged), or undefined if unknown. */
+  firstNudgeAt(word: string): number | undefined {
     return this.state.kickTimes?.[lemmaOf(word)]
   }
 
@@ -125,8 +125,8 @@ export class ScasController {
   }
 
   /**
-   * Process a document change: fire kicks, resolve substitutions, and (only when content was
-   * removed) lock deleted kicked lemmas. Returns true if the state changed.
+   * Process a document change: fire word nudges, resolve substitutions, and (only when content was
+   * removed) lock deleted nudged lemmas. Returns true if the state changed.
    */
   processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean): boolean {
     const words = scanCommitted(pmDoc, cursorPos)
@@ -134,7 +134,7 @@ export class ScasController {
     let st = this.state
 
     // 1. Resolutions — a completed substitution resolves the ORIGINAL lemma. Edge-triggered:
-    //    only act (and emit) when the original is currently outstanding (locked or a live kick),
+    //    only act (and emit) when the original is currently outstanding (locked or a live nudge),
     //    so a persisting slot word doesn't re-resolve/re-emit on every later keystroke.
     for (const w of words) {
       if (w.isSubstitution && w.slotOriginalLemma) {
@@ -143,7 +143,7 @@ export class ScasController {
         const wasLive = st.liveKicks.includes(o)
         if (wasLocked || wasLive) {
           st = wasLocked ? discharge(st, o) : markSatisfied(st, o)
-          this.kicks.emit({
+          this.nudges.emit({
             lemma: o,
             commitIndex: this.commitIndex++,
             setVersion: st.version,
@@ -156,9 +156,9 @@ export class ScasController {
       }
     }
 
-    // 2. Fresh kicks — a committed in-S lemma (not immune/locked) becomes an outstanding kick.
+    // 2. Fresh word nudges — a committed in-S lemma (not immune/locked) becomes an outstanding nudge.
     //    Stamp the moment it FIRST turns purple (kickTimes) — the slot's true "first-written" time,
-    //    persisted with the state so it survives reload (read later via firstKickAt).
+    //    persisted with the state so it survives reload (read later via firstNudgeAt).
     for (const w of words) {
       const v = classifyCommit(st, w.lemma, this.inSv(w.lemma))
       if (v.kicks && v.trigger === 'in-S') {
@@ -170,7 +170,7 @@ export class ScasController {
       }
     }
 
-    // 3. Deletions — a kicked lemma that vanished (and wasn't resolved via a slot) is a dodge → lock.
+    // 3. Deletions — a nudged lemma that vanished (and wasn't resolved via a slot) is a dodge → lock.
     //    Gated on an actual deletion so merely-not-yet-committed words aren't mistaken for deletes.
     if (hadDeletion) {
       const present = new Set(words.map((w) => w.lemma))
@@ -178,7 +178,7 @@ export class ScasController {
       for (const L of before.liveKicks) {
         if (!present.has(L) && !slotRefs.has(L)) {
           st = lock(st, L)
-          this.kicks.emit({
+          this.nudges.emit({
             lemma: L,
             commitIndex: this.commitIndex++,
             setVersion: st.version,

@@ -77,8 +77,8 @@ export function ActivityGraph({ a }: { a: Analytics }) {
   // X-axis ticks: 5 evenly across the view.
   const ticks = Array.from({ length: 5 }, (_, i) => v0 + (span * i) / 4)
   const zoomed = v1 - v0 < full - 1
-  // Limit kick labels to what's readable in view.
-  const viewKicks = a.kicks.filter((k) => inView(k.t))
+  // Limit word-nudge labels to what's readable in view.
+  const viewKicks = a.nudges.filter((k) => inView(k.t))
   const showLabels = viewKicks.length <= 28
 
   return (

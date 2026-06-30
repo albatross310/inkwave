@@ -49,11 +49,36 @@ function renderDisplay(latex: string, align: Align): string {
   if (!latex.trim()) return ''
   try {
     const src = applyCustomSymbols(applyShorthandsLive(latex), getSymbols())
-    // Strip trailing \\ — MathLive shows an empty last row for it, KaTeX suppresses it;
-    // strip here so the two renders stay visually identical after commit.
+    // Strip trailing \\ — MathLive shows an empty last row for it, KaTeX suppresses it.
     const cleaned = src.replace(/\s*\\\\\s*$/, '')
-    const wrapped = align === 'aligned' && !/\\begin\{/.test(cleaned)
-      ? `\\begin{aligned}\n${cleaned}\n\\end{aligned}` : cleaned
+
+    // MathLive stores multi-line content as \displaylines{...}; unwrap it so we can
+    // re-wrap with the correct environment for each alignment mode.
+    const dlMatch = /^\\displaylines\{([\s\S]*)\}$/.exec(cleaned)
+    const content = dlMatch ? dlMatch[1] : cleaned
+
+    let wrapped: string
+    if (/\\begin\{/.test(content)) {
+      // Already has an explicit environment — honour it as-is.
+      wrapped = content
+    } else if (align === 'aligned') {
+      // Insert & before the first bare = on each line so KaTeX can column-align at the
+      // equals sign. Skip lines that already have & or no plain =.
+      // Negative lookbehind guards: don't match <=, >=, !=, :=, \\= (LaTeX commands).
+      const autoAligned = content.split(/\\\\/).map(line =>
+        line.includes('&') ? line : line.replace(/(?<![<>!:\\])=(?!=)/, '&=')
+      ).join('\\\\')
+      wrapped = `\\begin{aligned}\n${autoAligned}\n\\end{aligned}`
+    } else if (align === 'left') {
+      // \begin{array}{l} creates a left-aligned column; KaTeX centers the array block
+      // on the page via .katex-display { text-align:center }, giving a "centred block
+      // with flush-left lines" — the correct semantic for left alignment in display math.
+      wrapped = `\\begin{array}{l}\n${content}\n\\end{array}`
+    } else {
+      // center: render as-is; .katex-display { text-align:center } handles centering.
+      wrapped = content
+    }
+
     return katex.renderToString(wrapped, { throwOnError: false, displayMode: true, output: 'htmlAndMathml', macros: MATHLIVE_MACROS })
   } catch { return '' }
 }
@@ -429,36 +454,29 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
       >
         {/* CSS Grid stack — KaTeX and MathLive share gridArea 1/1 so they occupy
             exactly the same box. KaTeX (visibility:hidden when active) always drives
-            the grid row height; MathLive overlays at the same centering reference.
-            When MathLive grows (new lines typed), the grid row expands naturally
-            rather than overflowing a fixed absolute container. */}
+            the grid row height; MathLive overlays at the same centering reference. */}
         <div style={{ display: 'grid' }}>
-          {/* For left alignment: flex-column + align-items:flex-start makes the
-              .katex-display block size to content width (not fill), so the formula
-              appears at the left edge. For center/aligned the block fills the grid
-              cell naturally and .katex-display { text-align:center } centres it. */}
+          {/* KaTeX alignment is handled entirely in renderDisplay:
+              - aligned → \begin{aligned} with auto-inserted &= per line
+              - left    → \begin{array}{l}  (left-flush lines, block centred by .katex-display)
+              - center  → plain display math (.katex-display text-align:center) */}
           <div style={{
             gridArea: '1/1',
             visibility: active && mlReady ? 'hidden' : 'visible',
-            ...(align === 'left'
-              ? { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }
-              : {}),
           }}
             dangerouslySetInnerHTML={{
               __html: displayHtml || '<em style="opacity:0.35;font-size:0.9em;font-style:italic">Click to enter equation…</em>',
             }}
           />
-          {/* flex-direction:column flips the axes: align-items now controls the
-              HORIZONTAL cross-axis, which (a) forces the math-field to shrink-wrap
-              to its content width regardless of flex-basis and (b) positions it
-              left or center. justify-content:center keeps it vertically centred in
-              the grid cell (matching the hidden KaTeX formula's vertical position). */}
+          {/* column-flex centres the math-field block horizontally (align-items:center).
+              Shadow-DOM text-align injection (see useEffect below) then controls whether
+              lines inside the block are centred (center/aligned) or flush-left (left). */}
           <div ref={mlContainer} style={{
             gridArea: '1/1',
             display: active ? 'flex' : 'none',
             flexDirection: 'column',
             justifyContent: 'center',
-            alignItems: align === 'left' ? 'flex-start' : 'center',
+            alignItems: 'center',
           }} />
         </div>
 

@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { verifyBundle } from './index'
 import type { ExportBundle } from '../provenance/bundle'
 import { pmToText } from '../provenance/bundle'
-import type { KickEvent, SignedReceipt, Snapshot, TiptapJSON } from '../types/document'
+import type { WordNudgeEvent, SignedReceipt, Snapshot, TiptapJSON } from '../types/document'
 // Real server signing core (Node) — bundles are signed exactly as in production.
 import { openSession, signPeriod } from '../../api/_provenance-core.mjs'
-import { kicksHash, genesisPrevHash, chainHash, bitmaskToLemmas, DEV_SIGNING_PK } from '../provenance/receipts'
+import { nudgesHash, genesisPrevHash, chainHash, bitmaskToLemmas, DEV_SIGNING_PK } from '../provenance/receipts'
 import { contentHash, bundleHash } from '../provenance/hash'
 
 const DOC = 'verify-test-doc'
@@ -15,9 +15,9 @@ const CONTENT: TiptapJSON = {
 }
 
 async function makeReceipt(
-  token: string, counter: number, prevHash: string, ch: string, setVersion: number, kicks: KickEvent[],
+  token: string, counter: number, prevHash: string, ch: string, setVersion: number, kicks: WordNudgeEvent[],
 ): Promise<SignedReceipt> {
-  const kh = await kicksHash(kicks)
+  const kh = await nudgesHash(kicks)
   const s = await signPeriod({ sessionToken: token, docId: DOC, counter, prevHash, contentHash: ch, setVersion, kicksHash: kh })
   return {
     v: 1, sessionToken: token, counter, prevHash, contentHash: ch, setVersion,
@@ -34,14 +34,14 @@ async function buildValidBundle(): Promise<ExportBundle> {
   const r0 = await makeReceipt(session.sessionToken, 0, prev0, ch, 0, [])
 
   // receipt 1 (set v1) with an in-S kick whose lemma is genuinely in v1's signed set
-  const probe = await signPeriod({ sessionToken: session.sessionToken, docId: DOC, counter: 1, prevHash: 'x', contentHash: ch, setVersion: 1, kicksHash: await kicksHash([]) })
+  const probe = await signPeriod({ sessionToken: session.sessionToken, docId: DOC, counter: 1, prevHash: 'x', contentHash: ch, setVersion: 1, kicksHash: await nudgesHash([]) })
   const memberOfV1 = [...bitmaskToLemmas(probe.lockedSet)][0]
-  const kick: KickEvent = { lemma: memberOfV1, commitIndex: 0, setVersion: 1, trigger: 'in-S', response: 'swapped', replacement: 'notion', deliberationMs: 0 }
+  const kick: WordNudgeEvent = { lemma: memberOfV1, commitIndex: 0, setVersion: 1, trigger: 'in-S', response: 'swapped', replacement: 'notion', deliberationMs: 0 }
   const r1 = await makeReceipt(session.sessionToken, 1, await chainHash(r0), ch, 1, [kick])
 
   const receipts = [r0, r1]
   const snapshot: Snapshot = {
-    id: 'snap-1', documentId: DOC, createdAt: '2026-06-13T00:00:00Z', trigger: 'kick',
+    id: 'snap-1', documentId: DOC, createdAt: '2026-06-13T00:00:00Z', trigger: 'word-nudge',
     wordCount: 7, contentHash: ch, contentJson: CONTENT, receipts,
     bundleHash: await bundleHash(ch, receipts), ots: { status: 'unstamped' },
   }
@@ -60,8 +60,8 @@ describe('verifyBundle', () => {
     expect(r.contentIntegrity.ok).toBe(true)
     expect(r.chain.ok).toBe(true)
     expect(r.chain.verified).toBe(2)
-    expect(r.kickConsistency.ok).toBe(true)
-    expect(r.friction.kicks).toBe(1)
+    expect(r.nudgeConsistency.ok).toBe(true)
+    expect(r.friction.nudges).toBe(1)
     expect(r.overall).toBe(true)
   })
 

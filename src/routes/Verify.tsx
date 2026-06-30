@@ -97,8 +97,8 @@ export function Verify() {
                  detail={report.textIntegrity.ok ? report.contentBinding.note : report.textIntegrity.reason} />
             <Row label="Signed chain" ok={report.chain.ok}
                  detail={report.chain.ok ? `${report.chain.verified} receipt(s) across ${report.chain.sessions} session(s) verify` : report.chain.reason} />
-            <Row label="Kick consistency" ok={report.kickConsistency.ok}
-                 detail={report.kickConsistency.ok ? `${report.kickConsistency.checked} kick(s) match the signed sets` : report.kickConsistency.reason} />
+            <Row label="Word nudge consistency" ok={report.nudgeConsistency.ok}
+                 detail={report.nudgeConsistency.ok ? `${report.nudgeConsistency.checked} word nudge(s) match the signed sets` : report.nudgeConsistency.reason} />
             <Row label="Friction" detail={report.friction.note} />
             <Row label="Bitcoin anchoring"
                  ok={report.anchor.tampered > 0 || !report.anchor.timeConsistent ? false
@@ -121,12 +121,12 @@ export function Verify() {
               <Stat label="Words added" value={`≥ ${analytics.stats.addedWords}`} hint="lower bound" />
               <Stat label="Words deleted" value={`≥ ${analytics.stats.deletedWords}`} hint="lower bound" />
               <Stat label="Churn" value={`${Math.round(analytics.stats.churn * 100)}%`} hint="deleted ÷ added" />
-              <Stat label="Kicks" value={analytics.stats.totalKicks} hint={`${analytics.stats.swaps} swapped`} />
+              <Stat label="Word Nudges" value={analytics.stats.totalNudges} hint={`${analytics.stats.swaps} swapped`} />
               <Stat label="Snapshots" value={analytics.stats.snapshots} />
               <Stat label="Sessions" value={analytics.stats.sessions} hint={`${analytics.stats.periods} period(s)`} />
               {analytics.stats.durationMs != null && <Stat label="Duration" value={fmtDur(analytics.stats.durationMs)} />}
               {analytics.stats.wpm != null && <Stat label="Words / min" value={analytics.stats.wpm} />}
-              {analytics.stats.avgDeliberationMs != null && <Stat label="Avg deliberation" value={`${(analytics.stats.avgDeliberationMs / 1000).toFixed(1)}s`} hint="per kick" />}
+              {analytics.stats.avgDeliberationMs != null && <Stat label="Avg deliberation" value={`${(analytics.stats.avgDeliberationMs / 1000).toFixed(1)}s`} hint="per nudge" />}
             </div>
             <p className="mt-3 text-xs text-stone-400">
               Drawn from the signed, Bitcoin-anchored record. Words added/deleted are LOWER BOUNDS from

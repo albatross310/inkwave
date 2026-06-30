@@ -46,10 +46,10 @@ interface ThesaurusPopoverProps {
   onHintChange: OnHintChange
   onCycleChange: (active: boolean) => void
   isLockedLemma?: (lemma: string) => boolean
-  firstKickAt?: (word: string) => number | undefined
+  firstNudgeAt?: (word: string) => number | undefined
 }
 
-export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange, isLockedLemma, firstKickAt }: ThesaurusPopoverProps) {
+export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintChange, onCycleChange, isLockedLemma, firstNudgeAt }: ThesaurusPopoverProps) {
   const { recordAccepted, recordIgnored } = useCompliance()
   const tabCursorRef = useRef<number | null>(null)
   const { cycle, setCycle, openCycleForElement, closeWithAnimation, commitWithSlide } = usePopoverLayout(editor, onHintChange, isLockedLemma)
@@ -169,13 +169,13 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     recordAccepted()
     const ghostRows = captureReelGhosts(replacement)   // freeze-frame target (reel geometry, while open)
     // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
-    // this range; otherwise the TRUE time the word first turned purple (firstKickAt); else now.
+    // this range; otherwise the TRUE time the word first turned purple (firstNudgeAt); else now.
     let firstCommitAt: string | null = null
     editor.state.doc.nodesBetween(from, to, (node) => {
       const m = node.marks.find(mk => mk.type.name === 'scasSlot')
       if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
     })
-    if (!firstCommitAt) firstCommitAt = String(firstKickAt?.(word) ?? Date.now())
+    if (!firstCommitAt) firstCommitAt = String(firstNudgeAt?.(word) ?? Date.now())
     const slotAttrs = { original: word, firstCommitAt }   // `word` holds the original
     const swap = () => {
       if (changed) {

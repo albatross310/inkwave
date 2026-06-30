@@ -36,8 +36,10 @@ const PASTE_INS_PER_BIN = Math.round((240 * BIN_MS) / 1000)
 export interface VerifyReport {
   contentIntegrity: { ok: boolean; checked: number; reason?: string }
   chain: { ok: boolean; sessions: number; verified: number; reason?: string }
+  nudgeConsistency: { ok: boolean; checked: number; reason?: string }
+  /** @deprecated use nudgeConsistency */
   kickConsistency: { ok: boolean; checked: number; reason?: string }
-  friction: { kicks: number; contentWords: number; onePerWords: number | null; note: string }
+  friction: { nudges: number; contentWords: number; onePerWords: number | null; note: string }
   // Cadence (paid). `withDigest` counts receipts that committed a signed cadence digest; `revealed`
   // counts those whose writer-held bins are present (so we can analyse them). `integrityOk` is false
   // only when revealed bins don't match their signed digest (tamper). Plausibility is surfaced, not
@@ -119,15 +121,15 @@ async function checkChains(bundle: ExportBundle, pubKeyHex: string): Promise<Ver
   return { ok: true, sessions: bySession.size, verified }
 }
 
-function checkKickConsistency(bundle: ExportBundle): VerifyReport['kickConsistency'] {
+function checkNudgeConsistency(bundle: ExportBundle): VerifyReport['nudgeConsistency'] {
   let checked = 0
   for (const r of bundle.receipts) {
     const sv = bitmaskToLemmas(r.lockedSet)
     for (const k of r.kicks) {
       checked++
-      // 'locked' kicks are forced regardless of S; only in-S kicks must be members of the signed set.
+      // 'locked' word nudges are forced regardless of S; only in-S nudges must be members of the signed set.
       if (k.trigger === 'in-S' && !sv.has(k.lemma)) {
-        return { ok: false, checked, reason: `kick "${k.lemma}" not in signed set v${r.setVersion}` }
+        return { ok: false, checked, reason: `word nudge "${k.lemma}" not in signed set v${r.setVersion}` }
       }
     }
   }
@@ -155,15 +157,15 @@ async function checkContentBinding(bundle: ExportBundle): Promise<VerifyReport['
 }
 
 function frictionScore(bundle: ExportBundle): VerifyReport['friction'] {
-  const kicks = bundle.receipts.reduce((n, r) => n + r.kicks.length, 0)
+  const nudges = bundle.receipts.reduce((n, r) => n + r.kicks.length, 0)
   const contentWords = countWords(bundle.document.contentJson)
-  const onePerWords = kicks > 0 ? Math.round(contentWords / kicks) : null
+  const onePerWords = nudges > 0 ? Math.round(contentWords / nudges) : null
   // A document with implausibly little friction proves little — surface the number, don't hide it.
   const note =
-    kicks === 0 ? 'no kicks recorded — proves little about live composition'
-    : onePerWords && onePerWords > 200 ? `low friction (~1 kick per ${onePerWords} words)`
-    : `~1 kick per ${onePerWords} words`
-  return { kicks, contentWords, onePerWords, note }
+    nudges === 0 ? 'no word nudges recorded — proves little about live composition'
+    : onePerWords && onePerWords > 200 ? `low friction (~1 nudge per ${onePerWords} words)`
+    : `~1 nudge per ${onePerWords} words`
+  return { nudges, contentWords, onePerWords, note }
 }
 
 // Cadence (paid): the cadenceDigest is already covered by each receipt's signature (verified in the
@@ -267,17 +269,17 @@ export async function verifyBundle(
 ): Promise<VerifyReport> {
   const contentIntegrity = await checkContentIntegrity(bundle)
   const chain = await checkChains(bundle, pubKeyHex)
-  const kickConsistency = checkKickConsistency(bundle)
+  const nudgeConsistency = checkNudgeConsistency(bundle)
   const friction = frictionScore(bundle)
   const cadence = await verifyCadence(bundle)
   const anchor = await verifyAnchors(bundle, fetchBlock)
   const textIntegrity = checkTextIntegrity(bundle)
   const contentBinding = await checkContentBinding(bundle)
   const existence = { snapshots: anchor.snapshots, confirmed: anchor.confirmed, pending: anchor.pending, unstamped: anchor.unstamped }
-  // A bundle fails if content/chain/kick integrity fails, the readable header doesn't match the
+  // A bundle fails if content/chain/nudge integrity fails, the readable header doesn't match the
   // content, revealed cadence contradicts its signed digest, OR a Bitcoin proof is forged / its
   // claimed block/time is a lie (anchor.ok). Absent or merely-unconfirmable anchoring, and trailing
   // unsigned edits, never fail a bundle — plausibility is surfaced, not asserted.
-  const overall = contentIntegrity.ok && chain.ok && kickConsistency.ok && textIntegrity.ok && cadence.integrityOk && anchor.ok
-  return { contentIntegrity, chain, kickConsistency, friction, cadence, anchor, textIntegrity, contentBinding, existence, overall }
+  const overall = contentIntegrity.ok && chain.ok && nudgeConsistency.ok && textIntegrity.ok && cadence.integrityOk && anchor.ok
+  return { contentIntegrity, chain, nudgeConsistency, kickConsistency: nudgeConsistency, friction, cadence, anchor, textIntegrity, contentBinding, existence, overall }
 }
