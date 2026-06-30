@@ -55,6 +55,13 @@ import { VerifyModal } from '../components/VerifyModal'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
+import { CitationNode } from './extensions/CitationNode'
+import { CiteSuggestion } from './extensions/CiteSuggestion'
+import { CiteAutocomplete } from '../components/CiteAutocomplete'
+import { BibPanel } from '../components/BibPanel'
+import { ZoteroSetup } from '../components/ZoteroSetup'
+import { loadPersistedHandle } from '../citations/fileChannel'
+import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { InstallPromptBanner } from '../components/InstallPromptBanner'
@@ -169,7 +176,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
-  const [lineHeight, setLineHeightState] = useState(getLineHeight)
+  const [lineHeight, setLineHeight_] = useState(getLineHeight)
+  // PageMenu sets line height; listen for the settings-changed event to sync the CSS var.
+  useEffect(() => {
+    const upd = () => setLineHeight_(getLineHeight())
+    window.addEventListener('inkwave:page-settings-changed', upd)
+    return () => window.removeEventListener('inkwave:page-settings-changed', upd)
+  }, [])
   // On a phone the toolbar hides while the keyboard is up to free the screen for writing,
   // and returns when the keyboard is dismissed. We detect the keyboard via the visual
   // viewport (its visible height shrinks when the keyboard shows) — far more reliable than
@@ -187,6 +200,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       window.removeEventListener('beforeinstallprompt', onPrompt)
       window.removeEventListener('appinstalled', onInstalled)
     }
+  }, [])
+
+  // ── Citation / bibliography state ─────────────────────────────────────────
+  const [bibPanelOpen, setBibPanelOpen] = useState(false)
+  const [zoteroSetupOpen, setZoteroSetupOpen] = useState(false)
+  const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
+
+  useEffect(() => {
+    loadPersistedHandle().catch(() => {})
   }, [])
 
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
@@ -266,6 +288,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       MathPasteHandler,
       TabIndent,
       LineNumbers,
+      CitationNode,
+      CiteSuggestion,
     ],
     content: doc.contentJson,
     editorProps: {
@@ -305,13 +329,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         }
       }
 
-      const updated: InkwaveDocument = {
+      const base: InkwaveDocument = {
         ...current,
         contentJson: e.getJSON(),
         updatedAt: new Date().toISOString(),
         title: deriveTitle(e.getText()) || current.title,
         scasState,
       }
+      const { doc: updated } = embedBibliography(base)
       docRef.current = updated
       onDocChange(updated)
       scheduleSave(updated)
@@ -1309,7 +1334,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
                 <div className="flex items-center px-4 py-2 border-b border-stone-200">
-                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} onLineHeightChange={setLineHeightState} phone={isTouch} />}
+                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} />}
                 </div>
               </div>
             )}
@@ -1353,6 +1378,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
                   S
+                </span>
+              </button>
+              {/* Cite button — opens the bibliography panel */}
+              <button
+                type="button"
+                onClick={() => setBibPanelOpen(o => !o)}
+                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                title="Bibliography / citations"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>
+                  ‟
                 </span>
               </button>
               <PageMenu editor={editor ?? undefined} />
@@ -1405,6 +1441,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onClose={() => setVerifyOpen(false)}
           />
         )}
+        {editor && <CiteAutocomplete editor={editor} />}
+        {bibPanelOpen && (
+          <BibPanel
+            doc={docRef.current}
+            citationStyle={citationStyle}
+            onStyleChange={s => {
+              setCitationStyle(s)
+              const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
+              docRef.current = updated
+              onDocChange(updated)
+              scheduleSave(updated)
+            }}
+            onConnectZotero={() => { setBibPanelOpen(false); setZoteroSetupOpen(true) }}
+            onClose={() => setBibPanelOpen(false)}
+          />
+        )}
+        {zoteroSetupOpen && <ZoteroSetup onClose={() => setZoteroSetupOpen(false)} />}
       </div>
     </ComplianceContext.Provider>
   )

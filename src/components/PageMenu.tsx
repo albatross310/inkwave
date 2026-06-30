@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { isTouchDevice } from '../editor/Scroll'
+import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
+import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 import {
   getSideMarginPx, setSideMarginPx,
   getTopMarginPx,  setTopMarginPx,
@@ -181,6 +183,48 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             <MRow label={'Para\nspacing'} presets={SPACING_PRESETS} conv={emConv}
               value={spacingVal} minCm={0} maxCm={4}
               onChange={em => parFocus ? applyParaEm('marginBottom', em) : applyGlobal(() => setParaSpacingEm(em))} />
+
+            {/* ── Text ── */}
+            <SectionHead label="Text" />
+
+            {/* First-line indent */}
+            <div className="flex items-center px-5 py-2 gap-4">
+              <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0">Indent</span>
+              <div className="flex gap-1.5">
+                {[
+                  { l: 'None', v: null },
+                  { l: 'Low',  v: '1em' },
+                  { l: 'High', v: '2em' },
+                ].map(p => {
+                  const paraAttrsNow = (parFocus && editor) ? (editor.getAttributes('paragraph') as Partial<ParagraphStyleAttrs>) : {}
+                  const cur = paraAttrsNow.textIndent ?? null
+                  const active = p.v === null ? !cur : cur === p.v
+                  return (
+                    <Chip key={p.l} label={p.l} active={active}
+                      onClick={() => {
+                        editor?.chain().setParaStyle({ textIndent: p.v } as Partial<ParagraphStyleAttrs>).run()
+                        rerender(n => n + 1)
+                      }} />
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Line height */}
+            <div className="flex items-center px-5 py-2 gap-4">
+              <span className="text-stone-500 text-xs uppercase tracking-wide w-20 shrink-0">Spacing</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {LINE_HEIGHTS.map(lh => (
+                  <Chip key={lh.label} label={lh.label} active={Math.abs(getLineHeight() - lh.value) < 0.01}
+                    onClick={() => {
+                      setLineHeight(lh.value)
+                      editor?.chain().setLineHeight(lh.value.toString()).run()
+                      window.dispatchEvent(new CustomEvent('inkwave:page-settings-changed'))
+                      rerender(n => n + 1)
+                    }} />
+                ))}
+              </div>
+            </div>
 
             {/* ── Layout ── */}
             <SectionHead label="Layout" />

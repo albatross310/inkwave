@@ -1,3 +1,23 @@
+// ─── Citation / bibliography types (M-Zotero) ────────────────────────────────
+
+export interface CSLItem {
+  id: string
+  type: string
+  title?: string
+  author?: { family?: string; given?: string; literal?: string }[]
+  issued?: { 'date-parts'?: number[][]; raw?: string }
+  DOI?: string
+  'container-title'?: string
+  [k: string]: unknown
+}
+
+export interface Bibliography {
+  source: 'zotero-bbt'
+  entries: CSLItem[]
+  generatedAt: string
+  bibHash?: string
+}
+
 // ─── Core JSON shape for ProseMirror / Tiptap content ────────────────────────
 // Re-export Tiptap's own JSONContent so the rest of the codebase uses one type.
 
@@ -33,6 +53,10 @@ export interface InkwaveDocument {
   scasPoolId?: string              // id + hash of the public pool P (reproducibility)
   scasState?: ScasState            // the ban-credit / satisfied / version overlay (persisted)
   scasReceipts?: SignedReceipt[]   // the live-composition signed receipt chain for this doc (M3)
+
+  // ─── Citation / bibliography (M-Zotero) ──────────────────────────────────
+  bibliography?: Bibliography      // embedded, self-contained cited entries (populated by resolve.ts)
+  citationStyle?: string           // CSL style id, e.g. 'apa', 'chicago-author-date'
 }
 
 // ─── SCAS engine state (M0) ───────────────────────────────────────────────────

@@ -14,6 +14,9 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^5.13.0",
+    "@citation-js/core": "^0.7.21",
+    "@citation-js/plugin-bibtex": "^0.7.21",
+    "@citation-js/plugin-csl": "^0.7.22",
     "@clerk/backend": "^3.7.0",
     "@clerk/clerk-react": "^5.61.3",
     "@noble/ed25519": "^3.1.0",
@@ -30,6 +33,7 @@
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "@tiptap/suggestion": "^2.27.2",
     "@types/katex": "^0.16.8",
     "isbot": "^5",
     "javascript-opentimestamps": "^0.4.5",
