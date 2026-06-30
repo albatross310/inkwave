@@ -9,10 +9,11 @@
 
 import { rateLimit, clientIp } from './_ratelimit.mjs'
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-sonnet-4-6'       // paragraph summaries
+const DIFF_MODEL = 'claude-haiku-4-5-20251001'  // diff summaries (cheap, sufficient)
 const MAX_TOKENS = 80
 
-async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS) {
+async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS, model = MODEL) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -21,7 +22,7 @@ async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -59,10 +60,12 @@ export default async function handler(req, res) {
         callClaude(apiKey,
           `In max 50 words, describe in past tense what changed going from the BEFORE text to the AFTER text. Focus on content added or changed. Start with a verb, e.g. "Added…". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
           120,
+          DIFF_MODEL,
         ),
         callClaude(apiKey,
           `In max 50 words, describe what hadn't happened yet in the BEFORE text compared to the AFTER text. Use the "hadn't yet" / "not yet" tense. Start with "Hadn't". Output ONLY the description.\n\nBEFORE:\n${before}\n\nAFTER:\n${after}`,
           120,
+          DIFF_MODEL,
         ),
       ])
       res.setHeader('content-type', 'application/json')

@@ -35,13 +35,13 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary } from '../provenance/snapshots'
-import { summariseParagraph, summariseBullets } from '../provenance/summarise'
+import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
-import { buildExportBundle, bundleFilename, downloadBundle } from '../provenance/bundle'
+import { buildExportBundle, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
@@ -103,6 +103,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // the content. createSnapshotIfChanged is serialised through a promise chain so rapid kicks can't
   // race the OPFS read-modify-write.
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const snapshotsRef = useRef<Snapshot[]>([])
+  // Keep ref in sync so async snapshot-queue closures can read the latest list without stale closure.
+  snapshotsRef.current = snapshots
   const snapQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   // Live-composition signing session (M3). The runner holds the server-issued S_v + the receipt
@@ -572,6 +575,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!editor) return
     const off = scasRef.current!.nudges.on((event) => {
       periodKicksRef.current.push(event) // buffer for the next signed period (M3)
+      const prevSnap = snapshotsRef.current[snapshotsRef.current.length - 1] ?? null
       enqueueSnapshotWork(async () => {
         // Anchor the receipt chain so far into the snapshot's bundleHash (so OTS commits to it).
         const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
@@ -581,6 +585,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         const stamped = await stampSnapshot(snap.documentId, snap.id) // pending proof
         if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
         mirrorIfActive()
+        // Background diff summary (Haiku, fire-and-forget)
+        if (prevSnap) void summariseDiff(pmToText(prevSnap.contentJson), pmToText(snap.contentJson)).then(async (ds) => {
+          if (!ds) return
+          await patchSnapshotDiffSummary(snap.documentId, snap.id, ds)
+          setSnapshots((prev) => prev.map((s) => s.id === snap.id ? { ...s, diffSummary: ds } : s))
+        })
       })
     })
     return off
@@ -588,6 +598,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Manual "save version" — always creates a snapshot regardless of whether content changed.
   function saveVersion() {
+    const prevSnap = snapshotsRef.current[snapshotsRef.current.length - 1] ?? null
     enqueueSnapshotWork(async () => {
       const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
       if (!snap) return
@@ -595,6 +606,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       const stamped = await stampSnapshot(snap.documentId, snap.id)
       if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
       mirrorIfActive()
+      // Background diff summary (Haiku, fire-and-forget)
+      if (prevSnap) void summariseDiff(pmToText(prevSnap.contentJson), pmToText(snap.contentJson)).then(async (ds) => {
+        if (!ds) return
+        await patchSnapshotDiffSummary(snap.documentId, snap.id, ds)
+        setSnapshots((prev) => prev.map((s) => s.id === snap.id ? { ...s, diffSummary: ds } : s))
+      })
     })
   }
 

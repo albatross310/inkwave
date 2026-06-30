@@ -5,6 +5,7 @@ import { listSnapshots, groupByVersion, patchSnapshotDiffSummary } from '../prov
 import { loadDocument } from '../storage/opfs'
 import { pmToText } from '../provenance/bundle'
 import { diffWords, diffStats } from '../provenance/diff'
+import { summariseDiff } from '../provenance/summarise'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
 
@@ -13,22 +14,6 @@ const NAV_BG = 'rgba(140, 90, 200, 0.20)'
 const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
-
-interface DiffSummary { forward: string; backward: string }
-
-async function fetchDiffSummary(before: string, after: string): Promise<DiffSummary | null> {
-  try {
-    const r = await fetch('/api/summarise', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ before, after }),
-    })
-    if (!r.ok) return null
-    return await r.json() as DiffSummary
-  } catch {
-    return null
-  }
-}
 
 // Summary box: opaque purple background. On narrow screens (window < 1024px) collapses to a
 // thin coloured strip; hover expands it over the document content. On wide screens always open.
@@ -107,7 +92,7 @@ export function SnapshotView() {
             const before = pmToText(snaps[i - 1].contentJson)
             const after = pmToText(snaps[i].contentJson)
             if (!before.trim() && !after.trim()) continue
-            const ds = await fetchDiffSummary(before, after)
+            const ds = await summariseDiff(before, after)
             if (ds && !cancelled) {
               await patchSnapshotDiffSummary(docId!, snaps[i].id, ds)
               // Update in-memory state so summaries appear without reload

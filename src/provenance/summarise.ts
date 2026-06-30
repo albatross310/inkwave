@@ -19,3 +19,20 @@ export function summariseParagraph(text: string): Promise<string> {
 export function summariseBullets(texts: string[]): Promise<string> {
   return callSummarise({ texts })
 }
+
+export async function summariseDiff(
+  before: string,
+  after: string,
+): Promise<{ forward: string; backward: string } | null> {
+  try {
+    const r = await fetch('/api/summarise', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ before, after }),
+    })
+    if (!r.ok) return null
+    return await r.json() as { forward: string; backward: string }
+  } catch {
+    return null
+  }
+}
