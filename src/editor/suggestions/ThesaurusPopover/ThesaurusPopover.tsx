@@ -282,6 +282,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     function onPointerDown(e: PointerEvent) {
       const t = (e.target as HTMLElement).closest('.scas-red') as HTMLElement | null
       if (!t || !edEl.contains(t)) return
+      // Shrink the effective click target by 3px each side so a click right at the word's
+      // edge falls through to ProseMirror's normal cursor placement instead of opening the cycle.
+      if (e.pointerType !== 'touch') {
+        const r = t.getBoundingClientRect()
+        if (e.clientX < r.left + 3 || e.clientX > r.right - 3) return
+      }
       e.preventDefault(); tabCursorRef.current = null
       openedByPointerRef.current = true   // this press opens a cycle — its release must not commit
       // Fix 4: opening rebuilds this .scas-red span (PM dispatch), and WebKit keeps sending the

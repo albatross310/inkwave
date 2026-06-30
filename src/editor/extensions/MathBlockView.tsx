@@ -58,25 +58,26 @@ function renderDisplay(latex: string, align: Align): string {
     const content = dlMatch ? dlMatch[1] : cleaned
 
     let wrapped: string
-    if (/\\begin\{/.test(content)) {
+    if (/\\begin\{/.test(cleaned)) {
       // Already has an explicit environment — honour it as-is.
-      wrapped = content
+      wrapped = cleaned
+    } else if (align === 'center') {
+      // Pass through: the \displaylines macro expands to \begin{gathered} in KaTeX
+      // (so multi-line MathLive equations render centered), and .katex-display
+      // { text-align:center } handles single-line. Don't unwrap \displaylines here.
+      wrapped = cleaned
     } else if (align === 'aligned') {
-      // Insert & before the first bare = on each line so KaTeX can column-align at the
-      // equals sign. Skip lines that already have & or no plain =.
-      // Negative lookbehind guards: don't match <=, >=, !=, :=, \\= (LaTeX commands).
+      // Unwrap \displaylines if present, then insert & before the first bare = on each
+      // line so KaTeX column-aligns at the equals sign.
+      // Negative lookbehind guards: skip <=, >=, !=, :=, \\-prefixed.
       const autoAligned = content.split(/\\\\/).map(line =>
         line.includes('&') ? line : line.replace(/(?<![<>!:\\])=(?!=)/, '&=')
       ).join('\\\\')
       wrapped = `\\begin{aligned}\n${autoAligned}\n\\end{aligned}`
-    } else if (align === 'left') {
-      // \begin{array}{l} creates a left-aligned column; KaTeX centers the array block
-      // on the page via .katex-display { text-align:center }, giving a "centred block
-      // with flush-left lines" — the correct semantic for left alignment in display math.
-      wrapped = `\\begin{array}{l}\n${content}\n\\end{array}`
     } else {
-      // center: render as-is; .katex-display { text-align:center } handles centering.
-      wrapped = content
+      // left: \begin{array}{l} creates a flush-left column; KaTeX centers the array
+      // block on the page via .katex-display { text-align:center }.
+      wrapped = `\\begin{array}{l}\n${content}\n\\end{array}`
     }
 
     return katex.renderToString(wrapped, { throwOnError: false, displayMode: true, output: 'htmlAndMathml', macros: MATHLIVE_MACROS })

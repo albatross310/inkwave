@@ -19,12 +19,13 @@ function relativeTime(t: number): string {
 }
 
 export function SyncStatus({
-  label, synced, path, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact,
+  label, synced, path, displayName, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact,
   open: externalOpen, onOpenChange, hideTrigger,
 }: {
   label: string
   synced: boolean
   path?: string | null
+  displayName?: string | null // override the filename shown in the panel (defaults to basename of path)
   lastSync?: number | null
   tooltip?: string
   webUrl?: string | null // when present, "Open in folder" opens it (the file in OneDrive)
@@ -76,7 +77,10 @@ export function SyncStatus({
           </div>
           {path && (() => {
             const rawName = path.split(/[\\/]/).pop() ?? path
-            const displayName = rawName.replace(/\.(inkwave|studio|json)$/i, '') + '.studio'
+            // Prefer an explicit displayName prop (e.g. doc title); fallback to stripping the extension
+            const shownName = displayName
+              ? (displayName.replace(/\.(inkwave|studio|json)$/i, '') + '.studio')
+              : (rawName.replace(/\.(inkwave|studio|json)$/i, '') + '.studio')
             const canReveal = !!(onShowInFolder || webUrl)
             return (
               <div className="mb-2">
@@ -85,12 +89,12 @@ export function SyncStatus({
                     onClick={() => onShowInFolder ? onShowInFolder() : window.open(webUrl!, '_blank')}
                     className="text-xs text-left bg-stone-50 rounded-lg px-2 py-1.5 w-full hover:bg-stone-100 transition-colors"
                     style={{ color: INK, border: `1px solid ${INK}22`, wordBreak: 'break-word' }}>
-                    {displayName}
+                    {shownName}
                   </button>
                 ) : (
                   <div className="text-xs text-stone-600 bg-stone-50 rounded-lg px-2 py-1.5" title={path}
                     style={{ wordBreak: 'break-word' }}>
-                    {displayName}
+                    {shownName}
                   </div>
                 )}
               </div>

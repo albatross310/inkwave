@@ -20,6 +20,7 @@ function debugHighlightAll(): boolean {
 }
 import type { InkwaveDocument } from '../../types/document'
 import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { slotTimeMode } from '../crossout'
 
 // Plugin state: the decoration set plus the "reveal" anchors (see SCAS_REVEAL_META).
 interface RedHighlightState {
@@ -161,14 +162,19 @@ interface RedWord {
                      // stamp. True even when the current text == the original (reverted): the memory
                      // (and the struck origin below) persists regardless of the current word.
   firstAt: string | null // slot.firstCommitAt (epoch ms, as stored) — when the original was first written
+  testOnly: boolean  // visible only because debugAll; NOT in S_v — categorised differently
 }
 
-// Time-of-day as four digits, 24h, no colon (e.g. 1432) — the slot's first-written stamp.
+// Time-of-day or date-of-month for the slot's first-written stamp.
+// Mode 'time' (default): "1432" (24h, no colon). Mode 'date': "Jun 5" or similar short form.
 function hhmm(raw: string | null): string | null {
   if (!raw) return null
   const ms = Number(raw)
   if (!Number.isFinite(ms) || ms <= 0) return null
   const d = new Date(ms)
+  if (slotTimeMode() === 'date') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
   return String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0')
 }
 
@@ -223,20 +229,29 @@ function buildDecorations(
         const anchoredOriginal = flagged.get(from)
         const anchorHeld = anchoredOriginal !== undefined && anchoredOriginal.startsWith(word)
 
+        const lemma = lemmaOf(word)
+        const greenEngine = isColoured(lookup, lemma)           // stochastically selected (in S_v)
+        const greenTest   = !greenEngine && debugAll && inPool(lemma) // test/pool-only
+        const greenNow    = greenEngine || greenTest
+
+        // Anchor releases as soon as the cursor moves away and the word is no longer in S_v.
+        // This means N-changes and test-mode toggles take effect on the next cursor move, not
+        // after a page reload. Test-mode-only words never get the sticky anchor in the first place.
+        const cursorNear  = cursorPos >= from && cursorPos <= to + 1
+        const anchorActive = anchorHeld && (greenEngine || cursorNear)
+
         // Single letters aren't coloured on their own — except a committed slot being deleted
         // to its last char (slot mark stays) or an anchored green word being deleted down.
         if (word.length < 2 && !slotMark && !anchorHeld) continue
 
         // Skip the word under the cursor while being typed (no anchor yet) to avoid flickering.
         // A committed slot or an already-anchored green word is exempt (no black flash).
-        if (!persistSlot && !anchorHeld && cursorPos >= from && cursorPos <= to) {
+        if (!persistSlot && !anchorActive && cursorPos >= from && cursorPos <= to) {
           const nextChar = text[match.index + word.length] ?? null
           if (!nextChar || !/[\s.,;:!?)\-'"…]/.test(nextChar)) continue
         }
 
-        const lemma = lemmaOf(word)
-        const greenNow = isColoured(lookup, lemma) || (debugAll && inPool(lemma))
-        if (!greenNow && !persistSlot && !anchorHeld) continue
+        if (!greenNow && !persistSlot && !anchorActive) continue
 
         if (persistSlot) {
           redWords.push({
@@ -244,17 +259,20 @@ function buildDecorations(
             dataWord: slotOriginal ?? word.toLowerCase(),
             secondary: !!slotOriginal,
             firstAt: (slotMark?.attrs.firstCommitAt as string | null) ?? null,
+            testOnly: false,
           })
         } else {
-          // Green (uncommitted) word — anchor it so it stays green + offers the full word's
-          // synonyms while being deleted down (sticky-green). Use the original as lookup key.
-          const original = anchoredOriginal ?? word
-          newFlagged.set(from, original)
+          // Green (uncommitted) word. Only anchor stochastic words (in S_v) so that test-mode
+          // words disappear the moment test mode is toggled off (reload) and N-changes clear as
+          // soon as the cursor moves away from the now-excluded word.
+          const original = anchorActive ? (anchoredOriginal ?? word) : word
+          if (greenEngine || anchorActive) newFlagged.set(from, original)
           redWords.push({
             from, to, pIdx, word, seqInPara: ++seqInPara,
             dataWord: original.toLowerCase(),
             secondary: false,
             firstAt: null,
+            testOnly: greenTest && !anchorActive,
           })
         }
       }
@@ -269,12 +287,13 @@ function buildDecorations(
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
-  for (const { from, to, dataWord, pIdx, seqInPara, secondary, firstAt } of redWords) {
+  for (const { from, to, dataWord, pIdx, seqInPara, secondary, firstAt, testOnly } of redWords) {
     const isFocused = focusedPos !== null && from === focusedPos
-    // All coloured words use the one dark purple now — the struck-through old word distinguishes a
-    // committed/substituted slot, so the lighter "secondary" tint is no longer needed.
+    // Two categories: scas-stochastic = in S_v exclusion set; scas-test = pool-only (debugAll).
+    // The distinction lets CSS or future tooling style them differently (e.g. lighter green for test).
+    const catClass = testOnly ? ' scas-test' : ' scas-stochastic'
     const attrs: Record<string, string> = {
-      class: `scas-red${isFocused ? ' scas-focused' : ''}${reveals.has(from) ? ' scas-revealing' : ''}`,
+      class: `scas-red${catClass}${isFocused ? ' scas-focused' : ''}${reveals.has(from) ? ' scas-revealing' : ''}`,
       'data-word': dataWord,
       'data-para': String(pIdx),
       'data-scas-n': String(seqInPara),

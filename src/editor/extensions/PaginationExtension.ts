@@ -140,7 +140,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           if (!enabled) return {}
           let raf = 0
           let paintRaf = 0
-          let lastInputSig = '' // doc size + page height — only re-measure when these change
+          let lastInputSig  = '' // doc size + page height — only re-measure when these change
+          let lastLayoutSig = '' // gap positions/sizes — only re-dispatch when breaks actually moved
+          let lastSet: DecorationSet = DecorationSet.empty // stable set to restore when sig unchanged
           let sheet: HTMLElement | null = null
           let layer: HTMLElement | null = null
           let observed = false
@@ -228,8 +230,17 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (cur && cur !== DecorationSet.empty) {
               view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
             }
-            const { set } = compute(view, pageH)
-            view.dispatch(view.state.tr.setMeta(KEY, set).setMeta('addToHistory', false))
+            const { set, sig } = compute(view, pageH)
+            // Only update the set when gap positions actually changed (sig differs). When sig is the
+            // same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating any
+            // sub-pixel rounding differences in botMargin — the main cause of page-height flicker on
+            // typing near a gap. Both sets are semantically equivalent; using the stable cached one
+            // prevents the gap widget height from jittering by ±1px on every keystroke.
+            if (sig !== lastLayoutSig) {
+              lastLayoutSig = sig
+              lastSet = set
+            }
+            view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             schedulePaint()
           }

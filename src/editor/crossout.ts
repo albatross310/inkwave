@@ -48,3 +48,16 @@ export function applyCrossoutMode(): void {
   document.documentElement.dataset.crossout = crossoutMode()
   document.documentElement.dataset.egg = watermarkEnabled() ? 'on' : 'off'
 }
+
+// ── Slot-time display mode ────────────────────────────────────────────────────────
+// Controls what the grey stamp above purple words shows: the time it was written ('time')
+// or the date (day of month, 'date'). Toggled from settings; integrated with the Old Word panel.
+const TIME_MODE_KEY = 'inkwave:slot-time-mode'
+
+export function slotTimeMode(): 'time' | 'date' {
+  try { return localStorage.getItem(TIME_MODE_KEY) === 'date' ? 'date' : 'time' } catch { return 'time' }
+}
+
+export function setSlotTimeMode(mode: 'time' | 'date'): void {
+  try { localStorage.setItem(TIME_MODE_KEY, mode) } catch { /* private mode */ }
+}

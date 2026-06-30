@@ -8,7 +8,11 @@ import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 
 const INK = '#5c2d8a'
-const BASE_SIZE = 18
+// BASE_SIZE is the CSS font-size of the editor root in px (1.125rem × 16px default).
+// The picker uses pt values (1pt = 96/72 px at 96 DPI). setSize converts pt→px before
+// computing the em ratio, so "12" in the picker = 12pt = 16px = Word's default body text.
+const BASE_SIZE = 18   // editor root size in px (matches .ProseMirror { font-size: 1.125rem })
+const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 
 const FONTS = [
   { label: 'Fell',        css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
@@ -21,7 +25,8 @@ const FONTS = [
   { label: 'Sans',        css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
 ]
 
-const FONT_SIZES = [8, 10, 11, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 48, 72]
+// Pt values (standard Word sizes). "12" = 12pt = Word body text.
+const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 
 type Align = 'left' | 'center' | 'right' | 'justify'
 
@@ -31,6 +36,32 @@ function IndentFirstLineIcon() {
       <line x1="5" y1="3.5" x2="12" y2="3.5" />
       <line x1="2" y1="7" x2="12" y2="7" />
       <line x1="2" y1="10.5" x2="10" y2="10.5" />
+    </svg>
+  )
+}
+
+function BulletListIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+      <circle cx="2.5" cy="3.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="2.5" cy="7" r="1" fill="currentColor" stroke="none" />
+      <circle cx="2.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+      <line x1="5" y1="3.5" x2="12" y2="3.5" />
+      <line x1="5" y1="7" x2="12" y2="7" />
+      <line x1="5" y1="10.5" x2="10" y2="10.5" />
+    </svg>
+  )
+}
+
+function OrderedListIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
+      <text x="0.5" y="4.5" fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">1.</text>
+      <text x="0.5" y="8" fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">2.</text>
+      <text x="0.5" y="11.5" fontSize="4" fill="currentColor" stroke="none" fontFamily="serif">3.</text>
+      <line x1="5" y1="3.5" x2="12" y2="3.5" />
+      <line x1="5" y1="7" x2="12" y2="7" />
+      <line x1="5" y1="10.5" x2="10" y2="10.5" />
     </svg>
   )
 }
@@ -90,16 +121,19 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
   const paraAttrs = editor.getAttributes('paragraph')
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
   const rawFontSize = ts.fontSize ?? ''
-  const curSize = rawFontSize.endsWith('em')
-    ? Math.round(parseFloat(rawFontSize) * BASE_SIZE)
+  // Convert stored em→px→pt for display so the picker shows Word-equivalent pt values.
+  const curSizePx = rawFontSize.endsWith('em')
+    ? parseFloat(rawFontSize) * BASE_SIZE
     : parseInt(rawFontSize, 10) || BASE_SIZE
+  const curSize = Math.round(curSizePx / PT_TO_PX)  // px → pt for display
   const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   // Line height: read from paragraph attribute (set per selection) or global default
   const curLH = parseFloat(paraAttrs.lineHeight ?? '') || getLineHeight()
   const curLHLabel = LINE_HEIGHTS.find(lh => lh.value === curLH)?.label ?? curLH.toString()
 
   const setFont  = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
-  const setSize  = (px: number) => { ping(); const em = +(px / BASE_SIZE).toFixed(4); editor.chain().setMark('textStyle', { fontSize: `${em}em` }).run(); setSizeOpen(false) }
+  // pt is the picker value; convert pt→px→em before storing so sizes match Word.
+  const setSize  = (pt: number) => { ping(); const px = pt * PT_TO_PX; const em = +(px / BASE_SIZE).toFixed(4); editor.chain().setMark('textStyle', { fontSize: `${em}em` }).run(); setSizeOpen(false) }
   const setAlign = (a: Align)   => { ping(); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
 
   const pickLineHeight = (v: number) => {
@@ -219,6 +253,32 @@ export function StyleBar({ editor, onActivity, onLineHeightChange, phone }: {
         </>,
         document.body,
       )}
+
+      {/* Bullet list toggle */}
+      {(() => {
+        const active = editor.isActive('bulletList')
+        return (
+          <button type="button" aria-pressed={active}
+            onClick={() => { ping(); editor.chain().focus().toggleBulletList().run() }}
+            className={`rounded border px-2 py-0.5 transition-colors ${active ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+            title="Bullet list">
+            <BulletListIcon />
+          </button>
+        )
+      })()}
+
+      {/* Ordered list toggle */}
+      {(() => {
+        const active = editor.isActive('orderedList')
+        return (
+          <button type="button" aria-pressed={active}
+            onClick={() => { ping(); editor.chain().focus().toggleOrderedList().run() }}
+            className={`rounded border px-2 py-0.5 transition-colors ${active ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`}
+            title="Numbered list">
+            <OrderedListIcon />
+          </button>
+        )
+      })()}
 
       {/* First-line indent toggle */}
       {(() => {

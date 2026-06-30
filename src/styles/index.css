@@ -164,24 +164,20 @@
     contain: layout;
   }
 
-  /* Global line numbers — widget spans injected by LineNumbers extension.
-     Positioned in the right margin; right-aligned so 1, 10, 100 share a column edge.
-     The paragraph's `contain: layout` makes it the absolute-positioning context;
-     paint overflows into the margin (no `contain: paint`). */
-  /* Line numbers via ::before on each block's outer wrapper.
-     data-line-num is set by Decoration.node so it works for both
-     plain paragraphs and React node-view blocks (math, etc.). */
-  .ProseMirror > [data-line-num] {
+  /* Equation numbers — rendered as "(N)" in the right margin of math blocks.
+     data-eq-num is set by Decoration.node only on mathBlock nodes. */
+  .ProseMirror > [data-eq-num] {
     position: relative;
   }
-  .ProseMirror > [data-line-num]::before {
-    content: attr(data-line-num);
+  .ProseMirror > [data-eq-num]::after {
+    content: "(" attr(data-eq-num) ")";
     position: absolute;
-    right: -2.8rem;
-    top: 0.25em;
-    width: 2.2rem;
+    right: -3.2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2.8rem;
     text-align: right;
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     color: #c4b9ae;
     font-family: ui-monospace, 'Cascadia Code', 'Courier New', monospace;
     line-height: 1;
@@ -217,12 +213,15 @@
   }
 
   /* Gap cursor: ProseMirror shows this between block nodes. Render as a vertical blinking bar
-     instead of the default horizontal dash, so it looks like a normal text cursor. */
+     instead of the default horizontal dash, so it looks like a normal text cursor. Using
+     bottom:0 + transform so it always sits at the TOP of the cursor div regardless of the
+     block height (tall math blocks would otherwise push the bar to the bottom of the block). */
   .ProseMirror-gapcursor::after {
     border-top: none !important;
     width: 2px !important;
-    height: 1.1em !important;
-    top: -1.1em !important;
+    height: 1.2em !important;
+    top: auto !important;
+    bottom: 0 !important;
     background: #5c2d8a !important;
     border-radius: 1px !important;
   }
@@ -255,6 +254,12 @@
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
+  }
+
+  /* Pool-only word visible in test/debug mode — lighter green to distinguish from real S_v words */
+  .scas-red.scas-test {
+    color: #52a572;
+    opacity: 0.75;
   }
 
   /* Focused word (popover open) — transparent in practice (the reel renders the word). */

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
-import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary } from '../provenance/snapshots'
+import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries } from '../provenance/snapshots'
 import { pmToText } from '../provenance/bundle'
 import { diffWords, diffStats } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
@@ -44,7 +44,7 @@ function SummaryPanel({ text, isWide, flashKey }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width: expanded ? '150px' : '6px',
+        width: expanded ? '150px' : '10px',
         minHeight: 36,
         overflow: 'hidden',
         background: '#ede5f7',
@@ -274,6 +274,8 @@ export function SnapshotView() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [showDiff, setShowDiff] = useState(true)
   const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
+  const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
+  const [isRegenerating, setIsRegenerating] = useState(false)
   // Flash counters: each increments only when that specific panel should pop open (1s)
   const [leftSnapFlash,  setLeftSnapFlash]  = useState(0)
   const [rightSnapFlash, setRightSnapFlash] = useState(0)
@@ -294,8 +296,8 @@ export function SnapshotView() {
     return () => { cancelled = true }
   }, [docId, snapId])
 
-  // Background-generate any missing diff + version summaries. Keyed on [docId] so
-  // snapshot navigation never cancels an in-progress generation run.
+  // Background-generate any missing diff + version summaries. Keyed on [docId, genSeed] so
+  // snapshot navigation never cancels a run; genSeed increment forces full regeneration.
   useEffect(() => {
     if (!docId) return
     let cancelled = false
@@ -331,9 +333,11 @@ export function SnapshotView() {
           setAllSnapshots((prev) => prev.map((s) => s.id === vs.id ? { ...s, versionSummary: vs2 } : s))
         }
       }
+      setIsRegenerating(false)
     })()
     return () => { cancelled = true }
-  }, [docId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId, genSeed])
 
   const groups = useMemo(() => groupByVersion(allSnapshots), [allSnapshots])
 
@@ -459,6 +463,33 @@ export function SnapshotView() {
             <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} className="accent-[#5c2d8a]" />
             Show changes
           </label>
+        )}
+        {docId && (
+          <button
+            type="button"
+            disabled={isRegenerating}
+            onClick={async () => {
+              if (!docId) return
+              setIsRegenerating(true)
+              setAllSnapshots((prev) => prev.map((s) => {
+                const { diffSummary: _d, versionSummary: _v, ...rest } = s
+                return rest as typeof s
+              }))
+              await clearAllSnapshotSummaries(docId)
+              setGenSeed((n) => n + 1)
+            }}
+            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+            style={{
+              fontSize: '0.85rem',
+              background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
+              border: '1px solid rgba(92, 45, 138, 0.35)',
+              color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
+              cursor: isRegenerating ? 'default' : 'pointer',
+            }}
+            title="Clear and regenerate all AI summaries"
+          >
+            {isRegenerating ? 'regenerating…' : '↺ summaries'}
+          </button>
         )}
         <button
           type="button"

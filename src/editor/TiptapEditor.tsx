@@ -23,6 +23,7 @@ import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { MathInline } from './extensions/MathInline'
 import { MathBlock } from './extensions/MathBlock'
 import { MathPasteHandler } from './extensions/MathPasteHandler'
+import { TabIndent } from './extensions/TabIndent'
 import { LineNumbers } from './extensions/LineNumbers'
 import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -252,6 +253,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       MathInline,
       MathBlock,
       MathPasteHandler,
+      TabIndent,
       LineNumbers,
     ],
     content: doc.contentJson,
@@ -1174,6 +1176,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 label={lastFileSave ? '✓ Synced to folder' : '🗀 Sync pending'}
                 synced={!!lastFileSave}
                 path={fileName}
+                displayName={doc.title || fileName}
                 lastSync={lastFileSave}
                 tooltip={`Saving to ${fileName}`}
                 onShowInFolder={showInFolder}
@@ -1204,6 +1207,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               label={lastSync ? '✓ Synced to OneDrive' : '☁ Sync pending'}
               synced={!!lastSync}
               path={oneDrivePath(doc)}
+              displayName={doc.title || undefined}
               lastSync={lastSync}
               tooltip={`OneDrive: ${oneDriveAcct}`}
               webUrl={oneDriveUrl}

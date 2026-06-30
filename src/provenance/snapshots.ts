@@ -166,6 +166,16 @@ export async function patchSnapshotVersionSummary(
   return snaps[i]
 }
 
+/** Clear all AI summaries for a document so they can be regenerated fresh. */
+export async function clearAllSnapshotSummaries(documentId: string): Promise<void> {
+  const snaps = await readSnapshotsFile(documentId)
+  const cleared = snaps.map((s) => {
+    const { diffSummary: _d, versionSummary: _v, ...rest } = s
+    return rest as typeof s
+  })
+  await writeSnapshotsFile(documentId, cleared)
+}
+
 /** Patch a snapshot's diffSummary field (the AI diff vs its predecessor). */
 export async function patchSnapshotDiffSummary(
   documentId: string,
