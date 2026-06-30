@@ -17,8 +17,8 @@ const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 // ── Summary panel ─────────────────────────────────────────────────────────────
 // Collapses to a 6px-wide vertical strip (width-collapse). On wide screens always
 // open. On narrow/phone flashes open for 1s when flashKey changes (not on mount).
-function SummaryPanel({ text, isWide, flashKey }: {
-  text: string; isWide: boolean; flashKey: string
+function SummaryPanel({ text, isWide, isPhone, flashKey }: {
+  text: string; isWide: boolean; isPhone: boolean; flashKey: string
 }) {
   const [hovered, setHovered] = useState(false)
   const [flashing, setFlashing] = useState(false)
@@ -44,10 +44,12 @@ function SummaryPanel({ text, isWide, flashKey }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width: expanded ? '150px' : '10px',
+        width: expanded ? '195px' : '10px',
         minHeight: 36,
         overflow: 'hidden',
-        background: expanded ? '#ede5f7' : '#5c2d8a',
+        background: expanded
+          ? (isPhone ? 'rgba(237,229,247,0.82)' : '#ede5f7')
+          : '#5c2d8a',
         border: expanded ? '1px solid rgba(92,45,138,0.22)' : 'none',
         borderRadius: 8,
         padding: expanded ? '5px 7px' : 0,
@@ -63,7 +65,7 @@ function SummaryPanel({ text, isWide, flashKey }: {
       }}
     >
       {expanded && (
-        <div style={{ width: 136 }}>
+        <div style={{ width: 178 }}>
           {lines.map((line, i) => <div key={i}>{line}</div>)}
         </div>
       )}
@@ -134,7 +136,7 @@ function NavSide({
             position: 'absolute', bottom: '100%', marginBottom: 5,
             [side]: 0, zIndex: 1, pointerEvents: 'none',
           }}>
-            <SummaryPanel text={summary} isWide={isWide} flashKey={snapFlashKey} />
+            <SummaryPanel text={summary} isWide={isWide} isPhone={isPhone} flashKey={snapFlashKey} />
           </div>
         )}
         <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
@@ -149,7 +151,7 @@ function NavSide({
               position: 'absolute', top: '100%', marginTop: 5,
               [side]: 0, zIndex: 1, pointerEvents: 'none',
             }}>
-              <SummaryPanel text={versionSummary} isWide={isWide} flashKey={verFlashKey} />
+              <SummaryPanel text={versionSummary} isWide={isWide} isPhone={isPhone} flashKey={verFlashKey} />
             </div>
           )}
         </div>
@@ -437,8 +439,8 @@ export function SnapshotView() {
     >
       {/* Fixed header — position:fixed so overscroll / rubber-band at page top doesn't move it */}
       <div
-        className="z-50 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem' }}
+        className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem' }}
       >
         <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
@@ -447,25 +449,30 @@ export function SnapshotView() {
         </span>
 
         {snapshot && (
-          <span className="text-stone-400" style={{ fontSize: '0.85rem' }}>
-            {snapshot.wordCount}w · {snapshot.ots.status}
+          <span className="text-stone-400">
+            {snapshot.wordCount}w
           </span>
         )}
 
         {allSnapshots.length > 1 && (
-          <span className="text-stone-400 tabular-nums" style={{ fontSize: '0.85rem' }}>
-            {`${groupIdx + 1}.${snapInGroup} / ${groups.length}.${lastGroup?.items.length ?? 1}`}
-            {'   '}
-            {`(${idx + 1}/${allSnapshots.length})`}
+          <span className="text-stone-400 tabular-nums">
+            {`v${groupIdx + 1}.${snapInGroup}/v${groups.length}.${lastGroup?.items.length ?? 1}`}
           </span>
         )}
 
-        {status === 'ready' && (
-          <label className="flex items-center gap-1.5 text-stone-500 cursor-pointer select-none ml-auto flex-shrink-0" style={{ fontSize: '0.85rem' }}>
-            <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} className="accent-[#5c2d8a]" />
-            Show changes
-          </label>
-        )}
+        <span className="flex items-center gap-2 ml-auto flex-shrink-0">
+          {allSnapshots.length > 1 && (
+            <span className="text-stone-400 tabular-nums">
+              {`s${idx + 1}/${allSnapshots.length}`}
+            </span>
+          )}
+          {status === 'ready' && (
+            <label className="flex items-center gap-1 text-stone-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} className="accent-[#5c2d8a]" />
+              Show changes
+            </label>
+          )}
+        </span>
         {docId && (
           <button
             type="button"
@@ -511,7 +518,7 @@ export function SnapshotView() {
       </div>
 
       {/* Spacer to clear the fixed header */}
-      <div style={{ height: 52 }} />
+      <div style={{ height: 36 }} />
 
       {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
       {status === 'missing' && (
@@ -553,6 +560,24 @@ export function SnapshotView() {
           />
         </>
       )}
+
+      {/* Fixed purple Verify button — bottom right, opens the verifier for this document */}
+      <button
+        type="button"
+        onClick={() => navigate('/verify')}
+        style={{
+          position: 'fixed', bottom: 16, right: 16, zIndex: 55,
+          background: '#5c2d8a', color: '#fff',
+          border: 'none', borderRadius: 8,
+          padding: '8px 18px', fontSize: '0.9rem', fontWeight: 600,
+          cursor: 'pointer', boxShadow: '0 2px 8px rgba(92,45,138,0.35)',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#7a3fb5')}
+        onMouseLeave={e => (e.currentTarget.style.background = '#5c2d8a')}
+        title="Open the verifier for this document"
+      >
+        Verify
+      </button>
     </div>
   )
 }

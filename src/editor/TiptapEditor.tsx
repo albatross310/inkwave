@@ -1057,7 +1057,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         const receipt = await runner.closePeriod(cHash, kicks, cadence, authToken)
         if (!receipt) return // offline — keep the kicks buffered, retry next period
         periodKicksRef.current = []
-        scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
+        scasRef.current!.useServerSet(
+          applyNLimit(runner.current.lemmas, docRef.current.scasSetSize ?? 0),
+          runner.current.setVersion,
+        )
         setReceipts([...runner.receipts])
         const updated: InkwaveDocument = {
           ...docRef.current,
@@ -1084,6 +1087,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => clearInterval(id)
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Apply the user's N limit to a server-provided lemma set.
+  // 0 = infinite = use the full set unchanged.
+  // N > 0 = take the first N lemmas (a deterministic approximation; the server issues the
+  // correctly-sampled set on the next period).
+  function applyNLimit(lemmas: Set<string>, n: number): Set<string> {
+    if (!n || n >= lemmas.size) return lemmas
+    const out = new Set<string>()
+    let count = 0
+    for (const l of lemmas) { if (count++ >= n) break; out.add(l) }
+    return out
+  }
+
   // Verify the held receipt chain against the published key (the guarantee, client-side).
   function verifyReceiptChain() {
     const runner = sessionRef.current
@@ -1096,14 +1111,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function handleLimitChange(next: number | 'infinite') {
     const newSetSize = next === 'infinite' ? 0 : next
     const scas = scasRef.current!
-    // Reseat the controller with the new exclusion-set size so S_v updates immediately,
-    // then drop any liveKicks for words that are no longer in the smaller set.
-    scas.reseat(
-      scas.state,
-      docRef.current.scasSeedRef ?? docRef.current.scasSessionSeed,
-      docRef.current.id,
-      newSetSize,
-    )
+    if (sessionRef.current) {
+      // M3 live: the server owns S_v. Filter its current lemma set to the requested size
+      // for immediate feedback (the server will issue a properly-sampled set next period).
+      scas.useServerSet(
+        applyNLimit(sessionRef.current.current.lemmas, newSetSize),
+        sessionRef.current.current.setVersion,
+      )
+    } else {
+      // M0/offline: derive S_v locally from the session seed.
+      scas.reseat(
+        scas.state,
+        docRef.current.scasSeedRef ?? docRef.current.scasSessionSeed,
+        docRef.current.id,
+        newSetSize,
+      )
+    }
     scas.clearStaleKicks()
     const updated: InkwaveDocument = {
       ...docRef.current,
