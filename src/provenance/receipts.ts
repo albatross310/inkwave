@@ -14,7 +14,7 @@ import { POOL } from '../scas/pool'
 export const DEV_SIGNING_PK = 'd5c5e5b40c2f33cb39f5c37ddc1ac27148addca4b7cdd12c7b89487a784787b4'
 
 // The published production signing key — the public half of the key the signing service actually
-// signs with (confirmed via GET /api/pubkey). Mirrored at /.well-known/inkwave-signing-key.json and
+// signs with. Published at /.well-known/inkwave-signing-key.json and
 // committed to the repo, so verification never depends on inkwave.studio being online (v4 spec §8).
 // This committed constant is authoritative (it's the git mirror) — we deliberately do NOT read it
 // from an env var, so a stray/mismatched VITE_SIGNING_PK can't silently break verification. To
