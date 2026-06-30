@@ -1038,7 +1038,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
-  const showMain   = !isTouch || !keyboardUp
+  // Show toolbar when: not a touch device, OR keyboard is down, OR text is selected
+  // (so the style bar is reachable for formatting even while the keyboard is up).
+  const showMain   = !isTouch || !keyboardUp || !selectionEmpty
   const barVisible = showMain
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible

@@ -1,9 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Snapshot } from '../types/document'
 import { useZoomScale } from '../editor/useZoomScale'
 
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
+
+// ── Time-of-day period labels ──────────────────────────────────────────────────
+function getPeriod(createdAt: string): string {
+  const h = new Date(createdAt).getHours()
+  if (h >= 5  && h < 8)  return 'early morning'
+  if (h >= 8  && h < 12) return 'morning'
+  if (h >= 12 && h < 17) return 'afternoon'
+  if (h >= 17 && h < 20) return 'evening'
+  return 'night'
+}
+
+/** Precompute a display label for every snapshot: period name, plus s1/s2/s3 suffix
+ *  when multiple snapshots share the same period on the same calendar day. */
+function computePeriodLabels(snapshots: Snapshot[]): Map<string, string> {
+  const groups = new Map<string, Snapshot[]>()
+  for (const s of snapshots) {
+    const key = `${s.createdAt.slice(0, 10)}-${getPeriod(s.createdAt)}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(s)
+  }
+  const labels = new Map<string, string>()
+  for (const [, group] of groups) {
+    const period = getPeriod(group[0].createdAt)
+    const sorted = [...group].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+    if (sorted.length === 1) {
+      labels.set(sorted[0].id, period)
+    } else {
+      sorted.forEach((s, i) => labels.set(s.id, `${period} s${i + 1}`))
+    }
+  }
+  return labels
+}
 
 // The growing record of tamper-evident snapshots + the live-composition receipt chain the writer
 // holds. Saving/syncing lives in the ⋮ menu (not duplicated here); this panel is the record viewer:
@@ -28,10 +60,10 @@ export function ReceiptPanel({
   chainStatus?: string | null
   onVerifyChain?: () => void
   wordCount?: number
-  compact?: boolean // mobile: a small ◈ circle instead of the text pill
-  open?: boolean   // controlled mode (toolbar trigger)
+  compact?: boolean
+  open?: boolean
   onOpenChange?: (v: boolean) => void
-  hideTrigger?: boolean // suppress the fixed-position trigger (it's in the toolbar instead)
+  hideTrigger?: boolean
 }) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
@@ -41,7 +73,8 @@ export function ReceiptPanel({
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
-  // Close on Escape (outside-click is handled by the backdrop below).
+  const periodLabels = useMemo(() => computePeriodLabels(snapshots), [snapshots])
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
@@ -51,21 +84,16 @@ export function ReceiptPanel({
 
   const panelOpen = open && (n > 0 || receiptCount > 0 || typeof wordCount === 'number')
 
-  // When the trigger lives in the toolbar, skip rendering entirely while closed.
   if (hideTrigger && !panelOpen) return null
 
   return (
     <>
-      {/* Invisible backdrop catches any outside click reliably (a document listener was missing
-          clicks on the page background). Below the panel (z-30 < z-40), above the rest. */}
       {panelOpen && <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />}
 
       <div
         className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
         style={{
           color: INK,
-          // When the trigger is in the toolbar, anchor the panel above the toolbar instead of at
-          // the screen bottom — otherwise the panel slides under the toolbar.
           bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 80px)' : '38px',
           padding: hideTrigger ? '0 1rem' : '0 28px',
           zoom: zoom !== 1 ? zoom : undefined,
@@ -92,7 +120,7 @@ export function ReceiptPanel({
             className="mb-1.5 bg-white overflow-auto"
             style={{ border: `1px solid rgba(92, 45, 138, 0.4)`, borderRadius: 10, maxHeight: '40vh', width: 200 }}
           >
-            {/* Manual "Save version" — appears first so it's always reachable */}
+            {/* Manual "Save version" — always at top */}
             {onSaveVersion && (
               <button
                 type="button"
@@ -140,17 +168,17 @@ export function ReceiptPanel({
                 style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
                 title={s.summary ?? `bundle ${s.bundleHash}`}
               >
-                {/* Row 1: time · wordcount · OTS status */}
+                {/* Row 1: period label · wordcount · OTS status */}
                 <div className="flex items-baseline gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
                   <span className="tabular-nums" style={{ color: LIGHT }}>
-                    {new Date(s.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {periodLabels.get(s.id) ?? getPeriod(s.createdAt)}
                   </span>
                   <span className="text-stone-500">{s.wordCount}w</span>
                   <span className="ml-auto text-stone-400" title={`bundle ${s.bundleHash}`}>
                     {s.ots.status === 'confirmed' ? '⛓' : s.ots.status === 'pending' ? '⏳' : '·'} ↗
                   </span>
                 </div>
-                {/* Row 2: AI summary (truncated single line; full text on hover via title above) */}
+                {/* Row 2: AI summary or trigger type */}
                 <div
                   className="text-stone-400 w-full"
                   style={{
@@ -166,7 +194,7 @@ export function ReceiptPanel({
                 >
                   {s.summary
                     ? s.summary
-                    : <span style={{ opacity: 0.4 }}>{s.trigger === 'kick' ? 'kick' : s.trigger === 'paragraph' ? 'para' : 'manual'}</span>
+                    : <span style={{ opacity: 0.4 }}>{s.trigger === 'kick' ? 'kick' : s.trigger === 'paragraph' ? 'para' : 'version'}</span>
                   }
                 </div>
               </button>

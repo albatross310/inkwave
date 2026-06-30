@@ -52,6 +52,36 @@ export async function latestSnapshot(documentId: string): Promise<Snapshot | nul
   return snaps.length ? snaps[snaps.length - 1] : null
 }
 
+// ─── Version grouping ─────────────────────────────────────────────────────────
+// A "version" is any manually saved snapshot (trigger:'manual'). All automatic
+// snapshots (kick/paragraph) that follow it — until the next manual save — are
+// its "species". Snapshots before the first manual save form a pre-version draft.
+
+export interface SnapshotGroup {
+  versionSnap: Snapshot | null  // null = pre-version draft
+  items: Snapshot[]             // versionSnap is items[0] when present
+  label: string                 // 'v1', 'v2', … or '' for the pre-version draft
+}
+
+/** Group an ordered (oldest-first) snapshot list into version buckets. */
+export function groupByVersion(snapshots: Snapshot[]): SnapshotGroup[] {
+  const groups: SnapshotGroup[] = []
+  let versionCount = 0
+  let current: SnapshotGroup = { versionSnap: null, items: [], label: '' }
+
+  for (const snap of snapshots) {
+    if (snap.trigger === 'manual') {
+      if (current.items.length > 0) groups.push(current)
+      versionCount++
+      current = { versionSnap: snap, items: [snap], label: `v${versionCount}` }
+    } else {
+      current.items.push(snap)
+    }
+  }
+  if (current.items.length > 0 || groups.length === 0) groups.push(current)
+  return groups
+}
+
 /** Count content words in TipTap JSON (whitespace-delimited runs of letters/digits). */
 export function countWords(contentJson: TiptapJSON): number {
   let text = ''

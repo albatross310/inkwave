@@ -124,6 +124,14 @@
   }
   .inkwave-editor-surface.is-phone::before { display: none; }
 
+  /* Phone text: double the apparent size so the writing is comfortable to read at arm's length.
+     The stored document font sizes are unchanged — this is display-only CSS applied to the
+     rendering layer. Custom font-size marks stay proportional (they're em-relative to this base). */
+  .inkwave-editor-surface.is-phone .ProseMirror {
+    font-size: 2.25rem;
+    line-height: var(--inkwave-lh, 1.55);
+  }
+
   /* Parchment paper texture for the scroll body (the page the text sits on). UNIFORM colour: the
      base + a tiled (400×400, repeating) noise texture. The old full-height linear-gradients made the
      tint vary top→bottom, which read as the paper "changing colour" as you scrolled a long document. */
@@ -237,12 +245,16 @@
      display:inline (not inline-block) so a flagged word at the start of a wrapped line
      is not an atomic box — the caret placed before it then renders on that line rather
      than at the end of the previous one. The FOCUSED word re-asserts inline-block via an
-     inline style (for its min-width expansion); see RedHighlightExtension. */
+     inline style (for its min-width expansion); see RedHighlightExtension.
+     font-family/font-size inherit explicitly to survive iOS rendering contexts where a
+     decoration span can fall back to the browser default rather than the mark's value. */
   .scas-red {
     display: inline;
     position: relative;
     color: #2e8b57;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
     cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
   }
 
   /* Focused word (popover open) — transparent in practice (the reel renders the word). */

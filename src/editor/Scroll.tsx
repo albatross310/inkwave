@@ -93,8 +93,8 @@ export function Scroll({
           className="scroll-paper relative pt-8 pb-24"
           style={{
             borderRadius: phone ? 0 : '8px',
-            paddingLeft:  phone ? 0 : `${sideMarginPx}px`,
-            paddingRight: phone ? 0 : `${sideMarginPx}px`,
+            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx}px`,
+            paddingRight: phone ? '1.25rem' : `${sideMarginPx}px`,
             paddingTop:   `${topMarginPx}px`,
             paddingBottom:`${btmMarginPx}px`,
             '--para-spacing': `${paraSpacingEm}em`,
