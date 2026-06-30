@@ -20,7 +20,6 @@ function debugHighlightAll(): boolean {
 }
 import type { InkwaveDocument } from '../../types/document'
 import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
-import { slotTimeMode } from '../crossout'
 
 // Plugin state: the decoration set plus the "reveal" anchors (see SCAS_REVEAL_META).
 interface RedHighlightState {
@@ -166,16 +165,13 @@ interface RedWord {
 }
 
 // Time-of-day or date-of-month for the slot's first-written stamp.
-// Mode 'time' (default): "1432" (24h, no colon). Mode 'date': "Jun 5" or similar short form.
+// Returns "DDMM" — e.g. "0501" for 5 January.
 function hhmm(raw: string | null): string | null {
   if (!raw) return null
   const ms = Number(raw)
   if (!Number.isFinite(ms) || ms <= 0) return null
   const d = new Date(ms)
-  if (slotTimeMode() === 'date') {
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  }
-  return String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0')
+  return String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0')
 }
 
 function buildDecorations(

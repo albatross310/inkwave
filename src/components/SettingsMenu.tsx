@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
-import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark, slotTimeMode, setSlotTimeMode } from '../editor/crossout'
+import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
 import { LimitSelector } from './LimitSelector'
 
 const INK = '#5c2d8a'
@@ -93,20 +93,6 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
                 title="Cycle old-word display style"
               >
                 {crossoutMode()}
-              </button>
-            </div>
-
-            {/* Word stamp: show time or date above purple words */}
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span>Word stamp</span>
-              <button
-                type="button"
-                onClick={() => { setSlotTimeMode(slotTimeMode() === 'time' ? 'date' : 'time'); rerender(n => n + 1) }}
-                className="text-xs px-2 py-0.5 rounded-full hover:bg-stone-100 transition-colors tabular-nums"
-                style={{ color: INK, border: `1px solid ${INK}44` }}
-                title="Toggle whether the grey stamp above purple words shows the time it was written or the date"
-              >
-                {slotTimeMode() === 'time' ? 'time' : 'date'}
               </button>
             </div>
 

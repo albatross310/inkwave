@@ -6,6 +6,8 @@ import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
 import TextAlign from '@tiptap/extension-text-align'
+import Highlight from '@tiptap/extension-highlight'
+import Underline from '@tiptap/extension-underline'
 import { FontSize } from './extensions/FontSize'
 import { ParagraphStyle } from './extensions/ParagraphStyle'
 import type { InkwaveDocument } from '../types/document'
@@ -77,10 +79,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     docRef.current = doc
   }, [doc])
 
-  // Keep the browser tab title in sync with the document name.
-  useEffect(() => {
-    if (doc.title) document.title = `Inkwave Solo: ${doc.title}`
-  }, [doc.title])
 
   // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
   useEffect(() => { applyCrossoutMode() }, [])
@@ -141,6 +139,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [odOpenerOpen, setOdOpenerOpen] = useState(false)
   const [gdriveOpenerOpen, setGdriveOpenerOpen] = useState(false)
   const [fileName, setFileName] = useState<string | null>(null) // linked local save file name (Chromium)
+
+  // Keep the browser tab title in sync with the file name (not the content-derived title).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const local = fileName?.replace(/\.(inkwave|studio|json)$/i, '')
+    const cloud = oneDriveFilename(doc.id)?.replace(/\.(inkwave|studio|json)$/i, '')
+    const tabName = local || cloud || (doc.title ? doc.title.slice(0, 40) : 'Untitled')
+    document.title = `Inkwave Solo: ${tabName}`
+  }, [doc.title, doc.id, fileName])
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)
   // Google Drive sync (Firefox/Safari alternative to OneDrive).
@@ -237,6 +244,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,
+      Highlight.configure({ multicolor: true }),
+      Underline,
       PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
       ScasSlotMark,
       TextStyle,
@@ -1058,14 +1067,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
   function handleLimitChange(next: number | 'infinite') {
+    const newSetSize = next === 'infinite' ? 0 : next
+    const scas = scasRef.current!
+    // Reseat the controller with the new exclusion-set size so S_v updates immediately,
+    // then drop any liveKicks for words that are no longer in the smaller set.
+    scas.reseat(
+      scas.state,
+      docRef.current.scasSeedRef ?? docRef.current.scasSessionSeed,
+      docRef.current.id,
+      newSetSize,
+    )
+    scas.clearStaleKicks()
     const updated: InkwaveDocument = {
       ...docRef.current,
       scasLimitN: next,
+      scasSetSize: newSetSize,
+      scasState: scas.state,
       updatedAt: new Date().toISOString(),
     }
     docRef.current = updated
     onDocChange(updated)
     scheduleSave(updated)
+    // Force the highlight plugin to rebuild decorations from the updated lookup.
+    if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
     // Re-focusing keeps the cursor in the editor on desktop; on a phone it would re-open
     // the keyboard and hide the toolbar (so the toolbar appears to "run away" when you
     // tap its controls), so skip the re-focus on touch-only devices.

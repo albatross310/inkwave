@@ -101,6 +101,18 @@ export class ScasController {
     this.currentSet = deriveSet(seedRef, docId, state.version, setSize)
   }
 
+  /**
+   * Remove from liveKicks any lemma that is no longer in the current S_v.
+   * Call this after reseating with a new setSize so the display responds
+   * immediately to N changes (words outside the new, smaller set go grey).
+   */
+  clearStaleKicks(): void {
+    const filtered = this.state.liveKicks.filter((l) => this.currentSet.has(l))
+    if (filtered.length !== this.state.liveKicks.length) {
+      this.state = { ...this.state, liveKicks: filtered }
+    }
+  }
+
   inSv(lemma: string): boolean {
     return this.currentSet.has(lemma)
   }

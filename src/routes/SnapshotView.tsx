@@ -47,8 +47,8 @@ function SummaryPanel({ text, isWide, flashKey }: {
         width: expanded ? '150px' : '10px',
         minHeight: 36,
         overflow: 'hidden',
-        background: '#ede5f7',
-        border: '1px solid rgba(92,45,138,0.22)',
+        background: expanded ? '#ede5f7' : '#5c2d8a',
+        border: expanded ? '1px solid rgba(92,45,138,0.22)' : 'none',
         borderRadius: 8,
         padding: expanded ? '5px 7px' : 0,
         fontSize: '0.72rem',
@@ -57,14 +57,16 @@ function SummaryPanel({ text, isWide, flashKey }: {
         cursor: expanded ? 'default' : 'pointer',
         userSelect: 'none',
         pointerEvents: 'auto',
-        transition: 'width 220ms ease, padding 220ms ease',
+        transition: 'width 220ms ease, padding 220ms ease, background 220ms ease',
         flexShrink: 0,
         textAlign: 'left',
       }}
     >
-      <div style={{ width: 136 }}>
-        {lines.map((line, i) => <div key={i}>{line}</div>)}
-      </div>
+      {expanded && (
+        <div style={{ width: 136 }}>
+          {lines.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
     </div>
   )
 }
