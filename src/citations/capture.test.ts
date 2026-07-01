@@ -30,6 +30,12 @@ describe('parseAuthor', () => {
   it('treats last word as family name', () => {
     expect(parseAuthor('Mary A. Jones')).toEqual([{ family: 'Jones', given: 'Mary A.' }])
   })
+  it('returns empty array for empty string', () => {
+    expect(parseAuthor('')).toEqual([])
+  })
+  it('treats two-word name (no separator) as given + family', () => {
+    expect(parseAuthor('Charles Darwin')).toEqual([{ family: 'Darwin', given: 'Charles' }])
+  })
 })
 
 describe('parseDate', () => {
