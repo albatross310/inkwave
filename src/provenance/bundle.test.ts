@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pmToText, inkwaveFileName, composeTraceFile, parseTraceFile, type ExportBundle } from './bundle'
+import { pmToText, inkwaveFileName, composeTraceFile, parseTraceFile, bundleReadme, type ExportBundle, type BundleSummary } from './bundle'
 import type { TiptapJSON } from '../types/document'
 
 function minBundle(overrides: Partial<ExportBundle> = {}): ExportBundle {
@@ -132,5 +132,45 @@ describe('composeTraceFile / parseTraceFile round-trip', () => {
     const jsonIdx = file.indexOf('{')
     expect(markerIdx).toBeGreaterThan(0)
     expect(jsonIdx).toBeGreaterThan(markerIdx)
+  })
+})
+
+describe('bundleReadme', () => {
+  const summary: BundleSummary = {
+    what: 'test',
+    title: 'Being and Time',
+    words: 120,
+    snapshots: 4,
+    signedReceipts: 7,
+    bitcoinAnchored: 3,
+    created: '2026-07-01T00:00:00.000Z',
+    exported: '2026-07-01T01:00:00.000Z',
+    verifyAt: 'https://inkwave.me/verify',
+    note: '',
+  }
+
+  it('always ends with a trailing newline', () => {
+    expect(bundleReadme().endsWith('\n')).toBe(true)
+    expect(bundleReadme(summary).endsWith('\n')).toBe(true)
+  })
+
+  it('includes the document title when a summary is provided', () => {
+    const text = bundleReadme(summary)
+    expect(text).toContain('Being and Time')
+    expect(text).toContain('120')
+    expect(text).toContain('4')
+    expect(text).toContain('7')
+    expect(text).toContain('3')
+  })
+
+  it('omits summary lines when no summary is given', () => {
+    const text = bundleReadme()
+    expect(text).not.toContain('Document')
+    expect(text).not.toContain('Words')
+  })
+
+  it('always contains the verify URL', () => {
+    expect(bundleReadme()).toContain('inkwave.me/verify')
+    expect(bundleReadme(summary)).toContain('inkwave.me/verify')
   })
 })
