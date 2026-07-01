@@ -29,7 +29,8 @@ const ITEMTYPE_CSL: Record<string, string> = {
   video: 'motion_picture',
 }
 
-function parseAuthor(value: string): CSLItem['author'] {
+/** @internal exported for unit tests only */
+export function parseAuthor(value: string): CSLItem['author'] {
   return value.split(/\s*(?:,|and|&)\s*/).filter(Boolean).map(name => {
     const parts = name.trim().split(/\s+/)
     if (parts.length === 1) return { literal: parts[0] }
@@ -38,7 +39,8 @@ function parseAuthor(value: string): CSLItem['author'] {
   })
 }
 
-function parseDate(value: string): CSLItem['issued'] | undefined {
+/** @internal exported for unit tests only */
+export function parseDate(value: string): CSLItem['issued'] | undefined {
   const m = /(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?/.exec(value)
   if (!m) return undefined
   const parts = [Number(m[1])]
@@ -47,14 +49,14 @@ function parseDate(value: string): CSLItem['issued'] | undefined {
   return { 'date-parts': [parts] }
 }
 
-interface ExtractResponse {
+export interface ExtractResponse {
   itemType?: string
   fields?: Record<string, CaptureField>
   confidence?: 'high' | 'low'
 }
 
-/** Assemble a CSLItem from the LLM's extracted fields. */
-function extractToCsl(res: ExtractResponse, url: string): { item: CSLItem; fields: Record<string, CaptureField> } {
+/** Assemble a CSLItem from the LLM's extracted fields. @internal exported for unit tests only */
+export function extractToCsl(res: ExtractResponse, url: string): { item: CSLItem; fields: Record<string, CaptureField> } {
   const f = res.fields ?? {}
   const title = f.title?.value
   const author = f.author?.value ? parseAuthor(f.author.value) : undefined
