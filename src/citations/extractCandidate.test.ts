@@ -41,4 +41,10 @@ describe('extractCandidate (server-side page scraping)', () => {
   it('bounds the body length', () => {
     expect(c.body.length).toBeLessThanOrEqual(1800)
   })
+  it('handles reversed attribute order (content before name)', () => {
+    const reversed = '<html><head><meta content="Bob Jones" name="author"><meta content="2025" property="article:published_time"></head></html>'
+    const r = extractCandidate(reversed)
+    expect(r.metas['author']).toBe('Bob Jones')
+    expect(r.metas['article:published_time']).toBe('2025')
+  })
 })

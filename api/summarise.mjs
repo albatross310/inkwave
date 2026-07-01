@@ -38,11 +38,19 @@ async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS, model = MODEL)
 // Exported for unit testing (the Anthropic call is a thin wrapper; this parsing is the logic).
 export function extractCandidate(html) {
   const metas = {}
-  const metaRe = /<meta\s+[^>]*?(?:name|property)=["']([^"']+)["'][^>]*?content=["']([^"']*)["'][^>]*>/gi
+  // Capture every <meta …> tag as a raw attribute string, then pull key and content out
+  // independently — handles both `name="x" content="y"` AND `content="y" name="x"` orderings.
+  const tagRe = /<meta\b([^>]*?)>/gi
+  const attrKey = /(?:name|property)=["']([^"']+)["']/i
+  const attrContent = /content=["']([^"']*)["']/i
   let m
-  while ((m = metaRe.exec(html)) && Object.keys(metas).length < 40) {
-    const key = m[1].toLowerCase()
-    if (/title|author|date|published|site_name|description|type|publisher/.test(key)) metas[key] = m[2]
+  while ((m = tagRe.exec(html)) && Object.keys(metas).length < 40) {
+    const attrs = m[1]
+    const km = attrKey.exec(attrs)
+    const cm = attrContent.exec(attrs)
+    if (!km || !cm) continue
+    const key = km[1].toLowerCase()
+    if (/title|author|date|published|site_name|description|type|publisher/.test(key)) metas[key] = cm[1]
   }
   const titleTag = (/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '').trim()
   // JSON-LD blocks often carry author/datePublished cleanly.
