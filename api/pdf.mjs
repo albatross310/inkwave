@@ -11,6 +11,7 @@
 
 import chromium from '@sparticuz/chromium'
 import puppeteer from 'puppeteer-core'
+import { rateLimit, clientIp } from './_ratelimit.mjs'
 
 export const config = { maxDuration: 60, api: { bodyParser: false } }
 
@@ -127,6 +128,10 @@ export default async function handler(req, res) {
     }
   }
   if (req.method !== 'POST') { res.statusCode = 405; return res.end('method not allowed') }
+  // PDF generation is memory- and time-expensive: 10 exports per minute per IP is generous for any
+  // legitimate writer but limits cost from accidental loops or targeted abuse.
+  const rl = await rateLimit(clientIp(req), 'pdf', 10, 60)
+  if (!rl.ok) { res.statusCode = 429; return res.end(JSON.stringify({ error: 'rate limited' })) }
   let body
   try { body = JSON.parse(await readRaw(req)) } catch { res.statusCode = 400; return res.end('bad request') }
   try {
