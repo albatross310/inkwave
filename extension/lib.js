@@ -60,9 +60,43 @@ export async function lookupDoi(doi) {
   return crossrefToCsl(m, id)
 }
 
+export async function lookupArxiv(arxivId) {
+  const r = await fetch(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(arxivId)}`)
+  if (!r.ok) throw new Error('arxiv ' + r.status)
+  const xml = await r.text()
+  // MV3 service workers have DOMParser (Chrome only; WXT build will use the TS module instead).
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  const entry = doc.querySelector('entry')
+  if (!entry) throw new Error('arxiv: no entry')
+  const title = entry.querySelector('title')?.textContent?.replace(/\s+/g, ' ').trim()
+  const authors = [...entry.querySelectorAll('author > name')].map(n => n.textContent?.trim()).filter(Boolean)
+  const published = entry.querySelector('published')?.textContent?.trim()
+  const doi = entry.querySelector('arxiv\\:doi, doi')?.textContent?.trim()
+  const year = published ? Number(published.slice(0, 4)) : undefined
+  const item = {
+    id: makeCitekey({ author: authors.map(n => ({ literal: n })), issued: year ? { 'date-parts': [[year]] } : undefined, title }),
+    type: 'article',
+    _iw: { fields: {}, source: 'crossref' },
+  }
+  if (title) item.title = title
+  if (authors.length) {
+    item.author = authors.map(n => {
+      const parts = n.trim().split(/\s+/)
+      const family = parts.pop() || n
+      return { family, given: parts.join(' ') || undefined }
+    })
+  }
+  if (year) item.issued = { 'date-parts': [[year]] }
+  if (doi) item.DOI = doi
+  item.URL = `https://arxiv.org/abs/${arxivId}`
+  for (const k of Object.keys(item)) if (k !== 'id' && k !== 'type' && !k.startsWith('_')) item._iw.fields[k] = { source: 'crossref' }
+  return item
+}
+
 export async function captureFromUrl(url) {
   const id = detectIdentifier(url)
   if (id?.kind === 'doi') return lookupDoi(id.value)
-  // arXiv/LLM paths omitted from the minimal build; the app's paste bar covers them.
+  if (id?.kind === 'arxiv') return lookupArxiv(id.value)
+  // LLM-scrape path omitted from the minimal build; the app's paste bar covers it.
   throw new Error('no identifier found on this page')
 }

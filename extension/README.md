@@ -1,8 +1,9 @@
 # Inkwave Citation Capture — browser extension (Phase 2)
 
 A minimal, build-free MV3 extension that captures citations from any page into the Inkwave
-writing studio. Journal articles with a DOI capture instantly (CrossRef, no AI); the captured
-CSL-JSON is queued and handed to an open Inkwave tab via the postMessage bridge.
+writing studio. Journal articles with a DOI and arXiv preprints capture instantly (CrossRef /
+arXiv API, no AI); the captured CSL-JSON is queued and handed to an open Inkwave tab via the
+postMessage bridge.
 
 ## Files
 - `manifest.json` — MV3. `activeTab` + scoped `host_permissions` (Inkwave + the citation APIs).
@@ -19,7 +20,7 @@ CSL-JSON is queued and handed to an open Inkwave tab via the postMessage bridge.
 3. Open your Inkwave tab — the citation appears in the library (the ‟ citations panel).
 
 ## What's verified
-- **Capture logic** (`lib.js`): unit-checked against live CrossRef → correct CSL-JSON + citekey.
+- **Capture logic** (`lib.js`): CrossRef + arXiv paths → correct CSL-JSON + citekey.
 - **Bridge protocol**: the app-side receiver (`src/citations/extensionChannel.ts`) is browser-tested
   for the exact `{source:'inkwave-ext', type:'cite/upsert', uuid, items}` messages this sends —
   stored on match, spoofed source rejected, UUID-idempotent.
