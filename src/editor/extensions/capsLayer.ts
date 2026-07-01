@@ -71,7 +71,8 @@ export function getCapsSymbol(letter: string, shift: boolean): string | null {
 }
 
 // Parses "\logm2d" → { key:'d', shift:false, latex:'\\log' }
-// Non-greedy so commands ending in 'm' work: "\limmm2d" → key:'d', latex:'\\lim'
+// Non-greedy: splits at the FIRST "m2" boundary. For \lim, use "\limm2d" (→ latex:'\\lim', key:'d').
+// "\limmm2d" would give latex:'\\limm', because the first m2 appears after "limm".
 export function parseCapsMapping(src: string): { key: string; shift: boolean; latex: string } | null {
   const m = src.trim().match(/^(\\[a-zA-Z]+?)m2([a-zA-Z])$/)
   if (!m) return null
