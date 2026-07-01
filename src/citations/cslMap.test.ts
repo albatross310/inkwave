@@ -50,7 +50,7 @@ describe('makeCitekey', () => {
 describe('tagProvenance', () => {
   it('tags every present metadata field with the source and records addedAt', () => {
     const tagged = tagProvenance({ id: 'x', type: 'book', title: 'T', DOI: '10.1/x' }, 'crossref', { sourceUrl: 'https://doi.org/10.1/x' })
-    const meta = (tagged as { _iw: { fields: Record<string, { source: string }>; sourceUrl: string; addedAt: string } })._iw
+    const meta = (tagged as unknown as { _iw: { fields: Record<string, { source: string }>; sourceUrl: string; addedAt: string } })._iw
     expect(meta.fields.title.source).toBe('crossref')
     expect(meta.fields.DOI.source).toBe('crossref')
     expect(meta.fields.id).toBeUndefined() // id/type are not tagged

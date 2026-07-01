@@ -34,7 +34,6 @@ import { Scroll, isTouchDevice } from './Scroll'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
 import { prefetchSynonyms } from './suggestions/thesaurus'
-import { LimitSelector } from '../components/LimitSelector'
 import { OptionsMenu } from '../components/OptionsMenu'
 import { StyleBar } from '../components/StyleBar'
 import { GuideMenu } from '../components/GuideMenu'
@@ -49,7 +48,7 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundle, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, setOneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
@@ -85,9 +84,6 @@ type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page'
 const SLOT_KEY = 'inkwave-toolbar-slots'
 const DEFAULT_SLOTS: [SlotId, SlotId, SlotId, SlotId] = ['bib', 'guide', 'math', 'receipt']
 const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page']
-const SLOT_LABELS: Record<SlotId, string> = {
-  bib: '‟ References', guide: 'ⓘ Info', math: 'Σ Math', receipt: 'R Provenance', page: 'P Page',
-}
 
 function loadToolbarSlots(): [SlotId, SlotId, SlotId, SlotId] {
   try {
@@ -221,7 +217,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
-  const [cycleActive, setCycleActive] = useState(false)
+  const [, setCycleActive] = useState(false)
   const [paperRight, setPaperRight] = useState(0)
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
@@ -292,11 +288,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function updateSlots(newSlots: [SlotId, SlotId, SlotId, SlotId]) {
     setToolbarSlots(newSlots)
     try { localStorage.setItem(SLOT_KEY, JSON.stringify(newSlots)) } catch {}
-  }
-
-  function addToSlots(id: SlotId) {
-    if (toolbarSlots.includes(id)) return
-    updateSlots([id, toolbarSlots[0], toolbarSlots[1], toolbarSlots[2]])
   }
 
   const dragIdRef = useRef<SlotId | null>(null)

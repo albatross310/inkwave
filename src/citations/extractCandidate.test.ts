@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-// @ts-expect-error — plain .mjs serverless module, no types
 import { extractCandidate } from '../../api/summarise.mjs'
 
 const HTML = `

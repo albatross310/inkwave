@@ -45,6 +45,6 @@ describe('computeAnalytics', () => {
     expect(a.stats.avgDeliberationMs).toBe(1250)
     expect(a.stats.durationMs).toBe(10_000)
     expect(a.words[0]).toEqual({ t: a.tMin, words: 0 })
-    expect(a.words.at(-1)).toMatchObject({ words: 4 })
+    expect(a.words[a.words.length - 1]).toMatchObject({ words: 4 })
   })
 })

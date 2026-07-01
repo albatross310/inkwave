@@ -29,15 +29,13 @@ const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % 
 //                            (seamless freeze-frame, fading out), the line reflows/commits in one
 //                            clean SNAP, and FADE_MS later the cross-out + date fade in. Ghost-out
 //                            and fade-in never overlap.
-// FADE_MS is mirrored in CSS as the annotations' animation-delay; GHOST_MS as scasReelOut.
+// GHOST_MS mirrored in CSS as scasReelOut; FADE_MS (500) as the annotations' animation-delay.
 const GHOST_MS = 500
-const FADE_MS = 500
 
 // ── Momentum tuning ──────────────────────────────────────────────────────────
 const MAX_VEL    = 0.060   // slots/ms — capped so a frame never jumps the whole window
 const FLING_TAU  = 260     // ms; coast distance ≈ v0 · TAU, so larger = more glide / browse
 const VEL_STOP   = 0.0006  // slots/ms; below this the fling hands off to the settle ease
-const COMMIT_VEL = 0.015   // slots/ms; release slower than this commits, faster coasts (click to accept)
 
 interface ThesaurusPopoverProps {
   editor: Editor
@@ -65,7 +63,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // word on commit (the reel card itself tears down instantly; the committed word snaps to its final
   // spot via a decoration). Drives the visible reel "flash out" without overlapping the committed word
   // (an overlap double-images at zoom → stray lines). Cleared after the fade.
-  const [ghosts, setGhosts] = useState<Array<{ top: number; left: number; rowH: number; text: string; color: string; fontFamily: string; fontSize: string }> | null>(null)
+  const [ghosts, setGhosts] = useState<Array<{ top: number; left: number; rowH: number; text: React.ReactNode; color: string; fontFamily: string; fontSize: string }> | null>(null)
 
   useEffect(() => { onCycleChange(!!cycle); if (!cycle) setCommitting(false) }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -131,11 +129,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const el = redWords().find(el => { const p = posOf(el, editor); return p > after && (max === undefined || p < max) })
     if (el) { openCycleForElement(el); return true }; return false
   }
-  function goPrev(before: number): boolean {
-    const el = [...redWords()].reverse().find(el => posOf(el, editor) < before)
-    if (el) { openCycleForElement(el); return true }; return false
-  }
-
   // ── Accept ────────────────────────────────────────────────────────────────
 
   function advanceOrRestore(from: number, advance: boolean) {

@@ -236,7 +236,7 @@ export function OptionsMenu({
 
       {modal && (
         <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
-          {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} onSaveAs={onSaveAs} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} onSaveAsOneDrive={onSaveAsOneDrive} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
+          {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onDone={() => setModal(null)} />}
@@ -262,10 +262,10 @@ function MenuButton({ onClick, children }: { onClick?: () => void; children: Rea
   )
 }
 
-function SavePanel({ onExportBundle, onSave, onSaveAs, folderAvailable, folderName, onSyncOneDrive, onChooseOneDriveFolder, onSaveAsOneDrive, oneDriveAccount, onSyncGoogleDrive, onSaveAsGoogleDrive, onChooseGoogleDriveFolder, googleDriveActive, onDone }: {
-  onExportBundle?: () => void; onSave?: () => void; onSaveAs?: () => void; folderAvailable?: boolean; folderName?: string | null
-  onSyncOneDrive?: () => void; onChooseOneDriveFolder?: () => void; onSaveAsOneDrive?: () => void; oneDriveAccount?: string | null
-  onSyncGoogleDrive?: () => void; onSaveAsGoogleDrive?: () => void; onChooseGoogleDriveFolder?: () => void; googleDriveActive?: boolean; onDone: () => void
+function SavePanel({ onExportBundle, onSave, folderAvailable, folderName, onSyncOneDrive, onChooseOneDriveFolder, oneDriveAccount, onSyncGoogleDrive, onChooseGoogleDriveFolder, googleDriveActive, onDone }: {
+  onExportBundle?: () => void; onSave?: () => void; folderAvailable?: boolean; folderName?: string | null
+  onSyncOneDrive?: () => void; onChooseOneDriveFolder?: () => void; oneDriveAccount?: string | null
+  onSyncGoogleDrive?: () => void; onChooseGoogleDriveFolder?: () => void; googleDriveActive?: boolean; onDone: () => void
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
