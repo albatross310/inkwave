@@ -105,6 +105,23 @@ describe('composeTraceFile / parseTraceFile round-trip', () => {
     expect(back.v).toBe(1)
   })
 
+  it('parseTraceFile accepts old inkwave.studio marker (backwards compat)', () => {
+    const bundle = minBundle({ text: 'Some writing.' })
+    const legacyFile = [
+      'Some writing.',
+      '',
+      '══════════════════════════════════════════════════════════════',
+      '══════ INKWAVE RECORD · verify at inkwave.studio/verify ══════',
+      'Everything below is the structured record.',
+      '══════════════════════════════════════════════════════════════',
+      '',
+      JSON.stringify(bundle, null, 2),
+    ].join('\n')
+    const back = parseTraceFile(legacyFile)
+    expect(back.v).toBe(1)
+    expect(back.exportedAt).toBe(bundle.exportedAt)
+  })
+
   it('parseTraceFile rejects oversized files', () => {
     expect(() => parseTraceFile('x'.repeat(20_000_001))).toThrow('file too large')
   })

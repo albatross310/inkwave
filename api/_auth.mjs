@@ -17,7 +17,7 @@ export async function userFromAuth(authorization) {
     // same Clerk instance is rejected — not just any signature-valid token (audit F5).
     const claims = await verifyToken(token, {
       secretKey,
-      authorizedParties: ['https://iwsolo.me', 'https://www.iwsolo.me', 'https://inkwave.studio', 'https://www.inkwave.studio'],
+      authorizedParties: ['https://inkwave.me', 'https://www.inkwave.me', 'https://iwsolo.me', 'https://www.iwsolo.me', 'https://inkwave.studio', 'https://www.inkwave.studio'],
     })
     return claims?.sub ? { userId: claims.sub } : null
   } catch {
