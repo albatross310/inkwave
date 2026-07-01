@@ -65,8 +65,7 @@ describe('getStems', () => {
   })
 
   it('-tion: strips suffix and adds silent-e form', () => {
-    // 'solution' → base = 'solut' (slice(0,-4) = 'solut')... wait 'solution'.slice(0,-4) = 'solu'
-    // Let's use 'calculation': 11 chars, ends with 'ation' → base = 'calcul'
+    // 'calculation' → base = slice(0,-5) = 'calcul', so: 'calcul', 'calcule', ...
     const stems = getStems('calculation')
     expect(stems).toContain('calcul')
     expect(stems).toContain('calcule')
