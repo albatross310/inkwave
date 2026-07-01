@@ -24,7 +24,7 @@ function csp(nonce: string): string {
     "frame-ancestors 'none'",
     "form-action 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https:`,
-    "connect-src 'self' https://api.stripe.com https://m.stripe.com https://m.stripe.network https://r.stripe.com https://q.stripe.com https://accounts.google.com https://apis.google.com https://www.googleapis.com https://content.googleapis.com https://www.gstatic.com https://*.clerk.accounts.dev https://*.clerk.com https://api.datamuse.com https://mempool.space https://blockstream.info https://login.microsoftonline.com https://graph.microsoft.com https://fonts.googleapis.com https://fonts.gstatic.com https://api.crossref.org https://export.arxiv.org https://eutils.ncbi.nlm.nih.gov https://openlibrary.org",
+    "connect-src 'self' https://api.stripe.com https://m.stripe.com https://m.stripe.network https://r.stripe.com https://q.stripe.com https://accounts.google.com https://apis.google.com https://www.googleapis.com https://content.googleapis.com https://www.gstatic.com https://*.clerk.accounts.dev https://*.clerk.com https://clerk-telemetry.com https://api.datamuse.com https://mempool.space https://blockstream.info https://login.microsoftonline.com https://graph.microsoft.com https://fonts.googleapis.com https://fonts.gstatic.com https://api.crossref.org https://export.arxiv.org https://eutils.ncbi.nlm.nih.gov https://openlibrary.org",
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
