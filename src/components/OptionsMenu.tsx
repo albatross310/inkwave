@@ -199,7 +199,7 @@ export function OptionsMenu({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
       {/* Hidden input: "Open…" clicks it directly so the OS file dialog opens immediately (no drop zone). */}
       <input ref={fileInputRef} type="file" accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
       <button

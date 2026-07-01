@@ -1441,7 +1441,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
                   onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
-                  className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                  className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                   title="Customise toolbar"
                 >
                   <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
@@ -1518,6 +1518,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
+                  style={isTouch ? { maxWidth: '40px' } : undefined}
                   draggable
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}

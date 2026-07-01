@@ -113,6 +113,21 @@ export function StyleBar({ editor, onActivity, phone }: {
     return () => { editor.off('selectionUpdate', upd); editor.off('transaction', upd) }
   }, [editor])
 
+  // Highlight should never extend to newly typed text — clear it from stored marks whenever
+  // the cursor lands anywhere, so typing always starts without an ambient highlight.
+  useEffect(() => {
+    const clearHighlight = () => {
+      const { state } = editor
+      if (!state.selection.empty) return
+      const marks = state.storedMarks ?? state.selection.$from.marks()
+      if (!marks.some((m: { type: { name: string } }) => m.type.name === 'highlight')) return
+      const filtered = marks.filter((m: { type: { name: string } }) => m.type.name !== 'highlight')
+      editor.view.dispatch(state.tr.setStoredMarks(filtered))
+    }
+    editor.on('selectionUpdate', clearHighlight)
+    return () => { editor.off('selectionUpdate', clearHighlight) }
+  }, [editor])
+
   const closeAll = () => { setFontOpen(false); setSizeOpen(false); setFmtOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false) }
 
   useEffect(() => {
