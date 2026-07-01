@@ -184,6 +184,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const tabName = local || cloud || (doc.title ? doc.title.slice(0, 40) : 'Untitled')
     document.title = `Inkwave Solo: ${tabName}`
   }, [doc.title, doc.id, fileName])
+
+  // Swap to a document-style favicon while a studio file is open so browser tabs are
+  // distinguishable from other Inkwave pages (the default is the wave/logo mark).
+  useEffect(() => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+      <rect x="4" y="2" width="18" height="24" rx="2" fill="#f5f0eb" stroke="#5c2d8a" stroke-width="1.5"/>
+      <path d="M19 2l5 5h-4a1 1 0 01-1-1z" fill="#c4a8e0" stroke="#5c2d8a" stroke-width="1"/>
+      <line x1="8" y1="12" x2="18" y2="12" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="8" y1="16" x2="18" y2="16" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="8" y1="20" x2="14" y2="20" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
+    </svg>`
+    const url = `data:image/svg+xml,${encodeURIComponent(svg)}`
+    const existing = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
+    const link: HTMLLinkElement = existing ?? document.createElement('link')
+    const prev = link.href
+    if (!existing) { link.rel = 'icon'; document.head.appendChild(link) }
+    link.type = 'image/svg+xml'
+    link.href = url
+    return () => { link.href = prev }
+  }, [])
+
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)
   // Google Drive sync (Firefox/Safari alternative to OneDrive).

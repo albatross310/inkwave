@@ -28,16 +28,16 @@ const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 
 const HIGHLIGHT_COLORS = [
   { label: 'Red',    color: '#fca5a5' },
+  { label: 'Coral',  color: '#fda4af' },
   { label: 'Orange', color: '#fed7aa' },
-  { label: 'Yellow', color: '#fef08a' },
   { label: 'Peach',  color: '#fde68a' },
+  { label: 'Yellow', color: '#fef08a' },
   { label: 'Green',  color: '#bbf7d0' },
   { label: 'Sage',   color: '#d1fae5' },
   { label: 'Teal',   color: '#99f6e4' },
   { label: 'Blue',   color: '#bae6fd' },
-  { label: 'Coral',  color: '#fda4af' },
+  { label: 'Indigo', color: '#a5b4fc' },
   { label: 'Pink',   color: '#fbcfe8' },
-  { label: 'Purple', color: '#e9d5ff' },
   { label: 'Clear',  color: null },
 ]
 
@@ -66,7 +66,11 @@ function useLongPress(onShortPress: () => void, onLongPress: () => void) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const firedRef = useRef(false)
   return {
-    onPointerDown: () => {
+    // stopPropagation prevents the outer toolbar div's onPointerDown from calling
+    // e.preventDefault(), which on iOS suppresses the subsequent click event (causing
+    // second-press deadlock when the editor is already focused).
+    onPointerDown: (e: React.PointerEvent) => {
+      e.stopPropagation()
       firedRef.current = false
       timerRef.current = setTimeout(() => { firedRef.current = true; onLongPress() }, HOLD_MS)
     },
@@ -91,7 +95,7 @@ export function StyleBar({ editor, onActivity, phone }: {
   const [listOpen,  setListOpen]  = useState(false)
 
   const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
-  const [lastHlColor,  setLastHlColor]  = useState<string | null>('#fef08a')
+  const [lastHlColor,  setLastHlColor]  = useState<string | null>(null)
   const [lastListType, setLastListType] = useState<ListType>('bulletList')
   const [lastAlign,    setLastAlign]    = useState<Align>('left')
   const [lastFont,     setLastFont]     = useState<string>('')
@@ -207,7 +211,10 @@ export function StyleBar({ editor, onActivity, phone }: {
     () => { closeAll(); setSizeOpen(true) },
   )
   const fmtPress   = useLongPress(() => applyFmt(lastFmt),          () => setFmtOpen(true))
-  const hlPress    = useLongPress(() => applyHighlight(lastHlColor), () => setHlOpen(true))
+  const hlPress    = useLongPress(
+    () => { if (lastHlColor !== null) applyHighlight(lastHlColor); else { closeAll(); setHlOpen(true) } },
+    () => setHlOpen(true),
+  )
   const listPress  = useLongPress(() => applyListType(lastListType), () => setListOpen(true))
   const alignPress = useLongPress(() => applyAlign(lastAlign),       () => setAlignOpen(true))
 

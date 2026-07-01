@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
@@ -43,7 +43,6 @@ export function SyncStatus({
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
 
   const zoom = useZoomScale()
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 5000)
@@ -61,8 +60,6 @@ export function SyncStatus({
         padding: hideTrigger ? '0 1rem' : '0 28px',
         zoom: zoom !== 1 ? zoom : undefined,
       }}
-      onMouseEnter={!hideTrigger ? () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true) } : undefined}
-      onMouseLeave={!hideTrigger ? () => { closeTimer.current = setTimeout(() => setOpen(false), 150) } : undefined}
     >
       {/* Backdrop to dismiss panel (both hover and click-opened paths) */}
       {open && (
@@ -127,7 +124,7 @@ export function SyncStatus({
           type="button"
           onClick={() => {
             if (onClick && !synced) onClick()
-            setOpen(o => !o)
+            setOpen(!open)
           }}
           title={tooltip}
           className={compact

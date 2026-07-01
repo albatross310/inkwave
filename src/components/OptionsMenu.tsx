@@ -459,10 +459,10 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   // Portal to body so the backdrop reliably covers the viewport and catches outside clicks (not
   // trapped in the footer's pointer-events/stacking context).
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-end justify-end pb-20 pr-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
-        className="relative bg-white w-full max-w-md p-6 flex flex-col shadow-xl"
+        className="relative bg-white w-full max-w-sm p-6 flex flex-col shadow-xl"
         style={{ border: `1px solid ${INK}bf`, borderRadius: '14px' }}
       >
         <div className="flex items-center justify-between">

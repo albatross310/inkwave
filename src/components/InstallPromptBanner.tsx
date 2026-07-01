@@ -105,9 +105,14 @@ export function InstallPromptBanner({ installPrompt }: { installPrompt: any }) {
 
       {ios ? (
         <div style={{ background: 'rgba(92,45,138,0.06)', borderRadius: '8px', padding: '10px 12px', fontSize: '0.8rem', color: '#4a3f3a', lineHeight: 1.5 }}>
-          Tap the iOS share button&nbsp;
-          <span style={{ display: 'inline-block', padding: '0 3px 1px', background: '#007AFF', color: 'white', borderRadius: 4, fontSize: '0.75rem', verticalAlign: 'middle', lineHeight: '1.4' }}>↑</span>
-          &nbsp;in the browser toolbar, then <strong>Add to Home Screen</strong>
+          Tap the&nbsp;
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 5px', background: '#007AFF', color: 'white', borderRadius: 4, verticalAlign: 'middle' }}>
+            <svg width="10" height="13" viewBox="0 0 10 13" fill="none" aria-hidden="true" style={{ display: 'block' }}>
+              <path d="M5 8V1M5 1L2.5 3.5M5 1L7.5 3.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M1 7V11C1 11.2761 1.22386 11.5 1.5 11.5H8.5C8.77614 11.5 9 11.2761 9 11V7" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+          </span>
+          &nbsp;share button just above the address bar, then <strong>Add to Home Screen</strong>
         </div>
       ) : (
         <button

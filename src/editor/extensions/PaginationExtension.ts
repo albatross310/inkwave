@@ -100,19 +100,27 @@ function compute(view: EditorView, pageH: number): { set: DecorationSet; sig: st
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
       // Parchment left below the last line on this page (its bottom margin), at least MARGIN_BOTTOM.
       const botMargin = Math.max(MARGIN_BOTTOM, pageH - MARGIN_TOP - used)
-      const at = lines[i].pos
-      // ignoreSelection: the gap is a TALL block widget sitting mid-paragraph; without this,
-      // ProseMirror folds its height into cursor/selection coordinate mapping, so a click at the end
-      // of the page-above jumps the caret past the gap to the start of the next page (and edits then
-      // land on the wrong page, which read as "deletions don't reflow"). Ignoring it for selection
-      // keeps the caret on the text it belongs to. stopEvent: clicks on the gap aren't editor input.
-      // side:-1 — the gap is one tall block widget; with side:1 the cursor at the break renders
-      // INSIDE the gap (stuck between pages). side:-1 keeps the cursor on real text (it lands at the
-      // start of the next page at the exact boundary — acceptable; editing/reflow work).
-      decos.push(Decoration.widget(at, () => gapEl(botMargin, MARGIN_TOP), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
-      sig.push(`${at}:${Math.round(botMargin)}`)
-      pageNo++
-      used = 0
+      let at = lines[i].pos
+      // Snap to the nearest top-level block boundary. A widget inside a <p> (mid-paragraph break)
+      // causes layout instability: its height forces line-wrapping inside that <p>, and typing near
+      // the gap changes botMargin, which changes the widget height, which re-wraps — it oscillates.
+      // Between-block positions are stable: the widget sits between <p> elements so paragraph layout
+      // is unaffected by the gap height. `before(1)` gives the position just before the top-level
+      // ancestor block containing `at` (depth 0 = between blocks, which is what we want).
+      try {
+        const $at = doc.resolve(Math.min(at, doc.content.size - 1))
+        if ($at.depth >= 1) at = $at.before(1)
+      } catch { /* keep original at if resolve fails */ }
+      if (at > 0) {
+        // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its
+        // height into cursor/selection coordinate mapping so a click at the page-above end jumps
+        // the caret past the gap. stopEvent: clicks on the gap aren't editor input. side:-1: keeps
+        // the cursor on real text rather than stranding it inside the gap.
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, MARGIN_TOP), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        sig.push(`${at}:${Math.round(botMargin)}`)
+        pageNo++
+        used = 0
+      }
     }
     used += lh
   }
