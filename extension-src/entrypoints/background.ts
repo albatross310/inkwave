@@ -6,7 +6,12 @@
 
 import { detectIdentifier } from '@inkwave/citations/identifiers'
 import { lookupIdentifier } from '@inkwave/citations/lookup'
+import { extractToCsl } from '@inkwave/citations/capture'
+import type { ExtractResponse } from '@inkwave/citations/capture'
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
+
+// The Inkwave app origin — also where the extraction server runs.
+const APP_ORIGIN = 'https://inkwave.me'
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -72,9 +77,47 @@ async function enqueue(item: object, sourceUrl: string): Promise<number> {
 async function captureActiveTab(): Promise<{ ok: boolean; id?: string; queued?: number; error?: string }> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   if (!tab?.url) throw new Error('no active tab')
+
+  // Identifier path (DOI/arXiv/ISBN/PMID) — instant, no AI.
   const id = detectIdentifier(tab.url)
-  if (!id) throw new Error('no identifier found on this page')
-  const item = await lookupIdentifier(id)
-  const n = await enqueue(item, tab.url)
+  if (id) {
+    const item = await lookupIdentifier(id)
+    const n = await enqueue(item, tab.url)
+    return { ok: true, id: item.id, queued: n }
+  }
+
+  // LLM-scrape fallback for blogs and websites.
+  return captureWithLLM(tab.url, tab.id)
+}
+
+async function captureWithLLM(url: string, tabId: number | undefined): Promise<{ ok: boolean; id?: string; queued?: number; error?: string }> {
+  // Fetch the page HTML in the background (background has host_permissions, content scripts don't).
+  let html = ''
+  if (tabId) {
+    try {
+      const [{ result }] = await browser.scripting.executeScript({
+        target: { tabId },
+        func: () => document.documentElement.outerHTML.slice(0, 400_000),
+      })
+      html = (result as string | null) ?? ''
+    } catch {
+      // Page may be restricted (chrome:// etc.) — fall through to server-fetch path.
+    }
+  }
+
+  const res = await fetch(`${APP_ORIGIN}/api/summarise`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ extract: { url, html: html || undefined } }),
+  })
+  if (!res.ok) throw new Error(`extraction server ${res.status}`)
+  const data = await res.json() as ExtractResponse & { error?: string }
+  if (data.error) throw new Error(data.error)
+  if (!data.fields || Object.keys(data.fields).length === 0) {
+    throw new Error('no citable metadata found on this page')
+  }
+
+  const { item } = extractToCsl(data, url)
+  const n = await enqueue(item, url)
   return { ok: true, id: item.id, queued: n }
 }
