@@ -170,13 +170,28 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const ghostRows = captureReelGhosts(replacement)   // freeze-frame target (reel geometry, while open)
     // Preserve the slot's first-written stamp across re-cycles: reuse any existing firstCommitAt in
     // this range; otherwise the TRUE time the word first turned purple (firstNudgeAt); else now.
+    // Also gather prior attrs for history/changes tracking (P3 memory slot persistence).
     let firstCommitAt: string | null = null
+    let priorAttrs: Record<string, unknown> = {}
     editor.state.doc.nodesBetween(from, to, (node) => {
       const m = node.marks.find(mk => mk.type.name === 'scasSlot')
-      if (m && m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
+      if (m) {
+        priorAttrs = m.attrs as Record<string, unknown>
+        if (m.attrs.firstCommitAt) firstCommitAt = String(m.attrs.firstCommitAt)
+      }
     })
     if (!firstCommitAt) firstCommitAt = String(firstNudgeAt?.(word) ?? Date.now())
-    const slotAttrs = { original: word, firstCommitAt }   // `word` holds the original
+    const prevHistory = (Array.isArray(priorAttrs.history) ? priorAttrs.history : []) as string[]
+    const prevChanges = typeof priorAttrs.changes === 'number' ? (priorAttrs.changes as number) : 0
+    const newHistory = changed ? [...prevHistory, replacement].slice(-3) : prevHistory
+    const slotAttrs = {
+      original: word,
+      firstCommitAt,
+      firstWord: (priorAttrs.firstWord as string | null) ?? replacement,
+      lastCommitAt: new Date().toISOString(),
+      history: newHistory.length ? newHistory : null,
+      changes: changed ? prevChanges + 1 : prevChanges,
+    }
     const swap = () => {
       if (changed) {
         if (tabCursorRef.current !== null && from < tabCursorRef.current) tabCursorRef.current += replacement.length - wl
@@ -414,11 +429,40 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // follows the word via the scroll handler). The physical wheel stays free for the anti-cheat gate.
     function onWheel() { /* no-op — trackpad/wheel reel scroll turned off */ }
 
-    // Right-click accepts the centred word and advances (same as Space).
+    // Right-click with cycle open: accept the centred word + advance (same as Space).
+    // Right-click on a committed slot with NO cycle: lock it in (normal colour, un-cyclable).
     function onContextMenu(e: MouseEvent) {
-      if (!cycleRef.current || !overTarget(e.target)) return
+      if (cycleRef.current) {
+        if (!overTarget(e.target)) return
+        e.preventDefault()
+        acceptLanded(reelRef.current, true)
+        return
+      }
+      // No cycle — check for a committed (unlocked) slot under the cursor.
+      const slotEl = (e.target as HTMLElement | null)
+        ?.closest?.('[data-scas-slot]:not([data-scas-locked])') as HTMLElement | null
+      if (!slotEl || !edEl.contains(slotEl)) return
       e.preventDefault()
-      acceptLanded(reelRef.current, true)
+      try {
+        const from = editor.view.posAtDOM(slotEl, 0)
+        const textLen = slotEl.textContent?.length ?? 0
+        if (textLen === 0) return
+        const to = from + textLen
+        const { state } = editor
+        // Find the existing scasSlot mark in this range.
+        let existingAttrs: Record<string, unknown> | null = null
+        state.doc.nodesBetween(from, to, node => {
+          if (existingAttrs) return false
+          const m = node.marks.find(mk => mk.type.name === 'scasSlot')
+          if (m && !m.attrs.locked) { existingAttrs = m.attrs as Record<string, unknown> }
+          return !existingAttrs
+        })
+        if (!existingAttrs) return
+        const lockedAttrs = Object.assign({}, existingAttrs, { locked: true })
+        const markType = state.schema.marks.scasSlot
+        const newMark = markType.create(lockedAttrs)
+        editor.view.dispatch(state.tr.addMark(from, to, newMark))
+      } catch { /* posAtDOM can fail if element left the editor DOM between events */ }
     }
 
     // Select a word's range so it can be deleted — the only delete path now that the ⌫
