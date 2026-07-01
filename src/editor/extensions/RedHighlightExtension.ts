@@ -20,6 +20,7 @@ function debugHighlightAll(): boolean {
 }
 import type { InkwaveDocument } from '../../types/document'
 import { REFLOW_OPEN_MS, REFLOW_EASE, ANIMATE_COMPRESSION, type LineRange } from '../suggestions/ThesaurusPopover/popoverConstants'
+import { slotTimeMode } from '../crossout'
 
 // Plugin state: the decoration set plus the "reveal" anchors (see SCAS_REVEAL_META).
 interface RedHighlightState {
@@ -164,14 +165,25 @@ interface RedWord {
   testOnly: boolean  // visible only because debugAll; NOT in S_v — categorised differently
 }
 
-// Time-of-day or date-of-month for the slot's first-written stamp.
-// Returns "DDMM" — e.g. "0501" for 5 January.
+// Time-of-day bin label or date-of-month for the slot's first-written stamp.
+// In 'time' mode (default): em 5–8:30, mn 8:30–12, ea 12–15:30, la 15:30–17:30, ev 17:30–19:30, nt 19:30–5.
+// In 'date' mode: "DDMM" — e.g. "0501" for 5 January.
 function hhmm(raw: string | null): string | null {
   if (!raw) return null
   const ms = Number(raw)
   if (!Number.isFinite(ms) || ms <= 0) return null
   const d = new Date(ms)
-  return String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0')
+  if (slotTimeMode() === 'date') {
+    return String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0')
+  }
+  const mins = d.getHours() * 60 + d.getMinutes()
+  if (mins < 300)  return 'nt'  // 00:00–05:00
+  if (mins < 510)  return 'em'  // 05:00–08:30
+  if (mins < 720)  return 'mn'  // 08:30–12:00
+  if (mins < 930)  return 'ea'  // 12:00–15:30
+  if (mins < 1050) return 'la'  // 15:30–17:30
+  if (mins < 1170) return 'ev'  // 17:30–19:30
+  return 'nt'                   // 19:30–24:00
 }
 
 function buildDecorations(
