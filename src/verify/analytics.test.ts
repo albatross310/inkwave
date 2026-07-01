@@ -47,4 +47,23 @@ describe('computeAnalytics', () => {
     expect(a.words[0]).toEqual({ t: a.tMin, words: 0 })
     expect(a.words[a.words.length - 1]).toMatchObject({ words: 4 })
   })
+
+  it('reports zero/null for an empty bundle (no snapshots, no receipts)', () => {
+    const empty = {
+      v: 1,
+      document: { id: 'e', title: 'empty', contentJson: { type: 'doc', content: [] } },
+      snapshots: [],
+      receipts: [],
+    } as unknown as ExportBundle
+    const e = computeAnalytics(empty)
+    expect(e.stats.finalWords).toBe(0)
+    expect(e.stats.totalNudges).toBe(0)
+    expect(e.stats.durationMs).toBeNull()
+    expect(e.stats.avgDeliberationMs).toBeNull()
+    expect(e.stats.wpm).toBeNull()
+    expect(e.tMin).toBe(0)
+    expect(e.tMax).toBe(0)
+    expect(e.intervals).toHaveLength(0)
+    expect(e.nudges).toHaveLength(0)
+  })
 })
