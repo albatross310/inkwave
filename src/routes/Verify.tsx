@@ -110,6 +110,9 @@ export function Verify() {
             <Row label="Word nudge consistency" ok={report.nudgeConsistency.ok}
                  detail={report.nudgeConsistency.ok ? `${report.nudgeConsistency.checked} word nudge(s) match the signed sets` : report.nudgeConsistency.reason} />
             <Row label="Friction" detail={report.friction.note} />
+            <Row label="Cadence"
+                 ok={!report.cadence.integrityOk ? false : report.cadence.pasteSuspectBins > 0 ? false : report.cadence.withDigest > 0 ? true : undefined}
+                 detail={report.cadence.note} />
             <Row label="Bitcoin anchoring"
                  ok={report.anchor.tampered > 0 || !report.anchor.timeConsistent ? false
                      : report.anchor.confirmed > 0 ? true : undefined}
