@@ -12,6 +12,7 @@ import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
 import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/resolve'
 import { captureFromInput } from '../citations/capture'
+import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { simpleInText } from '../citations/format'
 import type { CSLItem, FieldSource, IwCitationMeta } from '../types/document'
@@ -81,7 +82,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
   const refMode: RefMode | null = refCfg?.mode ?? null
   const manualKeys = new Set(refCfg?.manualKeys ?? [])
   const query = input.trim()
-  const captureable = /^https?:\/\//i.test(query) || /10\.\d{4,9}\//.test(query) || /arxiv|isbn|pmid/i.test(query)
+  const captureable = !!(detectIdentifier(query) || isUrl(query))
   const entries = query && !captureable ? bibProvider.search(query) : bibProvider.getAll()
 
   async function doCapture(value = query) {
@@ -168,7 +169,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && captureable) { e.preventDefault(); void doCapture() } }}
-              placeholder="Paste a DOI or URL, or search…"
+              placeholder="Paste a DOI, arXiv, URL, or search…"
               className="flex-1 text-xs border border-stone-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#5c2d8a]"
             />
             <button
@@ -194,7 +195,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
               <button
                 key={m} type="button" onClick={() => setMode(m)}
                 className="text-[11px] px-2 py-1 rounded border flex-1"
-                style={refMode === m || (refMode === null && m === 'cited' && false)
+                style={refMode === m
                   ? { background: `${INK}12`, borderColor: INK, color: INK }
                   : { borderColor: '#e7e5e4', color: '#78716c' }}
               >
