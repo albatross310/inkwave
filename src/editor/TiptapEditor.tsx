@@ -63,6 +63,7 @@ import { ReferenceListNode } from './extensions/ReferenceListNode'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
 import { CitationPanel } from '../components/CitationPanel'
 import { loadLibrary } from '../citations/library'
+import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
 import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
@@ -263,6 +264,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     loadLibrary().catch(() => {})
     setCitationStyleBus(doc.citationStyle ?? 'apa')
   }, [doc.citationStyle])
+
+  // Listen for citations handed over by the Inkwave browser extension (Phase 2 bridge).
+  useEffect(() => startExtensionChannel(), [])
 
   // PWA Web Share Target: an app shared "→ Inkwave" arrives as /?url=…&text=…&title=…. Open the
   // citation panel pre-loaded with the shared URL so the user can capture it as a source, then strip
