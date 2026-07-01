@@ -1,6 +1,6 @@
 // Client IP extraction — pure, no side effects. Import via the api/ path (vitest resolves it).
 import { describe, it, expect } from 'vitest'
-// @ts-expect-error — untyped Node-only ESM module in api/
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { clientIp } from '../../api/_ratelimit.mjs'
 
 type Req = { headers?: Record<string, string | undefined> }
