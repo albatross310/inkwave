@@ -27,18 +27,18 @@ const FONTS = [
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 
 const HIGHLIGHT_COLORS = [
-  { label: 'Yellow',   color: '#fef08a' },
-  { label: 'Green',    color: '#bbf7d0' },
-  { label: 'Teal',     color: '#99f6e4' },
-  { label: 'Blue',     color: '#bae6fd' },
-  { label: 'Purple',   color: '#e9d5ff' },
-  { label: 'Pink',     color: '#fbcfe8' },
-  { label: 'Red',      color: '#fca5a5' },
-  { label: 'Orange',   color: '#fed7aa' },
-  { label: 'Peach',    color: '#fde68a' },
-  { label: 'Lavender', color: '#c7d2fe' },
-  { label: 'Sage',     color: '#d1fae5' },
-  { label: 'Clear',    color: null },
+  { label: 'Red',    color: '#fca5a5' },
+  { label: 'Orange', color: '#fed7aa' },
+  { label: 'Yellow', color: '#fef08a' },
+  { label: 'Peach',  color: '#fde68a' },
+  { label: 'Green',  color: '#bbf7d0' },
+  { label: 'Sage',   color: '#d1fae5' },
+  { label: 'Teal',   color: '#99f6e4' },
+  { label: 'Blue',   color: '#bae6fd' },
+  { label: 'Coral',  color: '#fda4af' },
+  { label: 'Pink',   color: '#fbcfe8' },
+  { label: 'Purple', color: '#e9d5ff' },
+  { label: 'Clear',  color: null },
 ]
 
 type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
@@ -154,8 +154,21 @@ export function StyleBar({ editor, onActivity, phone }: {
   }
   function applyHighlight(color: string | null) {
     ping()
-    if (color) { setLastHlColor(color); editor.chain().setHighlight({ color }).run() }
-    else editor.chain().unsetHighlight().run()
+    if (color) {
+      setLastHlColor(color)
+      editor.chain().setHighlight({ color }).run()
+      // Clear highlight from stored marks so typing after highlighted text doesn't inherit it
+      const { state, view } = editor
+      const stored = state.storedMarks
+      if (stored) {
+        const filtered = stored.filter((m: { type: { name: string } }) => m.type.name !== 'highlight')
+        if (filtered.length !== stored.length) {
+          view.dispatch(state.tr.setStoredMarks(filtered))
+        }
+      }
+    } else {
+      editor.chain().unsetHighlight().run()
+    }
     setHlOpen(false)
   }
   function applyAlign(a: Align) { ping(); setLastAlign(a); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
@@ -191,17 +204,18 @@ export function StyleBar({ editor, onActivity, phone }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
-  // Desktop: pill-shaped outlined buttons. Phone: rectangular flush buttons filling bar height.
+  // Desktop: circular badge buttons. Phone: rectangular flush buttons filling bar height.
   const pill = (open: boolean, hl = false): string => {
     if (phone) {
       return `flex-1 flex items-center justify-center self-stretch transition-colors text-sm ${open || hl ? `text-[${INK}] bg-stone-50` : 'text-stone-500'}`
     }
-    return `rounded border px-2 py-1 transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-300 text-stone-500 hover:border-stone-400'}`
+    // Desktop: circular badge — same visual as main toolbar buttons
+    return `flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
   }
 
   const phoneFontSizeClass = `flex-1 flex items-center justify-center self-stretch text-xs text-stone-500 transition-colors`
-  const deskFontClass = `rounded border border-stone-300 px-2 py-1 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs`
-  const deskSizeClass = `flex items-center justify-center rounded border border-stone-300 hover:border-stone-400 transition-colors cursor-pointer px-2 py-1`
+  const deskFontClass = `flex items-center justify-center h-8 px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs min-w-[2.5rem]`
+  const deskSizeClass = `flex items-center justify-center h-8 px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums min-w-[2.5rem]`
 
   return (
     <div
@@ -215,7 +229,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       {/* Font — short-press applies last font, long-press opens picker */}
       <button ref={fontBtnRef} type="button" {...fontPress}
         onClick={e => { e.stopPropagation(); fontPress.onClick() }}
-        className={phone ? phoneFontSizeClass : deskFontClass + ' min-w-[3.5rem]'}
+        className={phone ? phoneFontSizeClass : deskFontClass}
         title="Font (hold to change)">
         {curFont.slice(0, 3)}
       </button>
@@ -241,7 +255,6 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={sizeBtnRef} type="button" {...sizePress}
         onClick={e => { e.stopPropagation(); sizePress.onClick() }}
         className={phone ? phoneFontSizeClass : deskSizeClass}
-        style={phone ? {} : { minWidth: 40 }}
         title="Font size (hold to change)">
         <span className="text-xs select-none">{curSize}</span>
       </button>
@@ -385,7 +398,7 @@ export function StyleBar({ editor, onActivity, phone }: {
         title="Select all"
         className={phone
           ? `flex-1 flex items-center justify-center self-stretch text-stone-500 text-base`
-          : `rounded border px-2 py-1 text-sm border-stone-300 text-stone-500 hover:border-stone-400 whitespace-nowrap`
+          : `flex items-center justify-center w-8 h-8 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-sm`
         }>
         ∀
       </button>

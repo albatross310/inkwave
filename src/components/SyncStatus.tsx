@@ -126,9 +126,8 @@ export function SyncStatus({
         <button
           type="button"
           onClick={() => {
-            if (onClick && !synced) { onClick(); return }
-            // When synced: click toggles the detail panel (in addition to hover)
-            setOpen(!open)
+            if (onClick && !synced) onClick()
+            setOpen(o => !o)
           }}
           title={tooltip}
           className={compact

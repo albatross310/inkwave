@@ -105,9 +105,9 @@ export function InstallPromptBanner({ installPrompt }: { installPrompt: any }) {
 
       {ios ? (
         <div style={{ background: 'rgba(92,45,138,0.06)', borderRadius: '8px', padding: '10px 12px', fontSize: '0.8rem', color: '#4a3f3a', lineHeight: 1.5 }}>
-          Tap the <strong>Share</strong> button&nbsp;
-          <span style={{ display: 'inline-block', fontSize: '1.1rem', verticalAlign: 'middle' }}>⎙</span>
-          &nbsp;then <strong>Add to Home Screen</strong>
+          Tap the iOS share button&nbsp;
+          <span style={{ display: 'inline-block', padding: '0 3px 1px', background: '#007AFF', color: 'white', borderRadius: 4, fontSize: '0.75rem', verticalAlign: 'middle', lineHeight: '1.4' }}>↑</span>
+          &nbsp;in the browser toolbar, then <strong>Add to Home Screen</strong>
         </div>
       ) : (
         <button

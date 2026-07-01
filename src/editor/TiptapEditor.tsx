@@ -81,22 +81,22 @@ const RESAMPLE_INTERVAL_MS = 30_000
 // ─── Toolbar slot customisation ───
 type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page'
 const SLOT_KEY = 'inkwave-toolbar-slots'
-const DEFAULT_SLOTS: [SlotId, SlotId] = ['bib', 'guide']
+const DEFAULT_SLOTS: [SlotId, SlotId, SlotId, SlotId] = ['bib', 'guide', 'math', 'receipt']
 const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page']
 const SLOT_LABELS: Record<SlotId, string> = {
   bib: '‟ References', guide: 'ⓘ Info', math: 'Σ Math', receipt: 'R Provenance', page: 'P Page',
 }
 
-function loadToolbarSlots(): [SlotId, SlotId] {
+function loadToolbarSlots(): [SlotId, SlotId, SlotId, SlotId] {
   try {
     const raw = localStorage.getItem(SLOT_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as unknown
-      if (Array.isArray(parsed) && parsed.length >= 2 &&
-          (ALL_SLOTS as string[]).includes(parsed[0] as string) &&
-          (ALL_SLOTS as string[]).includes(parsed[1] as string) &&
-          parsed[0] !== parsed[1]) {
-        return [parsed[0] as SlotId, parsed[1] as SlotId]
+      if (Array.isArray(parsed) && parsed.length >= 4) {
+        const slice = parsed.slice(0, 4)
+        const valid = slice.every(id => (ALL_SLOTS as string[]).includes(id as string))
+        const unique = new Set(slice).size === 4
+        if (valid && unique) return slice as [SlotId, SlotId, SlotId, SlotId]
       }
     }
   } catch {}
@@ -241,24 +241,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [])
 
   // Toolbar customisation slots
-  const [toolbarSlots, setToolbarSlots] = useState<[SlotId, SlotId]>(loadToolbarSlots)
+  const [toolbarSlots, setToolbarSlots] = useState<[SlotId, SlotId, SlotId, SlotId]>(loadToolbarSlots)
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
-  function updateSlots(newSlots: [SlotId, SlotId]) {
+  function updateSlots(newSlots: [SlotId, SlotId, SlotId, SlotId]) {
     setToolbarSlots(newSlots)
     try { localStorage.setItem(SLOT_KEY, JSON.stringify(newSlots)) } catch {}
   }
 
   function addToSlots(id: SlotId) {
-    const [s1, s2] = toolbarSlots
-    if (s1 === id || s2 === id) return
-    updateSlots([id, s1]) // newest in slot1; old slot1 bumps to slot2; old slot2 drops
-  }
-
-  function swapSlots() {
-    updateSlots([toolbarSlots[1], toolbarSlots[0]])
+    if (toolbarSlots.includes(id)) return
+    updateSlots([id, toolbarSlots[0], toolbarSlots[1], toolbarSlots[2]])
   }
 
   const dragIdRef = useRef<SlotId | null>(null)
@@ -1220,9 +1215,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // On phone with keyboard up + text selected: show ONLY the style bar (not the full toolbar).
   // styleBarOpen keeps the main row alive while the user is actively formatting.
   const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty
+  const selectionOnDesktop = !isTouch && !!(editor?.state.selection && !editor.state.selection.empty)
   const showMainRow = !isTouch || !keyboardUp || styleBarOpen
-  // Style bar auto-expands on phone text selection (no S button toggle needed in that case).
-  const styleBarExpanded = (selectionOnPhone || styleBarOpen) && !!editor
+  // Style bar auto-expands on phone text selection or desktop text selection.
+  const styleBarExpanded = (selectionOnPhone || selectionOnDesktop || styleBarOpen) && !!editor
   const barVisible = showMainRow || selectionOnPhone
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
@@ -1412,7 +1408,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           >
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
                 Auto-expands on phone text-selection even when the main toolbar row is hidden. */}
-            {(showMainRow || selectionOnPhone) && (
+            {(showMainRow || selectionOnPhone || selectionOnDesktop) && (
               <div style={{
                 overflow: 'hidden',
                 maxHeight: styleBarExpanded ? '60px' : '0',
@@ -1428,21 +1424,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Main toolbar row */}
             {showMainRow && (
-            <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
+            <div className={`flex items-center px-2 py-0.5 ${isTouch ? '' : 'gap-0.5'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
                   type="button"
                   onClick={() => setReceiptOpen(o => !o)}
-                  className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                  className="flex-1 flex items-center justify-center min-h-[44px]"
                   style={{ color: '#5c2d8a' }}
                   title="Provenance record"
                 >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-base">◈</span>
+                  <span className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
                 </button>
               )}
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
-              <div className="relative" ref={toolbarPickerRef}>
+              <div className={`relative ${isTouch ? 'flex-1 flex justify-center' : ''}`} ref={toolbarPickerRef}>
                 <button type="button"
                   onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
                   className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
@@ -1454,10 +1450,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     </svg>
                   </span>
                 </button>
-                {toolbarPickerOpen && (() => {
+                {(() => {
                   const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
                   return (
-                    <div className="absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120]"
+                    <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">
@@ -1491,11 +1487,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           draggable
                           onDragStart={() => { dragIdRef.current = id }}
                           onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => {
-                            // guide/math/page manage their own open state (portaled panels) — don't
-                            // close the picker here or the component unmounts and the panel disappears.
-                            if (id !== 'guide' && id !== 'math' && id !== 'page') setToolbarPickerOpen(false)
-                          }}
+                          onClick={() => setToolbarPickerOpen(false)}
                         >
                           {id === 'guide' && <GuideMenu />}
                           {id === 'math' && <MathMenuButton editor={editor} />}
@@ -1526,6 +1518,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
+                  className={isTouch ? 'flex-1 flex items-center justify-center' : ''}
                   draggable
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}
@@ -1533,10 +1526,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     e.preventDefault()
                     const from = dragIdRef.current; dragIdRef.current = null
                     if (!from || from === slotId) return
-                    const [s1, s2] = toolbarSlots
-                    const newSlots: [SlotId, SlotId] = slotIdx === 0
-                      ? [from, s2 === from ? s1 : s2]
-                      : [s1 === from ? s2 : s1, from]
+                    const newSlots = [...toolbarSlots] as typeof toolbarSlots
+                    const fromIdx = newSlots.indexOf(from as SlotId)
+                    if (fromIdx >= 0) newSlots[fromIdx] = slotId  // swap: put old slot where new slot was
+                    newSlots[slotIdx] = from as SlotId
                     updateSlots(newSlots)
                     setToolbarPickerOpen(false)
                   }}
@@ -1570,14 +1563,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 type="button"
                 aria-pressed={styleBarOpen}
                 onClick={() => { const next = !styleBarOpen; setStyleBarOpen(next); if (next) armStyleTimer(); else clearStyleTimer() }}
-                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                className={`${isTouch ? 'flex-1 ' : ''}flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
                   S
                 </span>
               </button>
-              <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
+              <div className={isTouch ? 'flex-1 flex justify-center' : ''}>
+                <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
+              </div>
+              <div className={isTouch ? 'flex-1 flex justify-center' : ''}>
               <OptionsMenu
                 paperRight={paperRight}
                 installPrompt={installPrompt}
@@ -1602,6 +1598,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
               />
+              </div>
               <InstallPromptBanner installPrompt={installPrompt} />
             </div>
             )}
