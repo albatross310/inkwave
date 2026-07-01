@@ -30,4 +30,37 @@ describe('diffWords', () => {
     expect(rebuiltPrev).toBe(prev)
     expect(rebuiltNext).toBe(next)
   })
+
+  it('handles empty prev: every token is an add', () => {
+    const ops = diffWords('', 'hello world')
+    expect(ops.every((o) => o.type === 'add')).toBe(true)
+    expect(diffStats(ops)).toEqual({ added: 2, removed: 0 })
+  })
+
+  it('handles empty next: every token is a del', () => {
+    const ops = diffWords('hello world', '')
+    expect(ops.every((o) => o.type === 'del')).toBe(true)
+    expect(diffStats(ops)).toEqual({ added: 0, removed: 2 })
+  })
+
+  it('handles both sides empty: empty ops array', () => {
+    expect(diffWords('', '')).toHaveLength(0)
+  })
+
+  it('completely different strings: all del then all add', () => {
+    const ops = diffWords('alpha beta', 'gamma delta')
+    expect(ops.some((o) => o.type === 'del')).toBe(true)
+    expect(ops.some((o) => o.type === 'add')).toBe(true)
+    expect(ops.filter((o) => o.type === 'same')).toHaveLength(0)
+  })
+
+  it('preserves trailing whitespace in round-trip', () => {
+    const prev = 'foo  bar  baz'
+    const next = 'foo  qux  baz'
+    const ops = diffWords(prev, next)
+    const rebuiltPrev = ops.filter((o) => o.type !== 'add').map((o) => o.text).join('')
+    const rebuiltNext = ops.filter((o) => o.type !== 'del').map((o) => o.text).join('')
+    expect(rebuiltPrev).toBe(prev)
+    expect(rebuiltNext).toBe(next)
+  })
 })
