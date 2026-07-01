@@ -157,15 +157,15 @@ export function StyleBar({ editor, onActivity, phone }: {
     if (color) {
       setLastHlColor(color)
       editor.chain().setHighlight({ color }).run()
-      // Clear highlight from stored marks so typing after highlighted text doesn't inherit it
-      const { state, view } = editor
-      const stored = state.storedMarks
-      if (stored) {
-        const filtered = stored.filter((m: { type: { name: string } }) => m.type.name !== 'highlight')
-        if (filtered.length !== stored.length) {
-          view.dispatch(state.tr.setStoredMarks(filtered))
-        }
-      }
+      // After applying highlight to a selection, storedMarks is null (range selection has no
+      // stored marks). But when the cursor later collapses to the right edge of highlighted text,
+      // ProseMirror auto-inherits the highlight mark. Override this by setting storedMarks now
+      // to the marks at the cursor position minus highlight, so typing never extends the highlight.
+      const { view } = editor
+      const st = view.state
+      const marksAtPos = st.selection.$from.marks()
+      const filtered = marksAtPos.filter((m: { type: { name: string } }) => m.type.name !== 'highlight')
+      view.dispatch(st.tr.setStoredMarks(filtered))
     } else {
       editor.chain().unsetHighlight().run()
     }

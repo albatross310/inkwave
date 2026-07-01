@@ -1424,13 +1424,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Main toolbar row */}
             {showMainRow && (
-            <div className={`flex items-center px-2 py-0.5 ${isTouch ? '' : 'gap-0.5'}`}>
+            <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
                   type="button"
                   onClick={() => setReceiptOpen(o => !o)}
-                  className="flex-1 flex items-center justify-center min-h-[44px]"
+                  className="flex items-center justify-center min-h-[44px]"
                   style={{ color: '#5c2d8a' }}
                   title="Provenance record"
                 >
@@ -1438,7 +1438,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 </button>
               )}
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
-              <div className={`relative ${isTouch ? 'flex-1 flex justify-center' : ''}`} ref={toolbarPickerRef}>
+              <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
                   onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
                   className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
@@ -1518,7 +1518,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
-                  className={isTouch ? 'flex-1 flex items-center justify-center' : ''}
                   draggable
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}
@@ -1563,17 +1562,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 type="button"
                 aria-pressed={styleBarOpen}
                 onClick={() => { const next = !styleBarOpen; setStyleBarOpen(next); if (next) armStyleTimer(); else clearStyleTimer() }}
-                className={`${isTouch ? 'flex-1 ' : ''}flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
                   S
                 </span>
               </button>
-              <div className={isTouch ? 'flex-1 flex justify-center' : ''}>
-                <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
-              </div>
-              <div className={isTouch ? 'flex-1 flex justify-center' : ''}>
+              <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
               <OptionsMenu
                 paperRight={paperRight}
                 installPrompt={installPrompt}
@@ -1598,7 +1594,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
               />
-              </div>
               <InstallPromptBanner installPrompt={installPrompt} />
             </div>
             )}
