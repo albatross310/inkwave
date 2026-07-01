@@ -1,6 +1,7 @@
 import { reactRouter } from '@react-router/dev/vite'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig, type PluginOption } from 'vite'
+import type { InlineConfig } from 'vitest'
 
 // The /api/* serverless functions (OTS relay, signing service) are Node-only and don't bundle into
 // the browser/SSR build — they run in Vercel functions in prod. `react-router dev` doesn't serve
@@ -102,6 +103,8 @@ const devApi: PluginOption = {
 }
 
 export default defineConfig({
+  // Vitest config. Only scan src/ to avoid git worktrees Claude Code creates under .claude/.
+  test: { include: ['src/**/*.test.{ts,tsx}'] } as InlineConfig,
   plugins: [devApi, reactRouter(), tsconfigPaths()],
   // A unique id per build. The service worker is registered as /sw.js?v=<id> and names its cache
   // after it, so EVERY deploy looks like an SW update → old caches purged + tabs reloaded once →
