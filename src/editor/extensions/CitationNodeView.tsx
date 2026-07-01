@@ -1,12 +1,13 @@
 // React NodeView for CitationNode.
-// Renders the in-text citation from bibProvider (live) or embedded bibliography (offline).
-// Falls back to [?key] when the key is unresolved.
+// Renders the in-text citation with the real CSL engine in the doc's current style.
+// Falls back to simpleInText if citation-js hasn't loaded yet. Falls back to [?key] when unresolved.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
-import { simpleInText } from '../../citations/format'
+import { formatInText, simpleInText } from '../../citations/format'
+import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import type { CSLItem, InkwaveDocument } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
@@ -17,7 +18,7 @@ export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: In
   const [label, setLabel] = useState('')
   const [missing, setMissing] = useState<string[]>([])
 
-  function buildLabel() {
+  const buildLabel = useCallback(async () => {
     const items: CSLItem[] = []
     const miss: string[] = []
     for (const key of attrs.citekeys) {
@@ -30,18 +31,31 @@ export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: In
       setLabel(miss.map(k => `[?${k}]`).join(' '))
       return
     }
-    let text = simpleInText(items)
-    if (attrs.locator) text = text.replace(/\)$/, `, ${attrs.locator})`)
-    if (attrs.prefix) text = `${attrs.prefix} ${text}`
-    if (attrs.suffix) text = text.replace(/\)$/, `${attrs.suffix})`)
+    let text: string
+    try {
+      text = await formatInText(items, getCitationStyle(), {
+        suppressAuthor: attrs.suppressAuthor,
+        locator: attrs.locator ?? undefined,
+        prefix: attrs.prefix ?? undefined,
+        suffix: attrs.suffix ?? undefined,
+      })
+    } catch {
+      // CSL engine not loaded yet — fall back to simple format
+      text = simpleInText(items)
+      if (attrs.locator) text = text.replace(/\)$/, `, ${attrs.locator})`)
+      if (attrs.prefix) text = `${attrs.prefix} ${text}`
+      if (attrs.suffix) text = text.replace(/\)$/, `${attrs.suffix})`)
+    }
     setLabel(text)
-  }
+  }, [attrs])
 
   useEffect(() => {
-    buildLabel()
-    return bibProvider.subscribe(buildLabel)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.attrs])
+    const schedule = () => queueMicrotask(() => void buildLabel())
+    schedule()
+    const unsubBib = bibProvider.subscribe(schedule)
+    const unsubStyle = subscribeCitationStyle(schedule)
+    return () => { unsubBib(); unsubStyle() }
+  }, [buildLabel])
 
   const hasMissing = missing.length > 0
 
