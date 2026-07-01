@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { crossrefToCsl, makeCitekey, tagProvenance } from './cslMap'
+import { crossrefToCsl, arxivToCsl, openLibraryToCsl, makeCitekey, tagProvenance } from './cslMap'
 
 const CROSSREF_MESSAGE = {
   type: 'journal-article',
@@ -44,6 +44,47 @@ describe('makeCitekey', () => {
   })
   it('falls back gracefully with no author/year', () => {
     expect(makeCitekey({ title: 'Solo' }).startsWith('anonnd')).toBe(true)
+  })
+})
+
+describe('arxivToCsl', () => {
+  it('maps arXiv entry fields to CSL', () => {
+    const item = arxivToCsl(
+      { title: 'Attention Is All You Need', authors: ['Ashish Vaswani', 'Noam Shazeer'], published: '2017-06-12T00:00:00Z', id: 'http://arxiv.org/abs/1706.03762v7', doi: '10.48550/arXiv.1706.03762' },
+      'vaswani2017attention',
+    )
+    expect(item.id).toBe('vaswani2017attention')
+    expect(item.type).toBe('article')
+    expect(item.title).toBe('Attention Is All You Need')
+    expect(item.author).toHaveLength(2)
+    expect((item.author![0] as { family: string }).family).toBe('Vaswani')
+    expect(item.issued).toEqual({ 'date-parts': [[2017]] })
+    expect(item.DOI).toBe('10.48550/arXiv.1706.03762')
+  })
+
+  it('omits DOI when not present', () => {
+    const item = arxivToCsl({ title: 'X', authors: [], published: '2020-01-01Z' }, 'x')
+    expect(item.DOI).toBeUndefined()
+  })
+})
+
+describe('openLibraryToCsl', () => {
+  it('maps OpenLibrary record to CSL book', () => {
+    const rec = {
+      title: 'Being and Time',
+      authors: [{ name: 'Martin Heidegger' }],
+      publish_date: '1927',
+      publishers: [{ name: 'Max Niemeyer' }],
+      number_of_pages: 589,
+    }
+    const item = openLibraryToCsl(rec, 'heidegger1927being')
+    expect(item.id).toBe('heidegger1927being')
+    expect(item.type).toBe('book')
+    expect(item.title).toBe('Being and Time')
+    expect(item.author).toHaveLength(1)
+    expect(item.author![0]).toEqual({ family: 'Heidegger', given: 'Martin' })
+    expect(item.issued).toEqual({ 'date-parts': [[1927]] })
+    expect(item.publisher).toBe('Max Niemeyer')
   })
 })
 
