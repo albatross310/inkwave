@@ -45,6 +45,20 @@ describe('makeCitekey', () => {
   it('falls back gracefully with no author/year', () => {
     expect(makeCitekey({ title: 'Solo' }).startsWith('anonnd')).toBe(true)
   })
+  it('uses literal when no family name is present', () => {
+    expect(makeCitekey({ author: [{ literal: 'WHO' }], issued: { 'date-parts': [[2021]] }, title: 'Global Report' })).toBe('who2021global')
+  })
+  it('reads year from issued.raw when date-parts is absent', () => {
+    expect(makeCitekey({ author: [{ family: 'Smith' }], issued: { raw: '2018' }, title: 'Long Paper Title' })).toBe('smith2018long')
+  })
+  it('omits title word when all words are 3 chars or fewer', () => {
+    const key = makeCitekey({ author: [{ family: 'Lee' }], issued: { 'date-parts': [[2022]] }, title: 'On the Art' })
+    expect(key).toBe('lee2022')
+  })
+  it('caps the citekey at 40 characters', () => {
+    const key = makeCitekey({ author: [{ family: 'Abcdefghijklmnopqrstuvwxyzabcde' }], issued: { 'date-parts': [[2020]] }, title: 'Long Title Word' })
+    expect(key.length).toBeLessThanOrEqual(40)
+  })
 })
 
 describe('arxivToCsl', () => {
