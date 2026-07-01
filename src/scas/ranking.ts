@@ -159,7 +159,10 @@ export function getStems(word: string): string[] {
   // -ment  (movement→move)
   if (w.endsWith('ment') && w.length > 6) { add(w.slice(0, -4)); add(w.slice(0, -4) + 'e') }
 
-  // -ation / -tion → base  (organisation→organise, creation→create, action→act)
+  // -ation → base (slice -5): organisation→organis, organise. Works for -ise/-ize roots;
+  // note that -ion appended roots (creation = creat+ion) are NOT correctly reduced here
+  // (the real product ships a curated surface→lemma map — this is that seam).
+  // -tion → base (slice -4): solution→solu, solue. Handles -tion endings not caught above.
   if (w.endsWith('ation') && w.length > 7) {
     const b = w.slice(0, -5)
     add(b); add(b + 'e'); add(b + 'ise'); add(b + 'ize')
