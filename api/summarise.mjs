@@ -32,6 +32,57 @@ async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS, model = MODEL)
   return data.content?.[0]?.text?.trim() ?? ''
 }
 
+// ── Citation extraction (the blog/website path) ───────────────────────────────
+// Strip a page's HTML down to candidate text + the meta tags most likely to carry citation data,
+// so Haiku sees a compact, high-signal input. Regex-based (no DOM in the serverless runtime).
+// Exported for unit testing (the Anthropic call is a thin wrapper; this parsing is the logic).
+export function extractCandidate(html) {
+  const metas = {}
+  const metaRe = /<meta\s+[^>]*?(?:name|property)=["']([^"']+)["'][^>]*?content=["']([^"']*)["'][^>]*>/gi
+  let m
+  while ((m = metaRe.exec(html)) && Object.keys(metas).length < 40) {
+    const key = m[1].toLowerCase()
+    if (/title|author|date|published|site_name|description|type|publisher/.test(key)) metas[key] = m[2]
+  }
+  const titleTag = (/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '').trim()
+  // JSON-LD blocks often carry author/datePublished cleanly.
+  const ld = []
+  const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  while ((m = ldRe.exec(html)) && ld.length < 3) ld.push(m[1].slice(0, 1200))
+  // Visible body text: drop scripts/styles/tags, collapse whitespace, keep the first ~1800 chars.
+  const body = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1800)
+  return { titleTag, metas, ld: ld.join('\n'), body }
+}
+
+async function callClaudeJson(apiKey, prompt, maxTokens = 500) {
+  const raw = await callClaude(apiKey, prompt, maxTokens, DIFF_MODEL) // Haiku 4.5
+  // Be forgiving: pull the first {...} block in case the model adds prose.
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start < 0 || end <= start) throw new Error('no json')
+  return JSON.parse(raw.slice(start, end + 1))
+}
+
+async function extractCitation(apiKey, url, html) {
+  const c = extractCandidate(html)
+  const metaLines = Object.entries(c.metas).map(([k, v]) => `${k}: ${v}`).join('\n')
+  const prompt =
+    `You are extracting bibliographic citation metadata from a web page. Return ONLY a JSON object, no prose.\n` +
+    `Shape: {"itemType": one of "blogPost"|"webpage"|"newsArticle"|"article"|"report"|"video",\n` +
+    `"confidence": "high"|"low",\n` +
+    `"fields": { "title": {"value": string, "quote": string|null}, "author": {"value": string, "quote": string|null},\n` +
+    `"date": {"value": "YYYY-MM-DD or YYYY", "quote": string|null}, "publisher": {"value": string, "quote": string|null} }}\n` +
+    `Rules: "value" is the best reading; "quote" MUST be a verbatim substring of the PAGE TEXT below where you found it, or null if it came from a meta tag / can't be located verbatim. Omit a field entirely if unknown. Set confidence "low" if the page is not a citable article/post or fields are largely missing.\n\n` +
+    `URL: ${url}\nTITLE TAG: ${c.titleTag}\nMETA:\n${metaLines}\nJSON-LD:\n${c.ld}\n\nPAGE TEXT:\n${c.body}`
+  return callClaudeJson(apiKey, prompt, 500)
+}
+
 function buildPrompt(body) {
   if (Array.isArray(body.texts) && body.texts.length > 0) {
     const items = body.texts.map((t, i) => `${i + 1}. ${t.slice(0, 800)}`).join('\n')
@@ -51,6 +102,25 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'object' && req.body ? req.body : JSON.parse(req.body || '{}')
+
+    // Citation extraction mode: { extract: { url, html? } } → { itemType, fields, confidence }.
+    // If html isn't supplied (PWA paste-URL path) the server fetches the page — no CORS problem,
+    // and the page's text never touches the client until the citation is returned.
+    if (body.extract && typeof body.extract === 'object') {
+      const { url, html } = body.extract
+      if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+        res.statusCode = 400; return res.end(JSON.stringify({ error: 'extract needs a url' }))
+      }
+      let pageHtml = typeof html === 'string' ? html : ''
+      if (!pageHtml) {
+        const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })
+        if (!pr.ok) { res.statusCode = 502; return res.end(JSON.stringify({ error: `fetch ${pr.status}` })) }
+        pageHtml = (await pr.text()).slice(0, 400_000)
+      }
+      const result = await extractCitation(apiKey, url, pageHtml)
+      res.setHeader('content-type', 'application/json')
+      return res.end(JSON.stringify(result))
+    }
 
     // Snapshot diff-summary mode: bullet points of what changed between two snapshots.
     if (typeof body.before === 'string' && typeof body.after === 'string') {

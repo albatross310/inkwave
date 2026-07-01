@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Inkwave Citation Capture",
+  "version": "0.1.0",
+  "description": "Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.",
+  "action": {
+    "default_title": "Capture citation to Inkwave",
+    "default_popup": "popup.html"
+  },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://inkwave.me/*",
+    "http://localhost:5173/*",
+    "https://api.crossref.org/*",
+    "https://export.arxiv.org/*",
+    "https://openlibrary.org/*",
+    "https://eutils.ncbi.nlm.nih.gov/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://inkwave.me/*", "http://localhost:5173/*"],
+      "js": ["content-inkwave.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": { "128": "icon-128.png" }
+}

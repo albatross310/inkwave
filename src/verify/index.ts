@@ -23,7 +23,7 @@
 
 import type { ExportBundle } from '../provenance/bundle'
 import type { SignedReceipt, TiptapJSON } from '../types/document'
-import { canonicalize, sha256Hex, bundleHash } from '../provenance/hash'
+import { canonicalize, sha256Hex, bundleHash, bibliographyHash } from '../provenance/hash'
 import { verifyChain, bitmaskToLemmas, PUBLISHED_SIGNING_PK } from '../provenance/receipts'
 import { cadenceDigest, BIN_MS } from '../provenance/cadence'
 import { pmToText } from '../provenance/bundle'
@@ -93,7 +93,16 @@ async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport
     checked++
     const ch = await sha256Hex(canonicalize(s.contentJson))
     if (ch !== s.contentHash) return { ok: false, checked, reason: `snapshot ${s.id}: contentHash mismatch` }
-    const bh = await bundleHash(s.contentHash, s.receipts ?? [])
+    // If the snapshot froze a DISPLAYED bibliography (v:2), recompute its bibHash from the stored
+    // entries+style so a tampered entries array is caught even before OTS anchoring, then fold that
+    // into the bundleHash recompute. Legacy v:1 snapshots (no bibHash) verify unchanged.
+    let bibHashForBundle = s.bibHash
+    if (s.bibliography && s.bibliography.entries.length > 0) {
+      const recomputed = await bibliographyHash(s.bibliography.entries, s.bibliography.style)
+      if (recomputed !== s.bibHash) return { ok: false, checked, reason: `snapshot ${s.id}: bibHash mismatch` }
+      bibHashForBundle = recomputed
+    }
+    const bh = await bundleHash(s.contentHash, s.receipts ?? [], bibHashForBundle)
     if (bh !== s.bundleHash) return { ok: false, checked, reason: `snapshot ${s.id}: bundleHash mismatch` }
     for (const r of s.receipts ?? []) {
       if (genuine.get(r.signature) !== canonicalize(r)) {

@@ -42,7 +42,6 @@ let cslPluginPromise: Promise<void> | null = null
 async function ensureCslPlugin(): Promise<void> {
   if (cslPluginPromise) return cslPluginPromise
   cslPluginPromise = (async () => {
-    await import('@citation-js/plugin-bibtex')
     await import('@citation-js/plugin-csl')
   })()
   return cslPluginPromise

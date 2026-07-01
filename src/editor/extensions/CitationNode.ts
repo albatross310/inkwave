@@ -6,6 +6,8 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { CitationNodeView } from './CitationNodeView'
+import { bibProvider } from '../../citations/bibProvider'
+import { simpleInText } from '../../citations/format'
 
 export interface CitationAttrs {
   citekeys: string[]
@@ -52,8 +54,14 @@ export const CitationNode = Node.create({
     return [{ tag: 'span[data-citation]' }]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['span', mergeAttributes(HTMLAttributes, { 'data-citation': '' }), 0]
+  // Emit a visible, resolved label into static HTML so exports / copy-paste / pmToText don't drop
+  // citations. Uses the sync simple form (CSL is async and unavailable here); the live NodeView
+  // renders the styled form. Falls back to the bare keys when the library isn't resolved.
+  renderHTML({ node, HTMLAttributes }) {
+    const keys = (node.attrs.citekeys as string[]) ?? []
+    const items = keys.map(k => bibProvider.get(k)).filter((x): x is NonNullable<typeof x> => !!x)
+    const label = items.length ? simpleInText(items) : (keys.length ? `(${keys.join('; ')})` : '')
+    return ['span', mergeAttributes(HTMLAttributes, { 'data-citation': '' }), label]
   },
 
   addNodeView() {

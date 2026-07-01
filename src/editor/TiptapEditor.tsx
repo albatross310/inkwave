@@ -59,10 +59,12 @@ import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { CitationNode } from './extensions/CitationNode'
 import { CiteSuggestion } from './extensions/CiteSuggestion'
+import { ReferenceListNode } from './extensions/ReferenceListNode'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
-import { BibPanel } from '../components/BibPanel'
-import { ZoteroSetup } from '../components/ZoteroSetup'
-import { loadPersistedHandle } from '../citations/fileChannel'
+import { CitationPanel } from '../components/CitationPanel'
+import { loadLibrary } from '../citations/library'
+import { startExtensionChannel } from '../citations/extensionChannel'
+import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
 import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
@@ -254,11 +256,31 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // ── Citation / bibliography state ─────────────────────────────────────────
   const [bibPanelOpen, setBibPanelOpen] = useState(false)
   const bibBtnRef = useRef<HTMLButtonElement>(null)
-  const [zoteroSetupOpen, setZoteroSetupOpen] = useState(false)
   const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
+  const [shareCapture, setShareCapture] = useState<string | null>(null)
 
+  // Hydrate the native citation library (OPFS) and seed the render bus with the doc's style.
   useEffect(() => {
-    loadPersistedHandle().catch(() => {})
+    loadLibrary().catch(() => {})
+    setCitationStyleBus(doc.citationStyle ?? 'apa')
+  }, [doc.citationStyle])
+
+  // Listen for citations handed over by the Inkwave browser extension (Phase 2 bridge).
+  useEffect(() => startExtensionChannel(), [])
+
+  // PWA Web Share Target: an app shared "→ Inkwave" arrives as /?url=…&text=…&title=…. Open the
+  // citation panel pre-loaded with the shared URL so the user can capture it as a source, then strip
+  // the params so a reload doesn't re-trigger. The universal (mobile-Chrome-safe) capture route.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const p = new URLSearchParams(window.location.search)
+    const shared = p.get('url') || p.get('text') || ''
+    if (/^https?:\/\//i.test(shared)) {
+      setShareCapture(shared)
+      setBibPanelOpen(true)
+      const clean = window.location.pathname + window.location.hash
+      window.history.replaceState(null, '', clean)
+    }
   }, [])
 
   // Toolbar customisation slots
@@ -369,6 +391,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       LineNumbers,
       CitationNode,
       CiteSuggestion,
+      ReferenceListNode,
       TaskList,
       TaskItem.configure({ nested: true }),
     ],
@@ -1629,23 +1652,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           />
         )}
         {editor && <CiteAutocomplete editor={editor} />}
-        {bibPanelOpen && (
-          <BibPanel
-            doc={docRef.current}
+        {bibPanelOpen && editor && (
+          <CitationPanel
+            editor={editor}
             citationStyle={citationStyle}
             btnRef={bibBtnRef}
+            initialCapture={shareCapture}
+            onInitialCaptureConsumed={() => setShareCapture(null)}
             onStyleChange={s => {
               setCitationStyle(s)
+              setCitationStyleBus(s)
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
               docRef.current = updated
               onDocChange(updated)
               scheduleSave(updated)
             }}
-            onConnectZotero={() => { setBibPanelOpen(false); setZoteroSetupOpen(true) }}
             onClose={() => setBibPanelOpen(false)}
           />
         )}
-        {zoteroSetupOpen && <ZoteroSetup onClose={() => setZoteroSetupOpen(false)} />}
       </div>
     </ComplianceContext.Provider>
   )

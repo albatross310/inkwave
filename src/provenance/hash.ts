@@ -71,7 +71,27 @@ export function contentHash(contentJson: unknown): Promise<string> {
  * The Bitcoin-anchored bundle hash. Commits to the content AND the receipt chain, so a single OTS
  * proof over this attests the whole signed record. `receipts` is `[]` until M3 wires the signing
  * service; the shape is fixed now so hashes computed today verify forever.
+ *
+ * When `bibHash` is supplied (the document has ≥1 DISPLAYED citation) the bundle takes the v:2 form
+ * `{ v:2, contentHash, bibHash, receipts }`, folding the displayed bibliography into the anchored
+ * hash. With no citations `bibHash` is omitted and the v:1 form is preserved byte-identically — so
+ * pre-citation documents and all already-anchored snapshots verify unchanged. See citations spec §12.
  */
-export function bundleHash(content: string, receipts: readonly unknown[] = []): Promise<string> {
-  return hashCanonical({ v: 1, contentHash: content, receipts })
+export function bundleHash(
+  content: string,
+  receipts: readonly unknown[] = [],
+  bibHash?: string,
+): Promise<string> {
+  return bibHash
+    ? hashCanonical({ v: 2, contentHash: content, bibHash, receipts })
+    : hashCanonical({ v: 1, contentHash: content, receipts })
+}
+
+/**
+ * Deterministic hash of the DISPLAYED bibliography. Excludes `generatedAt` (so it changes only when
+ * the actual citation data or style changes) and takes entries in the caller's order — resolve.ts
+ * sorts them by id first. `style` is folded in because it changes the rendered reference list.
+ */
+export function bibliographyHash(entries: readonly unknown[], style?: string): Promise<string> {
+  return hashCanonical({ v: 1, entries, style: style ?? null })
 }
