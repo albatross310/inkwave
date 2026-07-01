@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
+import { extractSlotMemory, type SlotMemory } from '../verify/slotMemory'
 import { ActivityGraph } from '../verify/ActivityGraph'
 import { signingPublicKeyHex } from '../provenance/receipts'
 import { parseTraceFile } from '../provenance/bundle'
@@ -15,12 +16,13 @@ export function Verify() {
   const loc = useLocation()
   const [report, setReport] = useState<VerifyReport | null>(null)
   const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [slotMemory, setSlotMemory] = useState<SlotMemory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState<string | null>(null)
 
   async function run(text: string) {
-    setError(null); setReport(null); setAnalytics(null); setTitle(null); setBusy(true)
+    setError(null); setReport(null); setAnalytics(null); setSlotMemory(null); setTitle(null); setBusy(true)
     try {
       const bundle = parseTraceFile(text)
       if (bundle.v !== 1 || !Array.isArray(bundle.receipts) || !Array.isArray(bundle.snapshots)) {
@@ -29,7 +31,8 @@ export function Verify() {
       setTitle(bundle.document?.title ?? null)
       // Verify against the published key (dev uses the dev placeholder, matching dev-signed bundles).
       setReport(await verifyBundle(bundle, signingPublicKeyHex()))
-      setAnalytics(computeAnalytics(bundle)) // descriptive, derived from the same signed data
+      setAnalytics(computeAnalytics(bundle))
+      if (bundle.document?.contentJson) setSlotMemory(extractSlotMemory(bundle.document.contentJson))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -139,6 +142,60 @@ export function Verify() {
               Drawn from the signed, Bitcoin-anchored record. Words added/deleted are LOWER BOUNDS from
               the snapshot contents — rework between snapshots that cancels out isn't counted. Word counts
               at snapshots are exact.
+            </p>
+          </div>
+        )}
+
+        {slotMemory && slotMemory.total > 0 && (
+          <div className="mt-8">
+            <h2 className="text-lg mb-2" style={{ color: INK }}>Word memory ({slotMemory.total} slot{slotMemory.total !== 1 ? 's' : ''})</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 mb-5">
+              <Stat label="Changed" value={slotMemory.changed} hint={`${Math.round(slotMemory.changed / slotMemory.total * 100)}% of slots`} />
+              <Stat label="Kept original" value={slotMemory.acceptedOriginal} hint="justified or dismissed" />
+              {slotMemory.locked > 0 && <Stat label="Locked in" value={slotMemory.locked} hint="committed final" />}
+              {slotMemory.avgFirstCommitMs != null && (
+                <Stat label="Avg time-to-commit" value={`${(slotMemory.avgFirstCommitMs / 1000).toFixed(1)}s`} hint="kick → first commit" />
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: '#e7e0d4' }}>
+                    <th className="text-left py-1.5 pr-4 font-normal text-xs text-stone-400">Original</th>
+                    <th className="text-left py-1.5 pr-4 font-normal text-xs text-stone-400">Final</th>
+                    <th className="text-left py-1.5 pr-4 font-normal text-xs text-stone-400">Changes</th>
+                    <th className="text-left py-1.5 font-normal text-xs text-stone-400">Time to first commit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {slotMemory.slots.map((s, i) => {
+                    const deliberationMs = s.kickedAt && s.firstCommitAt
+                      ? new Date(s.firstCommitAt).getTime() - new Date(s.kickedAt).getTime()
+                      : null
+                    const unchanged = s.finalWord === s.original
+                    return (
+                      <tr key={i} className="border-b" style={{ borderColor: '#f0ece6' }}>
+                        <td className="py-1.5 pr-4 font-serif" style={{ color: '#8a7a6a' }}>
+                          <span style={{ textDecoration: 'line-through' }}>{s.original}</span>
+                        </td>
+                        <td className="py-1.5 pr-4 font-serif" style={{ color: unchanged ? '#8a7a6a' : INK }}>
+                          {s.finalWord}
+                          {s.locked && <span className="ml-1 text-[10px] text-stone-400">(locked)</span>}
+                        </td>
+                        <td className="py-1.5 pr-4 text-stone-500">{s.changes}</td>
+                        <td className="py-1.5 text-stone-500">
+                          {deliberationMs != null ? `${(deliberationMs / 1000).toFixed(1)}s` : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-stone-400">
+              Derived from slot marks in the hash-bound document content. Original = the kicked word the
+              writer encountered; Final = what remains. Time-to-first-commit shows how long the writer
+              deliberated before their first choice.
             </p>
           </div>
         )}
