@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["wxt/browser"],
+    "paths": {
+      "~citations/*": ["../src/citations/*"]
+    }
+  },
+  "include": [".wxt/types/**", "entrypoints/**", "utils/**"]
+}
