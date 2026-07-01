@@ -8,7 +8,7 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../types/document'
-import { contentHash, bundleHash } from './hash'
+import { contentHash, bundleHash, bibliographyHash } from './hash'
 import { stampBundle, upgradeProof } from './ots'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
@@ -118,8 +118,18 @@ export async function createSnapshotIfChanged(
   const last = snaps[snaps.length - 1]
   if (!force && last && last.contentHash === cHash) return null
 
-  // bundleHash commits to content AND the live-composition receipt chain, so the OTS proof (M2)
-  // anchors the whole signed record to Bitcoin.
+  // Freeze the DISPLAYED bibliography (the mode-resolved cited subset resolve.ts embedded) and hash
+  // it deterministically. Only when there's ≥1 displayed entry — otherwise bibHash stays undefined
+  // and bundleHash keeps its v:1 form (pre-citation docs hash exactly as before). See citations §12.
+  const bib = doc.bibliography
+  const hasBib = !!bib && bib.entries.length > 0
+  const bHash = hasBib ? await bibliographyHash(bib!.entries, doc.citationStyle) : undefined
+  const frozenBib = hasBib
+    ? { ...bib!, style: doc.citationStyle, bibHash: bHash }
+    : undefined
+
+  // bundleHash commits to content, the DISPLAYED bibliography (v:2), AND the live-composition receipt
+  // chain, so the OTS proof (M2) anchors the whole signed record to Bitcoin.
   const snapshot: Snapshot = {
     id: uuidv4(),
     documentId: doc.id,
@@ -129,8 +139,9 @@ export async function createSnapshotIfChanged(
     contentHash: cHash,
     contentJson: doc.contentJson,
     receipts,
-    bundleHash: await bundleHash(cHash, receipts),
+    bundleHash: await bundleHash(cHash, receipts, bHash),
     ots: { status: 'unstamped' },
+    ...(frozenBib ? { bibliography: frozenBib, bibHash: bHash } : {}),
     ...(summary ? { summary } : {}),
     ...(nudgeWord ? { nudgeWord } : {}),
   }

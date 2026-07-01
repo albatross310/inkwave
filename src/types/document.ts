@@ -11,11 +11,30 @@ export interface CSLItem {
   [k: string]: unknown
 }
 
+// Where a citation's metadata came from. 'crossref' = resolved from a DOI (verified);
+// 'ai' = extracted by the LLM from a page (checkable); 'manual' = user-entered.
+// 'library' = mixed/native store; 'zotero-bbt' kept only so old persisted docs still read.
+export type CitationSource = 'library' | 'crossref' | 'ai' | 'manual' | 'zotero-bbt'
+
+// Per-field provenance carried on a CSLItem (via the [k:string] index) under `_iw`.
+export type FieldSource = 'crossref' | 'ai' | 'manual'
+export interface IwFieldMeta {
+  source: FieldSource
+  quote?: string          // verbatim source text (AI path) — powers hover-to-source + changelog
+}
+export interface IwCitationMeta {
+  fields?: Record<string, IwFieldMeta>  // field name → provenance
+  sourceUrl?: string      // origin page/DOI URL
+  addedAt?: string        // ISO — when first saved to the library
+  usedInDoc?: boolean     // convenience mirror; authoritative source is resolve.usedCitekeys
+}
+
 export interface Bibliography {
-  source: 'zotero-bbt'
+  source: CitationSource
   entries: CSLItem[]
   generatedAt: string
-  bibHash?: string
+  style?: string          // CSL style id frozen into a snapshot copy so bibHash is independently recomputable
+  bibHash?: string        // sha256Hex(JCS({ v:1, entries, style })) — deterministic (no generatedAt)
 }
 
 // ─── Core JSON shape for ProseMirror / Tiptap content ────────────────────────
@@ -111,7 +130,12 @@ export interface Snapshot {
   contentHash: string               // sha256Hex(JCS(contentJson))
   contentJson: TiptapJSON           // held by the writer; never transmitted
   receipts?: SignedReceipt[]        // the live-composition (+cadence) chain for this span (M3)
-  bundleHash: string                // sha256Hex(JCS({ v:1, contentHash, receipts: receipts ?? [] }))
+  // The DISPLAYED bibliography frozen at snapshot time (mode-resolved cited subset), and its hash.
+  // Present only when the doc had ≥1 displayed citation; absent → bundle stays the v:1 form so
+  // pre-citation documents hash byte-identically to before. See §3/§12 of the citations spec.
+  bibliography?: Bibliography       // frozen copy (its generatedAt is NOT part of bibHash)
+  bibHash?: string                  // sha256Hex(JCS({ v:1, entries, style }))
+  bundleHash: string                // v:1 {contentHash,receipts} OR v:2 {contentHash,bibHash,receipts} when bibHash present
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
   summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
   nudgeWord?: { from: string; to: string }  // old→new word for 'word-nudge' trigger snapshots

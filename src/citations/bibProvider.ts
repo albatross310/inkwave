@@ -1,11 +1,13 @@
 // Channel-agnostic citation store.
-// Holds Map<citekey, CSLItem> in memory. Both channels (file + BBT HTTP) write here.
-// Components subscribe to refresh events via subscribe().
+// Holds Map<citekey, CSLItem> in memory. The native library channel (OPFS) and the browser
+// extension both write here via upsert/remove/setEntries. Components subscribe to refresh events.
 
 import type { CSLItem } from '../types/document'
 
+export type BibChannel = 'library' | 'extension' | 'none'
+
 export interface BibProviderStatus {
-  channel: 'file' | 'bbt' | 'none'
+  channel: BibChannel
   entries: number
   lastSync?: string
 }
@@ -25,11 +27,29 @@ class BibProviderImpl implements BibProvider {
   private _status: BibProviderStatus = { channel: 'none', entries: 0 }
   private _refreshFn: (() => Promise<void>) | null = null
 
-  setEntries(items: CSLItem[], channel: 'file' | 'bbt'): void {
+  /** Replace the whole library (used when hydrating from the OPFS store on load). */
+  setEntries(items: CSLItem[], channel: Exclude<BibChannel, 'none'> = 'library'): void {
     this.map.clear()
     for (const item of items) this.map.set(item.id, item)
-    this._status = { channel, entries: items.length, lastSync: new Date().toISOString() }
+    this._status = { channel, entries: this.map.size, lastSync: new Date().toISOString() }
     this.notify()
+  }
+
+  /** Insert or replace one entry (extension capture, URL/DOI capture, manual add). */
+  upsert(item: CSLItem, channel: Exclude<BibChannel, 'none'> = 'library'): void {
+    this.map.set(item.id, item)
+    this._status = { channel, entries: this.map.size, lastSync: new Date().toISOString() }
+    this.notify()
+  }
+
+  /** Remove one entry by citekey. Returns true if it existed. */
+  remove(citekey: string): boolean {
+    const had = this.map.delete(citekey)
+    if (had) {
+      this._status = { ...this._status, entries: this.map.size, lastSync: new Date().toISOString() }
+      this.notify()
+    }
+    return had
   }
 
   setRefreshFn(fn: () => Promise<void>): void {
@@ -44,7 +64,8 @@ class BibProviderImpl implements BibProvider {
   get(citekey: string): CSLItem | undefined { return this.map.get(citekey) }
 
   search(query: string): CSLItem[] {
-    const q = query.toLowerCase()
+    const q = query.toLowerCase().trim()
+    if (!q) return this.getAll()
     const hits: Array<{ score: number; item: CSLItem }> = []
     for (const item of this.map.values()) {
       let score = 0
