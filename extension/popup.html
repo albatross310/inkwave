@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 260px; margin: 0; font-family: Georgia, serif; color: #3a3a3a; background: #fbf5ec; }
+    .h { padding: 10px 12px; border-bottom: 1px solid #e7e0d4; font-size: 13px; color: #5c2d8a; }
+    .b { padding: 12px; }
+    button { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #5c2d8a; color: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
+    button:disabled { opacity: .5; }
+    .s { margin-top: 10px; font-size: 12px; min-height: 16px; }
+    .ok { color: #15803d; } .err { color: #b91c1c; }
+    .hint { margin-top: 8px; font-size: 11px; color: #8a8378; }
+  </style>
+</head>
+<body>
+  <div class="h">Inkwave — capture citation</div>
+  <div class="b">
+    <button id="cap">Capture this page</button>
+    <div class="s" id="status"></div>
+    <div class="hint">Journal articles with a DOI capture instantly. Open your Inkwave tab to see them land in your library.</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
