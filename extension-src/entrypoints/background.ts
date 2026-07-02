@@ -8,10 +8,20 @@ import { detectIdentifier } from '@inkwave/citations/identifiers'
 import { lookupIdentifier } from '@inkwave/citations/lookup'
 import { extractToCsl } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
-import { INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
+import { INKWAVE_ORIGINS, INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
 
-// The Inkwave app origin — also where the extraction server runs.
-const APP_ORIGIN = 'https://inkwave.me'
+// Derive the API server origin from whichever Inkwave tab is open.
+// Picks localhost when a dev tab is open so the extension works without a rebuild.
+// Falls back to production when no Inkwave tab is visible.
+async function resolveApiOrigin(): Promise<string> {
+  const tabs = await browser.tabs.query({})
+  for (const tab of tabs) {
+    for (const origin of INKWAVE_ORIGINS) {
+      if (tab.url?.startsWith(origin)) return origin
+    }
+  }
+  return INKWAVE_ORIGINS[0] // production fallback
+}
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -105,7 +115,8 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
     }
   }
 
-  const res = await fetch(`${APP_ORIGIN}/api/summarise`, {
+  const apiOrigin = await resolveApiOrigin()
+  const res = await fetch(`${apiOrigin}/api/summarise`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ extract: { url, html: html || undefined } }),
