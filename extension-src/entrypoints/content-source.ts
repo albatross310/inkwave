@@ -100,6 +100,14 @@ function existsInVisibleText(needle: string): boolean {
   try { return normNode(document.body.innerText).includes(normed) } catch { return false }
 }
 
+// Multi-author values ("Tyler Graham, Katie Collins" / "Tyler Graham and Katie Collins") rarely
+// appear contiguously in the page — each author sits in its own byline card. Offer the whole value
+// first, then each individual author, so hover can at least snap to the primary author.
+function authorCandidates(value: string): string[] {
+  const parts = value.split(/\s*(?:,|;|&|\band\b)\s*/i).map(s => s.trim()).filter(s => s.length >= 3)
+  return parts.length > 1 ? [value, ...parts] : [value]
+}
+
 // For date values the AI returns ISO format (2017-08-28) but pages show
 // "August 28, 2017" etc. Try several common renderings before giving up.
 function dateSearchCandidates(value: string): string[] {
@@ -176,14 +184,17 @@ function showCapturePanel(capture: CaptureMsg) {
   const verifyQuote  = new Map<string, string>()
   for (const [key, f] of Object.entries(capture.fields)) {
     if (!f.value) continue
-    // The stored verifyQuote MUST be a string that appears in VISIBLE text, or hover can't highlight
-    // it (highlightQuote skips <script>/meta). So prefer a visible-text form; only fall back to the
-    // meta/title/JSON-LD check for the ✓/◎ badge, storing '' so hover is a harmless no-op.
-    const cands = (key === 'date' || key === 'accessed')
-      ? dateSearchCandidates(f.value) : [f.value]
+    // The stored verifyQuote drives hover-highlight. Prefer a form present in VISIBLE text (so hover
+    // definitely works). If a value only verifies via meta/title/JSON-LD at build time, still store
+    // the VALUE (not '') so hover RE-ATTEMPTS against the live DOM — CNET/YouTube bylines often
+    // hydrate after this snapshot; highlightQuote no-ops gracefully if the text truly isn't there.
+    const cands = (key === 'date' || key === 'accessed') ? dateSearchCandidates(f.value)
+      : key === 'author' ? authorCandidates(f.value)
+      : [f.value]
     if (isOembed) {
-      // oEmbed data is authoritative (platform-supplied). Content is in closed shadow DOM → no-op hover.
-      verifySource.set(key, 'ai'); verifyQuote.set(key, '')
+      // Platform-authoritative. YouTube renders title + channel into the light DOM (highlightable);
+      // publisher/date live in hidden/shadow UI → store '' (✓ badge, no-op hover).
+      verifySource.set(key, 'ai'); verifyQuote.set(key, existsInVisibleText(f.value) ? f.value : '')
     } else if (f.quote && existsInVisibleText(f.quote)) {
       verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)          // ✓ highlightable
     } else {
@@ -191,9 +202,9 @@ function showCapturePanel(capture: CaptureMsg) {
       if (inText) {
         verifySource.set(key, 'auto'); verifyQuote.set(key, inText)        // ◎ highlightable
       } else if (f.quote && existsOnPage(f.quote)) {
-        verifySource.set(key, 'ai'); verifyQuote.set(key, '')             // ✓ verified, not highlightable
+        verifySource.set(key, 'ai'); verifyQuote.set(key, f.value)        // ✓ verified; hover re-tries the value
       } else if (cands.some(existsOnPage)) {
-        verifySource.set(key, 'auto'); verifyQuote.set(key, '')           // ◎ verified, not highlightable
+        verifySource.set(key, 'auto'); verifyQuote.set(key, f.value)      // ◎ verified; hover re-tries the value
       }
     }
   }
