@@ -15,6 +15,23 @@ const FIELD_LABELS: Record<string, string> = {
   publisher: 'Publisher / Journal', URL: 'URL',
 }
 
+const STATUS_KEY = 'inkwave:popupStatus'
+
+// Restore last status message so reopening the popup shows what happened.
+function restoreStatus() {
+  try {
+    const saved = sessionStorage.getItem(STATUS_KEY)
+    if (!saved) return
+    const { cls, text } = JSON.parse(saved) as { cls: string; text: string }
+    statusEl.className = cls
+    statusEl.textContent = text
+  } catch { /* ignore */ }
+}
+
+function saveStatus(cls: string, text: string) {
+  try { sessionStorage.setItem(STATUS_KEY, JSON.stringify({ cls, text })) } catch { /* ignore */ }
+}
+
 // On popup open: check if the current tab has a recently-captured citation with AI quotes to show.
 async function loadCurrentCapture() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
@@ -70,25 +87,32 @@ function renderFields(item: CslItem, tabId: number | undefined) {
 btn.addEventListener('click', () => {
   btn.disabled = true
   statusEl.className = 's'
-  statusEl.textContent = 'Looking up…'
+  statusEl.textContent = 'Scraping page…'
+  saveStatus('s', 'Scraping page…')
 
   browser.runtime.sendMessage({ type: 'inkwave:capture' }).then((res: unknown) => {
     btn.disabled = false
     const r = res as { ok: boolean; id?: string; queued?: number; error?: string } | null
     if (r?.ok) {
+      const msg = `Captured — open Inkwave to use it.`
       statusEl.className = 's ok'
-      statusEl.textContent = `Captured "${r.id}". Open Inkwave to use it.`
-      // Re-check for newly captured AI fields.
+      statusEl.textContent = msg
+      saveStatus('s ok', msg)
       void loadCurrentCapture()
     } else {
+      const msg = r?.error || 'Nothing citable found on this page.'
       statusEl.className = 's err'
-      statusEl.textContent = r?.error || 'Nothing citable found on this page.'
+      statusEl.textContent = msg
+      saveStatus('s err', msg)
     }
   }).catch((e: Error) => {
     btn.disabled = false
+    const msg = e.message || 'Extension error.'
     statusEl.className = 's err'
-    statusEl.textContent = e.message || 'Extension error.'
+    statusEl.textContent = msg
+    saveStatus('s err', msg)
   })
 })
 
+restoreStatus()
 void loadCurrentCapture()

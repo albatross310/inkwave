@@ -77,9 +77,13 @@ async function enqueue(item: object, sourceUrl: string): Promise<number> {
     t.url && new RegExp('^' + pat.replace('*', '.*')).test(t.url)
   ))
   for (const t of inkwaveTabs) {
-    if (t.id) {
-      browser.tabs.sendMessage(t.id, { type: 'inkwave:flush' }).catch(() => {})
-    }
+    if (!t.id) continue
+    // Inject content script if the tab was open before the extension loaded/reloaded.
+    await browser.scripting.executeScript({
+      target: { tabId: t.id },
+      files: ['content-inkwave.js'],
+    }).catch(() => {})
+    browser.tabs.sendMessage(t.id, { type: 'inkwave:flush' }).catch(() => {})
   }
   return q.length
 }
