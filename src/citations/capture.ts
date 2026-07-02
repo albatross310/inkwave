@@ -27,6 +27,7 @@ const ITEMTYPE_CSL: Record<string, string> = {
   article: 'article-magazine',
   report: 'report',
   video: 'video',
+  book: 'book',
 }
 
 /** @internal exported for unit tests only */

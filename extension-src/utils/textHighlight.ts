@@ -145,8 +145,17 @@ export function highlightQuote(quote: string): boolean {
       scrollRange.setEnd(segs[segs.length - 1].node, segs[segs.length - 1].rawEnd)
       const rect = scrollRange.getBoundingClientRect()
       const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      // Vertical: always centre. Horizontal: only when the match is off-screen left/right (e.g. a
+      // zoomed-in page overflows the viewport width) — otherwise keep the current x so we don't jerk
+      // sideways on a normally-visible match.
+      const offRight = rect.right > window.innerWidth
+      const offLeft = rect.left < 0
+      const left = (offLeft || offRight)
+        ? Math.max(0, window.scrollX + rect.left - window.innerWidth / 2 + rect.width / 2)
+        : window.scrollX
       window.scrollTo({
         top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 2),
+        left,
         behavior: motionOk ? 'smooth' : 'auto',
       })
     } catch { /* scroll is best-effort */ }

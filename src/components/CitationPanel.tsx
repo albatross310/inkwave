@@ -734,11 +734,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         {iw?.deadUrl && <span className="text-[9px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
                         {changelog.length > 0 && (
                           <button type="button" onClick={() => toggleExpand(item.id)}
-                            className="text-[9px] text-stone-400 hover:text-[#5c2d8a]">
-                            {open ? '▾' : '▸'} {changelog.length} change{changelog.length > 1 ? 's' : ''}
+                            title="Show the correction history (old → new) for this citation"
+                            className="text-[9px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+                            {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
-                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-300">checked {relTime(iw.lastVerified)}</span>}
+                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">

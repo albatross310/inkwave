@@ -145,7 +145,7 @@ async function extractCitation(apiKey, url, html) {
     `You are a precise bibliographic metadata extractor. Given a web page, return ONLY a JSON object — no prose, no markdown fences.\n\n` +
     `Required shape:\n` +
     `{\n` +
-    `  "itemType": "blogPost" | "webpage" | "newsArticle" | "article" | "report" | "video",\n` +
+    `  "itemType": "blogPost" | "webpage" | "newsArticle" | "article" | "report" | "video" | "book",\n` +
     `  "confidence": "high" | "low",\n` +
     `  "fields": {\n` +
     `    "title":     { "value": string, "quote": string | null },\n` +
@@ -162,7 +162,7 @@ async function extractCitation(apiKey, url, html) {
     `5. "quote": a verbatim substring of PAGE TEXT confirming the value. Set null if the value came only from a meta/JSON-LD tag with no matching visible text.\n` +
     `6. Omit a field entirely if genuinely unknown — do not guess.\n` +
     `7. Set confidence "low" only if fewer than 2 fields are found OR the page is clearly not a citable document.\n` +
-    `8. "itemType" should be "newsArticle" for journalism, "blogPost" for personal/company blogs, "video" for YouTube/Vimeo, "report" for white-papers/PDFs, "article" for magazine/academic pieces without DOI.\n\n` +
+    `8. "itemType" should be "newsArticle" for journalism, "blogPost" for personal/company blogs, "video" for YouTube/Vimeo, "book" for a book / book-store / library-catalogue / Google Books page (publisher = the press, date = the edition's publication year), "report" for white-papers/PDFs, "article" for magazine/academic pieces without DOI.\n\n` +
     `URL: ${url}\n` +
     `TITLE TAG: ${c.titleTag}\n` +
     `META TAGS:\n${metaLines}\n` +

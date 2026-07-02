@@ -253,7 +253,7 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.innerHTML = `
     <div class="iwcp-header">
       <div class="iwcp-header-top">
-        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.1</span></span>
+        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.2</span></span>
         <button class="iwcp-close" aria-label="Dismiss">×</button>
       </div>
       <div class="iwcp-type-row">
@@ -473,7 +473,19 @@ function showCapturePanel(capture: CaptureMsg) {
 
   // Publisher field: hover outlines the real logo element on the page.
   const pubLi = panel.querySelector<HTMLElement>('[data-field-key="publisher"]')
-  if (pubLi && pubLogo.el) {
+  const pubValue = capture.fields.publisher?.value ?? ''
+  // Prefer highlighting the publisher's NAME where it appears on the page (a book's press on a
+  // Google Books/store page is text, not the site logo). Only fall back to outlining the site logo
+  // when the publisher name isn't visible text — i.e. the publisher really is the site brand
+  // (news/blog). This stops a book's publisher hover from snapping to an unrelated site logo.
+  if (pubLi && pubValue && existsInVisibleText(pubValue)) {
+    pubLi.dataset.quote = pubValue
+    pubLi.style.cursor = 'pointer'
+    pubLi.addEventListener('mouseenter', () => highlightQuote(pubValue))
+    pubLi.addEventListener('focus',      () => highlightQuote(pubValue))
+    pubLi.addEventListener('mouseleave', () => clearHighlight())
+    pubLi.addEventListener('blur',       () => clearHighlight())
+  } else if (pubLi && pubLogo.el) {
     const logoEl = pubLogo.el
     pubLi.style.cursor = 'pointer'
     pubLi.addEventListener('mouseenter', () => {
