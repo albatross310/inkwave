@@ -113,9 +113,8 @@ export function highlightQuote(quote: string): boolean {
     const gStart = match.index
     const gEnd = gStart + match[0].length
 
-    // Wrap the matched portion of every text node it spans. Forward order is safe: wrapping node N
-    // splits only node N's text; later nodes keep their identity + offsets.
-    const marks: HTMLElement[] = []
+    // Resolve the match to concrete DOM offsets across every text node it spans.
+    const segs: Array<{ node: Text; rawStart: number; rawEnd: number }> = []
     for (const n of nodes) {
       if (n.end <= gStart || n.start >= gEnd) continue
       const ls = Math.max(gStart, n.start) - n.start   // normalised offsets within this node
@@ -124,29 +123,42 @@ export function highlightQuote(quote: string): boolean {
       const rawStart = n.map[ls]
       const rawEnd = n.map[le]
       if (rawStart == null || rawEnd == null || rawStart >= rawEnd) continue
+      segs.push({ node: n.node, rawStart, rawEnd })
+    }
+    if (!segs.length) return false
+
+    // Scroll FIRST, independent of wrapping — a found match must always "snap" even if the colour
+    // wrap hits an edge case. Window scroll (the site's own scroll container would swallow
+    // scrollIntoView).
+    try {
+      const scrollRange = document.createRange()
+      scrollRange.setStart(segs[0].node, segs[0].rawStart)
+      scrollRange.setEnd(segs[segs.length - 1].node, segs[segs.length - 1].rawEnd)
+      const rect = scrollRange.getBoundingClientRect()
+      const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      window.scrollTo({
+        top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 2),
+        behavior: motionOk ? 'smooth' : 'auto',
+      })
+    } catch { /* scroll is best-effort */ }
+
+    // Colour: wrap each segment in a CSSOM-styled span. Forward order is safe — wrapping node N
+    // splits only node N's text; later nodes keep their identity + offsets.
+    const marks: HTMLElement[] = []
+    for (const s of segs) {
       try {
         const r = document.createRange()
-        r.setStart(n.node, rawStart)
-        r.setEnd(n.node, rawEnd)
+        r.setStart(s.node, s.rawStart)
+        r.setEnd(s.node, s.rawEnd)
         const mark = document.createElement('span')
         mark.className = 'inkwave-source-mark'
         // Inline CSSOM styles — exempt from page CSP, and paint reliably from the isolated world.
         mark.style.cssText = 'background-color:rgba(92,45,138,0.9);color:#fff;border-radius:2px;box-shadow:0 0 0 2px rgba(92,45,138,0.9)'
         r.surroundContents(mark)
         marks.push(mark)
-      } catch { /* skip nodes that resist wrapping (e.g. partial-boundary edge cases) */ }
+      } catch { /* skip nodes that resist wrapping */ }
     }
-    if (!marks.length) return false
     activeMarks = marks
-
-    // Scroll the first mark to the middle of the viewport (window scroll — the site's own scroll
-    // container would swallow scrollIntoView).
-    const rect = marks[0].getBoundingClientRect()
-    const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    window.scrollTo({
-      top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 2),
-      behavior: motionOk ? 'smooth' : 'auto',
-    })
     return true
   } catch {
     return false

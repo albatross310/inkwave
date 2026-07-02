@@ -88,6 +88,18 @@ function existsOnPage(needle: string): boolean {
   } catch { return false }
 }
 
+// Like existsOnPage but ONLY the truly visible, highlightable rendering: document.body.innerText
+// (which includes the open-shadow-DOM flattened tree). Crucially it does NOT consult textContent
+// (that leaks <script> JSON-LD — e.g. "datePublished":"2026-06-24" — so an ISO date "exists" but
+// isn't visible), nor title/meta. A value that passes HERE is guaranteed findable by highlightQuote,
+// so it can be safely used as the hover quote.
+function existsInVisibleText(needle: string): boolean {
+  if (!needle || needle.length < 3) return false
+  const normed = normText(needle)
+  if (!normed) return false
+  try { return normNode(document.body.innerText).includes(normed) } catch { return false }
+}
+
 // For date values the AI returns ISO format (2017-08-28) but pages show
 // "August 28, 2017" etc. Try several common renderings before giving up.
 function dateSearchCandidates(value: string): string[] {
@@ -164,17 +176,25 @@ function showCapturePanel(capture: CaptureMsg) {
   const verifyQuote  = new Map<string, string>()
   for (const [key, f] of Object.entries(capture.fields)) {
     if (!f.value) continue
+    // The stored verifyQuote MUST be a string that appears in VISIBLE text, or hover can't highlight
+    // it (highlightQuote skips <script>/meta). So prefer a visible-text form; only fall back to the
+    // meta/title/JSON-LD check for the ✓/◎ badge, storing '' so hover is a harmless no-op.
+    const cands = (key === 'date' || key === 'accessed')
+      ? dateSearchCandidates(f.value) : [f.value]
     if (isOembed) {
-      // oEmbed data is authoritative (from the platform) — mark as confirmed.
-      // Empty quote: hover is a no-op (YouTube content lives in closed shadow DOM, not highlightable).
+      // oEmbed data is authoritative (platform-supplied). Content is in closed shadow DOM → no-op hover.
       verifySource.set(key, 'ai'); verifyQuote.set(key, '')
-    } else if (f.quote && existsOnPage(f.quote)) {
-      verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)
+    } else if (f.quote && existsInVisibleText(f.quote)) {
+      verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)          // ✓ highlightable
     } else {
-      const candidates = (key === 'date' || key === 'accessed')
-        ? dateSearchCandidates(f.value) : [f.value]
-      const found = candidates.find(existsOnPage)
-      if (found) { verifySource.set(key, 'auto');  verifyQuote.set(key, found) }
+      const inText = cands.find(existsInVisibleText)
+      if (inText) {
+        verifySource.set(key, 'auto'); verifyQuote.set(key, inText)        // ◎ highlightable
+      } else if (f.quote && existsOnPage(f.quote)) {
+        verifySource.set(key, 'ai'); verifyQuote.set(key, '')             // ✓ verified, not highlightable
+      } else if (cands.some(existsOnPage)) {
+        verifySource.set(key, 'auto'); verifyQuote.set(key, '')           // ◎ verified, not highlightable
+      }
     }
   }
 
