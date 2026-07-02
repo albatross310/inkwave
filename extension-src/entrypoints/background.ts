@@ -9,7 +9,9 @@ import { lookupIdentifier } from '@inkwave/citations/lookup'
 import { extractToCsl, parseAuthor, parseDate } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
-import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY } from '../utils/constants'
+import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY } from '../utils/constants'
+
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
 
 // Derive the API server origin from open Inkwave tabs.
 // Prefers localhost (dev) over production so the extension hits the right server
@@ -193,6 +195,19 @@ async function enqueue(item: object, sourceUrl: string, fields?: Record<string, 
   const q: object[] = (store[QUEUE_KEY] as object[]) ?? []
   q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now(), fields, confidence })
   await browser.storage.local.set({ [QUEUE_KEY]: q })
+  // Write to history so popup can show "Already in library" after the queue is flushed.
+  const hStore = await browser.storage.local.get(HISTORY_KEY)
+  const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
+  const r = item as Record<string, unknown>
+  const type = String(r.type ?? 'webpage')
+  const required = REQUIRED_BY_TYPE[type] ?? []
+  const missingRequired = required.filter(f => {
+    if (f === 'year') return !(r.issued as { 'date-parts'?: number[][] } | undefined)?.['date-parts']?.[0]?.[0]
+    return !(fields as Record<string, { value?: string }>)?.[f]?.value && !r[f]
+  })
+  const entry: HistoryEntry = { id: String(r.id ?? ''), sourceUrl, type, title: String(r.title ?? ''), at: Date.now(), missingRequired }
+  const next = [entry, ...hist.filter(h => h.sourceUrl !== sourceUrl)].slice(0, 50)
+  await browser.storage.local.set({ [HISTORY_KEY]: next })
   // Poke any open Inkwave tab to flush immediately.
   const tabs = await browser.tabs.query({})
   const inkwaveTabs = tabs.filter(t => INKWAVE_URL_PATTERNS.some(pat =>

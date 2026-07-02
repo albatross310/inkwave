@@ -100,10 +100,12 @@ function showCapturePanel(capture: CaptureMsg) {
       ${(capture.missingRequired ?? []).map(key => `
         <label class="iwcp-fill-row">
           <span class="iwcp-fill-label">${esc(FIELD_LABELS[key] ?? key)}</span>
-          <input class="iwcp-fill-input" name="${esc(key)}" placeholder="${esc(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off" />
+          <input class="iwcp-fill-input" name="${esc(key)}" placeholder="${esc(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off"
+            style="all:unset;box-sizing:border-box;display:block;width:100%;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(92,45,138,0.25);border-radius:5px;padding:3px 7px;background:#fff;color:#3a3a3a" />
         </label>`).join('')}
       <div class="iwcp-fill-footer">
-        <button type="submit" class="iwcp-fill-save">Save to library</button>
+        <button type="submit" class="iwcp-fill-save"
+          style="all:unset;box-sizing:border-box;display:inline-block;margin:0;padding:3px 10px;background:#5c2d8a;color:#fff;border-radius:5px;font-size:10px;font-family:Georgia,serif;cursor:pointer;line-height:1.5;white-space:nowrap">Save to library</button>
         <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
       </div>
     </form>` : ''}
@@ -336,23 +338,25 @@ function injectStyles(): void {
       display: flex;
       align-items: center;
       gap: 7px;
-      margin-top: 2px;
+      margin: 3px 0 0 0;
+      padding: 0;
     }
     .iwcp-fill-save {
+      display: inline-block;
+      margin: 0;
+      padding: 3px 9px;
       background: #5c2d8a;
       color: #fff;
       border: none;
       border-radius: 5px;
-      padding: 3px 9px;
       font-size: 10px;
       font-family: Georgia, serif;
       cursor: pointer;
+      line-height: 1.4;
     }
-    .iwcp-fill-save:disabled { opacity: 0.5; }
+    .iwcp-fill-save:disabled { opacity: 0.5; cursor: default; }
     .iwcp-fill-save:hover:not(:disabled) { background: #4a2270; }
-    .iwcp-fill-status {
-      font-size: 10px;
-    }
+    .iwcp-fill-status { font-size: 10px; margin: 0; }
   `
   document.head?.appendChild(style)
 }

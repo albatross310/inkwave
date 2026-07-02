@@ -1,4 +1,4 @@
-import { QUEUE_KEY } from '../../utils/constants'
+import { QUEUE_KEY, HISTORY_KEY } from '../../utils/constants'
 import { REQUIRED_BY_TYPE, FIELD_LABELS, ITEM_TYPE_LABELS } from '@inkwave/citations/requiredFields'
 import type { CaptureMsg } from '../background'
 
@@ -41,13 +41,38 @@ function saveStatus(cls: string, text: string) {
 // currentCapture is populated if this page is already in the queue.
 let currentCapture: CaptureMsg | null = null
 
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
+
 async function loadCurrentCapture() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   if (!tab?.url) return
-  const store = await browser.storage.local.get(QUEUE_KEY)
-  const q: QueueEntry[] = (store[QUEUE_KEY] as QueueEntry[]) ?? []
+
+  const [qStore, hStore] = await Promise.all([
+    browser.storage.local.get(QUEUE_KEY),
+    browser.storage.local.get(HISTORY_KEY),
+  ])
+  const q: QueueEntry[] = (qStore[QUEUE_KEY] as QueueEntry[]) ?? []
+  const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
+
   const match = [...q].reverse().find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
-  if (!match) return
+
+  if (!match) {
+    // Queue entry flushed — check history for a lightweight "already in library" indicator.
+    const h = hist.find(e => tab.url?.startsWith(e.sourceUrl.split('?')[0]))
+    if (!h) return
+    const typeLabel = ITEM_TYPE_LABELS[h.type] ?? h.type
+    alreadyEl.style.display = 'block'
+    alTypeEl.textContent = typeLabel + ' · In Inkwave library'
+    const missingLabels = h.missingRequired.map(f => FIELD_LABELS[f] ?? f)
+    if (missingLabels.length) {
+      alMissingEl.style.display = 'block'
+      alMissingEl.textContent = `Still missing: ${missingLabels.join(', ')}`
+    }
+    hintEl.style.display = 'none'
+    // No fields to show on page (queue cleared), so hide the Show on page button.
+    showPanelBtn.style.display = 'none'
+    return
+  }
 
   const item = match.item
   const fields = (match.fields ?? item._iw?.fields ?? {}) as Record<string, FieldEntry>

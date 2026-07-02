@@ -9,8 +9,9 @@
 
 import { rateLimit, clientIp } from './_ratelimit.mjs'
 
-const MODEL = 'claude-sonnet-4-6'       // paragraph summaries
-const DIFF_MODEL = 'claude-haiku-4-5-20251001'  // diff summaries (cheap, sufficient)
+const MODEL = 'claude-sonnet-4-6'              // paragraph summaries + citation extraction
+const DIFF_MODEL = 'claude-haiku-4-5-20251001' // diff summaries (cheap, sufficient)
+const EXTRACT_MODEL = 'claude-sonnet-4-6'      // citation extraction: accuracy > cost
 const MAX_TOKENS = 80
 
 async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS, model = MODEL) {
@@ -44,27 +45,28 @@ export function extractCandidate(html) {
   const attrKey = /(?:name|property)=["']([^"']+)["']/i
   const attrContent = /content=["']([^"']*)["']/i
   let m
-  while ((m = tagRe.exec(html)) && Object.keys(metas).length < 40) {
+  while ((m = tagRe.exec(html)) && Object.keys(metas).length < 60) {
     const attrs = m[1]
     const km = attrKey.exec(attrs)
     const cm = attrContent.exec(attrs)
     if (!km || !cm) continue
     const key = km[1].toLowerCase()
-    if (/title|author|date|published|site_name|description|type|publisher/.test(key)) metas[key] = cm[1]
+    if (/title|author|creator|byline|date|published|modified|site_name|description|type|publisher|section|sailthru|dc\.|parsely/.test(key)) metas[key] = cm[1]
   }
   const titleTag = (/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] || '').trim()
   // JSON-LD blocks often carry author/datePublished cleanly.
   const ld = []
   const ldRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
-  while ((m = ldRe.exec(html)) && ld.length < 3) ld.push(m[1].slice(0, 1200))
-  // Visible body text: drop scripts/styles/tags, collapse whitespace, keep the first ~1800 chars.
+  while ((m = ldRe.exec(html)) && ld.length < 5) ld.push(m[1].slice(0, 2000))
+  // Visible body text: drop scripts/styles/tags, collapse whitespace, keep the first ~3000 chars.
+  // 3000 chars gives enough room to reach the author byline on news sites with long nav/header sections.
   const body = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 1800)
+    .slice(0, 3000)
   return { titleTag, metas, ld: ld.join('\n'), body }
 }
 
@@ -109,14 +111,33 @@ async function extractCitation(apiKey, url, html) {
   const c = extractCandidate(html)
   const metaLines = Object.entries(c.metas).map(([k, v]) => `${k}: ${v}`).join('\n')
   const prompt =
-    `You are extracting bibliographic citation metadata from a web page. Return ONLY a JSON object, no prose.\n` +
-    `Shape: {"itemType": one of "blogPost"|"webpage"|"newsArticle"|"article"|"report"|"video",\n` +
-    `"confidence": "high"|"low",\n` +
-    `"fields": { "title": {"value": string, "quote": string|null}, "author": {"value": string, "quote": string|null},\n` +
-    `"date": {"value": "YYYY-MM-DD or YYYY", "quote": string|null}, "publisher": {"value": string, "quote": string|null} }}\n` +
-    `Rules: "value" is the best reading; "quote" MUST be a verbatim substring of the PAGE TEXT below where you found it, or null if it came from a meta tag / can't be located verbatim. Omit a field entirely if unknown. Set confidence "low" if the page is not a citable article/post or fields are largely missing.\n\n` +
-    `URL: ${url}\nTITLE TAG: ${c.titleTag}\nMETA:\n${metaLines}\nJSON-LD:\n${c.ld}\n\nPAGE TEXT:\n${c.body}`
-  return callClaudeJson(apiKey, prompt, 500)
+    `You are a precise bibliographic metadata extractor. Given a web page, return ONLY a JSON object — no prose, no markdown fences.\n\n` +
+    `Required shape:\n` +
+    `{\n` +
+    `  "itemType": "blogPost" | "webpage" | "newsArticle" | "article" | "report" | "video",\n` +
+    `  "confidence": "high" | "low",\n` +
+    `  "fields": {\n` +
+    `    "title":     { "value": string, "quote": string | null },\n` +
+    `    "author":    { "value": string, "quote": string | null },\n` +
+    `    "date":      { "value": "YYYY-MM-DD or YYYY", "quote": string | null },\n` +
+    `    "publisher": { "value": string, "quote": string | null }\n` +
+    `  }\n` +
+    `}\n\n` +
+    `Extraction rules (follow precisely):\n` +
+    `1. "title": use the most specific heading, NOT the site name. Prefer og:title or article:title over <title> if <title> appends the site name.\n` +
+    `2. "author": look in JSON-LD "author" field, "article:author" meta, byline text ("By …", "Written by …"), or rel=author. For organisations use the org name.\n` +
+    `3. "date": prefer "datePublished" in JSON-LD or "article:published_time" meta. Format YYYY-MM-DD.\n` +
+    `4. "publisher": the publication/site name — og:site_name, JSON-LD "publisher.name", or masthead. NOT the author.\n` +
+    `5. "quote": a verbatim substring of PAGE TEXT confirming the value. Set null if the value came only from a meta/JSON-LD tag with no matching visible text.\n` +
+    `6. Omit a field entirely if genuinely unknown — do not guess.\n` +
+    `7. Set confidence "low" only if fewer than 2 fields are found OR the page is clearly not a citable document.\n` +
+    `8. "itemType" should be "newsArticle" for journalism, "blogPost" for personal/company blogs, "video" for YouTube/Vimeo, "report" for white-papers/PDFs, "article" for magazine/academic pieces without DOI.\n\n` +
+    `URL: ${url}\n` +
+    `TITLE TAG: ${c.titleTag}\n` +
+    `META TAGS:\n${metaLines}\n` +
+    `JSON-LD:\n${c.ld}\n\n` +
+    `PAGE TEXT (first ~1800 chars):\n${c.body}`
+  return callClaudeJson(apiKey, prompt, 700, EXTRACT_MODEL)
 }
 
 function buildPrompt(body) {
