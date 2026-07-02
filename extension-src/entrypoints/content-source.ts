@@ -110,17 +110,19 @@ function showCapturePanel(capture: CaptureMsg) {
     <ul class="iwcp-fields">
       ${fields.map(([key, f]) => {
         const label = FIELD_LABELS[key] ?? key
-        // ✓ if the AI supplied a quote OR we found the value in the live page.
-        const hasQuote = !!f.quote || autoRanges.has(key)
-        // data-quote drives the hover highlight — use the AI quote if available,
-        // otherwise fall back to the field value (highlightQuote will re-search).
-        const quoteAttr = f.quote ?? (autoRanges.has(key) ? (f.value ?? '') : '')
-        return `<li class="iwcp-field${hasQuote ? ' iwcp-has-quote' : ''}"
+        const aiQuoted = !!f.quote
+        const autoFound = !aiQuoted && autoRanges.has(key)
+        // data-quote drives the hover highlight.
+        const quoteAttr = f.quote ?? (autoFound ? (f.value ?? '') : '')
+        const cls = aiQuoted ? ' iwcp-has-quote' : autoFound ? ' iwcp-auto-found' : ''
+        const symbol = aiQuoted ? '✓' : autoFound ? '◎' : '○'
+        const role = (aiQuoted || autoFound) ? 'button' : 'listitem'
+        return `<li class="iwcp-field${cls}"
                     data-quote="${esc(quoteAttr)}"
-                    tabindex="${hasQuote ? '0' : '-1'}"
-                    role="${hasQuote ? 'button' : 'listitem'}"
-                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${hasQuote ? ' — hover to verify' : ''}">
-          <span class="iwcp-check">${hasQuote ? '✓' : '○'}</span>
+                    tabindex="${(aiQuoted || autoFound) ? '0' : '-1'}"
+                    role="${role}"
+                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm match' : aiQuoted ? ' — hover to verify' : ''}">
+          <span class="iwcp-check">${symbol}</span>
           <span class="iwcp-label">${esc(label)}</span>
           <span class="iwcp-value">${esc(f.value ?? '')}</span>
         </li>`
@@ -144,7 +146,7 @@ function showCapturePanel(capture: CaptureMsg) {
         <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
       </div>
     </form>` : ''}
-    ${hasQuotes ? '<p class="iwcp-hint">Hover a ✓ field to verify it on the page</p>' : ''}
+    ${hasQuotes ? '<p class="iwcp-hint">Hover ✓ or ◎ to see the match · click ◎ to confirm</p>' : ''}
   `
 
   panel.querySelectorAll<HTMLElement>('.iwcp-has-quote').forEach(el => {
@@ -153,6 +155,22 @@ function showCapturePanel(capture: CaptureMsg) {
     el.addEventListener('focus',      () => highlightQuote(quote))
     el.addEventListener('mouseleave', () => clearHighlight())
     el.addEventListener('blur',       () => clearHighlight())
+  })
+
+  // Auto-found (◎): hover highlights, click confirms → upgrades to ✓.
+  panel.querySelectorAll<HTMLElement>('.iwcp-auto-found').forEach(el => {
+    const quote = el.dataset.quote ?? ''
+    el.addEventListener('mouseenter', () => highlightQuote(quote))
+    el.addEventListener('focus',      () => highlightQuote(quote))
+    el.addEventListener('mouseleave', () => clearHighlight())
+    el.addEventListener('blur',       () => clearHighlight())
+    el.addEventListener('click', () => {
+      el.classList.remove('iwcp-auto-found')
+      el.classList.add('iwcp-has-quote')
+      const check = el.querySelector('.iwcp-check')
+      if (check) check.textContent = '✓'
+      el.setAttribute('aria-label', (el.getAttribute('aria-label') ?? '').replace('click to confirm match', 'hover to verify'))
+    })
   })
 
   panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
@@ -300,8 +318,14 @@ function injectStyles(): void {
       background: rgba(92,45,138,0.07);
       border-radius: 6px;
     }
+    .iwcp-auto-found { cursor: pointer; }
+    .iwcp-auto-found:hover, .iwcp-auto-found:focus {
+      background: rgba(180,83,9,0.06);
+      border-radius: 6px;
+    }
     .iwcp-check { font-size: 10px; color: #9b5ccc; flex-shrink: 0; width: 12px; }
-    .iwcp-field:not(.iwcp-has-quote) .iwcp-check { color: #c4b5d4; }
+    .iwcp-field:not(.iwcp-has-quote):not(.iwcp-auto-found) .iwcp-check { color: #c4b5d4; }
+    .iwcp-auto-found .iwcp-check { color: #b45309; }
     .iwcp-label {
       font-size: 9px;
       color: #9b5ccc;
