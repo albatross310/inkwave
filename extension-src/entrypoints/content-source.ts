@@ -221,7 +221,7 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.innerHTML = `
     <div class="iwcp-header">
       <div class="iwcp-header-top">
-        <span class="iwcp-logo">Inkwave</span>
+        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.1</span></span>
         <button class="iwcp-close" aria-label="Dismiss">×</button>
       </div>
       <div class="iwcp-type-row">
