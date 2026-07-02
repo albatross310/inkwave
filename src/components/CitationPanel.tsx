@@ -1,7 +1,7 @@
 // Unified Citation Panel — opened by the ‟ toolbar button. One place for everything:
 //   • a URL/DOI capture bar (paste a DOI/URL to add a source; free text filters the library)
 //   • the master list of every saved citation, each with a "used in document?" flag, a source
-//     badge (verified / AI / manual), a tick (manual-mode inclusion), cite + delete actions
+//     badge (verified / AI / manual), a tick (manual-mode inclusion), cite + edit + delete actions
 //   • the reference-list controls: the 3-mode toggle (Auto/All/Manual) + a style picker
 // Replaces the old Zotero/BBT BibPanel + ZoteroSetup. See citations spec §10.
 
@@ -11,7 +11,7 @@ import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
 import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/resolve'
-import { captureFromInput } from '../citations/capture'
+import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { simpleInText } from '../citations/format'
@@ -35,6 +35,19 @@ const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
   manual:   { label: 'manual',   color: '#6b7280' },
 }
 
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  'article-journal': 'Journal article',
+  'webpage':         'Webpage',
+  'post-weblog':     'Blog post',
+  'article-newspaper': 'News article',
+  'report':          'Report',
+  'book':            'Book',
+  'chapter':         'Book chapter',
+  'paper-conference':'Conference paper',
+  'thesis':          'Thesis',
+  'video':           'Video',
+}
+
 function itemSource(item: CSLItem): FieldSource {
   const meta = (item as { _iw?: IwCitationMeta })._iw
   const fields = meta?.fields
@@ -45,12 +58,126 @@ function itemSource(item: CSLItem): FieldSource {
   return 'manual'
 }
 
+// Format CSL author array → "Given Family; Given2 Family2" for editing.
+function authorsToString(authors: CSLItem['author']): string {
+  if (!authors?.length) return ''
+  return authors.map(a => {
+    if (a.literal) return a.literal
+    const parts = [a.given, a.family].filter(Boolean)
+    return parts.join(' ')
+  }).join('; ')
+}
+
+// ─── Edit dialog ────────────────────────────────────────────────────────────
+
+interface EditDialogProps {
+  item: CSLItem
+  onSave: (updated: CSLItem) => void
+  onClose: () => void
+}
+
+function EditDialog({ item, onSave, onClose }: EditDialogProps) {
+  const [title, setTitle] = useState(String(item.title ?? ''))
+  const [authors, setAuthors] = useState(authorsToString(item.author))
+  const [year, setYear] = useState(String(item.issued?.['date-parts']?.[0]?.[0] ?? ''))
+  const [url, setUrl] = useState(String(item.URL ?? ''))
+  const [container, setContainer] = useState(String(item['container-title'] ?? ''))
+  const [type, setType] = useState(item.type ?? 'webpage')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  async function save() {
+    setSaving(true)
+    const updated: CSLItem = {
+      ...item,
+      type,
+      title: title || undefined,
+      author: authors ? parseAuthor(authors) : undefined,
+      issued: year ? parseDate(year) : undefined,
+      URL: url || undefined,
+      'container-title': container || undefined,
+    }
+    await onSave(updated)
+    setSaving(false)
+  }
+
+  const field = (label: string, value: string, onChange: (v: string) => void, hint?: string) => (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wide text-stone-400">{label}</span>
+      <input
+        value={value} onChange={e => onChange(e.target.value)}
+        placeholder={hint}
+        className="text-xs border border-stone-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#5c2d8a]"
+      />
+    </label>
+  )
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[100] bg-black/20" onMouseDown={onClose} />
+      <div
+        role="dialog" aria-label="Edit citation"
+        className="fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(440px, 94vw)', maxHeight: '90vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        onMouseDown={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-stone-100">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-stone-400">Edit citation</div>
+            <div className="text-xs text-stone-500 mt-0.5 font-mono">{item.id}</div>
+          </div>
+          <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
+        </div>
+
+        {/* Form */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] uppercase tracking-wide text-stone-400">Type</span>
+            <select value={type} onChange={e => setType(e.target.value)}
+              className="text-xs border border-stone-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#5c2d8a]">
+              {Object.entries(ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          {field('Title', title, setTitle, 'Article or page title')}
+          {field('Author(s)', authors, setAuthors, 'Given Family; Given2 Family2')}
+          {field('Year', year, setYear, '2024')}
+          {field('Journal / Publisher', container, setContainer, 'Nature, MIT Press…')}
+          {field('URL', url, setUrl, 'https://…')}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-stone-100">
+          <button type="button" onClick={onClose}
+            className="text-xs px-3 py-1.5 rounded border border-stone-200 text-stone-500 hover:border-stone-300">
+            Cancel
+          </button>
+          <button type="button" onClick={() => void save()} disabled={saving}
+            className="text-xs px-4 py-1.5 rounded text-white disabled:opacity-40"
+            style={{ background: INK }}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+// ─── Main panel ─────────────────────────────────────────────────────────────
+
 export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, btnRef, initialCapture, onInitialCaptureConsumed }: Props) {
   const [, force] = useState(0)
   const rerender = useCallback(() => force(n => n + 1), [])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
+  const [editItem, setEditItem] = useState<CSLItem | null>(null)
 
   useEffect(() => {
     const unsub = bibProvider.subscribe(rerender)
@@ -60,10 +187,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
   }, [editor, rerender])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !editItem) onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, editItem])
 
   // Auto-capture a URL handed in via the PWA share target (once, on open).
   const consumedRef = useRef(false)
@@ -121,6 +248,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
     await removeFromLibrary(item.id)
   }
 
+  async function saveEdit(updated: CSLItem) {
+    await addToLibrary(updated)
+    setEditItem(null)
+    setNotice({ text: `Saved "${updated.id}"`, kind: 'ok' })
+  }
+
   function setMode(mode: RefMode) {
     cmd(() => {
       if (!refCfg) editor.chain().focus().insertReferenceList({ mode }).run()
@@ -149,6 +282,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
 
   return createPortal(
     <>
+      {editItem && (
+        <EditDialog
+          item={editItem}
+          onSave={saveEdit}
+          onClose={() => setEditItem(null)}
+        />
+      )}
       <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={onClose} />
       <div
         role="dialog" aria-label="Citations"
@@ -236,7 +376,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
                     <input type="checkbox" checked={manualKeys.has(item.id)} onChange={() => toggleManual(item)}
                       className="mt-1" aria-label={`Include ${item.id} in references`} />
                   )}
-                  <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    className="flex-1 min-w-0 text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors"
+                    onClick={() => setEditItem(item)}
+                    title="Click to edit"
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-medium truncate" style={{ color: INK }}>{item.id}</span>
                       <span className="text-[9px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
@@ -244,7 +389,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
                     </div>
                     <div className="text-[11px] text-stone-500 leading-tight truncate">{String(item.title ?? '')}</div>
                     <div className="text-[10px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
-                  </div>
+                  </button>
                   <div className="flex flex-col gap-1">
                     <button type="button" onClick={() => cite(item)}
                       className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>

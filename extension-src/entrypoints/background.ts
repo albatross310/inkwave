@@ -132,7 +132,20 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
     throw new Error('no citable metadata found on this page')
   }
 
-  const { item } = extractToCsl(data, url)
+  const { item, fields } = extractToCsl(data, url)
   const n = await enqueue(item, url)
+
+  // Show the in-page verification panel on the source tab (AI captures only).
+  if (tabId) {
+    await browser.scripting.executeScript({
+      target: { tabId },
+      files: ['content-source.js'],
+    }).catch(() => {})
+    browser.tabs.sendMessage(tabId, {
+      type: 'inkwave:showCapture',
+      capture: { id: item.id, title: String(item.title ?? ''), fields },
+    }).catch(() => {})
+  }
+
   return { ok: true, id: item.id, queued: n }
 }
