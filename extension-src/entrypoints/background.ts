@@ -121,8 +121,8 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ extract: { url, html: html || undefined } }),
   })
-  if (!res.ok) throw new Error(`extraction server ${res.status}`)
   const data = await res.json() as ExtractResponse & { error?: string }
+  if (!res.ok) throw new Error(data.error || `extraction server ${res.status}`)
   if (data.error) throw new Error(data.error)
   if (!data.fields || Object.keys(data.fields).length === 0) {
     throw new Error('no citable metadata found on this page')

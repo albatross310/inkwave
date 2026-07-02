@@ -119,15 +119,20 @@ export default async function handler(req, res) {
       if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
         res.statusCode = 400; return res.end(JSON.stringify({ error: 'extract needs a url' }))
       }
-      let pageHtml = typeof html === 'string' ? html : ''
-      if (!pageHtml) {
-        const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })
-        if (!pr.ok) { res.statusCode = 502; return res.end(JSON.stringify({ error: `fetch ${pr.status}` })) }
-        pageHtml = (await pr.text()).slice(0, 400_000)
-      }
-      const result = await extractCitation(apiKey, url, pageHtml)
       res.setHeader('content-type', 'application/json')
-      return res.end(JSON.stringify(result))
+      try {
+        let pageHtml = typeof html === 'string' ? html : ''
+        if (!pageHtml) {
+          const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })
+          if (!pr.ok) { res.statusCode = 502; return res.end(JSON.stringify({ error: `page fetch failed (${pr.status})` })) }
+          pageHtml = (await pr.text()).slice(0, 400_000)
+        }
+        const result = await extractCitation(apiKey, url, pageHtml)
+        return res.end(JSON.stringify(result))
+      } catch (extractErr) {
+        res.statusCode = 502
+        return res.end(JSON.stringify({ error: String(extractErr?.message || extractErr) }))
+      }
     }
 
     // Snapshot diff-summary mode: bullet points of what changed between two snapshots.
