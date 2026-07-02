@@ -214,7 +214,9 @@ export default async function handler(req, res) {
         let pageHtml = typeof html === 'string' ? html : ''
         if (!pageHtml) {
           const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })
-          if (!pr.ok) { res.statusCode = 502; return res.end(JSON.stringify({ error: `page fetch failed (${pr.status})` })) }
+          // Include the upstream status so the client can flag a DEAD source URL (404/410/403) during
+          // re-verification, vs a transient error. capture.ts still just treats !ok as a manual fallback.
+          if (!pr.ok) { res.statusCode = 502; return res.end(JSON.stringify({ error: `page fetch failed (${pr.status})`, status: pr.status })) }
           pageHtml = (await pr.text()).slice(0, 400_000)
         }
         const result = await extractCitation(apiKey, url, pageHtml)

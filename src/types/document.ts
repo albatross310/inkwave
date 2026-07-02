@@ -22,11 +22,26 @@ export interface IwFieldMeta {
   source: FieldSource
   quote?: string          // verbatim source text (AI path) — powers hover-to-source + changelog
 }
+
+// One recorded correction from a re-verification (or a manual revert). The `old` value is retained
+// so a revert is a one-click restore. `at` + `source` make the change auditable; because a change to
+// a DISPLAYED citation shifts bibHash between two anchored snapshots, the changelog is tamper-evident.
+export interface ChangelogEntry {
+  field: string           // CSL field that changed (title, author, issued, …)
+  old: unknown            // previous value (retained for revert)
+  new: unknown            // value it was overwritten with
+  at: string              // ISO timestamp of the change
+  source: FieldSource     // where the new value came from (crossref re-query, ai re-extract, manual revert)
+}
+
 export interface IwCitationMeta {
   fields?: Record<string, IwFieldMeta>  // field name → provenance
   sourceUrl?: string      // origin page/DOI URL
   addedAt?: string        // ISO — when first saved to the library
   usedInDoc?: boolean     // convenience mirror; authoritative source is resolve.usedCitekeys
+  changelog?: ChangelogEntry[]  // re-verification corrections (old→new), newest last
+  lastVerified?: string   // ISO — last successful re-verification check
+  deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
 }
 
 export interface Bibliography {

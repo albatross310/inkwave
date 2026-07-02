@@ -13,6 +13,7 @@ import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/re
 import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
+import { reverifyEntry, applyReverify, revertField } from '../citations/reverify'
 import { simpleInText } from '../citations/format'
 import { ITEM_TYPE_LABELS as TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS as CSL_FIELD_LABELS_MAP } from '../citations/requiredFields'
 import type { CSLItem, FieldSource, IwCitationMeta } from '../types/document'
@@ -186,6 +187,26 @@ function authorsToString(authors: CSLItem['author']): string {
 function strField(item: CSLItem, key: string): string {
   const v = (item as Record<string, unknown>)[key]
   return v != null ? String(v) : ''
+}
+
+// Render a changelog value (author array / date-parts / plain) for the old→new diff display.
+function fmtVal(field: string, v: unknown): string {
+  if (v == null || v === '') return '—'
+  if (field === 'author' || field === 'editor') return authorsToString(v as CSLItem['author'])
+  if (field === 'issued' || field === 'accessed') {
+    const dp = (v as { 'date-parts'?: number[][] })?.['date-parts']?.[0]
+    return dp ? dp.join('-') : String(v)
+  }
+  return String(v)
+}
+
+// Coarse "checked N ago" for the last-verified stamp.
+function relTime(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 30) return `${days}d ago`
+  return new Date(iso).toLocaleDateString()
 }
 
 // ─── Edit dialog ─────────────────────────────────────────────────────────────
@@ -364,6 +385,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
   const [editItem, setEditItem] = useState<CSLItem | null>(null)
+  const [rechecking, setRechecking] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const unsub = bibProvider.subscribe(rerender)
@@ -434,6 +457,40 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     await addToLibrary(updated)
     setEditItem(null)
     setNotice({ text: `Saved "${updated.id}"`, kind: 'ok' })
+  }
+
+  function toggleExpand(id: string) {
+    setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
+  // Re-verify one entry against its source (§12.1): overwrite changed fields, record a changelog,
+  // flag a dead source URL. Corrections keep the citekey, so a cited entry is never orphaned.
+  async function recheck(item: CSLItem) {
+    setRechecking(s => new Set(s).add(item.id))
+    try {
+      const result = await reverifyEntry(item)
+      if (result.deadUrl) {
+        await addToLibrary(applyReverify(item, result))
+        setNotice({ text: `"${item.id}" — source link looks dead (404/gone).`, kind: 'err' })
+      } else if (!result.ok) {
+        setNotice({ text: `Couldn't re-verify "${item.id}": ${result.error ?? 'unreachable'}`, kind: 'warn' })
+      } else if (result.diffs.length === 0) {
+        await addToLibrary(applyReverify(item, result)) // stamps lastVerified
+        setNotice({ text: `"${item.id}" verified — no changes.`, kind: 'ok' })
+      } else {
+        await addToLibrary(applyReverify(item, result))
+        const usedNote = usedKeys.has(item.id) ? ' — cited, will re-snapshot' : ''
+        setNotice({ text: `Updated ${result.diffs.length} field${result.diffs.length > 1 ? 's' : ''} in "${item.id}"${usedNote}.`, kind: 'ok' })
+        setExpanded(s => new Set(s).add(item.id))
+      }
+    } finally {
+      setRechecking(s => { const n = new Set(s); n.delete(item.id); return n })
+    }
+  }
+
+  async function revert(item: CSLItem, index: number) {
+    await addToLibrary(revertField(item, index))
+    setNotice({ text: `Reverted a change in "${item.id}".`, kind: 'ok' })
   }
 
   function setMode(mode: RefMode) {
@@ -649,6 +706,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
+                    <button type="button" onClick={e => { e.stopPropagation(); void recheck(item) }}
+                      disabled={rechecking.has(item.id)}
+                      title="Re-verify against source"
+                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-50">
+                      {rechecking.has(item.id) ? '…' : '↻'}
+                    </button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
                         title="Open source page (shows verification panel if extension installed)"
@@ -660,6 +723,41 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
                 </div>
+                {(() => {
+                  const iw = (item as { _iw?: IwCitationMeta })._iw
+                  const changelog = iw?.changelog ?? []
+                  const open = expanded.has(item.id)
+                  if (!iw?.deadUrl && changelog.length === 0 && !iw?.lastVerified) return null
+                  return (
+                    <>
+                      <div className="mt-1 pl-1 flex items-center gap-2 flex-wrap">
+                        {iw?.deadUrl && <span className="text-[9px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
+                        {changelog.length > 0 && (
+                          <button type="button" onClick={() => toggleExpand(item.id)}
+                            className="text-[9px] text-stone-400 hover:text-[#5c2d8a]">
+                            {open ? '▾' : '▸'} {changelog.length} change{changelog.length > 1 ? 's' : ''}
+                          </button>
+                        )}
+                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-300">checked {relTime(iw.lastVerified)}</span>}
+                      </div>
+                      {open && changelog.length > 0 && (
+                        <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">
+                          {changelog.map((c, i) => (
+                            <div key={i} className="text-[10px] text-stone-500 flex items-center gap-1.5">
+                              <span className="font-medium text-stone-600 flex-shrink-0">{(CSL_FIELD_LABELS_MAP as Record<string, string>)[c.field] ?? c.field}</span>
+                              <span className="text-stone-400 line-through truncate max-w-[80px]">{fmtVal(c.field, c.old)}</span>
+                              <span className="text-stone-300 flex-shrink-0">→</span>
+                              <span className="truncate max-w-[80px]" style={{ color: INK }}>{fmtVal(c.field, c.new)}</span>
+                              <span className="text-[9px] text-stone-300 flex-shrink-0">{c.source}</span>
+                              <button type="button" onClick={() => void revert(item, i)}
+                                className="text-[9px] text-stone-400 hover:text-[#5c2d8a] ml-auto flex-shrink-0">revert</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             )
           })}
