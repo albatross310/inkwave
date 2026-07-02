@@ -102,8 +102,10 @@ function showCapturePanel(capture: CaptureMsg) {
           <span class="iwcp-fill-label">${esc(FIELD_LABELS[key] ?? key)}</span>
           <input class="iwcp-fill-input" name="${esc(key)}" placeholder="${esc(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off" />
         </label>`).join('')}
-      <button type="submit" class="iwcp-fill-save">Save to library</button>
-      <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
+      <div class="iwcp-fill-footer">
+        <button type="submit" class="iwcp-fill-save">Save to library</button>
+        <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
+      </div>
     </form>` : ''}
     ${hasQuotes ? '<p class="iwcp-hint">Hover a ✓ field to verify it on the page</p>' : ''}
   `
@@ -330,23 +332,26 @@ function injectStyles(): void {
       width: 100%;
     }
     .iwcp-fill-input:focus { border-color: #5c2d8a; }
-    .iwcp-fill-save {
+    .iwcp-fill-footer {
+      display: flex;
+      align-items: center;
+      gap: 7px;
       margin-top: 2px;
+    }
+    .iwcp-fill-save {
       background: #5c2d8a;
       color: #fff;
       border: none;
-      border-radius: 6px;
-      padding: 5px 10px;
-      font-size: 11px;
+      border-radius: 5px;
+      padding: 3px 9px;
+      font-size: 10px;
       font-family: Georgia, serif;
       cursor: pointer;
-      align-self: flex-start;
     }
     .iwcp-fill-save:disabled { opacity: 0.5; }
     .iwcp-fill-save:hover:not(:disabled) { background: #4a2270; }
     .iwcp-fill-status {
       font-size: 10px;
-      align-self: center;
     }
   `
   document.head?.appendChild(style)
