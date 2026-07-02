@@ -109,7 +109,12 @@ export default async function handler(req, res) {
   if (!rl.ok) { res.statusCode = 429; return res.end(JSON.stringify({ error: 'rate limited' })) }
 
   try {
-    const body = typeof req.body === 'object' && req.body ? req.body : JSON.parse(req.body || '{}')
+    // Vercel pre-parses req.body for JSON content-type; the Vite dev webhook wrapper does not.
+    const body = typeof req.body === 'object' && req.body
+      ? req.body
+      : JSON.parse(await new Promise((resolve, reject) => {
+          let s = ''; req.on('data', c => { s += c }); req.on('end', () => resolve(s)); req.on('error', reject)
+        }).then(s => s || '{}').catch(() => '{}'))
 
     // Citation extraction mode: { extract: { url, html? } } → { itemType, fields, confidence }.
     // If html isn't supplied (PWA paste-URL path) the server fetches the page — no CORS problem,
