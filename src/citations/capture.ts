@@ -53,6 +53,7 @@ export interface ExtractResponse {
   itemType?: string
   fields?: Record<string, CaptureField>
   confidence?: 'high' | 'low'
+  source?: string
 }
 
 /** Assemble a CSLItem from the LLM's extracted fields. @internal exported for unit tests only */

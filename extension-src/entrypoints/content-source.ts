@@ -156,13 +156,19 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.setAttribute('aria-label', 'Inkwave citation captured')
 
   // Determine verifiability for each field.
+  // oEmbed captures (YouTube/Vimeo) are pre-verified by the platform — skip DOM search.
   // AI quotes are validated against visible DOM — AI often "quotes" from JSON-LD/meta tags.
   // Unquoted or invalidated fields fall back to auto-search; dates try multiple formats.
+  const isOembed = (capture as CaptureMsg & { source?: string }).source === 'oembed'
   const verifySource = new Map<string, 'ai' | 'auto'>()
   const verifyQuote  = new Map<string, string>()
   for (const [key, f] of Object.entries(capture.fields)) {
     if (!f.value) continue
-    if (f.quote && existsOnPage(f.quote)) {
+    if (isOembed) {
+      // oEmbed data is authoritative (from the platform) — mark as confirmed.
+      // Empty quote: hover is a no-op (YouTube content lives in closed shadow DOM, not highlightable).
+      verifySource.set(key, 'ai'); verifyQuote.set(key, '')
+    } else if (f.quote && existsOnPage(f.quote)) {
       verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)
     } else {
       const candidates = (key === 'date' || key === 'accessed')
@@ -412,10 +418,6 @@ function injectStyles(): void {
   const style = document.createElement('style')
   style.id = 'inkwave-styles'
   style.textContent = `
-    ::highlight(inkwave-source) {
-      background-color: rgba(92, 45, 138, 0.85);
-      color: #fff;
-    }
     #inkwave-capture-panel {
       position: fixed;
       bottom: 20px;

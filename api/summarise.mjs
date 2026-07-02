@@ -118,6 +118,7 @@ async function extractViaOEmbed(url, html) {
     return {
       itemType: 'video',
       confidence: 'high',
+      source: 'oembed',
       fields: {
         ...(d.title         ? { title:     { value: d.title,            quote: null } } : {}),
         ...(d.author_name   ? { author:    { value: d.author_name,      quote: null } } : {}),

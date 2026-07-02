@@ -38,12 +38,14 @@ export interface CaptureMsg {
   missingRequired: string[]
   missingLabels: string[]
   confidence: string
+  source?: string  // 'oembed' for YouTube/Vimeo — fields are pre-verified, skip DOM check
 }
 
 function buildCaptureMsg(
   item: Record<string, unknown>,
   fields: Record<string, FieldEntry>,
   confidence = 'high',
+  source?: string,
 ): CaptureMsg {
   const type = String(item.type ?? 'webpage')
   const required = REQUIRED_BY_TYPE[type] ?? []
@@ -64,11 +66,18 @@ function buildCaptureMsg(
     missingRequired,
     missingLabels: missingRequired.map(f => FIELD_LABELS[f] ?? f),
     confidence,
+    ...(source ? { source } : {}),
   }
 }
 
 async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise<void> {
   await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] }).catch(() => {})
+  // Use insertCSS (privileged API) so the highlight rule bypasses the host page's CSP.
+  // DOM-injected <style> tags from content scripts ARE blocked by strict style-src policies.
+  await browser.scripting.insertCSS({
+    target: { tabId },
+    css: `::highlight(inkwave-source){background-color:rgba(92,45,138,0.85)!important;color:#fff!important}`,
+  }).catch(() => {})
   browser.tabs.sendMessage(tabId, { type: 'inkwave:showCapture', capture }).catch(() => {})
 }
 
@@ -271,7 +280,7 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
   }
 
   const { item, fields } = extractToCsl(data, url)
-  const capture = buildCaptureMsg(item as Record<string, unknown>, fields as Record<string, FieldEntry>, data.confidence)
+  const capture = buildCaptureMsg(item as Record<string, unknown>, fields as Record<string, FieldEntry>, data.confidence, data.source)
   await enqueue(item, url, fields as Record<string, unknown>, data.confidence, capture)
 
   // Show the in-page verification panel on the source tab (AI captures only).
