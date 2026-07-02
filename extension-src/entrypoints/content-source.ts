@@ -107,6 +107,30 @@ function dateSearchCandidates(value: string): string[] {
   } catch { return [value] }
 }
 
+// Find the publisher's logo element on the page: prefers a real img in the header/nav
+// (so hover can outline it), falls back to link[rel="icon"] tags.
+function findPublisherLogo(): { el: HTMLImageElement | null; url: string } {
+  const containers = [
+    document.querySelector('header'),
+    document.querySelector('[role="banner"]'),
+    document.querySelector('nav'),
+    document.querySelector('[class*="header"]'),
+    document.querySelector('[id*="header"]'),
+  ].filter(Boolean) as Element[]
+  for (const c of containers) {
+    const imgs = Array.from(c.querySelectorAll('img')) as HTMLImageElement[]
+    const logo: HTMLImageElement | undefined =
+      imgs.find(img => /logo/i.test([img.className, img.id, img.alt ?? '', img.src].join(' ')))
+      ?? (imgs.length === 1 && imgs[0].width > 20 ? imgs[0] : undefined)
+    if (logo?.src) return { el: logo, url: logo.src }
+  }
+  for (const sel of ['link[rel="apple-touch-icon"]', 'link[rel="icon"][type="image/png"]', 'link[rel="icon"][sizes="32x32"]', 'link[rel="icon"]', 'link[rel="shortcut icon"]']) {
+    const el = document.querySelector(sel) as HTMLLinkElement | null
+    if (el?.href && !el.href.startsWith('data:')) return { el: null, url: el.href }
+  }
+  return { el: null, url: `${window.location.origin}/favicon.ico` }
+}
+
 function showCapturePanel(capture: CaptureMsg) {
   document.getElementById('inkwave-capture-panel')?.remove()
 
@@ -138,9 +162,8 @@ function showCapturePanel(capture: CaptureMsg) {
   const isLowConf = capture.confidence === 'low'
   const typeLabel = capture.typeLabel ?? capture.itemType ?? 'Webpage'
 
-  // Publisher favicon: small logo to help confirm which site the citation came from.
-  const pageDomain = (() => { try { return new URL(window.location.href).hostname } catch { return '' } })()
-  const faviconUrl = pageDomain ? `https://www.google.com/s2/favicons?domain=${pageDomain}&sz=32` : ''
+  // Find the publisher logo: real img element on the page (for hover-outline) or icon link.
+  const pubLogo = findPublisherLogo()
 
   panel.innerHTML = `
     <div class="iwcp-header">
@@ -166,12 +189,13 @@ function showCapturePanel(capture: CaptureMsg) {
         const role   = (aiVerified || autoFound) ? 'button' : 'listitem'
         return `<li class="iwcp-field${cls}"
                     data-quote="${esc(quoteAttr)}"
-                    tabindex="${(aiVerified || autoFound) ? '0' : '-1'}"
-                    role="${role}"
-                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
+                    data-field-key="${esc(key)}"
+                    tabindex="${(aiVerified || autoFound) || key === 'publisher' ? '0' : '-1'}"
+                    role="${(aiVerified || autoFound) || key === 'publisher' ? 'button' : 'listitem'}"
+                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : key === 'publisher' ? ' — hover to see logo' : ''}">
           <span class="iwcp-check">${symbol}</span>
           <span class="iwcp-label">${esc(label)}</span>
-          <span class="iwcp-value">${key === 'publisher' && faviconUrl ? `<img src="${faviconUrl}" style="all:unset;width:13px;height:13px;border-radius:2px;object-fit:contain;vertical-align:middle;margin-right:4px;display:inline-block" onerror="this.remove()" loading="lazy" />` : ''}${esc(f.value ?? '')}</span>
+          <span class="iwcp-value">${key === 'publisher' && pubLogo.url ? `<img src="${esc(pubLogo.url)}" style="width:13px;height:13px;border-radius:2px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.style.display='none'" />` : ''}${esc(f.value ?? '')}</span>
         </li>`
       }).join('')}
     </ul>
@@ -223,6 +247,7 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
     panel.remove()
     clearHighlight()
+    if (pubLogo.el) { pubLogo.el.style.outline = ''; pubLogo.el.style.outlineOffset = ''; pubLogo.el.style.borderRadius = '' }
   })
 
   // Fill-in form submit.
@@ -299,6 +324,61 @@ function showCapturePanel(capture: CaptureMsg) {
       if (saveBtn) saveBtn.disabled = false
     }
   })
+
+  // Publisher field: hover outlines the real logo element on the page.
+  const pubLi = panel.querySelector<HTMLElement>('[data-field-key="publisher"]')
+  if (pubLi && pubLogo.el) {
+    const logoEl = pubLogo.el
+    pubLi.style.cursor = 'pointer'
+    pubLi.addEventListener('mouseenter', () => {
+      logoEl.style.outline = '3px solid rgba(92,45,138,0.7)'
+      logoEl.style.outlineOffset = '3px'
+      logoEl.style.borderRadius = '4px'
+      logoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+    pubLi.addEventListener('mouseleave', () => {
+      logoEl.style.outline = ''
+      logoEl.style.outlineOffset = ''
+      logoEl.style.borderRadius = ''
+    })
+    pubLi.addEventListener('focus', () => {
+      logoEl.style.outline = '3px solid rgba(92,45,138,0.7)'
+      logoEl.style.outlineOffset = '3px'
+    })
+    pubLi.addEventListener('blur', () => {
+      logoEl.style.outline = ''
+      logoEl.style.outlineOffset = ''
+    })
+  }
+
+  // Draggable panel: mousedown on header drags by top/left.
+  const panelHeader = panel.querySelector<HTMLElement>('.iwcp-header')
+  if (panelHeader) {
+    panelHeader.style.cursor = 'move'
+    let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return
+      panel.style.left = `${origLeft + e.clientX - startX}px`
+      panel.style.top  = `${origTop  + e.clientY - startY}px`
+    }
+    const onUp = () => { dragging = false }
+    panelHeader.addEventListener('mousedown', (e) => {
+      if ((e.target as HTMLElement).closest('.iwcp-close')) return
+      const r = panel.getBoundingClientRect()
+      panel.style.bottom = 'auto'; panel.style.right = 'auto'
+      panel.style.left = `${r.left}px`; panel.style.top = `${r.top}px`
+      origLeft = r.left; origTop = r.top
+      startX = e.clientX; startY = e.clientY
+      dragging = true
+      e.preventDefault()
+    })
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }, { once: true })
+  }
 
   document.body.appendChild(panel)
 }

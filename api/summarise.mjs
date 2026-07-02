@@ -85,7 +85,24 @@ const OEMBED_PROVIDERS = [
   { pattern: /vimeo\.com\/\d+/, endpoint: 'https://vimeo.com/api/oembed.json' },
 ]
 
-async function extractViaOEmbed(url) {
+// Pull upload/publish date from HTML meta tags — oEmbed doesn't include it.
+function extractVideoDate(html) {
+  if (!html) return null
+  // itemprop="uploadDate" (YouTube, standard schema.org)
+  const itemprop = /itemprop=["']uploadDate["'][^>]*content=["']([^"']+)["']/i.exec(html)
+               || /content=["']([^"']+)["'][^>]*itemprop=["']uploadDate["']/i.exec(html)
+  if (itemprop) return itemprop[1].slice(0, 10) // YYYY-MM-DD
+  // datePublished in JSON-LD
+  const ld = /"datePublished"\s*:\s*"([^"]+)"/i.exec(html)
+  if (ld) return ld[1].slice(0, 10)
+  // og:video:release_date or article:published_time
+  const og = /(?:video:release_date|published_time)[^>]*content=["']([^"']+)["']/i.exec(html)
+          || /content=["']([^"']+)["'][^>]*(?:video:release_date|published_time)/i.exec(html)
+  if (og) return og[1].slice(0, 10)
+  return null
+}
+
+async function extractViaOEmbed(url, html) {
   const provider = OEMBED_PROVIDERS.find(p => p.pattern.test(url))
   if (!provider) return null
   try {
@@ -95,13 +112,15 @@ async function extractViaOEmbed(url) {
     if (!r.ok) return null
     const d = await r.json()
     if (!d.title) return null
+    const date = extractVideoDate(html)
     return {
       itemType: 'video',
       confidence: 'high',
       fields: {
-        ...(d.title       ? { title:     { value: d.title,       quote: null } } : {}),
-        ...(d.author_name ? { author:    { value: d.author_name, quote: null } } : {}),
-        ...(d.provider_name ? { publisher: { value: d.provider_name, quote: null } } : {}),
+        ...(d.title         ? { title:     { value: d.title,            quote: null } } : {}),
+        ...(d.author_name   ? { author:    { value: d.author_name,      quote: null } } : {}),
+        ...(d.provider_name ? { publisher: { value: d.provider_name,    quote: null } } : {}),
+        ...(date            ? { date:      { value: date,               quote: null } } : {}),
       },
     }
   } catch { return null }
@@ -176,7 +195,8 @@ export default async function handler(req, res) {
       res.setHeader('content-type', 'application/json')
       try {
         // Try oEmbed first for known video platforms — deterministic, no tokens used.
-        const oembed = await extractViaOEmbed(url)
+        // Pass html so extractVideoDate can pull the upload date (oEmbed itself omits it).
+        const oembed = await extractViaOEmbed(url, typeof html === 'string' ? html : '')
         if (oembed) return res.end(JSON.stringify(oembed))
 
         let pageHtml = typeof html === 'string' ? html : ''
