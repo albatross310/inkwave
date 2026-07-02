@@ -33,15 +33,24 @@ export default defineContentScript({
       }
     }
 
-    // Ack from app → dequeue.
+    // Messages from app → extension relay.
     window.addEventListener('message', async (e: MessageEvent) => {
       if (e.source !== window) return
-      const d = e.data as { source?: string; type?: string; uuid?: string } | null
-      if (!d || d.source !== 'inkwave-app' || d.type !== 'cite/ack' || !d.uuid) return
-      inflight.delete(d.uuid)
-      const store = await browser.storage.local.get(QUEUE_KEY)
-      const q: Array<{ uuid: string }> = (store[QUEUE_KEY] as typeof q) ?? []
-      await browser.storage.local.set({ [QUEUE_KEY]: q.filter(x => x.uuid !== d.uuid) })
+      const d = e.data as { source?: string; type?: string; uuid?: string; capture?: unknown; url?: string } | null
+      if (!d || d.source !== 'inkwave-app') return
+
+      if (d.type === 'cite/ack' && d.uuid) {
+        // Ack from app → dequeue.
+        inflight.delete(d.uuid)
+        const store = await browser.storage.local.get(QUEUE_KEY)
+        const q: Array<{ uuid: string }> = (store[QUEUE_KEY] as typeof q) ?? []
+        await browser.storage.local.set({ [QUEUE_KEY]: q.filter(x => x.uuid !== d.uuid) })
+      }
+
+      if (d.type === 'cite/visitSource' && d.url && d.capture) {
+        // App opened a source URL — tell background to watch for that tab opening and show the panel.
+        browser.runtime.sendMessage({ type: 'inkwave:watchPanel', url: d.url, capture: d.capture }).catch(() => {})
+      }
     })
 
     browser.runtime.onMessage.addListener((msg: unknown) => {

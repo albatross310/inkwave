@@ -6,10 +6,10 @@
 
 import { detectIdentifier } from '@inkwave/citations/identifiers'
 import { lookupIdentifier } from '@inkwave/citations/lookup'
-import { extractToCsl } from '@inkwave/citations/capture'
+import { extractToCsl, parseAuthor, parseDate } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
-import { INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
+import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY } from '../utils/constants'
 
 // Derive the API server origin from open Inkwave tabs.
 // Prefers localhost (dev) over production so the extension hits the right server
@@ -71,16 +71,32 @@ async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise
 }
 
 export default defineBackground(() => {
-  // When a tab finishes loading, check if its URL matches a stored AI capture.
-  // If so, inject content-source.js and show the verification panel automatically.
+  // When a tab finishes loading, show the verification panel if we have capture data for that URL.
+  // Checks: (1) the citation queue (item not yet flushed to app), (2) the watch list (app-triggered).
   browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
     if (info.status !== 'complete' || !tab.url) return
     if (INKWAVE_URL_PATTERNS.some(pat => tab.url && new RegExp('^' + pat.replace('*', '.*')).test(tab.url!))) return
-    const store = await browser.storage.local.get(QUEUE_KEY)
-    const q = ((store[QUEUE_KEY] as QueueEntry[]) ?? [])
-    const match = q.find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
-    if (!match?.fields || Object.keys(match.fields).length === 0) return
-    const capture = buildCaptureMsg(match.item, match.fields, match.confidence)
+
+    const [qStore, wStore] = await Promise.all([
+      browser.storage.local.get(QUEUE_KEY),
+      browser.storage.local.get(WATCH_KEY),
+    ])
+    const q = (qStore[QUEUE_KEY] as QueueEntry[]) ?? []
+    const watches = (wStore[WATCH_KEY] as Array<{ url: string; capture: CaptureMsg; at: number }>) ?? []
+
+    // Watch list takes priority (most recently added via app ↗ click).
+    const watchMatch = watches.find(w => tab.url?.startsWith(w.url.split('?')[0]))
+    if (watchMatch) {
+      await injectAndShowCapture(tabId, watchMatch.capture)
+      // Remove from watch list after showing so it doesn't reappear on every reload.
+      await browser.storage.local.set({ [WATCH_KEY]: watches.filter(w => w !== watchMatch) })
+      return
+    }
+
+    // Queue fallback (item still pending flush).
+    const qMatch = q.find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
+    if (!qMatch?.fields || Object.keys(qMatch.fields).length === 0) return
+    const capture = buildCaptureMsg(qMatch.item, qMatch.fields, qMatch.confidence)
     await injectAndShowCapture(tabId, capture)
   })
 
@@ -100,6 +116,23 @@ export default defineBackground(() => {
       return false
     }
 
+    if (m.type === 'inkwave:updateCaptureFields' && m.id && m.updates) {
+      void updateCaptureFields(String(m.id), m.updates as Record<string, string>)
+        .then(sendResponse)
+      return true
+    }
+
+    if (m.type === 'inkwave:watchPanel' && m.url && m.capture) {
+      void (async () => {
+        const store = await browser.storage.local.get(WATCH_KEY)
+        const watches = (store[WATCH_KEY] as Array<{ url: string; capture: CaptureMsg; at: number }>) ?? []
+        const next = watches.filter(w => w.url !== m.url)
+        next.push({ url: String(m.url), capture: m.capture as CaptureMsg, at: Date.now() })
+        await browser.storage.local.set({ [WATCH_KEY]: next.slice(-30) })
+      })()
+      return false
+    }
+
     if (m.type === 'inkwave:highlightOnTab' && m.tabId && m.quote) {
       void injectAndHighlight(m.tabId, m.quote)
       return false
@@ -113,6 +146,38 @@ export default defineBackground(() => {
     return false
   })
 })
+
+async function updateCaptureFields(id: string, updates: Record<string, string>): Promise<{ ok: boolean }> {
+  const store = await browser.storage.local.get(QUEUE_KEY)
+  const q = ((store[QUEUE_KEY] as QueueEntry[]) ?? [])
+  const entry = q.find(e => e.item.id === id)
+  if (!entry) return { ok: false }
+  if (!entry.fields) entry.fields = {}
+  for (const [key, raw] of Object.entries(updates)) {
+    if (!raw.trim()) continue
+    // Parse complex CSL types; store everything else as a flat string on item.
+    if (key === 'author' || key === 'editor') {
+      entry.item[key] = parseAuthor(raw)
+    } else if (key === 'year') {
+      entry.item.issued = parseDate(raw)
+    } else if (key === 'accessed') {
+      entry.item.accessed = parseDate(raw)
+    } else {
+      entry.item[key] = raw
+    }
+    entry.fields[key] = { value: raw, quote: null }
+  }
+  await browser.storage.local.set({ [QUEUE_KEY]: q })
+  // Poke Inkwave to re-flush with the updated item.
+  const tabs = await browser.tabs.query({})
+  for (const t of tabs.filter(t => INKWAVE_URL_PATTERNS.some(pat =>
+    t.url && new RegExp('^' + pat.replace('*', '.*')).test(t.url!)))) {
+    if (!t.id) continue
+    await browser.scripting.executeScript({ target: { tabId: t.id }, files: ['content-inkwave.js'] }).catch(() => {})
+    browser.tabs.sendMessage(t.id, { type: 'inkwave:flush' }).catch(() => {})
+  }
+  return { ok: true }
+}
 
 async function injectAndHighlight(tabId: number, quote: string): Promise<void> {
   try {

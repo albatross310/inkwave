@@ -1,4 +1,5 @@
 import { QUEUE_KEY } from '../../utils/constants'
+import { REQUIRED_BY_TYPE, FIELD_LABELS, ITEM_TYPE_LABELS } from '@inkwave/citations/requiredFields'
 import type { CaptureMsg } from '../background'
 
 const btn = document.getElementById('cap') as HTMLButtonElement
@@ -48,21 +49,30 @@ async function loadCurrentCapture() {
   const match = [...q].reverse().find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
   if (!match) return
 
-  // Build a CaptureMsg from the stored queue entry.
   const item = match.item
-  const fields = match.fields ?? item._iw?.fields ?? {}
+  const fields = (match.fields ?? item._iw?.fields ?? {}) as Record<string, FieldEntry>
+  const type = String(item.type ?? 'webpage')
+  const typeLabel = ITEM_TYPE_LABELS[type] ?? type
 
-  // Compute missingLabels if not stored (older entries).
-  const missingLabels: string[] = match.missingLabels ?? []
-  const typeLabel: string = match.typeLabel ?? item.type ?? 'Unknown type'
+  // Always compute missing fields fresh from the current item + fields.
+  const required = REQUIRED_BY_TYPE[type] ?? []
+  const issued = (item.issued as { 'date-parts'?: number[][] } | undefined)
+  const hasYear = !!(issued?.['date-parts']?.[0]?.[0] ?? fields.date?.value ?? fields.year?.value)
+  const missingRequired = required.filter(f => {
+    if (f === 'year') return !hasYear
+    if ((item as Record<string, unknown>)[f]) return false
+    if (fields[f]?.value) return false
+    return true
+  })
+  const missingLabels = missingRequired.map(f => FIELD_LABELS[f] ?? f)
 
   currentCapture = {
-    id: item.id,
+    id: String(item.id ?? ''),
     title: String(item.title ?? ''),
-    itemType: String(item.type ?? 'webpage'),
+    itemType: type,
     typeLabel,
     fields: fields as Record<string, { value?: string; quote?: string | null }>,
-    missingRequired: [],
+    missingRequired,
     missingLabels,
     confidence: match.confidence ?? 'high',
   }

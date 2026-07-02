@@ -12,6 +12,21 @@ const FIELD_LABELS: Record<string, string> = {
   title: 'Title', author: 'Author', date: 'Date', year: 'Year',
   publisher: 'Publisher', URL: 'URL', 'container-title': 'Source',
   volume: 'Volume', issue: 'Issue', page: 'Pages', DOI: 'DOI',
+  'event-title': 'Conference', genre: 'Degree type', edition: 'Edition',
+  accessed: 'Date accessed', number: 'Report no.',
+}
+
+const FIELD_PLACEHOLDERS: Record<string, string> = {
+  author: 'Given Family; Given2 Family2',
+  year: 'YYYY',
+  volume: 'e.g. 12',
+  page: 'e.g. 123–145',
+  'container-title': 'Journal / publication name',
+  publisher: 'Publisher / institution',
+  'event-title': 'Conference name',
+  genre: 'PhD thesis, Masters dissertation…',
+  accessed: 'YYYY-MM-DD',
+  DOI: '10.xxxx/…',
 }
 
 export default defineContentScript({
@@ -79,8 +94,17 @@ function showCapturePanel(capture: CaptureMsg) {
     ${missing.length > 0 ? `
     <div class="iwcp-warnings">
       <span class="iwcp-warn-icon">⚠</span>
-      <span>Missing for this type: ${esc(missing.join(', '))}. Edit in Inkwave before citing.</span>
-    </div>` : ''}
+      <span>Missing for this type: ${esc(missing.join(', '))}</span>
+    </div>
+    <form class="iwcp-fill" id="iwcp-fill">
+      ${(capture.missingRequired ?? []).map(key => `
+        <label class="iwcp-fill-row">
+          <span class="iwcp-fill-label">${esc(FIELD_LABELS[key] ?? key)}</span>
+          <input class="iwcp-fill-input" name="${esc(key)}" placeholder="${esc(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off" />
+        </label>`).join('')}
+      <button type="submit" class="iwcp-fill-save">Save to library</button>
+      <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
+    </form>` : ''}
     ${hasQuotes ? '<p class="iwcp-hint">Hover a ✓ field to verify it on the page</p>' : ''}
   `
 
@@ -97,10 +121,42 @@ function showCapturePanel(capture: CaptureMsg) {
     clearHighlight()
   })
 
+  // Fill-in form submit.
+  panel.querySelector<HTMLFormElement>('#iwcp-fill')?.addEventListener('submit', async e => {
+    e.preventDefault()
+    const form = e.target as HTMLFormElement
+    const data = new FormData(form)
+    const updates: Record<string, string> = {}
+    data.forEach((val, key) => { if (String(val).trim()) updates[key] = String(val).trim() })
+    if (!Object.keys(updates).length) return
+    const statusEl = panel.querySelector<HTMLElement>('#iwcp-fill-status')
+    const saveBtn = form.querySelector<HTMLButtonElement>('.iwcp-fill-save')
+    if (saveBtn) saveBtn.disabled = true
+    try {
+      const result = await browser.runtime.sendMessage({
+        type: 'inkwave:updateCaptureFields',
+        id: capture.id,
+        updates,
+      }) as { ok?: boolean }
+      if (statusEl) {
+        statusEl.textContent = result?.ok ? '✓ Saved' : '✗ Not found in queue'
+        statusEl.style.color = result?.ok ? '#15803d' : '#b91c1c'
+      }
+      if (result?.ok) {
+        // Remove the warning + form, replace with saved message.
+        panel.querySelector('.iwcp-warnings')?.remove()
+        form.innerHTML = '<p style="font-size:10px;color:#15803d;padding:6px 12px">✓ Fields saved to Inkwave library</p>'
+      }
+    } catch {
+      if (statusEl) { statusEl.textContent = '✗ Error'; statusEl.style.color = '#b91c1c' }
+      if (saveBtn) saveBtn.disabled = false
+    }
+  })
+
   document.body.appendChild(panel)
 
-  // Auto-dismiss after 15 seconds.
-  setTimeout(() => { panel.classList.add('iwcp-fade'); setTimeout(() => panel.remove(), 400) }, 15000)
+  // Auto-dismiss after 20 seconds (longer to give time to fill fields).
+  setTimeout(() => { panel.classList.add('iwcp-fade'); setTimeout(() => panel.remove(), 400) }, 20000)
 }
 
 function esc(s: string): string {
@@ -243,6 +299,54 @@ function injectStyles(): void {
       font-size: 9px;
       color: #9b8fa8;
       border-top: 1px solid rgba(92,45,138,0.08);
+    }
+    .iwcp-fill {
+      padding: 6px 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      border-top: 1px solid rgba(92,45,138,0.08);
+    }
+    .iwcp-fill-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .iwcp-fill-label {
+      font-size: 9px;
+      color: #9b5ccc;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .iwcp-fill-input {
+      font-size: 11px;
+      font-family: Georgia, serif;
+      border: 1px solid rgba(92,45,138,0.25);
+      border-radius: 5px;
+      padding: 3px 7px;
+      background: #fff;
+      color: #3a3a3a;
+      outline: none;
+      width: 100%;
+    }
+    .iwcp-fill-input:focus { border-color: #5c2d8a; }
+    .iwcp-fill-save {
+      margin-top: 2px;
+      background: #5c2d8a;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-family: Georgia, serif;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    .iwcp-fill-save:disabled { opacity: 0.5; }
+    .iwcp-fill-save:hover:not(:disabled) { background: #4a2270; }
+    .iwcp-fill-status {
+      font-size: 10px;
+      align-self: center;
     }
   `
   document.head?.appendChild(style)

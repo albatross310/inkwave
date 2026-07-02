@@ -14,7 +14,7 @@ import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { simpleInText } from '../citations/format'
-import { ITEM_TYPE_LABELS as TYPE_LABELS } from '../citations/requiredFields'
+import { ITEM_TYPE_LABELS as TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS as CSL_FIELD_LABELS_MAP } from '../citations/requiredFields'
 import type { CSLItem, FieldSource, IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -455,8 +455,35 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     })
   }
 
+  function visitSource(item: CSLItem) {
+    const url = String(item.URL ?? (item as { _iw?: IwCitationMeta })._iw?.sourceUrl ?? '')
+    if (!url) return
+    // Build a capture msg so the extension can show the panel on the source page.
+    const type = item.type
+    const required = (REQUIRED_BY_TYPE as Record<string, string[]>)[type] ?? []
+    const issued = item.issued
+    const hasYear = !!(issued?.['date-parts']?.[0]?.[0])
+    const missingRequired = required.filter(f => {
+      if (f === 'year') return !hasYear
+      return !(item as Record<string, unknown>)[f]
+    })
+    const capture = {
+      id: item.id,
+      title: String(item.title ?? ''),
+      itemType: type,
+      typeLabel: TYPE_LABELS[type] ?? type,
+      fields: {} as Record<string, { value?: string; quote?: string | null }>,
+      missingRequired,
+      missingLabels: missingRequired.map(f => (CSL_FIELD_LABELS_MAP as Record<string,string>)[f] ?? f),
+      confidence: 'high',
+    }
+    window.postMessage({ source: 'inkwave-app', type: 'cite/visitSource', url, capture }, window.location.origin)
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   function panelStyle(): React.CSSProperties {
-    return { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+    // Position below toolbar (~56px) so the panel never overlaps it.
+    return { position: 'fixed', top: 68, left: '50%', transform: 'translateX(-50%)' }
   }
 
   return createPortal(
@@ -476,7 +503,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
-          <span className="text-[11px] uppercase tracking-wide text-stone-400">Citations</span>
+          <span className="text-[12px] font-medium" style={{ color: INK }}>Inkwave Citations</span>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
 
@@ -504,13 +531,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           )}
         </div>
 
-        <div className="px-4 py-2.5 border-b border-stone-100">
-          <div className="text-[10px] uppercase tracking-wide text-stone-400 mb-1.5">Reference list</div>
-          <div className="flex gap-1 mb-2">
+        <div className="px-4 py-2 border-b border-stone-100">
+          <div className="flex items-center gap-1.5">
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
                 key={m} type="button" onClick={() => setMode(m)}
-                className="text-[11px] px-2 py-1 rounded border flex-1"
+                className="text-[11px] px-2 py-1 rounded border"
                 style={refMode === m
                   ? { background: `${INK}12`, borderColor: INK, color: INK }
                   : { borderColor: '#e7e5e4', color: '#78716c' }}
@@ -518,18 +544,16 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 {m === 'cited' ? 'Auto' : m === 'all' ? 'All' : 'Manual'}
               </button>
             ))}
-          </div>
-          {!refCfg && (
-            <button type="button" onClick={() => cmd(() => editor.chain().focus().insertReferenceList().run())}
-              className="text-[11px] w-full px-2 py-1 rounded border border-stone-200 text-stone-500 hover:border-stone-300">
-              + Insert References section
-            </button>
-          )}
-          <div className="mt-2">
             <select value={citationStyle} onChange={e => onStyleChange(e.target.value)}
-              className="text-xs text-stone-600 border border-stone-200 rounded px-2 py-1 w-full bg-white">
+              className="text-[11px] text-stone-600 border border-stone-200 rounded px-2 py-1 bg-white flex-1 min-w-0">
               {CSL_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
+            {!refCfg && (
+              <button type="button" onClick={() => cmd(() => editor.chain().focus().insertReferenceList().run())}
+                className="text-[11px] px-2 py-1 rounded border border-stone-200 text-stone-500 hover:border-stone-300 whitespace-nowrap">
+                + Refs
+              </button>
+            )}
           </div>
         </div>
 
@@ -571,13 +595,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     <button type="button" onClick={() => cite(item)}
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
-                      <a
-                        href={String(item.URL ?? (item as { _iw?: IwCitationMeta })._iw?.sourceUrl ?? '')}
-                        target="_blank" rel="noopener noreferrer"
-                        title="Open source page"
+                      <button type="button"
+                        title="Open source page (shows verification panel if extension installed)"
                         className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
-                        onClick={e => e.stopPropagation()}
-                      >↗</a>
+                        onClick={e => { e.stopPropagation(); visitSource(item) }}
+                      >↗</button>
                     )}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
