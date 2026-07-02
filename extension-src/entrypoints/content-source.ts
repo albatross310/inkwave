@@ -69,22 +69,17 @@ function normNode(s: string): string {
 // normText: needle normalizer — same as normNode but trims outer whitespace.
 function normText(s: string): string { return normNode(s).trim() }
 
-// Walk visible text nodes. Uses normNode (no trim) per-node so cross-element
-// author names don't lose the space between them.
+// existsOnPage: use innerText rather than a TreeWalker.
+// innerText gives the browser's own visible-text rendering — it collapses whitespace,
+// respects CSS display:none, and works for custom elements (YouTube's <yt-formatted-string>
+// etc.) where a manual TreeWalker misses content or produces double-spaces between nodes.
 function existsOnPage(needle: string): boolean {
   if (!needle || needle.length < 3) return false
   const normed = normText(needle)
   if (!normed) return false
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
-  let flat = ''
-  let node: Text | null
-  while ((node = walker.nextNode() as Text | null)) {
-    const parent = node.parentElement
-    if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) continue
-    flat += normNode(node.textContent ?? '')
-    if (flat.includes(normed)) return true
-  }
-  return false
+  try {
+    return normNode(document.body.innerText).includes(normed)
+  } catch { return false }
 }
 
 // For date values the AI returns ISO format (2017-08-28) but pages show
@@ -107,26 +102,38 @@ function dateSearchCandidates(value: string): string[] {
   } catch { return [value] }
 }
 
-// Find the publisher's logo element on the page: prefers a real img in the header/nav
-// (so hover can outline it), falls back to link[rel="icon"] tags.
-function findPublisherLogo(): { el: HTMLImageElement | null; url: string } {
-  const containers = [
-    document.querySelector('header'),
-    document.querySelector('[role="banner"]'),
-    document.querySelector('nav'),
-    document.querySelector('[class*="header"]'),
-    document.querySelector('[id*="header"]'),
-  ].filter(Boolean) as Element[]
-  for (const c of containers) {
+// Find the publisher's logo on the page. Returns:
+//   el  — the DOM element to outline on hover (img, svg, or a containing element)
+//   url — a URL for the small thumbnail in the panel (img src or favicon link)
+function findPublisherLogo(): { el: HTMLElement | null; url: string } {
+  // 1. Search header/banner/nav for an <img> with "logo" in class/id/alt/src.
+  for (const root of ['header', '[role="banner"]', 'nav', '[class*="header"]', '[id*="header"]']) {
+    const c = document.querySelector(root)
+    if (!c) continue
     const imgs = Array.from(c.querySelectorAll('img')) as HTMLImageElement[]
-    const logo: HTMLImageElement | undefined =
-      imgs.find(img => /logo/i.test([img.className, img.id, img.alt ?? '', img.src].join(' ')))
-      ?? (imgs.length === 1 && imgs[0].width > 20 ? imgs[0] : undefined)
+    const logo = imgs.find(img => /logo/i.test([img.className, img.id, img.alt ?? '', img.src].join(' ')))
+              ?? (imgs.length === 1 && imgs[0].offsetWidth > 20 ? imgs[0] : undefined)
     if (logo?.src) return { el: logo, url: logo.src }
   }
+  // 2. Broader: any element whose id or class contains "logo" (catches YouTube's #logo SVG,
+  //    site-logo divs, etc). Prefer the smallest matched element with a reasonable size.
+  const logoEls = Array.from(document.querySelectorAll<HTMLElement>(
+    '[id*="logo"]:not(#inkwave-capture-panel), [class*="logo"]:not(#inkwave-capture-panel)'
+  )).filter(el => {
+    const r = el.getBoundingClientRect()
+    return r.width >= 20 && r.width <= 500 && r.top < window.innerHeight * 0.4
+  })
+  // Prefer visible img children; fall back to the container element itself
+  for (const el of logoEls) {
+    const img = el.tagName === 'IMG' ? el as unknown as HTMLImageElement : el.querySelector('img')
+    if ((img as HTMLImageElement | null)?.src) return { el, url: (img as HTMLImageElement).src }
+    if (el.tagName === 'IMG') return { el, url: (el as unknown as HTMLImageElement).src }
+    if (logoEls.length > 0) return { el, url: '' } // SVG/div logo — outline it, get url from links
+  }
+  // 3. Favicon links as url fallback (el = null → hover does nothing, but icon shows in panel).
   for (const sel of ['link[rel="apple-touch-icon"]', 'link[rel="icon"][type="image/png"]', 'link[rel="icon"][sizes="32x32"]', 'link[rel="icon"]', 'link[rel="shortcut icon"]']) {
-    const el = document.querySelector(sel) as HTMLLinkElement | null
-    if (el?.href && !el.href.startsWith('data:')) return { el: null, url: el.href }
+    const link = document.querySelector(sel) as HTMLLinkElement | null
+    if (link?.href && !link.href.startsWith('data:')) return { el: null, url: link.href }
   }
   return { el: null, url: `${window.location.origin}/favicon.ico` }
 }
