@@ -507,6 +507,23 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
 
+        {/* Extension promo — top of panel */}
+        <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
+          <span className="text-xs text-stone-500">Download the Inkwave citation extension for single click import on any page</span>
+          <div className="flex gap-2 flex-shrink-0 ml-3">
+            <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
+              target="_blank" rel="noopener noreferrer"
+              className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+              Chrome
+            </a>
+            <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
+              target="_blank" rel="noopener noreferrer"
+              className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+              Firefox
+            </a>
+          </div>
+        </div>
+
         <div className="px-4 pt-3 pb-2 border-b border-stone-100">
           <div className="flex gap-2">
             <input
@@ -610,22 +627,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           })}
         </div>
 
-        {/* Extension download footer */}
-        <div className="px-4 py-2 border-t border-stone-100 flex items-center justify-between">
-          <span className="text-[10px] text-stone-400">Capture from any page</span>
-          <div className="flex gap-2">
-            <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
-              target="_blank" rel="noopener noreferrer"
-              className="text-[10px] text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
-              Chrome
-            </a>
-            <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
-              target="_blank" rel="noopener noreferrer"
-              className="text-[10px] text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
-              Firefox
-            </a>
-          </div>
-        </div>
       </div>
     </>,
     document.body,

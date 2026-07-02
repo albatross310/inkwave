@@ -106,7 +106,14 @@ function dateSearchCandidates(value: string): string[] {
 //   el  — the DOM element to outline on hover (img, svg, or a containing element)
 //   url — a URL for the small thumbnail in the panel (img src or favicon link)
 function findPublisherLogo(): { el: HTMLElement | null; url: string } {
-  // 1. Search header/banner/nav for an <img> with "logo" in class/id/alt/src.
+  // Resolve favicon url first (used as thumbnail when no better img url is available).
+  let faviconUrl = `${window.location.origin}/favicon.ico`
+  for (const sel of ['link[rel="apple-touch-icon"]', 'link[rel="icon"][type="image/png"]', 'link[rel="icon"][sizes="32x32"]', 'link[rel="icon"]', 'link[rel="shortcut icon"]']) {
+    const link = document.querySelector(sel) as HTMLLinkElement | null
+    if (link?.href && !link.href.startsWith('data:')) { faviconUrl = link.href; break }
+  }
+
+  // 1. Header/banner/nav: prefer an <img> with "logo" in class/id/alt/src.
   for (const root of ['header', '[role="banner"]', 'nav', '[class*="header"]', '[id*="header"]']) {
     const c = document.querySelector(root)
     if (!c) continue
@@ -115,27 +122,23 @@ function findPublisherLogo(): { el: HTMLElement | null; url: string } {
               ?? (imgs.length === 1 && imgs[0].offsetWidth > 20 ? imgs[0] : undefined)
     if (logo?.src) return { el: logo, url: logo.src }
   }
-  // 2. Broader: any element whose id or class contains "logo" (catches YouTube's #logo SVG,
-  //    site-logo divs, etc). Prefer the smallest matched element with a reasonable size.
+
+  // 2. Any element whose id or class contains "logo" — catches YouTube's #logo SVG,
+  //    site-logo divs, etc. Filter to visible elements in the top 40% of the page.
   const logoEls = Array.from(document.querySelectorAll<HTMLElement>(
     '[id*="logo"]:not(#inkwave-capture-panel), [class*="logo"]:not(#inkwave-capture-panel)'
   )).filter(el => {
     const r = el.getBoundingClientRect()
     return r.width >= 20 && r.width <= 500 && r.top < window.innerHeight * 0.4
   })
-  // Prefer visible img children; fall back to the container element itself
   for (const el of logoEls) {
     const img = el.tagName === 'IMG' ? el as unknown as HTMLImageElement : el.querySelector('img')
-    if ((img as HTMLImageElement | null)?.src) return { el, url: (img as HTMLImageElement).src }
-    if (el.tagName === 'IMG') return { el, url: (el as unknown as HTMLImageElement).src }
-    if (logoEls.length > 0) return { el, url: '' } // SVG/div logo — outline it, get url from links
+    const imgUrl = (img as HTMLImageElement | null)?.src
+    // Return the container as hover target; use img src if available, else favicon.
+    return { el, url: imgUrl || faviconUrl }
   }
-  // 3. Favicon links as url fallback (el = null → hover does nothing, but icon shows in panel).
-  for (const sel of ['link[rel="apple-touch-icon"]', 'link[rel="icon"][type="image/png"]', 'link[rel="icon"][sizes="32x32"]', 'link[rel="icon"]', 'link[rel="shortcut icon"]']) {
-    const link = document.querySelector(sel) as HTMLLinkElement | null
-    if (link?.href && !link.href.startsWith('data:')) return { el: null, url: link.href }
-  }
-  return { el: null, url: `${window.location.origin}/favicon.ico` }
+
+  return { el: null, url: faviconUrl }
 }
 
 function showCapturePanel(capture: CaptureMsg) {
