@@ -87,8 +87,8 @@ function renderFields(item: CslItem, tabId: number | undefined) {
 btn.addEventListener('click', () => {
   btn.disabled = true
   statusEl.className = 's'
-  statusEl.textContent = 'Scraping page…'
-  saveStatus('s', 'Scraping page…')
+  statusEl.textContent = 'Fetching citation info…'
+  saveStatus('s', 'Fetching citation info…')
 
   browser.runtime.sendMessage({ type: 'inkwave:capture' }).then((res: unknown) => {
     btn.disabled = false

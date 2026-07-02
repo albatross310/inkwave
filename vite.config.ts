@@ -1,6 +1,6 @@
 import { reactRouter } from '@react-router/dev/vite'
 import tsconfigPaths from 'vite-tsconfig-paths'
-import { defineConfig, type PluginOption } from 'vite'
+import { defineConfig, loadEnv, type PluginOption } from 'vite'
 import type { InlineConfig } from 'vitest'
 
 // The /api/* serverless functions (OTS relay, signing service) are Node-only and don't bundle into
@@ -102,7 +102,13 @@ const devApi: PluginOption = {
   },
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+// Force .env values into process.env so server middleware always sees the current
+// key — even if stale values are already set in the shell environment.
+const env = loadEnv(mode, process.cwd(), '')
+Object.assign(process.env, env)
+
+return {
   // Vitest config. Only scan src/ to avoid git worktrees Claude Code creates under .claude/.
   test: { include: ['src/**/*.test.{ts,tsx}'] } as InlineConfig,
   plugins: [devApi, reactRouter(), tsconfigPaths()],
@@ -113,4 +119,5 @@ export default defineConfig({
   server: {
     host: true, // bind 0.0.0.0 so the WSL2 dev server is reachable from the Windows browser
   },
+}
 })
