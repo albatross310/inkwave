@@ -1,14 +1,20 @@
 import { QUEUE_KEY } from '../../utils/constants'
+import type { CaptureMsg } from '../background'
 
 const btn = document.getElementById('cap') as HTMLButtonElement
 const statusEl = document.getElementById('status') as HTMLElement
 const fieldsEl = document.getElementById('fields') as HTMLElement
 const fieldListEl = document.getElementById('fieldList') as HTMLElement
 const hintEl = document.getElementById('hint') as HTMLElement
+const alreadyEl = document.getElementById('already') as HTMLElement
+const alTypeEl = document.getElementById('alType') as HTMLElement
+const alMissingEl = document.getElementById('alMissing') as HTMLElement
+const showPanelBtn = document.getElementById('showPanel') as HTMLButtonElement
 
 type FieldEntry = { value?: string; quote?: string | null; source?: string }
 type IW = { fields?: Record<string, FieldEntry>; addedAt?: string; sourceUrl?: string; source?: string }
-type CslItem = { id: string; title?: string; author?: unknown[]; _iw?: IW }
+type CslItem = { id: string; title?: string; type?: string; author?: unknown[]; _iw?: IW; issued?: { 'date-parts'?: number[][] } }
+type QueueEntry = { item: CslItem; sourceUrl?: string; fields?: Record<string, FieldEntry>; confidence?: string; missingLabels?: string[]; typeLabel?: string }
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'Title', author: 'Author', date: 'Date',
@@ -17,7 +23,6 @@ const FIELD_LABELS: Record<string, string> = {
 
 const STATUS_KEY = 'inkwave:popupStatus'
 
-// Restore last status message so reopening the popup shows what happened.
 function restoreStatus() {
   try {
     const saved = sessionStorage.getItem(STATUS_KEY)
@@ -32,21 +37,48 @@ function saveStatus(cls: string, text: string) {
   try { sessionStorage.setItem(STATUS_KEY, JSON.stringify({ cls, text })) } catch { /* ignore */ }
 }
 
-// On popup open: check if the current tab has a recently-captured citation with AI quotes to show.
+// currentCapture is populated if this page is already in the queue.
+let currentCapture: CaptureMsg | null = null
+
 async function loadCurrentCapture() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
   if (!tab?.url) return
   const store = await browser.storage.local.get(QUEUE_KEY)
-  const q: Array<{ item: CslItem; sourceUrl?: string }> = (store[QUEUE_KEY] as typeof q) ?? []
-  // Find the most recent queued citation from this tab's URL.
+  const q: QueueEntry[] = (store[QUEUE_KEY] as QueueEntry[]) ?? []
   const match = [...q].reverse().find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
   if (!match) return
-  const iw = match.item._iw
-  if (!iw?.fields) return
-  // Only show the fields panel when there are AI-extracted quotes to hover.
-  const hasQuotes = Object.values(iw.fields).some(f => f.quote)
-  if (!hasQuotes) return
-  renderFields(match.item, tab.id)
+
+  // Build a CaptureMsg from the stored queue entry.
+  const item = match.item
+  const fields = match.fields ?? item._iw?.fields ?? {}
+
+  // Compute missingLabels if not stored (older entries).
+  const missingLabels: string[] = match.missingLabels ?? []
+  const typeLabel: string = match.typeLabel ?? item.type ?? 'Unknown type'
+
+  currentCapture = {
+    id: item.id,
+    title: String(item.title ?? ''),
+    itemType: String(item.type ?? 'webpage'),
+    typeLabel,
+    fields: fields as Record<string, { value?: string; quote?: string | null }>,
+    missingRequired: [],
+    missingLabels,
+    confidence: match.confidence ?? 'high',
+  }
+
+  // Show "already captured" banner.
+  alreadyEl.style.display = 'block'
+  alTypeEl.textContent = typeLabel
+  if (missingLabels.length > 0) {
+    alMissingEl.style.display = 'block'
+    alMissingEl.textContent = `Missing: ${missingLabels.join(', ')}`
+  }
+  hintEl.style.display = 'none'
+
+  // Show field list in popup if there are AI quotes.
+  const hasQuotes = Object.values(fields).some(f => (f as FieldEntry).quote)
+  if (hasQuotes) renderFields(item, tab.id)
 }
 
 function renderFields(item: CslItem, tabId: number | undefined) {
@@ -83,6 +115,14 @@ function renderFields(item: CslItem, tabId: number | undefined) {
     fieldListEl.appendChild(div)
   }
 }
+
+showPanelBtn.addEventListener('click', async () => {
+  if (!currentCapture) return
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.id) return
+  browser.runtime.sendMessage({ type: 'inkwave:showCapturePanel', tabId: tab.id, capture: currentCapture })
+  window.close()
+})
 
 btn.addEventListener('click', () => {
   btn.disabled = true

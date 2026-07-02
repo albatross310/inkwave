@@ -14,6 +14,7 @@ import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { simpleInText } from '../citations/format'
+import { ITEM_TYPE_LABELS as TYPE_LABELS } from '../citations/requiredFields'
 import type { CSLItem, FieldSource, IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -34,25 +35,8 @@ const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
   manual:   { label: 'manual',   color: '#6b7280' },
 }
 
-// Human-readable type labels shown in the UI.
-export const ITEM_TYPE_LABELS: Record<string, string> = {
-  'article-journal':   'Journal article',
-  'webpage':           'Webpage',
-  'post-weblog':       'Blog post',
-  'article-newspaper': 'News article',
-  'book':              'Book',
-  'chapter':           'Book chapter',
-  'paper-conference':  'Conference paper',
-  'thesis':            'Thesis / Dissertation',
-  'report':            'Report',
-  'video':             'Video / Film',
-  'broadcast':         'TV / Radio broadcast',
-  'song':              'Song / Album',
-  'graphic':           'Image / Artwork',
-  'legal_case':        'Legal case',
-  'legislation':       'Legislation',
-  'dataset':           'Dataset',
-}
+// Re-export for consumers that previously imported from here.
+export { ITEM_TYPE_LABELS } from '../citations/requiredFields'
 
 // Fields and their required status per type.
 // Fields marked required: true are needed by at least one major style (APA 7, MLA 9, Chicago 17).
@@ -308,7 +292,7 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
             <span className="text-[10px] uppercase tracking-wide text-stone-400">Source type</span>
             <select value={type} onChange={e => setType(e.target.value)}
               className="text-xs border border-stone-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#5c2d8a]">
-              {Object.entries(ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <p className="text-[10px] text-stone-400 mt-1.5">
@@ -373,7 +357,7 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
-export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, btnRef, initialCapture, onInitialCaptureConsumed }: Props) {
+export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, initialCapture, onInitialCaptureConsumed }: Props) {
   const [, force] = useState(0)
   const rerender = useCallback(() => force(n => n + 1), [])
   const [input, setInput] = useState('')
@@ -472,10 +456,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
   }
 
   function panelStyle(): React.CSSProperties {
-    const br = btnRef?.current?.getBoundingClientRect()
-    if (!br) return { position: 'fixed', bottom: 80, right: 16 }
-    const right = Math.max(8, window.innerWidth - br.right)
-    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), right }
+    return { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
   }
 
   return createPortal(
@@ -491,7 +472,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
       <div
         role="dialog" aria-label="Citations"
         className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ ...panelStyle(), width: 'min(380px, 96vw)', maxHeight: '82vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        style={{ ...panelStyle(), width: 'min(520px, 96vw)', maxHeight: '85vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
@@ -563,7 +544,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
           ) : entries.map(item => {
             const used = usedKeys.has(item.id)
             const src = SOURCE_BADGE[itemSource(item)]
-            const typeLabel = ITEM_TYPE_LABELS[item.type] ?? item.type
+            const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
               <div key={item.id} className="py-2 border-b border-stone-50 last:border-0">
                 <div className="flex items-start gap-2">
@@ -586,20 +567,20 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
                     <div className="text-[11px] text-stone-500 leading-tight truncate mt-0.5">{String(item.title ?? '')}</div>
                     <div className="text-[10px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
                   </button>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
-                      className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
+                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <a
                         href={String(item.URL ?? (item as { _iw?: IwCitationMeta })._iw?.sourceUrl ?? '')}
                         target="_blank" rel="noopener noreferrer"
                         title="Open source page"
-                        className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-center"
+                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
                         onClick={e => e.stopPropagation()}
                       >↗</a>
                     )}
                     <button type="button" onClick={() => void del(item)}
-                      className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
+                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
                 </div>
               </div>

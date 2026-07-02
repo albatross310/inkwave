@@ -77,6 +77,34 @@ async function callClaudeJson(apiKey, prompt, maxTokens = 500) {
   return JSON.parse(raw.slice(start, end + 1))
 }
 
+// oEmbed providers — deterministic, free, no AI needed for known video platforms.
+const OEMBED_PROVIDERS = [
+  { pattern: /(?:youtube\.com\/watch\?.*v=|youtu\.be\/)[\w-]{11}/, endpoint: 'https://www.youtube.com/oembed' },
+  { pattern: /vimeo\.com\/\d+/, endpoint: 'https://vimeo.com/api/oembed.json' },
+]
+
+async function extractViaOEmbed(url) {
+  const provider = OEMBED_PROVIDERS.find(p => p.pattern.test(url))
+  if (!provider) return null
+  try {
+    const r = await fetch(`${provider.endpoint}?url=${encodeURIComponent(url)}&format=json`, {
+      headers: { accept: 'application/json', 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)' },
+    })
+    if (!r.ok) return null
+    const d = await r.json()
+    if (!d.title) return null
+    return {
+      itemType: 'video',
+      confidence: 'high',
+      fields: {
+        ...(d.title       ? { title:     { value: d.title,       quote: null } } : {}),
+        ...(d.author_name ? { author:    { value: d.author_name, quote: null } } : {}),
+        ...(d.provider_name ? { publisher: { value: d.provider_name, quote: null } } : {}),
+      },
+    }
+  } catch { return null }
+}
+
 async function extractCitation(apiKey, url, html) {
   const c = extractCandidate(html)
   const metaLines = Object.entries(c.metas).map(([k, v]) => `${k}: ${v}`).join('\n')
@@ -126,6 +154,10 @@ export default async function handler(req, res) {
       }
       res.setHeader('content-type', 'application/json')
       try {
+        // Try oEmbed first for known video platforms — deterministic, no tokens used.
+        const oembed = await extractViaOEmbed(url)
+        if (oembed) return res.end(JSON.stringify(oembed))
+
         let pageHtml = typeof html === 'string' ? html : ''
         if (!pageHtml) {
           const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })

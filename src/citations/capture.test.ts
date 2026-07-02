@@ -102,6 +102,6 @@ describe('extractToCsl', () => {
   it('maps itemType correctly for article/report/video', () => {
     expect(extractToCsl({ itemType: 'newsArticle', fields: {} }, URL).item.type).toBe('article-newspaper')
     expect(extractToCsl({ itemType: 'report', fields: {} }, URL).item.type).toBe('report')
-    expect(extractToCsl({ itemType: 'video', fields: {} }, URL).item.type).toBe('motion_picture')
+    expect(extractToCsl({ itemType: 'video', fields: {} }, URL).item.type).toBe('video')
   })
 })

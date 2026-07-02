@@ -8,7 +8,8 @@ import { detectIdentifier } from '@inkwave/citations/identifiers'
 import { lookupIdentifier } from '@inkwave/citations/lookup'
 import { extractToCsl } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
-import { INKWAVE_ORIGINS, INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
+import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
+import { INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
 
 // Derive the API server origin from open Inkwave tabs.
 // Prefers localhost (dev) over production so the extension hits the right server
@@ -23,29 +24,68 @@ async function resolveApiOrigin(): Promise<string> {
   return PROD // no Inkwave tab open — fall back to production
 }
 
-type QueueEntry = { uuid: string; item: Record<string, unknown>; sourceUrl?: string; at?: number; fields?: Record<string, { value?: string; quote?: string | null }> }
+type FieldEntry = { value?: string; quote?: string | null }
+type QueueEntry = { uuid: string; item: Record<string, unknown>; sourceUrl?: string; at?: number; fields?: Record<string, FieldEntry>; confidence?: string }
+
+export interface CaptureMsg {
+  id: string
+  title: string
+  itemType: string
+  typeLabel: string
+  fields: Record<string, FieldEntry>
+  missingRequired: string[]
+  missingLabels: string[]
+  confidence: string
+}
+
+function buildCaptureMsg(
+  item: Record<string, unknown>,
+  fields: Record<string, FieldEntry>,
+  confidence = 'high',
+): CaptureMsg {
+  const type = String(item.type ?? 'webpage')
+  const required = REQUIRED_BY_TYPE[type] ?? []
+  const issued = item.issued as { 'date-parts'?: number[][] } | undefined
+  const hasYear = !!(issued?.['date-parts']?.[0]?.[0] ?? fields.date?.value ?? fields.year?.value)
+  const missingRequired = required.filter(f => {
+    if (f === 'year') return !hasYear
+    if (item[f]) return false
+    if (fields[f]?.value) return false
+    return true
+  })
+  return {
+    id: String(item.id ?? ''),
+    title: String(item.title ?? ''),
+    itemType: type,
+    typeLabel: ITEM_TYPE_LABELS[type] ?? type,
+    fields,
+    missingRequired,
+    missingLabels: missingRequired.map(f => FIELD_LABELS[f] ?? f),
+    confidence,
+  }
+}
+
+async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise<void> {
+  await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] }).catch(() => {})
+  browser.tabs.sendMessage(tabId, { type: 'inkwave:showCapture', capture }).catch(() => {})
+}
 
 export default defineBackground(() => {
   // When a tab finishes loading, check if its URL matches a stored AI capture.
   // If so, inject content-source.js and show the verification panel automatically.
   browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
     if (info.status !== 'complete' || !tab.url) return
-    // Skip Inkwave app tabs and restricted URLs.
     if (INKWAVE_URL_PATTERNS.some(pat => tab.url && new RegExp('^' + pat.replace('*', '.*')).test(tab.url!))) return
     const store = await browser.storage.local.get(QUEUE_KEY)
     const q = ((store[QUEUE_KEY] as QueueEntry[]) ?? [])
     const match = q.find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
     if (!match?.fields || Object.keys(match.fields).length === 0) return
-    const title = String((match.item as Record<string, unknown>).title ?? '')
-    await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] }).catch(() => {})
-    browser.tabs.sendMessage(tabId, {
-      type: 'inkwave:showCapture',
-      capture: { id: match.item.id, title, fields: match.fields },
-    }).catch(() => {})
+    const capture = buildCaptureMsg(match.item, match.fields, match.confidence)
+    await injectAndShowCapture(tabId, capture)
   })
 
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    const m = msg as { type?: string; tabId?: number; quote?: string } | null
+    const m = msg as { type?: string; tabId?: number; quote?: string; capture?: CaptureMsg } | null
     if (!m) return false
 
     if (m.type === 'inkwave:capture') {
@@ -53,6 +93,11 @@ export default defineBackground(() => {
         .then(sendResponse)
         .catch(e => sendResponse({ ok: false, error: String((e as Error).message || e) }))
       return true // keep the channel open for the async response
+    }
+
+    if (m.type === 'inkwave:showCapturePanel' && m.tabId && m.capture) {
+      void injectAndShowCapture(m.tabId, m.capture)
+      return false
     }
 
     if (m.type === 'inkwave:highlightOnTab' && m.tabId && m.quote) {
@@ -71,25 +116,17 @@ export default defineBackground(() => {
 
 async function injectAndHighlight(tabId: number, quote: string): Promise<void> {
   try {
-    // Inject the source-page content script if it hasn't been injected yet.
-    await browser.scripting.executeScript({
-      target: { tabId },
-      files: ['content-source.js'],
-    })
-  } catch {
-    // Already injected, or tab is restricted — ignore.
-  }
+    await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] })
+  } catch { /* already injected or restricted */ }
   try {
     await browser.tabs.sendMessage(tabId, { type: 'inkwave:highlight', quote })
-  } catch {
-    // Content script not ready yet — ignore.
-  }
+  } catch { /* not ready */ }
 }
 
-async function enqueue(item: object, sourceUrl: string, fields?: Record<string, unknown>): Promise<number> {
+async function enqueue(item: object, sourceUrl: string, fields?: Record<string, unknown>, confidence?: string): Promise<number> {
   const store = await browser.storage.local.get(QUEUE_KEY)
   const q: object[] = (store[QUEUE_KEY] as object[]) ?? []
-  q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now(), fields })
+  q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now(), fields, confidence })
   await browser.storage.local.set({ [QUEUE_KEY]: q })
   // Poke any open Inkwave tab to flush immediately.
   const tabs = await browser.tabs.query({})
@@ -98,7 +135,6 @@ async function enqueue(item: object, sourceUrl: string, fields?: Record<string, 
   ))
   for (const t of inkwaveTabs) {
     if (!t.id) continue
-    // Inject content script if the tab was open before the extension loaded/reloaded.
     await browser.scripting.executeScript({
       target: { tabId: t.id },
       files: ['content-inkwave.js'],
@@ -125,7 +161,6 @@ async function captureActiveTab(): Promise<{ ok: boolean; id?: string; queued?: 
 }
 
 async function captureWithLLM(url: string, tabId: number | undefined): Promise<{ ok: boolean; id?: string; queued?: number; error?: string }> {
-  // Fetch the page HTML in the background (background has host_permissions, content scripts don't).
   let html = ''
   if (tabId) {
     try {
@@ -134,9 +169,7 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
         func: () => document.documentElement.outerHTML.slice(0, 400_000),
       })
       html = (result as string | null) ?? ''
-    } catch {
-      // Page may be restricted (chrome:// etc.) — fall through to server-fetch path.
-    }
+    } catch { /* restricted page */ }
   }
 
   const apiOrigin = await resolveApiOrigin()
@@ -153,19 +186,11 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
   }
 
   const { item, fields } = extractToCsl(data, url)
-  const n = await enqueue(item, url, fields as Record<string, unknown>)
+  const capture = buildCaptureMsg(item as Record<string, unknown>, fields as Record<string, FieldEntry>, data.confidence)
+  await enqueue(item, url, fields as Record<string, unknown>, data.confidence)
 
   // Show the in-page verification panel on the source tab (AI captures only).
-  if (tabId) {
-    await browser.scripting.executeScript({
-      target: { tabId },
-      files: ['content-source.js'],
-    }).catch(() => {})
-    browser.tabs.sendMessage(tabId, {
-      type: 'inkwave:showCapture',
-      capture: { id: item.id, title: String(item.title ?? ''), fields },
-    }).catch(() => {})
-  }
+  if (tabId) await injectAndShowCapture(tabId, capture)
 
-  return { ok: true, id: item.id, queued: n }
+  return { ok: true, id: item.id, queued: 0 }
 }
