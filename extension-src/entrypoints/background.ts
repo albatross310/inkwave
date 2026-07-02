@@ -10,17 +10,17 @@ import { extractToCsl } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
 import { INKWAVE_ORIGINS, INKWAVE_URL_PATTERNS, QUEUE_KEY } from '../utils/constants'
 
-// Derive the API server origin from whichever Inkwave tab is open.
-// Picks localhost when a dev tab is open so the extension works without a rebuild.
-// Falls back to production when no Inkwave tab is visible.
+// Derive the API server origin from open Inkwave tabs.
+// Prefers localhost (dev) over production so the extension hits the right server
+// without needing a rebuild when switching environments.
 async function resolveApiOrigin(): Promise<string> {
   const tabs = await browser.tabs.query({})
-  for (const tab of tabs) {
-    for (const origin of INKWAVE_ORIGINS) {
-      if (tab.url?.startsWith(origin)) return origin
-    }
-  }
-  return INKWAVE_ORIGINS[0] // production fallback
+  const urls = tabs.map(t => t.url ?? '')
+  const DEV = 'http://localhost:5173'
+  const PROD = 'https://inkwave.me'
+  if (urls.some(u => u.startsWith(DEV))) return DEV
+  if (urls.some(u => u.startsWith(PROD))) return PROD
+  return PROD // no Inkwave tab open — fall back to production
 }
 
 export default defineBackground(() => {
