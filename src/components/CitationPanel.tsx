@@ -570,7 +570,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             const src = SOURCE_BADGE[itemSource(item)]
             const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
-              <div key={item.id} className="py-2 border-b border-stone-50 last:border-0">
+              <div key={item.id} className="py-2.5 border-b border-stone-100 last:border-0">
                 <div className="flex items-start gap-2">
                   {refMode === 'manual' && (
                     <input type="checkbox" checked={manualKeys.has(item.id)} onChange={() => toggleManual(item)}

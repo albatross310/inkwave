@@ -16,6 +16,15 @@ export default defineConfig({
     name: 'Inkwave Citation Capture',
     description: 'Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.',
     permissions: ['activeTab', 'storage', 'scripting'],
+    commands: {
+      _execute_action: {
+        suggested_key: {
+          default: 'Alt+Shift+C',
+          mac: 'Alt+Shift+C',
+        },
+        description: 'Open Inkwave Citation Capture',
+      },
+    },
     host_permissions: [
       'https://inkwave.me/*',
       'http://localhost:5173/*',

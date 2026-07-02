@@ -50,24 +50,55 @@ export default defineContentScript({
   },
 })
 
-// Walk the live DOM and find the first text node containing `needle`.
-// Returns a Range so the caller can use it for highlighting directly.
-function findTextInPage(needle: string): Range | null {
-  if (!needle || needle.length < 3) return null
-  const lower = needle.toLowerCase()
+// Same normalizer as textHighlight.ts so our existence checks align exactly with
+// what highlightQuote will do on hover.
+function normText(s: string): string {
+  return s.normalize('NFC')
+    .replace(/[   ]/g, ' ')
+    .replace(/['']/g, "'")
+    .replace(/[""]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/­/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+// Walk visible text nodes and return true if `needle` is found (normalised).
+function existsOnPage(needle: string): boolean {
+  if (!needle || needle.length < 3) return false
+  const normed = normText(needle)
+  if (!normed) return false
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  let flat = ''
   let node: Text | null
   while ((node = walker.nextNode() as Text | null)) {
-    const text = node.textContent ?? ''
-    const idx = text.toLowerCase().indexOf(lower)
-    if (idx !== -1) {
-      const range = document.createRange()
-      range.setStart(node, idx)
-      range.setEnd(node, idx + needle.length)
-      return range
-    }
+    const parent = node.parentElement
+    if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) continue
+    flat += normText(node.textContent ?? '')
+    if (flat.includes(normed)) return true
   }
-  return null
+  return false
+}
+
+// For date values the AI returns ISO format (2017-08-28) but pages show
+// "August 28, 2017" etc. Try several common renderings before giving up.
+function dateSearchCandidates(value: string): string[] {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return [value]
+  const [, y, mo, d] = m
+  try {
+    const dt = new Date(Number(y), Number(mo) - 1, Number(d))
+    return [
+      value,
+      dt.toLocaleDateString('en-US', { year: 'numeric', month: 'long',  day: 'numeric' }), // August 28, 2017
+      dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }), // Aug 28, 2017
+      `${Number(d)} ${dt.toLocaleDateString('en-US', { month: 'long' })} ${Number(y)}`,    // 28 August 2017
+      `${Number(d)} ${dt.toLocaleDateString('en-US', { month: 'short' })} ${Number(y)}`,   // 28 Aug 2017
+      `${dt.toLocaleDateString('en-US', { month: 'long' })} ${Number(d)}`,                 // August 28
+      y,                                                                                    // 2017 (year alone)
+    ]
+  } catch { return [value] }
 }
 
 function showCapturePanel(capture: CaptureMsg) {
@@ -78,19 +109,25 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.setAttribute('role', 'status')
   panel.setAttribute('aria-label', 'Inkwave citation captured')
 
-  // For each field that has a value but no AI-supplied quote, try to locate
-  // the text directly in the page DOM. Ranges are pre-computed once so hovering
-  // doesn't trigger a second walk.
-  const autoRanges = new Map<string, Range>()
+  // Determine verifiability for each field.
+  // AI quotes are validated against visible DOM — AI often "quotes" from JSON-LD/meta tags.
+  // Unquoted or invalidated fields fall back to auto-search; dates try multiple formats.
+  const verifySource = new Map<string, 'ai' | 'auto'>()
+  const verifyQuote  = new Map<string, string>()
   for (const [key, f] of Object.entries(capture.fields)) {
-    if (f.value && !f.quote) {
-      const r = findTextInPage(f.value)
-      if (r) autoRanges.set(key, r)
+    if (!f.value) continue
+    if (f.quote && existsOnPage(f.quote)) {
+      verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)
+    } else {
+      const candidates = (key === 'date' || key === 'accessed')
+        ? dateSearchCandidates(f.value) : [f.value]
+      const found = candidates.find(existsOnPage)
+      if (found) { verifySource.set(key, 'auto');  verifyQuote.set(key, found) }
     }
   }
 
   const fields = Object.entries(capture.fields).filter(([, f]) => f.value)
-  const hasQuotes = fields.some(([key, f]) => f.quote || autoRanges.has(key))
+  const hasVerifiable = fields.some(([key]) => verifySource.has(key))
   const missing = capture.missingLabels ?? []
   const isLowConf = capture.confidence === 'low'
   const typeLabel = capture.typeLabel ?? capture.itemType ?? 'Webpage'
@@ -109,19 +146,19 @@ function showCapturePanel(capture: CaptureMsg) {
     </div>
     <ul class="iwcp-fields">
       ${fields.map(([key, f]) => {
-        const label = FIELD_LABELS[key] ?? key
-        const aiQuoted = !!f.quote
-        const autoFound = !aiQuoted && autoRanges.has(key)
-        // data-quote drives the hover highlight.
-        const quoteAttr = f.quote ?? (autoFound ? (f.value ?? '') : '')
-        const cls = aiQuoted ? ' iwcp-has-quote' : autoFound ? ' iwcp-auto-found' : ''
-        const symbol = aiQuoted ? '✓' : autoFound ? '◎' : '○'
-        const role = (aiQuoted || autoFound) ? 'button' : 'listitem'
+        const label     = FIELD_LABELS[key] ?? key
+        const src       = verifySource.get(key)
+        const aiVerified = src === 'ai'
+        const autoFound  = src === 'auto'
+        const quoteAttr  = verifyQuote.get(key) ?? ''
+        const cls    = aiVerified ? ' iwcp-has-quote' : autoFound ? ' iwcp-auto-found' : ''
+        const symbol = aiVerified ? '✓' : autoFound ? '◎' : '○'
+        const role   = (aiVerified || autoFound) ? 'button' : 'listitem'
         return `<li class="iwcp-field${cls}"
                     data-quote="${esc(quoteAttr)}"
-                    tabindex="${(aiQuoted || autoFound) ? '0' : '-1'}"
+                    tabindex="${(aiVerified || autoFound) ? '0' : '-1'}"
                     role="${role}"
-                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm match' : aiQuoted ? ' — hover to verify' : ''}">
+                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
           <span class="iwcp-check">${symbol}</span>
           <span class="iwcp-label">${esc(label)}</span>
           <span class="iwcp-value">${esc(f.value ?? '')}</span>
@@ -146,7 +183,7 @@ function showCapturePanel(capture: CaptureMsg) {
         <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
       </div>
     </form>` : ''}
-    ${hasQuotes ? '<p class="iwcp-hint">Hover ✓ or ◎ to see the match · click ◎ to confirm</p>' : ''}
+    ${hasVerifiable ? '<p class="iwcp-hint">Hover ✓ or ◎ to see the match · click ◎ to confirm</p>' : ''}
   `
 
   panel.querySelectorAll<HTMLElement>('.iwcp-has-quote').forEach(el => {
@@ -201,9 +238,51 @@ function showCapturePanel(capture: CaptureMsg) {
       }
       if (saveBtn) saveBtn.disabled = false
       if (result?.ok) {
-        panel.querySelector('.iwcp-warnings')?.remove()
-        // Briefly flash the status then clear it so the form stays editable.
-        setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 3000)
+        // Move each saved field from the form into the ✓/◎/○ field list.
+        const fieldsList = panel.querySelector<HTMLElement>('.iwcp-fields')
+        for (const [key, value] of Object.entries(updates)) {
+          // Remove the input row.
+          form.querySelector<HTMLElement>(`[name="${CSS.escape(key)}"]`)?.closest<HTMLElement>('.iwcp-fill-row')?.remove()
+          if (!fieldsList) continue
+          const label = FIELD_LABELS[key] ?? key
+          const range = findTextInPage(value)
+          const cls = range ? ' iwcp-auto-found' : ''
+          const symbol = range ? '◎' : '○'
+          const li = document.createElement('li')
+          li.className = `iwcp-field${cls}`
+          li.setAttribute('data-quote', range ? value : '')
+          li.setAttribute('tabindex', range ? '0' : '-1')
+          li.setAttribute('role', range ? 'button' : 'listitem')
+          li.innerHTML = `<span class="iwcp-check">${symbol}</span><span class="iwcp-label">${esc(label)}</span><span class="iwcp-value">${esc(value)}</span>`
+          if (range) {
+            li.addEventListener('mouseenter', () => highlightQuote(value))
+            li.addEventListener('focus',      () => highlightQuote(value))
+            li.addEventListener('mouseleave', clearHighlight)
+            li.addEventListener('blur',       clearHighlight)
+            li.addEventListener('click', () => {
+              li.classList.remove('iwcp-auto-found')
+              li.classList.add('iwcp-has-quote')
+              li.querySelector('.iwcp-check')!.textContent = '✓'
+            })
+          }
+          fieldsList.appendChild(li)
+        }
+        // If all inputs are gone hide the warnings + form.
+        if (!form.querySelector('.iwcp-fill-row')) {
+          panel.querySelector('.iwcp-warnings')?.remove()
+          form.style.display = 'none'
+        }
+        // Show the hint if there are now hoverable fields.
+        const hintEl = panel.querySelector('.iwcp-hint')
+        const hasHoverable = !!panel.querySelector('.iwcp-has-quote, .iwcp-auto-found')
+        if (hintEl) hintEl.style.display = hasHoverable ? '' : 'none'
+        else if (hasHoverable) {
+          const p = document.createElement('p')
+          p.className = 'iwcp-hint'
+          p.textContent = 'Hover ✓ or ◎ to see the match · click ◎ to confirm'
+          panel.appendChild(p)
+        }
+        setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 2000)
       }
     } catch {
       if (statusEl) { statusEl.textContent = '✗ Error'; statusEl.style.color = '#b91c1c' }
