@@ -67,6 +67,15 @@ function collectTextNodes(root: Node): { flat: string; nodes: TextNode[] } {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const el = node as Element
       if (el.id === 'inkwave-capture-panel') return // never highlight our own panel text
+      const tag = el.tagName
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'TEMPLATE') return
+      // Skip HIDDEN subtrees so the flat text matches innerText. Live pages (YouTube, CNET) render
+      // the title/byline MANY times in display:none scaffolding (17× for a channel name); without
+      // this the regex matches the first — a hidden 0×0 copy — and highlights nothing visible.
+      try {
+        const cs = getComputedStyle(el)
+        if (cs.display === 'none' || cs.visibility === 'hidden') return
+      } catch { /* detached / no view — fall through and include it */ }
       const sr = (el as HTMLElement).shadowRoot // open shadow roots only (closed → null)
       if (sr) visit(sr)
     }
