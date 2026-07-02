@@ -1,8 +1,7 @@
 // Unified Citation Panel — opened by the ‟ toolbar button. One place for everything:
 //   • a URL/DOI capture bar (paste a DOI/URL to add a source; free text filters the library)
-//   • the master list of every saved citation, each with a "used in document?" flag, a source
-//     badge (verified / AI / manual), a tick (manual-mode inclusion), cite + edit + delete actions
-//   • the reference-list controls: the 3-mode toggle (Auto/All/Manual) + a style picker
+//   • the master list of every saved citation with cite + edit + delete actions
+//   • reference-list controls: 3-mode toggle + style picker
 // Replaces the old Zotero/BBT BibPanel + ZoteroSetup. See citations spec §10.
 
 import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
@@ -25,7 +24,7 @@ interface Props {
   onStyleChange: (s: string) => void
   onClose: () => void
   btnRef?: RefObject<HTMLElement | null>
-  initialCapture?: string | null              // a shared URL (PWA share target) to auto-capture on open
+  initialCapture?: string | null
   onInitialCaptureConsumed?: () => void
 }
 
@@ -35,18 +34,151 @@ const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
   manual:   { label: 'manual',   color: '#6b7280' },
 }
 
-const ITEM_TYPE_LABELS: Record<string, string> = {
-  'article-journal': 'Journal article',
-  'webpage':         'Webpage',
-  'post-weblog':     'Blog post',
+// Human-readable type labels shown in the UI.
+export const ITEM_TYPE_LABELS: Record<string, string> = {
+  'article-journal':   'Journal article',
+  'webpage':           'Webpage',
+  'post-weblog':       'Blog post',
   'article-newspaper': 'News article',
-  'report':          'Report',
-  'book':            'Book',
-  'chapter':         'Book chapter',
-  'paper-conference':'Conference paper',
-  'thesis':          'Thesis',
-  'video':           'Video',
+  'book':              'Book',
+  'chapter':           'Book chapter',
+  'paper-conference':  'Conference paper',
+  'thesis':            'Thesis / Dissertation',
+  'report':            'Report',
+  'video':             'Video / Film',
+  'broadcast':         'TV / Radio broadcast',
+  'song':              'Song / Album',
+  'graphic':           'Image / Artwork',
+  'legal_case':        'Legal case',
+  'legislation':       'Legislation',
+  'dataset':           'Dataset',
 }
+
+// Fields and their required status per type.
+// Fields marked required: true are needed by at least one major style (APA 7, MLA 9, Chicago 17).
+interface FieldDef {
+  key: string
+  label: string
+  placeholder?: string
+  required: boolean
+  styles?: string   // which styles most need this (display hint only)
+}
+
+const TYPE_FIELDS: Record<string, FieldDef[]> = {
+  'article-journal': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Article title',   required: true },
+    { key: 'container-title', label: 'Journal name',    required: true },
+    { key: 'year',            label: 'Year',            placeholder: '2024',  required: true },
+    { key: 'volume',          label: 'Volume',          required: true,  styles: 'APA · MLA · Chicago' },
+    { key: 'issue',           label: 'Issue',           required: false, styles: 'APA · MLA' },
+    { key: 'page',            label: 'Pages',           placeholder: '123–145', required: true, styles: 'APA · MLA · Chicago' },
+    { key: 'DOI',             label: 'DOI',             placeholder: '10.xxxx/…', required: false },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'webpage': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: false },
+    { key: 'title',           label: 'Page title',      required: true },
+    { key: 'container-title', label: 'Website name',    required: false, styles: 'MLA · Chicago' },
+    { key: 'year',            label: 'Year published',  required: false },
+    { key: 'URL',             label: 'URL',             required: true },
+    { key: 'accessed',        label: 'Date accessed',   placeholder: 'YYYY-MM-DD', required: false, styles: 'MLA · Chicago' },
+  ],
+  'post-weblog': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Post title',      required: true },
+    { key: 'container-title', label: 'Blog name',       required: false },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'URL',             label: 'URL',             required: true },
+    { key: 'accessed',        label: 'Date accessed',   placeholder: 'YYYY-MM-DD', required: false, styles: 'MLA · Chicago' },
+  ],
+  'article-newspaper': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Article title',   required: true },
+    { key: 'container-title', label: 'Newspaper name',  required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'page',            label: 'Page(s)',         required: false },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'book': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Book title',      required: true },
+    { key: 'publisher',       label: 'Publisher',       required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'edition',         label: 'Edition',         placeholder: '2nd', required: false },
+    { key: 'container-title', label: 'Series',          required: false },
+    { key: 'DOI',             label: 'DOI',             required: false },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'chapter': [
+    { key: 'author',          label: 'Chapter author(s)', placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Chapter title',   required: true },
+    { key: 'container-title', label: 'Book title',      required: true },
+    { key: 'editor',          label: 'Editor(s)',       placeholder: 'Given Family; Given2 Family2', required: false },
+    { key: 'publisher',       label: 'Publisher',       required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'page',            label: 'Pages',           placeholder: '23–45', required: true },
+    { key: 'DOI',             label: 'DOI',             required: false },
+  ],
+  'paper-conference': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Paper title',     required: true },
+    { key: 'event-title',     label: 'Conference name', required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'page',            label: 'Pages',           required: false },
+    { key: 'publisher',       label: 'Publisher / Proceedings', required: false },
+    { key: 'DOI',             label: 'DOI',             required: false },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'thesis': [
+    { key: 'author',          label: 'Author',          placeholder: 'Given Family', required: true },
+    { key: 'title',           label: 'Thesis title',    required: true },
+    { key: 'genre',           label: 'Degree type',     placeholder: 'PhD thesis, Masters dissertation…', required: true },
+    { key: 'publisher',       label: 'Institution',     required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'URL',             label: 'URL / Repository', required: false },
+  ],
+  'report': [
+    { key: 'author',          label: 'Author(s)',       placeholder: 'Given Family; Given2 Family2', required: true },
+    { key: 'title',           label: 'Report title',    required: true },
+    { key: 'publisher',       label: 'Institution / Publisher', required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'number',          label: 'Report number',   required: false },
+    { key: 'URL',             label: 'URL',             required: false },
+    { key: 'DOI',             label: 'DOI',             required: false },
+  ],
+  'video': [
+    { key: 'author',          label: 'Director / Creator', placeholder: 'Given Family', required: true },
+    { key: 'title',           label: 'Title',           required: true },
+    { key: 'publisher',       label: 'Studio / Platform', required: false },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'broadcast': [
+    { key: 'author',          label: 'Host / Director', placeholder: 'Given Family', required: false },
+    { key: 'title',           label: 'Episode / Programme title', required: true },
+    { key: 'container-title', label: 'Series name',     required: false },
+    { key: 'publisher',       label: 'Network / Platform', required: true },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+  'song': [
+    { key: 'author',          label: 'Artist',          required: true },
+    { key: 'title',           label: 'Song / Album title', required: true },
+    { key: 'publisher',       label: 'Label / Platform', required: false },
+    { key: 'year',            label: 'Year',            required: true },
+    { key: 'URL',             label: 'URL',             required: false },
+  ],
+}
+
+// Fallback schema for any type not in the map above.
+const GENERIC_FIELDS: FieldDef[] = [
+  { key: 'author',    label: 'Author(s)', placeholder: 'Given Family; Given2 Family2', required: true },
+  { key: 'title',     label: 'Title',     required: true },
+  { key: 'year',      label: 'Year',      required: true },
+  { key: 'publisher', label: 'Publisher', required: false },
+  { key: 'URL',       label: 'URL',       required: false },
+]
 
 function itemSource(item: CSLItem): FieldSource {
   const meta = (item as { _iw?: IwCitationMeta })._iw
@@ -58,17 +190,21 @@ function itemSource(item: CSLItem): FieldSource {
   return 'manual'
 }
 
-// Format CSL author array → "Given Family; Given2 Family2" for editing.
 function authorsToString(authors: CSLItem['author']): string {
   if (!authors?.length) return ''
   return authors.map(a => {
     if (a.literal) return a.literal
-    const parts = [a.given, a.family].filter(Boolean)
-    return parts.join(' ')
+    return [a.given, a.family].filter(Boolean).join(' ')
   }).join('; ')
 }
 
-// ─── Edit dialog ────────────────────────────────────────────────────────────
+// Read a simple string CSL field, or empty string.
+function strField(item: CSLItem, key: string): string {
+  const v = (item as Record<string, unknown>)[key]
+  return v != null ? String(v) : ''
+}
+
+// ─── Edit dialog ─────────────────────────────────────────────────────────────
 
 interface EditDialogProps {
   item: CSLItem
@@ -77,13 +213,36 @@ interface EditDialogProps {
 }
 
 function EditDialog({ item, onSave, onClose }: EditDialogProps) {
-  const [title, setTitle] = useState(String(item.title ?? ''))
-  const [authors, setAuthors] = useState(authorsToString(item.author))
-  const [year, setYear] = useState(String(item.issued?.['date-parts']?.[0]?.[0] ?? ''))
-  const [url, setUrl] = useState(String(item.URL ?? ''))
-  const [container, setContainer] = useState(String(item['container-title'] ?? ''))
   const [type, setType] = useState(item.type ?? 'webpage')
+  const [values, setValues] = useState<Record<string, string>>(() => ({
+    author:          authorsToString(item.author),
+    title:           strField(item, 'title'),
+    'container-title': strField(item, 'container-title'),
+    year:            String(item.issued?.['date-parts']?.[0]?.[0] ?? ''),
+    volume:          strField(item, 'volume'),
+    issue:           strField(item, 'issue'),
+    page:            strField(item, 'page'),
+    DOI:             strField(item, 'DOI'),
+    URL:             strField(item, 'URL'),
+    publisher:       strField(item, 'publisher'),
+    edition:         strField(item, 'edition'),
+    'event-title':   strField(item, 'event-title'),
+    genre:           strField(item, 'genre'),
+    number:          strField(item, 'number'),
+    editor:          authorsToString(item.author),  // note: editor uses same format
+    accessed:        (() => {
+      const dp = (item as Record<string, unknown>).accessed as { 'date-parts'?: number[][] } | undefined
+      const parts = dp?.['date-parts']?.[0]
+      return parts ? parts.join('-') : ''
+    })(),
+  }))
   const [saving, setSaving] = useState(false)
+
+  // Reset editor field for editor (not author).
+  useEffect(() => {
+    const ed = (item as Record<string, unknown>).editor as CSLItem['author'] | undefined
+    setValues(v => ({ ...v, editor: authorsToString(ed) }))
+  }, [item])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -91,31 +250,39 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const fields = TYPE_FIELDS[type] ?? GENERIC_FIELDS
+  const missingRequired = fields.filter(f => f.required && !values[f.key]?.trim())
+
   async function save() {
     setSaving(true)
+    const year = values.year?.trim()
+    const accessed = values.accessed?.trim()
     const updated: CSLItem = {
       ...item,
       type,
-      title: title || undefined,
-      author: authors ? parseAuthor(authors) : undefined,
-      issued: year ? parseDate(year) : undefined,
-      URL: url || undefined,
-      'container-title': container || undefined,
+      title:             values.title?.trim() || undefined,
+      author:            values.author?.trim() ? parseAuthor(values.author) : undefined,
+      issued:            year ? parseDate(year) : undefined,
+      'container-title': values['container-title']?.trim() || undefined,
+      URL:               values.URL?.trim() || undefined,
+      DOI:               values.DOI?.trim() || undefined,
+      volume:            values.volume?.trim() || undefined,
+      issue:             values.issue?.trim() || undefined,
+      page:              values.page?.trim() || undefined,
+      publisher:         values.publisher?.trim() || undefined,
+      edition:           values.edition?.trim() || undefined,
+      'event-title':     values['event-title']?.trim() || undefined,
+      genre:             values.genre?.trim() || undefined,
+      number:            values.number?.trim() || undefined,
+      editor:            values.editor?.trim() ? parseAuthor(values.editor) : undefined,
+      accessed:          accessed ? parseDate(accessed) : undefined,
     }
     await onSave(updated)
     setSaving(false)
   }
 
-  const field = (label: string, value: string, onChange: (v: string) => void, hint?: string) => (
-    <label className="flex flex-col gap-0.5">
-      <span className="text-[10px] uppercase tracking-wide text-stone-400">{label}</span>
-      <input
-        value={value} onChange={e => onChange(e.target.value)}
-        placeholder={hint}
-        className="text-xs border border-stone-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#5c2d8a]"
-      />
-    </label>
-  )
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setValues(v => ({ ...v, [key]: e.target.value }))
 
   return createPortal(
     <>
@@ -123,33 +290,68 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
       <div
         role="dialog" aria-label="Edit citation"
         className="fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(440px, 94vw)', maxHeight: '90vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-stone-100">
           <div>
             <div className="text-[11px] uppercase tracking-wide text-stone-400">Edit citation</div>
-            <div className="text-xs text-stone-500 mt-0.5 font-mono">{item.id}</div>
+            <div className="text-[10px] text-stone-400 mt-0.5 font-mono">{item.id}</div>
           </div>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
 
-        {/* Form */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] uppercase tracking-wide text-stone-400">Type</span>
+        {/* Type selector */}
+        <div className="px-5 pt-3 pb-2 border-b border-stone-100">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-wide text-stone-400">Source type</span>
             <select value={type} onChange={e => setType(e.target.value)}
               className="text-xs border border-stone-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#5c2d8a]">
               {Object.entries(ITEM_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
-          {field('Title', title, setTitle, 'Article or page title')}
-          {field('Author(s)', authors, setAuthors, 'Given Family; Given2 Family2')}
-          {field('Year', year, setYear, '2024')}
-          {field('Journal / Publisher', container, setContainer, 'Nature, MIT Press…')}
-          {field('URL', url, setUrl, 'https://…')}
+          <p className="text-[10px] text-stone-400 mt-1.5">
+            Changing the type updates which fields are required for APA, MLA, and Chicago.
+          </p>
         </div>
+
+        {/* Fields */}
+        <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2.5">
+          {fields.map(f => {
+            const val = values[f.key] ?? ''
+            const missing = f.required && !val.trim()
+            return (
+              <label key={f.key} className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-stone-400">{f.label}</span>
+                  {f.required
+                    ? <span className="text-[9px] px-1 rounded" style={{ color: missing ? '#b91c1c' : '#15803d', background: missing ? '#fef2f2' : '#f0fdf4' }}>
+                        {missing ? 'required — missing' : 'required ✓'}
+                      </span>
+                    : <span className="text-[9px] text-stone-300">optional</span>}
+                  {f.styles && <span className="text-[9px] text-stone-300">{f.styles}</span>}
+                </div>
+                <input
+                  value={val}
+                  onChange={set(f.key)}
+                  placeholder={f.placeholder}
+                  className={`text-xs border rounded px-2 py-1.5 focus:outline-none ${missing ? 'border-red-200 focus:border-red-400' : 'border-stone-200 focus:border-[#5c2d8a]'}`}
+                />
+              </label>
+            )
+          })}
+        </div>
+
+        {/* Completeness notice */}
+        {missingRequired.length > 0 && (
+          <div className="px-5 py-2 border-t border-stone-100 bg-red-50">
+            <p className="text-[11px] text-red-700">
+              Missing required fields: {missingRequired.map(f => f.label).join(', ')}.
+              Citations may render incompletely in some styles.
+            </p>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-stone-100">
@@ -169,7 +371,7 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
   )
 }
 
-// ─── Main panel ─────────────────────────────────────────────────────────────
+// ─── Main panel ──────────────────────────────────────────────────────────────
 
 export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, btnRef, initialCapture, onInitialCaptureConsumed }: Props) {
   const [, force] = useState(0)
@@ -192,7 +394,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, editItem])
 
-  // Auto-capture a URL handed in via the PWA share target (once, on open).
   const consumedRef = useRef(false)
   useEffect(() => {
     if (initialCapture && !consumedRef.current) {
@@ -230,9 +431,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
     }
   }
 
-  // Editor mutations from click handlers are deferred to a microtask so the ProseMirror transaction
-  // (and the flushSync ReactNodeViewRenderer runs to sync a NodeView) never fires synchronously
-  // inside React's event dispatch — which would provoke a flushSync-during-render warning.
   const cmd = (fn: () => void) => queueMicrotask(fn)
 
   function cite(item: CSLItem) {
@@ -296,13 +494,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
         style={{ ...panelStyle(), width: 'min(380px, 96vw)', maxHeight: '82vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
           <span className="text-[11px] uppercase tracking-wide text-stone-400">Citations</span>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
 
-        {/* Capture bar */}
         <div className="px-4 pt-3 pb-2 border-b border-stone-100">
           <div className="flex gap-2">
             <input
@@ -327,7 +523,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
           )}
         </div>
 
-        {/* Reference-list controls */}
         <div className="px-4 py-2.5 border-b border-stone-100">
           <div className="text-[10px] uppercase tracking-wide text-stone-400 mb-1.5">Reference list</div>
           <div className="flex gap-1 mb-2">
@@ -357,7 +552,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
           </div>
         </div>
 
-        {/* Master list */}
         <div className="flex-1 overflow-y-auto px-4 py-2">
           <div className="text-[10px] uppercase tracking-wide text-stone-400 mb-2">
             Library ({bibProvider.getAll().length})
@@ -369,6 +563,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
           ) : entries.map(item => {
             const used = usedKeys.has(item.id)
             const src = SOURCE_BADGE[itemSource(item)]
+            const typeLabel = ITEM_TYPE_LABELS[item.type] ?? item.type
             return (
               <div key={item.id} className="py-2 border-b border-stone-50 last:border-0">
                 <div className="flex items-start gap-2">
@@ -382,17 +577,27 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
                     onClick={() => setEditItem(item)}
                     title="Click to edit"
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-xs font-medium truncate" style={{ color: INK }}>{item.id}</span>
                       <span className="text-[9px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
-                      {used && <span className="text-[9px] text-green-600" title="cited in this document">● used</span>}
+                      <span className="text-[9px] text-stone-300">{typeLabel}</span>
+                      {used && <span className="text-[9px] text-green-600">● used</span>}
                     </div>
-                    <div className="text-[11px] text-stone-500 leading-tight truncate">{String(item.title ?? '')}</div>
+                    <div className="text-[11px] text-stone-500 leading-tight truncate mt-0.5">{String(item.title ?? '')}</div>
                     <div className="text-[10px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
                   </button>
                   <div className="flex flex-col gap-1">
                     <button type="button" onClick={() => cite(item)}
                       className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
+                    {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
+                      <a
+                        href={String(item.URL ?? (item as { _iw?: IwCitationMeta })._iw?.sourceUrl ?? '')}
+                        target="_blank" rel="noopener noreferrer"
+                        title="Open source page"
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-center"
+                        onClick={e => e.stopPropagation()}
+                      >↗</a>
+                    )}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
@@ -400,6 +605,23 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, b
               </div>
             )
           })}
+        </div>
+
+        {/* Extension download footer */}
+        <div className="px-4 py-2 border-t border-stone-100 flex items-center justify-between">
+          <span className="text-[10px] text-stone-400">Capture from any page</span>
+          <div className="flex gap-2">
+            <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
+              target="_blank" rel="noopener noreferrer"
+              className="text-[10px] text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+              Chrome
+            </a>
+            <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
+              target="_blank" rel="noopener noreferrer"
+              className="text-[10px] text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+              Firefox
+            </a>
+          </div>
         </div>
       </div>
     </>,

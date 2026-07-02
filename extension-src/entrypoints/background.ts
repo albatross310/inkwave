@@ -23,7 +23,27 @@ async function resolveApiOrigin(): Promise<string> {
   return PROD // no Inkwave tab open — fall back to production
 }
 
+type QueueEntry = { uuid: string; item: Record<string, unknown>; sourceUrl?: string; at?: number; fields?: Record<string, { value?: string; quote?: string | null }> }
+
 export default defineBackground(() => {
+  // When a tab finishes loading, check if its URL matches a stored AI capture.
+  // If so, inject content-source.js and show the verification panel automatically.
+  browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+    if (info.status !== 'complete' || !tab.url) return
+    // Skip Inkwave app tabs and restricted URLs.
+    if (INKWAVE_URL_PATTERNS.some(pat => tab.url && new RegExp('^' + pat.replace('*', '.*')).test(tab.url!))) return
+    const store = await browser.storage.local.get(QUEUE_KEY)
+    const q = ((store[QUEUE_KEY] as QueueEntry[]) ?? [])
+    const match = q.find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
+    if (!match?.fields || Object.keys(match.fields).length === 0) return
+    const title = String((match.item as Record<string, unknown>).title ?? '')
+    await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] }).catch(() => {})
+    browser.tabs.sendMessage(tabId, {
+      type: 'inkwave:showCapture',
+      capture: { id: match.item.id, title, fields: match.fields },
+    }).catch(() => {})
+  })
+
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const m = msg as { type?: string; tabId?: number; quote?: string } | null
     if (!m) return false
@@ -66,10 +86,10 @@ async function injectAndHighlight(tabId: number, quote: string): Promise<void> {
   }
 }
 
-async function enqueue(item: object, sourceUrl: string): Promise<number> {
+async function enqueue(item: object, sourceUrl: string, fields?: Record<string, unknown>): Promise<number> {
   const store = await browser.storage.local.get(QUEUE_KEY)
   const q: object[] = (store[QUEUE_KEY] as object[]) ?? []
-  q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now() })
+  q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now(), fields })
   await browser.storage.local.set({ [QUEUE_KEY]: q })
   // Poke any open Inkwave tab to flush immediately.
   const tabs = await browser.tabs.query({})
@@ -133,7 +153,7 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
   }
 
   const { item, fields } = extractToCsl(data, url)
-  const n = await enqueue(item, url)
+  const n = await enqueue(item, url, fields as Record<string, unknown>)
 
   // Show the in-page verification panel on the source tab (AI captures only).
   if (tabId) {
