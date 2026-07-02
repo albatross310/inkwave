@@ -117,9 +117,25 @@ function sourceUrlFor(kind: string, value: string): string {
 export async function captureFromInput(input: string): Promise<CaptureResult> {
   const id = detectIdentifier(input)
   if (id) {
-    const item = await lookupIdentifier(id)
-    const tagged = tagProvenance(item, 'crossref', { sourceUrl: sourceUrlFor(id.kind, id.value) })
-    return { item: tagged, provenance: 'crossref' }
+    try {
+      const item = await lookupIdentifier(id)
+      const tagged = tagProvenance(item, 'crossref', { sourceUrl: sourceUrlFor(id.kind, id.value) })
+      return { item: tagged, provenance: 'crossref' }
+    } catch {
+      // Don't fail closed: the identifier was valid but the lookup service had no record (or was
+      // unreachable). Hand back an editable stub carrying what we know so the user can finish it,
+      // rather than a dead-end error. ISBN → a book stub; DOI → carry the DOI for a later re-check.
+      const isbn = id.kind === 'isbn'
+      const stub: CSLItem = {
+        id: `${isbn ? 'book' : id.kind}-${id.value}`.slice(0, 40),
+        type: isbn ? 'book' : 'document',
+        ...(isbn ? { ISBN: id.value } : {}),
+        ...(id.kind === 'doi' ? { DOI: id.value } : {}),
+        URL: sourceUrlFor(id.kind, id.value),
+      }
+      const tagged = tagProvenance(stub, 'manual', { sourceUrl: sourceUrlFor(id.kind, id.value) })
+      return { item: tagged, provenance: 'manual', warning: `Couldn't fetch ${id.kind.toUpperCase()} ${id.value} — enter the book's details, then re-check (↻) to verify.` }
+    }
   }
   if (isUrl(input)) return captureFromUrl(input)
   throw new Error('No DOI, identifier, or URL found in the input.')

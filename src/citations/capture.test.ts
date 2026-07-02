@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { parseAuthor, parseDate, extractToCsl, type ExtractResponse } from './capture'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { parseAuthor, parseDate, extractToCsl, captureFromInput, type ExtractResponse } from './capture'
+import type { IwCitationMeta } from '../types/document'
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('parseAuthor', () => {
   it('splits on comma', () => {
@@ -103,5 +106,19 @@ describe('extractToCsl', () => {
     expect(extractToCsl({ itemType: 'newsArticle', fields: {} }, URL).item.type).toBe('article-newspaper')
     expect(extractToCsl({ itemType: 'report', fields: {} }, URL).item.type).toBe('report')
     expect(extractToCsl({ itemType: 'video', fields: {} }, URL).item.type).toBe('video')
+  })
+})
+
+describe('captureFromInput — ISBN graceful degrade', () => {
+  it('returns an editable book stub (not an error) when no source has the ISBN', async () => {
+    // Both OpenLibrary and Google Books miss → lookup throws → capture must NOT fail closed.
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })) as unknown as typeof fetch
+    const res = await captureFromInput('9780262033848')
+    expect(res.provenance).toBe('manual')
+    expect(res.item.type).toBe('book')
+    expect(res.item.ISBN).toBe('9780262033848')
+    expect(res.warning).toMatch(/ISBN/i)
+    const meta = (res.item as { _iw?: IwCitationMeta })._iw
+    expect(meta?.sourceUrl).toContain('9780262033848')
   })
 })

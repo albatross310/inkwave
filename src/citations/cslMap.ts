@@ -131,3 +131,26 @@ export function openLibraryToCsl(rec: Record<string, unknown>, id: string): CSLI
     ...(typeof rec.url === 'string' ? { URL: rec.url } : {}),
   }
 }
+
+/** Google Books `volumeInfo` → CSLItem (fallback for ISBNs OpenLibrary lacks). `id` from makeCitekey. */
+export function googleBooksToCsl(info: Record<string, unknown>, id: string, isbn?: string): CSLItem {
+  const authors = Array.isArray(info.authors)
+    ? (info.authors as string[]).map(name => {
+        const parts = String(name).trim().split(/\s+/)
+        const family = parts.pop() ?? name
+        return { family, given: parts.join(' ') || undefined }
+      })
+    : undefined
+  const yearStr = typeof info.publishedDate === 'string' ? /\d{4}/.exec(info.publishedDate)?.[0] : undefined
+  const title = [info.title, info.subtitle].filter(v => typeof v === 'string' && v).join(': ')
+  return {
+    id,
+    type: 'book',
+    ...(title ? { title } : {}),
+    ...(authors && authors.length ? { author: authors } : {}),
+    ...(yearStr ? { issued: { 'date-parts': [[Number(yearStr)]] } } : {}),
+    ...(typeof info.publisher === 'string' ? { publisher: info.publisher } : {}),
+    ...(typeof info.pageCount === 'number' ? { 'number-of-pages': String(info.pageCount) } : {}),
+    ...(isbn ? { ISBN: isbn } : {}),
+  }
+}

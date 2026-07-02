@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { crossrefToCsl, arxivToCsl, openLibraryToCsl, makeCitekey, tagProvenance } from './cslMap'
+import { crossrefToCsl, arxivToCsl, openLibraryToCsl, googleBooksToCsl, makeCitekey, tagProvenance } from './cslMap'
 
 const CROSSREF_MESSAGE = {
   type: 'journal-article',
@@ -99,6 +99,30 @@ describe('openLibraryToCsl', () => {
     expect(item.author![0]).toEqual({ family: 'Heidegger', given: 'Martin' })
     expect(item.issued).toEqual({ 'date-parts': [[1927]] })
     expect(item.publisher).toBe('Max Niemeyer')
+  })
+})
+
+describe('googleBooksToCsl', () => {
+  it('maps volumeInfo → book CSL with subtitle, authors, year, publisher, ISBN', () => {
+    const info = {
+      title: 'Introduction to Algorithms',
+      subtitle: 'Third Edition',
+      authors: ['Thomas H. Cormen', 'Charles E. Leiserson'],
+      publishedDate: '2009-07-31',
+      publisher: 'MIT Press',
+      pageCount: 1292,
+    }
+    const item = googleBooksToCsl(info, 'cormen2009introduction', '9780262033848')
+    expect(item.type).toBe('book')
+    expect(item.title).toBe('Introduction to Algorithms: Third Edition')
+    expect(item.author).toEqual([
+      { family: 'Cormen', given: 'Thomas H.' },
+      { family: 'Leiserson', given: 'Charles E.' },
+    ])
+    expect(item.issued).toEqual({ 'date-parts': [[2009]] })
+    expect(item.publisher).toBe('MIT Press')
+    expect(item.ISBN).toBe('9780262033848')
+    expect(item['number-of-pages']).toBe('1292')
   })
 })
 
