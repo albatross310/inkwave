@@ -3,7 +3,9 @@
 // (app validates origin + source, writes to OPFS library, then acks → dequeue).
 // UUID-idempotent: a re-flush re-acks without double-adding.
 
-import { QUEUE_KEY } from '../utils/constants'
+import { QUEUE_KEY, HISTORY_KEY } from '../utils/constants'
+
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
 
 export default defineContentScript({
   matches: ['https://inkwave.me/*', 'http://localhost:5173/*'],
@@ -40,10 +42,27 @@ export default defineContentScript({
       if (!d || d.source !== 'inkwave-app') return
 
       if (d.type === 'cite/ack' && d.uuid) {
-        // Ack from app → dequeue.
+        // Ack from app → write to history then dequeue.
         inflight.delete(d.uuid)
-        const store = await browser.storage.local.get(QUEUE_KEY)
-        const q: Array<{ uuid: string }> = (store[QUEUE_KEY] as typeof q) ?? []
+        const [qStore, hStore] = await Promise.all([
+          browser.storage.local.get(QUEUE_KEY),
+          browser.storage.local.get(HISTORY_KEY),
+        ])
+        const q: Array<{ uuid: string; item?: Record<string, unknown>; sourceUrl?: string }> = (qStore[QUEUE_KEY] as typeof q) ?? []
+        const entry = q.find(x => x.uuid === d.uuid)
+        if (entry?.sourceUrl && entry.item) {
+          const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
+          const he: HistoryEntry = {
+            id: String(entry.item.id ?? ''),
+            sourceUrl: entry.sourceUrl,
+            type: String(entry.item.type ?? 'webpage'),
+            title: String(entry.item.title ?? ''),
+            at: Date.now(),
+            missingRequired: [],
+          }
+          const nextHist = [he, ...hist.filter(h => h.sourceUrl !== entry.sourceUrl)].slice(0, 50)
+          await browser.storage.local.set({ [HISTORY_KEY]: nextHist })
+        }
         await browser.storage.local.set({ [QUEUE_KEY]: q.filter(x => x.uuid !== d.uuid) })
       }
 

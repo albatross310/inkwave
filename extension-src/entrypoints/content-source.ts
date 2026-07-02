@@ -50,6 +50,26 @@ export default defineContentScript({
   },
 })
 
+// Walk the live DOM and find the first text node containing `needle`.
+// Returns a Range so the caller can use it for highlighting directly.
+function findTextInPage(needle: string): Range | null {
+  if (!needle || needle.length < 3) return null
+  const lower = needle.toLowerCase()
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  let node: Text | null
+  while ((node = walker.nextNode() as Text | null)) {
+    const text = node.textContent ?? ''
+    const idx = text.toLowerCase().indexOf(lower)
+    if (idx !== -1) {
+      const range = document.createRange()
+      range.setStart(node, idx)
+      range.setEnd(node, idx + needle.length)
+      return range
+    }
+  }
+  return null
+}
+
 function showCapturePanel(capture: CaptureMsg) {
   document.getElementById('inkwave-capture-panel')?.remove()
 
@@ -58,8 +78,19 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.setAttribute('role', 'status')
   panel.setAttribute('aria-label', 'Inkwave citation captured')
 
+  // For each field that has a value but no AI-supplied quote, try to locate
+  // the text directly in the page DOM. Ranges are pre-computed once so hovering
+  // doesn't trigger a second walk.
+  const autoRanges = new Map<string, Range>()
+  for (const [key, f] of Object.entries(capture.fields)) {
+    if (f.value && !f.quote) {
+      const r = findTextInPage(f.value)
+      if (r) autoRanges.set(key, r)
+    }
+  }
+
   const fields = Object.entries(capture.fields).filter(([, f]) => f.value)
-  const hasQuotes = fields.some(([, f]) => f.quote)
+  const hasQuotes = fields.some(([key, f]) => f.quote || autoRanges.has(key))
   const missing = capture.missingLabels ?? []
   const isLowConf = capture.confidence === 'low'
   const typeLabel = capture.typeLabel ?? capture.itemType ?? 'Webpage'
@@ -79,9 +110,13 @@ function showCapturePanel(capture: CaptureMsg) {
     <ul class="iwcp-fields">
       ${fields.map(([key, f]) => {
         const label = FIELD_LABELS[key] ?? key
-        const hasQuote = !!f.quote
+        // ✓ if the AI supplied a quote OR we found the value in the live page.
+        const hasQuote = !!f.quote || autoRanges.has(key)
+        // data-quote drives the hover highlight — use the AI quote if available,
+        // otherwise fall back to the field value (highlightQuote will re-search).
+        const quoteAttr = f.quote ?? (autoRanges.has(key) ? (f.value ?? '') : '')
         return `<li class="iwcp-field${hasQuote ? ' iwcp-has-quote' : ''}"
-                    data-quote="${esc(f.quote ?? '')}"
+                    data-quote="${esc(quoteAttr)}"
                     tabindex="${hasQuote ? '0' : '-1'}"
                     role="${hasQuote ? 'button' : 'listitem'}"
                     aria-label="${esc(label)}: ${esc(f.value ?? '')}${hasQuote ? ' — hover to verify' : ''}">
@@ -146,10 +181,11 @@ function showCapturePanel(capture: CaptureMsg) {
         statusEl.textContent = result?.ok ? '✓ Saved' : '✗ Not found in queue'
         statusEl.style.color = result?.ok ? '#15803d' : '#b91c1c'
       }
+      if (saveBtn) saveBtn.disabled = false
       if (result?.ok) {
-        // Remove the warning + form, replace with saved message.
         panel.querySelector('.iwcp-warnings')?.remove()
-        form.innerHTML = '<p style="font-size:10px;color:#15803d;padding:6px 12px">✓ Fields saved to Inkwave library</p>'
+        // Briefly flash the status then clear it so the form stays editable.
+        setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 3000)
       }
     } catch {
       if (statusEl) { statusEl.textContent = '✗ Error'; statusEl.style.color = '#b91c1c' }
@@ -158,9 +194,6 @@ function showCapturePanel(capture: CaptureMsg) {
   })
 
   document.body.appendChild(panel)
-
-  // Auto-dismiss after 20 seconds (longer to give time to fill fields).
-  setTimeout(() => { panel.classList.add('iwcp-fade'); setTimeout(() => panel.remove(), 400) }, 20000)
 }
 
 function esc(s: string): string {
