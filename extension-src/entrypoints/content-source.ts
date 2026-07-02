@@ -344,7 +344,11 @@ function showCapturePanel(capture: CaptureMsg) {
       logoEl.style.outline = '3px solid rgba(92,45,138,0.7)'
       logoEl.style.outlineOffset = '3px'
       logoEl.style.borderRadius = '4px'
-      logoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      // Use window.scrollTo so the scroll targets the document position, not a nested
+      // scroll container (scrollIntoView picks the nearest scrollable ancestor which is
+      // often the header itself, not the window, so it silently does nothing).
+      const rect = logoEl.getBoundingClientRect()
+      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - 20), behavior: 'smooth' })
     })
     pubLi.addEventListener('mouseleave', () => {
       logoEl.style.outline = ''
