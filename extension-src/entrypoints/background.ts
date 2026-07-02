@@ -72,12 +72,6 @@ function buildCaptureMsg(
 
 async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise<void> {
   await browser.scripting.executeScript({ target: { tabId }, files: ['content-source.js'] }).catch(() => {})
-  // Use insertCSS (privileged API) so the highlight rule bypasses the host page's CSP.
-  // DOM-injected <style> tags from content scripts ARE blocked by strict style-src policies.
-  await browser.scripting.insertCSS({
-    target: { tabId },
-    css: `::highlight(inkwave-source){background-color:rgba(92,45,138,0.85)!important;color:#fff!important}`,
-  }).catch(() => {})
   browser.tabs.sendMessage(tabId, { type: 'inkwave:showCapture', capture }).catch(() => {})
 }
 

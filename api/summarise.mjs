@@ -88,9 +88,9 @@ const OEMBED_PROVIDERS = [
 // Pull upload/publish date from HTML meta tags — oEmbed doesn't include it.
 function extractVideoDate(html) {
   if (!html) return null
-  // itemprop="uploadDate" (YouTube, standard schema.org)
-  const itemprop = /itemprop=["']uploadDate["'][^>]*content=["']([^"']+)["']/i.exec(html)
-               || /content=["']([^"']+)["'][^>]*itemprop=["']uploadDate["']/i.exec(html)
+  // itemprop="uploadDate" / "datePublished" (YouTube VideoObject microformat, schema.org)
+  const itemprop = /itemprop=["'](?:uploadDate|datePublished)["'][^>]*content=["']([^"']+)["']/i.exec(html)
+               || /content=["']([^"']+)["'][^>]*itemprop=["'](?:uploadDate|datePublished)["']/i.exec(html)
   if (itemprop) return itemprop[1].slice(0, 10) // YYYY-MM-DD
   // datePublished / uploadDate in JSON-LD (YouTube uses "uploadDate")
   const ld = /"datePublished"\s*:\s*"([^"]+)"/i.exec(html)
@@ -114,7 +114,16 @@ async function extractViaOEmbed(url, html) {
     if (!r.ok) return null
     const d = await r.json()
     if (!d.title) return null
-    const date = extractVideoDate(html)
+    let date = extractVideoDate(html)
+    if (!date) {
+      // The client-passed HTML is truncated to 400KB; YouTube's <meta itemprop="datePublished">
+      // sits at the very end of the (multi-MB) body, past the cut. Fetch the watch page fresh
+      // server-side and search the full HTML.
+      try {
+        const pr = await fetch(url, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.me)', accept: 'text/html' }, redirect: 'follow' })
+        if (pr.ok) date = extractVideoDate(await pr.text())
+      } catch { /* leave date null */ }
+    }
     return {
       itemType: 'video',
       confidence: 'high',
