@@ -5,7 +5,7 @@
 
 import { QUEUE_KEY, HISTORY_KEY } from '../utils/constants'
 
-type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
 
 export default defineContentScript({
   matches: ['https://inkwave.me/*', 'http://localhost:5173/*'],
@@ -52,6 +52,7 @@ export default defineContentScript({
         const entry = q.find(x => x.uuid === d.uuid)
         if (entry?.sourceUrl && entry.item) {
           const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
+          const prev = hist.find(h => h.sourceUrl === entry.sourceUrl)
           const he: HistoryEntry = {
             id: String(entry.item.id ?? ''),
             sourceUrl: entry.sourceUrl,
@@ -59,6 +60,7 @@ export default defineContentScript({
             title: String(entry.item.title ?? ''),
             at: Date.now(),
             missingRequired: [],
+            capture: prev?.capture, // preserve the full CaptureMsg written by background on enqueue
           }
           const nextHist = [he, ...hist.filter(h => h.sourceUrl !== entry.sourceUrl)].slice(0, 50)
           await browser.storage.local.set({ [HISTORY_KEY]: nextHist })

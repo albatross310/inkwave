@@ -50,9 +50,10 @@ export default defineContentScript({
   },
 })
 
-// Same normalizer as textHighlight.ts so our existence checks align exactly with
-// what highlightQuote will do on hover.
-function normText(s: string): string {
+// normNode: normalises a single text node without trimming — preserving the trailing
+// space in "Tyler " so cross-element names like "Tyler Graham" are found when the
+// first name and surname are in separate inline elements.
+function normNode(s: string): string {
   return s.normalize('NFC')
     .replace(/[   ]/g, ' ')
     .replace(/['']/g, "'")
@@ -60,11 +61,16 @@ function normText(s: string): string {
     .replace(/[–—]/g, '-')
     .replace(/­/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
     .toLowerCase()
+  // no .trim() here: trimming strips trailing spaces from nodes, breaking cross-element name matching
 }
 
 // Walk visible text nodes and return true if `needle` is found (normalised).
+// normText: needle normalizer — same as normNode but trims outer whitespace.
+function normText(s: string): string { return normNode(s).trim() }
+
+// Walk visible text nodes. Uses normNode (no trim) per-node so cross-element
+// author names don't lose the space between them.
 function existsOnPage(needle: string): boolean {
   if (!needle || needle.length < 3) return false
   const normed = normText(needle)
@@ -75,7 +81,7 @@ function existsOnPage(needle: string): boolean {
   while ((node = walker.nextNode() as Text | null)) {
     const parent = node.parentElement
     if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) continue
-    flat += normText(node.textContent ?? '')
+    flat += normNode(node.textContent ?? '')
     if (flat.includes(normed)) return true
   }
   return false
@@ -132,6 +138,10 @@ function showCapturePanel(capture: CaptureMsg) {
   const isLowConf = capture.confidence === 'low'
   const typeLabel = capture.typeLabel ?? capture.itemType ?? 'Webpage'
 
+  // Publisher favicon: small logo to help confirm which site the citation came from.
+  const pageDomain = (() => { try { return new URL(window.location.href).hostname } catch { return '' } })()
+  const faviconUrl = pageDomain ? `https://www.google.com/s2/favicons?domain=${pageDomain}&sz=32` : ''
+
   panel.innerHTML = `
     <div class="iwcp-header">
       <div class="iwcp-header-top">
@@ -161,7 +171,7 @@ function showCapturePanel(capture: CaptureMsg) {
                     aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
           <span class="iwcp-check">${symbol}</span>
           <span class="iwcp-label">${esc(label)}</span>
-          <span class="iwcp-value">${esc(f.value ?? '')}</span>
+          <span class="iwcp-value">${key === 'publisher' && faviconUrl ? `<img src="${faviconUrl}" style="all:unset;width:13px;height:13px;border-radius:2px;object-fit:contain;vertical-align:middle;margin-right:4px;display:inline-block" onerror="this.remove()" loading="lazy" />` : ''}${esc(f.value ?? '')}</span>
         </li>`
       }).join('')}
     </ul>

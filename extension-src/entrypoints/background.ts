@@ -11,7 +11,7 @@ import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY } from '../utils/constants'
 
-type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
 
 // Derive the API server origin from open Inkwave tabs.
 // Prefers localhost (dev) over production so the extension hits the right server
@@ -73,6 +73,11 @@ async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise
 }
 
 export default defineBackground(() => {
+  // Keyboard shortcut: Alt+Shift+I → capture current page directly (no popup).
+  browser.commands.onCommand.addListener((command) => {
+    if (command === 'capture') void captureActiveTab().catch(() => {})
+  })
+
   // When a tab finishes loading, show the verification panel if we have capture data for that URL.
   // Checks: (1) the citation queue (item not yet flushed to app), (2) the watch list (app-triggered).
   browser.tabs.onUpdated.addListener(async (tabId, info, tab) => {
@@ -190,12 +195,12 @@ async function injectAndHighlight(tabId: number, quote: string): Promise<void> {
   } catch { /* not ready */ }
 }
 
-async function enqueue(item: object, sourceUrl: string, fields?: Record<string, unknown>, confidence?: string): Promise<number> {
+async function enqueue(item: object, sourceUrl: string, fields?: Record<string, unknown>, confidence?: string, capture?: CaptureMsg): Promise<number> {
   const store = await browser.storage.local.get(QUEUE_KEY)
   const q: object[] = (store[QUEUE_KEY] as object[]) ?? []
   q.push({ uuid: crypto.randomUUID(), item, sourceUrl, at: Date.now(), fields, confidence })
   await browser.storage.local.set({ [QUEUE_KEY]: q })
-  // Write to history so popup can show "Already in library" after the queue is flushed.
+  // Write to history (with full capture) so popup can show "Already in library" + "Show on page" after flush.
   const hStore = await browser.storage.local.get(HISTORY_KEY)
   const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
   const r = item as Record<string, unknown>
@@ -205,7 +210,7 @@ async function enqueue(item: object, sourceUrl: string, fields?: Record<string, 
     if (f === 'year') return !(r.issued as { 'date-parts'?: number[][] } | undefined)?.['date-parts']?.[0]?.[0]
     return !(fields as Record<string, { value?: string }>)?.[f]?.value && !r[f]
   })
-  const entry: HistoryEntry = { id: String(r.id ?? ''), sourceUrl, type, title: String(r.title ?? ''), at: Date.now(), missingRequired }
+  const entry: HistoryEntry = { id: String(r.id ?? ''), sourceUrl, type, title: String(r.title ?? ''), at: Date.now(), missingRequired, capture }
   const next = [entry, ...hist.filter(h => h.sourceUrl !== sourceUrl)].slice(0, 50)
   await browser.storage.local.set({ [HISTORY_KEY]: next })
   // Poke any open Inkwave tab to flush immediately.
@@ -267,7 +272,7 @@ async function captureWithLLM(url: string, tabId: number | undefined): Promise<{
 
   const { item, fields } = extractToCsl(data, url)
   const capture = buildCaptureMsg(item as Record<string, unknown>, fields as Record<string, FieldEntry>, data.confidence)
-  await enqueue(item, url, fields as Record<string, unknown>, data.confidence)
+  await enqueue(item, url, fields as Record<string, unknown>, data.confidence, capture)
 
   // Show the in-page verification panel on the source tab (AI captures only).
   if (tabId) await injectAndShowCapture(tabId, capture)

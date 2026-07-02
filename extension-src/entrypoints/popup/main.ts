@@ -41,7 +41,7 @@ function saveStatus(cls: string, text: string) {
 // currentCapture is populated if this page is already in the queue.
 let currentCapture: CaptureMsg | null = null
 
-type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[] }
+type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
 
 async function loadCurrentCapture() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
@@ -69,8 +69,12 @@ async function loadCurrentCapture() {
       alMissingEl.textContent = `Still missing: ${missingLabels.join(', ')}`
     }
     hintEl.style.display = 'none'
-    // No fields to show on page (queue cleared), so hide the Show on page button.
-    showPanelBtn.style.display = 'none'
+    // Re-enable "Show on page" if the full capture was stored in history.
+    if (h.capture) {
+      currentCapture = h.capture
+    } else {
+      showPanelBtn.style.display = 'none'
+    }
     return
   }
 

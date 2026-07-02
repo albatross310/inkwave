@@ -150,7 +150,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           let paintRaf = 0
           let lastInputSig  = '' // doc size + page height — only re-measure when these change
           let lastLayoutSig = '' // gap positions/sizes — only re-dispatch when breaks actually moved
-          let lastPageH = 0     // shared between recompute() and paint() for min-height
           let lastSet: DecorationSet = DecorationSet.empty // stable set to restore when sig unchanged
           let sheet: HTMLElement | null = null
           let layer: HTMLElement | null = null
@@ -212,11 +211,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             segs.forEach((s, i) => {
               const d = layer!.children[i] as HTMLElement
               d.style.top = `${s.top}px`
-              // Ensure the last (or only) page panel is at least one full page tall so
-              // the footer logo+number always sits at the proper bottom-margin position
-              // rather than floating mid-content on short documents.
-              const minH = i === segs.length - 1 ? lastPageH : 0
-              d.style.height = `${Math.max(s.height, minH)}px`
+              d.style.height = `${s.height}px`
               const numSpan = (d.firstChild as HTMLElement).querySelector('span')
               if (numSpan) numSpan.textContent = String(i + 1)
             })
@@ -230,10 +225,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             const letter    = getPaperSize() === 'letter'
             const pageH = (sheet ? sheet.clientWidth : 794) *
               (letter ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
-            lastPageH = pageH
             if (sheet) {
               sheet.classList.add('inkwave-gapped')
               sheet.style.paddingTop = `${MARGIN_TOP}px` // page-1 top margin matches the rest
+              // Enforce minimum one-page scroll height so the footer (logo+number, position:
+              // absolute; bottom:22px) always lands at the page bottom, never mid-content
+              // on short documents. scrollHeight reflects this minHeight, so segs get the
+              // full page height and the panel div fills it naturally — no per-panel hack needed.
+              if (pageH > 0) sheet.style.minHeight = `${pageH}px`
             }
             // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
             // resize → pageH). Our own setMeta dispatches below don't change these, so they can't loop.
@@ -287,7 +286,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               layer?.remove()
               sheet?.classList.remove('inkwave-gapped')
-              if (sheet) sheet.style.paddingTop = ''
+              if (sheet) { sheet.style.paddingTop = ''; sheet.style.minHeight = '' }
             },
           }
         },
