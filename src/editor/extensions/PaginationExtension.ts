@@ -199,11 +199,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               d.className = 'inkwave-sheet'
               const f = document.createElement('div')
               f.className = 'inkwave-sheet-num'
+              // Inline styles guarantee alignment even if CSS layer ordering shifts.
+              f.style.cssText = 'position:absolute;bottom:22px;left:0;right:0;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;pointer-events:none'
               const logo = document.createElement('img')
               logo.src = '/inkwave-logo-v7.png'
               logo.alt = ''
+              logo.style.cssText = 'width:22px;height:22px;opacity:0.75;flex-shrink:0;display:block'
               f.appendChild(logo)
               const num = document.createElement('span')
+              num.style.cssText = 'font-family:"EB Garamond",Georgia,serif;color:#9b5ccc;font-size:0.9rem;line-height:1;display:block'
               f.appendChild(num)
               d.appendChild(f)
               layer.appendChild(d)

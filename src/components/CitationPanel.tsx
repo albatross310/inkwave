@@ -481,9 +481,42 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 
+  // Drag state — null means use default centered position.
+  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
+  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
   function panelStyle(): React.CSSProperties {
-    // Position below toolbar (~56px) so the panel never overlaps it.
-    return { position: 'fixed', top: 68, left: '50%', transform: 'translateX(-50%)' }
+    if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
+    // Default: 18px below top (50px higher than before) centred horizontally.
+    return { position: 'fixed', top: 18, left: '50%', transform: 'translateX(-50%)' }
+  }
+
+  function onHeaderMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    const panel = panelRef.current
+    if (!panel) return
+    const r = panel.getBoundingClientRect()
+    const left = r.left
+    const top = r.top
+    setDragPos({ left, top })
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: left, origTop: top }
+
+    function onMove(ev: MouseEvent) {
+      if (!dragRef.current) return
+      setDragPos({
+        left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX),
+        top:  dragRef.current.origTop  + (ev.clientY - dragRef.current.startY),
+      })
+    }
+    function onUp() {
+      dragRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   return createPortal(
@@ -497,12 +530,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
       )}
       <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={onClose} />
       <div
+        ref={panelRef}
         role="dialog" aria-label="Citations"
         className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={{ ...panelStyle(), width: 'min(520px, 96vw)', maxHeight: '85vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
+        <div
+          className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100"
+          style={{ cursor: 'grab' }}
+          onMouseDown={onHeaderMouseDown}
+        >
           <span className="text-[12px] font-medium" style={{ color: INK }}>Inkwave Citations</span>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>

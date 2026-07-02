@@ -92,8 +92,10 @@ function extractVideoDate(html) {
   const itemprop = /itemprop=["']uploadDate["'][^>]*content=["']([^"']+)["']/i.exec(html)
                || /content=["']([^"']+)["'][^>]*itemprop=["']uploadDate["']/i.exec(html)
   if (itemprop) return itemprop[1].slice(0, 10) // YYYY-MM-DD
-  // datePublished in JSON-LD
+  // datePublished / uploadDate in JSON-LD (YouTube uses "uploadDate")
   const ld = /"datePublished"\s*:\s*"([^"]+)"/i.exec(html)
+          || /"uploadDate"\s*:\s*"([^"]+)"/i.exec(html)
+          || /"publishDate"\s*:\s*"([^"]+)"/i.exec(html)
   if (ld) return ld[1].slice(0, 10)
   // og:video:release_date or article:published_time
   const og = /(?:video:release_date|published_time)[^>]*content=["']([^"']+)["']/i.exec(html)

@@ -69,16 +69,22 @@ function normNode(s: string): string {
 // normText: needle normalizer — same as normNode but trims outer whitespace.
 function normText(s: string): string { return normNode(s).trim() }
 
-// existsOnPage: use innerText rather than a TreeWalker.
-// innerText gives the browser's own visible-text rendering — it collapses whitespace,
-// respects CSS display:none, and works for custom elements (YouTube's <yt-formatted-string>
-// etc.) where a manual TreeWalker misses content or produces double-spaces between nodes.
+// existsOnPage: cascade through four sources to handle SPA shadow DOM, lazy content, etc.
 function existsOnPage(needle: string): boolean {
   if (!needle || needle.length < 3) return false
   const normed = normText(needle)
   if (!normed) return false
   try {
-    return normNode(document.body.innerText).includes(normed)
+    // 1. Browser's visible-text rendering (best for most sites, handles CSS display:none).
+    if (normNode(document.body.innerText).includes(normed)) return true
+    // 2. textContent: catches CSS-hidden elements innerText skips.
+    if (normNode(document.body.textContent ?? '').includes(normed)) return true
+    // 3. document.title: catches YouTube video titles even when shadow DOM hides DOM text.
+    if (normNode(document.title).includes(normed)) return true
+    // 4. Meta tag content: catches dates/authors that live only in meta (YouTube uploadDate, etc.).
+    const metaContent = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[content]'))
+      .map(m => m.content).join(' ')
+    return normNode(metaContent).includes(normed)
   } catch { return false }
 }
 
@@ -407,8 +413,8 @@ function injectStyles(): void {
   style.id = 'inkwave-styles'
   style.textContent = `
     ::highlight(inkwave-source) {
-      background-color: rgba(92, 45, 138, 0.25);
-      color: inherit;
+      background-color: rgba(92, 45, 138, 0.85);
+      color: #fff;
     }
     #inkwave-capture-panel {
       position: fixed;

@@ -5,18 +5,26 @@
 
 const HIGHLIGHT_NAME = 'inkwave-source'
 
-// Normalise text for robust matching: NFC, NBSP→space, smart quotes/dashes, collapsed whitespace.
-function norm(s: string): string {
+// normNode: per-node normaliser — NO trim. Preserves trailing/leading spaces so that
+// cross-element names ("Tyler " in one span + "Graham" in the next) concatenate with
+// a space rather than collapsing to "tylergraham".
+function normNode(s: string): string {
   return s
     .normalize('NFC')
-    .replace(/ | | /g, ' ')   // NBSP + narrow spaces
-    .replace(/['']/g, "'")                    // smart apostrophes
-    .replace(/[""]/g, '"')                   // smart double-quotes
-    .replace(/[–—]/g, '-')                    // en/em dashes
-    .replace(/­/g, '')                   // soft hyphens
+    .replace(/ | | /g, ' ')   // NBSP + narrow spaces → regular space
+    .replace(/['']/g, "'")
+    .replace(/[""]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/­/g, '')        // soft hyphens
+    .replace(/[​-‏⁠﻿]/g, '') // zero-width chars
     .replace(/\s+/g, ' ')
-    .trim()
     .toLowerCase()
+  // no .trim() — trimming strips the inter-node space that cross-element names need
+}
+
+// norm: used for the search needle only — trim is fine here.
+function norm(s: string): string {
+  return normNode(s).trim()
 }
 
 interface TextNode { node: Text; start: number; end: number }
@@ -26,16 +34,15 @@ function collectTextNodes(root: Element): { flat: string; nodes: TextNode[] } {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const nodes: TextNode[] = []
   let pos = 0
-  let flatParts: string[] = []
+  const flatParts: string[] = []
   let node: Text | null
   // eslint-disable-next-line no-cond-assign
   while ((node = walker.nextNode() as Text | null)) {
     const parent = node.parentElement
-    // Skip script/style/invisible nodes.
     if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) continue
     const raw = node.textContent ?? ''
     if (!raw) continue
-    const normed = norm(raw)
+    const normed = normNode(raw)  // no trim per-node
     flatParts.push(normed)
     nodes.push({ node, start: pos, end: pos + normed.length })
     pos += normed.length
@@ -72,11 +79,19 @@ export function highlightQuote(quote: string): boolean {
     const needle = norm(quote)
     if (!needle) return false
 
-    const idx = flat.indexOf(needle)
-    if (idx === -1) return false
+    // Build a regex that allows \s+ between words. This handles the double-space that
+    // arises when two adjacent text nodes each contribute whitespace between them
+    // (e.g. "Tyler " + " Graham" → "tyler  graham" in flat, but needle is "tyler graham").
+    const pattern = needle.replace(/\s+/g, '\\s+')
+    const re = new RegExp(pattern)
+    const match = re.exec(flat)
+    if (!match) return false
+
+    const idx = match.index
+    const endIdx = idx + match[0].length  // actual matched length (may differ from needle.length)
 
     const startNode = resolveOffset(idx, nodes)
-    const endNode = resolveOffset(idx + needle.length - 1, nodes)
+    const endNode = resolveOffset(endIdx - 1, nodes)
     if (!startNode || !endNode) return false
 
     const range = document.createRange()
@@ -85,16 +100,14 @@ export function highlightQuote(quote: string): boolean {
 
     CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(range))
 
-    // Scroll the match into view (respect prefers-reduced-motion).
+    // Scroll the match into view via window.scrollTo (not scrollIntoView, which targets
+    // the nearest scroll ancestor — often the site's own container — and silently does nothing).
+    const rect = range.getBoundingClientRect()
     const motionOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    try {
-      range.startContainer.parentElement?.scrollIntoView({
-        behavior: motionOk ? 'smooth' : 'instant',
-        block: 'center',
-      })
-    } catch {
-      // scrollIntoView may fail on detached nodes.
-    }
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 2),
+      behavior: motionOk ? 'smooth' : 'instant',
+    })
 
     return true
   } catch {
