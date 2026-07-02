@@ -19,7 +19,7 @@ export default defineConfig({
     commands: {
       capture: {
         suggested_key: {
-          default: 'Alt+Shift+I',
+          default: 'Ctrl+Alt+I',
         },
         description: 'Capture citation from current page',
       },
