@@ -86,6 +86,7 @@ export function OptionsMenu({
   onExportEquations,
   googleDriveActive,
   onVerifyRecord,
+  onFileOpenError,
 }: {
   paperRight: number
   installPrompt?: any
@@ -109,6 +110,7 @@ export function OptionsMenu({
   onExportEquations?: () => void
   googleDriveActive?: boolean
   onVerifyRecord?: () => void
+  onFileOpenError?: (msg: string) => void
 }) {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -144,7 +146,11 @@ export function OptionsMenu({
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-picking the same file
     if (!file) return
-    try { await openInkwaveFile(file) } catch { /* ignore a bad file; user can retry */ }
+    try {
+      await openInkwaveFile(file)
+    } catch (err) {
+      onFileOpenError?.(err instanceof Error ? err.message : `Could not open "${file.name}"`)
+    }
   }
 
   useEffect(() => {

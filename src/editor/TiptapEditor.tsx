@@ -1652,6 +1652,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
+                onFileOpenError={setFileOpenError}
               />
               <InstallPromptBanner installPrompt={installPrompt} />
             </div>
