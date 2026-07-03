@@ -38,9 +38,13 @@ export async function openInkwaveFile(
     file.name.replace(/\.(studio|inkwave|trace\.json|insig\.json|json)$/i, '')
   const id = (data.document?.id as string | undefined) ?? uuidv4()
 
+  // Normalise the filename: always store the .studio extension so the next sync uses it correctly.
+  const studioName = file.name.toLowerCase().match(/\.(studio|inkwave|trace\.json)$/)
+    ? file.name
+    : file.name.replace(/\.[^.]*$/, '') + '.studio'
   if (googleFileId) adoptGoogleDriveFile(id, googleFileId)            // resume Google Drive sync
   else if (oneDriveFile) adoptOneDriveFile(id, oneDriveFile.folder, oneDriveFile.name) // resume OneDrive sync
-  else setOneDriveFilename(id, file.name)                            // resume OneDrive sync (by name)
+  else setOneDriveFilename(id, studioName)                           // resume OneDrive sync (by name)
   if (handle) await setSaveFileHandle(id, handle)                    // resume local file sync (writable handle)
 
   // Restore provenance history from the bundle when OPFS has fewer snapshots (device transfer).
