@@ -158,43 +158,19 @@ function dateSearchCandidates(value: string): string[] {
   } catch { return [value] }
 }
 
-// Find the publisher's logo on the page. Returns:
-//   el  — the DOM element to outline on hover (img, svg, or a containing element)
-//   url — a URL for the small thumbnail in the panel (img src or favicon link)
-function findPublisherLogo(): { el: HTMLElement | null; url: string } {
-  // Resolve favicon url first (used as thumbnail when no better img url is available).
-  let faviconUrl = `${window.location.origin}/favicon.ico`
-  for (const sel of ['link[rel="apple-touch-icon"]', 'link[rel="icon"][type="image/png"]', 'link[rel="icon"][sizes="32x32"]', 'link[rel="icon"]', 'link[rel="shortcut icon"]']) {
-    const link = document.querySelector(sel) as HTMLLinkElement | null
-    if (link?.href && !link.href.startsWith('data:')) { faviconUrl = link.href; break }
-  }
-
-  // 1. Header/banner/nav: prefer an <img> with "logo" in class/id/alt/src.
-  for (const root of ['header', '[role="banner"]', 'nav', '[class*="header"]', '[id*="header"]']) {
-    const c = document.querySelector(root)
-    if (!c) continue
-    const imgs = Array.from(c.querySelectorAll('img')) as HTMLImageElement[]
-    const logo = imgs.find(img => /logo/i.test([img.className, img.id, img.alt ?? '', img.src].join(' ')))
-              ?? (imgs.length === 1 && imgs[0].offsetWidth > 20 ? imgs[0] : undefined)
-    if (logo?.src) return { el: logo, url: logo.src }
-  }
-
-  // 2. Any element whose id or class contains "logo" — catches YouTube's #logo SVG,
-  //    site-logo divs, etc. Filter to visible elements in the top 40% of the page.
-  const logoEls = Array.from(document.querySelectorAll<HTMLElement>(
-    '[id*="logo"]:not(#inkwave-capture-panel), [class*="logo"]:not(#inkwave-capture-panel)'
-  )).filter(el => {
-    const r = el.getBoundingClientRect()
-    return r.width >= 20 && r.width <= 500 && r.top < window.innerHeight * 0.4
-  })
-  for (const el of logoEls) {
-    const img = el.tagName === 'IMG' ? el as unknown as HTMLImageElement : el.querySelector('img')
-    const imgUrl = (img as HTMLImageElement | null)?.src
-    // Return the container as hover target; use img src if available, else favicon.
-    return { el, url: imgUrl || faviconUrl }
-  }
-
-  return { el: null, url: faviconUrl }
+// Count occurrences of `needle` in the visible text (capped). Used to decide whether a value is
+// DISTINCTIVE enough to highlight: a book's press ("University of Wales Press") occurs ~once and is a
+// meaningful target, but a site brand ("CNET") repeats throughout the body — highlighting the first
+// hit lands on a random spot (e.g. deep in an author bio), which is worse than not highlighting.
+function countInVisibleText(needle: string): number {
+  const normed = normText(needle)
+  if (!normed || normed.length < 3) return 0
+  try {
+    const hay = normNode(document.body.innerText)
+    let count = 0, i = 0
+    while ((i = hay.indexOf(normed, i)) !== -1 && count < 4) { count++; i += normed.length }
+    return count
+  } catch { return 0 }
 }
 
 function showCapturePanel(capture: CaptureMsg) {
@@ -225,8 +201,25 @@ function showCapturePanel(capture: CaptureMsg) {
       // Platform-authoritative. YouTube renders title + channel into the light DOM (highlightable);
       // the date shows only as a RELATIVE string ("13 days ago"), the absolute form hides in a
       // dropdown — so for the date, snap to the relative form if it's on screen.
-      const oCands = key === 'date' ? [...relativeDateCandidates(f.value), f.value] : [f.value]
-      verifySource.set(key, 'ai'); verifyQuote.set(key, oCands.find(existsInVisibleText) ?? '')
+      if (key === 'date') {
+        // The relative date ("2 weeks ago") repeats on every recommended-video card, so highlighting
+        // the first hit jumps to a random recommendation. Only snap when a form is DISTINCTIVE
+        // (occurs ~once = the main video's metadata); otherwise show the verified date with no jump.
+        const found = [...relativeDateCandidates(f.value), f.value].find(c => {
+          const n = countInVisibleText(c); return n >= 1 && n <= 2
+        })
+        verifySource.set(key, 'ai'); verifyQuote.set(key, found ?? '')
+      } else {
+        verifySource.set(key, 'ai'); verifyQuote.set(key, existsInVisibleText(f.value) ? f.value : '')
+      }
+    } else if (key === 'publisher') {
+      // Publisher: highlight the AI quote if it's on the page, else the value only when it's
+      // DISTINCTIVE (occurs ~once — a book's press). A repeated site brand ("CNET") gets a verified
+      // badge but no hover target, so it never snaps to a random body-text occurrence.
+      const n = countInVisibleText(f.value)
+      if (f.quote && existsInVisibleText(f.quote)) { verifySource.set(key, 'ai'); verifyQuote.set(key, f.quote) }
+      else if (n >= 1 && n <= 2) { verifySource.set(key, 'auto'); verifyQuote.set(key, f.value) }
+      else if (n > 0 || existsOnPage(f.value)) { verifySource.set(key, 'auto'); verifyQuote.set(key, '') }
     } else if (f.quote && existsInVisibleText(f.quote)) {
       verifySource.set(key, 'ai');  verifyQuote.set(key, f.quote)          // ✓ highlightable
     } else {
@@ -247,13 +240,10 @@ function showCapturePanel(capture: CaptureMsg) {
   const isLowConf = capture.confidence === 'low'
   const typeLabel = capture.typeLabel ?? capture.itemType ?? 'Webpage'
 
-  // Find the publisher logo: real img element on the page (for hover-outline) or icon link.
-  const pubLogo = findPublisherLogo()
-
   panel.innerHTML = `
     <div class="iwcp-header">
       <div class="iwcp-header-top">
-        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.2</span></span>
+        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.3</span></span>
         <button class="iwcp-close" aria-label="Dismiss">×</button>
       </div>
       <div class="iwcp-type-row">
@@ -276,12 +266,12 @@ function showCapturePanel(capture: CaptureMsg) {
                     data-quote="${esc(quoteAttr)}"
                     data-field-key="${esc(key)}"
                     data-value="${esc(f.value ?? '')}"
-                    tabindex="${(aiVerified || autoFound) || key === 'publisher' ? '0' : '-1'}"
-                    role="${(aiVerified || autoFound) || key === 'publisher' ? 'button' : 'listitem'}"
-                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : key === 'publisher' ? ' — hover to see logo' : ''}">
+                    tabindex="${(aiVerified || autoFound) ? '0' : '-1'}"
+                    role="${(aiVerified || autoFound) ? 'button' : 'listitem'}"
+                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
           <span class="iwcp-check">${symbol}</span>
           <span class="iwcp-label">${esc(label)}</span>
-          <span class="iwcp-value">${key === 'publisher' && pubLogo.url ? `<img src="${esc(pubLogo.url)}" style="width:13px;height:13px;border-radius:2px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.style.display='none'" />` : ''}${esc(f.value ?? '')}</span>
+          <span class="iwcp-value">${esc(f.value ?? '')}</span>
           <button class="iwcp-edit" aria-label="Edit ${esc(label)}" title="Edit"
                   style="all:unset;box-sizing:border-box;margin-left:auto;padding:0 4px;cursor:pointer;font-size:11px;opacity:0.4;line-height:1;flex-shrink:0">✎</button>
         </li>`
@@ -312,7 +302,7 @@ function showCapturePanel(capture: CaptureMsg) {
   // so an inline edit that changes the quote takes effect without re-wiring. Publisher has its own
   // logo-outline hover, so it's excluded here.
   const wireFieldHover = (el: HTMLElement) => {
-    if (el.dataset.wired || el.dataset.fieldKey === 'publisher') return
+    if (el.dataset.wired) return
     el.dataset.wired = '1'
     el.addEventListener('mouseenter', () => highlightQuote(el.dataset.quote ?? ''))
     el.addEventListener('focus',      () => highlightQuote(el.dataset.quote ?? ''))
@@ -393,7 +383,6 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
     panel.remove()
     clearHighlight()
-    if (pubLogo.el) { pubLogo.el.style.outline = ''; pubLogo.el.style.outlineOffset = ''; pubLogo.el.style.borderRadius = '' }
   })
 
   // Fill-in form submit.
@@ -471,47 +460,8 @@ function showCapturePanel(capture: CaptureMsg) {
     }
   })
 
-  // Publisher field: hover outlines the real logo element on the page.
-  const pubLi = panel.querySelector<HTMLElement>('[data-field-key="publisher"]')
-  const pubValue = capture.fields.publisher?.value ?? ''
-  // Prefer highlighting the publisher's NAME where it appears on the page (a book's press on a
-  // Google Books/store page is text, not the site logo). Only fall back to outlining the site logo
-  // when the publisher name isn't visible text — i.e. the publisher really is the site brand
-  // (news/blog). This stops a book's publisher hover from snapping to an unrelated site logo.
-  if (pubLi && pubValue && existsInVisibleText(pubValue)) {
-    pubLi.dataset.quote = pubValue
-    pubLi.style.cursor = 'pointer'
-    pubLi.addEventListener('mouseenter', () => highlightQuote(pubValue))
-    pubLi.addEventListener('focus',      () => highlightQuote(pubValue))
-    pubLi.addEventListener('mouseleave', () => clearHighlight())
-    pubLi.addEventListener('blur',       () => clearHighlight())
-  } else if (pubLi && pubLogo.el) {
-    const logoEl = pubLogo.el
-    pubLi.style.cursor = 'pointer'
-    pubLi.addEventListener('mouseenter', () => {
-      logoEl.style.outline = '3px solid rgba(92,45,138,0.7)'
-      logoEl.style.outlineOffset = '3px'
-      logoEl.style.borderRadius = '4px'
-      // Use window.scrollTo so the scroll targets the document position, not a nested
-      // scroll container (scrollIntoView picks the nearest scrollable ancestor which is
-      // often the header itself, not the window, so it silently does nothing).
-      const rect = logoEl.getBoundingClientRect()
-      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - 20), behavior: 'smooth' })
-    })
-    pubLi.addEventListener('mouseleave', () => {
-      logoEl.style.outline = ''
-      logoEl.style.outlineOffset = ''
-      logoEl.style.borderRadius = ''
-    })
-    pubLi.addEventListener('focus', () => {
-      logoEl.style.outline = '3px solid rgba(92,45,138,0.7)'
-      logoEl.style.outlineOffset = '3px'
-    })
-    pubLi.addEventListener('blur', () => {
-      logoEl.style.outline = ''
-      logoEl.style.outlineOffset = ''
-    })
-  }
+  // Publisher is now a plain field (logo feature removed): it highlights its name only when
+  // distinctive (handled in the verify loop above), so no special wiring here.
 
   // Draggable panel: mousedown on header drags by top/left.
   const panelHeader = panel.querySelector<HTMLElement>('.iwcp-header')

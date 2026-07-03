@@ -4,7 +4,7 @@
 //
 // bibProvider holds the in-memory mirror; this module hydrates it on load and persists on change.
 
-import type { CSLItem } from '../types/document'
+import type { CSLItem, IwCitationMeta } from '../types/document'
 import { bibProvider } from './bibProvider'
 
 const DIR = 'library'
@@ -77,7 +77,22 @@ function freeCitekey(base: string, incoming: CSLItem): string {
  */
 export async function addToLibrary(item: CSLItem): Promise<CSLItem> {
   const id = freeCitekey(item.id, item)
-  const stored = id === item.id ? item : { ...item, id }
+  let stored = id === item.id ? item : { ...item, id }
+  // Preserve re-verification history (changelog / lastVerified / deadUrl) when the SAME source is
+  // re-captured — e.g. the extension re-flushes its queue on every visit, and a fresh capture carries
+  // no changelog. `??` keeps the incoming values when present (so a real re-verify still updates the
+  // history) and otherwise falls back to the previous entry's, so a re-flush never wipes it.
+  const prev = bibProvider.get(id)
+  const prevIw = (prev as { _iw?: IwCitationMeta } | undefined)?._iw
+  if (prev && prevIw && sameSource(prev, stored) && (prevIw.changelog || prevIw.lastVerified || prevIw.deadUrl != null)) {
+    const curIw = (stored as { _iw?: IwCitationMeta })._iw ?? {}
+    stored = { ...stored, _iw: {
+      ...curIw,
+      changelog: curIw.changelog ?? prevIw.changelog,
+      lastVerified: curIw.lastVerified ?? prevIw.lastVerified,
+      deadUrl: curIw.deadUrl ?? prevIw.deadUrl,
+    } }
+  }
   bibProvider.upsert(stored, 'library')
   await persistLibrary()
   return stored

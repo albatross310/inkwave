@@ -41,8 +41,10 @@ function comparable(field: string, value: unknown): string {
     return (arr ?? []).map(a => `${a.family ?? ''}|${a.given ?? ''}|${a.literal ?? ''}`).join(';').toLowerCase().trim()
   }
   if (field === 'issued' || field === 'accessed') {
+    // Compare by YEAR only: a book stored as "2006" must NOT be "corrected" to CrossRef's fuller
+    // "2006-10-01" — same year, just more granular. Only a genuinely different year is a real change.
     const dp = (value as { 'date-parts'?: number[][] })?.['date-parts']
-    return JSON.stringify(dp ?? value)
+    return String(dp?.[0]?.[0] ?? value ?? '')
   }
   return String(value).replace(/\s+/g, ' ').trim().toLowerCase()
 }
