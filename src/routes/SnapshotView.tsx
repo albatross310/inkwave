@@ -417,19 +417,17 @@ export function SnapshotView() {
     ? (groups[prevGroupIdx].versionSnap ?? groups[prevGroupIdx].items[0] ?? null)
     : null
 
-  // Snapshot diff summaries (bullet points)
-  const leftSummary  = snapshot?.diffSummary?.bullets ?? null
-  const rightSummary = (idx >= 0 && idx < allSnapshots.length - 1)
-    ? allSnapshots[idx + 1]?.diffSummary?.bullets ?? null
-    : null
-
   // Version summaries: each versionSnap stores what changed vs. the previous version
   const currentGroup = groupIdx >= 0 ? groups[groupIdx] : null
-  const nextGroup    = groupIdx >= 0 && groupIdx < groups.length - 1 ? groups[groupIdx + 1] : null
-  // Left side shows the current version's summary (what was added vs. prev version — what you'd leave behind going back)
-  const leftVersionSummary  = currentGroup?.versionSnap?.versionSummary ?? null
-  // Right side shows the next version's summary (what was added vs. current version — what you'd gain going forward)
-  const rightVersionSummary = nextGroup?.versionSnap?.versionSummary ?? null
+
+  // Snapshot diff and version diff are always "current vs its predecessor".
+  // Only show on the side of the button the user just clicked (navDir).
+  const currentDiff    = snapshot?.diffSummary?.bullets ?? null
+  const currentVerDiff = currentGroup?.versionSnap?.versionSummary ?? null
+  const leftSummary         = navDir === 'back' ? currentDiff    : null
+  const rightSummary        = navDir === 'fwd'  ? currentDiff    : null
+  const leftVersionSummary  = navDir === 'back' ? currentVerDiff : null
+  const rightVersionSummary = navDir === 'fwd'  ? currentVerDiff : null
 
   return (
     <div
