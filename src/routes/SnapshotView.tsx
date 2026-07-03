@@ -161,107 +161,278 @@ function NavSide({
   )
 }
 
-// ── Dual diff renderer ────────────────────────────────────────────────────────
-// Snapshot-level changes (dark green/red) overlaid on version-level changes (light green).
-// snapRef: the adjacent snapshot (direction-sensitive) — dark highlights
-// verRef:  the previous version's base snapshot — light green highlights where text is new
-function DualDiffView({
-  snapshot, snapRef, verRef,
-}: {
-  snapshot: Snapshot
-  snapRef: Snapshot | null
-  verRef: Snapshot | null
-}) {
-  const currentText = pmToText(snapshot.contentJson)
+// ── Git-style diff helpers ───────────────────────────────────────────────────
+// Render a word-level diff as an inline annotated stream with collapsed context.
+// Unchanged regions more than CONTEXT chars from a change collapse to a ··· separator.
+// Context windows are trimmed to sentence boundaries where possible.
+const DIFF_CONTEXT = 240  // characters of unchanged text to show around each change
 
-  const snapOps = useMemo(
-    () => snapRef ? diffWords(pmToText(snapRef.contentJson), currentText) : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snapRef?.id, snapshot.id, currentText],
-  )
+function buildDiffNodes(ops: DiffOp[]): React.ReactNode[] {
+  const n = ops.length
+  if (!n) return []
 
-  const verAdded = useMemo(() => {
-    if (!verRef) return null
-    const ops = diffWords(pmToText(verRef.contentJson), currentText)
-    const s = new Set<number>()
-    let p = 0
-    for (const op of ops) {
-      if (op.type === 'add') {
-        for (let i = 0; i < op.text.length; i++) s.add(p + i)
-        p += op.text.length
-      } else if (op.type === 'same') {
-        p += op.text.length
-      }
-    }
-    return s
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verRef?.id, snapshot.id, currentText])
-
-  const { added: snapAdded, removed: snapRemoved } = snapOps ? diffStats(snapOps) : { added: 0, removed: 0 }
-  const noChange = snapRef && snapAdded === 0 && snapRemoved === 0
-
-  const nodes: React.ReactNode[] = []
-  const ops = snapOps ?? []
-  let pos = 0
-
-  for (let k = 0; k < ops.length; k++) {
-    const op = ops[k]
-    if (op.type === 'del') {
-      nodes.push(<span key={k} style={{ color: '#9b2226', textDecoration: 'line-through' }}>{op.text}</span>)
-    } else if (op.type === 'add') {
-      nodes.push(<span key={k} style={{ background: '#b0e8b0', color: '#1a5f1a' }}>{op.text}</span>)
-      pos += op.text.length
-    } else {
-      // 'same' at snapshot level — subdivide by version-added status
-      const text = op.text
-      if (!verAdded) {
-        nodes.push(<span key={k}>{text}</span>)
-        pos += text.length
-      } else {
-        let segStart = 0
-        for (let j = 0; j < text.length; j++) {
-          const isNew = verAdded.has(pos + j)
-          const nextIsNew = j + 1 < text.length ? verAdded.has(pos + j + 1) : !isNew
-          if (nextIsNew !== isNew) {
-            const seg = text.slice(segStart, j + 1)
-            nodes.push(
-              <span key={`${k}-${segStart}`} style={isNew ? { background: '#e0f4e0', color: '#2a6a2a' } : undefined}>
-                {seg}
-              </span>
-            )
-            segStart = j + 1
-          }
-        }
-        if (segStart < text.length) {
-          const seg = text.slice(segStart)
-          const isNew = segStart < text.length && verAdded.has(pos + segStart)
-          nodes.push(
-            <span key={`${k}-${segStart}f`} style={isNew ? { background: '#e0f4e0', color: '#2a6a2a' } : undefined}>
-              {seg}
-            </span>
-          )
-        }
-        pos += text.length
-      }
-    }
+  // Precompute: for each op, how many chars of 'same' text lie between it and the NEXT change
+  const untilNext = new Array<number>(n).fill(Infinity)
+  let acc = Infinity
+  for (let i = n - 1; i >= 0; i--) {
+    if (ops[i].type !== 'same') { acc = 0 }
+    else { untilNext[i] = acc; acc = acc === Infinity ? ops[i].text.length : acc + ops[i].text.length }
   }
 
+  // Whether any change lies after op i
+  const anyChangeAfter = (() => {
+    const a = new Array<boolean>(n).fill(false)
+    let seen = false
+    for (let i = n - 1; i >= 0; i--) { if (ops[i].type !== 'same') seen = true; a[i] = seen }
+    return a
+  })()
+
+  const nodes: React.ReactNode[] = []
+  let k = 0
+  let charsSinceLast = Infinity  // chars of same since last change (Infinity = no change yet)
+  let gapPending = false         // a ··· separator is queued but not yet flushed
+
+  const flushGap = () => {
+    if (!gapPending) return
+    nodes.push(<span key={`g${k++}`} style={{
+      display: 'block', textAlign: 'center', color: '#c4b5d8',
+      padding: '2px 0', fontStyle: 'italic', fontSize: '0.8em', userSelect: 'none',
+    }}>···</span>)
+    gapPending = false
+  }
+  const emit = (text: string, style?: React.CSSProperties) => {
+    if (!text) return
+    flushGap()
+    nodes.push(<span key={`t${k++}`} style={style}>{text}</span>)
+  }
+
+  for (let i = 0; i < n; i++) {
+    const op = ops[i]
+    if (op.type !== 'same') {
+      charsSinceLast = 0
+      if (op.type === 'del') {
+        emit(op.text, {
+          color: '#b91c1c', textDecoration: 'line-through',
+          background: 'rgba(185,28,28,0.07)', borderRadius: 2,
+        })
+      } else {
+        emit(op.text, {
+          background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2,
+        })
+      }
+      continue
+    }
+
+    const t = op.text
+    const len = t.length
+    // How many chars to show from the head (proximity to previous change)
+    const headLen = charsSinceLast === Infinity ? 0 : Math.max(0, DIFF_CONTEXT - charsSinceLast)
+    // How many chars to show from the tail (proximity to next change)
+    const tailLen = untilNext[i] === Infinity ? 0 : Math.max(0, DIFF_CONTEXT - untilNext[i])
+
+    charsSinceLast = charsSinceLast === Infinity ? len : charsSinceLast + len
+
+    if (headLen + tailLen >= len) {
+      // Window covers the whole op — show entirely
+      emit(t)
+      continue
+    }
+
+    // Trim head: end at last sentence boundary within the head slice
+    if (headLen > 0) {
+      let head = t.slice(0, headLen)
+      const sentEnd = head.search(/[.!?]\s*$/) // trim to last sentence end if near edge
+      if (headLen < len && sentEnd > headLen * 0.4) head = head.slice(0, sentEnd + 1)
+      emit(head.trimEnd())
+    }
+
+    // Trim tail: start at first sentence boundary within the tail slice
+    if (tailLen > 0) {
+      gapPending = true  // separator before tail
+      let tail = t.slice(len - tailLen)
+      const sentStart = tail.search(/(?<=[.!?]\s{1,3})[A-ZÀ-ž]/)
+      if (sentStart > 0 && sentStart < tailLen * 0.6) tail = tail.slice(sentStart)
+      else tail = tail.trimStart()
+      emit(tail)
+    } else if (anyChangeAfter[i]) {
+      // Head only, more changes coming — add pending gap
+      gapPending = true
+    }
+    // Trailing-only gap (no more changes) — intentionally omitted
+  }
+
+  return nodes
+}
+
+// ── InlineDiffView ────────────────────────────────────────────────────────────
+// Right pane: git-style inline diff vs the immediately preceding snapshot.
+function InlineDiffView({ snapshot, prevSnap }: { snapshot: Snapshot; prevSnap: Snapshot | null }) {
+  const afterText  = useMemo(() => pmToText(snapshot.contentJson), [snapshot.id])
+  const beforeText = useMemo(() => prevSnap ? pmToText(prevSnap.contentJson) : '', [prevSnap?.id])
+
+  const ops = useMemo(
+    () => prevSnap ? diffWords(beforeText, afterText) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [prevSnap?.id, snapshot.id],
+  )
+
+  const { added, removed } = ops ? diffStats(ops) : { added: 0, removed: 0 }
+  const hasChange = added > 0 || removed > 0
+  const nodes = useMemo(() => ops && hasChange ? buildDiffNodes(ops) : [], [ops, hasChange])
+
   return (
-    <>
-      {snapRef && (
-        <p className="text-xs text-stone-400 mb-3">
-          {noChange
-            ? 'No changes from previous snapshot.'
-            : <>vs prev: <span style={{ color: '#1a5f1a' }}>+{snapAdded}</span>{' '}
-              <span style={{ color: '#9b2226' }}>−{snapRemoved}</span> words
-              {verRef && <span style={{ color: '#888', marginLeft: 8 }}>· <span style={{ background: '#e0f4e0', color: '#2a6a2a', padding: '0 2px', borderRadius: 2 }}>light</span> = new this version</span>}</>
-          }
-        </p>
-      )}
-      <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
-        {nodes.length > 0 ? nodes : <DocView doc={snapshot.contentJson} />}
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
+      {/* Diff header bar */}
+      <div style={{
+        flexShrink: 0,
+        fontSize: '0.75rem', color: '#888',
+        padding: '6px 16px',
+        borderBottom: '1px solid rgba(92,45,138,0.08)',
+        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        background: 'rgba(249,247,244,0.98)',
+      }}>
+        {!prevSnap && <span style={{ fontStyle: 'italic' }}>Initial snapshot</span>}
+        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic' }}>No changes from previous snapshot</span>}
+        {prevSnap && hasChange && (
+          <>
+            <span style={{ color: '#15803d', fontWeight: 500 }}>+{added}</span>
+            <span style={{ color: '#b91c1c', fontWeight: 500 }}>−{removed}</span>
+            <span>words vs previous</span>
+          </>
+        )}
       </div>
-    </>
+
+      {/* Diff body */}
+      <div style={{
+        flex: 1, overflow: 'auto',
+        padding: '1.25rem 1.75rem',
+        lineHeight: 1.8, fontSize: '1rem',
+        whiteSpace: 'pre-wrap',
+        fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
+      }}>
+        {!prevSnap && (
+          <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>
+            No previous snapshot to compare against.
+          </p>
+        )}
+        {prevSnap && !hasChange && (
+          <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>
+            Content is identical to the previous snapshot.
+          </p>
+        )}
+        {nodes}
+      </div>
+    </div>
+  )
+}
+
+// ── SplitDiffView ─────────────────────────────────────────────────────────────
+// Two-pane layout: left/top = clean snapshot, right/bottom = inline diff.
+// Desktop: horizontal with draggable divider. Mobile/narrow: vertical stack.
+function SplitDiffView({
+  snapshot, prevSnap, isPhone, isNarrow,
+}: {
+  snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
+}) {
+  const vertical = isPhone || isNarrow
+  const [splitPct, setSplitPct] = useState(50)
+  const dragging = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Unified pointer/touch drag handler
+  const startDrag = useCallback((startX: number, startY: number) => {
+    dragging.current = true
+    const onMove = (x: number, y: number) => {
+      if (!dragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const raw = vertical
+        ? ((y - rect.top) / rect.height) * 100
+        : ((x - rect.left) / rect.width) * 100
+      setSplitPct(Math.max(20, Math.min(80, Math.round(raw))))
+    }
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
+    const onTouchMove = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY) }
+    const onUp = () => {
+      dragging.current = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onUp)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onUp)
+    void startX; void startY  // unused but keep signature symmetric
+  }, [vertical])
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        display: 'flex',
+        flexDirection: vertical ? 'column' : 'row',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Left / top pane — clean document */}
+      <div style={{
+        [vertical ? 'height' : 'width']: `${splitPct}%`,
+        overflow: 'auto',
+        flexShrink: 0,
+      }}>
+        <Scroll phone={isPhone}>
+          <div className="tiptap-editor ProseMirror">
+            <DocView doc={snapshot.contentJson} />
+          </div>
+        </Scroll>
+      </div>
+
+      {/* Drag divider */}
+      <div
+        style={{
+          [vertical ? 'height' : 'width']: 7,
+          background: 'rgba(92,45,138,0.10)',
+          cursor: vertical ? 'row-resize' : 'col-resize',
+          flexShrink: 0,
+          zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background 0.12s',
+          userSelect: 'none',
+        }}
+        onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
+        onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
+        onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+        title="Drag to resize"
+      >
+        {/* Grip dots */}
+        <div style={{
+          display: 'flex',
+          flexDirection: vertical ? 'row' : 'column',
+          gap: 3,
+          pointerEvents: 'none',
+        }}>
+          {[0,1,2].map(n => (
+            <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />
+          ))}
+        </div>
+      </div>
+
+      {/* Right / bottom pane — diff view */}
+      <div style={{
+        flex: 1,
+        overflow: 'hidden',
+        background: '#f9f7f4',
+        borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
+        borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
+      }}>
+        <InlineDiffView snapshot={snapshot} prevSnap={prevSnap} />
+      </div>
+    </div>
   )
 }
 
@@ -277,7 +448,6 @@ export function SnapshotView() {
 
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
-  const [showDiff, setShowDiff] = useState(true)
   const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -407,21 +577,11 @@ export function SnapshotView() {
     : 0
   const lastGroup = groups[groups.length - 1]
 
-  // Direction-sensitive diff reference: the snapshot we just navigated away from
-  const snapRefIdx = navDir === 'back' ? idx + 1 : idx - 1
-  const snapRef = snapRefIdx >= 0 && snapRefIdx < allSnapshots.length ? allSnapshots[snapRefIdx] : null
+  // Always diff against the immediately preceding snapshot (not direction-sensitive)
+  const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
-  // Version-level ref: previous version group's base snapshot
-  const prevGroupIdx = groupIdx > 0 ? groupIdx - 1 : -1
-  const verRef = prevGroupIdx >= 0
-    ? (groups[prevGroupIdx].versionSnap ?? groups[prevGroupIdx].items[0] ?? null)
-    : null
-
-  // Version summaries: each versionSnap stores what changed vs. the previous version
+  // AI summary side panels
   const currentGroup = groupIdx >= 0 ? groups[groupIdx] : null
-
-  // Snapshot diff and version diff are always "current vs its predecessor".
-  // Only show on the side of the button the user just clicked (navDir).
   const currentDiff    = snapshot?.diffSummary?.bullets ?? null
   const currentVerDiff = currentGroup?.versionSnap?.versionSummary ?? null
   const leftSummary         = navDir === 'back' ? currentDiff    : null
@@ -430,16 +590,17 @@ export function SnapshotView() {
   const rightVersionSummary = navDir === 'fwd'  ? currentVerDiff : null
 
   return (
+    // height:100dvh so the split pane fills the screen without page scroll
     <div
-      className="min-h-screen font-serif"
-      style={{ color: '#3a3a3a' }}
+      className="font-serif"
+      style={{ height: '100dvh', overflow: 'hidden', color: '#3a3a3a', display: 'flex', flexDirection: 'column' }}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Fixed header — position:fixed so overscroll / rubber-band at page top doesn't move it */}
+      {/* Fixed header */}
       <div
         className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem' }}
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 36 }}
       >
         <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
@@ -464,12 +625,6 @@ export function SnapshotView() {
             <span className="text-stone-400 tabular-nums">
               {`s${idx + 1}/${allSnapshots.length}`}
             </span>
-          )}
-          {status === 'ready' && (
-            <label className="flex items-center gap-1 text-stone-500 cursor-pointer select-none">
-              <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} className="accent-[#5c2d8a]" />
-              Show changes
-            </label>
           )}
         </span>
         {docId && (
@@ -516,27 +671,26 @@ export function SnapshotView() {
         </button>
       </div>
 
-      {/* Spacer to clear the fixed header */}
-      <div style={{ height: 36 }} />
+      {/* Spacer for fixed header */}
+      <div style={{ height: 36, flexShrink: 0 }} />
 
-      {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
-      {status === 'missing' && (
-        <p className="text-center text-stone-500 mt-20">
-          That snapshot isn't on this device. Snapshots live in the browser where they were written.
-        </p>
-      )}
-
-      {status === 'ready' && snapshot && (
-        <Scroll phone={isPhone}>
-          {showDiff ? (
-            <DualDiffView snapshot={snapshot} snapRef={snapRef} verRef={verRef} />
-          ) : (
-            <div className="tiptap-editor ProseMirror">
-              <DocView doc={snapshot.contentJson} />
-            </div>
-          )}
-        </Scroll>
-      )}
+      {/* Split pane fills remaining viewport */}
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
+        {status === 'missing' && (
+          <p className="text-center text-stone-500 mt-20">
+            That snapshot isn't on this device. Snapshots live in the browser where they were written.
+          </p>
+        )}
+        {status === 'ready' && snapshot && (
+          <SplitDiffView
+            snapshot={snapshot}
+            prevSnap={prevSnap}
+            isPhone={isPhone}
+            isNarrow={!isWide}
+          />
+        )}
+      </div>
 
       {/* ── Side navigation ── */}
       {allSnapshots.length > 1 && status === 'ready' && (
