@@ -87,6 +87,7 @@ export interface InkwaveDocument {
   scasPoolId?: string              // id + hash of the public pool P (reproducibility)
   scasState?: ScasState            // the ban-credit / satisfied / version overlay (persisted)
   scasReceipts?: SignedReceipt[]   // the live-composition signed receipt chain for this doc (M3)
+  scasGreenAnchors?: string[]      // words currently anchored as green (unresolved); persisted across sessions
 
   // ─── Citation / bibliography (M-Zotero) ──────────────────────────────────
   bibliography?: Bibliography      // embedded, self-contained cited entries (populated by resolve.ts)

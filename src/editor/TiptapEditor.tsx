@@ -13,7 +13,7 @@ import { ParagraphStyle } from './extensions/ParagraphStyle'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
-import { RedHighlightExtension, SCAS_HINT_META } from './extensions/RedHighlightExtension'
+import { RedHighlightExtension, SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
 import { PaginationExtension } from './extensions/PaginationExtension'
 import { ListStyle } from './extensions/ListStyle'
 import { gappedPagesEnabled } from './pageView'
@@ -431,6 +431,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         updatedAt: new Date().toISOString(),
         title: deriveTitle(e.getText()) || current.title,
         scasState,
+        scasGreenAnchors: getGreenAnchors(e.state),
       }
       const { doc: updated } = embedBibliography(base)
       docRef.current = updated

@@ -83,6 +83,39 @@ interface RedHighlightOptions {
   getScasLookup: () => ScasLookup
 }
 
+/** Extract the current set of anchored-green word strings from editor state (for autosave). */
+export function getGreenAnchors(state: import('@tiptap/pm/state').EditorState): string[] {
+  const plugin = RED_HIGHLIGHT_KEY.getState(state)
+  if (!plugin?.flagged.size) return []
+  const doc = state.doc
+  const words = new Set<string>()
+  plugin.flagged.forEach((original, pos) => {
+    try { if (doc.nodeAt(pos)?.isText) words.add(original) } catch { /* position shifted */ }
+  })
+  return [...words]
+}
+
+/** Build the initial flagged map from persisted anchor words by scanning the PM document. */
+function initialFlaggedFromAnchors(pmDoc: PMNode, anchors: string[]): Map<number, string> {
+  if (!anchors.length) return new Map()
+  const anchorSet = new Set(anchors.map(w => w.toLowerCase()))
+  const flagged = new Map<number, string>()
+  pmDoc.descendants((node: PMNode, pos: number) => {
+    if (!node.isText || !node.text) return true
+    WORD_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = WORD_RE.exec(node.text)) !== null) {
+      const word = match[0]
+      if (anchorSet.has(word.toLowerCase())) {
+        const from = pos + match.index
+        flagged.set(from, word)
+      }
+    }
+    return true
+  })
+  return flagged
+}
+
 export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
   name: 'redHighlight',
 
@@ -101,7 +134,12 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
         key: RED_HIGHLIGHT_KEY,
         state: {
           init(_, state): RedHighlightState {
-            const built = buildDecorations(state.doc, getDoc(), state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, new Map())
+            const inkDoc = getDoc()
+            const savedAnchors = inkDoc.scasGreenAnchors?.length
+              ? new Set(inkDoc.scasGreenAnchors.map(w => w.toLowerCase()))
+              : undefined
+            const initFlagged = savedAnchors ? initialFlaggedFromAnchors(state.doc, [...savedAnchors]) : new Map<number, string>()
+            const built = buildDecorations(state.doc, inkDoc, state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, initFlagged, savedAnchors)
             return { decorations: built.decorations, reveals: EMPTY_REVEALS, flagged: built.flagged }
           },
           apply(tr, old, prev, next): RedHighlightState {
@@ -194,6 +232,7 @@ function buildDecorations(
   lookup: ScasLookup,
   reveals: ReadonlySet<number>,
   flagged: Map<number, string>,
+  initialAnchors?: ReadonlySet<string>,
 ): { decorations: DecorationSet; flagged: Map<number, string> } {
   const newFlagged = new Map<number, string>()
   // SCAS engine off (un-migrated or non-N-mode) → no decorations.
@@ -236,17 +275,17 @@ function buildDecorations(
         // is still that word or a deletion-remnant (startsWith). Released on commit/lock/delete.
         const anchoredOriginal = flagged.get(from)
         const anchorHeld = anchoredOriginal !== undefined && anchoredOriginal.startsWith(word)
+        // Restored anchor: word was green in a prior session (saved in scasGreenAnchors).
+        // Force it green regardless of current S_v so it survives OPFS/file round-trips.
+        const restoredAnchor = !anchorHeld && !!initialAnchors?.has(word.toLowerCase())
 
         const lemma = lemmaOf(word)
         const greenEngine = isColoured(lookup, lemma)           // stochastically selected (in S_v)
         const greenTest   = !greenEngine && debugAll && inPool(lemma) // test/pool-only
         const greenNow    = greenEngine || greenTest
 
-        // Anchor releases as soon as the cursor moves away and the word is no longer in S_v.
-        // This means N-changes and test-mode toggles take effect on the next cursor move, not
-        // after a page reload. Test-mode-only words never get the sticky anchor in the first place.
         const cursorNear  = cursorPos >= from && cursorPos <= to + 1
-        const anchorActive = anchorHeld && (greenEngine || cursorNear)
+        const anchorActive = (anchorHeld && (greenEngine || cursorNear)) || restoredAnchor
 
         // Single letters aren't coloured on their own — except a committed slot being deleted
         // to its last char (slot mark stays) or an anchored green word being deleted down.
@@ -273,7 +312,7 @@ function buildDecorations(
           // Green (uncommitted) word. Only anchor stochastic words (in S_v) so that test-mode
           // words disappear the moment test mode is toggled off (reload) and N-changes clear as
           // soon as the cursor moves away from the now-excluded word.
-          const original = anchorActive ? (anchoredOriginal ?? word) : word
+          const original = restoredAnchor ? word : (anchorActive ? (anchoredOriginal ?? word) : word)
           if (greenEngine || anchorActive) newFlagged.set(from, original)
           redWords.push({
             from, to, pIdx, word, seqInPara: ++seqInPara,
