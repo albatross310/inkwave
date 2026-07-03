@@ -209,7 +209,13 @@ function showCapturePanel(capture: CaptureMsg) {
           const n = countInVisibleText(c); return n >= 1 && n <= 2
         })
         verifySource.set(key, 'ai'); verifyQuote.set(key, found ?? '')
+      } else if (key === 'publisher') {
+        // Publisher is the platform brand ("YouTube"), which appears all over the page (header,
+        // footer, every recommendation) → never a useful target. Snap only if it's distinctive.
+        const n = countInVisibleText(f.value)
+        verifySource.set(key, 'ai'); verifyQuote.set(key, (n >= 1 && n <= 2) ? f.value : '')
       } else {
+        // title + channel render distinctively in the light DOM → highlightable.
         verifySource.set(key, 'ai'); verifyQuote.set(key, existsInVisibleText(f.value) ? f.value : '')
       }
     } else if (key === 'publisher') {
@@ -243,7 +249,7 @@ function showCapturePanel(capture: CaptureMsg) {
   panel.innerHTML = `
     <div class="iwcp-header">
       <div class="iwcp-header-top">
-        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.3</span></span>
+        <span class="iwcp-logo">Inkwave <span style="opacity:0.45;font-size:9px;font-weight:400">v0.1.4</span></span>
         <button class="iwcp-close" aria-label="Dismiss">×</button>
       </div>
       <div class="iwcp-type-row">
