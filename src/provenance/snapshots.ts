@@ -51,6 +51,18 @@ export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
 }
 
+/**
+ * Restore snapshots from an export bundle into OPFS — only when OPFS has FEWER snapshots than the
+ * bundle. Local OPFS always wins: if the machine already has the full history, leave it untouched.
+ * Call this when opening a .studio file so provenance survives device transfers.
+ */
+export async function restoreSnapshotsFromBundle(documentId: string, bundleSnaps: Snapshot[]): Promise<void> {
+  if (!bundleSnaps.length) return
+  const existing = await readSnapshotsFile(documentId)
+  if (existing.length >= bundleSnaps.length) return // local is already at least as complete
+  await writeSnapshotsFile(documentId, bundleSnaps)
+}
+
 export async function latestSnapshot(documentId: string): Promise<Snapshot | null> {
   const snaps = await readSnapshotsFile(documentId)
   return snaps.length ? snaps[snaps.length - 1] : null

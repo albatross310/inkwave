@@ -11,6 +11,7 @@ import { withScasDefaults } from '../scas/state'
 import { setOneDriveFilename, adoptOneDriveFile, type OneDriveFolder } from './onedrive'
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
+import { restoreSnapshotsFromBundle } from '../provenance/snapshots'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 
@@ -22,7 +23,12 @@ export async function openInkwaveFile(
   opts: { handle?: FileSystemFileHandle; googleFileId?: string; oneDriveFile?: { folder: OneDriveFolder; name: string } } = {},
 ): Promise<void> {
   const { handle, googleFileId, oneDriveFile } = opts
-  const data = parseTraceFile(await file.text())
+  let data: ReturnType<typeof parseTraceFile>
+  try {
+    data = parseTraceFile(await file.text())
+  } catch {
+    throw new Error(`"${file.name}" doesn't look like an Inkwave file — it may be a plain-text document that was renamed to .studio`)
+  }
   // Accept an export bundle (content under .document) OR a raw saved document (top-level contentJson).
   const contentJson = (data as { contentJson?: typeof data.document.contentJson }).contentJson ?? data.document?.contentJson
   if (!contentJson) throw new Error('not an Inkwave file')
@@ -37,10 +43,16 @@ export async function openInkwaveFile(
   else setOneDriveFilename(id, file.name)                            // resume OneDrive sync (by name)
   if (handle) await setSaveFileHandle(id, handle)                    // resume local file sync (writable handle)
 
+  // Restore provenance history from the bundle when OPFS has fewer snapshots (device transfer).
+  // Local OPFS wins if it already has all snapshots.
+  if (data.snapshots?.length) await restoreSnapshotsFromBundle(id, data.snapshots)
+
   const now = new Date().toISOString()
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
     schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: uuidv4(),
+    // Restore the signed receipt chain from the bundle so the ReceiptPanel shows history.
+    ...(data.receipts?.length ? { scasReceipts: data.receipts } : {}),
   })
   await saveDocument(doc)
   await upsertMeta({ id, title: doc.title, updatedAt: doc.updatedAt })

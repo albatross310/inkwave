@@ -35,7 +35,11 @@ if (lq && typeof lq.setConsumer === 'function') {
         const file = await handle.getFile()
         const { openInkwaveFile } = await import('../src/storage/openDoc')
         await openInkwaveFile(file, { handle })
-      } catch { /* ignore */ }
+      } catch (err) {
+        // Surface parse failures — a renamed plain-text file would otherwise silently do nothing.
+        const msg = err instanceof Error ? err.message : 'Could not open file'
+        alert(`Inkwave couldn't open this file:\n\n${msg}`)
+      }
     })()
   })
 }

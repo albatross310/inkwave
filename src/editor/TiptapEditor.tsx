@@ -238,6 +238,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [keyboardUp, setKeyboardUp] = useState(false)
   // PWA install prompt — captured here so both OptionsMenu and InstallPromptBanner can use it.
   const [installPrompt, setInstallPrompt] = useState<any>(null)
+  const [fileOpenError, setFileOpenError] = useState<string | null>(null)
   useEffect(() => {
     const onPrompt = (e: Event) => { e.preventDefault(); setInstallPrompt(e) }
     const onInstalled = () => setInstallPrompt(null)
@@ -940,9 +941,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
     const text = await downloadGoogleDriveFile(f.id)
     if (!text) return
-    // Remember the file's folder as a Recent folder ('root' → '' to match the picker's root id).
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
-    await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+    try {
+      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+    } catch (err) {
+      setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
+    }
   }
   // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.
   async function uploadFromOneDrive() {
@@ -953,8 +957,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
     const text = await downloadOneDriveFile(f.itemId)
     if (!text) return
-    void addRecentFolder(f.folder) // opening from a folder makes it a "Recent folder" too, not just saving
-    await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
+    void addRecentFolder(f.folder)
+    try {
+      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
+    } catch (err) {
+      setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
+    }
   }
 
   // "Save a copy" for OneDrive (Firefox/Safari): name a NEW file, point future syncs at it (the old
@@ -1278,6 +1286,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               className="underline whitespace-nowrap hover:opacity-70"
             >
               Got it
+            </button>
+          </div>
+        )}
+        {fileOpenError && (
+          <div
+            className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif"
+            style={{ background: '#fef2f2', borderBottom: '1px solid #fca5a5', color: '#991b1b' }}
+          >
+            <span>⚠ {fileOpenError}</span>
+            <button
+              type="button"
+              onClick={() => setFileOpenError(null)}
+              className="underline whitespace-nowrap hover:opacity-70"
+            >
+              Dismiss
             </button>
           </div>
         )}
