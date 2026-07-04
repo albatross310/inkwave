@@ -10,7 +10,9 @@
 // enters the prerender/SSR graph.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { loadPdf, savePdf } from '../citations/pdfStore'
+import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
 import { setDocSource } from './docSource'
 
@@ -277,15 +279,67 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   if (!CLIENT_ID) return { ok: false, webUrl: null }
   const token = await getSilentToken()
   if (!token) return { ok: false, webUrl: null }
-  // One self-contained file: readable writing on top, then the record (content + snapshots + Bitcoin
-  // proofs + receipts).
-  const file = composeTraceFile(await buildExportBundleWithPdfs(doc, snapshots))
+  // The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes. The cited PDFs go
+  // as sidecar files next to it, uploaded once (re-uploaded only if the PDF itself changes).
+  const bundle = buildExportBundle(doc, snapshots)
+  const studioName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
   try {
-    const webUrl = await putFile(token, oneDriveFilename(doc.id) ?? bundleFilename(doc), file)
+    const webUrl = await putFile(token, studioName, composeTraceFile(bundle))
     setDocSource(doc.id, 'onedrive')
+    void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget
     return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }
+  }
+}
+
+// ── PDF sidecars ──────────────────────────────────────────────────────────────
+// A cited source's PDF is stored beside the .studio as "<base>.<citekey>.pdf". Uploaded once and
+// tracked per-doc (by pdfName), so annotations — which live as JSON in the .studio, not in the PDF —
+// never trigger a re-upload; only replacing the PDF does.
+const sidecarBase = (studioName: string) => studioName.replace(/\.(studio|inkwave)$/i, '')
+const sidecarName = (studioName: string, citekey: string) => `${sidecarBase(studioName)}.${citekey.replace(/[^\w.-]/g, '_')}.pdf`
+
+function contentUrlIn(folder: OneDriveFolder | null, name: string): string {
+  return folder?.id
+    ? `${GRAPH}/me/drive/items/${folder.id}:/${encodeURIComponent(name)}:/content`
+    : `${GRAPH}/me/drive/root:/${encodeURIComponent(name)}:/content`
+}
+
+const pdfNameOf = (item: CSLItem): string | undefined => (item as { _iw?: IwCitationMeta })._iw?.pdfName
+
+async function uploadPdfSidecars(token: string, docId: string, studioName: string, items: CSLItem[]): Promise<void> {
+  const folder = getChosenFolder()
+  const doneKey = `inkwave:od-pdfsidecars:${docId}`
+  let done: Record<string, string> = {}
+  try { done = JSON.parse(localStorage.getItem(doneKey) || '{}') } catch { /* ignore */ }
+  for (const item of items) {
+    const name = pdfNameOf(item)
+    if (!name || done[item.id] === name) continue // no PDF, or this exact PDF already uploaded
+    const blob = await loadPdf(item.id)
+    if (!blob) continue
+    try {
+      const res = await fetch(contentUrlIn(folder, sidecarName(studioName, item.id)), {
+        method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/pdf' }, body: blob,
+      })
+      if (res.ok) done[item.id] = name
+    } catch { /* leave for the next sync */ }
+  }
+  try { localStorage.setItem(doneKey, JSON.stringify(done)) } catch { /* ignore */ }
+}
+
+/** Download a doc's PDF sidecars into OPFS when opening it from OneDrive. */
+export async function fetchPdfSidecars(folder: OneDriveFolder | null, studioName: string, items: CSLItem[]): Promise<void> {
+  if (!oneDriveConfigured()) return
+  const token = await getSilentToken()
+  if (!token) return
+  for (const item of items) {
+    if (!pdfNameOf(item)) continue
+    if (await loadPdf(item.id)) continue // already have it locally
+    try {
+      const res = await fetch(contentUrlIn(folder, sidecarName(studioName, item.id)), { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) await savePdf(item.id, await res.blob())
+    } catch { /* skip missing sidecar */ }
   }
 }
 

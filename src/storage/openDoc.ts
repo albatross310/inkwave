@@ -8,7 +8,7 @@ import { parseTraceFile } from '../provenance/bundle'
 import { saveDocument } from './opfs'
 import { upsertMeta } from './indexeddb'
 import { withScasDefaults } from '../scas/state'
-import { setOneDriveFilename, adoptOneDriveFile, type OneDriveFolder } from './onedrive'
+import { setOneDriveFilename, adoptOneDriveFile, fetchPdfSidecars, type OneDriveFolder } from './onedrive'
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
 import { restoreSnapshotsFromBundle } from '../provenance/snapshots'
@@ -62,8 +62,13 @@ export async function openInkwaveFile(
     await loadLibrary()
     for (const it of bib ?? []) bibProvider.upsert(it, 'library')
     await persistLibrary()
+    // Embedded PDFs (explicit-download bundles) restore directly...
     for (const [key, p] of Object.entries(pdfs ?? {})) {
       try { await savePdf(key, base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
+    }
+    // ...OneDrive-synced docs keep PDFs as sidecars — fetch them for the cited sources.
+    if (oneDriveFile && bib?.length) {
+      await fetchPdfSidecars(oneDriveFile.folder, oneDriveFile.name, bib)
     }
   }
 

@@ -163,7 +163,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
       // Page label: the printed page (Haiku-detected) plus the native PDF sheet number.
       const label = document.createElement('div')
-      label.style.cssText = 'position:absolute;top:4px;right:6px;z-index:3;font-size:10px;color:#78716c;background:rgba(255,255,255,0.78);border-radius:3px;padding:0 5px;pointer-events:none;font-family:system-ui,sans-serif;'
+      label.style.cssText = 'position:absolute;bottom:4px;right:6px;z-index:3;font-size:10px;color:#78716c;background:rgba(255,255,255,0.78);border-radius:3px;padding:0 5px;pointer-events:none;font-family:system-ui,sans-serif;'
       label.textContent = printedKnownRef.current ? `p. ${n + offsetRef.current} · sheet ${n}` : `sheet ${n}`
       pageEl.appendChild(label)
 
