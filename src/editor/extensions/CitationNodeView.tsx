@@ -9,6 +9,7 @@
 // entry in the reference list. See citationNav.ts.
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
@@ -223,7 +224,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           📄
         </button>
       )}
-      {pageEdit && (
+      {pageEdit && createPortal(
         <span
           data-iw-pagepop=""
           contentEditable={false}
@@ -263,7 +264,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               📄 PDF
             </button>
           )}
-        </span>
+        </span>,
+        document.body,
       )}
     </NodeViewWrapper>
   )
