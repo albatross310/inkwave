@@ -40,7 +40,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { createSnapshotIfChanged, listSnapshots, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
@@ -1168,6 +1168,41 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         scheduleSave(updated)
       }
 
+      // Purge sessions whose receipts fail cryptographic verification (bad signature = was signed
+      // with a dev key, or corrupted by the kicks-array reference bug). Done once at session open
+      // so the next export bundle only includes verifiable receipt chains. Also removes any OPFS
+      // snapshots whose embedded receipts were all from purged sessions (so content integrity
+      // checks won't fail on receipts that are no longer in bundle.receipts).
+      const pubKey = signingPublicKeyHex()
+      const bySession = new Map<string, SignedReceipt[]>()
+      for (const r of (docRef.current.scasReceipts ?? [])) {
+        const arr = bySession.get(r.sessionToken) ?? []
+        arr.push(r)
+        bySession.set(r.sessionToken, arr)
+      }
+      const badSessions = new Set<string>()
+      for (const [token, receipts] of bySession) {
+        receipts.sort((a, b) => a.counter - b.counter)
+        const v = await verifyChain(receipts, token, pubKey)
+        if (!v.ok) badSessions.add(token)
+      }
+      if (badSessions.size && !cancelled && docRef.current.id === docId) {
+        const cleanReceipts = (docRef.current.scasReceipts ?? []).filter(
+          (r) => !badSessions.has(r.sessionToken),
+        )
+        // Remove snapshots that only embed bad-session receipts (so content integrity passes)
+        const snapsAfterRecovery = await listSnapshots(docId)
+        for (const s of snapsAfterRecovery) {
+          const snapReceipts = s.receipts ?? []
+          const allBad = snapReceipts.length > 0 && snapReceipts.every((r) => badSessions.has(r.sessionToken))
+          if (allBad) await deleteSnapshot(docId, s.id)
+        }
+        const updated: InkwaveDocument = { ...docRef.current, scasReceipts: cleanReceipts }
+        docRef.current = updated
+        onDocChange(updated)
+        scheduleSave(updated)
+      }
+
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
       scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
       if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
@@ -1187,7 +1222,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!ed || ed.isDestroyed) return
     const runner = sessionRef.current
     if (runner) {
-      const kicks = periodKicksRef.current
+      const kicks = [...periodKicksRef.current] // snapshot — a second nudge must not mutate this
       const cHash = await contentHash(docRef.current.contentJson)
       // Insignia: drain this period's cadence bins + send the Clerk token so the server can gate
       // the signed digest on an active subscription. Free tier sends neither (cadence undefined).
