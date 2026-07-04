@@ -65,18 +65,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       pg.hlLayer.textContent = ''
       for (const hl of highlightsRef.current) {
         if (hl.page !== i + 1) continue
+        const kind = hl.kind ?? 'highlight'
         for (const r of hl.rects) {
           const div = document.createElement('div')
           const left = r.x * pg.w, top = r.y * pg.h, w = r.w * pg.w, h = r.h * pg.h
-          const kind = hl.kind ?? 'highlight'
           let paint: string
           if (kind === 'underline') paint = `left:${left}px;top:${top + h - 2}px;width:${w}px;height:2px;background:${hl.color};`
           else if (kind === 'strike') paint = `left:${left}px;top:${top + h / 2 - 1}px;width:${w}px;height:2px;background:${hl.color};`
           else paint = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;background:${hl.color};opacity:0.4;border-radius:2px;mix-blend-mode:multiply;`
-          div.style.cssText = `position:absolute;${paint}pointer-events:auto;cursor:pointer;`
-          div.title = `${hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))}\n(click to remove)`
-          div.onclick = () => removeHighlight(hl.id)
+          // pointer-events:none so the text underneath stays selectable and a click never deletes it.
+          div.style.cssText = `position:absolute;${paint}pointer-events:none;`
+          div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
           pg.hlLayer.appendChild(div)
+        }
+        // Small delete handle at the annotation's start — the ONLY way to remove it (no accidental
+        // click-to-delete). Subtle by default, solid on hover.
+        const r0 = hl.rects[0]
+        if (r0) {
+          const x = document.createElement('button')
+          x.textContent = '×'
+          x.title = 'Remove annotation'
+          x.style.cssText = `position:absolute;left:${r0.x * pg.w - 7}px;top:${r0.y * pg.h - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid ${INK}66;background:#fff;color:${INK};cursor:pointer;font-size:12px;opacity:0.35;transition:opacity 120ms;pointer-events:auto;z-index:2;`
+          x.onmouseenter = () => { x.style.opacity = '1' }
+          x.onmouseleave = () => { x.style.opacity = '0.35' }
+          x.onclick = e => { e.stopPropagation(); removeHighlight(hl.id) }
+          pg.hlLayer.appendChild(x)
         }
       }
     }
