@@ -1,21 +1,21 @@
 // React NodeView for CitationNode.
-// Uses useSyncExternalStore to subscribe to bibProvider — React 18's designed-for-purpose API
-// for external store subscriptions. It forces synchronous, tear-free re-renders when the store
-// changes, even inside Tiptap's isolated createRoot. No async state, no subscription races.
+// Mirrors the subscription pattern from ReferenceListNodeView (which demonstrably works):
+// queueMicrotask-deferred setState, bibProvider.subscribe, subscribeCitationStyle, and
+// editor.on('update'). The microtask deferral avoids calling setState synchronously inside
+// Tiptap's flushSync-driven render cycle, which causes React's "flushSync during render" error.
 
-import { useSyncExternalStore } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
-import { subscribeCitationStyle, getCitationStyle as _getCitationStyle } from '../../citations/citationsBus'
+import { subscribeCitationStyle } from '../../citations/citationsBus'
 import type { CSLItem, InkwaveDocument } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
 const INK = '#5c2d8a'
 
-// Sync in-text formatter. The CSL engine (formatInText) is intentionally NOT used:
-// citation-js's fetchEngine calls engine.updateItems([]) before rebuildProcessorState,
-// leaving the engine with no items, so citeproc-js falls back to "anonymous".
+// Sync in-text formatter — bypasses citation-js to avoid the fetchEngine/updateItems([]) bug
+// where citeproc-js loses its item registry and falls back to "anonymous".
 function inTextLabel(items: CSLItem[], opts: {
   suppressAuthor?: boolean
   locator?: string | null
@@ -50,41 +50,62 @@ function inTextLabel(items: CSLItem[], opts: {
   return `${pre}${base}${suf}`
 }
 
-// Stable subscribe function for useSyncExternalStore: bib changes + style changes + DOM event.
-const subscribeBibAndStyle = (callback: () => void) => {
-  const unsubBib = bibProvider.subscribe(callback)
-  const unsubStyle = subscribeCitationStyle(callback)
-  window.addEventListener('inkwave:bib-changed', callback)
-  return () => { unsubBib(); unsubStyle(); window.removeEventListener('inkwave:bib-changed', callback) }
-}
-
-export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: InkwaveDocument }) {
+export function CitationNodeView({ node, editor, selected }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
+  const [label, setLabel] = useState('')
+  const [missing, setMissing] = useState<string[]>([])
 
-  // useSyncExternalStore: subscribes to external store, forces a synchronous re-render when the
-  // version changes. Computed directly in render — no setState, no async, no batching surprises.
-  useSyncExternalStore(
-    subscribeBibAndStyle,
-    () => bibProvider.getVersion(), // snapshot = version counter; changes on every library edit
-  )
+  // Always-current ref — avoids stale closure inside the subscription callback.
+  const attrsRef = useRef(attrs)
+  attrsRef.current = attrs
 
-  // Compute label synchronously from the current (always fresh) bibProvider state.
-  const items: CSLItem[] = []
-  const missing: string[] = []
-  for (const key of attrs.citekeys) {
-    const item = bibProvider.get(key)
-    if (item) items.push(item)
-    else missing.push(key)
-  }
+  const buildLabel = useCallback(() => {
+    const a = attrsRef.current
+    const items: CSLItem[] = []
+    const miss: string[] = []
+    for (const key of a.citekeys) {
+      const item = bibProvider.get(key)
+      if (item) items.push(item)
+      else miss.push(key)
+    }
+    setMissing(miss)
+    if (items.length === 0) {
+      setLabel(miss.map(k => `[?${k}]`).join(' '))
+      return
+    }
+    setLabel(inTextLabel(items, {
+      suppressAuthor: a.suppressAuthor,
+      locator: a.locator,
+      prefix: a.prefix,
+      suffix: a.suffix,
+    }))
+  }, []) // stable — reads from attrsRef
 
-  const label = items.length > 0
-    ? inTextLabel(items, {
-        suppressAuthor: attrs.suppressAuthor,
-        locator: attrs.locator,
-        prefix: attrs.prefix,
-        suffix: attrs.suffix,
-      })
-    : missing.map(k => `[?${k}]`).join(' ')
+  // Keep a ref so the subscription closure always calls the current version.
+  const buildLabelRef = useRef(buildLabel)
+  buildLabelRef.current = buildLabel
+
+  useEffect(() => {
+    // queueMicrotask: defer setState so it never runs synchronously inside Tiptap's flushSync
+    // render cycle (mirrors ReferenceListNodeView's proven subscription pattern).
+    const schedule = () => queueMicrotask(() => buildLabelRef.current())
+    schedule() // initial build on mount / re-mount
+    const unsubBib = bibProvider.subscribe(schedule)
+    const unsubStyle = subscribeCitationStyle(schedule)
+    editor.on('update', schedule)           // safety net: rebuild on any doc change
+    window.addEventListener('inkwave:bib-changed', schedule)
+    return () => {
+      unsubBib()
+      unsubStyle()
+      editor.off('update', schedule)
+      window.removeEventListener('inkwave:bib-changed', schedule)
+    }
+  }, [editor]) // re-subscribe if editor instance changes
+
+  // Also rebuild when node attrs change (e.g., different citekeys after editing a citation).
+  useEffect(() => {
+    queueMicrotask(() => buildLabelRef.current())
+  }, [attrs.citekeys, attrs.suppressAuthor, attrs.locator, attrs.prefix, attrs.suffix])
 
   const hasMissing = missing.length > 0
 
