@@ -19,6 +19,7 @@ import {
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
+import { pageOffsetOf } from '../../citations/pageOffset'
 import type { CSLItem, InkwaveDocument, IwCitationMeta } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
@@ -97,8 +98,9 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
       if (item && !firstPdf && (item as { _iw?: IwCitationMeta })._iw?.pdfName) firstPdf = key
-      // Displayed pages = manual locator ∪ pages that carry a PDF highlight/annotation, merged.
-      const pages = item ? mergePages(a.locator, highlightPages(item)) : ''
+      // Displayed pages = manual locator ∪ printed pages that carry a highlight (PDF sheet + offset).
+      const off = pageOffsetOf(item)
+      const pages = item ? mergePages(a.locator, highlightPages(item).map(p => p + off)) : ''
       return item
         ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages }), occ: occMap.get(key) ?? 1, found: true }
         : { key, text: `?${key}`, occ: occMap.get(key) ?? 1, found: false }
@@ -211,7 +213,9 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               quote: attrs.quote,
               label: segs.find(s => s.key === pdfKey)?.text ?? pdfKey,
               // Selecting a sentence in the PDF sets this citation's pinpoint (quote + page).
-              onLink: (quote, page) => updateAttributes({ quote, locator: String(page) }),
+              // Only store the quote; the page shows via the highlight (offset-corrected), so we
+              // don't also write a raw-PDF-page locator that would double-count.
+              onLink: (quote) => updateAttributes({ quote }),
             })
           }}
           title={attrs.quote ? 'Open PDF at the linked sentence' : `Open PDF${attrs.locator ? ` at ${attrs.locator}` : ''} — select a sentence to link it`}
@@ -257,7 +261,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               onClick={() => {
                 openPdf({ citekey: pageEdit.key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
                   label: segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key,
-                  onLink: (quote, page) => updateAttributes({ quote, locator: String(page) }) })
+                  onLink: (quote) => updateAttributes({ quote }) })
                 setPageEdit(null)
               }}
               style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>

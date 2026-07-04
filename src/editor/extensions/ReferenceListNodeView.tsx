@@ -16,6 +16,7 @@ import { addToLibrary } from '../../citations/library'
 import { referenceListKeys } from '../../citations/resolve'
 import { formatReferenceEntries, simpleRefList } from '../../citations/format'
 import { highlightPages } from '../../citations/pdfHighlights'
+import { pageOffsetOf } from '../../citations/pageOffset'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
@@ -98,17 +99,19 @@ function noteButtonHtml(key: string, hasNote: boolean): string {
   return `<button type="button" class="iw-note-add" data-iw-note="${key}" contenteditable="false" title="${hasNote ? 'Edit note' : 'Add note'}">${hasNote ? '✎' : '+'}</button>`
 }
 
-// "esp. pp 2, 4–6" — the pages this source is pinpointed to across its in-text citations.
-function espHtml(pages: number[]): string {
+// "esp. pp 2, 4–6" — the pages this source is pinpointed to across its in-text citations. `raw` marks
+// pages that are the PDF's own sheet numbers (Haiku page-offset detection failed) with a "†".
+function espHtml(pages: number[], raw: boolean): string {
   if (!pages.length) return ''
   const label = pages.length === 1 ? 'esp. p' : 'esp. pp'
-  return `<span class="iw-esp" contenteditable="false"> ${label} ${formatPages(pages)}.</span>`
+  const dagger = raw ? '<span title="These are the PDF’s own page numbers — automatic page-number detection was unavailable."> †</span>' : ''
+  return `<span class="iw-esp" contenteditable="false"> ${label} ${formatPages(pages)}${dagger}.</span>`
 }
 
 // Inject the entry anchor id + esp-pages + back-refs + note button into a single `.csl-entry` html.
-function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[]): string {
+function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[], raw: boolean): string {
   let out = html.replace(/^(\s*<[a-z]+)/i, `$1 id="${bibAnchorId(id)}"`)
-  const trailing = espHtml(pages) + backrefHtml(id, occPages) + noteButtonHtml(id, hasNote)
+  const trailing = espHtml(pages, raw) + backrefHtml(id, occPages) + noteButtonHtml(id, hasNote)
   out = out.replace(/<\/[a-z]+>\s*$/i, m => `${trailing}${m}`)
   return out
 }
@@ -153,10 +156,13 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       const itemById = new Map(items.map(it => [it.id, it]))
       setEntries(formatted.map(([id, html]) => {
         const note = noteById.get(id) ?? ''
-        // esp. pp = pages cited in-text ∪ pages carrying a PDF highlight/annotation.
-        const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(itemById.get(id))])].sort((a, b) => a - b)
+        const it = itemById.get(id)
+        const off = pageOffsetOf(it)
+        // esp. pp = pages cited in-text ∪ printed pages carrying a highlight (PDF sheet + offset).
+        const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(it).map(p => p + off)])].sort((a, b) => a - b)
+        const raw = pages.length > 0 && (it as { _iw?: IwCitationMeta })?._iw?.pageOffsetFlag === 'raw'
         const occPages = occurrencePages(id, counts.get(id) ?? 0)
-        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages), occ: counts.get(id) ?? 0, note }
+        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages, raw), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)
       setPlain([])

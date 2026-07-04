@@ -33,6 +33,18 @@ async function callClaude(apiKey, prompt, maxTokens = MAX_TOKENS, model = MODEL)
   return data.content?.[0]?.text?.trim() ?? ''
 }
 
+// Vision call — `content` is an Anthropic content array (image + text blocks).
+async function callClaudeVision(apiKey, content, model, maxTokens = 300) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'user', content }] }),
+  })
+  if (!r.ok) throw new Error(`anthropic ${r.status}`)
+  const data = await r.json()
+  return data.content?.[0]?.text?.trim() ?? ''
+}
+
 // ── Citation extraction (the blog/website path) ───────────────────────────────
 // Strip a page's HTML down to candidate text + the meta tags most likely to carry citation data,
 // so Haiku sees a compact, high-signal input. Regex-based (no DOM in the serverless runtime).
@@ -195,6 +207,30 @@ export default async function handler(req, res) {
       : JSON.parse(await new Promise((resolve, reject) => {
           let s = ''; req.on('data', c => { s += c }); req.on('end', () => resolve(s)); req.on('error', reject)
         }).then(s => s || '{}').catch(() => '{}'))
+
+    // Page-number detection: { pageNumbers: { images: [{ page, data(base64 png) }] } } → the printed
+    // page number visible on each sheet, so the client can compute PDF-sheet → printed-page offset.
+    if (body.pageNumbers && Array.isArray(body.pageNumbers.images)) {
+      res.setHeader('content-type', 'application/json')
+      try {
+        const imgs = body.pageNumbers.images.slice(0, 4)
+        const content = []
+        for (const img of imgs) {
+          content.push({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: String(img.data) } })
+          content.push({ type: 'text', text: `↑ That image is the PDF sheet at index ${Number(img.page)}.` })
+        }
+        content.push({ type: 'text', text:
+          'For EACH image, report the page number PRINTED ON THE PAGE itself (usually in a header or footer), NOT the sheet index I gave. ' +
+          'Return ONLY a JSON array, no prose: [{"sheet":<index I gave>,"printed":"<exact printed text, e.g. 12 or xii>"}]. ' +
+          'Use null for "printed" if no page number is visible on that page.' })
+        const raw = await callClaudeVision(apiKey, content, DIFF_MODEL)
+        const json = JSON.parse((raw.match(/\[[\s\S]*\]/) || ['[]'])[0])
+        return res.end(JSON.stringify({ results: Array.isArray(json) ? json : [] }))
+      } catch (e) {
+        res.statusCode = 502
+        return res.end(JSON.stringify({ error: String((e && e.message) || e) }))
+      }
+    }
 
     // Citation extraction mode: { extract: { url, html? } } → { itemType, fields, confidence }.
     // If html isn't supplied (PWA paste-URL path) the server fetches the page — no CORS problem,

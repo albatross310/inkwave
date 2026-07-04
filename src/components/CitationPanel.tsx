@@ -16,6 +16,7 @@ import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { savePdf, deletePdf } from '../citations/pdfStore'
 import { openPdf } from '../citations/pdfViewer'
 import { maybeShowCitationToast } from '../citations/citationToast'
+import { detectPageOffset } from '../citations/pageOffset'
 import { makeCitekey } from '../citations/cslMap'
 import { reverifyEntry, applyReverify, revertField } from '../citations/reverify'
 import { simpleInText } from '../citations/format'
@@ -489,6 +490,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         const iw: IwCitationMeta = { ...((item as { _iw?: IwCitationMeta })._iw ?? {}), pdfName: file.name }
         await addToLibrary({ ...item, _iw: iw })
       }
+      void detectPageOffset(key) // one-time: reconcile PDF sheet index with the book's printed pages
       setNotice({ text: `Embedded PDF for "${key}" — click 📄 next to its citations to open at the cited page.`, kind: 'ok' })
     } catch (err) {
       setNotice({ text: err instanceof Error ? err.message : 'Could not embed the PDF.', kind: 'err' })
