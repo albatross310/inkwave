@@ -797,15 +797,15 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     {(item as { _iw?: IwCitationMeta })._iw?.pdfName ? (
                       <button type="button"
                         title={`Open embedded PDF (${(item as { _iw?: IwCitationMeta })._iw?.pdfName}) — shift-click to remove`}
-                        className="text-[10px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d]"
+                        className="text-[10px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
                         onClick={e => { e.stopPropagation(); if (e.shiftKey) void removePdf(item); else openPdf({ citekey: item.id, page: 1, label: item.id }) }}
-                      >📄</button>
+                      >📄 PDF</button>
                     ) : (
                       <button type="button"
                         title="Embed a PDF for this source"
-                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
+                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
                         onClick={e => { e.stopPropagation(); attachPdf(item) }}
-                      >📎</button>
+                      >📎 PDF</button>
                     )}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
