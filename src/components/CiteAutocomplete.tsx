@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
+import { maybeShowCitationToast } from '../citations/citationToast'
 import type { CSLItem } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -96,6 +97,7 @@ export function CiteAutocomplete({ editor }: Props) {
       .deleteRange({ from: triggerStart, to: from })
       .insertCitation({ citekeys: [item.id] })
       .run()
+    maybeShowCitationToast()
   }
 
   if (!popup) return null

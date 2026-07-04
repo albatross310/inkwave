@@ -14,9 +14,10 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
-  bibAnchorId, citeAnchorId, navigateToAnchor, occurrencesAt, ensureNavStyles,
+  bibAnchorId, citeAnchorId, navigateToAnchor, occurrencesAt, ensureNavStyles, mergePages,
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
+import { highlightPages } from '../../citations/pdfHighlights'
 import type { CSLItem, InkwaveDocument, IwCitationMeta } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
@@ -33,8 +34,9 @@ function bindStopPM(el: HTMLInputElement | null): void {
   for (const t of STOP_TYPES) marked.addEventListener(t, stop)
 }
 
-// One item's in-text text — "Bacon, 2004" / "Smith et al., 2004" / (suppressAuthor) "2004".
-function oneCiteText(item: CSLItem, opts: { suppressAuthor?: boolean; locator?: string | null }): string {
+// One item's in-text text — "Bacon, 2004" / "Smith et al., 2004, 2–4" / (suppressAuthor) "2004".
+// `pages` is the already-merged page string (manual locator ∪ pages carrying a PDF highlight).
+function oneCiteText(item: CSLItem, opts: { suppressAuthor?: boolean; pages?: string }): string {
   const authors = item.author ?? []
   let name: string
   if (authors.length === 0) {
@@ -51,7 +53,7 @@ function oneCiteText(item: CSLItem, opts: { suppressAuthor?: boolean; locator?: 
     name = `${authors[0].family ?? authors[0].literal ?? '?'} et al.`
   }
   const year = item.issued?.['date-parts']?.[0]?.[0] ?? 'n.d.'
-  const loc = opts.locator ? `, ${opts.locator}` : ''
+  const loc = opts.pages ? `, ${opts.pages}` : ''
   return opts.suppressAuthor ? `${year}${loc}` : `${name}, ${year}${loc}`
 }
 
@@ -67,6 +69,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   const [segs, setSegs] = useState<Seg[]>([])
   const [pdfKey, setPdfKey] = useState<string | null>(null)  // first cited source with an embedded PDF
   const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number } | null>(null)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const heldRef = useRef(false)
 
   useEffect(() => {
     if (!pageEdit) return
@@ -92,8 +96,10 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
       if (item && !firstPdf && (item as { _iw?: IwCitationMeta })._iw?.pdfName) firstPdf = key
+      // Displayed pages = manual locator ∪ pages that carry a PDF highlight/annotation, merged.
+      const pages = item ? mergePages(a.locator, highlightPages(item)) : ''
       return item
-        ? { key, text: oneCiteText(item, a), occ: occMap.get(key) ?? 1, found: true }
+        ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages }), occ: occMap.get(key) ?? 1, found: true }
         : { key, text: `?${key}`, occ: occMap.get(key) ?? 1, found: false }
     })
     setSegs(next)
@@ -159,11 +165,22 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       id={citeAnchorId(s.key, s.occ)}
                       className="iw-cite-link"
                       style={{ color: INK }}
-                      title="Set page(s) · go to reference"
+                      title="Click: go to reference · Click & hold: set page(s)"
+                      onPointerDown={e => {
+                        e.stopPropagation()
+                        heldRef.current = false
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        holdTimer.current = setTimeout(() => {
+                          heldRef.current = true
+                          setPageEdit({ key: s.key, x: r.left, y: r.bottom })
+                        }, 450)
+                      }}
+                      onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                      onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                       onClick={e => {
                         e.stopPropagation()
-                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                        setPageEdit({ key: s.key, x: r.left, y: r.bottom })
+                        if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
+                        navigateToAnchor(bibAnchorId(s.key))
                       }}
                     >
                       {s.text}

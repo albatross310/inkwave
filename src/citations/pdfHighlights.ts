@@ -27,6 +27,13 @@ export function highlightsOf(item: CSLItem | undefined): PdfHighlight[] {
   return Array.isArray(hs) ? hs : []
 }
 
+/** Distinct, sorted PDF pages that carry any highlight/annotation for a source. */
+export function highlightPages(item: CSLItem | undefined): number[] {
+  const set = new Set<number>()
+  for (const h of highlightsOf(item)) if (h.page > 0) set.add(h.page)
+  return [...set].sort((a, b) => a - b)
+}
+
 /** Replace the full highlight list for a source and persist. */
 export async function saveHighlights(citekey: string, highlights: PdfHighlight[]): Promise<void> {
   const item = bibProvider.get(citekey)

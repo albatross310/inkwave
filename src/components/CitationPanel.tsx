@@ -15,6 +15,7 @@ import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { savePdf, deletePdf } from '../citations/pdfStore'
 import { openPdf } from '../citations/pdfViewer'
+import { maybeShowCitationToast } from '../citations/citationToast'
 import { makeCitekey } from '../citations/cslMap'
 import { reverifyEntry, applyReverify, revertField } from '../citations/reverify'
 import { simpleInText } from '../citations/format'
@@ -451,6 +452,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
   function cite(item: CSLItem) {
     cmd(() => editor.chain().focus().insertCitation({ citekeys: [item.id] }).run())
+    maybeShowCitationToast()
     setNotice({ text: `Cited "${item.id}"`, kind: 'ok' })
   }
 

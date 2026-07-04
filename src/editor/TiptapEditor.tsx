@@ -62,6 +62,7 @@ import { ReferenceListNode } from './extensions/ReferenceListNode'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
 import { CitationPanel } from '../components/CitationPanel'
 import { PdfSidePanel } from '../components/PdfSidePanel'
+import { Toast } from '../components/Toast'
 import { loadLibrary } from '../citations/library'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
@@ -1745,6 +1746,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         )}
         {editor && <CiteAutocomplete editor={editor} />}
         <PdfSidePanel />
+        <Toast />
         {bibPanelOpen && editor && (
           <CitationPanel
             editor={editor}

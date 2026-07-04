@@ -15,6 +15,7 @@ import { bibProvider } from '../../citations/bibProvider'
 import { addToLibrary } from '../../citations/library'
 import { referenceListKeys } from '../../citations/resolve'
 import { formatReferenceEntries, simpleRefList } from '../../citations/format'
+import { highlightPages } from '../../citations/pdfHighlights'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
@@ -138,9 +139,11 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     try {
       const formatted = await formatReferenceEntries(items, getCitationStyle())
       const noteById = new Map(items.map(it => [it.id, noteOf(it)]))
+      const itemById = new Map(items.map(it => [it.id, it]))
       setEntries(formatted.map(([id, html]) => {
         const note = noteById.get(id) ?? ''
-        const pages = citedPages(editor.state.doc, id)
+        // esp. pp = pages cited in-text ∪ pages carrying a PDF highlight/annotation.
+        const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(itemById.get(id))])].sort((a, b) => a - b)
         return { id, html: decorateEntry(id, html, counts.get(id) ?? 0, !!note.trim(), pages), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)

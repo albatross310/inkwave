@@ -103,6 +103,15 @@ export function citedPages(doc: PMNode, key: string): number[] {
   return [...set].sort((x, y) => x - y)
 }
 
+/** Merge a locator string's pages with extra page numbers (e.g. highlighted pages) into "2, 4–6".
+ *  A non-numeric locator ("ch. 3") is preserved when there are no numeric pages to merge. */
+export function mergePages(locator: string | null | undefined, extra: number[]): string {
+  const set = new Set<number>(extra)
+  if (locator) for (const [a, b] of parseRanges(locator)) for (let p = a; p <= Math.min(b, a + 999); p++) set.add(p)
+  const s = formatPages([...set].sort((x, y) => x - y))
+  return s || (locator ?? '')
+}
+
 /** Merge sorted page numbers into a compact "2, 4–6, 9" string. */
 export function formatPages(nums: number[]): string {
   if (!nums.length) return ''
