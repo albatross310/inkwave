@@ -19,7 +19,7 @@ import { highlightPages } from '../../citations/pdfHighlights'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
-  citedPages, formatPages,
+  citedPages, formatPages, occurrencePages,
 } from '../../citations/citationNav'
 import type { CSLItem, IwCitationMeta } from '../../types/document'
 import type { RefMode } from '../../citations/resolve'
@@ -72,13 +72,24 @@ function NotePanel({ value, onChange }: { value: string; onChange: (v: string) =
   )
 }
 
-// Back-reference markers linking each reference entry to its in-text occurrences.
-function backrefHtml(key: string, occ: number): string {
-  if (occ <= 0) return ''
+// Back-reference markers — the DOCUMENT pages where a source is cited (from the pagination guides),
+// each snapping back to that in-text citation. Falls back to occurrence ordinals when pages can't be
+// measured (scroll / gapped mode). Pages are deduped so each appears once.
+function backrefHtml(key: string, occPages: Array<{ occ: number; page: number | null }>): string {
+  if (!occPages.length) return ''
+  const anyPage = occPages.some(o => o.page != null)
+  const seen = new Set<number>()
   const marks: string[] = []
-  for (let n = 1; n <= occ; n++) {
-    marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, n)}" title="Go to citation ${n}">${n}</a>`)
+  for (const { occ, page } of occPages) {
+    if (anyPage) {
+      if (page == null || seen.has(page)) continue
+      seen.add(page)
+      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to page ${page}">${page}</a>`)
+    } else {
+      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to citation ${occ}">${occ}</a>`)
+    }
   }
+  if (!marks.length) return ''
   return `<span class="iw-backref-group" contenteditable="false"><span class="iw-backref-arrow">↩</span> ${marks.join(' ')}</span>`
 }
 
@@ -95,9 +106,9 @@ function espHtml(pages: number[]): string {
 }
 
 // Inject the entry anchor id + esp-pages + back-refs + note button into a single `.csl-entry` html.
-function decorateEntry(id: string, html: string, occ: number, hasNote: boolean, pages: number[]): string {
+function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[]): string {
   let out = html.replace(/^(\s*<[a-z]+)/i, `$1 id="${bibAnchorId(id)}"`)
-  const trailing = espHtml(pages) + backrefHtml(id, occ) + noteButtonHtml(id, hasNote)
+  const trailing = espHtml(pages) + backrefHtml(id, occPages) + noteButtonHtml(id, hasNote)
   out = out.replace(/<\/[a-z]+>\s*$/i, m => `${trailing}${m}`)
   return out
 }
@@ -144,7 +155,8 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
         const note = noteById.get(id) ?? ''
         // esp. pp = pages cited in-text ∪ pages carrying a PDF highlight/annotation.
         const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(itemById.get(id))])].sort((a, b) => a - b)
-        return { id, html: decorateEntry(id, html, counts.get(id) ?? 0, !!note.trim(), pages), occ: counts.get(id) ?? 0, note }
+        const occPages = occurrencePages(id, counts.get(id) ?? 0)
+        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)
       setPlain([])

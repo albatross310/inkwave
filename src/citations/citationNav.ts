@@ -10,6 +10,8 @@
 // anchors on both ends line up.
 
 import type { Node as PMNode } from '@tiptap/pm/model'
+import { getPaperSize, getOrientation } from '../editor/pageSettings'
+import { gappedPagesEnabled } from '../editor/pageView'
 
 const INK = '#5c2d8a'
 const STYLE_ID = 'iw-citation-nav-styles'
@@ -64,6 +66,32 @@ export function navigateToAnchor(id: string): void {
 }
 
 // ── Occurrence counting ─────────────────────────────────────────────────────────
+
+// Document page (1-based) a citation element sits on, per the NONGAPPED pagination guides (page height
+// = sheet width × paper ratio, same as Scroll.tsx's PageGuides). null when pages don't apply (scroll /
+// gapped mode) or it can't be measured — callers then fall back to occurrence ordinals.
+function docPageOf(el: HTMLElement): number | null {
+  if (typeof document === 'undefined' || gappedPagesEnabled()) return null
+  const paper = getPaperSize()
+  if (paper === 'scroll') return null
+  const sheet = el.closest('.scroll-paper') as HTMLElement | null
+  if (!sheet || !sheet.clientWidth) return null
+  const landscape = getOrientation() === 'landscape'
+  const ratio = paper === 'letter' ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2)
+  const pageH = sheet.clientWidth * ratio
+  const y = el.getBoundingClientRect().top - sheet.getBoundingClientRect().top
+  return Math.max(1, Math.floor(y / pageH) + 1)
+}
+
+/** For each in-text occurrence of a citekey, the document page it sits on (measured from the DOM). */
+export function occurrencePages(key: string, count: number): Array<{ occ: number; page: number | null }> {
+  const out: Array<{ occ: number; page: number | null }> = []
+  for (let n = 1; n <= count; n++) {
+    const el = document.getElementById(citeAnchorId(key, n))
+    out.push({ occ: n, page: el ? docPageOf(el) : null })
+  }
+  return out
+}
 
 /** Total in-text occurrences per citekey across the whole document, in order. */
 export function occurrenceCounts(doc: PMNode): Map<string, number> {
