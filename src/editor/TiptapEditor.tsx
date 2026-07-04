@@ -1130,11 +1130,44 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setReceipts([])
     setChainStatus(null)
     const docId = doc.id
-    void SessionRunner.open(docId).then((runner) => {
+    void SessionRunner.open(docId).then(async (runner) => {
       if (cancelled || !runner || docRef.current.id !== docId) return
       sessionRef.current = runner
-      // Snapshot the receipts accumulated before this session so the signing
-      // callback can append rather than replace (prevents cross-session receipt loss).
+
+      // Recover any receipts from previous sessions that were lost due to the cross-session
+      // overwrite bug (now fixed). Scan OPFS snapshots; collect receipts from sessions that
+      // appear in the snapshots but not in doc.scasReceipts. Only adds receipts from sessions
+      // whose counter-0 is present (so the chain can be verified end-to-end). Saves back to
+      // OPFS so future exports include the full receipt history.
+      const knownSigs = new Set((docRef.current.scasReceipts ?? []).map((r) => r.signature))
+      const knownSessions = new Set((docRef.current.scasReceipts ?? []).map((r) => r.sessionToken))
+      const snaps = await listSnapshots(docId)
+      // Build a per-session receipt map from all embedded snapshot receipts
+      const candidatesBySession = new Map<string, Map<number, import('../types/document').SignedReceipt>>()
+      for (const s of snaps) {
+        for (const r of (s.receipts ?? [])) {
+          if (knownSessions.has(r.sessionToken) || knownSigs.has(r.signature)) continue
+          const m = candidatesBySession.get(r.sessionToken) ?? new Map()
+          if (!m.has(r.counter)) m.set(r.counter, r)
+          candidatesBySession.set(r.sessionToken, m)
+        }
+      }
+      // Only recover sessions whose chain starts at counter=0 (otherwise the verifier would fail)
+      const recovered: import('../types/document').SignedReceipt[] = []
+      for (const [, byCounter] of candidatesBySession) {
+        if (!byCounter.has(0)) continue
+        const sorted = [...byCounter.values()].sort((a, b) => a.counter - b.counter)
+        // Only include if counters are contiguous (no gaps)
+        if (sorted.every((r, i) => r.counter === i)) recovered.push(...sorted)
+      }
+      if (recovered.length && !cancelled && docRef.current.id === docId) {
+        const merged = [...recovered, ...(docRef.current.scasReceipts ?? [])]
+        const updated: InkwaveDocument = { ...docRef.current, scasReceipts: merged }
+        docRef.current = updated
+        onDocChange(updated)
+        scheduleSave(updated)
+      }
+
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
       scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
       if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))

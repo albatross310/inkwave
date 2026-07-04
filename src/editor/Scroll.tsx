@@ -182,9 +182,9 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
           />
         )
       })}
-      {/* Page 1 label — fixed at the top-right of the sheet, below the logo */}
+      {/* Page 1 label — right of the logo, vertically aligned with it */}
       {marks.length > 0 && (
-        <div className="font-serif" style={{ position: 'absolute', right: 24, top: logoSize + 16, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>1</div>
+        <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>1</div>
       )}
       {marks.map(({ y, n, rule }) => (
         <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
