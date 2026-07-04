@@ -47,6 +47,29 @@ function bindStopPM(el: HTMLTextAreaElement | null): void {
   for (const t of STOP_TYPES) marked.addEventListener(t, stop)
 }
 
+// Module-scope so its component identity is STABLE across the parent's re-renders. Defining it inside
+// ReferenceListNodeView made it a fresh type on every setState (i.e. every keystroke → setDraft),
+// which remounts the textarea and drops focus after one character.
+function NotePanel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44` }}>
+      <textarea
+        ref={bindStopPM}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="Notes on this source…"
+        rows={2}
+        style={{
+          width: '100%', resize: 'vertical', boxSizing: 'border-box',
+          fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: '#4a4a4a',
+          background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
+          padding: '0.4em 0.55em', outline: 'none',
+        }}
+      />
+    </div>
+  )
+}
+
 // Back-reference markers linking each reference entry to its in-text occurrences.
 function backrefHtml(key: string, occ: number): string {
   if (occ <= 0) return ''
@@ -172,27 +195,6 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     el.querySelectorAll<HTMLElement>('.csl-entry').forEach(e => { e.style.margin = '0'; e.style.display = 'inline' })
   }
 
-  const NotePanel = ({ id, note }: { id: string; note: string }) => (
-    <div style={{
-      margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em',
-      borderLeft: `2px solid ${INK}44`,
-    }}>
-      <textarea
-        ref={bindStopPM}
-        value={draft[id] ?? note}
-        onChange={e => onNoteChange(id, e.target.value)}
-        placeholder="Notes on this source…"
-        rows={2}
-        style={{
-          width: '100%', resize: 'vertical', boxSizing: 'border-box',
-          fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: '#4a4a4a',
-          background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
-          padding: '0.4em 0.55em', outline: 'none',
-        }}
-      />
-    </div>
-  )
-
   return (
     <NodeViewWrapper
       as="section"
@@ -218,7 +220,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           {entries.map(e => (
             <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.75em' }}>
               <div ref={styleEntry} dangerouslySetInnerHTML={{ __html: e.html }} />
-              {openNotes.has(e.id) && <NotePanel id={e.id} note={e.note} />}
+              {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} />}
             </div>
           ))}
         </div>
@@ -240,7 +242,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
                 <button type="button" className="iw-note-add" data-iw-note={p.id}
                   title={p.note.trim() ? 'Edit note' : 'Add note'}>{p.note.trim() ? '✎' : '+'}</button>
               </p>
-              {openNotes.has(p.id) && <NotePanel id={p.id} note={p.note} />}
+              {openNotes.has(p.id) && <NotePanel value={draft[p.id] ?? p.note} onChange={v => onNoteChange(p.id, v)} />}
             </div>
           ))}
         </div>
