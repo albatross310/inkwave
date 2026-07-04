@@ -426,12 +426,115 @@ function InlineDiffView({
   )
 }
 
+// ── Midline content anchoring ───────────────────────────────────────────────
+// The midline stays on the SAME WORDS across snapshot navigation (not the same
+// scroll fraction). We capture a short text signature of whatever sits on the line,
+// then after the next snapshot renders we find that text again and scroll it to the
+// line — so the document "scrolls around a bit" to keep the words put. Falls back to
+// fractional anchoring when the anchored text was edited away.
+
+const SIG_LEN = 80          // chars of the on-line text used as the anchor signature
+const SIG_MIN = 12          // shorter than this = too weak to anchor reliably
+
+/** Cross-browser caret hit-test → the text node + offset at a viewport point. */
+function caretAtPoint(x: number, y: number): { node: Text; offset: number } | null {
+  // Firefox
+  const anyDoc = document as unknown as {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    caretRangeFromPoint?: (x: number, y: number) => Range | null
+  }
+  if (anyDoc.caretPositionFromPoint) {
+    const p = anyDoc.caretPositionFromPoint(x, y)
+    if (p && p.offsetNode.nodeType === Node.TEXT_NODE) return { node: p.offsetNode as Text, offset: p.offset }
+  }
+  if (anyDoc.caretRangeFromPoint) {
+    const r = anyDoc.caretRangeFromPoint(x, y)
+    if (r && r.startContainer.nodeType === Node.TEXT_NODE) return { node: r.startContainer as Text, offset: r.startOffset }
+  }
+  return null
+}
+
+/** Global character offset of (node, offset) within root's textContent. */
+function globalOffsetOf(root: HTMLElement, node: Text, offset: number): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let acc = 0
+  let n = walker.nextNode() as Text | null
+  while (n) {
+    if (n === node) return acc + offset
+    acc += n.data.length
+    n = walker.nextNode() as Text | null
+  }
+  return acc
+}
+
+/** Locate the text node + in-node offset for a global textContent offset. */
+function locateOffset(root: HTMLElement, globalOffset: number): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let acc = 0
+  let n = walker.nextNode() as Text | null
+  while (n) {
+    const len = n.data.length
+    if (acc + len >= globalOffset) return { node: n, offset: globalOffset - acc }
+    acc += len
+    n = walker.nextNode() as Text | null
+  }
+  return null
+}
+
+/** The text signature currently sitting on the midline (or null if not over text). */
+function midlineSignature(el: HTMLElement): string | null {
+  const rect = el.getBoundingClientRect()
+  const x = rect.left + rect.width / 2
+  const y = rect.top + el.clientHeight / 2
+  const caret = caretAtPoint(x, y)
+  if (!caret) return null
+  const globalOffset = globalOffsetOf(el, caret.node, caret.offset)
+  const sig = (el.textContent ?? '').slice(globalOffset, globalOffset + SIG_LEN)
+  return sig.trim().length >= SIG_MIN ? sig : null
+}
+
+/** scrollTop that places `sig` on the midline, preferring the occurrence nearest ratioBias. */
+function scrollTopForSignature(el: HTMLElement, sig: string, ratioBias: number): number | null {
+  const full = el.textContent ?? ''
+  const biasChar = ratioBias * full.length
+  const findBest = (needle: string): number => {
+    let idx = -1, best = Infinity, from = 0
+    for (;;) {
+      const i = full.indexOf(needle, from)
+      if (i < 0) break
+      const d = Math.abs(i - biasChar)
+      if (d < best) { best = d; idx = i }
+      from = i + 1
+    }
+    return idx
+  }
+  // Full signature first; if the anchor text was lightly edited, retry a shorter prefix.
+  let at = findBest(sig)
+  if (at < 0) {
+    const short = sig.slice(0, 28)
+    if (short.trim().length < SIG_MIN) return null
+    at = findBest(short)
+    if (at < 0) return null
+  }
+  const loc = locateOffset(el, at)
+  if (!loc) return null
+  const range = document.createRange()
+  const end = Math.min(loc.offset + 1, loc.node.data.length)
+  range.setStart(loc.node, Math.min(loc.offset, loc.node.data.length))
+  range.setEnd(loc.node, end)
+  const rect = range.getBoundingClientRect()
+  if (!rect.height && !rect.top) return null
+  const elRect = el.getBoundingClientRect()
+  const targetTopInContent = rect.top - elRect.top + el.scrollTop
+  return targetTopInContent - el.clientHeight / 2
+}
+
 // ── SplitDiffView ─────────────────────────────────────────────────────────────
 // Two-pane layout: left/top = full annotated document, right/bottom = compact hunk diff.
 // Desktop: horizontal with draggable divider. Mobile/narrow: vertical stack.
 //
 // Midline: a dashed line fixed at the centre of the document pane.
-// Scroll lock: navigating snapshots keeps the same text at the midline.
+// Scroll lock: navigating snapshots keeps the same TEXT on the midline (content-anchored).
 // Click-to-midline: clicking any change in the hunk panel scrolls the document pane
 //   so that change's text sits at the midline.
 function SplitDiffView({
@@ -446,6 +549,8 @@ function SplitDiffView({
   const leftScrollRef  = useRef<HTMLDivElement>(null)
   const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
   const anchorRatioRef  = useRef(0.5)
+  const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
+  const sigTickRef      = useRef(false)                // throttle signature recompute to 1/frame
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
 
@@ -547,18 +652,36 @@ function SplitDiffView({
   }, [setAttr])
 
   // ── Scroll anchor ──────────────────────────────────────────────────────────
+  // Track both the fractional position (fallback) and the text on the midline (primary).
   const onLeftScroll = useCallback(() => {
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+    // caret hit-testing is comparatively costly — recompute the signature at most once per frame
+    if (!sigTickRef.current) {
+      sigTickRef.current = true
+      requestAnimationFrame(() => {
+        sigTickRef.current = false
+        const cur = leftScrollRef.current
+        if (cur) { const s = midlineSignature(cur); if (s) anchorSigRef.current = s }
+      })
+    }
   }, [])
 
+  // On snapshot change: scroll the new content so the SAME words return to the midline.
   useEffect(() => {
     const el = leftScrollRef.current
     if (!el) return
     const id = requestAnimationFrame(() => {
-      const target = anchorRatioRef.current * el.scrollHeight - el.clientHeight / 2
+      const sig = anchorSigRef.current
+      let target: number | null = null
+      if (sig) target = scrollTopForSignature(el, sig, anchorRatioRef.current)
+      if (target == null) target = anchorRatioRef.current * el.scrollHeight - el.clientHeight / 2
       el.scrollTop = Math.max(0, target)
+      // Refresh the anchor from the new midline so the next navigation stays locked to
+      // these same words even if the user never manually scrolls.
+      const s = midlineSignature(el)
+      if (s) anchorSigRef.current = s
     })
     return () => cancelAnimationFrame(id)
   }, [snapshot.id])
