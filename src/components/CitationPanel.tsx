@@ -499,9 +499,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     if (cur) {
       const iw = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}) }
       delete (iw as IwCitationMeta).pdfName
+      delete (iw as IwCitationMeta).highlights   // annotations belonged to the old PDF
       await addToLibrary({ ...cur, _iw: iw })
     }
-    setNotice({ text: `Removed the embedded PDF for "${item.id}".`, kind: 'ok' })
+    setNotice({ text: `Removed the PDF for "${item.id}" — attach a new one with 📎 PDF.`, kind: 'ok' })
   }
 
   async function saveEdit(updated: CSLItem) {
@@ -771,45 +772,52 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     title="Click to edit"
                   >
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-medium truncate" style={{ color: INK }}>{item.id}</span>
-                      <span className="text-[9px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
-                      <span className="text-[9px] text-stone-300">{typeLabel}</span>
-                      {used && <span className="text-[9px] text-green-600">● used</span>}
+                      <span className="text-sm font-medium truncate" style={{ color: INK }}>{item.id}</span>
+                      <span className="text-[10px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
+                      <span className="text-[10px] text-stone-400">{typeLabel}</span>
+                      {used && <span className="text-[10px] text-green-600">● used</span>}
                     </div>
-                    <div className="text-[11px] text-stone-500 leading-tight truncate mt-0.5">{String(item.title ?? '')}</div>
-                    <div className="text-[10px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
+                    <div className="text-[13px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
+                    <div className="text-[12px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
-                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
+                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
                     <button type="button" onClick={e => { e.stopPropagation(); void recheck(item) }}
                       disabled={rechecking.has(item.id)}
                       title="Re-verify against source"
-                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-50">
+                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-50">
                       {rechecking.has(item.id) ? '…' : '↻'}
                     </button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
                         title="Open source page (shows verification panel if extension installed)"
-                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
+                        className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
                         onClick={e => { e.stopPropagation(); visitSource(item) }}
                       >↗</button>
                     )}
                     {(item as { _iw?: IwCitationMeta })._iw?.pdfName ? (
-                      <button type="button"
-                        title={`Open embedded PDF (${(item as { _iw?: IwCitationMeta })._iw?.pdfName}) — shift-click to remove`}
-                        className="text-[10px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
-                        onClick={e => { e.stopPropagation(); if (e.shiftKey) void removePdf(item); else openPdf({ citekey: item.id, page: 1, label: item.id }) }}
-                      >📄 PDF</button>
+                      <>
+                        <button type="button"
+                          title={`Open embedded PDF (${(item as { _iw?: IwCitationMeta })._iw?.pdfName})`}
+                          className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
+                          onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
+                        >📄 PDF</button>
+                        <button type="button"
+                          title="Remove this PDF (and its annotations) so you can attach a new one"
+                          className="text-[11px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500"
+                          onClick={e => { e.stopPropagation(); if (confirm('Remove this PDF and its annotations?')) void removePdf(item) }}
+                        >✕</button>
+                      </>
                     ) : (
                       <button type="button"
                         title="Embed a PDF for this source"
-                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
+                        className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
                         onClick={e => { e.stopPropagation(); attachPdf(item) }}
                       >📎 PDF</button>
                     )}
                     <button type="button" onClick={() => void del(item)}
-                      className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
+                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
                 </div>
                 {(() => {
