@@ -1,31 +1,70 @@
 // React NodeView for CitationNode.
-// Renders the in-text citation with the real CSL engine in the doc's current style.
-// Falls back to simpleInText if citation-js hasn't loaded yet. Falls back to [?key] when unresolved.
+// Renders in-text citations synchronously from bibProvider — no async CSL engine here.
+// The CSL engine (citation-js) has a caching bug where engine.updateItems([]) clears
+// registered items before rebuildProcessorState runs, causing stale "anonymous" output on
+// re-renders. Since in-text labels only need "(Author, Year[, locator])", we compute them
+// directly and stay instantly reactive to library edits.
 
 import { useEffect, useRef, useState } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
-import { formatInText, simpleInText } from '../../citations/format'
-import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
+import { subscribeCitationStyle } from '../../citations/citationsBus'
 import type { CSLItem, InkwaveDocument } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
 const INK = '#5c2d8a'
+
+// Sync in-text formatter — produces "(Author1 & Author2, Year, locator)" for all styles.
+// The CSL engine (formatInText) is intentionally NOT used here: it has a caching defect
+// that causes stale data on repeated calls with the same citekey. The reference list uses
+// the CSL engine for full bibliography formatting; in-text hooks only need author+year.
+function inTextLabel(items: CSLItem[], opts: {
+  suppressAuthor?: boolean
+  locator?: string | null
+  prefix?: string | null
+  suffix?: string | null
+}): string {
+  if (items.length === 0) return ''
+
+  const parts = items.map(item => {
+    const authors = item.author ?? []
+    let name: string
+    if (authors.length === 0) {
+      name = opts.suppressAuthor ? '' : (typeof item.title === 'string' ? item.title.slice(0, 20) : '?')
+    } else if (opts.suppressAuthor) {
+      name = ''
+    } else if (authors.length === 1) {
+      name = authors[0].family ?? authors[0].literal ?? '?'
+    } else if (authors.length === 2) {
+      const a = authors[0].family ?? authors[0].literal ?? '?'
+      const b = authors[1].family ?? authors[1].literal ?? '?'
+      name = `${a} & ${b}`
+    } else {
+      name = `${authors[0].family ?? authors[0].literal ?? '?'} et al.`
+    }
+    const year = item.issued?.['date-parts']?.[0]?.[0] ?? 'n.d.'
+    const loc = opts.locator ? `, ${opts.locator}` : ''
+    return opts.suppressAuthor ? String(year) + loc : `${name}, ${year}${loc}`
+  })
+
+  const inner = parts.join('; ')
+  const base = `(${inner})`
+  const pre = opts.prefix ? `${opts.prefix} ` : ''
+  const suf = opts.suffix ?? ''
+  return `${pre}${base}${suf}`
+}
 
 export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
   const [label, setLabel] = useState('')
   const [missing, setMissing] = useState<string[]>([])
 
-  // Keep attrs in a ref so the stable subscription closure always reads the latest values
-  // (node.attrs is a fresh object on every render so useCallback([attrs]) would recreate
-  // buildLabel — and the useEffect([buildLabel]) would re-subscribe — on every editor update,
-  // risking missed notifications during the cleanup/re-subscribe cycle).
+  // Keep attrs in a ref so the stable subscription closure always reads the latest values.
   const attrsRef = useRef(attrs)
   attrsRef.current = attrs
 
-  const buildLabel = async () => {
+  const buildLabel = () => {
     const a = attrsRef.current
     const items: CSLItem[] = []
     const miss: string[] = []
@@ -39,43 +78,32 @@ export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: In
       setLabel(miss.map(k => `[?${k}]`).join(' '))
       return
     }
-    let text: string
-    try {
-      text = await formatInText(items, getCitationStyle(), {
-        suppressAuthor: a.suppressAuthor,
-        locator: a.locator ?? undefined,
-        prefix: a.prefix ?? undefined,
-        suffix: a.suffix ?? undefined,
-      })
-    } catch {
-      // CSL engine not loaded yet — fall back to simple format
-      text = simpleInText(items)
-      if (a.locator) text = text.replace(/\)$/, `, ${a.locator})`)
-      if (a.prefix) text = `${a.prefix} ${text}`
-      if (a.suffix) text = text.replace(/\)$/, `${a.suffix})`)
-    }
-    setLabel(text)
+    setLabel(inTextLabel(items, {
+      suppressAuthor: a.suppressAuthor,
+      locator: a.locator,
+      prefix: a.prefix,
+      suffix: a.suffix,
+    }))
   }
 
-  // Keep buildLabel in a ref so the stable subscription closure always calls the latest version.
   const buildLabelRef = useRef(buildLabel)
   buildLabelRef.current = buildLabel
 
   useEffect(() => {
-    // Subscribe once on mount. Belt-and-suspenders: both the module singleton (bibProvider.subscribe)
-    // and the DOM event (inkwave:bib-changed) are used — NodeViews live in separate React roots and
-    // the module singleton can silently fail if the module is duplicated by the bundler.
-    const schedule = () => queueMicrotask(() => void buildLabelRef.current())
-    schedule()
-    const unsubBib = bibProvider.subscribe(schedule)
-    const unsubStyle = subscribeCitationStyle(schedule)
-    window.addEventListener('inkwave:bib-changed', schedule)
-    return () => { unsubBib(); unsubStyle(); window.removeEventListener('inkwave:bib-changed', schedule) }
+    // Subscribe once on mount. Belt-and-suspenders: module singleton + DOM event, because
+    // Tiptap renders NodeViews in isolated React roots (createRoot) which can silently
+    // sever module-singleton subscriptions in some bundler configurations.
+    const run = () => buildLabelRef.current()
+    run()
+    const unsubBib = bibProvider.subscribe(run)
+    const unsubStyle = subscribeCitationStyle(run)
+    window.addEventListener('inkwave:bib-changed', run)
+    return () => { unsubBib(); unsubStyle(); window.removeEventListener('inkwave:bib-changed', run) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-build when node attrs change (citekey added/removed, locator edited, etc.)
   useEffect(() => {
-    void buildLabelRef.current()
+    buildLabelRef.current()
   }, [attrs.citekeys, attrs.suppressAuthor, attrs.locator, attrs.prefix, attrs.suffix]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasMissing = missing.length > 0
