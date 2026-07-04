@@ -9,7 +9,7 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation } from '../pageSettings'
+import { getPaperSize, getOrientation, getTopMarginPx } from '../pageSettings'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
@@ -79,7 +79,7 @@ function collectLines(view: EditorView, editorTop: number): Array<{ top: number;
   return lines
 }
 
-function compute(view: EditorView, pageH: number): { set: DecorationSet; sig: string } {
+function compute(view: EditorView, pageH: number, topM: number): { set: DecorationSet; sig: string } {
   if (pageH <= 0) return { set: DecorationSet.empty, sig: 'empty' }
   const editorTop = (view.dom as HTMLElement).getBoundingClientRect().top
   const doc = view.state.doc
@@ -87,9 +87,10 @@ function compute(view: EditorView, pageH: number): { set: DecorationSet; sig: st
   const lines = collectLines(view, editorTop)
   if (!lines.length) return { set: DecorationSet.empty, sig: 'empty' }
 
-  // Each page's TEXT area is the A4 height minus the top + bottom margins; we break before the line
-  // that would overflow it, so text never reaches the bottom edge / the gap.
-  const textArea = Math.max(1, pageH - MARGIN_TOP - MARGIN_BOTTOM)
+  // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
+  // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
+  // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
+  const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM)
   const decos: Decoration[] = []
   const sig: string[] = []
   let used = 0
@@ -99,7 +100,7 @@ function compute(view: EditorView, pageH: number): { set: DecorationSet; sig: st
     // Break before the LINE that would overflow the text area — splitting the paragraph if mid-block.
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
       // Parchment left below the last line on this page (its bottom margin), at least MARGIN_BOTTOM.
-      const botMargin = Math.max(MARGIN_BOTTOM, pageH - MARGIN_TOP - used)
+      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
       let at = lines[i].pos
       // Snap to the nearest top-level block boundary. A widget inside a <p> (mid-paragraph break)
       // causes layout instability: its height forces line-wrapping inside that <p>, and typing near
@@ -116,7 +117,7 @@ function compute(view: EditorView, pageH: number): { set: DecorationSet; sig: st
         // height into cursor/selection coordinate mapping so a click at the page-above end jumps
         // the caret past the gap. stopEvent: clicks on the gap aren't editor input. side:-1: keeps
         // the cursor on real text rather than stranding it inside the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, MARGIN_TOP), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = 0
@@ -227,11 +228,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             ensureSheet()
             const landscape = getOrientation() === 'landscape'
             const letter    = getPaperSize() === 'letter'
+            const topM = getTopMarginPx()
             const pageH = (sheet ? sheet.clientWidth : 794) *
               (letter ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
             if (sheet) {
               sheet.classList.add('inkwave-gapped')
-              sheet.style.paddingTop = `${MARGIN_TOP}px` // page-1 top margin matches the rest
+              // Keep paddingTop in sync with the user's top-margin setting so page 1 content
+              // starts at the same Y as in non-gapped mode — this makes the gap land at
+              // pageH - MARGIN_BOTTOM, matching the dashed rule position in PageGuides.
+              sheet.style.paddingTop = `${topM}px`
               // Enforce minimum one-page scroll height so the footer (logo+number, position:
               // absolute; bottom:22px) always lands at the page bottom, never mid-content
               // on short documents. scrollHeight reflects this minHeight, so segs get the
@@ -239,8 +244,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (pageH > 0) sheet.style.minHeight = `${pageH}px`
             }
             // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
-            // resize → pageH). Our own setMeta dispatches below don't change these, so they can't loop.
-            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}`
+            // resize → pageH; margin settings). Our own setMeta dispatches below don't change these,
+            // so they can't loop.
+            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
             if (inputSig === lastInputSig) { schedulePaint(); return }
             lastInputSig = inputSig
 
@@ -254,7 +260,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (cur && cur !== DecorationSet.empty) {
               view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
             }
-            const { set, sig } = compute(view, pageH)
+            const { set, sig } = compute(view, pageH, topM)
             // Only update the set when gap positions actually changed (sig differs). When sig is the
             // same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating any
             // sub-pixel rounding differences in botMargin — the main cause of page-height flicker on
@@ -269,17 +275,21 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             schedulePaint()
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
+          const forceRecompute = () => { lastInputSig = ''; schedule() }
           schedule()
           // Web fonts (EB Garamond) load AFTER first paint and reflow the text, moving every line —
           // but a font swap changes neither the doc size nor the page width, so the inputSig guard
           // would skip re-measuring (the break sits wrong until an edit nudges it). Force a fresh
           // measure once fonts are ready (and on any later font load).
           let destroyed = false
-          const fontCb = () => { if (!destroyed) { lastInputSig = ''; schedule() } }
+          const fontCb = () => { if (!destroyed) forceRecompute() }
           if (typeof document !== 'undefined' && document.fonts) {
             document.fonts.ready.then(fontCb).catch(() => {})
             document.fonts.addEventListener?.('loadingdone', fontCb)
           }
+          // Re-measure when page settings (top margin, paper size, orientation) change.
+          const settingsCb = () => { if (!destroyed) forceRecompute() }
+          window.addEventListener('inkwave:page-settings-changed', settingsCb)
           return {
             update: schedule,
             destroy() {
@@ -288,6 +298,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (raf) cancelAnimationFrame(raf)
               if (paintRaf) cancelAnimationFrame(paintRaf)
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
+              window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               layer?.remove()
               sheet?.classList.remove('inkwave-gapped')
               if (sheet) { sheet.style.paddingTop = ''; sheet.style.minHeight = '' }
