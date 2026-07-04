@@ -91,6 +91,7 @@ const TYPE_FIELDS: Record<string, FieldDef[]> = {
     { key: 'title',           label: 'Book title',      required: true },
     { key: 'publisher',       label: 'Publisher',       required: true },
     { key: 'year',            label: 'Year',            required: true },
+    { key: 'translator',      label: 'Translator(s)',   placeholder: 'Given Family; Given2 Family2', required: false },
     { key: 'edition',         label: 'Edition',         placeholder: '2nd', required: false },
     { key: 'container-title', label: 'Series',          required: false },
     { key: 'DOI',             label: 'DOI',             required: false },
@@ -101,6 +102,7 @@ const TYPE_FIELDS: Record<string, FieldDef[]> = {
     { key: 'title',           label: 'Chapter title',   required: true },
     { key: 'container-title', label: 'Book title',      required: true },
     { key: 'editor',          label: 'Editor(s)',       placeholder: 'Given Family; Given2 Family2', required: false },
+    { key: 'translator',      label: 'Translator(s)',   placeholder: 'Given Family; Given2 Family2', required: false },
     { key: 'publisher',       label: 'Publisher',       required: true },
     { key: 'year',            label: 'Year',            required: true },
     { key: 'page',            label: 'Pages',           placeholder: '23–45', required: true },
@@ -193,7 +195,7 @@ function strField(item: CSLItem, key: string): string {
 // Render a changelog value (author array / date-parts / plain) for the old→new diff display.
 function fmtVal(field: string, v: unknown): string {
   if (v == null || v === '') return '—'
-  if (field === 'author' || field === 'editor') return authorsToString(v as CSLItem['author'])
+  if (field === 'author' || field === 'editor' || field === 'translator') return authorsToString(v as CSLItem['author'])
   if (field === 'issued' || field === 'accessed') {
     const dp = (v as { 'date-parts'?: number[][] })?.['date-parts']?.[0]
     return dp ? dp.join('-') : String(v)
@@ -236,7 +238,8 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
     'event-title':   strField(item, 'event-title'),
     genre:           strField(item, 'genre'),
     number:          strField(item, 'number'),
-    editor:          authorsToString(item.author),  // note: editor uses same format
+    editor:          authorsToString(item.author),  // corrected by useEffect below
+    translator:      authorsToString((item as Record<string, unknown>).translator as CSLItem['author']),
     accessed:        (() => {
       const dp = (item as Record<string, unknown>).accessed as { 'date-parts'?: number[][] } | undefined
       const parts = dp?.['date-parts']?.[0]
@@ -245,10 +248,11 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
   }))
   const [saving, setSaving] = useState(false)
 
-  // Reset editor field for editor (not author).
+  // Correct author-list fields that can't be initialized cleanly from item in useState.
   useEffect(() => {
     const ed = (item as Record<string, unknown>).editor as CSLItem['author'] | undefined
-    setValues(v => ({ ...v, editor: authorsToString(ed) }))
+    const tr = (item as Record<string, unknown>).translator as CSLItem['author'] | undefined
+    setValues(v => ({ ...v, editor: authorsToString(ed), translator: authorsToString(tr) }))
   }, [item])
 
   useEffect(() => {
@@ -282,6 +286,7 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
       genre:             values.genre?.trim() || undefined,
       number:            values.number?.trim() || undefined,
       editor:            values.editor?.trim() ? parseAuthor(values.editor) : undefined,
+      translator:        values.translator?.trim() ? parseAuthor(values.translator) : undefined,
       accessed:          accessed ? parseDate(accessed) : undefined,
     }
     await onSave(updated)
@@ -687,7 +692,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
-              <div className="text-[10px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>
+              <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>
             </div>
             <button type="button" onClick={openNewRef}
               className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
