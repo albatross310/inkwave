@@ -16,7 +16,7 @@ async function enqueue(item, sourceUrl) {
   q.push({ uuid: uuid(), item, sourceUrl, at: Date.now() })
   await chrome.storage.local.set({ [QUEUE_KEY]: q })
   // Nudge any open Inkwave tab to flush now (it also flushes on storage.onChanged + on load).
-  const tabs = await chrome.tabs.query({ url: ['https://inkwave.me/*', 'http://localhost:5173/*'] })
+  const tabs = await chrome.tabs.query({ url: ['https://iwsolo.me/*', 'http://localhost:5173/*'] })
   for (const t of tabs) chrome.tabs.sendMessage(t.id, { type: 'inkwave:flush' }).catch(() => {})
   return q.length
 }

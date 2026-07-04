@@ -3,11 +3,17 @@
   "name": "Inkwave Citation Capture",
   "version": "0.1.0",
   "description": "Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "citation-capture@iwsolo.me",
+      "strict_min_version": "128.0"
+    }
+  },
   "action": {
     "default_title": "Capture citation to Inkwave",
     "default_popup": "popup.html"
   },
-  "background": { "service_worker": "background.js", "type": "module" },
+  "background": { "scripts": ["background.js"], "type": "module" },
   "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "host_permissions": [
     "https://iwsolo.me/*",
