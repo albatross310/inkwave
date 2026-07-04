@@ -1508,7 +1508,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
-          style={{ paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px` }}
+          style={{
+            paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px`,
+            // When the PDF side panel is open, stop the centring box at the panel's left edge so the
+            // toolbar recentres over the (left-shifted) writing instead of drifting under the panel.
+            right: 'var(--iw-pdf-room, 0px)',
+            transition: 'right 0.18s ease',
+          }}
         >
           <div
             ref={footerRef}

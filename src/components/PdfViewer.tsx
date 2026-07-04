@@ -7,11 +7,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs } from '../citations/pdfjsSetup'
-import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect } from '../citations/pdfHighlights'
+import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
 import { bibProvider } from '../citations/bibProvider'
 
 const INK = '#5c2d8a'
 const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#d0bcff']
+const TOOLS: Array<{ kind: HighlightKind; label: string; title: string }> = [
+  { kind: 'highlight', label: '▮', title: 'Highlight' },
+  { kind: 'underline', label: 'U', title: 'Underline' },
+  { kind: 'strike', label: 'S', title: 'Strikethrough' },
+]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
 interface PageRef { wrapper: HTMLDivElement; hlLayer: HTMLDivElement; w: number; h: number }
@@ -37,8 +42,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [zoom, setZoom] = useState(1)
+  const [tool, setTool] = useState<HighlightKind | null>(null) // active markup mode (null = off)
+  const [color, setColor] = useState(COLORS[0])
+  const toolRef = useRef<HighlightKind | null>(null); toolRef.current = tool
+  const colorRef = useRef(color); colorRef.current = color
 
-  const redrawOverlays = useCallback(() => {
+  const removeHighlight = (id: string) => {
+    highlightsRef.current = highlightsRef.current.filter(h => h.id !== id)
+    redrawOverlays()
+    void saveHighlights(citekey, highlightsRef.current)
+  }
+
+  function redrawOverlays() {
     for (let i = 0; i < pagesRef.current.length; i++) {
       const pg = pagesRef.current[i]
       pg.hlLayer.textContent = ''
@@ -46,13 +61,20 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         if (hl.page !== i + 1) continue
         for (const r of hl.rects) {
           const div = document.createElement('div')
-          div.style.cssText = `position:absolute;left:${r.x * pg.w}px;top:${r.y * pg.h}px;width:${r.w * pg.w}px;height:${r.h * pg.h}px;background:${hl.color};opacity:0.4;border-radius:2px;pointer-events:auto;cursor:pointer;mix-blend-mode:multiply;`
-          div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
+          const left = r.x * pg.w, top = r.y * pg.h, w = r.w * pg.w, h = r.h * pg.h
+          const kind = hl.kind ?? 'highlight'
+          let paint: string
+          if (kind === 'underline') paint = `left:${left}px;top:${top + h - 2}px;width:${w}px;height:2px;background:${hl.color};`
+          else if (kind === 'strike') paint = `left:${left}px;top:${top + h / 2 - 1}px;width:${w}px;height:2px;background:${hl.color};`
+          else paint = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;background:${hl.color};opacity:0.4;border-radius:2px;mix-blend-mode:multiply;`
+          div.style.cssText = `position:absolute;${paint}pointer-events:auto;cursor:pointer;`
+          div.title = `${hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))}\n(click to remove)`
+          div.onclick = () => removeHighlight(hl.id)
           pg.hlLayer.appendChild(div)
         }
       }
     }
-  }, [])
+  }
 
   // Render every page at `scale`. Cancellable via a token so a zoom/reopen supersedes an in-flight run.
   const renderPages = useCallback(async (scale: number) => {
@@ -109,7 +131,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       await new pdfjs.TextLayer({ textContentSource: tc, container: textLayer, viewport }).render().catch(() => {})
     }
     if (token === renderTokenRef.current) redrawOverlays()
-  }, [redrawOverlays])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Load document (on open) → render at fit scale → scroll to the cited sentence ──
   useEffect(() => {
@@ -218,13 +241,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     setTimeout(() => el.remove(), 1800)
   }
 
-  function onMouseUp() {
+  // Read the current selection into normalised, page-grouped rects (or null if none in the viewer).
+  function selectionInfo(): Pending | null {
     const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !sel.rangeCount) { setPending(null); return }
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null
     const text = sel.toString().trim()
-    if (!text || !viewerRef.current?.contains(sel.anchorNode)) { setPending(null); return }
+    if (!text || !viewerRef.current?.contains(sel.anchorNode)) return null
     const clientRects = Array.from(sel.getRangeAt(0).getClientRects())
-    if (!clientRects.length) { setPending(null); return }
+    if (!clientRects.length) return null
     let page = 1
     const rects: HighlightRect[] = []
     for (const cr of clientRects) {
@@ -238,30 +262,73 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         }
       }
     }
-    if (!rects.length) { setPending(null); return }
+    if (!rects.length) return null
     const last = clientRects[clientRects.length - 1]
     const box = scrollRef.current!.getBoundingClientRect()
-    setPending({ text, page, rects, x: last.right - box.left, y: last.bottom - box.top })
+    return { text, page, rects, x: last.right - box.left, y: last.bottom - box.top }
   }
 
-  async function commitHighlight(color: string, link: boolean) {
-    if (!pending) return
+  function onMouseUp() {
+    const info = selectionInfo()
+    if (!info) { setPending(null); return }
+    // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
+    if (toolRef.current) {
+      void createHighlight(info, toolRef.current, colorRef.current, false)
+      window.getSelection()?.removeAllRanges()
+      setPending(null)
+    } else {
+      setPending(info)
+    }
+  }
+
+  async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
     const hl: PdfHighlight = {
-      id: uuidv4(), page: pending.page, rects: pending.rects, color,
-      text: pending.text, createdAt: new Date().toISOString(), ...(link ? { citekey } : {}),
+      id: uuidv4(), page: info.page, rects: info.rects, color, kind,
+      text: info.text, createdAt: new Date().toISOString(), ...(link ? { citekey } : {}),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
     redrawOverlays()
-    window.getSelection()?.removeAllRanges()
-    const linkedText = pending.text, linkedPage = pending.page
-    setPending(null)
     await saveHighlights(citekey, highlightsRef.current)
-    if (link) onLinkToCitation?.(linkedText, linkedPage)
+    if (link) onLinkToCitation?.(info.text, info.page)
+  }
+
+  async function commitPending(color: string, link: boolean) {
+    if (!pending) return
+    const info = pending
+    window.getSelection()?.removeAllRanges()
+    setPending(null)
+    await createHighlight(info, 'highlight', color, link)
   }
 
   return (
-    <div style={{ position: 'relative', flex: 1, minHeight: 0 }}
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
+
+      {/* Persistent markup toolbar */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>
+        {TOOLS.map(t => {
+          const active = tool === t.kind
+          return (
+            <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
+              onClick={() => setTool(active ? null : t.kind)}
+              style={{
+                width: 24, height: 22, borderRadius: 5, cursor: 'pointer', fontSize: '0.78rem',
+                border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
+                color: INK, textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
+              }}>{t.label}</button>
+          )
+        })}
+        <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 2px' }} />
+        {COLORS.map(c => (
+          <button key={c} type="button" title="Colour" onClick={() => setColor(c)}
+            style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {tool ? `select text to ${tool}` : 'pick a tool, or select text'}
+        </span>
+      </div>
+
+      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
       <div ref={scrollRef} onMouseUp={onMouseUp}
         style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12 }}>
         <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
@@ -287,17 +354,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           boxShadow: '0 4px 16px rgba(0,0,0,0.18)', padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           {COLORS.map(c => (
-            <button key={c} type="button" title="Highlight" onClick={() => void commitHighlight(c, false)}
+            <button key={c} type="button" title="Highlight" onClick={() => void commitPending(c, false)}
               style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer' }} />
           ))}
           {onLinkToCitation && (
-            <button type="button" onClick={() => void commitHighlight(COLORS[0], true)}
+            <button type="button" onClick={() => void commitPending(colorRef.current, true)}
               style={{ fontSize: '0.72rem', color: '#fff', background: INK, border: 'none', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               ↳ Link to citation
             </button>
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

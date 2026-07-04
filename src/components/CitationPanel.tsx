@@ -607,8 +607,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
   function panelStyle(): React.CSSProperties {
     if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
-    // Default: 18px below top (50px higher than before) centred horizontally.
-    return { position: 'fixed', top: 18, left: '50%', transform: 'translateX(-50%)' }
+    // Default: 18px below top, centred over the writing area (shift left by half the PDF panel width
+    // when it's open so the panel doesn't sit under it).
+    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2)', transform: 'translateX(-50%)' }
   }
 
   function onHeaderMouseDown(e: React.MouseEvent) {

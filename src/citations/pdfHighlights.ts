@@ -8,11 +8,14 @@ import { addToLibrary } from './library'
 
 export interface HighlightRect { x: number; y: number; w: number; h: number } // normalised 0..1
 
+export type HighlightKind = 'highlight' | 'underline' | 'strike'
+
 export interface PdfHighlight {
   id: string
   page: number            // 1-based
   rects: HighlightRect[]
   color: string           // rgba/hex
+  kind?: HighlightKind    // fill (default), underline, or strikethrough
   text: string            // the selected text (used for search fallback + display)
   note?: string           // optional annotation note
   citekey?: string        // set when this highlight is linked to an in-text citation's pinpoint
