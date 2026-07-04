@@ -15,6 +15,32 @@ async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
 }
 
+// ── Gzip helpers (CompressionStream, available in all target browsers) ────────
+// Snapshots JSON is highly repetitive (same contentJson structure, receipt fields)
+// and compresses ~75%, keeping storage manageable as the snapshot list grows.
+async function gzipEncode(json: string): Promise<Uint8Array> {
+  const bytes = new TextEncoder().encode(json)
+  const cs    = new CompressionStream('gzip')
+  const w     = cs.writable.getWriter()
+  void w.write(bytes)
+  void w.close()
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer())
+}
+
+async function gzipDecode(buf: ArrayBuffer): Promise<string> {
+  const ds = new DecompressionStream('gzip')
+  const w  = ds.writable.getWriter()
+  void w.write(buf)
+  void w.close()
+  return new Response(ds.readable).text()
+}
+
+// Detect gzip by magic bytes 0x1f 0x8b.
+function isGzip(buf: ArrayBuffer): boolean {
+  const v = new Uint8Array(buf, 0, 2)
+  return v[0] === 0x1f && v[1] === 0x8b
+}
+
 async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
   try {
     const root = await getRoot()
@@ -23,7 +49,10 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
       dir = await dir.getDirectoryHandle(part)
     }
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
-    const parsed = JSON.parse(await file.text())
+    const buf  = await file.arrayBuffer()
+    // Legacy uncompressed files fall through to plain UTF-8 decode.
+    const json = isGzip(buf) ? await gzipDecode(buf) : new TextDecoder().decode(buf)
+    const parsed = JSON.parse(json)
     if (!Array.isArray(parsed)) return []
     // Normalise legacy 'kick' trigger to 'word-nudge' on read (stored data backward compat)
     return (parsed as Snapshot[]).map((s) =>
@@ -40,9 +69,9 @@ async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promis
   for (const part of `documents/${documentId}`.split('/')) {
     dir = await dir.getDirectoryHandle(part, { create: true })
   }
-  const handle = await dir.getFileHandle('snapshots.json', { create: true })
+  const handle   = await dir.getFileHandle('snapshots.json', { create: true })
   const writable = await handle.createWritable()
-  await writable.write(JSON.stringify(snaps))
+  await writable.write(await gzipEncode(JSON.stringify(snaps)))
   await writable.close()
 }
 
