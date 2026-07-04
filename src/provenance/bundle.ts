@@ -96,7 +96,20 @@ function countWords(contentJson: TiptapJSON): number {
 }
 
 export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): ExportBundle {
-  const receipts = doc.scasReceipts ?? []
+  // Collect all receipts: doc.scasReceipts PLUS any receipts embedded in snapshots that
+  // aren't already present. This self-heals bundles where prior sessions' receipts were
+  // lost from doc.scasReceipts due to the cross-session overwrite bug (now fixed in the
+  // editor), so the verifier's "anchors a receipt not in the signed chain" check passes.
+  const seen = new Set<string>()
+  const receipts: import('../types/document').SignedReceipt[] = []
+  for (const r of (doc.scasReceipts ?? [])) {
+    if (!seen.has(r.signature)) { seen.add(r.signature); receipts.push(r) }
+  }
+  for (const s of snapshots) {
+    for (const r of (s.receipts ?? [])) {
+      if (!seen.has(r.signature)) { seen.add(r.signature); receipts.push(r) }
+    }
+  }
   const exportedAt = new Date().toISOString()
   const summary: BundleSummary = {
     what: 'Inkwave provenance record — a tamper-evident, independently-verifiable record of how this document was written.',

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
-import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries } from '../provenance/snapshots'
+import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
 import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
 import { loadDocument } from '../storage/opfs'
-import { diffWords, diffStats } from '../provenance/diff'
+import { diffWords, diffStats, type DiffOp } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
@@ -453,7 +453,7 @@ function SplitDiffView({
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty('--snap-split-pct', vertical ? '50%' : `${splitPct}%`)
-    return () => root.style.removeProperty('--snap-split-pct')
+    return () => { root.style.removeProperty('--snap-split-pct') }
   }, [splitPct, vertical])
 
   // Compute ops once; shared between both panes
@@ -867,6 +867,35 @@ export function SnapshotView() {
             title="Clear and regenerate all AI summaries"
           >
             {isRegenerating ? 'regenerating…' : '↺ summaries'}
+          </button>
+        )}
+        {docId && snapshot && (
+          <button
+            type="button"
+            onClick={async () => {
+              if (!confirm(`Delete this snapshot (${new Date(snapshot.createdAt).toLocaleString()})? This cannot be undone.`)) return
+              await deleteSnapshot(docId, snapshot.id)
+              // Navigate to an adjacent snapshot, or back to the editor if none left
+              const remaining = allSnapshots.filter((s) => s.id !== snapshot.id)
+              if (!remaining.length) { navigate('/'); return }
+              const newIdx = Math.min(idx, remaining.length - 1)
+              const p = new URLSearchParams()
+              p.set('doc', docId)
+              p.set('snap', remaining[newIdx].id)
+              navigate(`/snapshot?${p.toString()}`)
+              setAllSnapshots(remaining)
+            }}
+            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif"
+            style={{
+              fontSize: '0.85rem',
+              background: 'rgba(185,28,28,0.07)',
+              border: '1px solid rgba(185,28,28,0.25)',
+              color: '#b91c1c',
+              cursor: 'pointer',
+            }}
+            title="Permanently delete this snapshot"
+          >
+            ✕ snapshot
           </button>
         )}
         <button

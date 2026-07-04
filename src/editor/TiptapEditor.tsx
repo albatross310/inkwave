@@ -76,8 +76,8 @@ import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { Snapshot, SignedReceipt, WordNudgeEvent } from '../types/document'
 
-// Wall-clock resample cadence for the rotating exclusion set S_v (v4 spec §4.2: 20–60 s).
-const RESAMPLE_INTERVAL_MS = 30_000
+// No wall-clock resample timer — S_v rotation and receipt signing happen on word nudge only.
+// This keeps the green/red word set stable between nudges and avoids spurious receipts.
 
 // ─── Toolbar slot customisation ───
 type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page'
@@ -150,6 +150,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // chain; null while opening or when the service is unreachable (then the controller falls back to
   // locally-derived S_v — composition degrades visibly rather than blocking writing).
   const sessionRef = useRef<SessionRunner | null>(null)
+  const priorReceiptsRef = useRef<SignedReceipt[]>([]) // receipts from previous sessions; preserved across session resets
   const periodKicksRef = useRef<WordNudgeEvent[]>([]) // word nudges resolved during the current signing period
   // Insignia (paid) keystroke-cadence tap — accumulates per-0.5s insert/delete COUNTS (never chars).
   // Created lazily only for active subscribers; stays null (inert) for the free tier.
@@ -714,12 +715,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     if (!editor) return
     const off = scasRef.current!.nudges.on((event) => {
-      periodKicksRef.current.push(event) // buffer for the next signed period (M3)
+      periodKicksRef.current.push(event) // buffer this kick for the signing call below
       const prevSnap = snapshotsRef.current[snapshotsRef.current.length - 1] ?? null
       enqueueSnapshotWork(async () => {
-        // Anchor the receipt chain so far into the snapshot's bundleHash (so OTS commits to it).
+        // Sign now so the snapshot's bundleHash anchors the receipt covering this kick (M3).
+        await runPeriodRef.current()
         const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
-        const snap = await createSnapshotIfChanged(docRef.current, 'word-nudge', sessionRef.current?.receipts ?? [], undefined, false, nudgeWord)
+        const snap = await createSnapshotIfChanged(docRef.current, 'word-nudge', [...priorReceiptsRef.current, ...(sessionRef.current?.receipts ?? [])], undefined, false, nudgeWord)
         if (!snap) return
         setSnapshots((prev) => [...prev, snap])
         const stamped = await stampSnapshot(snap.documentId, snap.id) // pending proof
@@ -1131,6 +1133,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void SessionRunner.open(docId).then((runner) => {
       if (cancelled || !runner || docRef.current.id !== docId) return
       sessionRef.current = runner
+      // Snapshot the receipts accumulated before this session so the signing
+      // callback can append rather than replace (prevents cross-session receipt loss).
+      priorReceiptsRef.current = docRef.current.scasReceipts ?? []
       scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
       if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
     })
@@ -1141,42 +1146,43 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // it, and adopt the next server-issued set. Without one: fall back to a local resample (M0).
   // Verdicts are frozen (locked ∪ liveKicks persist), so neither reflows committed text. Held in a
   // ref so the interval always runs the latest closure (no stale editor/refs).
-  const runPeriodRef = useRef<() => void>(() => {})
-  runPeriodRef.current = () => {
+  // Returns a promise so the nudge handler can await signing before snapshotting,
+  // ensuring the snapshot's bundleHash covers the receipt for this nudge.
+  const runPeriodRef = useRef<() => Promise<void>>(async () => {})
+  runPeriodRef.current = async () => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
     const runner = sessionRef.current
     if (runner) {
-      void (async () => {
-        const kicks = periodKicksRef.current
-        const cHash = await contentHash(docRef.current.contentJson)
-        // Insignia: drain this period's cadence bins + send the Clerk token so the server can gate
-        // the signed digest on an active subscription. Free tier sends neither (cadence undefined).
-        let cadence: ReturnType<CadenceTap['drain']> | undefined
-        let authToken: string | undefined
-        if (cadenceTierActive() && cadenceTapRef.current?.hasData) {
-          cadence = cadenceTapRef.current.drain()
-          authToken = (await getClerkToken()) ?? undefined
-        }
-        const receipt = await runner.closePeriod(cHash, kicks, cadence, authToken)
-        if (!receipt) return // offline — keep the kicks buffered, retry next period
-        periodKicksRef.current = []
-        scasRef.current!.useServerSet(
-          applyNLimit(runner.current.lemmas, docRef.current.scasSetSize ?? 0),
-          runner.current.setVersion,
-        )
-        setReceipts([...runner.receipts])
-        const updated: InkwaveDocument = {
-          ...docRef.current,
-          scasState: scasRef.current!.state,
-          scasReceipts: [...runner.receipts],
-        }
-        docRef.current = updated
-        onDocChange(updated)
-        scheduleSave(updated)
-        mirrorIfActive()
-        if (!ed.isDestroyed) ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
-      })()
+      const kicks = periodKicksRef.current
+      const cHash = await contentHash(docRef.current.contentJson)
+      // Insignia: drain this period's cadence bins + send the Clerk token so the server can gate
+      // the signed digest on an active subscription. Free tier sends neither (cadence undefined).
+      let cadence: ReturnType<CadenceTap['drain']> | undefined
+      let authToken: string | undefined
+      if (cadenceTierActive() && cadenceTapRef.current?.hasData) {
+        cadence = cadenceTapRef.current.drain()
+        authToken = (await getClerkToken()) ?? undefined
+      }
+      const receipt = await runner.closePeriod(cHash, kicks, cadence, authToken)
+      if (!receipt) return // offline — keep the kicks buffered, retry next nudge
+      periodKicksRef.current = []
+      scasRef.current!.useServerSet(
+        applyNLimit(runner.current.lemmas, docRef.current.scasSetSize ?? 0),
+        runner.current.setVersion,
+      )
+      const allReceipts = [...priorReceiptsRef.current, ...runner.receipts]
+      setReceipts(allReceipts)
+      const updated: InkwaveDocument = {
+        ...docRef.current,
+        scasState: scasRef.current!.state,
+        scasReceipts: allReceipts,
+      }
+      docRef.current = updated
+      onDocChange(updated)
+      scheduleSave(updated)
+      mirrorIfActive()
+      if (!ed.isDestroyed) ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
     } else {
       scasRef.current!.resampleNow()
       const updated: InkwaveDocument = { ...docRef.current, scasState: scasRef.current!.state }
@@ -1185,11 +1191,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       scheduleSave(updated)
     }
   }
-  useEffect(() => {
-    if (!editor) return
-    const id = setInterval(() => runPeriodRef.current(), RESAMPLE_INTERVAL_MS)
-    return () => clearInterval(id)
-  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply the user's N limit to a server-provided lemma set.
   // 0 = infinite = use the full set unchanged.

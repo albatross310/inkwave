@@ -80,6 +80,14 @@ export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
 }
 
+/** Permanently remove one snapshot by ID. The remaining snapshots are unaffected. */
+export async function deleteSnapshot(documentId: string, snapId: string): Promise<void> {
+  const snaps = await readSnapshotsFile(documentId)
+  const filtered = snaps.filter((s) => s.id !== snapId)
+  if (filtered.length === snaps.length) return // already gone
+  await writeSnapshotsFile(documentId, filtered)
+}
+
 /**
  * Restore snapshots from an export bundle into OPFS — only when OPFS has FEWER snapshots than the
  * bundle. Local OPFS always wins: if the machine already has the full history, leave it untouched.
