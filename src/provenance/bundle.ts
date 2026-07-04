@@ -3,9 +3,11 @@
 // signed receipt chain, and the signing key reference. A third party verifies it with no Inkwave
 // login (src/verify), against Bitcoin and the published key. Pure data assembly — no I/O here.
 
-import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem } from '../types/document'
+import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem, IwCitationMeta } from '../types/document'
 import { bibProvider } from '../citations/bibProvider'
 import { simpleInText } from '../citations/format'
+import { usedCitekeys, referenceListKeys } from '../citations/resolve'
+import { loadPdf, blobToBase64 } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
 import { POOL_ID } from '../scas/pool'
 import { deviceId } from '../sync/presence'
@@ -104,6 +106,20 @@ export interface ExportBundle {
   signingKey: { keyId: string; alg: 'Ed25519'; publicKeyHex: string }
   poolId: string
   session?: string // writing device id (advisory multi-device guard; not part of any hash)
+  // Portability extras (not hashed): the cited library entries so citations resolve on another
+  // device, and — only on an explicit "download" export — the embedded PDFs (base64) so the doc
+  // travels with its sources + annotations. See buildExportBundleWithPdfs / openInkwaveFile.
+  bibliography?: CSLItem[]
+  pdfs?: Record<string, { name: string; data: string }>
+}
+
+// The library entries a document depends on (cited in-text or shown in its reference list), so a
+// transferred .studio can resolve its citations without the recipient's own library.
+function citedItems(contentJson: TiptapJSON): CSLItem[] {
+  const keys = new Set([...usedCitekeys(contentJson), ...referenceListKeys(contentJson)])
+  const out: CSLItem[] = []
+  for (const k of keys) { const it = bibProvider.get(k); if (it) out.push(it) }
+  return out
 }
 
 function countWords(contentJson: TiptapJSON): number {
@@ -156,7 +172,23 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     signingKey: { keyId: 'inkwave-signing-v1', alg: 'Ed25519', publicKeyHex: signingPublicKeyHex() },
     poolId: doc.scasPoolId ?? POOL_ID,
     session: deviceId(),
+    bibliography: citedItems(doc.contentJson),
   }
+}
+
+// Explicit-export variant: also embeds each cited source's PDF bytes (base64) so the .studio is fully
+// self-contained. NOT used by autosave/sync (would rewrite megabytes on every checkpoint) — only when
+// the writer clicks "download". On the other end, openInkwaveFile restores them to OPFS.
+export async function buildExportBundleWithPdfs(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<ExportBundle> {
+  const bundle = buildExportBundle(doc, snapshots)
+  const pdfs: Record<string, { name: string; data: string }> = {}
+  for (const item of bundle.bibliography ?? []) {
+    const name = (item as { _iw?: IwCitationMeta })._iw?.pdfName
+    if (!name) continue
+    const blob = await loadPdf(item.id)
+    if (blob) pdfs[item.id] = { name, data: await blobToBase64(blob) }
+  }
+  return Object.keys(pdfs).length ? { ...bundle, pdfs } : bundle
 }
 
 /** Plain-text README written alongside the mirrored files (folder + OneDrive), for humans. */
@@ -229,7 +261,7 @@ export function composeTraceFile(bundle: ExportBundle): string {
 
 // Cap the dropped-file size before JSON.parse (audit F7): a real record is well under this, so a
 // huge file is either a mistake or a DoS attempt — reject it cheaply rather than parse it.
-const MAX_TRACE_BYTES = 20_000_000 // 20 MB
+const MAX_TRACE_BYTES = 120_000_000 // 120 MB — allows a few base64-embedded source PDFs
 
 /** Read a .trace.json file back into a bundle (hybrid text-header format OR a legacy pure-JSON file). */
 export function parseTraceFile(fileText: string): ExportBundle {

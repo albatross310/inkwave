@@ -12,6 +12,9 @@ import { setOneDriveFilename, adoptOneDriveFile, type OneDriveFolder } from './o
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
 import { restoreSnapshotsFromBundle } from '../provenance/snapshots'
+import { bibProvider } from '../citations/bibProvider'
+import { loadLibrary, persistLibrary } from '../citations/library'
+import { savePdf, base64ToBlob } from '../citations/pdfStore'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 
@@ -50,6 +53,19 @@ export async function openInkwaveFile(
   // Restore provenance history from the bundle when OPFS has fewer snapshots (device transfer).
   // Local OPFS wins if it already has all snapshots.
   if (data.snapshots?.length) await restoreSnapshotsFromBundle(id, data.snapshots)
+
+  // Restore the embedded citation library (+ any embedded PDFs) so citations resolve and their
+  // sources/annotations travel with the doc. Merge with any existing local library, then persist.
+  const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
+  const pdfs = (data as { pdfs?: Record<string, { name: string; data: string }> }).pdfs
+  if (bib?.length || pdfs) {
+    await loadLibrary()
+    for (const it of bib ?? []) bibProvider.upsert(it, 'library')
+    await persistLibrary()
+    for (const [key, p] of Object.entries(pdfs ?? {})) {
+      try { await savePdf(key, base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
+    }
+  }
 
   const now = new Date().toISOString()
   const doc = withScasDefaults({

@@ -46,7 +46,7 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
-import { buildExportBundle, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
@@ -766,8 +766,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
-  function exportBundle() {
-    const bundle = buildExportBundle(docRef.current, snapshots)
+  // Uses the async variant so embedded source PDFs travel inside the .studio file.
+  async function exportBundle() {
+    const bundle = await buildExportBundleWithPdfs(docRef.current, snapshots)
     downloadBundle(bundle, bundleFilename(docRef.current))
   }
 

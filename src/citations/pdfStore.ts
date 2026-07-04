@@ -45,3 +45,19 @@ export async function deletePdf(citekey: string): Promise<void> {
   if (!dir) return
   try { await dir.removeEntry(fileName(citekey)) } catch { /* already gone */ }
 }
+
+// ── base64 <-> Blob (for embedding PDFs in the .studio bundle) ──
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunk = 0x8000 // chunk to avoid String.fromCharCode arg-count limits on big files
+  for (let i = 0; i < buf.length; i += chunk) binary += String.fromCharCode(...buf.subarray(i, i + chunk))
+  return btoa(binary)
+}
+
+export function base64ToBlob(b64: string, type = 'application/pdf'): Blob {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
+}

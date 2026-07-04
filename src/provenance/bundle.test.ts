@@ -123,7 +123,8 @@ describe('composeTraceFile / parseTraceFile round-trip', () => {
   })
 
   it('parseTraceFile rejects oversized files', () => {
-    expect(() => parseTraceFile('x'.repeat(20_000_001))).toThrow('file too large')
+    // Limit is 120 MB (allows a few base64-embedded source PDFs).
+    expect(() => parseTraceFile('x'.repeat(120_000_001))).toThrow('file too large')
   })
 
   it('composeTraceFile puts the marker before the JSON', () => {
