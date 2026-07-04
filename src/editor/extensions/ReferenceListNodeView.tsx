@@ -32,6 +32,21 @@ const MODE_LABEL: Record<RefMode, string> = {
 
 interface Entry { id: string; html: string; occ: number; note: string }
 
+// The notes textarea lives INSIDE the editor DOM (the reference list is a document node), so editing
+// events bubble up to ProseMirror's listener on view.dom. React's onKeyDown/onPaste fire too late to
+// stop that (React delegates at the app root, ABOVE view.dom), so a Backspace/Enter/cut/paste in the
+// notes field would ALSO run ProseMirror's keymap on the document — silently deleting or splitting the
+// real prose. Binding NATIVE listeners on the textarea stops those events before they reach PM.
+// input/beforeinput are deliberately left alone — React's onChange needs them to bubble to its root.
+const STOP_TYPES = ['keydown', 'keyup', 'cut', 'copy', 'paste', 'drop', 'dragstart', 'mousedown', 'pointerdown', 'click']
+function bindStopPM(el: HTMLTextAreaElement | null): void {
+  const marked = el as (HTMLTextAreaElement & { _iwStopBound?: boolean }) | null
+  if (!marked || marked._iwStopBound) return
+  marked._iwStopBound = true
+  const stop = (e: Event) => e.stopPropagation()
+  for (const t of STOP_TYPES) marked.addEventListener(t, stop)
+}
+
 // Back-reference markers linking each reference entry to its in-text occurrences.
 function backrefHtml(key: string, occ: number): string {
   if (occ <= 0) return ''
@@ -163,10 +178,9 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       borderLeft: `2px solid ${INK}44`,
     }}>
       <textarea
+        ref={bindStopPM}
         value={draft[id] ?? note}
         onChange={e => onNoteChange(id, e.target.value)}
-        onMouseDown={e => e.stopPropagation()}
-        onKeyDown={e => e.stopPropagation()}
         placeholder="Notes on this source…"
         rows={2}
         style={{
