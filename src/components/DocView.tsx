@@ -1,11 +1,23 @@
 import { Fragment, type ReactNode } from 'react'
-import type { TiptapJSON } from '../types/document'
+import type { TiptapJSON, CSLItem } from '../types/document'
+import { bibProvider } from '../citations/bibProvider'
+import { simpleInText } from '../citations/format'
 
 // A small, read-only renderer for a TiptapJSON document — used by the snapshot viewer to show an
 // old version exactly as written, with no editor/ProseMirror machinery. Handles the node + mark
-// types Inkwave produces (paragraphs, headings, lists, blockquote, code, and inline marks).
+// types Inkwave produces (paragraphs, headings, lists, blockquote, code, inline marks, citations).
 
 type Node = { type?: string; text?: string; marks?: Array<{ type: string }>; attrs?: Record<string, unknown>; content?: Node[] }
+
+// In-text citation → "(Author, Year)" from the loaded library, falling back to the bare citekeys.
+// Without this a citation (a leaf atom with no text/content) would render as nothing.
+function citationInline(attrs: Node['attrs'], key: number): ReactNode {
+  const keys = (attrs?.citekeys as string[] | undefined) ?? []
+  if (!keys.length) return null
+  const items = keys.map(k => bibProvider.get(k)).filter((x): x is CSLItem => !!x)
+  const label = items.length ? simpleInText(items) : `(${keys.join('; ')})`
+  return <span key={key} style={{ color: '#5c2d8a' }}>{label}</span>
+}
 
 function applyMarks(text: string, marks: Node['marks'], key: number): ReactNode {
   let el: ReactNode = text
@@ -23,6 +35,7 @@ function inline(nodes: Node[] | undefined): ReactNode {
   return (nodes ?? []).map((n, i) => {
     if (n.type === 'hardBreak') return <br key={i} />
     if (n.type === 'text') return applyMarks(n.text ?? '', n.marks, i)
+    if (n.type === 'citation') return citationInline(n.attrs, i)
     return <Fragment key={i}>{inline(n.content)}</Fragment>
   })
 }

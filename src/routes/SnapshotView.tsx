@@ -4,6 +4,7 @@ import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
 import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
 import { loadDocument } from '../storage/opfs'
+import { loadLibrary } from '../citations/library'
 import { diffWords, diffStats, type DiffOp } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
@@ -786,6 +787,7 @@ export function SnapshotView() {
 
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
+  const [libReady, setLibReady] = useState(false)
   const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -794,6 +796,14 @@ export function SnapshotView() {
   const [rightSnapFlash, setRightSnapFlash] = useState(0)
   const [leftVerFlash,   setLeftVerFlash]   = useState(0)
   const [rightVerFlash,  setRightVerFlash]  = useState(0)
+
+  // Populate bibProvider once so citations resolve in DocView + pmToText (the snapshot route has no
+  // editor to load the library). Gates the split-view render below to avoid a red "missing" flash.
+  useEffect(() => {
+    let cancelled = false
+    void loadLibrary().finally(() => { if (!cancelled) setLibReady(true) })
+    return () => { cancelled = true }
+  }, [])
 
   // Load snapshots + set status on every navigation. Stays lean so it doesn't cancel
   // the background generation (which lives in its own effect below).
@@ -1043,13 +1053,13 @@ export function SnapshotView() {
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {status === 'loading' && <p className="text-center text-stone-400 mt-20">Loading…</p>}
+        {(status === 'loading' || (status === 'ready' && !libReady)) && <p className="text-center text-stone-400 mt-20">Loading…</p>}
         {status === 'missing' && (
           <p className="text-center text-stone-500 mt-20">
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
           </p>
         )}
-        {status === 'ready' && snapshot && (
+        {status === 'ready' && libReady && snapshot && (
           <SplitDiffView
             snapshot={snapshot}
             prevSnap={prevSnap}

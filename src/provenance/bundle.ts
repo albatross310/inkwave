@@ -8,14 +8,30 @@ import { signingPublicKeyHex } from './receipts'
 import { POOL_ID } from '../scas/pool'
 import { deviceId } from '../sync/presence'
 
+// Render an in-text citation as readable text from the node's OWN attrs only — deterministic and
+// library-independent. pmToText feeds the verifiable bundle header (verify/index.ts recomputes it and
+// requires a byte match), so this MUST NOT depend on bibProvider: the verify environment has no
+// library, and a resolved "(Author, Year)" there would diverge from the exporter's. The bare citekeys
+// are stable across both. This still fixes the real bug — a dropped citation used to leave an orphaned
+// ". " in the prose/diff. (DocView, which is not verified, resolves the pretty author-year form.)
+function citationText(attrs: Record<string, unknown> | undefined): string {
+  const keys = (attrs?.citekeys as string[] | undefined) ?? []
+  if (!keys.length) return ''
+  const loc = attrs?.locator ? `, ${String(attrs.locator)}` : ''
+  const pre = attrs?.prefix ? `${String(attrs.prefix)} ` : ''
+  const suf = attrs?.suffix ? String(attrs.suffix) : ''
+  return `${pre}(${keys.join('; ')}${loc})${suf}`
+}
+
 // A clean, readable plain-text copy of the document — block nodes (paragraphs/headings/list items)
 // separated by blank lines, hard breaks as newlines. Sits near the top of the bundle so the writing
 // is legible to a human opening the file, with no markdown syntax to parse.
 export function pmToText(doc: TiptapJSON): string {
   const blocks: string[] = []
-  const inline = (node: { type?: string; text?: string; content?: unknown[] }): string => {
+  const inline = (node: { type?: string; text?: string; content?: unknown[]; attrs?: Record<string, unknown> }): string => {
     if (node.type === 'text') return node.text ?? ''
     if (node.type === 'hardBreak') return '\n'
+    if (node.type === 'citation') return citationText(node.attrs)
     return (node.content as typeof node[] ?? []).map(inline).join('')
   }
   const walk = (node: { type?: string; text?: string; content?: unknown[] }): void => {

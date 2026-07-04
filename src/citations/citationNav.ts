@@ -34,8 +34,15 @@ export function ensureNavStyles(): void {
       0%, 55% { outline: 2px solid ${INK}; outline-offset: 2px; background-color: rgba(92,45,138,0.12); }
       100%    { outline: 2px solid transparent; outline-offset: 2px; background-color: transparent; }
     }
-    .iw-backref-group { margin-left: 0.45em; font-size: 0.8em; color: ${INK}88; user-select: none; white-space: nowrap; }
-    .iw-backref-group .iw-cite-link { color: ${INK}; padding: 0 0.15em; }
+    .iw-backref-group { margin-left: 0.5em; font-size: 1em; color: ${INK}99; user-select: none; white-space: nowrap; }
+    .iw-backref-group .iw-backref-arrow { font-size: 1.15em; }
+    .iw-backref-group .iw-cite-link { color: ${INK}; font-weight: 600; padding: 0 0.22em; }
+    .iw-note-add {
+      margin-left: 0.5em; font-size: 0.95em; line-height: 1; color: ${INK}; cursor: pointer;
+      border: 1px solid ${INK}44; border-radius: 4px; background: transparent; padding: 0 0.35em;
+      user-select: none; transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
   `
   document.head.appendChild(el)
 }

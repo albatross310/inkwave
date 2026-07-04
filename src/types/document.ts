@@ -42,6 +42,7 @@ export interface IwCitationMeta {
   changelog?: ChangelogEntry[]  // re-verification corrections (old→new), newest last
   lastVerified?: string   // ISO — last successful re-verification check
   deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
+  note?: string           // free-text reading notes shown indented under the bibliography entry
 }
 
 export interface Bibliography {

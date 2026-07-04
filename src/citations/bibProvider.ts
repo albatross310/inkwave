@@ -96,7 +96,9 @@ class BibProviderImpl implements BibProvider {
   private notify(): void {
     this._version++
     for (const cb of this.subs) cb()
-    window.dispatchEvent(new CustomEvent('inkwave:bib-changed'))
+    // DOM-event backup for NodeViews in isolated React roots. Guarded so the store stays usable in
+    // SSR / tests / workers where there is no window.
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('inkwave:bib-changed'))
   }
 }
 
