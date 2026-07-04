@@ -84,6 +84,7 @@ function NavSide({
   hasVersions, isPhone, isWide,
   summary, versionSummary,
   snapFlashKey, verFlashKey,
+  overridePos,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
@@ -94,6 +95,7 @@ function NavSide({
   versionSummary: string | null
   snapFlashKey: string
   verFlashKey: string
+  overridePos?: React.CSSProperties
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
   const bracketVer = snapDir === 'back' ? '<<' : '>>'
@@ -125,9 +127,10 @@ function NavSide({
   )
 
   return (
-    // 16px inset keeps the collapsed 6px bar visible and away from the very edge
     <div style={{
-      position: 'fixed', [side]: 16, top: '50%', transform: 'translateY(-50%)',
+      position: 'fixed',
+      ...(overridePos ?? { [side]: 16 }),
+      top: '50%', transform: 'translateY(-50%)',
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
       {/* Snapshot section: snap panel ABOVE the < button */}
@@ -177,7 +180,7 @@ function takeFirst(text: string, n: number): string {
   return text.slice(0, end + trail.length)
 }
 
-/** Last n words, including any preceding newline(s) for paragraph context. */
+/** Last n words, including any newline immediately before the first word (≤ 3 chars back). */
 function takeLast(text: string, n: number): string {
   if (n <= 0) return ''
   const positions: number[] = []
@@ -186,9 +189,12 @@ function takeLast(text: string, n: number): string {
   while ((m = re.exec(text)) !== null) positions.push(m.index)
   if (!positions.length) return ''
   const startIdx = positions[Math.max(0, positions.length - n)]
-  const pre = text.slice(0, startIdx)
-  const nl = pre.lastIndexOf('\n')
-  return text.slice(nl >= 0 ? nl : startIdx)
+  // Only look back ≤ 3 chars so we grab an immediately-preceding \n\n but
+  // never drag in an entire prior paragraph (the old lastIndexOf('\n') bug).
+  const lookback = text.slice(Math.max(0, startIdx - 3), startIdx)
+  const nl = lookback.lastIndexOf('\n')
+  const from = nl >= 0 ? startIdx - (lookback.length - nl) : startIdx
+  return text.slice(from)
 }
 
 /**
@@ -200,6 +206,7 @@ function takeLast(text: string, n: number): string {
 function buildDiffNodes(
   ops: DiffOp[],
   onChangeClick?: (opIdx: number) => void,
+  onHoverOp?: (opIdx: number | null) => void,
 ): React.ReactNode[] {
   const n = ops.length
   if (!n) return []
@@ -263,15 +270,18 @@ function buildDiffNodes(
     nodes.push(<span key={`t${k++}`} style={style}>{text}</span>)
   }
 
-  const emitChange = (text: string, style: React.CSSProperties, opIdx: number) => {
+  const emitChange = (text: string, style: React.CSSProperties, opIdx: number, cls: string) => {
     if (!text) return; flushGap()
     const clickable = !!onChangeClick
     nodes.push(
       <span
         key={`c${k++}`}
+        className={cls}
         data-opidx={String(opIdx)}
         style={{ ...style, cursor: clickable ? 'pointer' : undefined }}
         onClick={clickable ? () => onChangeClick!(opIdx) : undefined}
+        onMouseEnter={onHoverOp ? () => onHoverOp!(opIdx) : undefined}
+        onMouseLeave={onHoverOp ? () => onHoverOp!(null) : undefined}
         title={clickable ? 'Jump to this change in document' : undefined}
       >{text}</span>
     )
@@ -287,11 +297,11 @@ function buildDiffNodes(
         emitChange(op.text, {
           color: '#b91c1c', textDecoration: 'line-through',
           background: 'rgba(185,28,28,0.07)', borderRadius: 2,
-        }, i)
+        }, i, 'diff-del')
       } else {
         emitChange(op.text, {
           background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2,
-        }, i)
+        }, i, 'diff-add')
       }
       continue
     }
@@ -314,8 +324,18 @@ function buildDiffNodes(
 
 // ── FullDiffView ──────────────────────────────────────────────────────────────
 // Left pane: entire document with inline green/red diff marks (no collapsing).
-// data-opidx on every span so the click-to-midline feature can target elements.
-function FullDiffView({ ops, snapshot }: { ops: DiffOp[] | null; snapshot: Snapshot }) {
+// When ops is null (first snapshot), falls back to the rich DocView with formatting.
+// When ops exists, renders plain-text diff — inline marks (bold etc.) are not
+// preserved because the diff runs at the text level. A ProseMirror-aware diff
+// would be needed for mark-level fidelity (future work).
+// onOpClick: called with opIdx when a change span is clicked (reverse hyperlink to right pane).
+function FullDiffView({
+  ops, snapshot, onOpClick,
+}: {
+  ops: DiffOp[] | null
+  snapshot: Snapshot
+  onOpClick?: (opIdx: number) => void
+}) {
   if (!ops) {
     return (
       <div className="tiptap-editor ProseMirror">
@@ -323,22 +343,32 @@ function FullDiffView({ ops, snapshot }: { ops: DiffOp[] | null; snapshot: Snaps
       </div>
     )
   }
-  const nodes = ops.map((op, i) => {
+  const spans = ops.map((op, i) => {
     if (op.type === 'del') return (
-      <span key={i} data-opidx={String(i)} style={{
-        color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)',
-      }}>{op.text}</span>
+      <span key={i} className="diff-del" data-opidx={String(i)}
+        style={{
+          color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)',
+          cursor: onOpClick ? 'pointer' : undefined,
+        }}
+        onClick={onOpClick ? () => onOpClick(i) : undefined}
+        title={onOpClick ? 'Jump to this change in diff panel' : undefined}
+      >{op.text}</span>
     )
     if (op.type === 'add') return (
-      <span key={i} data-opidx={String(i)} style={{
-        background: 'rgba(22,163,74,0.15)', color: '#166534',
-      }}>{op.text}</span>
+      <span key={i} className="diff-add" data-opidx={String(i)}
+        style={{
+          background: 'rgba(22,163,74,0.15)', color: '#166534',
+          cursor: onOpClick ? 'pointer' : undefined,
+        }}
+        onClick={onOpClick ? () => onOpClick(i) : undefined}
+        title={onOpClick ? 'Jump to this change in diff panel' : undefined}
+      >{op.text}</span>
     )
     return <span key={i} data-opidx={String(i)}>{op.text}</span>
   })
   return (
     <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
-      {nodes}
+      {spans}
     </div>
   )
 }
@@ -346,43 +376,48 @@ function FullDiffView({ ops, snapshot }: { ops: DiffOp[] | null; snapshot: Snaps
 // ── InlineDiffView ────────────────────────────────────────────────────────────
 // Right pane: compact hunk view of the diff.
 function InlineDiffView({
-  ops, prevSnap, onChangeClick,
+  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef,
 }: {
   ops: DiffOp[] | null
   prevSnap: Snapshot | null
   onChangeClick: (opIdx: number) => void
+  onHoverOp: (opIdx: number | null) => void
+  scrollBodyRef?: React.RefObject<HTMLDivElement>
 }) {
   const { added, removed } = ops ? diffStats(ops) : { added: 0, removed: 0 }
   const hasChange = added > 0 || removed > 0
   const nodes = useMemo(
-    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick) : [],
+    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ops, hasChange, onChangeClick],
+    [ops, hasChange, onChangeClick, onHoverOp],
   )
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
       <div style={{
-        flexShrink: 0, fontSize: '0.75rem', color: '#888',
-        padding: '6px 16px', borderBottom: '1px solid rgba(92,45,138,0.08)',
-        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        flexShrink: 0,
+        padding: '8px 16px', borderBottom: '1px solid rgba(92,45,138,0.08)',
+        display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
         background: 'rgba(249,247,244,0.98)',
       }}>
-        {!prevSnap && <span style={{ fontStyle: 'italic' }}>Initial snapshot</span>}
-        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic' }}>No changes from previous snapshot</span>}
+        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>Initial snapshot</span>}
+        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>No changes from previous snapshot</span>}
         {prevSnap && hasChange && (
           <>
-            <span style={{ color: '#15803d', fontWeight: 500 }}>+{added}</span>
-            <span style={{ color: '#b91c1c', fontWeight: 500 }}>−{removed}</span>
-            <span>words vs previous</span>
+            <span style={{ color: '#15803d', fontWeight: 700, fontSize: '1.15rem' }}>+{added}</span>
+            <span style={{ color: '#b91c1c', fontWeight: 700, fontSize: '1.15rem' }}>−{removed}</span>
+            <span style={{ fontSize: '0.95rem', color: '#666' }}>words vs previous</span>
           </>
         )}
       </div>
-      <div style={{
-        flex: 1, overflow: 'auto', padding: '1rem 1.5rem',
-        lineHeight: 1.85, fontSize: '1rem', whiteSpace: 'pre-wrap',
-        fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
-      }}>
+      <div
+        ref={scrollBodyRef}
+        style={{
+          flex: 1, overflow: 'auto', padding: '1rem 1.5rem',
+          lineHeight: 1.85, fontSize: '1rem', whiteSpace: 'pre-wrap',
+          fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
+        }}
+      >
         {!prevSnap && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
         {prevSnap && !hasChange && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
         {nodes}
@@ -406,10 +441,20 @@ function SplitDiffView({
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(50)
-  const dragging = useRef(false)
-  const containerRef  = useRef<HTMLDivElement>(null)
-  const leftScrollRef = useRef<HTMLDivElement>(null)     // the scrollable left pane
-  const anchorRatioRef = useRef(0.5)                     // fraction of scrollHeight at midline
+  const dragging   = useRef(false)
+  const containerRef   = useRef<HTMLDivElement>(null)
+  const leftScrollRef  = useRef<HTMLDivElement>(null)
+  const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
+  const anchorRatioRef  = useRef(0.5)
+  const lastHoveredRef  = useRef<number | null>(null)
+  const activeOpIdxRef  = useRef<number | null>(null)
+
+  // Publish split position as a CSS variable so the parent can position the right nav.
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--snap-split-pct', vertical ? '50%' : `${splitPct}%`)
+    return () => root.style.removeProperty('--snap-split-pct')
+  }, [splitPct, vertical])
 
   // Compute ops once; shared between both panes
   const ops = useMemo(() => {
@@ -420,41 +465,103 @@ function SplitDiffView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevSnap?.id, snapshot.id])
 
+  // Keep a ref so imperative highlight helpers can read ops without stale closure
+  const opsRef = useRef<DiffOp[] | null>(null)
+  opsRef.current = ops
+
+  // ── Cross-pane highlight (injected CSS + data-attrs — zero React re-renders) ──
+  // Inject once; CSS targets .diff-del / .diff-add spans that carry data-hover / data-active.
+  useEffect(() => {
+    const uid = `dv${Math.random().toString(36).slice(2, 8)}`
+    const el = containerRef.current
+    if (el) el.setAttribute('data-dv', uid)
+    const style = document.createElement('style')
+    style.textContent = [
+      // hover: darker background, both panes
+      `[data-dv="${uid}"] span.diff-del[data-hover] { background: rgba(185,28,28,0.22) !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { background: rgba(22,163,74,0.32)  !important; }`,
+      // active (clicked): darker + outline, both panes
+      `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
+      // hover + active simultaneously: combine outline with hover shade
+      `[data-dv="${uid}"] span.diff-del[data-hover][data-active] { background: rgba(185,28,28,0.28) !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover][data-active] { background: rgba(22,163,74,0.38)  !important; }`,
+    ].join('\n')
+    document.head.appendChild(style)
+    return () => { style.remove(); el?.removeAttribute('data-dv') }
+  }, [])
+
+  const setAttr = useCallback((opIdx: number | null, attr: string, add: boolean) => {
+    if (opIdx === null) return
+    containerRef.current?.querySelectorAll(`[data-opidx="${opIdx}"]`).forEach(el => {
+      if (add) el.setAttribute(attr, '') ; else el.removeAttribute(attr)
+    })
+  }, [])
+
+  const handleHoverOp = useCallback((opIdx: number | null) => {
+    setAttr(lastHoveredRef.current, 'data-hover', false)
+    lastHoveredRef.current = opIdx
+    setAttr(opIdx, 'data-hover', true)
+  }, [setAttr])
+
+  // Click from right pane: toggle active op, scroll LEFT pane so midline hits the change.
+  const handleClickOp = useCallback((opIdx: number) => {
+    const prev = activeOpIdxRef.current
+    const next = prev === opIdx ? null : opIdx
+    setAttr(prev, 'data-active', false)
+    activeOpIdxRef.current = next
+    setAttr(next, 'data-active', true)
+    if (next !== null) {
+      const el = leftScrollRef.current
+      if (!el) return
+      const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      if (!target) return
+      const elRect     = el.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
+      const newScrollTop = targetTopInContent - el.clientHeight / 2
+      el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
+      anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
+    }
+  }, [setAttr])
+
+  // Click from left pane: toggle active op, scroll RIGHT pane so the hunk is centred.
+  const handleLeftPaneClick = useCallback((opIdx: number) => {
+    const prev = activeOpIdxRef.current
+    const next = prev === opIdx ? null : opIdx
+    setAttr(prev, 'data-active', false)
+    activeOpIdxRef.current = next
+    setAttr(next, 'data-active', true)
+    if (next !== null) {
+      const el = rightScrollRef.current
+      if (!el) return
+      // Right pane only has data-opidx on change ops (built in buildDiffNodes)
+      const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      if (!target) return
+      const elRect     = el.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
+      const newScrollTop = targetTopInContent - el.clientHeight / 2
+      el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
+    }
+  }, [setAttr])
+
   // ── Scroll anchor ──────────────────────────────────────────────────────────
-  // Save the fractional position of the midline (scrollTop + h/2) / scrollHeight on scroll.
   const onLeftScroll = useCallback(() => {
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
   }, [])
 
-  // Restore the same midline ratio when the snapshot content changes.
   useEffect(() => {
     const el = leftScrollRef.current
     if (!el) return
-    // Wait one rAF so the DOM has updated with new content
     const id = requestAnimationFrame(() => {
       const target = anchorRatioRef.current * el.scrollHeight - el.clientHeight / 2
       el.scrollTop = Math.max(0, target)
     })
     return () => cancelAnimationFrame(id)
   }, [snapshot.id])
-
-  // ── Click-to-midline ───────────────────────────────────────────────────────
-  // Find the DOM element with matching data-opidx in the left pane and scroll to midline.
-  const scrollOpToMidline = useCallback((opIdx: number) => {
-    const el = leftScrollRef.current
-    if (!el) return
-    const target = el.querySelector(`[data-opidx="${opIdx}"]`) as HTMLElement | null
-    if (!target) return
-    // Walk offsetParent chain to get absolute offset within the scroll container
-    let offsetTop = 0
-    let node: HTMLElement | null = target
-    while (node && node !== el) { offsetTop += node.offsetTop; node = node.offsetParent as HTMLElement | null }
-    const newScrollTop = offsetTop - el.clientHeight / 2 + target.offsetHeight / 2
-    el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
-    anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
-  }, [])
 
   // ── Divider drag ──────────────────────────────────────────────────────────
   const startDrag = useCallback((startX: number, startY: number) => {
@@ -492,28 +599,17 @@ function SplitDiffView({
       {/* ── Left / top pane: full annotated document + midline ── */}
       <div style={{
         [vertical ? 'height' : 'width']: `${splitPct}%`,
-        flexShrink: 0,
-        position: 'relative',  // anchor for the absolute midline overlay
-        overflow: 'hidden',
+        flexShrink: 0, position: 'relative', overflow: 'hidden',
       }}>
-        {/* Dotted midline — fixed at 50% of the pane height, not scrolling */}
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
-            borderTop: '1px dashed rgba(92,45,138,0.38)',
-            pointerEvents: 'none',
-            transform: 'translateY(-0.5px)',
-          }}
-        />
-        {/* Scrollable content */}
-        <div
-          ref={leftScrollRef}
-          onScroll={onLeftScroll}
-          style={{ height: '100%', overflow: 'auto' }}
-        >
+        {/* Dotted midline — fixed at 50% of the pane height */}
+        <div aria-hidden="true" style={{
+          position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+          borderTop: '1px dashed rgba(92,45,138,0.38)',
+          pointerEvents: 'none', transform: 'translateY(-0.5px)',
+        }} />
+        <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
           <Scroll phone={isPhone}>
-            <FullDiffView ops={ops} snapshot={snapshot} />
+            <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
           </Scroll>
         </div>
       </div>
@@ -546,7 +642,9 @@ function SplitDiffView({
         <InlineDiffView
           ops={ops}
           prevSnap={prevSnap}
-          onChangeClick={scrollOpToMidline}
+          onChangeClick={handleClickOp}
+          onHoverOp={handleHoverOp}
+          scrollBodyRef={rightScrollRef}
         />
       </div>
     </div>
@@ -827,6 +925,9 @@ export function SnapshotView() {
             hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
             summary={rightSummary} versionSummary={rightVersionSummary}
             snapFlashKey={String(rightSnapFlash)} verFlashKey={String(rightVerFlash)}
+            overridePos={isWide && !isPhone
+              ? { left: 'calc(var(--snap-split-pct, 50%) - 60px)' }
+              : undefined}
           />
         </>
       )}
