@@ -19,7 +19,12 @@ const TOOLS: Array<{ kind: HighlightKind; label: string; title: string }> = [
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
-interface PageRef { wrapper: HTMLDivElement; hlLayer: HTMLDivElement; w: number; h: number }
+interface PageRef {
+  wrapper: HTMLDivElement; canvasWrap: HTMLDivElement; textLayer: HTMLDivElement; hlLayer: HTMLDivElement
+  w: number; h: number
+  page: any; viewport: any // eslint-disable-line @typescript-eslint/no-explicit-any
+  rendered: boolean; rendering: boolean
+}
 interface Pending { text: string; page: number; rects: HighlightRect[]; x: number; y: number }
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -34,6 +39,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
+  const observerRef = useRef<IntersectionObserver | null>(null)
   const highlightsRef = useRef<PdfHighlight[]>([])
   const docRef = useRef<PdfDoc | null>(null)
   const fitScaleRef = useRef(1)
@@ -76,7 +82,33 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     }
   }
 
-  // Render every page at `scale`. Cancellable via a token so a zoom/reopen supersedes an in-flight run.
+  // Paint one page's canvas + text layer on demand (called by the IntersectionObserver). Placeholder
+  // sizes are already correct, so this never reflows — which is also what stops the open-scroll snap.
+  async function renderOnePage(idx: number, token: number) {
+    const pg = pagesRef.current[idx]
+    if (!pg || pg.rendered || pg.rendering) return
+    pg.rendering = true
+    const pdfjs = await getPdfjs()
+    if (token !== renderTokenRef.current) { pg.rendering = false; return }
+    const outputScale = Math.min(window.devicePixelRatio || 1, 2)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.floor(pg.viewport.width * outputScale)
+    canvas.height = Math.floor(pg.viewport.height * outputScale)
+    canvas.style.cssText = `width:${Math.floor(pg.viewport.width)}px;height:${Math.floor(pg.viewport.height)}px;display:block;`
+    pg.canvasWrap.appendChild(canvas)
+    await pg.page.render({
+      canvas, canvasContext: canvas.getContext('2d')!, viewport: pg.viewport,
+      transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
+    }).promise.catch(() => {})
+    if (token !== renderTokenRef.current) return
+    const tc = await pg.page.getTextContent()
+    if (token !== renderTokenRef.current) return
+    await new pdfjs.TextLayer({ textContentSource: tc, container: pg.textLayer, viewport: pg.viewport }).render().catch(() => {})
+    pg.rendered = true
+  }
+
+  // Build placeholders (correct sizes, cheap) for every page, then let an IntersectionObserver paint
+  // pages only as they scroll near the viewport. This keeps a big PDF from blocking the main thread.
   const renderPages = useCallback(async (scale: number) => {
     const doc = docRef.current
     const viewer = viewerRef.current
@@ -84,9 +116,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const token = ++renderTokenRef.current
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) return
+    observerRef.current?.disconnect()
     viewer.textContent = ''
     pagesRef.current = []
-    const outputScale = window.devicePixelRatio || 1
 
     for (let n = 1; n <= doc.numPages; n++) {
       const page = await doc.getPage(n)
@@ -95,16 +127,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
       const pageEl = document.createElement('div')
       pageEl.className = 'page'
+      pageEl.dataset.idx = String(n - 1)
       pageEl.style.cssText = `--scale-factor:${scale};--user-unit:1;position:relative;width:${Math.floor(viewport.width)}px;height:${Math.floor(viewport.height)}px;margin:0 auto 12px;box-shadow:0 1px 6px rgba(0,0,0,0.18);background:#fff;`
 
       const canvasWrap = document.createElement('div')
       canvasWrap.className = 'canvasWrapper'
       canvasWrap.style.cssText = 'position:absolute;inset:0;'
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.floor(viewport.width * outputScale)
-      canvas.height = Math.floor(viewport.height * outputScale)
-      canvas.style.cssText = `width:${Math.floor(viewport.width)}px;height:${Math.floor(viewport.height)}px;display:block;`
-      canvasWrap.appendChild(canvas)
       pageEl.appendChild(canvasWrap)
 
       const textLayer = document.createElement('div')
@@ -117,20 +145,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       pageEl.appendChild(hlLayer)
 
       viewer.appendChild(pageEl)
-      pagesRef.current.push({ wrapper: pageEl, hlLayer, w: viewport.width, h: viewport.height })
-
-      const ctx = canvas.getContext('2d')!
-      await page.render({
-        canvas, canvasContext: ctx, viewport,
-        transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
-      }).promise.catch(() => {})
-      if (token !== renderTokenRef.current) return
-
-      const tc = await page.getTextContent()
-      if (token !== renderTokenRef.current) return
-      await new pdfjs.TextLayer({ textContentSource: tc, container: textLayer, viewport }).render().catch(() => {})
+      pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false })
     }
-    if (token === renderTokenRef.current) redrawOverlays()
+    if (token !== renderTokenRef.current) return
+    redrawOverlays()
+
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (e.isIntersecting) void renderOnePage(Number((e.target as HTMLElement).dataset.idx), token)
+      }
+    }, { root: scrollRef.current, rootMargin: '800px 0px' })
+    for (const pg of pagesRef.current) io.observe(pg.wrapper)
+    observerRef.current = io
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -158,8 +184,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         await renderPages(fitScaleRef.current)
         if (cancelled) return
         setStatus('ready')
-        // One deferred, direct scroll (no scrollIntoView, which was double-firing and snapping back).
-        requestAnimationFrame(() => { if (!cancelled) scrollToTarget() })
+        // Direct scroll (placeholder sizes are final, so no reflow to fight). Re-apply a couple of
+        // times in case a late layout pass nudges it — but only while the user hasn't scrolled yet.
+        let last = -1
+        const settle = (n: number) => {
+          if (cancelled) return
+          if (last >= 0 && Math.abs((scrollRef.current?.scrollTop ?? 0) - last) > 4) return // user scrolled
+          scrollToTarget()
+          last = scrollRef.current?.scrollTop ?? 0
+          if (n > 0) setTimeout(() => requestAnimationFrame(() => settle(n - 1)), 120)
+        }
+        requestAnimationFrame(() => settle(3))
       } catch {
         if (!cancelled) setStatus('error')
       }
@@ -168,6 +203,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     return () => {
       cancelled = true
       renderTokenRef.current++       // supersede any in-flight render
+      observerRef.current?.disconnect()
       docRef.current = null
       if (loadingTask) void loadingTask.destroy().catch(() => {})
     }
