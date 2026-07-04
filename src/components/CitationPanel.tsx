@@ -685,7 +685,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
+              <div className="text-[10px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>
+            </div>
             <button type="button" onClick={openNewRef}
               className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               + new
