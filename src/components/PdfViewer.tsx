@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
-import { getPdfjs } from '../citations/pdfjsSetup'
+import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
 import { bibProvider } from '../citations/bibProvider'
 
@@ -184,7 +184,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       setStatus('loading')
       try {
         const pdfjs = await getPdfjs()
-        const task = pdfjs.getDocument({ data: data.slice(0) }) // slice: keep caller's buffer usable
+        const task = pdfjs.getDocument({ data: data.slice(0), ...PDF_DOC_PARAMS }) // slice: keep caller's buffer usable
         loadingTask = task
         const doc = await task.promise
         if (cancelled) return

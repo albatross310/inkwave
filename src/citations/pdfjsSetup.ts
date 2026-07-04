@@ -5,6 +5,15 @@ type Pdfjs = typeof import('pdfjs-dist')
 
 let libPromise: Promise<Pdfjs> | null = null
 
+// Self-hosted decoders/fonts (copied to public/pdfjs). wasmUrl is what makes SCANNED PDFs usable:
+// without it pdf.js falls back to a pure-JS JBIG2/JPEG2000 decoder that takes ages. Spread into every
+// getDocument call.
+export const PDF_DOC_PARAMS = {
+  wasmUrl: '/pdfjs/wasm/',
+  standardFontDataUrl: '/pdfjs/standard_fonts/',
+  iccUrl: '/pdfjs/iccs/',
+} as const
+
 export function getPdfjs(): Promise<Pdfjs> {
   if (!libPromise) {
     libPromise = (async () => {

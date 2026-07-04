@@ -7,7 +7,7 @@
 // the main body, whose offset is what we want. If detection fails for any reason we store offset 0
 // with flag 'raw' (use the PDF's own pages, flagged as unverified).
 
-import { getPdfjs } from './pdfjsSetup'
+import { getPdfjs, PDF_DOC_PARAMS } from './pdfjsSetup'
 import { loadPdf } from './pdfStore'
 import { bibProvider } from './bibProvider'
 import { addToLibrary } from './library'
@@ -32,7 +32,7 @@ export async function detectPageOffset(citekey: string): Promise<void> {
     const blob = await loadPdf(citekey)
     if (!blob) return
     const pdfjs = await getPdfjs()
-    const task = pdfjs.getDocument({ data: await blob.arrayBuffer() })
+    const task = pdfjs.getDocument({ data: await blob.arrayBuffer(), ...PDF_DOC_PARAMS })
     const doc = await task.promise
     const n = doc.numPages
     // Sample content pages (skip the cover; bias to the body where arabic numbers live).
