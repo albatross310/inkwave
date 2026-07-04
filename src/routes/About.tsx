@@ -79,7 +79,10 @@ export function About() {
 
         <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: '#eee' }}>
           <Link to="/" style={{ color: INK }} className="underline">Start writing</Link>
-          <Link to="/verify" style={{ color: LIGHT }} className="underline">Verify a record</Link>
+          <div className="flex gap-4">
+            <Link to="/privacy" className="text-stone-400 hover:text-[#5c2d8a] underline">Privacy</Link>
+            <Link to="/verify" style={{ color: LIGHT }} className="underline">Verify a record</Link>
+          </div>
         </footer>
       </div>
     </div>

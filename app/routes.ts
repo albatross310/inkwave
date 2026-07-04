@@ -4,6 +4,7 @@ export default [
   // The editor IS the landing page (low friction — no dashboard).
   index('routes/home.tsx'),
   route('about', 'routes/about.tsx'),
+  route('privacy', 'routes/privacy.tsx'),
   route('verify', 'routes/verify.tsx'), // open, client-side provenance verification (M5)
   route('login', 'routes/login.tsx'),   // paid-tier sign-in (Clerk) — dormant until configured
   route('snapshot', 'routes/snapshot.tsx'), // read-only viewer for a past snapshot (+ diff vs now)
