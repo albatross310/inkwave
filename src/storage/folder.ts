@@ -5,7 +5,7 @@
 // download (and/or OneDrive).
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
@@ -127,7 +127,7 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
   if (!handle) return false
   try {
     const writable = await handle.createWritable()
-    await writable.write(composeTraceFile(buildExportBundle(doc, snapshots)))
+    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, snapshots)))
     await writable.close()
     return true
   } catch {

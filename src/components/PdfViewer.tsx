@@ -8,7 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
+import { pageOffsetOf } from '../citations/pageOffset'
 import { bibProvider } from '../citations/bibProvider'
+import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
 const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#d0bcff']
@@ -45,6 +47,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const fitScaleRef = useRef(1)
   const renderTokenRef = useRef(0)
   const hoverRef = useRef(false)
+  const offsetRef = useRef(0)          // printed page = sheet + offset
+  const printedKnownRef = useRef(false) // true when Haiku verified the offset
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [zoom, setZoom] = useState(1)
@@ -157,6 +161,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       hlLayer.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none;'
       pageEl.appendChild(hlLayer)
 
+      // Page label: the printed page (Haiku-detected) plus the native PDF sheet number.
+      const label = document.createElement('div')
+      label.style.cssText = 'position:absolute;top:4px;right:6px;z-index:3;font-size:10px;color:#78716c;background:rgba(255,255,255,0.78);border-radius:3px;padding:0 5px;pointer-events:none;font-family:system-ui,sans-serif;'
+      label.textContent = printedKnownRef.current ? `p. ${n + offsetRef.current} · sheet ${n}` : `sheet ${n}`
+      pageEl.appendChild(label)
+
       viewer.appendChild(pageEl)
       pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false })
     }
@@ -177,7 +187,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   useEffect(() => {
     let cancelled = false
     let loadingTask: { destroy: () => Promise<void> } | null = null
-    highlightsRef.current = highlightsOf(bibProvider.get(citekey))
+    const item0 = bibProvider.get(citekey)
+    highlightsRef.current = highlightsOf(item0)
+    offsetRef.current = pageOffsetOf(item0)
+    printedKnownRef.current = (item0 as { _iw?: IwCitationMeta } | undefined)?._iw?.pageOffsetFlag === 'verified'
     setZoom(1)
 
     void (async () => {

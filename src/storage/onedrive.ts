@@ -10,7 +10,7 @@
 // enters the prerender/SSR graph.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { readAppJson, writeAppJson } from './opfs'
 import { setDocSource } from './docSource'
 
@@ -279,7 +279,7 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   if (!token) return { ok: false, webUrl: null }
   // One self-contained file: readable writing on top, then the record (content + snapshots + Bitcoin
   // proofs + receipts).
-  const file = composeTraceFile(buildExportBundle(doc, snapshots))
+  const file = composeTraceFile(await buildExportBundleWithPdfs(doc, snapshots))
   try {
     const webUrl = await putFile(token, oneDriveFilename(doc.id) ?? bundleFilename(doc), file)
     setDocSource(doc.id, 'onedrive')
