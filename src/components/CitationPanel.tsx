@@ -13,6 +13,7 @@ import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/re
 import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
+import { makeCitekey } from '../citations/cslMap'
 import { reverifyEntry, applyReverify, revertField } from '../citations/reverify'
 import { simpleInText } from '../citations/format'
 import { ITEM_TYPE_LABELS as TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS as CSL_FIELD_LABELS_MAP } from '../citations/requiredFields'
@@ -213,11 +214,12 @@ function relTime(iso: string): string {
 
 interface EditDialogProps {
   item: CSLItem
+  isNew?: boolean
   onSave: (updated: CSLItem) => void
   onClose: () => void
 }
 
-function EditDialog({ item, onSave, onClose }: EditDialogProps) {
+function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
   const [type, setType] = useState(item.type ?? 'webpage')
   const [values, setValues] = useState<Record<string, string>>(() => ({
     author:          authorsToString(item.author),
@@ -301,8 +303,8 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-stone-100">
           <div>
-            <div className="text-[11px] uppercase tracking-wide text-stone-400">Edit citation</div>
-            <div className="text-[10px] text-stone-400 mt-0.5 font-mono">{item.id}</div>
+            <div className="text-[11px] uppercase tracking-wide text-stone-400">{isNew ? 'New reference' : 'Edit citation'}</div>
+            {!isNew && <div className="text-[10px] text-stone-400 mt-0.5 font-mono">{item.id}</div>}
           </div>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
@@ -385,6 +387,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
   const [editItem, setEditItem] = useState<CSLItem | null>(null)
+  const [isNewRef, setIsNewRef] = useState(false)
   const [rechecking, setRechecking] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
@@ -454,9 +457,20 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   }
 
   async function saveEdit(updated: CSLItem) {
-    await addToLibrary(updated)
+    let item = updated
+    if (isNewRef) {
+      const key = makeCitekey(updated)
+      item = { ...updated, id: key }
+    }
+    await addToLibrary(item)
     setEditItem(null)
-    setNotice({ text: `Saved "${updated.id}"`, kind: 'ok' })
+    setIsNewRef(false)
+    setNotice({ text: `Saved "${item.id}"`, kind: 'ok' })
+  }
+
+  function openNewRef() {
+    setIsNewRef(true)
+    setEditItem({ id: '__new__', type: 'article-journal' } as unknown as CSLItem)
   }
 
   function toggleExpand(id: string) {
@@ -581,8 +595,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
       {editItem && (
         <EditDialog
           item={editItem}
+          isNew={isNewRef}
           onSave={saveEdit}
-          onClose={() => setEditItem(null)}
+          onClose={() => { setEditItem(null); setIsNewRef(false) }}
         />
       )}
       <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={onClose} />
@@ -670,8 +685,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-stone-400 mb-2">
-            Library ({bibProvider.getAll().length})
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
+            <button type="button" onClick={openNewRef}
+              className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+              + new
+            </button>
           </div>
           {entries.length === 0 ? (
             <div className="py-6 text-center text-xs text-stone-400">
