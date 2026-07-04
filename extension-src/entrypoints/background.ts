@@ -20,7 +20,7 @@ async function resolveApiOrigin(): Promise<string> {
   const tabs = await browser.tabs.query({})
   const urls = tabs.map(t => t.url ?? '')
   const DEV = 'http://localhost:5173'
-  const PROD = 'https://inkwave.me'
+  const PROD = 'https://inkwave.studio'
   if (urls.some(u => u.startsWith(DEV))) return DEV
   if (urls.some(u => u.startsWith(PROD))) return PROD
   return PROD // no Inkwave tab open — fall back to production

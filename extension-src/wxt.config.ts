@@ -25,7 +25,7 @@ export default defineConfig({
       },
     },
     host_permissions: [
-      'https://inkwave.me/*',
+      'https://inkwave.studio/*',
       'http://localhost:5173/*',
       'https://api.crossref.org/*',
       'https://export.arxiv.org/*',
@@ -35,7 +35,7 @@ export default defineConfig({
     ...(browser === 'firefox' ? {
       browser_specific_settings: {
         gecko: {
-          id: 'citation-capture@inkwave.me',
+          id: 'citation-capture@inkwave.studio',
           strict_min_version: '109.0',
         },
       },
