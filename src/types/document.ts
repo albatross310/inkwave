@@ -43,6 +43,7 @@ export interface IwCitationMeta {
   lastVerified?: string   // ISO — last successful re-verification check
   deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
   note?: string           // free-text reading notes shown indented under the bibliography entry
+  pdfName?: string        // original filename of an embedded PDF (bytes live in OPFS library/pdfs/)
 }
 
 export interface Bibliography {

@@ -13,6 +13,8 @@ import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/re
 import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
+import { savePdf, deletePdf } from '../citations/pdfStore'
+import { openPdf } from '../citations/pdfViewer'
 import { makeCitekey } from '../citations/cslMap'
 import { reverifyEntry, applyReverify, revertField } from '../citations/reverify'
 import { simpleInText } from '../citations/format'
@@ -457,7 +459,49 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
       setNotice({ text: `"${item.id}" is cited in the document — remove the in-text citation first.`, kind: 'err' })
       return
     }
+    await deletePdf(item.id).catch(() => {})
     await removeFromLibrary(item.id)
+  }
+
+  // ── Embedded PDFs ────────────────────────────────────────────────────────────
+  const pdfInputRef = useRef<HTMLInputElement>(null)
+  const pdfTargetRef = useRef<string | null>(null)
+
+  function attachPdf(item: CSLItem) {
+    pdfTargetRef.current = item.id
+    pdfInputRef.current?.click()
+  }
+
+  async function onPdfChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    const key = pdfTargetRef.current
+    e.target.value = '' // allow re-choosing the same file later
+    if (!file || !key) return
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setNotice({ text: 'That file is not a PDF.', kind: 'err' }); return
+    }
+    try {
+      await savePdf(key, file)
+      const item = bibProvider.get(key)
+      if (item) {
+        const iw: IwCitationMeta = { ...((item as { _iw?: IwCitationMeta })._iw ?? {}), pdfName: file.name }
+        await addToLibrary({ ...item, _iw: iw })
+      }
+      setNotice({ text: `Embedded PDF for "${key}" — click 📄 next to its citations to open at the cited page.`, kind: 'ok' })
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : 'Could not embed the PDF.', kind: 'err' })
+    }
+  }
+
+  async function removePdf(item: CSLItem) {
+    await deletePdf(item.id).catch(() => {})
+    const cur = bibProvider.get(item.id)
+    if (cur) {
+      const iw = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}) }
+      delete (iw as IwCitationMeta).pdfName
+      await addToLibrary({ ...cur, _iw: iw })
+    }
+    setNotice({ text: `Removed the embedded PDF for "${item.id}".`, kind: 'ok' })
   }
 
   async function saveEdit(updated: CSLItem) {
@@ -621,6 +665,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
         </div>
 
+        {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
+        <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
+          onChange={e => void onPdfChosen(e)} />
+
         {/* Extension promo — top of panel */}
         <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
           <span className="text-xs text-stone-500">Download the Inkwave citation extension for single click import on any page</span>
@@ -693,9 +741,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-1">
             <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
             <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>
+          </div>
+          <div className="text-[10px] text-stone-400 mb-2">
+            <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
           </div>
           {entries.length === 0 ? (
             <div className="py-6 text-center text-xs text-stone-400">
@@ -742,6 +793,19 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
                         onClick={e => { e.stopPropagation(); visitSource(item) }}
                       >↗</button>
+                    )}
+                    {(item as { _iw?: IwCitationMeta })._iw?.pdfName ? (
+                      <button type="button"
+                        title={`Open embedded PDF (${(item as { _iw?: IwCitationMeta })._iw?.pdfName}) — shift-click to remove`}
+                        className="text-[10px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d]"
+                        onClick={e => { e.stopPropagation(); if (e.shiftKey) void removePdf(item); else openPdf({ citekey: item.id, page: 1, label: item.id }) }}
+                      >📄</button>
+                    ) : (
+                      <button type="button"
+                        title="Embed a PDF for this source"
+                        className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
+                        onClick={e => { e.stopPropagation(); attachPdf(item) }}
+                      >📎</button>
                     )}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[10px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>

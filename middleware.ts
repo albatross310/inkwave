@@ -28,7 +28,9 @@ function csp(nonce: string): string {
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://m.stripe.network https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://*.clerk.accounts.dev https://*.clerk.com https://challenges.cloudflare.com https://login.microsoftonline.com",
+    // blob: — the embedded-source PDF viewer frames a blob: URL of the OPFS-stored PDF (same-origin,
+    // created by our own code) in the citation side panel.
+    "frame-src 'self' blob: https://js.stripe.com https://hooks.stripe.com https://m.stripe.network https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://*.clerk.accounts.dev https://*.clerk.com https://challenges.cloudflare.com https://login.microsoftonline.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
   ].join('; ')

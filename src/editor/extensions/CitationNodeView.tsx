@@ -16,7 +16,8 @@ import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrencesAt, ensureNavStyles,
 } from '../../citations/citationNav'
-import type { CSLItem, InkwaveDocument } from '../../types/document'
+import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
+import type { CSLItem, InkwaveDocument, IwCitationMeta } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
 const INK = '#5c2d8a'
@@ -53,6 +54,7 @@ interface Seg {
 export function CitationNodeView({ node, editor, selected, getPos }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
+  const [pdfKey, setPdfKey] = useState<string | null>(null)  // first cited source with an embedded PDF
 
   // Always-current ref — avoids stale closure inside the subscription callback.
   const attrsRef = useRef(attrs)
@@ -62,13 +64,16 @@ export function CitationNodeView({ node, editor, selected, getPos }: NodeViewPro
     const a = attrsRef.current
     const pos = typeof getPos === 'function' ? getPos() : null
     const occMap = pos != null ? occurrencesAt(editor.state.doc, pos) : new Map<string, number>()
+    let firstPdf: string | null = null
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
+      if (item && !firstPdf && (item as { _iw?: IwCitationMeta })._iw?.pdfName) firstPdf = key
       return item
         ? { key, text: oneCiteText(item, a), occ: occMap.get(key) ?? 1, found: true }
         : { key, text: `?${key}`, occ: occMap.get(key) ?? 1, found: false }
     })
     setSegs(next)
+    setPdfKey(firstPdf)
   }, [editor, getPos]) // reads attrs from attrsRef
 
   // Keep a ref so the subscription closure always calls the current version.
@@ -147,6 +152,28 @@ export function CitationNodeView({ node, editor, selected, getPos }: NodeViewPro
             </>
           )}
       </span>
+      {pdfKey && (
+        <button
+          type="button"
+          contentEditable={false}
+          onClick={e => {
+            e.stopPropagation()
+            openPdf({
+              citekey: pdfKey,
+              page: pageFromLocator(attrs.locator),
+              label: segs.find(s => s.key === pdfKey)?.text ?? pdfKey,
+            })
+          }}
+          title={`Open PDF${attrs.locator ? ` at ${attrs.locator}` : ''}`}
+          style={{
+            marginLeft: 2, padding: '0 2px', border: 'none', background: 'transparent',
+            cursor: 'pointer', fontSize: '0.82em', lineHeight: 1, verticalAlign: 'baseline',
+            userSelect: 'none',
+          }}
+        >
+          📄
+        </button>
+      )}
     </NodeViewWrapper>
   )
 }

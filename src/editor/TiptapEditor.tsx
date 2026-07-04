@@ -61,6 +61,7 @@ import { CiteSuggestion } from './extensions/CiteSuggestion'
 import { ReferenceListNode } from './extensions/ReferenceListNode'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
 import { CitationPanel } from '../components/CitationPanel'
+import { PdfSidePanel } from '../components/PdfSidePanel'
 import { loadLibrary } from '../citations/library'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
@@ -1737,6 +1738,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           />
         )}
         {editor && <CiteAutocomplete editor={editor} />}
+        <PdfSidePanel />
         {bibPanelOpen && editor && (
           <CitationPanel
             editor={editor}
