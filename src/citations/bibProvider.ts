@@ -16,6 +16,7 @@ export interface BibProvider {
   refresh(): Promise<void>
   getAll(): CSLItem[]
   get(citekey: string): CSLItem | undefined
+  getVersion(): number
   search(query: string): CSLItem[]
   subscribe(cb: () => void): () => void
   status(): BibProviderStatus
@@ -26,6 +27,10 @@ class BibProviderImpl implements BibProvider {
   private subs: Set<() => void> = new Set()
   private _status: BibProviderStatus = { channel: 'none', entries: 0 }
   private _refreshFn: (() => Promise<void>) | null = null
+  private _version = 0
+
+  /** Monotonically increasing counter — increments on every change. Use with useSyncExternalStore. */
+  getVersion(): number { return this._version }
 
   /** Replace the whole library (used when hydrating from the OPFS store on load). */
   setEntries(items: CSLItem[], channel: Exclude<BibChannel, 'none'> = 'library'): void {
@@ -89,8 +94,8 @@ class BibProviderImpl implements BibProvider {
   status(): BibProviderStatus { return { ...this._status } }
 
   private notify(): void {
+    this._version++
     for (const cb of this.subs) cb()
-    // Belt-and-suspenders: DOM event so NodeViews in separate React roots also receive updates.
     window.dispatchEvent(new CustomEvent('inkwave:bib-changed'))
   }
 }
