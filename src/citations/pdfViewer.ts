@@ -6,6 +6,8 @@ export interface OpenPdfDetail {
   citekey: string
   page?: number | null
   label?: string        // human label for the panel header (e.g. the in-text citation text)
+  quote?: string | null // a stored pinpoint sentence to scroll to + highlight on open
+  onLink?: (quote: string, page: number) => void // present when opened from a citation → set its pinpoint
 }
 
 export const OPEN_PDF_EVENT = 'inkwave:open-pdf'

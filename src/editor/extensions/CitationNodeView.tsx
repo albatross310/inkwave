@@ -51,7 +51,7 @@ interface Seg {
   found: boolean
 }
 
-export function CitationNodeView({ node, editor, selected, getPos }: NodeViewProps & { _doc?: InkwaveDocument }) {
+export function CitationNodeView({ node, editor, selected, getPos, updateAttributes }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
   const [pdfKey, setPdfKey] = useState<string | null>(null)  // first cited source with an embedded PDF
@@ -161,10 +161,13 @@ export function CitationNodeView({ node, editor, selected, getPos }: NodeViewPro
             openPdf({
               citekey: pdfKey,
               page: pageFromLocator(attrs.locator),
+              quote: attrs.quote,
               label: segs.find(s => s.key === pdfKey)?.text ?? pdfKey,
+              // Selecting a sentence in the PDF sets this citation's pinpoint (quote + page).
+              onLink: (quote, page) => updateAttributes({ quote, locator: String(page) }),
             })
           }}
-          title={`Open PDF${attrs.locator ? ` at ${attrs.locator}` : ''}`}
+          title={attrs.quote ? 'Open PDF at the linked sentence' : `Open PDF${attrs.locator ? ` at ${attrs.locator}` : ''} — select a sentence to link it`}
           style={{
             marginLeft: 2, padding: '0 2px', border: 'none', background: 'transparent',
             cursor: 'pointer', fontSize: '0.82em', lineHeight: 1, verticalAlign: 'baseline',

@@ -44,6 +44,11 @@ export interface IwCitationMeta {
   deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
   note?: string           // free-text reading notes shown indented under the bibliography entry
   pdfName?: string        // original filename of an embedded PDF (bytes live in OPFS library/pdfs/)
+  // Overlay annotations on the embedded PDF — normalised rects + text; see citations/pdfHighlights.
+  highlights?: Array<{
+    id: string; page: number; rects: Array<{ x: number; y: number; w: number; h: number }>
+    color: string; text: string; note?: string; citekey?: string; createdAt: string
+  }>
 }
 
 export interface Bibliography {

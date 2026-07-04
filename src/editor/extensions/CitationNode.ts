@@ -15,6 +15,7 @@ export interface CitationAttrs {
   suffix?: string | null
   locator?: string | null
   suppressAuthor?: boolean
+  quote?: string | null   // pinpoint sentence selected in the source PDF (for open-at + highlight)
 }
 
 declare module '@tiptap/core' {
@@ -47,6 +48,7 @@ export const CitationNode = Node.create({
       suffix:         { default: null },
       locator:        { default: null },
       suppressAuthor: { default: false },
+      quote:          { default: null },
     }
   },
 

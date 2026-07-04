@@ -11,22 +11,24 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { loadPdf } from '../citations/pdfStore'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
+import { PdfViewer } from './PdfViewer'
 
 const INK = '#5c2d8a'
 const MIN_W = 320
 
-interface Viewing { url: string; page: number; label: string; citekey: string }
+interface Viewing {
+  data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
+  onLink?: (quote: string, page: number) => void
+}
 
 export function PdfSidePanel() {
   const [viewing, setViewing] = useState<Viewing | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [width, setWidth] = useState(480)
+  const [width, setWidth] = useState(560)
   const [dragging, setDragging] = useState(false)
-  const urlRef = useRef<string | null>(null)
   const dragStart = useRef<{ x: number; w: number } | null>(null)
 
   const open = !!(viewing || error)
-  const revoke = () => { if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null } }
 
   useEffect(() => {
     const onOpen = (e: Event) => {
@@ -36,15 +38,13 @@ export function PdfSidePanel() {
       void (async () => {
         const blob = await loadPdf(detail.citekey)
         if (!blob) { setError('No PDF is embedded for this source.'); setViewing(null); return }
-        revoke()
-        const url = URL.createObjectURL(blob)
-        urlRef.current = url
+        const data = await blob.arrayBuffer()
         const page = detail.page && detail.page > 0 ? detail.page : 1
-        setViewing({ url, page, label: detail.label || detail.citekey, citekey: detail.citekey })
+        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, onLink: detail.onLink })
       })()
     }
     window.addEventListener(OPEN_PDF_EVENT, onOpen)
-    return () => { window.removeEventListener(OPEN_PDF_EVENT, onOpen); revoke() }
+    return () => window.removeEventListener(OPEN_PDF_EVENT, onOpen)
   }, [])
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export function PdfSidePanel() {
     return () => { root.style.setProperty('--iw-pdf-room', '0px') }
   }, [open, width])
 
-  function close() { revoke(); setViewing(null); setError(null) }
+  function close() { setViewing(null); setError(null) }
 
   if (!open) return null
 
@@ -90,7 +90,11 @@ export function PdfSidePanel() {
           <span style={{ fontSize: '0.8rem', color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             📄 {viewing?.label ?? 'PDF'}
           </span>
-          {viewing && <span style={{ fontSize: '0.72rem', color: '#9ca3af', flexShrink: 0 }}>page {viewing.page}</span>}
+          {viewing && (
+            <span style={{ fontSize: '0.68rem', color: '#9ca3af', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              select text to highlight{viewing.onLink ? ' or link' : ''}
+            </span>
+          )}
           <button type="button" onClick={close}
             style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
             title="Close (Esc)">×</button>
@@ -99,12 +103,16 @@ export function PdfSidePanel() {
         {error ? (
           <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>{error}</div>
         ) : viewing ? (
-          <iframe
-            key={`${viewing.citekey}#${viewing.page}`}
-            title={`PDF: ${viewing.label}`}
-            src={`${viewing.url}#page=${viewing.page}&view=FitH`}
-            style={{ flex: 1, width: '100%', border: 'none', pointerEvents: dragging ? 'none' : 'auto' }}
-          />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: dragging ? 'none' : 'auto' }}>
+            <PdfViewer
+              key={viewing.citekey}
+              data={viewing.data}
+              citekey={viewing.citekey}
+              initialPage={viewing.page}
+              initialQuote={viewing.quote}
+              onLinkToCitation={viewing.onLink}
+            />
+          </div>
         ) : null}
       </div>
 
