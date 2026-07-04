@@ -56,6 +56,26 @@ export async function formatReferenceList(
   }) as string
 }
 
+// Like formatReferenceList, but returns each entry paired with its citekey, in the style's own
+// sorted order — so callers can attach per-entry DOM anchors / back-references. Each html string is
+// a single `.csl-entry` element already carrying `data-csl-entry-id`. Uses the CSL plugin's
+// `asEntryArray` output option (see @citation-js/plugin-csl/lib/bibliography.js).
+export async function formatReferenceEntries(
+  items: CSLItem[],
+  styleId = 'apa',
+): Promise<Array<[string, string]>> {
+  if (items.length === 0) return []
+  await ensureStyle(styleId)
+  const { Cite } = await import('@citation-js/core')
+  const cite = new Cite(items)
+  return cite.format('bibliography', {
+    format: 'html',
+    template: styleId,
+    lang: 'en-US',
+    asEntryArray: true,
+  }) as unknown as Array<[string, string]>
+}
+
 // Fallback plain-text reference list if CSL engine unavailable
 export function simpleRefList(items: CSLItem[]): string {
   return items.map(item => {
