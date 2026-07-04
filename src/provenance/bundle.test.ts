@@ -145,7 +145,7 @@ describe('bundleReadme', () => {
     bitcoinAnchored: 3,
     created: '2026-07-01T00:00:00.000Z',
     exported: '2026-07-01T01:00:00.000Z',
-    verifyAt: 'https://inkwave.me/verify',
+    verifyAt: 'https://inkwave.studio/verify',
     note: '',
   }
 
@@ -170,7 +170,7 @@ describe('bundleReadme', () => {
   })
 
   it('always contains the verify URL', () => {
-    expect(bundleReadme()).toContain('inkwave.me/verify')
-    expect(bundleReadme(summary)).toContain('inkwave.me/verify')
+    expect(bundleReadme()).toContain('inkwave.studio/verify')
+    expect(bundleReadme(summary)).toContain('inkwave.studio/verify')
   })
 })

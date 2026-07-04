@@ -7,7 +7,7 @@ import type { CSLItem } from '../types/document'
 import type { DetectedIdentifier } from './identifiers'
 import { crossrefToCsl, arxivToCsl, openLibraryToCsl, googleBooksToCsl, makeCitekey } from './cslMap'
 
-const MAILTO = 'hello@inkwave.me'
+const MAILTO = 'hello@inkwave.studio'
 
 async function fetchJson(url: string): Promise<Record<string, unknown>> {
   const r = await fetch(url, { headers: { accept: 'application/json' } })
