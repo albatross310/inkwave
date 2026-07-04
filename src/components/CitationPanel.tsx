@@ -429,11 +429,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     try {
       const res = await captureFromInput(value)
       const stored = await addToLibrary(res.item)
-      editor.chain().focus().insertCitation({ citekeys: [stored.id] }).run()
       setInput('')
       setNotice(res.warning
         ? { text: res.warning, kind: 'warn' }
-        : { text: `Added & cited "${stored.id}"`, kind: 'ok' })
+        : { text: `Added "${stored.id}" — click cite to insert`, kind: 'ok' })
     } catch (err) {
       setNotice({ text: err instanceof Error ? err.message : 'Capture failed', kind: 'err' })
     } finally {
