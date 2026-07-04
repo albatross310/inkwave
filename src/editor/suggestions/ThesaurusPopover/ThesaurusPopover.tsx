@@ -371,6 +371,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
         e.stopPropagation()
         if (e.key === 'Escape') { e.preventDefault(); cancelAnim(); closeCycle(); return }
+        // Alt+` / Alt+~ → insert the literal character (` and ~ are remapped to SCAS nav)
+        if (e.altKey && (e.key === '`' || e.key === '~')) {
+          e.preventDefault(); editor.commands.insertContent(e.key); return
+        }
         // ` = prev synonym, ~ (shift+`) = next synonym
         if (e.key === '`') { e.preventDefault(); nudge(-1); return }
         if (e.key === '~') { e.preventDefault(); nudge(+1); return }
@@ -384,9 +388,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         e.preventDefault(); return
       }
       // ` = next red word, ~ = prev red word (mirrors synonym nav direction)
+      // Alt+` / Alt+~ → insert the literal character instead
       if (e.key === '`' || e.key === '~') {
         const active = document.activeElement
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return
+        if (e.altKey) { e.preventDefault(); editor.commands.insertContent(e.key); return }
         e.preventDefault()
         if (tabCursorRef.current === null) tabCursorRef.current = editor.state.selection.from
         const cur = editor.state.selection.from

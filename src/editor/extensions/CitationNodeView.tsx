@@ -62,12 +62,15 @@ export function CitationNodeView({ node, selected }: NodeViewProps & { _doc?: In
   buildLabelRef.current = buildLabel
 
   useEffect(() => {
-    // Subscribe once on mount; use refs so we never need to re-subscribe when attrs or style change.
+    // Subscribe once on mount. Belt-and-suspenders: both the module singleton (bibProvider.subscribe)
+    // and the DOM event (inkwave:bib-changed) are used — NodeViews live in separate React roots and
+    // the module singleton can silently fail if the module is duplicated by the bundler.
     const schedule = () => queueMicrotask(() => void buildLabelRef.current())
     schedule()
     const unsubBib = bibProvider.subscribe(schedule)
     const unsubStyle = subscribeCitationStyle(schedule)
-    return () => { unsubBib(); unsubStyle() }
+    window.addEventListener('inkwave:bib-changed', schedule)
+    return () => { unsubBib(); unsubStyle(); window.removeEventListener('inkwave:bib-changed', schedule) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-build when node attrs change (citekey added/removed, locator edited, etc.)

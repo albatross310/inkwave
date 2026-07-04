@@ -88,7 +88,11 @@ class BibProviderImpl implements BibProvider {
 
   status(): BibProviderStatus { return { ...this._status } }
 
-  private notify(): void { for (const cb of this.subs) cb() }
+  private notify(): void {
+    for (const cb of this.subs) cb()
+    // Belt-and-suspenders: DOM event so NodeViews in separate React roots also receive updates.
+    window.dispatchEvent(new CustomEvent('inkwave:bib-changed'))
+  }
 }
 
 // Singleton — the entire app shares one provider.

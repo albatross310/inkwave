@@ -77,7 +77,8 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
         </p>
       ) : html ? (
         <div className="csl-bib-body" style={{ fontSize: '0.92em', lineHeight: 1.5 }}
-          dangerouslySetInnerHTML={{ __html: html }} />
+          dangerouslySetInnerHTML={{ __html: html }}
+          ref={el => { if (el) el.querySelectorAll<HTMLElement>('.csl-entry').forEach(e => { e.style.marginBottom = '0.75em' }) }} />
       ) : (
         <div style={{ fontSize: '0.92em', lineHeight: 1.5 }}>
           {plain.map((p, i) => <p key={i} style={{ margin: '0 0 0.6em', paddingLeft: '1.5em', textIndent: '-1.5em' }}>{p}</p>)}
