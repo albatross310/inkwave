@@ -161,133 +161,210 @@ function NavSide({
   )
 }
 
-// ── Git-style diff helpers ───────────────────────────────────────────────────
-// Render a word-level diff as an inline annotated stream with collapsed context.
-// Unchanged regions more than CONTEXT chars from a change collapse to a ··· separator.
-// Context windows are trimmed to sentence boundaries where possible.
-const DIFF_CONTEXT = 240  // characters of unchanged text to show around each change
+// ── Diff helpers ──────────────────────────────────────────────────────────────
 
-function buildDiffNodes(ops: DiffOp[]): React.ReactNode[] {
+const CONTEXT_WORDS = 5  // words of unchanged context shown either side of each change
+
+function wc(text: string): number { return (text.match(/\S+/g) ?? []).length }
+
+/** First n words + their trailing horizontal whitespace. */
+function takeFirst(text: string, n: number): string {
+  if (n <= 0) return ''
+  const re = /\S+/g
+  let end = 0, count = 0, m: RegExpExecArray | null
+  while (count < n && (m = re.exec(text)) !== null) { end = m.index + m[0].length; count++ }
+  const trail = text.slice(end).match(/^[ \t]*/)?.[0] ?? ''
+  return text.slice(0, end + trail.length)
+}
+
+/** Last n words, including any preceding newline(s) for paragraph context. */
+function takeLast(text: string, n: number): string {
+  if (n <= 0) return ''
+  const positions: number[] = []
+  const re = /\S+/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) positions.push(m.index)
+  if (!positions.length) return ''
+  const startIdx = positions[Math.max(0, positions.length - n)]
+  const pre = text.slice(0, startIdx)
+  const nl = pre.lastIndexOf('\n')
+  return text.slice(nl >= 0 ? nl : startIdx)
+}
+
+/**
+ * Build React nodes for the hunk-style diff panel.
+ * – 5-word context around each change, collapsed to ··· elsewhere
+ * – ¶N / p.N label at the start of a new hunk when the paragraph changes
+ * – data-opidx on change spans so clicks can target the left pane
+ */
+function buildDiffNodes(
+  ops: DiffOp[],
+  onChangeClick?: (opIdx: number) => void,
+): React.ReactNode[] {
   const n = ops.length
   if (!n) return []
 
-  // Precompute: for each op, how many chars of 'same' text lie between it and the NEXT change
-  const untilNext = new Array<number>(n).fill(Infinity)
-  let acc = Infinity
+  // Per-op: words of 'same' until the NEXT change op
+  const untilNextW = new Array<number>(n).fill(Infinity)
+  let accW = 0
   for (let i = n - 1; i >= 0; i--) {
-    if (ops[i].type !== 'same') { acc = 0 }
-    else { untilNext[i] = acc; acc = acc === Infinity ? ops[i].text.length : acc + ops[i].text.length }
+    if (ops[i].type !== 'same') { accW = 0 }
+    else { untilNextW[i] = accW; accW += wc(ops[i].text) }
   }
 
-  // Whether any change lies after op i
-  const anyChangeAfter = (() => {
-    const a = new Array<boolean>(n).fill(false)
-    let seen = false
-    for (let i = n - 1; i >= 0; i--) { if (ops[i].type !== 'same') seen = true; a[i] = seen }
-    return a
-  })()
+  // Per-op: does any change exist after this op?
+  const changeAfter = new Array<boolean>(n).fill(false)
+  let sawC = false
+  for (let i = n - 1; i >= 0; i--) { if (ops[i].type !== 'same') sawC = true; changeAfter[i] = sawC }
+
+  // Per-op: paragraph index in the "after" text at the START of each op
+  // pmToText joins paragraphs with \n\n, so count \n\n sequences
+  const opPara = new Array<number>(n).fill(0)
+  let para = 0
+  for (let i = 0; i < n; i++) {
+    opPara[i] = para
+    if (ops[i].type !== 'del') para += (ops[i].text.match(/\n\n/g) ?? []).length
+  }
+
+  // Per-op: cumulative word count at START of each op (for page estimation)
+  const opWords = new Array<number>(n).fill(0)
+  let cw = 0
+  for (let i = 0; i < n; i++) { opWords[i] = cw; if (ops[i].type !== 'del') cw += wc(ops[i].text) }
 
   const nodes: React.ReactNode[] = []
   let k = 0
-  let charsSinceLast = Infinity  // chars of same since last change (Infinity = no change yet)
-  let gapPending = false         // a ··· separator is queued but not yet flushed
+  let wordsSinceLast = Infinity
+  let gapPending = false
+  let lastHunkPara = -1
 
   const flushGap = () => {
     if (!gapPending) return
+    gapPending = false
     nodes.push(<span key={`g${k++}`} style={{
       display: 'block', textAlign: 'center', color: '#c4b5d8',
-      padding: '2px 0', fontStyle: 'italic', fontSize: '0.8em', userSelect: 'none',
+      padding: '1px 0', fontStyle: 'italic', fontSize: '0.78em', userSelect: 'none',
     }}>···</span>)
-    gapPending = false
   }
+
+  const emitLabel = (p: number, words: number) => {
+    if (p === lastHunkPara) return
+    lastHunkPara = p
+    const page = Math.floor(words / 250) + 1
+    const pageStr = page > 1 ? ` · p.${page}` : ''
+    nodes.push(<span key={`lbl${k++}`} style={{
+      display: 'block', fontSize: '0.7rem',
+      color: 'rgba(92,45,138,0.5)', userSelect: 'none',
+      padding: '5px 0 1px', fontStyle: 'normal', letterSpacing: '0.03em',
+    }}>¶{p + 1}{pageStr}</span>)
+  }
+
   const emit = (text: string, style?: React.CSSProperties) => {
-    if (!text) return
-    flushGap()
+    if (!text) return; flushGap()
     nodes.push(<span key={`t${k++}`} style={style}>{text}</span>)
+  }
+
+  const emitChange = (text: string, style: React.CSSProperties, opIdx: number) => {
+    if (!text) return; flushGap()
+    const clickable = !!onChangeClick
+    nodes.push(
+      <span
+        key={`c${k++}`}
+        data-opidx={String(opIdx)}
+        style={{ ...style, cursor: clickable ? 'pointer' : undefined }}
+        onClick={clickable ? () => onChangeClick!(opIdx) : undefined}
+        title={clickable ? 'Jump to this change in document' : undefined}
+      >{text}</span>
+    )
   }
 
   for (let i = 0; i < n; i++) {
     const op = ops[i]
+
     if (op.type !== 'same') {
-      charsSinceLast = 0
+      emitLabel(opPara[i], opWords[i])
+      wordsSinceLast = 0
       if (op.type === 'del') {
-        emit(op.text, {
+        emitChange(op.text, {
           color: '#b91c1c', textDecoration: 'line-through',
           background: 'rgba(185,28,28,0.07)', borderRadius: 2,
-        })
+        }, i)
       } else {
-        emit(op.text, {
+        emitChange(op.text, {
           background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2,
-        })
+        }, i)
       }
       continue
     }
 
     const t = op.text
-    const len = t.length
-    // How many chars to show from the head (proximity to previous change)
-    const headLen = charsSinceLast === Infinity ? 0 : Math.max(0, DIFF_CONTEXT - charsSinceLast)
-    // How many chars to show from the tail (proximity to next change)
-    const tailLen = untilNext[i] === Infinity ? 0 : Math.max(0, DIFF_CONTEXT - untilNext[i])
+    const words = wc(t)
+    const headW = wordsSinceLast === Infinity ? 0 : Math.max(0, CONTEXT_WORDS - wordsSinceLast)
+    const tailW = untilNextW[i] === Infinity ? 0 : Math.max(0, CONTEXT_WORDS - untilNextW[i])
+    wordsSinceLast = wordsSinceLast === Infinity ? words : wordsSinceLast + words
 
-    charsSinceLast = charsSinceLast === Infinity ? len : charsSinceLast + len
+    if (headW + tailW >= words) { emit(t); continue }
 
-    if (headLen + tailLen >= len) {
-      // Window covers the whole op — show entirely
-      emit(t)
-      continue
-    }
-
-    // Trim head: end at last sentence boundary within the head slice
-    if (headLen > 0) {
-      let head = t.slice(0, headLen)
-      const sentEnd = head.search(/[.!?]\s*$/) // trim to last sentence end if near edge
-      if (headLen < len && sentEnd > headLen * 0.4) head = head.slice(0, sentEnd + 1)
-      emit(head.trimEnd())
-    }
-
-    // Trim tail: start at first sentence boundary within the tail slice
-    if (tailLen > 0) {
-      gapPending = true  // separator before tail
-      let tail = t.slice(len - tailLen)
-      const sentStart = tail.search(/(?<=[.!?]\s{1,3})[A-ZÀ-ž]/)
-      if (sentStart > 0 && sentStart < tailLen * 0.6) tail = tail.slice(sentStart)
-      else tail = tail.trimStart()
-      emit(tail)
-    } else if (anyChangeAfter[i]) {
-      // Head only, more changes coming — add pending gap
-      gapPending = true
-    }
-    // Trailing-only gap (no more changes) — intentionally omitted
+    if (headW > 0)  emit(takeFirst(t, headW).trimEnd())
+    if (tailW > 0)  { gapPending = true; emit(takeLast(t, tailW)) }
+    else if (changeAfter[i]) gapPending = true
   }
 
   return nodes
 }
 
-// ── InlineDiffView ────────────────────────────────────────────────────────────
-// Right pane: git-style inline diff vs the immediately preceding snapshot.
-function InlineDiffView({ snapshot, prevSnap }: { snapshot: Snapshot; prevSnap: Snapshot | null }) {
-  const afterText  = useMemo(() => pmToText(snapshot.contentJson), [snapshot.id])
-  const beforeText = useMemo(() => prevSnap ? pmToText(prevSnap.contentJson) : '', [prevSnap?.id])
-
-  const ops = useMemo(
-    () => prevSnap ? diffWords(beforeText, afterText) : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prevSnap?.id, snapshot.id],
+// ── FullDiffView ──────────────────────────────────────────────────────────────
+// Left pane: entire document with inline green/red diff marks (no collapsing).
+// data-opidx on every span so the click-to-midline feature can target elements.
+function FullDiffView({ ops, snapshot }: { ops: DiffOp[] | null; snapshot: Snapshot }) {
+  if (!ops) {
+    return (
+      <div className="tiptap-editor ProseMirror">
+        <DocView doc={snapshot.contentJson} />
+      </div>
+    )
+  }
+  const nodes = ops.map((op, i) => {
+    if (op.type === 'del') return (
+      <span key={i} data-opidx={String(i)} style={{
+        color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)',
+      }}>{op.text}</span>
+    )
+    if (op.type === 'add') return (
+      <span key={i} data-opidx={String(i)} style={{
+        background: 'rgba(22,163,74,0.15)', color: '#166534',
+      }}>{op.text}</span>
+    )
+    return <span key={i} data-opidx={String(i)}>{op.text}</span>
+  })
+  return (
+    <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
+      {nodes}
+    </div>
   )
+}
 
+// ── InlineDiffView ────────────────────────────────────────────────────────────
+// Right pane: compact hunk view of the diff.
+function InlineDiffView({
+  ops, prevSnap, onChangeClick,
+}: {
+  ops: DiffOp[] | null
+  prevSnap: Snapshot | null
+  onChangeClick: (opIdx: number) => void
+}) {
   const { added, removed } = ops ? diffStats(ops) : { added: 0, removed: 0 }
   const hasChange = added > 0 || removed > 0
-  const nodes = useMemo(() => ops && hasChange ? buildDiffNodes(ops) : [], [ops, hasChange])
+  const nodes = useMemo(
+    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ops, hasChange, onChangeClick],
+  )
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
-      {/* Diff header bar */}
       <div style={{
-        flexShrink: 0,
-        fontSize: '0.75rem', color: '#888',
-        padding: '6px 16px',
-        borderBottom: '1px solid rgba(92,45,138,0.08)',
+        flexShrink: 0, fontSize: '0.75rem', color: '#888',
+        padding: '6px 16px', borderBottom: '1px solid rgba(92,45,138,0.08)',
         display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
         background: 'rgba(249,247,244,0.98)',
       }}>
@@ -301,25 +378,13 @@ function InlineDiffView({ snapshot, prevSnap }: { snapshot: Snapshot; prevSnap: 
           </>
         )}
       </div>
-
-      {/* Diff body */}
       <div style={{
-        flex: 1, overflow: 'auto',
-        padding: '1.25rem 1.75rem',
-        lineHeight: 1.8, fontSize: '1rem',
-        whiteSpace: 'pre-wrap',
+        flex: 1, overflow: 'auto', padding: '1rem 1.5rem',
+        lineHeight: 1.85, fontSize: '1rem', whiteSpace: 'pre-wrap',
         fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
       }}>
-        {!prevSnap && (
-          <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>
-            No previous snapshot to compare against.
-          </p>
-        )}
-        {prevSnap && !hasChange && (
-          <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>
-            Content is identical to the previous snapshot.
-          </p>
-        )}
+        {!prevSnap && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
+        {prevSnap && !hasChange && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
         {nodes}
       </div>
     </div>
@@ -327,8 +392,13 @@ function InlineDiffView({ snapshot, prevSnap }: { snapshot: Snapshot; prevSnap: 
 }
 
 // ── SplitDiffView ─────────────────────────────────────────────────────────────
-// Two-pane layout: left/top = clean snapshot, right/bottom = inline diff.
+// Two-pane layout: left/top = full annotated document, right/bottom = compact hunk diff.
 // Desktop: horizontal with draggable divider. Mobile/narrow: vertical stack.
+//
+// Midline: a dashed line fixed at the centre of the document pane.
+// Scroll lock: navigating snapshots keeps the same text at the midline.
+// Click-to-midline: clicking any change in the hunk panel scrolls the document pane
+//   so that change's text sits at the midline.
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow,
 }: {
@@ -337,17 +407,64 @@ function SplitDiffView({
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(50)
   const dragging = useRef(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const leftScrollRef = useRef<HTMLDivElement>(null)     // the scrollable left pane
+  const anchorRatioRef = useRef(0.5)                     // fraction of scrollHeight at midline
 
-  // Unified pointer/touch drag handler
+  // Compute ops once; shared between both panes
+  const ops = useMemo(() => {
+    if (!prevSnap) return null
+    const before = pmToText(prevSnap.contentJson)
+    const after  = pmToText(snapshot.contentJson)
+    return diffWords(before, after)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prevSnap?.id, snapshot.id])
+
+  // ── Scroll anchor ──────────────────────────────────────────────────────────
+  // Save the fractional position of the midline (scrollTop + h/2) / scrollHeight on scroll.
+  const onLeftScroll = useCallback(() => {
+    const el = leftScrollRef.current
+    if (!el || !el.scrollHeight) return
+    anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+  }, [])
+
+  // Restore the same midline ratio when the snapshot content changes.
+  useEffect(() => {
+    const el = leftScrollRef.current
+    if (!el) return
+    // Wait one rAF so the DOM has updated with new content
+    const id = requestAnimationFrame(() => {
+      const target = anchorRatioRef.current * el.scrollHeight - el.clientHeight / 2
+      el.scrollTop = Math.max(0, target)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [snapshot.id])
+
+  // ── Click-to-midline ───────────────────────────────────────────────────────
+  // Find the DOM element with matching data-opidx in the left pane and scroll to midline.
+  const scrollOpToMidline = useCallback((opIdx: number) => {
+    const el = leftScrollRef.current
+    if (!el) return
+    const target = el.querySelector(`[data-opidx="${opIdx}"]`) as HTMLElement | null
+    if (!target) return
+    // Walk offsetParent chain to get absolute offset within the scroll container
+    let offsetTop = 0
+    let node: HTMLElement | null = target
+    while (node && node !== el) { offsetTop += node.offsetTop; node = node.offsetParent as HTMLElement | null }
+    const newScrollTop = offsetTop - el.clientHeight / 2 + target.offsetHeight / 2
+    el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
+    anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
+  }, [])
+
+  // ── Divider drag ──────────────────────────────────────────────────────────
   const startDrag = useCallback((startX: number, startY: number) => {
     dragging.current = true
     const onMove = (x: number, y: number) => {
       if (!dragging.current || !containerRef.current) return
       const rect = containerRef.current.getBoundingClientRect()
       const raw = vertical
-        ? ((y - rect.top) / rect.height) * 100
-        : ((x - rect.left) / rect.width) * 100
+        ? ((y - rect.top)  / rect.height) * 100
+        : ((x - rect.left) / rect.width)  * 100
       setSplitPct(Math.max(20, Math.min(80, Math.round(raw))))
     }
     const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
@@ -363,45 +480,51 @@ function SplitDiffView({
     window.addEventListener('mouseup', onUp)
     window.addEventListener('touchmove', onTouchMove, { passive: false })
     window.addEventListener('touchend', onUp)
-    void startX; void startY  // unused but keep signature symmetric
+    void startX; void startY
   }, [vertical])
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        display: 'flex',
-        flexDirection: vertical ? 'column' : 'row',
-        height: '100%',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Left / top pane — clean document */}
+    <div ref={containerRef} style={{
+      display: 'flex', flexDirection: vertical ? 'column' : 'row',
+      height: '100%', overflow: 'hidden',
+    }}>
+
+      {/* ── Left / top pane: full annotated document + midline ── */}
       <div style={{
         [vertical ? 'height' : 'width']: `${splitPct}%`,
-        overflow: 'auto',
         flexShrink: 0,
+        position: 'relative',  // anchor for the absolute midline overlay
+        overflow: 'hidden',
       }}>
-        <Scroll phone={isPhone}>
-          <div className="tiptap-editor ProseMirror">
-            <DocView doc={snapshot.contentJson} />
-          </div>
-        </Scroll>
+        {/* Dotted midline — fixed at 50% of the pane height, not scrolling */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+            borderTop: '1px dashed rgba(92,45,138,0.38)',
+            pointerEvents: 'none',
+            transform: 'translateY(-0.5px)',
+          }}
+        />
+        {/* Scrollable content */}
+        <div
+          ref={leftScrollRef}
+          onScroll={onLeftScroll}
+          style={{ height: '100%', overflow: 'auto' }}
+        >
+          <Scroll phone={isPhone}>
+            <FullDiffView ops={ops} snapshot={snapshot} />
+          </Scroll>
+        </div>
       </div>
 
-      {/* Drag divider */}
+      {/* ── Drag divider ── */}
       <div
         style={{
-          [vertical ? 'height' : 'width']: 7,
-          background: 'rgba(92,45,138,0.10)',
-          cursor: vertical ? 'row-resize' : 'col-resize',
-          flexShrink: 0,
-          zIndex: 10,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          transition: 'background 0.12s',
-          userSelect: 'none',
+          [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
+          background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 0.12s', userSelect: 'none',
         }}
         onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
         onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
@@ -409,28 +532,22 @@ function SplitDiffView({
         onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
         title="Drag to resize"
       >
-        {/* Grip dots */}
-        <div style={{
-          display: 'flex',
-          flexDirection: vertical ? 'row' : 'column',
-          gap: 3,
-          pointerEvents: 'none',
-        }}>
-          {[0,1,2].map(n => (
-            <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />
-          ))}
+        <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
+          {[0,1,2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
         </div>
       </div>
 
-      {/* Right / bottom pane — diff view */}
+      {/* ── Right / bottom pane: compact hunk diff ── */}
       <div style={{
-        flex: 1,
-        overflow: 'hidden',
-        background: '#f9f7f4',
+        flex: 1, overflow: 'hidden', background: '#f9f7f4',
         borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
         borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
       }}>
-        <InlineDiffView snapshot={snapshot} prevSnap={prevSnap} />
+        <InlineDiffView
+          ops={ops}
+          prevSnap={prevSnap}
+          onChangeClick={scrollOpToMidline}
+        />
       </div>
     </div>
   )
