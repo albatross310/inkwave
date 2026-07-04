@@ -18,6 +18,7 @@ import { formatReferenceEntries, simpleRefList } from '../../citations/format'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
+  citedPages, formatPages,
 } from '../../citations/citationNav'
 import type { CSLItem, IwCitationMeta } from '../../types/document'
 import type { RefMode } from '../../citations/resolve'
@@ -85,10 +86,17 @@ function noteButtonHtml(key: string, hasNote: boolean): string {
   return `<button type="button" class="iw-note-add" data-iw-note="${key}" contenteditable="false" title="${hasNote ? 'Edit note' : 'Add note'}">${hasNote ? '✎' : '+'}</button>`
 }
 
-// Inject the entry anchor id + back-refs + note button into a single `.csl-entry` html string.
-function decorateEntry(id: string, html: string, occ: number, hasNote: boolean): string {
+// "esp. pp 2, 4–6" — the pages this source is pinpointed to across its in-text citations.
+function espHtml(pages: number[]): string {
+  if (!pages.length) return ''
+  const label = pages.length === 1 ? 'esp. p' : 'esp. pp'
+  return `<span class="iw-esp" contenteditable="false"> ${label} ${formatPages(pages)}.</span>`
+}
+
+// Inject the entry anchor id + esp-pages + back-refs + note button into a single `.csl-entry` html.
+function decorateEntry(id: string, html: string, occ: number, hasNote: boolean, pages: number[]): string {
   let out = html.replace(/^(\s*<[a-z]+)/i, `$1 id="${bibAnchorId(id)}"`)
-  const trailing = backrefHtml(id, occ) + noteButtonHtml(id, hasNote)
+  const trailing = espHtml(pages) + backrefHtml(id, occ) + noteButtonHtml(id, hasNote)
   out = out.replace(/<\/[a-z]+>\s*$/i, m => `${trailing}${m}`)
   return out
 }
@@ -132,7 +140,8 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       const noteById = new Map(items.map(it => [it.id, noteOf(it)]))
       setEntries(formatted.map(([id, html]) => {
         const note = noteById.get(id) ?? ''
-        return { id, html: decorateEntry(id, html, counts.get(id) ?? 0, !!note.trim()), occ: counts.get(id) ?? 0, note }
+        const pages = citedPages(editor.state.doc, id)
+        return { id, html: decorateEntry(id, html, counts.get(id) ?? 0, !!note.trim(), pages), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)
       setPlain([])

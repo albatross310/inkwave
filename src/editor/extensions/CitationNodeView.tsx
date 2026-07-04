@@ -22,6 +22,17 @@ import type { CitationAttrs } from './CitationNode'
 
 const INK = '#5c2d8a'
 
+// The page input lives inside the editor DOM, so native editing events must be stopped before they
+// bubble to ProseMirror (React handlers fire too late). Same fix as the bibliography notes field.
+const STOP_TYPES = ['keydown', 'keyup', 'cut', 'copy', 'paste', 'drop', 'dragstart', 'mousedown', 'pointerdown', 'click']
+function bindStopPM(el: HTMLInputElement | null): void {
+  const marked = el as (HTMLInputElement & { _iwStopBound?: boolean }) | null
+  if (!marked || marked._iwStopBound) return
+  marked._iwStopBound = true
+  const stop = (e: Event) => e.stopPropagation()
+  for (const t of STOP_TYPES) marked.addEventListener(t, stop)
+}
+
 // One item's in-text text — "Bacon, 2004" / "Smith et al., 2004" / (suppressAuthor) "2004".
 function oneCiteText(item: CSLItem, opts: { suppressAuthor?: boolean; locator?: string | null }): string {
   const authors = item.author ?? []
@@ -55,6 +66,19 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
   const [pdfKey, setPdfKey] = useState<string | null>(null)  // first cited source with an embedded PDF
+  const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!pageEdit) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e instanceof MouseEvent && (e.target as HTMLElement)?.closest?.('[data-iw-pagepop]')) return
+      setPageEdit(null)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close) }
+  }, [pageEdit])
 
   // Always-current ref — avoids stale closure inside the subscription callback.
   const attrsRef = useRef(attrs)
@@ -135,8 +159,12 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       id={citeAnchorId(s.key, s.occ)}
                       className="iw-cite-link"
                       style={{ color: INK }}
-                      title={`Go to reference: ${s.key}`}
-                      onClick={e => { e.stopPropagation(); navigateToAnchor(bibAnchorId(s.key)) }}
+                      title="Set page(s) · go to reference"
+                      onClick={e => {
+                        e.stopPropagation()
+                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setPageEdit({ key: s.key, x: r.left, y: r.bottom })
+                      }}
                     >
                       {s.text}
                     </span>
@@ -176,6 +204,47 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
         >
           📄
         </button>
+      )}
+      {pageEdit && (
+        <span
+          data-iw-pagepop=""
+          contentEditable={false}
+          onMouseDown={e => e.stopPropagation()}
+          style={{
+            position: 'fixed', left: pageEdit.x, top: pageEdit.y + 4, zIndex: 300,
+            background: '#fff', border: `1px solid ${INK}55`, borderRadius: 8,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.16)', padding: '6px 8px',
+            display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#57534e',
+            fontFamily: 'system-ui, sans-serif', userSelect: 'none',
+          }}
+        >
+          <span>p.</span>
+          <input
+            ref={bindStopPM}
+            autoFocus
+            value={attrs.locator ?? ''}
+            onChange={e => updateAttributes({ locator: e.target.value || null })}
+            placeholder="2, 4–6"
+            style={{ width: 64, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
+          />
+          <button type="button"
+            onClick={() => { navigateToAnchor(bibAnchorId(pageEdit.key)); setPageEdit(null) }}
+            style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            → refs
+          </button>
+          {pdfKey === pageEdit.key && (
+            <button type="button"
+              onClick={() => {
+                openPdf({ citekey: pageEdit.key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
+                  label: segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key,
+                  onLink: (quote, page) => updateAttributes({ quote, locator: String(page) }) })
+                setPageEdit(null)
+              }}
+              style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              📄 PDF
+            </button>
+          )}
+        </span>
       )}
     </NodeViewWrapper>
   )

@@ -43,6 +43,7 @@ export function ensureNavStyles(): void {
       user-select: none; transition: background-color 120ms ease, border-color 120ms ease;
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
+    .iw-esp { font-style: italic; color: ${INK}bb; font-size: 0.95em; }
   `
   document.head.appendChild(el)
 }
@@ -74,6 +75,45 @@ export function occurrenceCounts(doc: PMNode): Map<string, number> {
     }
   })
   return counts
+}
+
+// Parse a locator string ("2", "2-4", "2–4, 6") into [start,end] ranges.
+function parseRanges(loc: string): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  const re = /(\d+)\s*[–-]\s*(\d+)|(\d+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(loc))) {
+    if (m[1] && m[2]) out.push([Number(m[1]), Number(m[2])])
+    else if (m[3]) out.push([Number(m[3]), Number(m[3])])
+  }
+  return out
+}
+
+/** All distinct page numbers cited for a source across the document (from citation locators), sorted. */
+export function citedPages(doc: PMNode, key: string): number[] {
+  const set = new Set<number>()
+  doc.descendants(node => {
+    if (node.type.name !== 'citation') return
+    const keys = (node.attrs.citekeys as string[]) ?? []
+    if (!keys.includes(key)) return
+    const loc = node.attrs.locator as string | null
+    if (!loc) return
+    for (const [a, b] of parseRanges(loc)) for (let p = a; p <= Math.min(b, a + 999); p++) set.add(p)
+  })
+  return [...set].sort((x, y) => x - y)
+}
+
+/** Merge sorted page numbers into a compact "2, 4–6, 9" string. */
+export function formatPages(nums: number[]): string {
+  if (!nums.length) return ''
+  const parts: string[] = []
+  let start = nums[0], prev = nums[0]
+  for (let i = 1; i <= nums.length; i++) {
+    if (i < nums.length && nums[i] === prev + 1) { prev = nums[i]; continue }
+    parts.push(start === prev ? `${start}` : `${start}–${prev}`)
+    if (i < nums.length) { start = prev = nums[i] }
+  }
+  return parts.join(', ')
 }
 
 /** Occurrence index (1-based) of each citekey AT the citation node located at `targetPos`. */
