@@ -172,7 +172,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                         holdTimer.current = setTimeout(() => {
                           heldRef.current = true
-                          setPageEdit({ key: s.key, x: r.left, y: r.bottom })
+                          // Anchor at the citation's top-centre; the popover renders directly above it.
+                          setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top })
                         }, 450)
                       }}
                       onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
@@ -228,11 +229,12 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           contentEditable={false}
           onMouseDown={e => e.stopPropagation()}
           style={{
-            position: 'fixed', left: pageEdit.x, top: pageEdit.y + 4, zIndex: 300,
+            position: 'fixed', left: pageEdit.x, top: pageEdit.y, zIndex: 300,
+            transform: 'translate(-50%, calc(-100% - 8px))', // centred directly above the citation
             background: '#fff', border: `1px solid ${INK}55`, borderRadius: 8,
             boxShadow: '0 4px 16px rgba(0,0,0,0.16)', padding: '6px 8px',
             display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#57534e',
-            fontFamily: 'system-ui, sans-serif', userSelect: 'none',
+            fontFamily: 'system-ui, sans-serif', userSelect: 'none', whiteSpace: 'nowrap',
           }}
         >
           <span>p.</span>

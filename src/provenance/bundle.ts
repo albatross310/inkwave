@@ -3,7 +3,9 @@
 // signed receipt chain, and the signing key reference. A third party verifies it with no Inkwave
 // login (src/verify), against Bitcoin and the published key. Pure data assembly — no I/O here.
 
-import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../types/document'
+import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem } from '../types/document'
+import { bibProvider } from '../citations/bibProvider'
+import { simpleInText } from '../citations/format'
 import { signingPublicKeyHex } from './receipts'
 import { POOL_ID } from '../scas/pool'
 import { deviceId } from '../sync/presence'
@@ -14,9 +16,15 @@ import { deviceId } from '../sync/presence'
 // library, and a resolved "(Author, Year)" there would diverge from the exporter's. The bare citekeys
 // are stable across both. This still fixes the real bug — a dropped citation used to leave an orphaned
 // ". " in the prose/diff. (DocView, which is not verified, resolves the pretty author-year form.)
-function citationText(attrs: Record<string, unknown> | undefined): string {
+function citationText(attrs: Record<string, unknown> | undefined, resolve = false): string {
   const keys = (attrs?.citekeys as string[] | undefined) ?? []
   if (!keys.length) return ''
+  // Display mode (snapshot diff): resolve to "(Author, Year)" like the reader sees it. NEVER do this
+  // in the verifiable path — the verifier has no library and would diverge (keeps default resolve=false).
+  if (resolve) {
+    const items = keys.map(k => bibProvider.get(k)).filter((x): x is CSLItem => !!x)
+    if (items.length) return simpleInText(items)
+  }
   const loc = attrs?.locator ? `, ${String(attrs.locator)}` : ''
   const pre = attrs?.prefix ? `${String(attrs.prefix)} ` : ''
   const suf = attrs?.suffix ? String(attrs.suffix) : ''
@@ -26,12 +34,12 @@ function citationText(attrs: Record<string, unknown> | undefined): string {
 // A clean, readable plain-text copy of the document — block nodes (paragraphs/headings/list items)
 // separated by blank lines, hard breaks as newlines. Sits near the top of the bundle so the writing
 // is legible to a human opening the file, with no markdown syntax to parse.
-export function pmToText(doc: TiptapJSON): string {
+export function pmToText(doc: TiptapJSON, resolveCitations = false): string {
   const blocks: string[] = []
   const inline = (node: { type?: string; text?: string; content?: unknown[]; attrs?: Record<string, unknown> }): string => {
     if (node.type === 'text') return node.text ?? ''
     if (node.type === 'hardBreak') return '\n'
-    if (node.type === 'citation') return citationText(node.attrs)
+    if (node.type === 'citation') return citationText(node.attrs, resolveCitations)
     return (node.content as typeof node[] ?? []).map(inline).join('')
   }
   const walk = (node: { type?: string; text?: string; content?: unknown[] }): void => {

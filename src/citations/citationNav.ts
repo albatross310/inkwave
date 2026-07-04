@@ -43,7 +43,7 @@ export function ensureNavStyles(): void {
       user-select: none; transition: background-color 120ms ease, border-color 120ms ease;
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
-    .iw-esp { font-style: italic; color: ${INK}bb; font-size: 0.95em; }
+    .iw-esp { font-style: italic; color: #3a1e5e; font-size: 0.95em; }
   `
   document.head.appendChild(el)
 }

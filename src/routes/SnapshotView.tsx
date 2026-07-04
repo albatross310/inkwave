@@ -562,11 +562,12 @@ function SplitDiffView({
     return () => { root.style.removeProperty('--snap-split-pct') }
   }, [splitPct, vertical])
 
-  // Compute ops once; shared between both panes
+  // Compute ops once; shared between both panes. resolveCitations:true → the diff shows the reader's
+  // "(Author, Year)" form, not the raw citekeys (the library is loaded on this route).
   const ops = useMemo(() => {
     if (!prevSnap) return null
-    const before = pmToText(prevSnap.contentJson)
-    const after  = pmToText(snapshot.contentJson)
+    const before = pmToText(prevSnap.contentJson, true)
+    const after  = pmToText(snapshot.contentJson, true)
     return diffWords(before, after)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevSnap?.id, snapshot.id])
