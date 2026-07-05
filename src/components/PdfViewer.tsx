@@ -68,6 +68,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     for (let i = 0; i < pagesRef.current.length; i++) {
       const pg = pagesRef.current[i]
       pg.hlLayer.textContent = ''
+      // Measure the overlay layer itself — the SAME box selections are normalised against — so nothing
+      // (a page border, padding, sub-pixel rounding) can offset highlights from the text.
+      const pw = pg.hlLayer.clientWidth || pg.w, ph = pg.hlLayer.clientHeight || pg.h
       for (const hl of highlightsRef.current) {
         if (hl.page !== i + 1) continue
         const kind = hl.kind ?? 'highlight'
@@ -75,7 +78,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           const r0 = hl.rects[0]
           if (!r0) continue
           const note = document.createElement('div')
-          note.style.cssText = `position:absolute;left:${r0.x * pg.w}px;top:${r0.y * pg.h}px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;`
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;`
           note.textContent = hl.note || hl.text
           note.title = 'Click to edit (blank to delete)'
           note.onclick = () => {
@@ -91,7 +94,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         }
         for (const r of hl.rects) {
           const div = document.createElement('div')
-          const left = r.x * pg.w, top = r.y * pg.h, w = r.w * pg.w, h = r.h * pg.h
+          const left = r.x * pw, top = r.y * ph, w = r.w * pw, h = r.h * ph
           let paint: string
           if (kind === 'underline') paint = `left:${left}px;top:${top + h - 2}px;width:${w}px;height:2px;background:${hl.color};`
           else if (kind === 'strike') paint = `left:${left}px;top:${top + h / 2 - 1}px;width:${w}px;height:2px;background:${hl.color};`
@@ -108,7 +111,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           const x = document.createElement('button')
           x.textContent = '×'
           x.title = 'Remove annotation'
-          x.style.cssText = `position:absolute;left:${r0.x * pg.w - 7}px;top:${r0.y * pg.h - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid ${INK}66;background:#fff;color:${INK};cursor:pointer;font-size:12px;opacity:0.35;transition:opacity 120ms;pointer-events:auto;z-index:2;`
+          x.style.cssText = `position:absolute;left:${r0.x * pw - 7}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid ${INK}66;background:#fff;color:${INK};cursor:pointer;font-size:12px;opacity:0.35;transition:opacity 120ms;pointer-events:auto;z-index:2;`
           x.onmouseenter = () => { x.style.opacity = '1' }
           x.onmouseleave = () => { x.style.opacity = '0.35' }
           x.onclick = e => { e.stopPropagation(); removeHighlight(hl.id) }
@@ -306,7 +309,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         ?? highlightsRef.current.find(h => h.text.includes(initialQuote) || initialQuote.includes(h.text))
       const pg = hl ? pagesRef.current[hl.page - 1] : undefined
       if (hl && pg && hl.rects[0]) {
-        top = toTop(pg, hl.rects[0].y * pg.h - container.clientHeight / 2)
+        top = toTop(pg, hl.rects[0].y * (pg.hlLayer.clientHeight || pg.h) - container.clientHeight / 2)
         flashRect(pg, hl.rects[0])
       }
     }
@@ -320,7 +323,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
   function flashRect(pg: PageRef, r: HighlightRect) {
     const el = document.createElement('div')
-    el.style.cssText = `position:absolute;left:${r.x * pg.w}px;top:${r.y * pg.h}px;width:${r.w * pg.w}px;height:${r.h * pg.h}px;outline:2px solid ${INK};border-radius:2px;pointer-events:none;`
+    const pw = pg.hlLayer.clientWidth || pg.w, ph = pg.hlLayer.clientHeight || pg.h
+    el.style.cssText = `position:absolute;left:${r.x * pw}px;top:${r.y * ph}px;width:${r.w * pw}px;height:${r.h * ph}px;outline:2px solid ${INK};border-radius:2px;pointer-events:none;`
     pg.hlLayer.appendChild(el)
     setTimeout(() => el.remove(), 1800)
   }
@@ -337,7 +341,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const rects: HighlightRect[] = []
     for (const cr of clientRects) {
       for (let i = 0; i < pagesRef.current.length; i++) {
-        const pr = pagesRef.current[i].wrapper.getBoundingClientRect()
+        const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
         const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2
         if (cx >= pr.left && cx <= pr.right && cy >= pr.top && cy <= pr.bottom) {
           page = i + 1
