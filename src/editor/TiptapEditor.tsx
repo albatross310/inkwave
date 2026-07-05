@@ -25,7 +25,7 @@ import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/p
 import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { CommentMark } from './extensions/CommentMark'
 import { CommentNotes } from '../components/CommentNotes'
-import { activeSet, setActiveSet, suggestOn, setSuggestOn, onReviewChanged, DEFAULT_SET } from './review/reviewState'
+import { ReviewBar } from '../components/ReviewBar'
 import { MathInline } from './extensions/MathInline'
 import { MathBlock } from './extensions/MathBlock'
 import { MathPasteHandler } from './extensions/MathPasteHandler'
@@ -228,8 +228,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)   // review layer: sticky-note comments + track changes
-  const [reviewTick, setReviewTick] = useState(0)       // re-render the review bar on set/suggest changes
-  useEffect(() => onReviewChanged(() => setReviewTick(n => n + 1)), [])
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
@@ -1422,6 +1420,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           hideTrigger={isTouch || keyboardUp}
         />
 
+        {/* Review layer: sticky-note comments (always visible when present) + the review control bar
+            (only while the R button is toggled on). Comments live on the CommentMark in the doc. */}
+        {editor && <CommentNotes editor={editor} paperRef={paperRef} />}
+        {editor && reviewOpen && <ReviewBar editor={editor} bottom={88} onClose={() => setReviewOpen(false)} />}
+
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
             keyboard is up so it never sits over the writing. */}
@@ -1648,9 +1651,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           )}
                           {id === 'receipt' && (
                             <button type="button"
-                              onClick={() => { setReceiptOpen(o => !o) }}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Provenance record"
+                              onClick={() => { setReviewOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Review — comments & track changes"
                             >
                               <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
                             </button>
@@ -1694,9 +1697,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   )}
                   {slotId === 'receipt' && (
                     <button type="button"
-                      onClick={() => setReceiptOpen(o => !o)}
-                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                      title="Provenance record"
+                      onClick={() => setReviewOpen(o => !o)}
+                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                      title="Review — comments & track changes"
                     >
                       <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
                     </button>

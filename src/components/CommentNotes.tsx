@@ -3,7 +3,7 @@
 // their anchor and reposition on scroll/resize/edit. Click a note to edit its text (blank = delete).
 // Only comments in the ACTIVE set are shown. Data lives on the CommentMark in the doc (see CommentMark).
 
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { activeSet, onReviewChanged } from '../editor/review/reviewState'
@@ -43,6 +43,16 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
     const off = onReviewChanged(collect)
     return () => { editor.off('update', collect); off() }
   }, [editor])
+
+  // A newly-added comment (from the ReviewBar) opens straight into edit mode so you can type the note.
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      if (id) { setDraft(''); setEditingId(id) }
+    }
+    window.addEventListener('inkwave:edit-comment', onEdit)
+    return () => window.removeEventListener('inkwave:edit-comment', onEdit)
+  }, [])
 
   // Reposition (re-read anchor rects) on any scroll or resize.
   useEffect(() => {
