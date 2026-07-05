@@ -126,6 +126,45 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   `ParagraphGlyphExtension`, `GlyphDashboard`, or certification PDF/QR. Per the v4 spec's
   out-of-scope list these are later/Phase-2; the spine (M2–M6) comes first.
 
+## Major systems added since the spine (2026-06 → 2026-07)
+
+- **Cloud sync + writer-held files.** `storage/onedrive.ts` (Graph API), `storage/gdrive.ts`,
+  `storage/folder.ts` (File System Access). All three write the self-contained `.studio` bundle.
+  **INVARIANT — snapshot history is grow-only:** every write-back MUST union with the target's
+  existing snapshots first (`mergeSnapshots` in `provenance/snapshots.ts`) so a short local set
+  (fresh login / cleared data / a save racing ahead of restore) can never TRUNCATE the archive.
+  This was a real data-loss incident (2026-07-05). `restoreSnapshotsFromBundle` also unions.
+- **Native citations** (replacing Zotero/BBT). `citations/` — `bibProvider` (reactive store),
+  real CSL formatting, `CitationNodeView` (in-text purple hooks; reactive via editor.on('update')
+  + queueMicrotask), `ReferenceListNodeView` (bibliography). Citation nav (click hook ↔ reference
+  back-refs by DOCUMENT page). `pmToText(doc, resolveCitations)` — **must stay byte-deterministic**
+  when resolveCitations=false (verify/bundle rely on it); SnapshotView passes true for display.
+- **PDF viewer + annotations.** `components/PdfViewer.tsx` — bundled pdf.js (self-hosted wasm/fonts
+  in `public/pdfjs/`), lazy per-page render, markup overlays (highlight/underline/strike/text notes
+  stored on `_iw.highlights`, NOT baked into the PDF), select-sentence→link-to-citation, cursor-
+  anchored zoom, supersampled canvas (≥2× for crispness). `PdfSidePanel` docks side/bottom.
+  PDFs stored as OneDrive **sidecars** (`<base>.<citekey>.pdf`, uploaded once) + OPFS; embedded in
+  local-folder saves. URL PDFs via SSRF-guarded proxy `api/pdf.mjs?proxy=`. Haiku page-offset
+  detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
+- **Editor chrome.** `Scroll.tsx` — the fixed full-region scroll container is opt-in via the `fill`
+  prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make
+  it fixed there or it covers the diff panel). Solid styled scrollbar + inset `::before` so the fixed
+  waves don't bleed over it. `StyleBar.tsx` = the formatting bar (font/size/B/H/align/list/∀).
+- **In-app zoom (WIP, unmerged).** Editor zoom is font-reflow on master (`inkwave:editorZoom`,
+  Ctrl+wheel, pointer-anchored). Peter's target model is on branch **`feat/zoom-magnify`**: CSS
+  transform-magnify below the fit point (page scales up to fill width; scales guides/numbers/margins
+  uniformly since transform doesn't touch clientWidth) → font-reflow above it. NOT native browser
+  zoom (can't be scoped to one panel). PDF + editor + (todo) diff each zoom independently. See
+  memory `inkwave-hybrid-zoom`. Do NOT use CSS `zoom` on the parchment — it inflates clientWidth and
+  breaks the paginator.
+- **Review layer (IN PROGRESS, branch `feat/review`).** Peter's spec: live suggestion mode (track
+  changes on every keystroke, behind a toggle so normal typing is unaffected), comments as sticky
+  notes over the wave (not a panel), triggered from the **R** button in the footer toolbar, review
+  nav (←/→ + Alt+A accept / Alt+S discard), named annotation sets via a drop-up.
+- **Snapshot review** (`routes/SnapshotView.tsx`, `/snapshot`) — split diff (annotated doc + hunk
+  panel), keep-same-words-on-the-midline OR snap-to-biggest-change dotted-line modes, shift-wheel
+  fast scrub, per-version summaries (Haiku). Grow-only + deterministic pmToText apply here too.
+
 ## Code map
 
 ```
