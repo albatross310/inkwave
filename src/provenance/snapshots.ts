@@ -75,6 +75,25 @@ async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promis
   await writable.close()
 }
 
+/** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back
+ *  (OPFS restore, folder mirror, cloud sync) may ever SHRINK it just because the local OPFS set is
+ *  momentarily short — a fresh login, cleared site data, or a sync racing ahead of a restore. The
+ *  richer copy wins on an id clash (more signed receipts = more evidence); ordering is by createdAt. */
+export function mergeSnapshots(a: Snapshot[], b: Snapshot[]): Snapshot[] {
+  const byId = new Map<string, Snapshot>()
+  for (const s of a) if (s && s.id) byId.set(s.id, s)
+  for (const s of b) {
+    if (!s || !s.id) continue
+    const prev = byId.get(s.id)
+    if (!prev || receiptCount(s) >= receiptCount(prev)) byId.set(s.id, s)
+  }
+  return [...byId.values()].sort((x, y) => (x.createdAt < y.createdAt ? -1 : x.createdAt > y.createdAt ? 1 : 0))
+}
+function receiptCount(s: Snapshot): number {
+  const r = (s as { receipts?: unknown[] }).receipts
+  return Array.isArray(r) ? r.length : 0
+}
+
 /** All snapshots for a document, in creation order. */
 export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
@@ -96,8 +115,9 @@ export async function deleteSnapshot(documentId: string, snapId: string): Promis
 export async function restoreSnapshotsFromBundle(documentId: string, bundleSnaps: Snapshot[]): Promise<void> {
   if (!bundleSnaps.length) return
   const existing = await readSnapshotsFile(documentId)
-  if (existing.length >= bundleSnaps.length) return // local is already at least as complete
-  await writeSnapshotsFile(documentId, bundleSnaps)
+  const merged = mergeSnapshots(existing, bundleSnaps)
+  if (merged.length <= existing.length) return // OPFS already holds everything the bundle has
+  await writeSnapshotsFile(documentId, merged)   // union — never drops local-only snapshots either
 }
 
 export async function latestSnapshot(documentId: string): Promise<Snapshot | null> {

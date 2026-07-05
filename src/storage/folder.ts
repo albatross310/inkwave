@@ -6,6 +6,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
@@ -126,9 +127,18 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
   const handle = await getSaveFileHandle(doc.id, false)
   if (!handle) return false
   try {
+    // GROW-ONLY: never let a write shrink the file's archived history. If a short local OPFS set
+    // (fresh login / cleared data / race ahead of restore) reached us, union it with whatever the
+    // file already holds first — otherwise this overwrite would silently truncate provenance.
+    let merged = snapshots
+    try {
+      const existing = parseTraceFile(await (await handle.getFile()).text())
+      if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
+    } catch { /* new / unreadable file → write the local set as-is */ }
     const writable = await handle.createWritable()
-    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, snapshots)))
+    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, merged)))
     await writable.close()
+    if (merged.length > snapshots.length) await restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return true
   } catch {
     return false

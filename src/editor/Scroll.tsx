@@ -23,11 +23,14 @@ export function Scroll({
   paperRef,
   containerRef,
   phone = false,
+  fill = false,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
   containerRef?: RefObject<HTMLDivElement>
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
+  fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
+                  // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
 }) {
   // The (fixed) background waves don't scroll with the page. As you scroll we only sway them
   // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
@@ -88,7 +91,7 @@ export function Scroll({
   }, [phone])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}

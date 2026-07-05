@@ -5,7 +5,8 @@
 // duplicate) on every sync. Gated on VITE_GOOGLE_CLIENT_ID — inert until that's set.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
+import { composeTraceFile, buildExportBundle, bundleFilename, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
 
@@ -270,10 +271,21 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (!CLIENT_ID) return { ok: false, webUrl: null }
   const token = await getDriveToken(false)
   if (!token) return { ok: false, webUrl: null }
-  const file = composeTraceFile(buildExportBundle(doc, snapshots))
+  // GROW-ONLY: union with the snapshots already in the remote file before overwriting, so a short
+  // local set can never truncate the archived history (see syncToOneDrive for the rationale).
+  let merged = snapshots
+  const fileId = driveFileId(doc.id)
+  if (fileId) {
+    try {
+      const text = await downloadGoogleDriveFile(fileId)
+      if (text) { const remote = parseTraceFile(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
+    } catch { /* unreadable → write local as-is */ }
+  }
+  const file = composeTraceFile(buildExportBundle(doc, merged))
   try {
     const webUrl = await uploadDrive(token, doc.id, gDriveFilename(doc.id) ?? bundleFilename(doc), file)
     setDocSource(doc.id, 'gdrive')
+    if (merged.length > snapshots.length) void restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }

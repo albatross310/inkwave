@@ -1377,7 +1377,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </button>
           </div>
         )}
-        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch}>
+        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill>
           <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />

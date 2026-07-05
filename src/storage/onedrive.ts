@@ -11,6 +11,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
@@ -281,12 +282,25 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   if (!token) return { ok: false, webUrl: null }
   // The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes. The cited PDFs go
   // as sidecar files next to it, uploaded once (re-uploaded only if the PDF itself changes).
-  const bundle = buildExportBundle(doc, snapshots)
   const studioName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
+  // GROW-ONLY: read the snapshots already in the remote file and union them in before overwriting,
+  // so a short local set (fresh login / cleared data / race ahead of restore) can't truncate the
+  // archived history. Syncs are throttled (≥20s) and the .studio is lean (no PDF bytes), so the
+  // extra GET is cheap. 404/parse-fail on a brand-new file → just write the local set.
+  let merged = snapshots
+  try {
+    const res = await fetch(contentUrl(studioName), { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) {
+      const remote = parseTraceFile(await res.text())
+      if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots)
+    }
+  } catch { /* no remote yet → write local as-is */ }
+  const bundle = buildExportBundle(doc, merged)
   try {
     const webUrl = await putFile(token, studioName, composeTraceFile(bundle))
     setDocSource(doc.id, 'onedrive')
     void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget
+    if (merged.length > snapshots.length) void restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }

@@ -42,7 +42,10 @@
      panel). So its scrollbar sits at the editor's own right edge in the side dock, and is confined to
      the editor's pane in the bottom dock — instead of the viewport scrollbar hiding under the panel.
      The fixed ::before waves stay viewport-anchored regardless. */
-  .inkwave-editor-surface:not(.is-phone) {
+  /* Only the LIVE editor (Scroll fill) becomes a fixed, full-region scroll container.
+     The snapshot view reuses <Scroll> inside a split pane, where the surface must stay
+     in-flow (position: static) so it doesn't cover the diff panel. */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) {
     position: fixed;
     top: 0;
     left: 0;
@@ -312,7 +315,8 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #1b6b3d;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
+    color: #237a47;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) — a mid green:
+                         between the first-cut #2e8b57 and the too-dark #1b6b3d */
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;
@@ -326,7 +330,7 @@
 
   /* Focused word (popover open) — transparent in practice (the reel renders the word). */
   .scas-focused {
-    color: #5c2d8a;
+    color: #6f3b9e;
   }
 
   /* A substituted (secondary) word — committed from a synonym, not the original. Rendered the
@@ -334,7 +338,7 @@
      it had in the reel, and reopening it shows the same colour (no jump). The unchanged original
      word stays the lighter #9b5ccc. */
   .scas-secondary {
-    color: #5c2d8a;
+    color: #6f3b9e;   /* mid purple — lighter than the brand ink #5c2d8a, still clearly the "final" colour */
   }
 
   /* Memory cross-out: a substituted slot shows its ORIGINAL word struck-through just beneath the new
@@ -344,7 +348,7 @@
      switched by data-crossout on the editor root (the settings toggle). */
   /* A RESOLVED slot (committed from the cycle) reads purple — the "final" colour. */
   .scas-red[data-scas-old] {
-    color: #5c2d8a;
+    color: #6f3b9e;
     /* Themeable tea-stain fill behind the crossed-out word (one knob so a future page-colour change
        can recolour every watermark at once). */
     --scas-egg: rgba(120, 78, 38, 0.16);
