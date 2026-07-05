@@ -191,13 +191,14 @@ export function Scroll({
           className="scroll-paper relative pt-8 pb-24"
           style={{
             borderRadius: phone ? 0 : '8px',
-            // Margins stay at their setting values (NOT scaled by widthScale) so the gapped-page
-            // paginator — which forces paddingTop = getTopMarginPx() and computes breaks from topM +
-            // MARGIN_BOTTOM — stays consistent with what we render. Phase 3 still narrows the sides.
-            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
-            paddingRight: phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
-            paddingTop:   `${topMarginPx}px`,
-            paddingBottom:`${btmMarginPx}px`,
+            // Margins scale WITH the page (widthScale) so phase-1 page zoom is truly proportional —
+            // otherwise fixed-px margins look huge when zoomed out and thin when zoomed in. The gapped
+            // paginator derives the same scale from clientWidth/basePaperPx (see PaginationExtension),
+            // so gapped breaks stay consistent. Phase 3 additionally narrows the sides (marginScale).
+            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx * (hybrid ? widthScale : 1) * marginScale}px`,
+            paddingRight: phone ? '1.25rem' : `${sideMarginPx * (hybrid ? widthScale : 1) * marginScale}px`,
+            paddingTop:   `${topMarginPx * (hybrid ? widthScale : 1)}px`,
+            paddingBottom:`${btmMarginPx * (hybrid ? widthScale : 1)}px`,
             '--para-spacing': `${paraSpacingEm}em`,
           } as React.CSSProperties}
         >
@@ -249,11 +250,15 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       const pageH = w * (paperSize === 'letter'
         ? (landscape ? 8.5 / 11 : 11 / 8.5)
         : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
+      // Page-zoom scale (parchment width vs its true 100% size; 1 when not hybrid-zoomed) so the dashed
+      // rule offset scales with the page — matching the gapped paginator (see PaginationExtension).
+      const basePaperPx = ((paperSize === 'letter' ? (landscape ? 279 : 216) : (landscape ? 297 : 210)) * 96) / 25.4
+      const marginBottom = MARGIN_BOTTOM * (basePaperPx > 0 ? w / basePaperPx : 1)
       const count = Math.max(1, Math.ceil(total / pageH))
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {
-        // Align with gapped-page-mode break: content ends at pageH - MARGIN_BOTTOM, not pageH
-        const bottom = i * pageH - MARGIN_BOTTOM
+        // Align with gapped-page-mode break: content ends at pageH - marginBottom, not pageH
+        const bottom = i * pageH - marginBottom
         next.push({ y: Math.min(bottom, total - 2), n: i, rule: bottom < total })
       }
       setMarks(next)
