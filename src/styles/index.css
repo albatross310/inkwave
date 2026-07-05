@@ -68,6 +68,16 @@
     border: 3px solid #cfe9ec; /* inset the thumb inside the aqua track */
   }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-thumb:hover { background: rgba(92, 45, 138, 0.5); }
+  /* The fixed wave ::before is a positioned descendant of the scroll container, so in Chromium it
+     paints OVER the container's own scrollbars (styling the track alone didn't stop the bleed). Inset
+     the waves away from the scrollbar gutters — 13px (matching ::-webkit-scrollbar) plus any PDF-panel
+     room — so the waves never reach the scrollbar channel. `scrollbar-gutter: stable` keeps the gutter
+     reserved so the inset strip always coincides with the scrollbar (no bare aqua sliver). */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) { scrollbar-gutter: stable; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone)::before {
+    right: calc(var(--iw-pdf-room, 0px) + 13px);
+    bottom: calc(var(--iw-pdf-room-bottom, 0px) + 13px);
+  }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
