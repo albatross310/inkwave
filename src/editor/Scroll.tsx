@@ -53,34 +53,34 @@ export function Scroll({
   const [editorZoom, setEditorZoom] = useState(() => {
     try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
   })
-  // Anchor the font zoom to the pointer: record the content fraction under the cursor before the
-  // reflow, restore it after, so whatever's under the cursor stays at the same screen height.
-  const zoomAnchorRef = useRef<{ offY: number; fracY: number } | null>(null)
+  const editorZoomRef = useRef(editorZoom); editorZoomRef.current = editorZoom
+  // Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
+  // reading the anchored element's new position, then correct scrollTop in the SAME frame — all before
+  // the browser paints. The anchor is the actual element under the cursor (exact — a fraction estimate
+  // drifts badly further down the page since reflow doesn't grow uniformly). scrollLeft is held so it
+  // never jumps to the left edge. React state is updated after, to the same value (no re-paint).
   useEffect(() => {
     const el = surfaceRef.current
     if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      const offY = e.clientY - el.getBoundingClientRect().top
-      zoomAnchorRef.current = { offY, fracY: el.scrollHeight ? (el.scrollTop + offY) / el.scrollHeight : 0 }
-      setEditorZoom(z => {
-        const next = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
-        try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
-        return next
-      })
+      const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null // skips pointer-events:none guides
+      const cursorY = e.clientY, keepLeft = el.scrollLeft
+      const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
+      el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
+      if (target && el.contains(target) && target.isConnected) {
+        const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
+        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - cursorY)) // anchor back under the pointer
+        el.scrollLeft = keepLeft
+      }
+      editorZoomRef.current = next
+      setEditorZoom(next) // keep React in sync; sets the same var value, so no extra paint
+      try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [phone])
-  // After the reflow settles, put the anchored content back under the cursor.
-  useEffect(() => {
-    const el = surfaceRef.current
-    const a = zoomAnchorRef.current
-    if (!el || phone || !a) return
-    const id = requestAnimationFrame(() => { el.scrollTop = Math.max(0, a.fracY * el.scrollHeight - a.offY) })
-    return () => cancelAnimationFrame(id)
-  }, [editorZoom, phone])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
