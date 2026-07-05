@@ -30,13 +30,27 @@
     padding: 1.25rem 1rem 8rem;
   }
 
-  /* When the PDF panel is open it sets --iw-pdf-room (side dock) or --iw-pdf-room-bottom (bottom dock);
-     the surface pads that edge so the parchment clears the panel (mx-auto recentres for the side case;
-     bottom padding lifts the end of the writing above a bottom dock). */
-  .inkwave-editor-surface {
+  /* Phone keeps BODY scroll (so the address bar hides and the on-screen keyboard behaves); make room
+     for the PDF panel with padding. */
+  .inkwave-editor-surface.is-phone {
     padding-right: calc(1rem + var(--iw-pdf-room, 0px));
     padding-bottom: calc(8rem + var(--iw-pdf-room-bottom, 0px));
     transition: padding-right 0.18s ease, padding-bottom 0.18s ease;
+  }
+
+  /* Desktop: the surface IS the scroll container, sized to the EDITOR region (viewport minus the PDF
+     panel). So its scrollbar sits at the editor's own right edge in the side dock, and is confined to
+     the editor's pane in the bottom dock — instead of the viewport scrollbar hiding under the panel.
+     The fixed ::before waves stay viewport-anchored regardless. */
+  .inkwave-editor-surface:not(.is-phone) {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: var(--iw-pdf-room, 0px);
+    bottom: var(--iw-pdf-room-bottom, 0px);
+    min-height: 0;
+    overflow: auto;
+    transition: right 0.18s ease, bottom 0.18s ease;
   }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.

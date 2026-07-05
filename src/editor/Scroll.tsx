@@ -52,16 +52,19 @@ export function Scroll({
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
+    // Desktop scrolls the surface itself (it's the scroll container); phone scrolls the window/body.
+    const target: HTMLElement | Window = phone ? window : el
     let raf = 0
     const apply = () => {
       raf = 0
-      el.style.setProperty('--wave-x', `${(window.scrollY * 0.09).toFixed(1)}px`) // horizontal sway
+      const y = phone ? window.scrollY : el.scrollTop
+      el.style.setProperty('--wave-x', `${(y * 0.09).toFixed(1)}px`) // horizontal sway
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => { window.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
-  }, [])
+    target.addEventListener('scroll', onScroll, { passive: true })
+    return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
+  }, [phone])
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}`}>

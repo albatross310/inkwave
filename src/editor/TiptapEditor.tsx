@@ -1872,8 +1872,9 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
     if (!open) return
     const close = () => setOpen(false)
     document.addEventListener('mousedown', close)
-    window.addEventListener('scroll', close, { passive: true })
-    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close) }
+    // capture:true so it also fires when the desktop editor's own scroll container scrolls.
+    window.addEventListener('scroll', close, { passive: true, capture: true })
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, { capture: true } as EventListenerOptions) }
   }, [open])
 
   // Listen for symbol changes from the math input boxes.

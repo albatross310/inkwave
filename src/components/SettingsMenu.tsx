@@ -21,8 +21,8 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     const onScroll = () => setOpen(false)
     document.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll) }
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true })
+    return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions) }
   }, [open])
 
   function toggle() { setOpen(o => !o) }
