@@ -269,13 +269,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, citekey])
 
-  // ── Zoom: re-render at fitScale*zoom, preserving the scroll ratio ──
+  // ── Zoom: re-render at fitScale*zoom, keeping the point at the viewport CENTRE fixed ──
+  // Track the content fraction under the centre of the viewport on BOTH axes and restore it after the
+  // re-render, so zooming grows/shrinks around the middle of the canvas instead of drifting to a corner.
   useEffect(() => {
     if (!docRef.current || status !== 'ready') return
     const el = scrollRef.current!
-    const ratio = el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0
+    const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + el.clientHeight / 2) / el.scrollHeight : 0.5
+    const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth  : 0.5
     void renderPages(fitScaleRef.current * zoom).then(() => {
-      requestAnimationFrame(() => { el.scrollTop = ratio * Math.max(0, el.scrollHeight - el.clientHeight) })
+      requestAnimationFrame(() => {
+        el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - el.clientHeight / 2)
+        el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - el.clientWidth  / 2)
+      })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom])
