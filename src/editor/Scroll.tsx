@@ -69,9 +69,17 @@ export function Scroll({
           fills the screen edge-to-edge, no shadow. */}
       <div
         ref={paperRef}
-        className="mx-auto w-full"
+        // FIXED page width (not max-width + w-full) so the text always reflows at true A4/Letter width.
+        // That keeps words-per-line — and therefore words-per-page — constant regardless of screen
+        // width, so the page-break guides + gapped pages fall at the SAME content on any screen (they
+        // used to move because pageH scaled with the rendered width). Narrower containers scroll
+        // horizontally instead of reflowing. Phone + 'scroll' paper keep the fluid full-width layout.
+        className={(() => {
+          if (phone || getPaperSize() === 'scroll') return 'mx-auto w-full'
+          return 'mx-auto'
+        })()}
         style={{
-          maxWidth: (() => {
+          width: (() => {
             if (phone) return undefined
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
