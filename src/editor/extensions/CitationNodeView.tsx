@@ -20,6 +20,7 @@ import {
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
 import { pageOffsetOf } from '../../citations/pageOffset'
+import { sourceUrlOf, openSourceAtPinpoint } from '../../citations/sourceLink'
 import type { CSLItem, InkwaveDocument, IwCitationMeta } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
@@ -140,6 +141,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   const hasMissing = segs.some(s => !s.found)
   const pre = attrs.prefix ? `${attrs.prefix} ` : ''
   const suf = attrs.suffix ?? ''
+  const pageEditUrl = pageEdit ? sourceUrlOf(bibProvider.get(pageEdit.key)) : null
 
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
@@ -238,35 +240,55 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
             transform: 'translate(-50%, calc(-100% - 8px))', // centred directly above the citation
             background: '#fff', border: `1px solid ${INK}55`, borderRadius: 8,
             boxShadow: '0 4px 16px rgba(0,0,0,0.16)', padding: '6px 8px',
-            display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#57534e',
-            fontFamily: 'system-ui, sans-serif', userSelect: 'none', whiteSpace: 'nowrap',
+            display: 'flex', flexDirection: 'column', gap: 6, fontSize: '12px', color: '#57534e',
+            fontFamily: 'system-ui, sans-serif', userSelect: 'none',
           }}
         >
-          <span>p.</span>
-          <input
-            ref={bindStopPM}
-            autoFocus
-            value={attrs.locator ?? ''}
-            onChange={e => updateAttributes({ locator: e.target.value || null })}
-            placeholder="2, 4–6"
-            style={{ width: 64, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
-          />
-          <button type="button"
-            onClick={() => { navigateToAnchor(bibAnchorId(pageEdit.key)); setPageEdit(null) }}
-            style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            → refs
-          </button>
-          {pdfKey === pageEdit.key && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>p.</span>
+            <input
+              ref={bindStopPM}
+              autoFocus
+              value={attrs.locator ?? ''}
+              onChange={e => updateAttributes({ locator: e.target.value || null })}
+              placeholder="2, 4–6"
+              style={{ width: 60, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
+            />
             <button type="button"
-              onClick={() => {
-                openPdf({ citekey: pageEdit.key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
-                  label: segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key,
-                  onLink: (quote) => updateAttributes({ quote }) })
-                setPageEdit(null)
-              }}
-              style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              📄 PDF
+              onClick={() => { navigateToAnchor(bibAnchorId(pageEdit.key)); setPageEdit(null) }}
+              style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              → refs
             </button>
+            {pdfKey === pageEdit.key && (
+              <button type="button"
+                onClick={() => {
+                  openPdf({ citekey: pageEdit.key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
+                    label: segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key,
+                    onLink: (quote) => updateAttributes({ quote }) })
+                  setPageEdit(null)
+                }}
+                style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                📄 PDF
+              </button>
+            )}
+          </div>
+          {/* Sentence pinpoint + open-in-browser deep link (works for any web source with a URL). */}
+          {pageEditUrl && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                ref={bindStopPM}
+                value={attrs.quote ?? ''}
+                onChange={e => updateAttributes({ quote: e.target.value || null })}
+                placeholder="cited sentence (opens the source there)"
+                style={{ flex: 1, minWidth: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
+              />
+              <button type="button"
+                title="Open the source in your browser at this sentence"
+                onClick={() => { openSourceAtPinpoint(pageEditUrl, { quote: attrs.quote, page: pageFromLocator(attrs.locator) }); setPageEdit(null) }}
+                style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                ↗ source
+              </button>
+            </div>
           )}
         </span>,
         document.body,
