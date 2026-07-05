@@ -172,6 +172,7 @@ export function OptionsMenu({
     { label: 'Print', run: () => onPrint?.() },
     { label: 'Verify a record', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
+    { label: 'Privacy', run: () => navigate('/privacy') },
   ]
   if (installPrompt) {
     items.push({
