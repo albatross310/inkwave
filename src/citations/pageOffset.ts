@@ -8,7 +8,7 @@
 // with flag 'raw' (use the PDF's own pages, flagged as unverified).
 
 import { getPdfjs, PDF_DOC_PARAMS } from './pdfjsSetup'
-import { loadPdf } from './pdfStore'
+import { getPdfData } from './pdfSource'
 import { bibProvider } from './bibProvider'
 import { addToLibrary } from './library'
 import type { IwCitationMeta, CSLItem } from '../types/document'
@@ -29,10 +29,10 @@ export async function detectPageOffset(citekey: string): Promise<void> {
   let offset = 0
   let flag: 'verified' | 'raw' = 'raw'
   try {
-    const blob = await loadPdf(citekey)
-    if (!blob) return
+    const bytes = await getPdfData(citekey)
+    if (!bytes) return
     const pdfjs = await getPdfjs()
-    const task = pdfjs.getDocument({ data: await blob.arrayBuffer(), ...PDF_DOC_PARAMS })
+    const task = pdfjs.getDocument({ data: bytes, ...PDF_DOC_PARAMS })
     const doc = await task.promise
     const n = doc.numPages
     // Sample content pages (skip the cover; bias to the body where arabic numbers live).

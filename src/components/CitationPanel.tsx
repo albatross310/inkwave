@@ -503,10 +503,25 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     if (cur) {
       const iw = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}) }
       delete (iw as IwCitationMeta).pdfName
+      delete (iw as IwCitationMeta).pdfUrl
       delete (iw as IwCitationMeta).highlights   // annotations belonged to the old PDF
+      delete (iw as IwCitationMeta).pageOffset
+      delete (iw as IwCitationMeta).pageOffsetFlag
       await addToLibrary({ ...cur, _iw: iw })
     }
-    setNotice({ text: `Removed the PDF for "${item.id}" — attach a new one with 📎 PDF.`, kind: 'ok' })
+    setNotice({ text: `Removed the PDF for "${item.id}".`, kind: 'ok' })
+  }
+
+  async function attachPdfUrl(item: CSLItem) {
+    const url = window.prompt('Public PDF URL (opens in-app for markup, no file stored):', item.URL ? String(item.URL) : 'https://')?.trim()
+    if (!url) return
+    if (!/^https?:\/\/.+/i.test(url)) { setNotice({ text: 'That doesn’t look like a URL.', kind: 'err' }); return }
+    const cur = bibProvider.get(item.id)
+    if (!cur) return
+    const iw: IwCitationMeta = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}), pdfUrl: url }
+    await addToLibrary({ ...cur, _iw: iw })
+    void detectPageOffset(item.id)
+    setNotice({ text: `Linked PDF URL for "${item.id}" — click 📄 to open + annotate it.`, kind: 'ok' })
   }
 
   async function saveEdit(updated: CSLItem) {
@@ -800,26 +815,36 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         onClick={e => { e.stopPropagation(); visitSource(item) }}
                       >↗</button>
                     )}
-                    {(item as { _iw?: IwCitationMeta })._iw?.pdfName ? (
-                      <>
-                        <button type="button"
-                          title={`Open embedded PDF (${(item as { _iw?: IwCitationMeta })._iw?.pdfName})`}
-                          className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
-                          onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
-                        >📄 PDF</button>
-                        <button type="button"
-                          title="Remove this PDF (and its annotations) so you can attach a new one"
-                          className="text-[11px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500"
-                          onClick={e => { e.stopPropagation(); if (confirm('Remove this PDF and its annotations?')) void removePdf(item) }}
-                        >✕</button>
-                      </>
-                    ) : (
-                      <button type="button"
-                        title="Embed a PDF for this source"
-                        className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
-                        onClick={e => { e.stopPropagation(); attachPdf(item) }}
-                      >📎 PDF</button>
-                    )}
+                    {(() => {
+                      const iw = (item as { _iw?: IwCitationMeta })._iw
+                      return iw?.pdfName || iw?.pdfUrl ? (
+                        <>
+                          <button type="button"
+                            title={iw?.pdfName ? `Open embedded PDF (${iw.pdfName})` : `Open linked PDF (${iw?.pdfUrl})`}
+                            className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
+                            onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
+                          >{iw?.pdfName ? '📄 PDF' : '🔗 PDF'}</button>
+                          <button type="button"
+                            title="Remove this PDF (and its annotations)"
+                            className="text-[11px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500"
+                            onClick={e => { e.stopPropagation(); if (confirm('Remove this PDF and its annotations?')) void removePdf(item) }}
+                          >✕</button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button"
+                            title="Embed a PDF file for this source"
+                            className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
+                            onClick={e => { e.stopPropagation(); attachPdf(item) }}
+                          >📎 PDF</button>
+                          <button type="button"
+                            title="Link a public PDF by URL (annotate in-app, no file stored)"
+                            className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
+                            onClick={e => { e.stopPropagation(); void attachPdfUrl(item) }}
+                          >🔗 URL</button>
+                        </>
+                      )
+                    })()}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>

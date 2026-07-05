@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { loadPdf } from '../citations/pdfStore'
+import { getPdfData } from '../citations/pdfSource'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
 
@@ -24,6 +24,7 @@ interface Viewing {
 export function PdfSidePanel() {
   const [viewing, setViewing] = useState<Viewing | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   const [width, setWidth] = useState(560)
   const [height, setHeight] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.5))
   const [dragging, setDragging] = useState(false)
@@ -42,17 +43,19 @@ export function PdfSidePanel() {
   }, [])
   const orientation: 'bottom' | 'side' = isWide ? storedOrient : 'bottom'
 
-  const open = !!(viewing || error)
+  const open = !!(viewing || error || loading)
 
   useEffect(() => {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<OpenPdfDetail>).detail
       if (!detail?.citekey) return
       setError(null)
+      setViewing(null)
+      setLoading(true)
       void (async () => {
-        const blob = await loadPdf(detail.citekey)
-        if (!blob) { setError('No PDF is embedded for this source.'); setViewing(null); return }
-        const data = await blob.arrayBuffer()
+        const data = await getPdfData(detail.citekey)
+        setLoading(false)
+        if (!data) { setError('Couldn’t load this source’s PDF (no embedded file, or the URL didn’t load).'); return }
         const page = detail.page && detail.page > 0 ? detail.page : 1
         setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, onLink: detail.onLink })
       })()
@@ -81,7 +84,7 @@ export function PdfSidePanel() {
     return () => set('0px', '0px')
   }, [open, orientation, width, height])
 
-  function close() { setViewing(null); setError(null) }
+  function close() { setViewing(null); setError(null); setLoading(false) }
   function toggleOrient() {
     setStoredOrient(o => {
       const next = o === 'side' ? 'bottom' : 'side'
@@ -138,7 +141,9 @@ export function PdfSidePanel() {
             title="Close (Esc)">×</button>
         </div>
 
-        {error ? (
+        {loading && !viewing ? (
+          <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#9ca3af' }}>Loading PDF…</div>
+        ) : error ? (
           <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>{error}</div>
         ) : viewing ? (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: dragging ? 'none' : 'auto' }}>

@@ -113,6 +113,33 @@ export default async function handler(req, res) {
   // CRON_SECRET is set, require it — Vercel's cron sends it automatically; keeps randoms from
   // triggering launches.
   if (req.method === 'GET') {
+    // Proxy branch: ?proxy=<pdf-url> → fetch a public PDF server-side and stream it back (bypasses the
+    // browser's CORS block), so a URL-referenced PDF can load in the in-app pdf.js viewer for markup.
+    const proxied = (() => { try { return new URL(req.url, 'http://x').searchParams.get('proxy') } catch { return null } })()
+    if (proxied) {
+      const rl = await rateLimit(clientIp(req), 'pdfproxy', 40, 60)
+      if (!rl.ok) { res.statusCode = 429; return res.end('rate limited') }
+      if (!/^https?:\/\//i.test(proxied)) { res.statusCode = 400; return res.end('bad url') }
+      // SSRF guard: refuse localhost / link-local / private ranges.
+      let host = ''
+      try { host = new URL(proxied).hostname.toLowerCase() } catch { res.statusCode = 400; return res.end('bad url') }
+      if (host === 'localhost' || host.endsWith('.local') || /^(127\.|10\.|192\.168\.|169\.254\.|::1|0\.0\.0\.0)/.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+        res.statusCode = 400; return res.end('blocked host')
+      }
+      try {
+        const r = await fetch(proxied, { headers: { 'user-agent': 'InkwaveCitationBot/1.0 (+https://inkwave.studio)', accept: 'application/pdf,*/*' }, redirect: 'follow' })
+        if (!r.ok) { res.statusCode = 502; return res.end(`fetch failed (${r.status})`) }
+        const buf = Buffer.from(await r.arrayBuffer())
+        if (buf.length > 80_000_000) { res.statusCode = 413; return res.end('pdf too large') }
+        if (buf.length >= 5 && buf.subarray(0, 5).toString('latin1') !== '%PDF-') { res.statusCode = 415; return res.end('not a pdf') }
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/pdf')
+        res.setHeader('cache-control', 'private, max-age=3600')
+        return res.end(buf)
+      } catch (e) {
+        res.statusCode = 502; return res.end('proxy error: ' + (e && e.message ? e.message : 'error'))
+      }
+    }
     const secret = process.env.CRON_SECRET
     if (secret && req.headers.authorization !== `Bearer ${secret}`) { res.statusCode = 401; return res.end('unauthorized') }
     try {

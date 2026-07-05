@@ -44,6 +44,7 @@ export interface IwCitationMeta {
   deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
   note?: string           // free-text reading notes shown indented under the bibliography entry
   pdfName?: string        // original filename of an embedded PDF (bytes live in OPFS library/pdfs/)
+  pdfUrl?: string         // a public PDF URL fetched on demand via the proxy (annotate in-app, no bytes stored)
   pageOffset?: number     // printed page = PDF sheet index + this offset (Haiku-detected, one-time)
   pageOffsetFlag?: 'verified' | 'raw' // 'raw' = detection failed → showing the PDF's own page numbers
   // Overlay annotations on the embedded PDF — normalised rects + text; see citations/pdfHighlights.

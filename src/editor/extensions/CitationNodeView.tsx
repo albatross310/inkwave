@@ -20,8 +20,9 @@ import {
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
 import { pageOffsetOf } from '../../citations/pageOffset'
+import { hasPdf } from '../../citations/pdfSource'
 import { sourceUrlOf, openSourceAtPinpoint } from '../../citations/sourceLink'
-import type { CSLItem, InkwaveDocument, IwCitationMeta } from '../../types/document'
+import type { CSLItem, InkwaveDocument } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
 const INK = '#5c2d8a'
@@ -98,7 +99,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     let firstPdf: string | null = null
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
-      if (item && !firstPdf && (item as { _iw?: IwCitationMeta })._iw?.pdfName) firstPdf = key
+      if (item && !firstPdf && hasPdf(item)) firstPdf = key
       // Displayed pages = manual locator ∪ printed pages that carry a highlight (PDF sheet + offset).
       const off = pageOffsetOf(item)
       const pages = item ? mergePages(a.locator, highlightPages(item).map(p => p + off)) : ''
