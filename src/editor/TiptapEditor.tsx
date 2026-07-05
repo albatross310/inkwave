@@ -23,6 +23,9 @@ import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
+import { CommentMark } from './extensions/CommentMark'
+import { CommentNotes } from '../components/CommentNotes'
+import { activeSet, setActiveSet, suggestOn, setSuggestOn, onReviewChanged, DEFAULT_SET } from './review/reviewState'
 import { MathInline } from './extensions/MathInline'
 import { MathBlock } from './extensions/MathBlock'
 import { MathPasteHandler } from './extensions/MathPasteHandler'
@@ -224,6 +227,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [paperRight, setPaperRight] = useState(0)
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)   // review layer: sticky-note comments + track changes
+  const [reviewTick, setReviewTick] = useState(0)       // re-render the review bar on set/suggest changes
+  useEffect(() => onReviewChanged(() => setReviewTick(n => n + 1)), [])
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
@@ -368,6 +374,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       ListStyle,
       PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
       ScasSlotMark,
+      CommentMark,
       TextStyle,
       FontFamily,
       FontSize,
