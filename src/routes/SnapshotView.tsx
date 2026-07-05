@@ -538,10 +538,24 @@ function scrollTopForSignature(el: HTMLElement, sig: string, ratioBias: number):
 // Scroll lock: navigating snapshots keeps the same TEXT on the midline (content-anchored).
 // Click-to-midline: clicking any change in the hunk panel scrolls the document pane
 //   so that change's text sits at the midline.
+// The op (add or del) with the longest single character chain — the biggest contiguous change.
+// Returns its index in the ops array (= its data-opidx in the left pane), or null if no change.
+function longestChangeOpIdx(ops: DiffOp[] | null): number | null {
+  if (!ops) return null
+  let best: number | null = null, bestLen = 0
+  ops.forEach((op, i) => {
+    if (op.type === 'same') return
+    const len = op.text.length
+    if (len > bestLen) { bestLen = len; best = i }
+  })
+  return best
+}
+
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
+  lineMode: 'center' | 'longest'
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(50)
@@ -670,11 +684,27 @@ function SplitDiffView({
     }
   }, [])
 
-  // On snapshot change: scroll the new content so the SAME words return to the midline.
+  // On snapshot change: reposition the new content under the midline. Two modes:
+  //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
+  //  • 'longest' — snap so the biggest change sits just BELOW the midline, i.e. the dotted line
+  //                lands just above whichever diff has the longest character chain.
   useEffect(() => {
     const el = leftScrollRef.current
     if (!el) return
     const id = requestAnimationFrame(() => {
+      if (lineMode === 'longest') {
+        const li = longestChangeOpIdx(opsRef.current)
+        const target = li != null ? (el.querySelector(`[data-opidx="${li}"]`) as HTMLElement | null) : null
+        if (target) {
+          const elRect = el.getBoundingClientRect()
+          const tRect  = target.getBoundingClientRect()
+          const topInContent = tRect.top - elRect.top + el.scrollTop
+          el.scrollTop = Math.max(0, topInContent - el.clientHeight / 2 - 8) // diff sits just below the line
+          const s = midlineSignature(el); if (s) anchorSigRef.current = s
+          return
+        }
+        // no change to snap to → fall through to keep-words-put
+      }
       const sig = anchorSigRef.current
       let target: number | null = null
       if (sig) target = scrollTopForSignature(el, sig, anchorRatioRef.current)
@@ -686,7 +716,7 @@ function SplitDiffView({
       if (s) anchorSigRef.current = s
     })
     return () => cancelAnimationFrame(id)
-  }, [snapshot.id])
+  }, [snapshot.id, lineMode])
 
   // ── Divider drag ──────────────────────────────────────────────────────────
   const startDrag = useCallback((startX: number, startY: number) => {
@@ -797,6 +827,18 @@ export function SnapshotView() {
   const [rightSnapFlash, setRightSnapFlash] = useState(0)
   const [leftVerFlash,   setLeftVerFlash]   = useState(0)
   const [rightVerFlash,  setRightVerFlash]  = useState(0)
+  // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
+  // above the biggest change in each snapshot. Persisted.
+  const [lineMode, setLineMode] = useState<'center' | 'longest'>(() => {
+    try { return localStorage.getItem('inkwave:snapLineMode') === 'longest' ? 'longest' : 'center' } catch { return 'center' }
+  })
+  const toggleLineMode = useCallback(() => {
+    setLineMode(m => {
+      const next = m === 'longest' ? 'center' : 'longest'
+      try { localStorage.setItem('inkwave:snapLineMode', next) } catch { /* private mode */ }
+      return next
+    })
+  }, [])
 
   // Populate bibProvider once so citations resolve in DocView + pmToText (the snapshot route has no
   // editor to load the library). Gates the split-view render below to avoid a red "missing" flash.
@@ -894,6 +936,36 @@ export function SnapshotView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [goBack, goFwd])
 
+  // ── Shift+wheel: scrub through snapshots fast ─────────────────────────────────
+  // Accumulate wheel delta and jump STRAIGHT to the target index (a fast flick moves many at once),
+  // so scrubbing stays smooth without stepping through every intermediate navigation.
+  const idxRef = useRef(idx); idxRef.current = idx
+  const allRef = useRef(allSnapshots); allRef.current = allSnapshots
+  const wheelAccum = useRef(0)
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey) return
+      e.preventDefault()
+      // Shift+wheel arrives as horizontal delta on many setups → take whichever axis is larger.
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+      wheelAccum.current += d
+      const STEP = 45 // wheel px per snapshot
+      let n = 0
+      while (Math.abs(wheelAccum.current) >= STEP) {
+        if (wheelAccum.current > 0) { wheelAccum.current -= STEP; n++ } else { wheelAccum.current += STEP; n-- }
+      }
+      if (!n) return
+      const cur = idxRef.current, all = allRef.current
+      if (cur < 0 || !all.length) return
+      const target = Math.max(0, Math.min(all.length - 1, cur + n))
+      if (target === cur) return
+      setNavDir(n > 0 ? 'fwd' : 'back')
+      goTo(all[target])
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => window.removeEventListener('wheel', onWheel)
+  }, [goTo])
+
   // ── Touch swipe ──────────────────────────────────────────────────────────────
   const touchStartX = useRef(0)
   const touchStartY = useRef(0)
@@ -976,6 +1048,22 @@ export function SnapshotView() {
             </span>
           )}
         </span>
+        <button
+          type="button"
+          onClick={toggleLineMode}
+          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          style={{
+            fontSize: '0.85rem',
+            background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
+            border: '1px solid rgba(92, 45, 138, 0.35)',
+            color: INK,
+          }}
+          title={lineMode === 'longest'
+            ? 'Dotted line snaps just above the biggest change in each snapshot — click to keep it centred on the same words'
+            : 'Dotted line stays centred on the same words — click to snap it above the biggest change'}
+        >
+          {lineMode === 'longest' ? '⇥ biggest change' : '↔ centred line'}
+        </button>
         {docId && (
           <button
             type="button"
@@ -1066,6 +1154,7 @@ export function SnapshotView() {
             prevSnap={prevSnap}
             isPhone={isPhone}
             isNarrow={!isWide}
+            lineMode={lineMode}
           />
         )}
       </div>
