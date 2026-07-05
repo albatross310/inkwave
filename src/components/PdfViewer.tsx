@@ -92,17 +92,33 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           pg.hlLayer.appendChild(note)
           continue
         }
-        for (const r of hl.rects) {
-          const div = document.createElement('div')
-          const left = r.x * pw, top = r.y * ph, w = r.w * pw, h = r.h * ph
-          let paint: string
-          if (kind === 'underline') paint = `left:${left}px;top:${top + h - 2}px;width:${w}px;height:2px;background:${hl.color};`
-          else if (kind === 'strike') paint = `left:${left}px;top:${top + h / 2 - 1}px;width:${w}px;height:2px;background:${hl.color};`
-          else paint = `left:${left}px;top:${top}px;width:${w}px;height:${h}px;background:${hl.color};opacity:0.4;border-radius:2px;mix-blend-mode:multiply;`
-          // pointer-events:none so the text underneath stays selectable and a click never deletes it.
-          div.style.cssText = `position:absolute;${paint}pointer-events:none;`
-          div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
-          pg.hlLayer.appendChild(div)
+        if (kind === 'highlight') {
+          // Group the annotation's per-line rects under ONE 0.4-opacity multiply layer. opacity<1
+          // makes the group an isolation buffer, so its rects composite at FULL opacity among
+          // themselves (overlapping consecutive-line rects just UNION) and the 0.4 multiply is applied
+          // once to the union — instead of each rect multiplying separately and double-darkening the
+          // middle lines where consecutive line rects overlap.
+          const group = document.createElement('div')
+          group.style.cssText = 'position:absolute;inset:0;pointer-events:none;opacity:0.4;mix-blend-mode:multiply;'
+          for (const r of hl.rects) {
+            const div = document.createElement('div')
+            div.style.cssText = `position:absolute;left:${r.x * pw}px;top:${r.y * ph}px;width:${r.w * pw}px;height:${r.h * ph}px;background:${hl.color};border-radius:2px;`
+            div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
+            group.appendChild(div)
+          }
+          pg.hlLayer.appendChild(group)
+        } else {
+          for (const r of hl.rects) {
+            const div = document.createElement('div')
+            const left = r.x * pw, top = r.y * ph, w = r.w * pw, h = r.h * ph
+            const paint = kind === 'underline'
+              ? `left:${left}px;top:${top + h - 2}px;width:${w}px;height:2px;background:${hl.color};`
+              : `left:${left}px;top:${top + h / 2 - 1}px;width:${w}px;height:2px;background:${hl.color};`
+            // pointer-events:none so the text underneath stays selectable and a click never deletes it.
+            div.style.cssText = `position:absolute;${paint}pointer-events:none;`
+            div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
+            pg.hlLayer.appendChild(div)
+          }
         }
         // Small delete handle at the annotation's start — the ONLY way to remove it (no accidental
         // click-to-delete). Subtle by default, solid on hover.
