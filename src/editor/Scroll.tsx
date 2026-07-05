@@ -50,13 +50,16 @@ export function Scroll({
 
   // ── In-app HYBRID zoom (one wheel axis, three phases) ────────────────────────────────────────────
   // Ctrl/⌘+wheel (or pinch) over the editor. A single level `zoomU` moves continuously through:
-  //   Phase 1 (u 0→1): the whole PAGE zooms — grows from small up to filling the window width. No
-  //                    reflow (it's a visual scale of the parchment, applied as CSS `zoom`).
-  //   Phase 2 (u 1→2): the page stays at full width; the FONT grows 1×→2× so text REFLOWS like a webpage.
+  //   Phase 1 (u 0→1): the whole PAGE zooms — width AND font grow together, so the reflow is constant
+  //                    (the "font stays at the selected size") and the page just scales up to fill the
+  //                    window width at u=1.
+  //   Phase 2 (u 1→2): the page holds at full width; the FONT outruns it (grows 1×→2×) so text REFLOWS.
   //   Phase 3 (u >2):  the font KEEPS growing and the left/right margins narrow together for more column.
-  // pageZoom is CSS `zoom` (not transform): it scales layout too, so scrolling + centering stay correct
-  // and PageGuides' clientWidth-based page-break maths are unaffected → the dotted lines keep landing on
-  // the same words. The hybrid only runs in the live editor on desktop; elsewhere it's plain font zoom.
+  // Implemented with REAL layout — the parchment's px width scales and the font scales via
+  // --iw-editor-zoom; NO CSS `zoom`/transform. That's the whole point: clientWidth stays honest, so
+  // PageGuides + the gapped-page PaginationExtension keep measuring page breaks correctly at every zoom
+  // (CSS `zoom` inflated clientWidth → very long pages + wrong gapped breaks + guides that didn't track
+  // the text). The hybrid only runs in the live editor on desktop; elsewhere it's plain font zoom.
   const hybrid = fill && !phone
   const [zoomU, setZoomU] = useState(() => {
     try { return Number(localStorage.getItem(hybrid ? 'inkwave:zoomU' : 'inkwave:editorZoom')) || 1 } catch { return 1 }
@@ -103,13 +106,24 @@ export function Scroll({
     return () => { ro.disconnect(); window.removeEventListener('inkwave:page-settings-changed', compute) }
   }, [hybrid])
 
-  // Derive the three knobs from (zoomU, fit).
-  const MIN_PAGE = 0.45 // most zoomed-out = 45% of the fit-to-width size
-  let pageZoom = 1, editorZoom = 1, marginScale = 1
+  // The parchment's true (100%) width in CSS px for the current paper size — what widthScale multiplies.
+  const basePaperPx = (() => {
+    const landscape = getOrientation() === 'landscape'
+    const ps = getPaperSize()
+    const mm = ps === 'letter' ? (landscape ? 279 : 216) : (landscape ? 297 : 210)
+    return (mm * 96) / 25.4
+  })()
+
+  // Derive the knobs from (zoomU, fit). widthScale scales the parchment WIDTH; editorZoom scales the
+  // FONT (--iw-editor-zoom). Phase 1: they move together (page zoom, constant reflow). Phase 2–3: the
+  // font outruns the width (reflow), and past u=2 the side margins narrow too. Because fit multiplies
+  // BOTH width and font, words-per-line depends only on how far past u=1 you are — never on screen size.
+  const MIN_PAGE = 0.45 // most zoomed-out = 45% of the fill-to-width size
+  let widthScale = 1, editorZoom = 1, marginScale = 1
   if (hybrid) {
-    if (zoomU <= 1) { pageZoom = fit * (MIN_PAGE + (1 - MIN_PAGE) * Math.max(0, zoomU)); editorZoom = 1 }
-    else            { pageZoom = fit; editorZoom = 1 + (zoomU - 1) }        // font grows past 2× in phase 3
-    if (zoomU > 2)  marginScale = Math.max(0.12, 1 - (zoomU - 2) * 0.55)     // …and margins narrow with it
+    if (zoomU <= 1) { widthScale = (MIN_PAGE + (1 - MIN_PAGE) * Math.max(0, zoomU)) * fit; editorZoom = widthScale }
+    else            { widthScale = fit; editorZoom = fit * zoomU }           // font outruns width past the fit point
+    if (zoomU > 2)  marginScale = Math.max(0.12, 1 - (zoomU - 2) * 0.55)      // …and the side margins narrow
   } else {
     editorZoom = zoomU // font-only (snapshot view, phone): unchanged behaviour
   }
@@ -156,6 +170,8 @@ export function Scroll({
             if (phone) return undefined
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
+            // Hybrid zoom scales the true width in px (real layout — keeps clientWidth honest).
+            if (hybrid) return `${Math.round(basePaperPx * widthScale)}px`
             const landscape = getOrientation() === 'landscape'
             if (ps === 'letter') return landscape ? '279mm' : '216mm'
             return landscape ? '297mm' : '210mm' // a4
@@ -165,9 +181,6 @@ export function Scroll({
           // the whole parchment on every reel frame.
           borderRadius: phone ? 0 : '8px',
           boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
-          // Phase-1 page zoom (CSS `zoom` scales layout too, so scroll/centre stay right and the
-          // clientWidth-based page-break guides are unaffected). 1 when not in hybrid mode.
-          zoom: hybrid ? pageZoom : undefined,
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
@@ -178,7 +191,9 @@ export function Scroll({
           className="scroll-paper relative pt-8 pb-24"
           style={{
             borderRadius: phone ? 0 : '8px',
-            // Phase-3 narrows the side margins (widening the text column) once the font is doubled.
+            // Margins stay at their setting values (NOT scaled by widthScale) so the gapped-page
+            // paginator — which forces paddingTop = getTopMarginPx() and computes breaks from topM +
+            // MARGIN_BOTTOM — stays consistent with what we render. Phase 3 still narrows the sides.
             paddingLeft:  phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
             paddingRight: phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
             paddingTop:   `${topMarginPx}px`,
