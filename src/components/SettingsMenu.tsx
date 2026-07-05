@@ -103,6 +103,16 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
             />
 
+            {/* SCAS on/off — turn the vocabulary suggestions (green words) off entirely */}
+            <Row
+              label="SCAS suggestions"
+              checked={!(typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:scasOff') === '1')}
+              onChange={() => {
+                try { localStorage.setItem('inkwave:scasOff', localStorage.getItem('inkwave:scasOff') === '1' ? '0' : '1') } catch { /* private mode */ }
+                window.location.reload()
+              }}
+            />
+
             {/* SCAS testing mode — highlights all exclusion-set words, not just the ones in your text */}
             <Row
               label="SCAS test mode"

@@ -311,7 +311,7 @@
   .scas-red {
     display: inline;
     position: relative;
-    color: #2e8b57;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
+    color: #1b6b3d;   /* an UNRESOLVED kicked word is green (before it's cycled/committed) */
     cursor: pointer;
     font-family: inherit;
     font-size: inherit;

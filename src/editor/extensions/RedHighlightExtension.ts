@@ -9,6 +9,13 @@ import { isColoured, type ScasLookup } from '../../scas/state'
 // constrainable (pool) word, so pasted/typed text lights up densely for testing the word-cycle
 // animation. Off by default. Turn on with `?debughl=1` (works on the live site too) or via the
 // dev-only Options menu toggle (localStorage `inkwave:debugHighlightAll`).
+// User switch (Settings): turn the SCAS vocabulary suggestions off entirely — no green words, nothing
+// to cycle. The provenance engine still runs underneath; this only suppresses the display + interaction.
+export function scasSuggestionsOff(): boolean {
+  if (typeof window === 'undefined') return false
+  try { return window.localStorage.getItem('inkwave:scasOff') === '1' } catch { return false }
+}
+
 function debugHighlightAll(): boolean {
   if (typeof window === 'undefined') return false
   try {
@@ -235,8 +242,8 @@ function buildDecorations(
   initialAnchors?: ReadonlySet<string>,
 ): { decorations: DecorationSet; flagged: Map<number, string> } {
   const newFlagged = new Map<number, string>()
-  // SCAS engine off (un-migrated or non-N-mode) → no decorations.
-  if (inkDoc.scasMode !== 'n' || !inkDoc.scasState) return { decorations: DecorationSet.empty, flagged: newFlagged }
+  // SCAS engine off (un-migrated or non-N-mode), or the writer switched suggestions off → no decorations.
+  if (inkDoc.scasMode !== 'n' || !inkDoc.scasState || scasSuggestionsOff()) return { decorations: DecorationSet.empty, flagged: newFlagged }
 
   // ── 1. Collect kicked words (skip the uncommitted word under the cursor) ──────
   // A word is purple iff its lemma is Locked or an outstanding live kick — the frozen verdict
