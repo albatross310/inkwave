@@ -54,11 +54,15 @@ export function SyncStatus({
 
   return (
     <div
-      className="fixed right-0 z-40 font-serif select-none flex flex-col items-end"
+      className="fixed z-40 font-serif select-none flex flex-col items-end"
       style={{
-        bottom: hideTrigger ? 'calc(env(safe-area-inset-bottom) + 80px)' : '38px',
+        // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
+        // isn't covered, matching the toolbars.
+        right: 'var(--iw-pdf-room, 0px)',
+        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '38px'} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 28px',
         zoom: zoom !== 1 ? zoom : undefined,
+        transition: 'right 0.18s ease, bottom 0.18s ease',
       }}
     >
       {/* Backdrop to dismiss panel (both hover and click-opened paths) */}
