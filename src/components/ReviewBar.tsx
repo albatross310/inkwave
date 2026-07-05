@@ -2,13 +2,31 @@
 // the selection, pick/create the active annotation SET (drop-up), toggle live suggestion mode, and
 // step through changes. Styled to match the footer toolbar. Sits just above the footer.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Editor } from '@tiptap/react'
 import { activeSet, setActiveSet, suggestOn, setSuggestOn, onReviewChanged, DEFAULT_SET } from '../editor/review/reviewState'
+import { resolveSuggestions } from '../editor/extensions/TrackChanges'
 
 const INK = '#5c2d8a'
+
+// Contiguous runs of tracked-change text (insertion or deletion), in document order — the units the
+// review nav steps through and accept/discard act on.
+function changeRanges(editor: Editor): Array<{ from: number; to: number; kind: 'ins' | 'del' }> {
+  const out: Array<{ from: number; to: number; kind: 'ins' | 'del' }> = []
+  let cur: { from: number; to: number; kind: 'ins' | 'del' } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) { cur = null; return }
+    const kind: 'ins' | 'del' | null =
+      node.marks.some((m) => m.type.name === 'insertion') ? 'ins'
+      : node.marks.some((m) => m.type.name === 'deletion') ? 'del' : null
+    if (!kind) { cur = null; return }
+    if (cur && cur.kind === kind && cur.to === pos) cur.to = pos + node.nodeSize
+    else { cur = { from: pos, to: pos + node.nodeSize, kind }; out.push(cur) }
+  })
+  return out
+}
 
 // Distinct comment sets present in the doc, plus the default + active, for the drop-up.
 function docSets(editor: Editor): string[] {
@@ -43,6 +61,39 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
 
   const hasSelection = editor.state.selection.from !== editor.state.selection.to
   const suggest = suggestOn()
+
+  // ── Review nav (step through tracked changes; accept/discard) ──
+  const navIdxRef = useRef(0)
+  const nChanges = changeRanges(editor).length
+  function goToChange(i: number) {
+    const chs = changeRanges(editor)
+    if (!chs.length) return
+    const n = ((i % chs.length) + chs.length) % chs.length
+    navIdxRef.current = n
+    const c = chs[n]
+    editor.chain().focus().setTextSelection({ from: c.from, to: c.to }).scrollIntoView().run()
+    tick((x) => x + 1)
+  }
+  function resolveCurrent(mode: 'accept' | 'reject') {
+    const chs = changeRanges(editor)
+    if (!chs.length) return
+    const n = Math.min(navIdxRef.current, chs.length - 1)
+    resolveSuggestions(editor, mode, chs[n])
+    navIdxRef.current = Math.max(0, n - (n >= chs.length - 1 ? 1 : 0))
+    tick((x) => x + 1)
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 'a') { e.preventDefault(); resolveCurrent('accept') }
+      else if (k === 's') { e.preventDefault(); resolveCurrent('reject') }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); goToChange(navIdxRef.current + 1) }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); goToChange(navIdxRef.current - 1) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pill = 'flex items-center justify-center h-8 px-3 rounded-full border text-sm font-serif transition-colors whitespace-nowrap'
 
@@ -95,6 +146,21 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
           </div>
         )}
       </div>
+
+      {/* Review nav: step through tracked changes + accept/discard (Alt+A / Alt+S, Alt+←/→) */}
+      {nChanges > 0 && (
+        <div className="flex items-center gap-1 pl-1" style={{ borderLeft: '1px solid #e5e5e8' }}>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current - 1)}
+            className="flex items-center justify-center w-7 h-7 rounded-full text-stone-500 hover:bg-stone-100" title="Previous change (Alt+←)">‹</button>
+          <span className="text-xs text-stone-500 tabular-nums">{Math.min(navIdxRef.current + 1, nChanges)}/{nChanges}</span>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current + 1)}
+            className="flex items-center justify-center w-7 h-7 rounded-full text-stone-500 hover:bg-stone-100" title="Next change (Alt+→)">›</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('accept')}
+            className="flex items-center justify-center w-7 h-7 rounded-full text-green-700 hover:bg-green-50" title="Accept (Alt+A)">✓</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('reject')}
+            className="flex items-center justify-center w-7 h-7 rounded-full text-red-600 hover:bg-red-50" title="Discard (Alt+S)">✗</button>
+        </div>
+      )}
 
       {/* Suggest (track changes) toggle */}
       <button type="button" onClick={() => setSuggestOn(!suggest)}

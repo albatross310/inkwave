@@ -81,6 +81,12 @@
     border-radius: 2px 2px 0 0;
   }
 
+  /* Track changes (live suggestion mode). Insertions = green underline; deletions = red strike, kept
+     visible until accepted/rejected. */
+  ins.iw-ins { text-decoration: none; color: #15803d; border-bottom: 2px solid rgba(21, 128, 61, 0.55); background: rgba(21, 128, 61, 0.08); }
+  del.iw-del { text-decoration: line-through; text-decoration-color: rgba(185, 28, 28, 0.8); color: #b91c1c; background: rgba(185, 28, 28, 0.07); }
+  .iw-change-current { outline: 2px solid #5c2d8a; outline-offset: 1px; border-radius: 2px; }
+
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the

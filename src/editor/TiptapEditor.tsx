@@ -24,6 +24,7 @@ import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { CommentMark } from './extensions/CommentMark'
+import { InsertionMark, DeletionMark, TrackChanges } from './extensions/TrackChanges'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { MathInline } from './extensions/MathInline'
@@ -373,6 +374,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
       ScasSlotMark,
       CommentMark,
+      InsertionMark,
+      DeletionMark,
+      TrackChanges,
       TextStyle,
       FontFamily,
       FontSize,
