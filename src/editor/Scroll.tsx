@@ -44,6 +44,27 @@ export function Scroll({
     window.addEventListener('inkwave:page-settings-changed', onChanged)
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
+
+  // In-app editor zoom: Ctrl/⌘+wheel (or pinch) over the editor scales the font (so text REFLOWS,
+  // like a webpage) — isolated from the PDF panel because we preventDefault the browser zoom. Persisted.
+  const [editorZoom, setEditorZoom] = useState(() => {
+    try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
+  })
+  useEffect(() => {
+    const el = surfaceRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      setEditorZoom(z => {
+        const next = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
+        try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+        return next
+      })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
@@ -67,7 +88,8 @@ export function Scroll({
   }, [phone])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}`}>
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}`}
+      style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}
       <div

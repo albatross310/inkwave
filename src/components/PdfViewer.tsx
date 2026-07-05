@@ -272,17 +272,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom])
 
-  // ── Ctrl/Cmd +/-/0 zoom (when the pointer is over the panel) ──
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!hoverRef.current || !(e.ctrlKey || e.metaKey)) return
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(z => Math.min(ZOOM_MAX, z * 1.2)) }
-      else if (e.key === '-' || e.key === '_') { e.preventDefault(); setZoom(z => Math.max(ZOOM_MIN, z / 1.2)) }
-      else if (e.key === '0') { e.preventDefault(); setZoom(1) }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  // NB: no Ctrl+= keyboard zoom — the browser's own zoom can't be reliably blocked from a keydown, so
+  // it would double-zoom (scale the PDF AND browser-zoom the page). Ctrl+wheel (below) + the on-screen
+  // − / + buttons are the isolated zoom; Ctrl+= stays as normal browser zoom.
 
   // Ctrl/Cmd + wheel zoom (native listener so preventDefault works — React onWheel is passive).
   useEffect(() => {

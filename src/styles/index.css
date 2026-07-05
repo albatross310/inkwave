@@ -147,7 +147,7 @@
      The stored document font sizes are unchanged — this is display-only CSS applied to the
      rendering layer. Custom font-size marks stay proportional (they're em-relative to this base). */
   .inkwave-editor-surface.is-phone .ProseMirror {
-    font-size: 2.25rem;
+    font-size: calc(2.25rem * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.55);
   }
 
@@ -166,7 +166,8 @@
   .ProseMirror {
     outline: none;
     font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;
-    font-size: 1.125rem;
+    /* --iw-editor-zoom is the in-app font zoom (Ctrl+wheel); text reflows as it changes. */
+    font-size: calc(1.125rem * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.618);
     color: #1a1a1a;
     min-height: calc(100vh - 6rem);
