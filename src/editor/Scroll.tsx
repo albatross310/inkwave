@@ -53,12 +53,17 @@ export function Scroll({
   const [editorZoom, setEditorZoom] = useState(() => {
     try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
   })
+  // Anchor the font zoom to the pointer: record the content fraction under the cursor before the
+  // reflow, restore it after, so whatever's under the cursor stays at the same screen height.
+  const zoomAnchorRef = useRef<{ offY: number; fracY: number } | null>(null)
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el) return
+    if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
+      const offY = e.clientY - el.getBoundingClientRect().top
+      zoomAnchorRef.current = { offY, fracY: el.scrollHeight ? (el.scrollTop + offY) / el.scrollHeight : 0 }
       setEditorZoom(z => {
         const next = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
         try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
@@ -67,7 +72,15 @@ export function Scroll({
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [phone])
+  // After the reflow settles, put the anchored content back under the cursor.
+  useEffect(() => {
+    const el = surfaceRef.current
+    const a = zoomAnchorRef.current
+    if (!el || phone || !a) return
+    const id = requestAnimationFrame(() => { el.scrollTop = Math.max(0, a.fracY * el.scrollHeight - a.offY) })
+    return () => cancelAnimationFrame(id)
+  }, [editorZoom, phone])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()

@@ -285,18 +285,24 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, citekey])
 
-  // ── Zoom: re-render at fitScale*zoom, keeping the point at the viewport CENTRE fixed ──
-  // Track the content fraction under the centre of the viewport on BOTH axes and restore it after the
-  // re-render, so zooming grows/shrinks around the middle of the canvas instead of drifting to a corner.
+  // ── Zoom: re-render at fitScale*zoom, keeping the point UNDER THE CURSOR fixed ──
+  // The wheel handler records the pointer position; we track the content fraction under it on both
+  // axes and restore it after re-render, so zooming grows/shrinks around the cursor. The −/+ buttons
+  // leave no pointer, so those fall back to the viewport centre.
+  const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null)
   useEffect(() => {
     if (!docRef.current || status !== 'ready') return
     const el = scrollRef.current!
-    const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + el.clientHeight / 2) / el.scrollHeight : 0.5
-    const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth  : 0.5
+    const box = el.getBoundingClientRect()
+    const a = zoomAnchorRef.current
+    const ax = a ? a.x - box.left : el.clientWidth / 2   // anchor offset within the viewport
+    const ay = a ? a.y - box.top  : el.clientHeight / 2
+    const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + ay) / el.scrollHeight : 0
+    const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + ax) / el.scrollWidth  : 0
     void renderPages(fitScaleRef.current * zoom).then(() => {
       requestAnimationFrame(() => {
-        el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - el.clientHeight / 2)
-        el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - el.clientWidth  / 2)
+        el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - ay)
+        el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - ax)
       })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -313,6 +319,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
+      zoomAnchorRef.current = { x: e.clientX, y: e.clientY } // zoom around the pointer
       setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * (e.deltaY < 0 ? 1.1 : 0.9))))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -472,7 +479,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
       {/* Zoom controls */}
       <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 15, display: 'flex', gap: 4, background: '#fff', border: `1px solid ${INK}33`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', padding: 2 }}>
-        {([['−', () => setZoom(z => Math.max(ZOOM_MIN, z / 1.2))], [`${Math.round(zoom * 100)}%`, () => setZoom(1)], ['+', () => setZoom(z => Math.min(ZOOM_MAX, z * 1.2))]] as const).map(([label, fn], i) => (
+        {([['−', () => { zoomAnchorRef.current = null; setZoom(z => Math.max(ZOOM_MIN, z / 1.2)) }], [`${Math.round(zoom * 100)}%`, () => { zoomAnchorRef.current = null; setZoom(1) }], ['+', () => { zoomAnchorRef.current = null; setZoom(z => Math.min(ZOOM_MAX, z * 1.2)) }]] as const).map(([label, fn], i) => (
           <button key={i} type="button" onClick={fn}
             style={{ minWidth: label.length > 2 ? 44 : 26, height: 26, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '0.8rem', borderRadius: 5 }}
             title={label === '+' ? 'Zoom in (Ctrl +)' : label === '−' ? 'Zoom out (Ctrl −)' : 'Reset zoom (Ctrl 0)'}>
