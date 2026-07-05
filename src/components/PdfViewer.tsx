@@ -129,7 +129,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     pg.rendering = true
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) { pg.rendering = false; return }
-    const outputScale = Math.min(window.devicePixelRatio || 1, 2)
+    // Supersample: render the canvas at ≥2× the CSS size and let the browser downscale, so PDF text
+    // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
+    // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
+    // only adds resolution where the page is still small (the default fit view, where the blur shows).
+    const MAX_CANVAS = 4096
+    const outputScale = Math.max(1, Math.min(
+      3, Math.max(2, window.devicePixelRatio || 1),
+      MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
+    ))
     const canvas = document.createElement('canvas')
     canvas.width = Math.floor(pg.viewport.width * outputScale)
     canvas.height = Math.floor(pg.viewport.height * outputScale)
