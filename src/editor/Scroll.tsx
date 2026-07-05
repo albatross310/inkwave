@@ -48,10 +48,18 @@ export function Scroll({
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
 
-  // In-app editor zoom: Ctrl/⌘+wheel (or pinch) over the editor scales the font (so text REFLOWS,
-  // like a webpage) — isolated from the PDF panel because we preventDefault the browser zoom. Persisted.
-  const [editorZoom, setEditorZoom] = useState(() => {
-    try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
+  // ── In-app HYBRID zoom (one wheel axis, three phases) ────────────────────────────────────────────
+  // Ctrl/⌘+wheel (or pinch) over the editor. A single level `zoomU` moves continuously through:
+  //   Phase 1 (u 0→1): the whole PAGE zooms — grows from small up to filling the window width. No
+  //                    reflow (it's a visual scale of the parchment, applied as CSS `zoom`).
+  //   Phase 2 (u 1→2): the page stays at full width; the FONT grows 1×→2× so text REFLOWS like a webpage.
+  //   Phase 3 (u >2):  the font KEEPS growing and the left/right margins narrow together for more column.
+  // pageZoom is CSS `zoom` (not transform): it scales layout too, so scrolling + centering stay correct
+  // and PageGuides' clientWidth-based page-break maths are unaffected → the dotted lines keep landing on
+  // the same words. The hybrid only runs in the live editor on desktop; elsewhere it's plain font zoom.
+  const hybrid = fill && !phone
+  const [zoomU, setZoomU] = useState(() => {
+    try { return Number(localStorage.getItem(hybrid ? 'inkwave:zoomU' : 'inkwave:editorZoom')) || 1 } catch { return 1 }
   })
   useEffect(() => {
     const el = surfaceRef.current
@@ -59,15 +67,52 @@ export function Scroll({
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      setEditorZoom(z => {
-        const next = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
-        try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+      setZoomU(u => {
+        // Hybrid moves ADDITIVELY through phase-space (0→~3.2); font-only mode keeps the old
+        // MULTIPLICATIVE feel (0.6×–2.5×) so the snapshot view etc. behave exactly as before.
+        const next = hybrid
+          ? Math.max(0, Math.min(3.2, +(u + (e.deltaY < 0 ? 0.05 : -0.05)).toFixed(3)))
+          : Math.max(0.6, Math.min(2.5, +(u * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
+        try { localStorage.setItem(hybrid ? 'inkwave:zoomU' : 'inkwave:editorZoom', String(next)) } catch { /* private mode */ }
         return next
       })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [hybrid])
+
+  // fit = how much the true-A4 parchment must scale to fill the available width (>1 on wide screens,
+  // <1 on narrow). Measured from the surface width so it tracks resizes AND the PDF panel opening.
+  const [fit, setFit] = useState(1)
+  useEffect(() => {
+    if (!hybrid) return
+    const el = surfaceRef.current
+    if (!el) return
+    const compute = () => {
+      const landscape = getOrientation() === 'landscape'
+      const ps = getPaperSize()
+      const mm = ps === 'letter' ? (landscape ? 279 : 216) : (landscape ? 297 : 210)
+      const paperPx = (mm * 96) / 25.4                 // true parchment width in CSS px (unzoomed)
+      const avail = Math.max(120, el.clientWidth - 32)  // leave a small breathing gutter
+      setFit(Math.max(0.2, +(avail / paperPx).toFixed(4)))
+    }
+    compute()
+    const ro = new ResizeObserver(compute)
+    ro.observe(el)
+    window.addEventListener('inkwave:page-settings-changed', compute)
+    return () => { ro.disconnect(); window.removeEventListener('inkwave:page-settings-changed', compute) }
+  }, [hybrid])
+
+  // Derive the three knobs from (zoomU, fit).
+  const MIN_PAGE = 0.45 // most zoomed-out = 45% of the fit-to-width size
+  let pageZoom = 1, editorZoom = 1, marginScale = 1
+  if (hybrid) {
+    if (zoomU <= 1) { pageZoom = fit * (MIN_PAGE + (1 - MIN_PAGE) * Math.max(0, zoomU)); editorZoom = 1 }
+    else            { pageZoom = fit; editorZoom = 1 + (zoomU - 1) }        // font grows past 2× in phase 3
+    if (zoomU > 2)  marginScale = Math.max(0.12, 1 - (zoomU - 2) * 0.55)     // …and margins narrow with it
+  } else {
+    editorZoom = zoomU // font-only (snapshot view, phone): unchanged behaviour
+  }
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
@@ -120,6 +165,9 @@ export function Scroll({
           // the whole parchment on every reel frame.
           borderRadius: phone ? 0 : '8px',
           boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
+          // Phase-1 page zoom (CSS `zoom` scales layout too, so scroll/centre stay right and the
+          // clientWidth-based page-break guides are unaffected). 1 when not in hybrid mode.
+          zoom: hybrid ? pageZoom : undefined,
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
@@ -130,8 +178,9 @@ export function Scroll({
           className="scroll-paper relative pt-8 pb-24"
           style={{
             borderRadius: phone ? 0 : '8px',
-            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx}px`,
-            paddingRight: phone ? '1.25rem' : `${sideMarginPx}px`,
+            // Phase-3 narrows the side margins (widening the text column) once the font is doubled.
+            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
+            paddingRight: phone ? '1.25rem' : `${sideMarginPx * marginScale}px`,
             paddingTop:   `${topMarginPx}px`,
             paddingBottom:`${btmMarginPx}px`,
             '--para-spacing': `${paraSpacingEm}em`,
