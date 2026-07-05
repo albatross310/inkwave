@@ -18,6 +18,7 @@ const TOOLS: Array<{ kind: HighlightKind; label: string; title: string }> = [
   { kind: 'highlight', label: '▮', title: 'Highlight' },
   { kind: 'underline', label: 'U', title: 'Underline' },
   { kind: 'strike', label: 'S', title: 'Strikethrough' },
+  { kind: 'text', label: 'T', title: 'Text note — click on the page to place' },
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
@@ -70,6 +71,24 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       for (const hl of highlightsRef.current) {
         if (hl.page !== i + 1) continue
         const kind = hl.kind ?? 'highlight'
+        if (kind === 'text') {
+          const r0 = hl.rects[0]
+          if (!r0) continue
+          const note = document.createElement('div')
+          note.style.cssText = `position:absolute;left:${r0.x * pg.w}px;top:${r0.y * pg.h}px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;`
+          note.textContent = hl.note || hl.text
+          note.title = 'Click to edit (blank to delete)'
+          note.onclick = () => {
+            const v = window.prompt('Edit note (leave blank to delete):', hl.note || hl.text)
+            if (v === null) return
+            if (!v.trim()) { removeHighlight(hl.id); return }
+            hl.note = v.trim(); hl.text = v.trim()
+            redrawOverlays()
+            void saveHighlights(citekey, highlightsRef.current)
+          }
+          pg.hlLayer.appendChild(note)
+          continue
+        }
         for (const r of hl.rects) {
           const div = document.createElement('div')
           const left = r.x * pg.w, top = r.y * pg.h, w = r.w * pg.w, h = r.h * pg.h
@@ -330,8 +349,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     return { text, page, rects, x: last.right - box.left, y: last.bottom - box.top }
   }
 
-  function onMouseUp() {
+  function onMouseUp(e: React.MouseEvent) {
     const info = selectionInfo()
+    // Text tool: a click (no selection) drops a note where you clicked.
+    if (toolRef.current === 'text') {
+      if (!info) placeTextNote(e.clientX, e.clientY)
+      setPending(null)
+      return
+    }
     if (!info) { setPending(null); return }
     // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
     if (toolRef.current) {
@@ -340,6 +365,24 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       setPending(null)
     } else {
       setPending(info)
+    }
+  }
+
+  function placeTextNote(clientX: number, clientY: number) {
+    for (let i = 0; i < pagesRef.current.length; i++) {
+      const pr = pagesRef.current[i].wrapper.getBoundingClientRect()
+      if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
+      const text = window.prompt('Note:')?.trim()
+      if (!text) return
+      const hl: PdfHighlight = {
+        id: uuidv4(), page: i + 1, color: colorRef.current, kind: 'text', text, note: text,
+        rects: [{ x: (clientX - pr.left) / pr.width, y: (clientY - pr.top) / pr.height, w: 0.22, h: 0.05 }],
+        createdAt: new Date().toISOString(),
+      }
+      highlightsRef.current = [...highlightsRef.current, hl]
+      redrawOverlays()
+      void saveHighlights(citekey, highlightsRef.current)
+      return
     }
   }
 
@@ -386,7 +429,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
             style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
         <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {tool ? `select text to ${tool}` : 'pick a tool, or select text'}
+          {tool === 'text' ? 'click a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
         </span>
       </div>
 

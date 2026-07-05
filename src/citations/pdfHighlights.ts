@@ -8,7 +8,7 @@ import { addToLibrary } from './library'
 
 export interface HighlightRect { x: number; y: number; w: number; h: number } // normalised 0..1
 
-export type HighlightKind = 'highlight' | 'underline' | 'strike'
+export type HighlightKind = 'highlight' | 'underline' | 'strike' | 'text'
 
 export interface PdfHighlight {
   id: string

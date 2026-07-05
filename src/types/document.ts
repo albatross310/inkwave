@@ -49,7 +49,7 @@ export interface IwCitationMeta {
   // Overlay annotations on the embedded PDF — normalised rects + text; see citations/pdfHighlights.
   highlights?: Array<{
     id: string; page: number; rects: Array<{ x: number; y: number; w: number; h: number }>
-    color: string; kind?: 'highlight' | 'underline' | 'strike'; text: string
+    color: string; kind?: 'highlight' | 'underline' | 'strike' | 'text'; text: string
     note?: string; citekey?: string; createdAt: string
   }>
 }
