@@ -164,7 +164,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       const pageEl = document.createElement('div')
       pageEl.className = 'page'
       pageEl.dataset.idx = String(n - 1)
-      pageEl.style.cssText = `--scale-factor:${scale};--user-unit:1;position:relative;width:${Math.floor(viewport.width)}px;height:${Math.floor(viewport.height)}px;margin:0 auto 12px;box-shadow:0 1px 6px rgba(0,0,0,0.18);background:#fff;`
+      // border:0 / padding:0 override pdf.js's default .page border — otherwise the page's border box
+      // (what selection rects are normalised against) and the inset:0 overlay layers disagree by the
+      // border width, so highlights land down-and-right of the text.
+      pageEl.style.cssText = `--scale-factor:${scale};--user-unit:1;position:relative;border:0;padding:0;width:${Math.floor(viewport.width)}px;height:${Math.floor(viewport.height)}px;margin:0 auto 12px;box-shadow:0 1px 6px rgba(0,0,0,0.18);background:#fff;`
 
       const canvasWrap = document.createElement('div')
       canvasWrap.className = 'canvasWrapper'
@@ -434,12 +437,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       </div>
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-      {/* direction:rtl puts the scrollbar on the LEFT; the content is set back to ltr. */}
       <div ref={scrollRef} onMouseUp={onMouseUp}
-        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12, direction: 'rtl' }}>
-        <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1, direction: 'ltr' } as React.CSSProperties} />
-        {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40, direction: 'ltr' }}>Loading PDF…</p>}
-        {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40, direction: 'ltr' }}>Couldn't render this PDF.</p>}
+        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12 }}>
+        <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
+        {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
+        {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
 
       {/* Zoom controls */}
