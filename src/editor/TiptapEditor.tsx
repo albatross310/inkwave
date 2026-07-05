@@ -1512,10 +1512,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
           style={{
             paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px`,
-            // When the PDF side panel is open, stop the centring box at the panel's left edge so the
-            // toolbar recentres over the (left-shifted) writing instead of drifting under the panel.
+            // When the PDF panel is open: a side dock stops the centring box at its left edge
+            // (--iw-pdf-room) so the toolbar recentres over the writing; a bottom dock lifts the whole
+            // toolbar above it (--iw-pdf-room-bottom).
             right: 'var(--iw-pdf-room, 0px)',
-            transition: 'right 0.18s ease',
+            bottom: 'var(--iw-pdf-room-bottom, 0px)',
+            transition: 'right 0.18s ease, bottom 0.18s ease',
           }}
         >
           <div

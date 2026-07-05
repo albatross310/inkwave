@@ -1,11 +1,10 @@
-// App-level side panel that shows an embedded source PDF at the page cited in-text. Mounted once in
-// the editor; listens for the 'inkwave:open-pdf' event (see citations/pdfViewer.ts), loads the PDF
-// bytes from OPFS, and shows them in an <iframe> using the browser's native viewer with a #page=N
-// fragment. No pdf.js dependency — the built-in viewer honours #page for blob: URLs.
+// App-level PDF panel. Mounted once in the editor; listens for 'inkwave:open-pdf' (citations/
+// pdfViewer.ts), loads the PDF bytes from OPFS, and renders them with the bundled pdf.js viewer.
 //
-// While open it sets --iw-pdf-room so the editor surface pads its right edge and the writing slides
-// left to make room (see styles/index.css). Resizing drags a full-viewport overlay (portaled above
-// the iframe) — an iframe otherwise swallows the mousemove/up, leaving the drag stuck to the cursor.
+// Docks top/bottom by default (and always on narrow/phone screens); on a wide screen a toggle switches
+// it to a right-hand side-by-side dock. It publishes --iw-pdf-room (side) / --iw-pdf-room-bottom
+// (bottom) so the editor surface + floating toolbars make room (see styles/index.css). Resizing drags
+// a full-viewport overlay portaled above the viewer so pointer events aren't swallowed mid-drag.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -14,7 +13,8 @@ import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
 
 const INK = '#5c2d8a'
-const MIN_W = 320
+const MIN_W = 320, MIN_H = 200
+const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
@@ -25,8 +25,22 @@ export function PdfSidePanel() {
   const [viewing, setViewing] = useState<Viewing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [width, setWidth] = useState(560)
+  const [height, setHeight] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.5))
   const [dragging, setDragging] = useState(false)
-  const dragStart = useRef<{ x: number; w: number } | null>(null)
+  const dragStart = useRef<{ axis: 'x' | 'y'; start: number; size: number } | null>(null)
+
+  // Stored preference (wide screens only); narrow/phone is always bottom.
+  const [storedOrient, setStoredOrient] = useState<'bottom' | 'side'>(() => {
+    try { return localStorage.getItem(ORIENT_KEY) === 'side' ? 'side' : 'bottom' } catch { return 'bottom' }
+  })
+  const [isWide, setIsWide] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const h = (e: MediaQueryListEvent) => setIsWide(e.matches)
+    mq.addEventListener('change', h)
+    return () => mq.removeEventListener('change', h)
+  }, [])
+  const orientation: 'bottom' | 'side' = isWide ? storedOrient : 'bottom'
 
   const open = !!(viewing || error)
 
@@ -54,38 +68,55 @@ export function PdfSidePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // Push the editor over to make room (padding-right on .inkwave-editor-surface reads this var).
+  // Make room: side → padding-right; bottom → padding-bottom (+ shift the footer toolbar up).
   useEffect(() => {
     const root = document.documentElement
-    root.style.setProperty('--iw-pdf-room', open ? `${width}px` : '0px')
-    return () => { root.style.setProperty('--iw-pdf-room', '0px') }
-  }, [open, width])
+    const set = (side: string, bottom: string) => {
+      root.style.setProperty('--iw-pdf-room', side)
+      root.style.setProperty('--iw-pdf-room-bottom', bottom)
+    }
+    if (!open) set('0px', '0px')
+    else if (orientation === 'side') set(`${width}px`, '0px')
+    else set('0px', `${height}px`)
+    return () => set('0px', '0px')
+  }, [open, orientation, width, height])
 
   function close() { setViewing(null); setError(null) }
+  function toggleOrient() {
+    setStoredOrient(o => {
+      const next = o === 'side' ? 'bottom' : 'side'
+      try { localStorage.setItem(ORIENT_KEY, next) } catch { /* private mode */ }
+      return next
+    })
+  }
 
   if (!open) return null
 
+  const side = orientation === 'side'
+  const panelPos: React.CSSProperties = side
+    ? { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: `1px solid ${INK}33`, boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' }
+    : { left: 0, right: 0, bottom: 0, height, maxHeight: '92vh', borderTop: `1px solid ${INK}33`, boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }
+  const handlePos: React.CSSProperties = side
+    ? { left: 0, top: 0, bottom: 0, width: 10, cursor: 'col-resize' }
+    : { left: 0, right: 0, top: 0, height: 10, cursor: 'row-resize' }
+
   return (
     <>
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 80,
-        width, maxWidth: '100vw', background: '#fff',
-        boxShadow: '-4px 0 24px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column',
-        borderLeft: `1px solid ${INK}33`,
-      }}>
-        {/* Drag handle — a grabbable strip on the panel's left edge */}
+      <div style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
+        {/* Resize handle on the edge facing the editor */}
         <div
-          onPointerDown={e => { e.preventDefault(); dragStart.current = { x: e.clientX, w: width }; setDragging(true) }}
-          title="Drag to resize"
-          style={{
-            position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, zIndex: 2,
-            cursor: 'col-resize', background: dragging ? `${INK}22` : 'transparent',
+          onPointerDown={e => {
+            e.preventDefault()
+            dragStart.current = side ? { axis: 'x', start: e.clientX, size: width } : { axis: 'y', start: e.clientY, size: height }
+            setDragging(true)
           }}
+          title="Drag to resize"
+          style={{ position: 'absolute', zIndex: 2, background: dragging ? `${INK}22` : 'transparent', ...handlePos }}
         />
 
         <div style={{
           flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 12px 8px 16px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc',
+          padding: side ? '8px 12px 8px 16px' : '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc',
         }}>
           <span style={{ fontSize: '0.8rem', color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             📄 {viewing?.label ?? 'PDF'}
@@ -95,8 +126,15 @@ export function PdfSidePanel() {
               select text to highlight{viewing.onLink ? ' or link' : ''}
             </span>
           )}
+          {isWide && (
+            <button type="button" onClick={toggleOrient}
+              style={{ marginLeft: 'auto', border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.72rem', borderRadius: 5, padding: '2px 7px', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}
+              title={side ? 'Dock to bottom' : 'Dock to the side'}>
+              {side ? '▭ bottom' : '▯ side'}
+            </button>
+          )}
           <button type="button" onClick={close}
-            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
+            style={{ marginLeft: isWide ? 4 : 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
             title="Close (Esc)">×</button>
         </div>
 
@@ -116,18 +154,18 @@ export function PdfSidePanel() {
         ) : null}
       </div>
 
-      {/* Drag overlay — portaled to body so it sits ABOVE the iframe; the iframe would otherwise eat
-          the pointer events and leave the drag stuck to the cursor. */}
+      {/* Drag overlay — portaled to body so it sits above the viewer (pointer events aren't swallowed). */}
       {dragging && createPortal(
         <div
           onPointerMove={e => {
-            if (!dragStart.current) return
-            const next = dragStart.current.w + (dragStart.current.x - e.clientX)
-            setWidth(Math.max(MIN_W, Math.min(window.innerWidth - 80, next)))
+            const d = dragStart.current
+            if (!d) return
+            if (d.axis === 'x') setWidth(Math.max(MIN_W, Math.min(window.innerWidth - 80, d.size + (d.start - e.clientX))))
+            else setHeight(Math.max(MIN_H, Math.min(window.innerHeight - 80, d.size + (d.start - e.clientY))))
           }}
           onPointerUp={() => { dragStart.current = null; setDragging(false) }}
           onPointerCancel={() => { dragStart.current = null; setDragging(false) }}
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, cursor: 'col-resize' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, cursor: side ? 'col-resize' : 'row-resize' }}
         />,
         document.body,
       )}

@@ -30,11 +30,13 @@
     padding: 1.25rem 1rem 8rem;
   }
 
-  /* When the PDF side panel is open it sets --iw-pdf-room to its width; the surface pads its right
-     edge by that much so the centred parchment (mx-auto) slides left and clears the panel. */
+  /* When the PDF panel is open it sets --iw-pdf-room (side dock) or --iw-pdf-room-bottom (bottom dock);
+     the surface pads that edge so the parchment clears the panel (mx-auto recentres for the side case;
+     bottom padding lifts the end of the writing above a bottom dock). */
   .inkwave-editor-surface {
     padding-right: calc(1rem + var(--iw-pdf-room, 0px));
-    transition: padding-right 0.18s ease;
+    padding-bottom: calc(8rem + var(--iw-pdf-room-bottom, 0px));
+    transition: padding-right 0.18s ease, padding-bottom 0.18s ease;
   }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
