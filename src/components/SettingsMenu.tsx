@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
+import { nightModeEnabled, setNightMode } from '../editor/theme'
 import { LimitSelector } from './LimitSelector'
 
 const INK = '#5c2d8a'
@@ -68,6 +69,13 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
             onMouseDown={e => e.stopPropagation()}
           >
             <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-stone-400">Settings</div>
+
+            {/* Night mode — dark writing surface */}
+            <Row
+              label="Night mode"
+              checked={nightModeEnabled()}
+              onChange={() => { setNightMode(!nightModeEnabled()); rerender(n => n + 1) }}
+            />
 
             {/* Vocab limit */}
             <div className="flex items-center justify-between px-4 py-2.5">

@@ -514,3 +514,35 @@
      content (page-1 top padding + the 72px gaps + the A4−144px text area). */
   @page { size: A4; margin: 0; }
 }
+
+/* ─────────────────────────────  NIGHT MODE  ─────────────────────────────────
+   Toggled from Settings (src/editor/theme.ts sets <html data-theme="night">). Kept UNLAYERED so it
+   overrides the @layer base defaults above. Peter's palette: black background, grey-on-black waves,
+   charcoal paper, very-light-blue text, light purple/green highlights. Scopes the WRITING SURFACE. */
+:root[data-theme="night"] { color-scheme: dark; background-color: #0a0b0e; }
+:root[data-theme="night"] body { background-color: #0a0b0e; }
+:root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e; }
+
+/* Grey waves on black (same two-layer tiles, grey strokes instead of white). */
+:root[data-theme="night"] .inkwave-editor-surface::before {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='2.4'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='2.4'/%3E%3C/svg%3E");
+}
+
+/* Charcoal paper. */
+:root[data-theme="night"] .scroll-paper,
+:root[data-theme="night"] .inkwave-sheet { background-color: #26272c; }
+:root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
+
+/* Very-light-blue text. */
+:root[data-theme="night"] .ProseMirror { color: #dbe6ff; }
+:root[data-theme="night"] .inkwave-sheet-num { color: #b79be0; }
+:root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(155, 130, 220, 0.28); }
+
+/* Light purple / light green highlights. */
+:root[data-theme="night"] .scas-red { color: #86e6a6; }               /* unresolved kicked word */
+:root[data-theme="night"] .iw-comment { border-bottom-color: #c9a9ff; }
+:root[data-theme="night"] ins.iw-ins { color: #86e6a6; border-bottom-color: rgba(134, 230, 166, 0.6); background: rgba(134, 230, 166, 0.1); }
+:root[data-theme="night"] del.iw-del { color: #ff9b9b; text-decoration-color: rgba(255, 155, 155, 0.8); background: rgba(255, 155, 155, 0.1); }
+:root[data-theme="night"] .iw-change-current { outline-color: #c9a9ff; }

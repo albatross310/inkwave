@@ -5,6 +5,10 @@ import { HydratedRouter } from 'react-router/dom'
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
 console.log(`%c[inkwave] build: ${__BUILD_ID__}`, 'color:#5c2d8a;font-weight:bold')
 
+// Apply the saved theme (night/day) before hydration so a night-mode reader doesn't flash light.
+import { applyTheme } from '../src/editor/theme'
+applyTheme()
+
 // Wrap the app in Clerk ONLY when configured (paid-tier auth, M6). Dynamic import keeps Clerk out
 // of the bundle entirely when unconfigured, and entry.client is client-only so it never touches
 // the prerender/SSR build. The publishable key is public (safe in the client).
