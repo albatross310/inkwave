@@ -699,35 +699,38 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
 
-  // Load existing snapshots when the document opens / switches, then (online) stamp any unstamped
-  // backlog and upgrade pending proofs toward Bitcoin confirmation. DEFERRED to idle so the text
-  // paints and becomes interactive FIRST — reading+parsing the snapshot history + the OTS pass are not
-  // needed for the first frame, so keeping them off the critical path removes the startup stall.
+  // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid
+  // snapshot scrubbing is a core feature, so the reviewer must never wait for it (deferring it made
+  // the first open lag). Only the OTS Bitcoin re-check is pushed off idle + throttled: it's ~10s of
+  // serial calendar-server round-trips, it was running on every reload (the residual load lag), and
+  // confirmations take HOURS — so it only runs when something is actually unstamped/pending, at most
+  // once per 15 min. (New snapshots are stamped on creation; ReceiptPanel "check Bitcoin" forces it.)
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
-    const run = () => {
+    const t0 = performance.now()
+    void listSnapshots(docId).then((s) => {
       if (cancelled) return
-      const t0 = performance.now()
-      void listSnapshots(docId).then((s) => {
-        if (!cancelled) setSnapshots(s)
-        console.log(`%c[perf] listSnapshots (${s.length} snaps): ${Math.round(performance.now() - t0)}ms`, 'color:#2563eb')
-      })
-      enqueueSnapshotWork(async () => {
+      setSnapshots(s)
+      console.log(`%c[perf] listSnapshots (${s.length} snaps): ${Math.round(performance.now() - t0)}ms`, 'color:#2563eb')
+      const needsOts = s.some((sn) => sn.ots?.status === 'unstamped' || sn.ots?.status === 'pending')
+      if (!needsOts) return
+      const OTS_KEY = `inkwave:otsCheckedAt:${docId}`
+      let lastOts = 0
+      try { lastOts = Number(localStorage.getItem(OTS_KEY)) || 0 } catch { /* private mode */ }
+      if (Date.now() - lastOts < 15 * 60 * 1000) return
+      const doOts = () => enqueueSnapshotWork(async () => {
         const t1 = performance.now()
         await drainUnstamped(docId)
         await upgradePending(docId)
         await refreshSnapshots(docId)
+        try { localStorage.setItem(OTS_KEY, String(Date.now())) } catch { /* private mode */ }
         console.log(`%c[perf] OTS drain+upgrade: ${Math.round(performance.now() - t1)}ms`, 'color:#2563eb')
       })
-    }
-    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
-    const id = ric ? ric(run, { timeout: 3000 }) : window.setTimeout(run, 400)
-    return () => {
-      cancelled = true
-      const cic = (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback
-      if (ric && cic) cic(id); else clearTimeout(id)
-    }
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+      if (ric) ric(doOts, { timeout: 5000 }); else window.setTimeout(doOts, 1500)
+    })
+    return () => { cancelled = true }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Snapshot trigger: on a resolved kick, snapshot if the content hash changed (M1), then anchor it

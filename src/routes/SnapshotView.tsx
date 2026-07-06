@@ -869,6 +869,19 @@ export function SnapshotView() {
     })
   }, [])
 
+  // First-ever snapshot open: a big one-time toast teaching the killer gesture (Shift+scroll to fly
+  // through snapshots). Shown once (persisted), auto-dismisses, dismissable by click.
+  const [showScrubHint, setShowScrubHint] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('inkwave:snapScrubHintSeen') === '1') return
+      localStorage.setItem('inkwave:snapScrubHintSeen', '1')
+    } catch { return }
+    setShowScrubHint(true)
+    const t = setTimeout(() => setShowScrubHint(false), 6000)
+    return () => clearTimeout(t)
+  }, [])
+
   // Populate bibProvider once so citations resolve in DocView + pmToText (the snapshot route has no
   // editor to load the library). Gates the split-view render below to avoid a red "missing" flash.
   useEffect(() => {
@@ -965,9 +978,9 @@ export function SnapshotView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [goBack, goFwd])
 
-  // ── Shift+wheel: scrub through snapshots fast ─────────────────────────────────
-  // Accumulate wheel delta and jump STRAIGHT to the target index (a fast flick moves many at once),
-  // so scrubbing stays smooth without stepping through every intermediate navigation.
+  // ── Shift+wheel: scrub through snapshots ONE at a time ────────────────────────
+  // Each wheel notch advances exactly ONE snapshot (never a jump of several) — rapid physical
+  // scrolling still flies because the OS streams many notches, but each is a single, legible step.
   const idxRef = useRef(idx); idxRef.current = idx
   const allRef = useRef(allSnapshots); allRef.current = allSnapshots
   const wheelAccum = useRef(0)
@@ -978,10 +991,12 @@ export function SnapshotView() {
       // Shift+wheel arrives as horizontal delta on many setups → take whichever axis is larger.
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
       wheelAccum.current += d
-      const STEP = 45 // wheel px per snapshot
+      const STEP = 40 // wheel px to cross before stepping
       let n = 0
-      while (Math.abs(wheelAccum.current) >= STEP) {
-        if (wheelAccum.current > 0) { wheelAccum.current -= STEP; n++ } else { wheelAccum.current += STEP; n-- }
+      // Move at most ±1 per event (then reset), so one notch = one snapshot regardless of its size.
+      if (Math.abs(wheelAccum.current) >= STEP) {
+        n = wheelAccum.current > 0 ? 1 : -1
+        wheelAccum.current = 0
       }
       if (!n) return
       const cur = idxRef.current, all = allRef.current
@@ -1047,6 +1062,21 @@ export function SnapshotView() {
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
+      {/* First-open gesture hint — big, centred, one-time. */}
+      {showScrubHint && (
+        <div
+          onClick={() => setShowScrubHint(false)}
+          style={{
+            position: 'fixed', top: '20%', left: '50%', transform: 'translateX(-50%)', zIndex: 200,
+            padding: '18px 30px', borderRadius: 16, cursor: 'pointer',
+            background: 'rgba(35,25,50,0.94)', color: '#fff', boxShadow: '0 10px 40px rgba(0,0,0,0.35)',
+            fontSize: 'clamp(1.25rem, 3vw, 1.9rem)', fontWeight: 500, textAlign: 'center', lineHeight: 1.35,
+            maxWidth: '90vw',
+          }}
+        >
+          Press <span style={{ color: '#c9a9ff' }}>Shift&nbsp;+&nbsp;Scroll</span> to fly through snapshots
+        </div>
+      )}
       {/* Fixed header */}
       <div
         className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
