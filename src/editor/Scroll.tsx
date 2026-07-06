@@ -100,7 +100,7 @@ export function Scroll({
       const z = el.style.getPropertyValue('--iw-editor-zoom')
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(y * 0.09).toFixed(1)}px`)
+      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
