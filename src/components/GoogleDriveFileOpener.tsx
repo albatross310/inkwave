@@ -88,7 +88,7 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label="Open from Google Drive" onMouseDown={(e) => e.stopPropagation()}
-        className="relative bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${G_BLUE}55`, borderRadius: 14 }}>
+        className="relative iw-nightable bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${G_BLUE}55`, borderRadius: 14 }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <DriveMark />

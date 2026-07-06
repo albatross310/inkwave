@@ -102,7 +102,7 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label="Choose OneDrive folder" onMouseDown={(e) => e.stopPropagation()}
-        className="relative bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${ONE}66`, borderRadius: 14 }}>
+        className="relative iw-nightable bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${ONE}66`, borderRadius: 14 }}>
         {/* OneDrive-branded header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">

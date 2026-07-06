@@ -99,7 +99,7 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
 
   return createPortal(
     <div
-      className="fixed left-1/2 -translate-x-1/2 z-[95] flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-md"
+      className="fixed left-1/2 -translate-x-1/2 z-[95] flex items-center gap-2 px-3 py-1.5 iw-nightable bg-white rounded-full shadow-md"
       style={{ bottom, border: `1px solid ${INK}44` }}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -119,7 +119,7 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
           ◆ {cur} ▾
         </button>
         {setMenu && (
-          <div className="absolute bottom-full mb-2 left-0 min-w-[160px] bg-white rounded-lg shadow-lg py-1 text-sm"
+          <div className="absolute bottom-full mb-2 left-0 min-w-[160px] iw-nightable bg-white rounded-lg shadow-lg py-1 text-sm"
             style={{ border: `1px solid ${INK}33` }}>
             {sets.map((s) => (
               <button key={s} type="button"
