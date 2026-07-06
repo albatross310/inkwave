@@ -77,18 +77,27 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         if (kind === 'text') {
           const r0 = hl.rects[0]
           if (!r0) continue
+          // A text note is an EDITABLE box on the page — type directly into it (like Edge/Firefox),
+          // no popup. Live-update the model on input (so a redraw keeps what you typed), persist on blur,
+          // and delete if left blank. data-hl-id lets placeTextNote focus a freshly-created one.
           const note = document.createElement('div')
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;`
+          note.dataset.hlId = hl.id
+          note.setAttribute('contenteditable', 'true')
+          note.spellcheck = false
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;min-width:40px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;outline:none;`
           note.textContent = hl.note || hl.text
-          note.title = 'Click to edit (blank to delete)'
-          note.onclick = () => {
-            const v = window.prompt('Edit note (leave blank to delete):', hl.note || hl.text)
-            if (v === null) return
-            if (!v.trim()) { removeHighlight(hl.id); return }
-            hl.note = v.trim(); hl.text = v.trim()
-            redrawOverlays()
+          note.title = 'Type your note — click away to save, leave blank to delete'
+          note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
+          note.addEventListener('keydown', (ev) => {
+            ev.stopPropagation() // keep note typing out of the page/editor shortcuts
+            if (ev.key === 'Escape') { ev.preventDefault(); note.blur() }
+          })
+          note.addEventListener('blur', () => {
+            const v = (note.textContent ?? '').trim()
+            if (!v) { highlightsRef.current = highlightsRef.current.filter(h => h.id !== hl.id); redrawOverlays() }
+            else { hl.note = v; hl.text = v }
             void saveHighlights(citekey, highlightsRef.current)
-          }
+          })
           pg.hlLayer.appendChild(note)
           continue
         }
@@ -186,7 +195,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     for (let n = 1; n <= doc.numPages; n++) {
       const page = await doc.getPage(n)
       if (token !== renderTokenRef.current) return
-      const viewport = page.getViewport({ scale })
+      const viewport = page.getViewport({ scale, rotation: rotationRef.current })
 
       const pageEl = document.createElement('div')
       pageEl.className = 'page'
@@ -291,6 +300,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   // axes and restore it after re-render, so zooming grows/shrinks around the cursor. The −/+ buttons
   // leave no pointer, so those fall back to the viewport centre.
   const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null)
+  const rotationRef = useRef(0)                                      // 0/90/180/270 — user PDF rotation
   const renderedZoomRef = useRef(1)                                  // the zoom the canvases are drawn at
   const zoomSettleRef = useRef<ReturnType<typeof setTimeout>>()
   const zoomBaseRef = useRef<{ left: number; top: number } | null>(null) // untransformed viewer origin
@@ -437,16 +447,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     for (let i = 0; i < pagesRef.current.length; i++) {
       const pr = pagesRef.current[i].wrapper.getBoundingClientRect()
       if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
-      const text = window.prompt('Note:')?.trim()
-      if (!text) return
+      // Drop an EMPTY editable note at the click and focus it — the writer types straight into the page
+      // (no prompt). It persists on blur, or vanishes if left blank (see the contenteditable box above).
       const hl: PdfHighlight = {
-        id: uuidv4(), page: i + 1, color: colorRef.current, kind: 'text', text, note: text,
+        id: uuidv4(), page: i + 1, color: colorRef.current, kind: 'text', text: '', note: '',
         rects: [{ x: (clientX - pr.left) / pr.width, y: (clientY - pr.top) / pr.height, w: 0.22, h: 0.05 }],
         createdAt: new Date().toISOString(),
       }
       highlightsRef.current = [...highlightsRef.current, hl]
       redrawOverlays()
-      void saveHighlights(citekey, highlightsRef.current)
+      requestAnimationFrame(() => {
+        const el = pagesRef.current[i]?.hlLayer?.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
+        el?.focus()
+      })
       return
     }
   }
@@ -508,6 +521,22 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
       {/* Zoom controls */}
       <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 15, display: 'flex', gap: 4, background: '#fff', border: `1px solid ${INK}33`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', padding: 2 }}>
+        <button type="button" title="Rotate 90°" aria-label="Rotate 90 degrees"
+          onClick={async () => {
+            const next = (rotationRef.current + 90) % 360
+            rotationRef.current = next
+            const doc = docRef.current
+            if (doc) { // re-fit for the new orientation (width/height swap at 90°/270°)
+              const containerW = (scrollRef.current?.clientWidth ?? 800) - 24
+              const vp = (await doc.getPage(1)).getViewport({ scale: 1, rotation: next })
+              fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / vp.width))
+            }
+            renderedZoomRef.current = zoom
+            void renderPages(fitScaleRef.current * zoom)
+          }}
+          style={{ minWidth: 26, height: 26, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '0.95rem', borderRadius: 5 }}>
+          ⟳
+        </button>
         {([['−', () => { zoomAnchorRef.current = null; setZoom(z => Math.max(ZOOM_MIN, z / 1.2)) }], [`${Math.round(zoom * 100)}%`, () => { zoomAnchorRef.current = null; setZoom(1) }], ['+', () => { zoomAnchorRef.current = null; setZoom(z => Math.min(ZOOM_MAX, z * 1.2)) }]] as const).map(([label, fn], i) => (
           <button key={i} type="button" onClick={fn}
             style={{ minWidth: label.length > 2 ? 44 : 26, height: 26, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '0.8rem', borderRadius: 5 }}
