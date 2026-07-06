@@ -11,7 +11,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
-import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
+import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
@@ -283,18 +283,20 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   // The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes. The cited PDFs go
   // as sidecar files next to it, uploaded once (re-uploaded only if the PDF itself changes).
   const studioName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
-  // GROW-ONLY: read the snapshots already in the remote file and union them in before overwriting,
-  // so a short local set (fresh login / cleared data / race ahead of restore) can't truncate the
-  // archived history. Syncs are throttled (≥20s) and the .studio is lean (no PDF bytes), so the
-  // extra GET is cheap. 404/parse-fail on a brand-new file → just write the local set.
+  // GROW-ONLY: union the remote file's snapshots in before overwriting so a short local set can't
+  // truncate history — but only ONCE per session (the per-sync GET+parse of a big file adds lag).
   let merged = snapshots
-  try {
-    const res = await fetch(contentUrl(studioName), { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) {
-      const remote = parseTraceFile(await res.text())
-      if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots)
-    }
-  } catch { /* no remote yet → write local as-is */ }
+  const key = `onedrive:${doc.id}`
+  if (needsWritebackMerge(key)) {
+    try {
+      const res = await fetch(contentUrl(studioName), { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) {
+        const remote = parseTraceFile(await res.text())
+        if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots)
+        markWritebackMerged(key)
+      }
+    } catch { /* no remote yet → write local as-is; retry the merge next sync */ }
+  }
   const bundle = buildExportBundle(doc, merged)
   try {
     const webUrl = await putFile(token, studioName, composeTraceFile(bundle))
