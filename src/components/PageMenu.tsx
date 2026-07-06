@@ -40,6 +40,13 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   const parFocusRef = useRef(false)
   const parFocus = parFocusRef.current
 
+  // Movable + resizable like the citations panel: opens CENTRED, drag the header to move, drag the
+  // bottom-right corner to resize. dragPos null = default centred.
+  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
+  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (!open) setDragPos(null) }, [open]) // re-centre each time it opens
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
@@ -48,11 +55,25 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   }, [open])
 
   function menuStyle(): React.CSSProperties {
-    const br = btnRef.current?.getBoundingClientRect()
-    if (!br) return { position: 'fixed', bottom: 80, right: 16 }
-    // Shift 24px right from the button's left edge so it sits inset from the right edge
-    const right = Math.max(8, Math.round(window.innerWidth - br.right) - 24)
-    return { position: 'fixed', bottom: Math.round(window.innerHeight - br.top + 8), right }
+    if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
+    return { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+  }
+
+  function onHeaderMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    const panel = panelRef.current
+    if (!panel) return
+    const r = panel.getBoundingClientRect()
+    setDragPos({ left: r.left, top: r.top })
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: r.left, origTop: r.top }
+    function onMove(ev: MouseEvent) {
+      if (!dragRef.current) return
+      setDragPos({ left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX), top: dragRef.current.origTop + (ev.clientY - dragRef.current.startY) })
+    }
+    function onUp() { dragRef.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
   }
 
   const paraAttrs = (parFocus && editor) ? (editor.getAttributes('paragraph') as Record<string, string>) : {}
@@ -151,13 +172,14 @@ export function PageMenu({ editor }: { editor?: Editor }) {
 
       {open && createPortal(
         <>
-          <div role="dialog" aria-label="Page settings"
-            className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600"
-            style={{ ...menuStyle(), width: 384, border: `1px solid ${INK}55`, borderRadius: 14 }}
+          <div ref={panelRef} role="dialog" aria-label="Page settings"
+            className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+            style={{ ...menuStyle(), width: 384, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
             onMouseDown={e => e.stopPropagation()}>
 
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100">
+            {/* Header (drag to move) */}
+            <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100"
+              style={{ cursor: 'grab' }} onMouseDown={onHeaderMouseDown}>
               <span className="text-[11px] uppercase tracking-wide text-stone-400">Page</span>
               <div className="flex items-center gap-2">
                 {parFocus && editor ? (
