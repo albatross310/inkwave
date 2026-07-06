@@ -171,7 +171,7 @@ describe('bundleReadme', () => {
   })
 
   it('always contains the verify URL', () => {
-    expect(bundleReadme()).toContain('inkwave.studio/verify')
-    expect(bundleReadme(summary)).toContain('inkwave.studio/verify')
+    expect(bundleReadme()).toContain('iwzero.me/verify')
+    expect(bundleReadme(summary)).toContain('iwzero.me/verify')
   })
 })

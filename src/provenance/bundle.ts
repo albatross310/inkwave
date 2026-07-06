@@ -147,7 +147,7 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     bitcoinAnchored: snapshots.filter((s) => s.ots.status === 'confirmed').length,
     created: doc.createdAt,
     exported: exportedAt,
-    verifyAt: 'https://inkwave.studio/verify',
+    verifyAt: 'https://iwzero.me/verify',
     note: 'Open this file at the verify link above (or any Inkwave /verify page) to check it — entirely in your browser, against the published signing key and Bitcoin, with no sign-in. The fields below are the cryptographic record; this summary is for humans.',
   }
   return {
@@ -216,7 +216,7 @@ export function bundleReadme(s?: BundleSummary): string {
     '',
     'Files:',
     '  inkwave-*.json     — the self-verifying export bundle. Open it at',
-    '                       https://inkwave.studio/verify to check it (no sign-in).',
+    '                       https://iwzero.me/verify to check it (no sign-in).',
     '  *.current.json     — the document content (for reloading your work).',
     '  *.snapshots.json   — the dated snapshots with their Bitcoin proofs.',
     '',
@@ -251,8 +251,12 @@ export function bundleFilename(doc: InkwaveDocument): string {
 // you open the file and read it immediately), then this marker, then the verifiable JSON record.
 // composeTraceFile() writes that shape; parseTraceFile() reads it back (and still accepts a legacy
 // pure-JSON file). The box-drawing rule makes the marker unmistakable and ~impossible to hit in prose.
-const TRACE_DATA_MARKER = '══════ INKWAVE RECORD · verify at inkwave.studio/verify ══════'
-const TRACE_DATA_MARKER_LEGACY = '══════ INKWAVE RECORD · verify at inkwave.me/verify ══════'
+const TRACE_DATA_MARKER = '══════ INKWAVE RECORD · verify at iwzero.me/verify ══════'
+// Older domains, still accepted on read so files exported before the iwzero.me migration keep opening.
+const TRACE_DATA_MARKERS_LEGACY = [
+  '══════ INKWAVE RECORD · verify at inkwave.studio/verify ══════',
+  '══════ INKWAVE RECORD · verify at inkwave.me/verify ══════',
+]
 
 /** Serialize a bundle to the single .trace.json file: readable writing on top, JSON record below. */
 export function composeTraceFile(bundle: ExportBundle): string {
@@ -262,7 +266,7 @@ export function composeTraceFile(bundle: ExportBundle): string {
     '══════════════════════════════════════════════════════════════',
     TRACE_DATA_MARKER,
     'Everything below is the structured record that proves the writing above. You don’t need to',
-    'read it — open this file at inkwave.studio/verify to check it.',
+    'read it — open this file at iwzero.me/verify to check it.',
     '══════════════════════════════════════════════════════════════',
     '',
     JSON.stringify(bundle, null, 2),
@@ -281,7 +285,7 @@ export function parseTraceFile(fileText: string): ExportBundle {
   // to redirect the JSON slice (audit F7). Accept both the current domain and the legacy one so
   // files exported before the inkwave.studio domain continue to open.
   let i = fileText.indexOf(TRACE_DATA_MARKER)
-  if (i < 0) i = fileText.indexOf(TRACE_DATA_MARKER_LEGACY)
+  if (i < 0) for (const m of TRACE_DATA_MARKERS_LEGACY) { i = fileText.indexOf(m); if (i >= 0) break }
   const json = i < 0 ? fileText : fileText.slice(fileText.indexOf('{', i))
   return JSON.parse(json) as ExportBundle
 }
