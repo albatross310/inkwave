@@ -67,6 +67,7 @@ export function ReceiptPanel({
   compact,
   open: externalOpen,
   onOpenChange,
+  onOpened,
   hideTrigger,
 }: {
   snapshots: Snapshot[]
@@ -79,11 +80,14 @@ export function ReceiptPanel({
   compact?: boolean
   open?: boolean
   onOpenChange?: (v: boolean) => void
+  onOpened?: () => void
   hideTrigger?: boolean
 }) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
+  // Fire the (throttled) OTS sweep only when the panel actually opens — keeps it off the load path.
+  useEffect(() => { if (open) onOpened?.() }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [saving, setSaving] = useState(false)
   const [toastPhase, setToastPhase] = useState<'hidden' | 'show' | 'fade'>('hidden')

@@ -859,7 +859,8 @@ export function SnapshotView() {
   // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
   // above the biggest change in each snapshot. Persisted.
   const [lineMode, setLineMode] = useState<'center' | 'longest'>(() => {
-    try { return localStorage.getItem('inkwave:snapLineMode') === 'longest' ? 'longest' : 'center' } catch { return 'center' }
+    // Default to 'longest' (snap to the biggest change) — only an explicit opt-out sticks to 'center'.
+    try { return localStorage.getItem('inkwave:snapLineMode') === 'center' ? 'center' : 'longest' } catch { return 'longest' }
   })
   const toggleLineMode = useCallback(() => {
     setLineMode(m => {

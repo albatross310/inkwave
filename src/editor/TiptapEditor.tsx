@@ -699,12 +699,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
 
-  // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid
-  // snapshot scrubbing is a core feature, so the reviewer must never wait for it (deferring it made
-  // the first open lag). Only the OTS Bitcoin re-check is pushed off idle + throttled: it's ~10s of
-  // serial calendar-server round-trips, it was running on every reload (the residual load lag), and
-  // confirmations take HOURS — so it only runs when something is actually unstamped/pending, at most
-  // once per 15 min. (New snapshots are stamped on creation; ReceiptPanel "check Bitcoin" forces it.)
+  // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid snapshot
+  // scrubbing is a core feature, so the reviewer never waits for it. The OTS Bitcoin re-check does NOT
+  // run here: it re-writes the compressed snapshot file per snapshot + does serial calendar round-trips
+  // (~10s), which was the startup lag. It now runs only when the receipts panel is opened (runOtsSweep),
+  // throttled. New snapshots are still stamped on creation, so nothing is lost by not sweeping on load.
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
@@ -713,22 +712,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (cancelled) return
       setSnapshots(s)
       console.log(`%c[perf] listSnapshots (${s.length} snaps): ${Math.round(performance.now() - t0)}ms`, 'color:#2563eb')
-      const needsOts = s.some((sn) => sn.ots?.status === 'unstamped' || sn.ots?.status === 'pending')
-      if (!needsOts) return
-      const OTS_KEY = `inkwave:otsCheckedAt:${docId}`
-      let lastOts = 0
-      try { lastOts = Number(localStorage.getItem(OTS_KEY)) || 0 } catch { /* private mode */ }
-      if (Date.now() - lastOts < 15 * 60 * 1000) return
-      const doOts = () => enqueueSnapshotWork(async () => {
-        const t1 = performance.now()
-        await drainUnstamped(docId)
-        await upgradePending(docId)
-        await refreshSnapshots(docId)
-        try { localStorage.setItem(OTS_KEY, String(Date.now())) } catch { /* private mode */ }
-        console.log(`%c[perf] OTS drain+upgrade: ${Math.round(performance.now() - t1)}ms`, 'color:#2563eb')
-      })
-      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
-      if (ric) ric(doOts, { timeout: 5000 }); else window.setTimeout(doOts, 1500)
     })
     return () => { cancelled = true }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -785,6 +768,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function checkBitcoin() {
     const docId = docRef.current.id
     enqueueSnapshotWork(async () => { await upgradePending(docId); await refreshSnapshots(docId) })
+  }
+
+  // Background OTS sweep — stamp any unstamped backlog + upgrade pending proofs toward Bitcoin
+  // confirmation. Runs when the receipts panel OPENS (not on load — that was the startup lag), and
+  // only when there's actually something to do, at most once per 15 min per doc (confirmations take
+  // hours). The panel's "check Bitcoin" button still forces an immediate upgrade any time.
+  function runOtsSweep() {
+    const docId = docRef.current.id
+    const needsOts = snapshotsRef.current.some((sn) => sn.ots?.status === 'unstamped' || sn.ots?.status === 'pending')
+    if (!needsOts) return
+    const OTS_KEY = `inkwave:otsCheckedAt:${docId}`
+    let lastOts = 0
+    try { lastOts = Number(localStorage.getItem(OTS_KEY)) || 0 } catch { /* private mode */ }
+    if (Date.now() - lastOts < 15 * 60 * 1000) return
+    enqueueSnapshotWork(async () => {
+      await drainUnstamped(docId)
+      await upgradePending(docId)
+      await refreshSnapshots(docId)
+      try { localStorage.setItem(OTS_KEY, String(Date.now())) } catch { /* private mode */ }
+    })
   }
 
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
@@ -1426,6 +1429,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         <ReceiptPanel
           snapshots={snapshots}
           onCheckBitcoin={checkBitcoin}
+          onOpened={runOtsSweep}
           onSaveVersion={saveVersion}
           receiptCount={receipts.length}
           chainStatus={chainStatus}
