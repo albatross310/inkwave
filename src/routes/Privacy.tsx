@@ -38,7 +38,7 @@ export function Privacy() {
               </li>
               <li>
                 <strong>Provenance signing.</strong> When you write, Inkwave contacts
-                its signing service at <code className="text-xs bg-stone-100 px-1 rounded">inkwave.studio</code> to
+                its signing service at <code className="text-xs bg-stone-100 px-1 rounded">iwzero.me</code> to
                 sign composition receipts. The service receives only cryptographic hashes —
                 never your text, your identity, or any personally identifiable information.
               </li>
@@ -76,7 +76,7 @@ export function Privacy() {
               </li>
               <li>
                 <strong>What it sends.</strong> The page URL and extracted metadata are
-                sent to <code className="text-xs bg-stone-100 px-1 rounded">inkwave.studio/api/summarise</code> so
+                sent to <code className="text-xs bg-stone-100 px-1 rounded">iwzero.me/api/summarise</code> so
                 the server can extract structured bibliographic fields using an AI model.
                 The page's full text is not retained after processing.
               </li>
@@ -109,8 +109,8 @@ export function Privacy() {
             <h2 className="text-lg font-semibold mb-2" style={{ color: INK }}>Contact</h2>
             <p>
               Questions about this policy:{' '}
-              <a href="mailto:hello@inkwave.studio" style={{ color: LIGHT }} className="underline">
-                hello@inkwave.studio
+              <a href="mailto:hello@iwzero.me" style={{ color: LIGHT }} className="underline">
+                hello@iwzero.me
               </a>
             </p>
           </section>

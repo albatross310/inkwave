@@ -4,11 +4,11 @@ import { useEffect } from 'react'
 import { FONT_PRELOAD } from './fontPreload'
 
 const TAB_TITLES = [
-  'Inkwave Solo: writing that remembers',
-  'Inkwave Solo: a mnemonic environment',
-  'Inkwave Solo: a calm place to write',
-  'Inkwave Solo: writing with memory',
-  'Inkwave Solo: every word intentional',
+  'Inkwave Zero: writing that remembers',
+  'Inkwave Zero: a mnemonic environment',
+  'Inkwave Zero: a calm place to write',
+  'Inkwave Zero: writing with memory',
+  'Inkwave Zero: every word intentional',
 ]
 
 // The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a
@@ -49,14 +49,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#2a3b5f" />
         <meta name="google-site-verification" content="h79VCdHP57BlmRzPhYg_vgOKBj1iMfKkq4J1gpAIvR4" />
         <meta name="robots" content="index, follow" />
-        <meta name="application-name" content="Inkwave Solo" />
-        <meta property="og:site_name" content="Inkwave Solo" />
-        <meta property="og:image" content="https://inkwave.me/inkwave-seal-512.webp" />
+        <meta name="application-name" content="Inkwave Zero" />
+        <meta property="og:site_name" content="Inkwave Zero" />
+        <meta property="og:image" content="https://iwzero.me/inkwave-seal-512.webp" />
         <meta property="og:image:width" content="512" />
         <meta property="og:image:height" content="512" />
         <meta property="og:image:alt" content="The Inkwave seal — a great wave within a circle" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:image" content="https://inkwave.me/inkwave-seal-512.webp" />
+        <meta name="twitter:image" content="https://iwzero.me/inkwave-seal-512.webp" />
         <Meta />
         <Links />
       </head>
