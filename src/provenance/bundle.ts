@@ -7,7 +7,7 @@ import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem, IwC
 import { bibProvider } from '../citations/bibProvider'
 import { simpleInText } from '../citations/format'
 import { usedCitekeys, referenceListKeys } from '../citations/resolve'
-import { loadPdf, blobToBase64 } from '../citations/pdfStore'
+import { loadPdf, blobToBase64, pdfVersion } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
 import { POOL_ID } from '../scas/pool'
 import { deviceId } from '../sync/presence'
@@ -179,14 +179,25 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
 // Explicit-export variant: also embeds each cited source's PDF bytes (base64) so the .studio is fully
 // self-contained. NOT used by autosave/sync (would rewrite megabytes on every checkpoint) — only when
 // the writer clicks "download". On the other end, openInkwaveFile restores them to OPFS.
+// Cache the base64 of each PDF keyed by citekey + its version, so a save that hasn't changed any PDF
+// (the common case) reuses the encoded strings instead of re-reading OPFS + re-encoding ~20 MB.
+const _pdfB64Cache = new Map<string, { v: number; name: string; data: string }>()
+
 export async function buildExportBundleWithPdfs(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<ExportBundle> {
   const bundle = buildExportBundle(doc, snapshots)
   const pdfs: Record<string, { name: string; data: string }> = {}
   for (const item of bundle.bibliography ?? []) {
     const name = (item as { _iw?: IwCitationMeta })._iw?.pdfName
     if (!name) continue
+    const v = pdfVersion(item.id)
+    const cached = _pdfB64Cache.get(item.id)
+    if (cached && cached.v === v && cached.name === name) { pdfs[item.id] = { name, data: cached.data }; continue }
     const blob = await loadPdf(item.id)
-    if (blob) pdfs[item.id] = { name, data: await blobToBase64(blob) }
+    if (blob) {
+      const data = await blobToBase64(blob)
+      _pdfB64Cache.set(item.id, { v, name, data })
+      pdfs[item.id] = { name, data }
+    }
   }
   return Object.keys(pdfs).length ? { ...bundle, pdfs } : bundle
 }
