@@ -30,8 +30,12 @@ if (typeof PerformanceObserver !== 'undefined') {
 // the prerender/SSR build. The publishable key is public (safe in the client).
 async function bootstrap() {
   const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
+  // Only mount Clerk when auth is explicitly requested (?auth) — NOT on every free-tier load, where
+  // its multi-second dev-instance init is the startup CPU whir. Same gate as authEnabled() so the
+  // provider is present exactly when the auth UI (AccountControl / /login) renders. See auth/config.
+  const { authRequested } = await import('../src/auth/config')
   let tree: ReactNode = <HydratedRouter />
-  if (pk) {
+  if (pk && authRequested()) {
     const { ClerkProvider } = await import('@clerk/clerk-react')
     tree = <ClerkProvider publishableKey={pk}>{tree}</ClerkProvider>
   }
