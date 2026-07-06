@@ -579,7 +579,11 @@
   color: #dfe3e9 !important;
   border-color: #5c6672 !important;
   --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
+  --iw-nightable-border: #5c6672;          /* inline-styled control borders */
 }
+/* Light hover fills (hover:bg-stone-50/100) would flash bright white on the dark panel — darken them. */
+:root[data-theme="night"] .iw-nightable .hover\:bg-stone-50:hover,
+:root[data-theme="night"] .iw-nightable .hover\:bg-stone-100:hover { background-color: #3c444e !important; }
 /* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey. */
 :root[data-theme="night"] .iw-nightable .bg-white,
 :root[data-theme="night"] .iw-nightable [style*="background: #fff"],

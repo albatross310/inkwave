@@ -774,8 +774,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 key={m} type="button" onClick={() => setMode(m)}
                 className="h-7 text-[11px] px-2 rounded border flex items-center"
                 style={refMode === m
-                  ? { background: `${INK}12`, borderColor: INK, color: INK }
-                  : { borderColor: '#e7e5e4', color: '#78716c' }}
+                  ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #5c2d8a)', color: 'var(--iw-cite-color, #5c2d8a)' }
+                  : { borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
               >
                 {m === 'cited' ? 'Auto' : m === 'all' ? 'All' : 'Manual'}
               </button>
