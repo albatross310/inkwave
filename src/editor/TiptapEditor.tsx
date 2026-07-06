@@ -1596,7 +1596,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               }
             } : undefined}
             style={{
-              border: '1px solid rgba(92, 45, 138, 0.75)',
+              border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
