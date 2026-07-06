@@ -165,6 +165,38 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   panel), keep-same-words-on-the-midline OR snap-to-biggest-change dotted-line modes, shift-wheel
   fast scrub, per-version summaries (Haiku). Grow-only + deterministic pmToText apply here too.
 
+## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
+
+A big doc (thesis + embedded PDFs, ~20 MB `.studio`) was lagging ~10s on every load / hard refresh.
+Root causes were NOT file size — they were background work on the critical path. What was wrong + the
+rule that keeps it fast (measure with a `PerformanceObserver` `longtask` logger + `performance.now()`
+timers; the main thread only blocks ~1.5s now):
+
+- **Clerk loaded on every free-tier page.** Its dev-instance init (network handshake + hidden iframe +
+  token polling) churned for seconds. M6 auth is dormant, so `authEnabled()` now requires an explicit
+  sticky opt-in (`?auth`; `?auth=off` clears) and `entry.client` only mounts `ClerkProvider` then. Do
+  NOT mount auth for the free tier. See `src/auth/config.ts`.
+- **OTS sweep ran on every load (~10s).** `drainUnstamped` + `upgradePending` re-write the compressed
+  snapshot file PER snapshot and do serial calendar round-trips. Bitcoin confirms over HOURS, so this
+  must NOT run on load — it runs only when the ReceiptPanel OPENS (`onOpened` → `runOtsSweep`), only if
+  something is unstamped/pending, throttled once per 15 min (`inkwave:otsCheckedAt:<docId>`). New
+  snapshots still stamp on creation; "check Bitcoin" forces it.
+- **Multi-device heartbeat read+JSON-parsed the whole 20 MB file** on load AND every 45s. Now
+  `readLocalHeartbeat` compares the File's `lastModified` to our recorded last write — metadata only,
+  no content read.
+- **`blobToBase64` built a 20 MB string + `btoa` on the main thread** every save. Now native
+  `FileReader.readAsDataURL` (off-thread) + a per-PDF base64 cache keyed by `pdfVersion` (bumped on
+  save/delete), so unchanged PDFs are never re-encoded.
+- **The grow-only snapshot union re-read the whole file on every write-back.** Now once per session per
+  target (`needsWritebackMerge`/`markWritebackMerged` in `snapshots.ts`).
+- **DON'T lazy-defer the snapshot LIST.** Rapid snapshot scrubbing is a core moat, so `listSnapshots`
+  loads EAGERLY on doc open (deferring it made the first snapshot open lag). Only defer/gate the
+  genuinely-not-needed-for-first-frame work (OTS), never the list.
+
+Rule of thumb: nothing that reads/parses/encodes the whole `.studio` or hits the network per-snapshot
+may run synchronously on load. Stamp on creation, sweep on demand, cache encodes, read metadata not
+bodies.
+
 ## Code map
 
 ```
