@@ -145,12 +145,13 @@ export function ReceiptPanel({
         className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
         style={{
           color: INK,
-          // Lift above a BOTTOM-docked PDF panel (--iw-pdf-room-bottom) exactly like the sync pill —
-          // otherwise this snapshot pill hides behind the panel when it opens.
-          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '30px'} + var(--iw-pdf-room-bottom, 0px))`,
+          // Match the toolbar baseline (room-bottom + 28*zoom); transform:scale for size (see SyncStatus
+          // — css `zoom` multiplied the offset, lifting the pill by room-bottom*zoom when a panel opened).
+          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
           padding: hideTrigger ? '0 1rem' : '0 28px',
           transition: 'bottom 0.18s ease',
-          zoom: zoom !== 1 ? zoom : undefined,
+          transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+          transformOrigin: 'bottom left',
         }}
       >
         {!hideTrigger && (
