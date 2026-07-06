@@ -708,11 +708,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     let cancelled = false
     const run = () => {
       if (cancelled) return
-      void listSnapshots(docId).then((s) => { if (!cancelled) setSnapshots(s) })
+      const t0 = performance.now()
+      void listSnapshots(docId).then((s) => {
+        if (!cancelled) setSnapshots(s)
+        console.log(`%c[perf] listSnapshots (${s.length} snaps): ${Math.round(performance.now() - t0)}ms`, 'color:#2563eb')
+      })
       enqueueSnapshotWork(async () => {
+        const t1 = performance.now()
         await drainUnstamped(docId)
         await upgradePending(docId)
         await refreshSnapshots(docId)
+        console.log(`%c[perf] OTS drain+upgrade: ${Math.round(performance.now() - t1)}ms`, 'color:#2563eb')
       })
     }
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
