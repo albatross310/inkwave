@@ -1,4 +1,4 @@
-// Privacy policy — covers Inkwave Solo (web app) and the Citation Capture browser extension.
+// Privacy policy — covers Inkwave Zero (web app) and the Citation Capture browser extension.
 // Prerendered to static HTML; no client-side data fetching.
 
 import { Link } from 'react-router'
@@ -15,21 +15,21 @@ export function Privacy() {
 
         <header className="mt-8">
           <h1 className="text-3xl tracking-tight" style={{ color: INK }}>Privacy Policy</h1>
-          <p className="mt-2 text-sm text-stone-400">Inkwave Solo · Last updated {UPDATED}</p>
+          <p className="mt-2 text-sm text-stone-400">Inkwave Zero · Last updated {UPDATED}</p>
         </header>
 
         <div className="mt-10 space-y-8 text-[1rem] leading-relaxed text-stone-700">
 
           <section>
             <p>
-              Inkwave Solo is designed so your writing never leaves your device unless you
+              Inkwave Zero is designed so your writing never leaves your device unless you
               choose to export it. This policy explains exactly what data the app and its
               companion browser extension handle.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold mb-2" style={{ color: INK }}>Inkwave Solo — web app</h2>
+            <h2 className="text-lg font-semibold mb-2" style={{ color: INK }}>Inkwave Zero — web app</h2>
             <ul className="list-disc pl-5 space-y-2">
               <li>
                 <strong>All document data is stored in your browser only</strong> — in the
