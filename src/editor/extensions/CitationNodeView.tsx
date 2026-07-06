@@ -144,6 +144,22 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   const suf = attrs.suffix ?? ''
   const pageEditUrl = pageEdit ? sourceUrlOf(bibProvider.get(pageEdit.key)) : null
 
+  // Navigate to the cited sentence: PDF (at the quote) when this source has one, else the web source.
+  function goToPinpoint() {
+    if (!pageEdit) return
+    const key = pageEdit.key
+    if (pdfKey === key) {
+      openPdf({
+        citekey: key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
+        label: segs.find(s => s.key === key)?.text ?? key,
+        onLink: (quote) => updateAttributes({ quote }),
+      })
+    } else if (pageEditUrl) {
+      openSourceAtPinpoint(pageEditUrl, { quote: attrs.quote, page: pageFromLocator(attrs.locator) })
+    }
+    setPageEdit(null)
+  }
+
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
       <span
@@ -255,39 +271,25 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               placeholder="2, 4–6"
               style={{ width: 60, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
             />
-            <button type="button"
-              onClick={() => { navigateToAnchor(bibAnchorId(pageEdit.key)); setPageEdit(null) }}
-              style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              → refs
-            </button>
-            {pdfKey === pageEdit.key && (
-              <button type="button"
-                onClick={() => {
-                  openPdf({ citekey: pageEdit.key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
-                    label: segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key,
-                    onLink: (quote) => updateAttributes({ quote }) })
-                  setPageEdit(null)
-                }}
-                style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                📄 PDF
-              </button>
-            )}
           </div>
-          {/* Sentence pinpoint + open-in-browser deep link (works for any web source with a URL). */}
-          {pageEditUrl && (
+          {/* Go to the cited sentence: opens the embedded PDF at that quote if there is one, otherwise
+              deep-links the web source (#:~:text=). Enter in the box or the → go button both navigate —
+              typing a quote alone used to just STORE it (nothing happened), which is the bug Peter hit. */}
+          {(pdfKey === pageEdit.key || pageEditUrl) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 ref={bindStopPM}
                 value={attrs.quote ?? ''}
                 onChange={e => updateAttributes({ quote: e.target.value || null })}
-                placeholder="cited sentence (opens the source there)"
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); goToPinpoint() } }}
+                placeholder={pdfKey === pageEdit.key ? 'cited sentence (opens the PDF there)' : 'cited sentence (opens the source there)'}
                 style={{ flex: 1, minWidth: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
               />
               <button type="button"
-                title="Open the source in your browser at this sentence"
-                onClick={() => { openSourceAtPinpoint(pageEditUrl, { quote: attrs.quote, page: pageFromLocator(attrs.locator) }); setPageEdit(null) }}
-                style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`, borderRadius: 4, padding: '2px 6px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                ↗ source
+                title={pdfKey === pageEdit.key ? 'Open the PDF at this sentence' : 'Open the source in your browser at this sentence'}
+                onClick={goToPinpoint}
+                style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                → go
               </button>
             </div>
           )}
