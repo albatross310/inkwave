@@ -854,8 +854,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       <span className="text-[11px] text-stone-400">{typeLabel}</span>
                       {used && <span className="text-[11px] text-green-600">● used</span>}
                     </div>
-                    <div className="text-[14px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
-                    <div className="text-[13px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
+                    <div className="text-[16px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
+                    <div className="text-[14px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}

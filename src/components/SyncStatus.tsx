@@ -59,9 +59,13 @@ export function SyncStatus({
         // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
         // isn't covered, matching the toolbars.
         right: 'var(--iw-pdf-room, 0px)',
-        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '30px'} + var(--iw-pdf-room-bottom, 0px))`,
+        // Match the footer toolbar's baseline (room-bottom + 28*zoom). Use transform:scale (NOT css
+        // `zoom`) for size — css `zoom` also multiplies the bottom offset, so with a bottom-docked panel
+        // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
+        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 28px',
-        zoom: zoom !== 1 ? zoom : undefined,
+        transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+        transformOrigin: 'bottom right',
         transition: 'right 0.18s ease, bottom 0.18s ease',
       }}
     >

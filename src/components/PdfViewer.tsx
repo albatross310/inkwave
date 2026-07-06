@@ -371,24 +371,35 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, citekey])
 
-  // Ctrl/Cmd+F while the pointer is over the PDF viewer → open the in-PDF find bar (not the browser's).
+  // Keyboard over the PDF viewer: Ctrl/Cmd+F opens the in-PDF find bar; Escape leaves the active markup
+  // mode (and closes the find bar) — unless a note is being edited (its own handler eats Escape first).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && hoverRef.current) {
+      if (!hoverRef.current) return
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         setSearchOpen(true)
         requestAnimationFrame(() => { searchBoxRef.current?.focus(); searchBoxRef.current?.select() })
+      } else if (e.key === 'Escape') {
+        if (searchOpen) { setSearchOpen(false); clearFindHits() }
+        if (toolRef.current) setTool(null)
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen])
 
   // Citation "→ go": when a cited quote arrives (on open OR when a different citation targets the same
-  // already-open PDF — the component doesn't remount then), find + highlight it via the same mechanism.
+  // already-open PDF — the component doesn't remount then), open the find bar with the quote and run the
+  // SAME search so it's visible + navigable (not just a silent highlight).
   useEffect(() => {
     if (status !== 'ready' || !initialQuote) return
-    const t = setTimeout(() => void findQuote(initialQuote), 140)
+    const t = setTimeout(() => {
+      setSearchOpen(true)
+      setSearchQuery(initialQuote)
+      void findQuote(initialQuote)
+    }, 160)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuote, status])
