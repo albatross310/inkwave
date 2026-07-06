@@ -549,7 +549,7 @@
 
 /* Light-grey body text; page numbers match it; inline citations go light blue (via the cite var). */
 :root[data-theme="night"] { --iw-cite-color: #93c5fd; }
-:root[data-theme="night"] .ProseMirror { color: #c6c8cd; }
+:root[data-theme="night"] .ProseMirror { color: #eceef2; } /* nearly white (but not pure) */
 :root[data-theme="night"] .inkwave-sheet-num { color: #c6c8cd; }
 :root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(147, 197, 253, 0.26); }
 

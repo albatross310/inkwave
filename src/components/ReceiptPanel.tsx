@@ -3,8 +3,6 @@ import type { Snapshot } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 
-const INK = '#5c2d8a'
-const LIGHT = '#9b5ccc'
 
 // ── Bitcoin coin icon ─────────────────────────────────────────────────────────
 function BitcoinIcon({ size = 14 }: { size?: number }) {
