@@ -34,10 +34,16 @@ export const DeletionMark = Mark.create({
 
 const KEY = new PluginKey('trackChanges')
 
-function hasMark(view: EditorView, pos: number, markName: string): boolean {
-  const $ = view.state.doc.resolve(Math.max(0, Math.min(pos, view.state.doc.content.size)))
-  const marks = $.marksAcross($) ?? $.marks()
-  return marks.some((m) => m.type.name === markName)
+// True if the whole range [from,to) is text carrying `markName` (used to detect "this selection is
+// entirely my own pending insertion", so deleting it just removes it rather than marking a deletion).
+function rangeAllHasMark(view: EditorView, from: number, to: number, markName: string): boolean {
+  let all = true, sawText = false
+  view.state.doc.nodesBetween(from, to, (node) => {
+    if (!node.isText) return
+    sawText = true
+    if (!node.marks.some((m) => m.type.name === markName)) all = false
+  })
+  return sawText && all
 }
 
 export const TrackChanges = Extension.create({
@@ -71,7 +77,7 @@ export const TrackChanges = Extension.create({
             // Selection: mark it all as deletion (or, if it's entirely your own pending insertion, drop it).
             if (!sel.empty) {
               const { from, to } = sel
-              if (hasMark(view, from + 1, 'insertion')) {
+              if (rangeAllHasMark(view, from, to, 'insertion')) {
                 view.dispatch(state.tr.delete(from, to).scrollIntoView()) // reject own insertion
               } else {
                 view.dispatch(state.tr.addMark(from, to, delType.create({ set: activeSet() }))
