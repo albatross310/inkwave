@@ -55,8 +55,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<HighlightKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
+  const [noteSize, setNoteSize] = useState<number>(() => { try { return Number(localStorage.getItem('inkwave:pdfNoteSize')) || 12 } catch { return 12 } })
   const toolRef = useRef<HighlightKind | null>(null); toolRef.current = tool
   const colorRef = useRef(color); colorRef.current = color
+  const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
 
   const removeHighlight = (id: string) => {
     highlightsRef.current = highlightsRef.current.filter(h => h.id !== id)
@@ -85,7 +87,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           note.setAttribute('contenteditable', 'true')
           note.spellcheck = false
           // Width comes from the drag (r0.w); depth is flexible — the box wraps text and grows downward.
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Type your note — click away to save, leave blank to delete'
           note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
@@ -518,7 +520,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const widthPx = Math.abs(ev.clientX - d.startX)
     const wFrac = widthPx < 24 ? 0.3 : Math.min(0.95, widthPx / pr.width) // tiny drag = click → default
     const hl: PdfHighlight = {
-      id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '',
+      id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '', size: noteSizeRef.current,
       rects: [{ x: Math.max(0, (left - pr.left) / pr.width), y: Math.max(0, (d.startY - pr.top) / pr.height), w: wFrac, h: 0.05 }],
       createdAt: new Date().toISOString(),
     }
@@ -555,26 +557,32 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
       {/* Persistent markup toolbar */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>
         {TOOLS.map(t => {
           const active = tool === t.kind
           return (
             <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
               onClick={() => setTool(active ? null : t.kind)}
               style={{
-                width: 24, height: 22, borderRadius: 5, cursor: 'pointer', fontSize: '0.78rem',
+                width: 30, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem',
                 border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
                 color: INK, textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.label}</button>
           )
         })}
-        <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 2px' }} />
+        {/* Text-note font size */}
+        <select value={noteSize} title="Text note size"
+          onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
+          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer' }}>
+          {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
+        </select>
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 2px' }} />
         {COLORS.map(c => (
           <button key={c} type="button" title="Colour" onClick={() => setColor(c)}
-            style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+            style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: '0.66rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {tool === 'text' ? 'click a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
+        <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
         </span>
       </div>
 
