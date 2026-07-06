@@ -316,16 +316,20 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       const box = el.getBoundingClientRect()
       const ax = a ? a.x - box.left : el.clientWidth / 2
       const ay = a ? a.y - box.top  : el.clientHeight / 2
-      const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + ay) / el.scrollHeight : 0
-      const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + ax) / el.scrollWidth  : 0
+      // EXACT anchor: the content pixel under the cursor is (scroll+ax); at the new scale it's
+      // (scroll+ax)*ratio, so scroll so it lands back at ax. This MATCHES the CSS transform above, so
+      // dropping the transform for the sharp render causes no jump (the fraction estimate did — it
+      // drifted a little each time, which read as flicker).
+      const ratio = zoom / renderedZoomRef.current
+      const sl = el.scrollLeft, st = el.scrollTop
       void renderPages(fitScaleRef.current * zoom).then(() => {
         viewer.style.transform = ''
         viewer.style.transformOrigin = ''
         zoomBaseRef.current = null
         renderedZoomRef.current = zoom
         requestAnimationFrame(() => {
-          el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - ay)
-          el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - ax)
+          el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
+          el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
         })
       })
     }, 170)

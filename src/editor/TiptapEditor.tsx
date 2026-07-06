@@ -700,15 +700,28 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
 
   // Load existing snapshots when the document opens / switches, then (online) stamp any unstamped
-  // backlog and upgrade pending proofs toward Bitcoin confirmation.
+  // backlog and upgrade pending proofs toward Bitcoin confirmation. DEFERRED to idle so the text
+  // paints and becomes interactive FIRST — reading+parsing the snapshot history + the OTS pass are not
+  // needed for the first frame, so keeping them off the critical path removes the startup stall.
   useEffect(() => {
     const docId = doc.id
-    void listSnapshots(docId).then(setSnapshots)
-    enqueueSnapshotWork(async () => {
-      await drainUnstamped(docId)
-      await upgradePending(docId)
-      await refreshSnapshots(docId)
-    })
+    let cancelled = false
+    const run = () => {
+      if (cancelled) return
+      void listSnapshots(docId).then((s) => { if (!cancelled) setSnapshots(s) })
+      enqueueSnapshotWork(async () => {
+        await drainUnstamped(docId)
+        await upgradePending(docId)
+        await refreshSnapshots(docId)
+      })
+    }
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+    const id = ric ? ric(run, { timeout: 3000 }) : window.setTimeout(run, 400)
+    return () => {
+      cancelled = true
+      const cic = (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback
+      if (ric && cic) cic(id); else clearTimeout(id)
+    }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Snapshot trigger: on a resolved kick, snapshot if the content hash changed (M1), then anchor it
