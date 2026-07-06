@@ -513,7 +513,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const normText = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
   const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const searchPattern = (q: string) => new RegExp(normText(q).split(' ').filter(Boolean).map(escapeRe).join('\\s+'), 'gi')
-  function clearFindHits() { document.querySelectorAll('.iw-pdf-find-hit').forEach(n => n.classList.remove('iw-pdf-find-hit')) }
+  function clearFindHits() { document.querySelectorAll('.iw-pdf-find-hit').forEach(n => n.remove()) }
 
   // Search every page's text (via getTextContent — no render needed), record one entry per match,
   // then jump to the first. Same mechanism the citation "→ go" pinpoint uses.
@@ -551,28 +551,46 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const pg = pagesRef.current[pageIdx]
     if (!container || !pg) return
     void renderOnePage(pageIdx, renderTokenRef.current).then(() => {
-      const top = container.scrollTop + (pg.wrapper.getBoundingClientRect().top - container.getBoundingClientRect().top) - 60
-      container.scrollTop = Math.max(0, top)
-      flashQueryOnPage(pg, query)
+      // Wait a frame so the freshly-rendered text layer has laid out before we measure spans.
+      requestAnimationFrame(() => {
+        const firstTop = flashQueryOnPage(pg, query)
+        const cRect = container.getBoundingClientRect()
+        const target = firstTop != null ? firstTop : pg.wrapper.getBoundingClientRect().top
+        container.scrollTop = Math.max(0, container.scrollTop + (target - cRect.top) - container.clientHeight / 3)
+      })
     })
   }
 
-  // Highlight (find-style) every occurrence of the query in a page's text layer.
-  function flashQueryOnPage(pg: PageRef, query: string) {
+  // Draw a find-style highlight rectangle over every occurrence of the query, in the hlLayer (which sits
+  // ABOVE the canvas — the text-layer spans are transparent/behind it, so span backgrounds don't show).
+  // Returns the first hit's viewport top (for scrolling), or null.
+  function flashQueryOnPage(pg: PageRef, query: string): number | null {
     clearFindHits()
     const nq = normText(query)
-    if (!nq) return
+    if (!nq) return null
     const spans = Array.from(pg.textLayer.querySelectorAll('span')) as HTMLElement[]
     let full = ''
     const ranges: Array<{ span: HTMLElement; start: number; end: number }> = []
     for (const s of spans) { const t = s.textContent ?? ''; ranges.push({ span: s, start: full.length, end: full.length + t.length }); full += t + ' ' }
     const re = searchPattern(nq)
+    const hit = new Set<HTMLElement>()
     let m: RegExpExecArray | null
     while ((m = re.exec(full))) {
       const s = m.index, e = s + m[0].length
-      for (const r of ranges) if (r.end > s && r.start < e) r.span.classList.add('iw-pdf-find-hit')
+      for (const r of ranges) if (r.end > s && r.start < e) hit.add(r.span)
       if (re.lastIndex === m.index) re.lastIndex++
     }
+    let firstTop: number | null = null
+    const layer = pg.hlLayer.getBoundingClientRect()
+    for (const span of hit) {
+      const r = span.getBoundingClientRect()
+      if (firstTop == null || r.top < firstTop) firstTop = r.top
+      const div = document.createElement('div')
+      div.className = 'iw-pdf-find-hit'
+      div.style.cssText = `position:absolute;left:${r.left - layer.left}px;top:${r.top - layer.top}px;width:${r.width}px;height:${r.height}px;pointer-events:none;`
+      pg.hlLayer.appendChild(div)
+    }
+    return firstTop
   }
 
   function stepMatch(delta: number) {
@@ -748,9 +766,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       {/* Find-in-PDF bar (Ctrl+F) */}
       {searchOpen && (
         <div className="iw-nightable" style={{
-          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
-          display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: `1px solid ${INK}44`,
-          borderRadius: 8, boxShadow: '0 2px 10px rgba(0,0,0,0.18)', padding: '5px 8px',
+          position: 'absolute', top: 10, right: 18, zIndex: 25,
+          display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: `1px solid ${INK}44`,
+          borderRadius: 10, boxShadow: '0 3px 14px rgba(0,0,0,0.22)', padding: '8px 12px',
         }}>
           <input
             ref={searchBoxRef}
@@ -761,15 +779,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
               if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false); clearFindHits() }
             }}
             placeholder="Find in PDF…"
-            style={{ width: 180, fontSize: '13px', border: `1px solid ${INK}33`, borderRadius: 5, padding: '3px 7px', outline: 'none' }}
+            style={{ width: 240, fontSize: '15px', border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
           />
-          <span style={{ fontSize: '11px', color: '#78716c', minWidth: 42, textAlign: 'center' }}>
+          <span style={{ fontSize: '13px', color: 'var(--iw-pill-fg, #78716c)', minWidth: 48, textAlign: 'center' }}>
             {matchInfo.total ? `${matchInfo.cur}/${matchInfo.total}` : (searchQuery ? '0/0' : '')}
           </span>
           <button type="button" onClick={() => stepMatch(-1)} title="Previous (Shift+Enter)"
-            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', borderRadius: 5, fontSize: '0.9rem' }}>‹</button>
+            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #5c2d8a)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>‹</button>
           <button type="button" onClick={() => stepMatch(1)} title="Next (Enter)"
-            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', borderRadius: 5, fontSize: '0.9rem' }}>›</button>
+            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #5c2d8a)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>›</button>
           <button type="button" onClick={() => { setSearchOpen(false); clearFindHits() }} title="Close (Esc)"
             style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: '#78716c', cursor: 'pointer', borderRadius: 5, fontSize: '0.95rem' }}>×</button>
         </div>

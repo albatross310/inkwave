@@ -144,7 +144,7 @@ export function ReceiptPanel({
       <div
         className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
         style={{
-          color: INK,
+          color: 'var(--iw-ink, #5c2d8a)',
           // Match the toolbar baseline (room-bottom + 28*zoom); transform:scale for size (see SyncStatus
           // — css `zoom` multiplied the offset, lifting the pill by room-bottom*zoom when a panel opened).
           bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
@@ -204,7 +204,7 @@ export function ReceiptPanel({
                 onClick={handleSaveVersion}
                 disabled={saving}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium disabled:opacity-50"
-                style={{ borderBottom: `1px solid rgba(92, 45, 138, 0.12)`, color: INK, fontSize: '0.78rem' }}
+                style={{ borderBottom: `1px solid rgba(92, 45, 138, 0.12)`, color: 'var(--iw-ink, #5c2d8a)', fontSize: '0.78rem' }}
                 title="Save a named version of this document now"
               >
                 {saving ? '⊕ saving…' : '⊕ save version'}
@@ -232,7 +232,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onCheckBitcoin}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', color: LIGHT, fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', color: 'var(--iw-light, #9b5ccc)', fontSize: '0.75rem' }}
               >
                 ⏳ check Bitcoin…
               </button>
@@ -257,8 +257,8 @@ export function ReceiptPanel({
                 >
                   {/* Row 1: v1s3 · Arvo. 30/06 · wordcount · OTS */}
                   <div className="flex items-center gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
-                    <span style={{ color: INK, fontWeight: 600 }}>{vLabel}</span>
-                    <span style={{ color: LIGHT }}>{period}</span>
+                    <span style={{ color: 'var(--iw-ink, #5c2d8a)', fontWeight: 600 }}>{vLabel}</span>
+                    <span style={{ color: 'var(--iw-light, #9b5ccc)' }}>{period}</span>
                     <span className="text-stone-400">{s.wordCount}w</span>
                     <span className="ml-auto flex items-center">{otsIcon}</span>
                   </div>
@@ -278,7 +278,7 @@ export function ReceiptPanel({
                   >
                     {s.summary ? s.summary
                       : (s.trigger === 'word-nudge' || s.trigger === 'kick') && s.nudgeWord
-                        ? <span>{s.nudgeWord.from} <span style={{ color: LIGHT }}>→</span> {s.nudgeWord.to}</span>
+                        ? <span>{s.nudgeWord.from} <span style={{ color: 'var(--iw-light, #9b5ccc)' }}>→</span> {s.nudgeWord.to}</span>
                         : <span style={{ opacity: 0.4 }}>
                             {(s.trigger === 'word-nudge' || s.trigger === 'kick') ? 'word nudge'
                               : s.trigger === 'paragraph' ? 'para' : 'version'}

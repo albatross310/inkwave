@@ -562,13 +562,20 @@
 
 /* ── Chrome (toolbars, popups, pills): "dolphin-back grey" panels with light-grey text. Panels opt in
    with the `iw-nightable` class; scoping the sweeping overrides to it keeps the blast radius small. ── */
+:root { --iw-ink: #5c2d8a; }               /* app ink/purple; lightened inside night chrome */
 :root[data-theme="night"] .iw-nightable {
   background-color: #454e59 !important;   /* dolphin-back grey */
   color: #dfe3e9 !important;
   border-color: #5c6672 !important;
   --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
-  --iw-nightable-border: #5c6672;          /* inline-styled control borders */
+  --iw-nightable-border: #7c8794;          /* inline-styled control borders (light) */
+  --iw-ink: #cbb8f2;                        /* light purple in place of #5c2d8a inline colours */
+  --iw-light: #c3a8ef;                      /* lighter purple accent (was #9b5ccc) */
 }
+/* Catch Tailwind arbitrary purple text/border classes (text-[#5c2d8a] etc.) that inline-lose to iw-ink
+   otherwise — so purple toolbar buttons / labels don't vanish on the dark chrome. */
+:root[data-theme="night"] .iw-nightable [class*="5c2d8a"],
+:root[data-theme="night"] .iw-nightable [class*="9b5ccc"] { color: var(--iw-ink) !important; border-color: var(--iw-nightable-border) !important; }
 /* Light hover fills (hover:bg-stone-50/100) would flash bright white on the dark panel — darken them. */
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-50:hover,
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-100:hover { background-color: #3c444e !important; }
