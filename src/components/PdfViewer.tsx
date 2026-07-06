@@ -331,8 +331,6 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           if (n > 0) setTimeout(() => requestAnimationFrame(() => settle(n - 1)), 120)
         }
         requestAnimationFrame(() => settle(3))
-        // Citation "→ go": find + highlight the cited sentence in the real text (same as Ctrl+F).
-        if (initialQuote) setTimeout(() => { if (!cancelled) void runSearch(initialQuote) }, 220)
       } catch {
         if (!cancelled) setStatus('error')
       }
@@ -360,6 +358,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
+
+  // Citation "→ go": when a cited quote arrives (on open OR when a different citation targets the same
+  // already-open PDF — the component doesn't remount then), find + highlight it via the same mechanism.
+  useEffect(() => {
+    if (status !== 'ready' || !initialQuote) return
+    const t = setTimeout(() => void findQuote(initialQuote), 140)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuote, status])
 
   // ── Zoom: re-render at fitScale*zoom, keeping the point UNDER THE CURSOR fixed ──
   // The wheel handler records the pointer position; we track the content fraction under it on both
@@ -474,11 +481,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
   // Search every page's text (via getTextContent — no render needed), record one entry per match,
   // then jump to the first. Same mechanism the citation "→ go" pinpoint uses.
-  async function runSearch(query: string) {
+  async function runSearch(query: string): Promise<number> {
     const nq = normText(query)
     matchesRef.current = []
     clearFindHits()
-    if (!nq) { setMatchInfo({ cur: 0, total: 0 }); return }
+    if (!nq) { setMatchInfo({ cur: 0, total: 0 }); return 0 }
     const per: number[] = []
     for (let i = 0; i < pagesRef.current.length; i++) {
       const tc = await pagesRef.current[i].page.getTextContent()
@@ -489,6 +496,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     matchesRef.current = per
     setMatchInfo({ cur: per.length ? 1 : 0, total: per.length })
     if (per.length) gotoMatch(0, query)
+    return per.length
+  }
+
+  // Find a cited sentence: try the whole quote, then shorter leading fragments. PDF text extraction
+  // drops/re-wraps words, so a long exact quote often won't match while a leading fragment reliably does.
+  async function findQuote(quote: string) {
+    const words = normText(quote).split(' ').filter(Boolean)
+    if (!words.length) return
+    const tries = [words.length, 8, 6, 4].filter((n, i, a) => n <= words.length && a.indexOf(n) === i)
+    for (const n of tries) if (await runSearch(words.slice(0, n).join(' ')) > 0) return
   }
 
   function gotoMatch(i: number, query = searchQuery) {

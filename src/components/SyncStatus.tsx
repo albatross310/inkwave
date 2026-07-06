@@ -59,7 +59,7 @@ export function SyncStatus({
         // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
         // isn't covered, matching the toolbars.
         right: 'var(--iw-pdf-room, 0px)',
-        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '10px'} + var(--iw-pdf-room-bottom, 0px))`,
+        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '30px'} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 28px',
         zoom: zoom !== 1 ? zoom : undefined,
         transition: 'right 0.18s ease, bottom 0.18s ease',

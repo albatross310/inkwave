@@ -147,7 +147,7 @@ export function ReceiptPanel({
           color: INK,
           // Lift above a BOTTOM-docked PDF panel (--iw-pdf-room-bottom) exactly like the sync pill —
           // otherwise this snapshot pill hides behind the panel when it opens.
-          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '10px'} + var(--iw-pdf-room-bottom, 0px))`,
+          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '30px'} + var(--iw-pdf-room-bottom, 0px))`,
           padding: hideTrigger ? '0 1rem' : '0 28px',
           transition: 'bottom 0.18s ease',
           zoom: zoom !== 1 ? zoom : undefined,
