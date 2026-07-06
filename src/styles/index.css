@@ -571,6 +571,11 @@
   --iw-nightable-border: #7c8794;          /* inline-styled control borders (light) */
   --iw-ink: #cbb8f2;                        /* light purple in place of #5c2d8a inline colours */
   --iw-light: #c3a8ef;                      /* lighter purple accent (was #9b5ccc) */
+  --iw-verified: #6ee7a0;                    /* verified ✓ box — light green on dark */
+  --iw-newbtn-fg: #0c4a6e;                   /* + New text — darker on its light-blue chip in night */
+  --iw-addbtn-bg: #7c5bb0;                    /* Add button — lighter purple + light outline in night */
+  --iw-addbtn-fg: #f4f0fb;
+  --iw-addbtn-border: #a68fd6;
 }
 /* Catch Tailwind arbitrary purple text/border classes (text-[#5c2d8a] etc.) that inline-lose to iw-ink
    otherwise — so purple toolbar buttons / labels don't vanish on the dark chrome. */

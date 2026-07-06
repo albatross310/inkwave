@@ -500,6 +500,21 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     await removeFromLibrary(item.id)
   }
 
+  // Rename a citation's key. Blocked while it's cited in the document (the in-text nodes reference the
+  // old key), so remove those first — keeps every citation resolvable.
+  async function renameCitation(item: CSLItem) {
+    if (usedKeys.has(item.id)) {
+      setNotice({ text: `"${item.id}" is cited — remove the in-text citations before renaming.`, kind: 'err' })
+      return
+    }
+    const next = window.prompt('Rename citation to:', item.id)?.trim()
+    if (!next || next === item.id) return
+    if (bibProvider.get(next)) { setNotice({ text: `"${next}" already exists.`, kind: 'err' }); return }
+    await removeFromLibrary(item.id)
+    await addToLibrary({ ...item, id: next })
+    setNotice({ text: `Renamed to "${next}".`, kind: 'ok' })
+  }
+
   // ── Embedded PDFs ────────────────────────────────────────────────────────────
   const pdfInputRef = useRef<HTMLInputElement>(null)
   const pdfTargetRef = useRef<string | null>(null)
@@ -704,7 +719,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         ref={panelRef}
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ ...panelStyle(), width: 520, height: '80vh', minWidth: 360, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        style={{ ...panelStyle(), width: 520, height: '80vh', minWidth: 360, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         <div
@@ -753,8 +768,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             />
             <button
               type="button" disabled={!captureable || busy} onClick={() => void doCapture()}
-              className="text-xs px-3 py-1.5 rounded text-white disabled:opacity-40"
-              style={{ background: INK }}
+              className="text-sm px-3.5 py-1.5 rounded disabled:opacity-40"
+              style={{ background: 'var(--iw-addbtn-bg, #5c2d8a)', color: 'var(--iw-addbtn-fg, #fff)', border: '1px solid var(--iw-addbtn-border, transparent)' }}
             >
               {busy ? '…' : 'Add'}
             </button>
@@ -772,7 +787,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
                 key={m} type="button" onClick={() => setMode(m)}
-                className="h-7 text-[11px] px-2 rounded border flex items-center"
+                className="h-8 text-[13px] px-2 rounded border flex items-center"
                 style={refMode === m
                   ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #5c2d8a)', color: 'var(--iw-cite-color, #5c2d8a)' }
                   : { borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
@@ -781,50 +796,46 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               </button>
             ))}
             <select value={citationStyle} onChange={e => onStyleChange(e.target.value)}
-              className="h-7 text-[11px] text-stone-600 border border-stone-200 rounded px-2 bg-white flex-1 min-w-0">
+              className="h-8 text-[13px] text-stone-600 border border-stone-200 rounded px-2 bg-white flex-1 min-w-0">
               {CSL_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
             {/* Sort — sits just left of + New, per Peter's spec. */}
             <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
               title="Sort the library"
-              className="h-7 text-[11px] text-stone-600 border border-stone-200 rounded px-1.5 bg-white">
+              className="h-8 text-[13px] text-stone-600 border border-stone-200 rounded px-1.5 bg-white">
               <option value="added">Recently added</option>
               <option value="alpha">Alphabetical</option>
               <option value="author">Author</option>
             </select>
             <button type="button" onClick={toggleSortDir}
               title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
-              className="h-7 w-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+              className="h-8 w-8 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
             {/* Re-verify all — square button, curly arrow, tooltip on hover. Colour via the theme var so
                 it stays visible in night mode (inline INK was invisible on the dolphin-grey panel). */}
             <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
               title="Re-verify all sources against their origins"
-              className="h-7 w-7 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
+              className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
               style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
               {recheckingAll ? '…' : '↻'}
             </button>
             <button type="button" onClick={openNewRef}
               className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
-              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: '#0369a1' }}>
+              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
               + New
             </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="text-[11px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
-            {!helpDismissed && <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>}
-            {!helpDismissed && (
-              <button type="button" onClick={dismissHelp} title="Hide these tips"
-                className="ml-auto text-stone-400 hover:text-stone-600 text-base leading-none">×</button>
-            )}
-          </div>
           {!helpDismissed && (
-            <div className="text-[11px] text-stone-400 mb-2">
-              <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
+            <div className="flex items-start gap-2 mb-2">
+              <div className="text-[11px] text-stone-400">
+                type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert · <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
+              </div>
+              <button type="button" onClick={dismissHelp} title="Hide these tips"
+                className="ml-auto text-stone-400 hover:text-stone-600 text-base leading-none flex-shrink-0">×</button>
             </div>
           )}
           {entries.length === 0 ? (
@@ -850,9 +861,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   >
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[15px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
-                      <span className="text-[11px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
+                      {/* Verified sources → a compact ✓ box (tooltip on hover); others keep their label. */}
+                      {itemSource(item) === 'crossref'
+                        ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
+                        : <span className="text-[11px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>}
                       <span className="text-[11px] text-stone-400">{typeLabel}</span>
-                      {used && <span className="text-[11px] text-green-600">● used</span>}
+                      {used && <span className="text-[11px] text-green-600 ml-auto">● used</span>}
                     </div>
                     <div className="text-[16px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
                     <div className="text-[14px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
@@ -897,6 +911,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         </>
                       )
                     })()}
+                    <button type="button" onClick={() => void renameCitation(item)} title="Rename this citation's key"
+                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">ren</button>
                     <button type="button" onClick={() => void del(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
@@ -917,7 +933,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
-                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
+                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-400 ml-auto" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">
