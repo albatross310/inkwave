@@ -246,7 +246,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
             // resize → pageH; margin settings). Our own setMeta dispatches below don't change these,
             // so they can't loop.
-            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
+            // Editor font-zoom (--iw-editor-zoom, inherited onto the doc) reflows the text taller/shorter
+            // WITHOUT changing doc size or pageH — so include it, else zoom leaves stale page regions (an
+            // empty tail below the text and uneven page lengths). Rounded so tiny float jitter doesn't loop.
+            const zoomVar = Math.round((parseFloat(getComputedStyle(view.dom).getPropertyValue('--iw-editor-zoom')) || 1) * 100)
+            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}:${zoomVar}`
             if (inputSig === lastInputSig) { schedulePaint(); return }
             lastInputSig = inputSig
 
