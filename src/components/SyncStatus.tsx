@@ -59,7 +59,7 @@ export function SyncStatus({
         // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
         // isn't covered, matching the toolbars.
         right: 'var(--iw-pdf-room, 0px)',
-        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '38px'} + var(--iw-pdf-room-bottom, 0px))`,
+        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '10px'} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 28px',
         zoom: zoom !== 1 ? zoom : undefined,
         transition: 'right 0.18s ease, bottom 0.18s ease',
@@ -72,7 +72,7 @@ export function SyncStatus({
 
       {/* Detail panel — opens UPWARD, fixed width, path wraps inside it. */}
       {open && (
-        <div className="relative z-40 mb-2 w-64 max-lg:w-[7.7rem] bg-white shadow-lg rounded-xl p-3 text-stone-600" style={{ border: `1px solid ${INK}40` }}>
+        <div className="iw-nightable relative z-40 mb-2 w-64 max-lg:w-[7.7rem] bg-white shadow-lg rounded-xl p-3 text-stone-600" style={{ border: `1px solid ${INK}40` }}>
           <div className="text-xs text-stone-400 mb-1.5">
             {synced && lastSync ? `synced ${relativeTime(lastSync)}` : 'not syncing yet — your work is still saved on this device'}
           </div>
@@ -131,10 +131,10 @@ export function SyncStatus({
             setOpen(!open)
           }}
           title={tooltip}
-          className={compact
+          className={`iw-nightable ${compact
             ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
-            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}
-          style={{ color: synced ? '#6b7280' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
+            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}`}
+          style={{ color: synced ? 'var(--iw-pill-fg, #6b7280)' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
         >
           {compact ? '☁' : label}
         </button>

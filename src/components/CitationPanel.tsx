@@ -703,7 +703,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
       <div
         ref={panelRef}
         role="dialog" aria-label="Citations"
-        className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+        className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={{ ...panelStyle(), width: 'min(520px, 96vw)', maxHeight: '85vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >

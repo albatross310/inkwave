@@ -165,7 +165,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       <span
         contentEditable={false}
         style={{
-          color: hasMissing ? '#b91c1c' : INK,
+          // via a CSS var so night mode can recolour citations (light blue) without an inline override.
+          color: hasMissing ? '#b91c1c' : 'var(--iw-cite-color, #5c2d8a)',
           background: selected ? `${INK}18` : undefined,
           borderRadius: 3,
           padding: '0 2px',
@@ -186,7 +187,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                     <span
                       id={citeAnchorId(s.key, s.occ)}
                       className="iw-cite-link"
-                      style={{ color: INK }}
+                      style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
                       title="Click: go to reference · Click & hold: set page(s)"
                       onPointerDown={e => {
                         e.stopPropagation()
@@ -250,6 +251,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       {pageEdit && createPortal(
         <span
           data-iw-pagepop=""
+          className="iw-nightable"
           contentEditable={false}
           onMouseDown={e => e.stopPropagation()}
           style={{

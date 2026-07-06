@@ -147,7 +147,7 @@ export function ReceiptPanel({
           color: INK,
           // Lift above a BOTTOM-docked PDF panel (--iw-pdf-room-bottom) exactly like the sync pill —
           // otherwise this snapshot pill hides behind the panel when it opens.
-          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '38px'} + var(--iw-pdf-room-bottom, 0px))`,
+          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : '10px'} + var(--iw-pdf-room-bottom, 0px))`,
           padding: hideTrigger ? '0 1rem' : '0 28px',
           transition: 'bottom 0.18s ease',
           zoom: zoom !== 1 ? zoom : undefined,
@@ -157,8 +157,8 @@ export function ReceiptPanel({
           <button
             type="button"
             onClick={() => setOpen(!open)}
-            className={compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}
-            style={{ border: `1px solid rgba(92, 45, 138, 0.75)`, borderRadius: compact ? 9999 : 12 }}
+            className={`iw-nightable ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}
+            style={{ border: `1px solid rgba(92, 45, 138, 0.75)`, borderRadius: compact ? 9999 : 12, color: 'var(--iw-pill-fg, #5c2d8a)' }}
             title="Provenance record (held by you)"
           >
             {compact ? '◈' : (
@@ -193,7 +193,7 @@ export function ReceiptPanel({
 
         {panelOpen && (
           <div
-            className="mb-1.5 bg-white overflow-auto"
+            className="iw-nightable mb-1.5 bg-white overflow-auto"
             style={{ border: `1px solid rgba(92, 45, 138, 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
           >
             {/* Save version — stays open so the new entry appears in-place */}
