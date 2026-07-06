@@ -716,12 +716,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
-    const t0 = performance.now()
-    void listSnapshots(docId).then((s) => {
-      if (cancelled) return
-      setSnapshots(s)
-      console.log(`%c[perf] listSnapshots (${s.length} snaps): ${Math.round(performance.now() - t0)}ms`, 'color:#2563eb')
-    })
+    void listSnapshots(docId).then((s) => { if (!cancelled) setSnapshots(s) })
     return () => { cancelled = true }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 

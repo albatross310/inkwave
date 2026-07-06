@@ -5,26 +5,6 @@ import { HydratedRouter } from 'react-router/dom'
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
 console.log(`%c[inkwave] build: ${__BUILD_ID__}`, 'color:#5c2d8a;font-weight:bold')
 
-// TEMP startup-CPU diagnostic: log main-thread long tasks (>80ms) for the first 15s after load, plus a
-// total, so we can see how much the load blocks the main thread. (For WHICH function, record the
-// DevTools Performance tab across a refresh — the flame chart names it.) Remove once the lag is found.
-if (typeof PerformanceObserver !== 'undefined') {
-  try {
-    let total = 0, n = 0
-    const obs = new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) {
-        total += e.duration; n++
-        if (e.duration > 80) console.log(`%c[perf] long task ${Math.round(e.duration)}ms @ ${Math.round(e.startTime)}ms`, 'color:#b91c1c')
-      }
-    })
-    obs.observe({ entryTypes: ['longtask'] })
-    setTimeout(() => {
-      obs.disconnect()
-      console.log(`%c[perf] first 15s: ${n} long tasks, ${Math.round(total)}ms total main-thread blocking`, 'color:#b91c1c;font-weight:bold')
-    }, 15000)
-  } catch { /* longtask entryType unsupported */ }
-}
-
 // Wrap the app in Clerk ONLY when configured (paid-tier auth, M6). Dynamic import keeps Clerk out
 // of the bundle entirely when unconfigured, and entry.client is client-only so it never touches
 // the prerender/SSR build. The publishable key is public (safe in the client).
