@@ -182,6 +182,12 @@ function itemSource(item: CSLItem): FieldSource {
   return 'manual'
 }
 
+// First author's family (or literal) name, lowercased — the sort key for "Author" order.
+function authorFamily(item: CSLItem): string {
+  const a = item.author?.[0]
+  return (a?.family || a?.literal || (a ? [a.given, a.family].filter(Boolean).join(' ') : '') || '￿').toLowerCase()
+}
+
 function authorsToString(authors: CSLItem['author']): string {
   if (!authors?.length) return ''
   return authors.map(a => {
@@ -397,8 +403,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
   const [editItem, setEditItem] = useState<CSLItem | null>(null)
   const [isNewRef, setIsNewRef] = useState(false)
-  const [rechecking, setRechecking] = useState<Set<string>>(new Set())
+  const [recheckingAll, setRecheckingAll] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // Dismissible helper banners (persisted) + library sort.
+  const [extDismissed, setExtDismissed] = useState(() => { try { return localStorage.getItem('inkwave:citeExtDismissed') === '1' } catch { return false } })
+  const [helpDismissed, setHelpDismissed] = useState(() => { try { return localStorage.getItem('inkwave:citeHelpDismissed') === '1' } catch { return false } })
+  const [sortBy, setSortBy] = useState<'added' | 'alpha' | 'author'>(() => { try { return (localStorage.getItem('inkwave:citeSortBy') as 'added' | 'alpha' | 'author') || 'added' } catch { return 'added' } })
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => { try { return (localStorage.getItem('inkwave:citeSortDir') as 'asc' | 'desc') || 'desc' } catch { return 'desc' } })
+  const dismissExt = () => { setExtDismissed(true); try { localStorage.setItem('inkwave:citeExtDismissed', '1') } catch { /* private */ } }
+  const dismissHelp = () => { setHelpDismissed(true); try { localStorage.setItem('inkwave:citeHelpDismissed', '1') } catch { /* private */ } }
+  const changeSort = (by: 'added' | 'alpha' | 'author') => { setSortBy(by); try { localStorage.setItem('inkwave:citeSortBy', by) } catch { /* private */ } }
+  const toggleSortDir = () => setSortDir(d => { const n = d === 'asc' ? 'desc' : 'asc'; try { localStorage.setItem('inkwave:citeSortDir', n) } catch { /* private */ }; return n })
 
   useEffect(() => {
     const unsub = bibProvider.subscribe(rerender)
@@ -430,7 +445,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const manualKeys = new Set(refCfg?.manualKeys ?? [])
   const query = input.trim()
   const captureable = !!(detectIdentifier(query) || isUrl(query))
-  const entries = query && !captureable ? bibProvider.search(query) : bibProvider.getAll()
+  const base = query && !captureable ? bibProvider.search(query) : bibProvider.getAll()
+  // Sort the library: 'added' preserves natural (insertion) order, so desc = most-recent-first.
+  const entries = base
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => {
+      const cmp = sortBy === 'alpha' ? a.item.id.localeCompare(b.item.id)
+        : sortBy === 'author' ? authorFamily(a.item).localeCompare(authorFamily(b.item))
+        : a.i - b.i
+      return sortDir === 'desc' ? -cmp : cmp
+    })
+    .map(x => x.item)
 
   async function doCapture(value = query) {
     if (!value || busy) return
@@ -545,28 +570,24 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
-  // Re-verify one entry against its source (§12.1): overwrite changed fields, record a changelog,
-  // flag a dead source URL. Corrections keep the citekey, so a cited entry is never orphaned.
-  async function recheck(item: CSLItem) {
-    setRechecking(s => new Set(s).add(item.id))
+  // Re-verify EVERY source in one go (the single top button replaces the per-row ↻). Sequential so we
+  // don't hammer the network; the per-item notices are superseded by a final summary.
+  async function recheckAll() {
+    if (recheckingAll) return
+    setRecheckingAll(true)
+    let changed = 0, dead = 0
     try {
-      const result = await reverifyEntry(item)
-      if (result.deadUrl) {
-        await addToLibrary(applyReverify(item, result))
-        setNotice({ text: `"${item.id}" — source link looks dead (404/gone).`, kind: 'err' })
-      } else if (!result.ok) {
-        setNotice({ text: `Couldn't re-verify "${item.id}": ${result.error ?? 'unreachable'}`, kind: 'warn' })
-      } else if (result.diffs.length === 0) {
-        await addToLibrary(applyReverify(item, result)) // stamps lastVerified
-        setNotice({ text: `"${item.id}" verified — no changes.`, kind: 'ok' })
-      } else {
-        await addToLibrary(applyReverify(item, result))
-        const usedNote = usedKeys.has(item.id) ? ' — cited, will re-snapshot' : ''
-        setNotice({ text: `Updated ${result.diffs.length} field${result.diffs.length > 1 ? 's' : ''} in "${item.id}"${usedNote}.`, kind: 'ok' })
-        setExpanded(s => new Set(s).add(item.id))
+      for (const item of bibProvider.getAll()) {
+        const cur = bibProvider.get(item.id) ?? item
+        try {
+          const result = await reverifyEntry(cur)
+          if (result.deadUrl) { dead++; await addToLibrary(applyReverify(cur, result)) }
+          else if (result.ok) { if (result.diffs.length) changed += result.diffs.length; await addToLibrary(applyReverify(cur, result)) }
+        } catch { /* skip unreachable */ }
       }
+      setNotice({ text: `Re-verified library — ${changed} field${changed === 1 ? '' : 's'} updated${dead ? `, ${dead} dead link${dead === 1 ? '' : 's'}` : ''}.`, kind: dead ? 'warn' : 'ok' })
     } finally {
-      setRechecking(s => { const n = new Set(s); n.delete(item.id); return n })
+      setRecheckingAll(false)
     }
   }
 
@@ -690,22 +711,26 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
           onChange={e => void onPdfChosen(e)} />
 
-        {/* Extension promo — top of panel */}
-        <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
-          <span className="text-xs text-stone-500">Download the Inkwave citation extension for single click import on any page</span>
-          <div className="flex gap-2 flex-shrink-0 ml-3">
-            <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
-              target="_blank" rel="noopener noreferrer"
-              className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
-              Chrome
-            </a>
-            <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
-              target="_blank" rel="noopener noreferrer"
-              className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
-              Firefox
-            </a>
+        {/* Extension promo — top of panel (dismissible) */}
+        {!extDismissed && (
+          <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
+            <span className="text-xs text-stone-500">Download the Inkwave citation extension for single click import on any page</span>
+            <div className="flex gap-2 flex-shrink-0 ml-3 items-center">
+              <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+                Chrome
+              </a>
+              <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
+                target="_blank" rel="noopener noreferrer"
+                className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+                Firefox
+              </a>
+              <button type="button" onClick={dismissExt} title="Dismiss"
+                className="text-stone-400 hover:text-stone-600 text-base leading-none ml-1">×</button>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="px-4 pt-3 pb-2 border-b border-stone-100">
           <div className="flex gap-2">
@@ -754,8 +779,22 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 + Refs
               </button>
             )}
+            {/* Sort — sits just left of + New, per Peter's spec. */}
+            <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
+              title="Sort the library"
+              className="text-[11px] text-stone-600 border border-stone-200 rounded px-1.5 py-1 bg-white">
+              <option value="added">Recently added</option>
+              <option value="alpha">Alphabetical</option>
+              <option value="author">Author</option>
+            </select>
+            <button type="button" onClick={toggleSortDir}
+              title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+              className="text-[11px] px-1.5 py-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
             <button type="button" onClick={openNewRef}
-              className="text-[11px] px-2 py-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap">
+              className="text-[11px] px-2 py-1 rounded border whitespace-nowrap"
+              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: '#0369a1' }}>
               + New
             </button>
           </div>
@@ -763,12 +802,25 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
           <div className="flex items-center gap-2 mb-1">
-            <div className="text-[10px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
-            <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>
+            <div className="text-[11px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
+            {!helpDismissed && <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>}
+            {/* One big "re-verify all" button — replaces the per-row ↻. */}
+            <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
+              title="Re-verify every source against its origin (updates changed fields, flags dead links)"
+              className="ml-auto text-[11px] px-2.5 py-1 rounded border whitespace-nowrap disabled:opacity-50 hover:bg-[#5c2d8a0d]"
+              style={{ borderColor: `${INK}55`, color: INK }}>
+              {recheckingAll ? '↻ Re-verifying…' : '↻ Re-verify all'}
+            </button>
+            {!helpDismissed && (
+              <button type="button" onClick={dismissHelp} title="Hide these tips"
+                className="text-stone-400 hover:text-stone-600 text-base leading-none">×</button>
+            )}
           </div>
-          <div className="text-[10px] text-stone-400 mb-2">
-            <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
-          </div>
+          {!helpDismissed && (
+            <div className="text-[11px] text-stone-400 mb-2">
+              <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
+            </div>
+          )}
           {entries.length === 0 ? (
             <div className="py-6 text-center text-xs text-stone-400">
               {query ? 'No matches.' : 'Paste a DOI or URL above to add your first source.'}
@@ -802,12 +854,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
-                    <button type="button" onClick={e => { e.stopPropagation(); void recheck(item) }}
-                      disabled={rechecking.has(item.id)}
-                      title="Re-verify against source"
-                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-50">
-                      {rechecking.has(item.id) ? '…' : '↻'}
-                    </button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
                         title="Open source page (shows verification panel if extension installed)"
