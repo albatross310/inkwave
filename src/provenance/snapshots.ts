@@ -94,6 +94,15 @@ function receiptCount(s: Snapshot): number {
   return Array.isArray(r) ? r.length : 0
 }
 
+// The grow-only "read the existing file and union its snapshots" pass on write-back only needs to run
+// ONCE per target per session — enough to fold in another device's snapshots. After that the local
+// OPFS set is the superset (snapshots are append-only), so a save just grows it; re-reading and parsing
+// the (possibly 20 MB) file on EVERY save is pure lag. Callers gate on needsWritebackMerge() and call
+// markWritebackMerged() only on a successful read, so a failed read retries next time.
+const _mergedTargets = new Set<string>()
+export const needsWritebackMerge = (targetKey: string): boolean => !_mergedTargets.has(targetKey)
+export const markWritebackMerged = (targetKey: string): void => { _mergedTargets.add(targetKey) }
+
 /** All snapshots for a document, in creation order. */
 export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)

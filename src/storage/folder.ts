@@ -6,7 +6,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
-import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
+import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
@@ -127,14 +127,18 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
   const handle = await getSaveFileHandle(doc.id, false)
   if (!handle) return false
   try {
-    // GROW-ONLY: never let a write shrink the file's archived history. If a short local OPFS set
-    // (fresh login / cleared data / race ahead of restore) reached us, union it with whatever the
-    // file already holds first — otherwise this overwrite would silently truncate provenance.
+    // GROW-ONLY: never let a write shrink the file's archived history. Read the file's snapshots and
+    // union them in first — but ONLY once per session (reading+parsing a large file on every save is
+    // the "occasional typing lag"; after the first union the local set is already the superset).
     let merged = snapshots
-    try {
-      const existing = parseTraceFile(await (await handle.getFile()).text())
-      if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
-    } catch { /* new / unreadable file → write the local set as-is */ }
+    const key = `folder:${doc.id}`
+    if (needsWritebackMerge(key)) {
+      try {
+        const existing = parseTraceFile(await (await handle.getFile()).text())
+        if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
+        markWritebackMerged(key)
+      } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }
+    }
     const writable = await handle.createWritable()
     await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, merged)))
     await writable.close()

@@ -6,7 +6,7 @@
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
-import { mergeSnapshots, restoreSnapshotsFromBundle } from '../provenance/snapshots'
+import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
 
@@ -271,15 +271,17 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (!CLIENT_ID) return { ok: false, webUrl: null }
   const token = await getDriveToken(false)
   if (!token) return { ok: false, webUrl: null }
-  // GROW-ONLY: union with the snapshots already in the remote file before overwriting, so a short
-  // local set can never truncate the archived history (see syncToOneDrive for the rationale).
+  // GROW-ONLY: union the remote file's snapshots in before overwriting (see syncToOneDrive) — but
+  // only ONCE per session, so the download+parse of a big file doesn't add per-sync lag.
   let merged = snapshots
   const fileId = driveFileId(doc.id)
-  if (fileId) {
+  const key = `gdrive:${doc.id}`
+  if (fileId && needsWritebackMerge(key)) {
     try {
       const text = await downloadGoogleDriveFile(fileId)
       if (text) { const remote = parseTraceFile(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
-    } catch { /* unreadable → write local as-is */ }
+      markWritebackMerged(key)
+    } catch { /* unreadable → write local as-is; retry next sync */ }
   }
   const file = composeTraceFile(buildExportBundle(doc, merged))
   try {
