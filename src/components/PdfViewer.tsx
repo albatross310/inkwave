@@ -91,26 +91,47 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           // and delete if left blank. data-hl-id lets placeTextNote focus a freshly-created one.
           const note = document.createElement('div')
           note.dataset.hlId = hl.id
-          note.setAttribute('contenteditable', 'true')
           note.spellcheck = false
-          // Width comes from the drag (r0.w); depth is flexible — the box wraps text and grows downward.
-          // Empty notes get a dotted border (a clear "type here" affordance); filled ones a solid one.
+          note.tabIndex = 0 // focusable in SELECT mode too, so Delete/Backspace can remove it
+          // Two modes: SELECT (single-click → outline; Delete/Backspace removes the whole box) and EDIT
+          // (double-click / Enter → type into it). Width + initial height come from the drag; it still
+          // grows downward as you type. Empty notes get a dashed "type here" border.
           const emptyNote = !(hl.note || hl.text)
           const noteBorder = emptyNote ? `1.5px dashed ${INK}` : '1px solid rgba(0,0,0,0.2)'
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
+          const minH = (r0.h || 0) > 0.001 ? `min-height:${Math.max(20, (r0.h || 0) * ph)}px;` : ''
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
           note.textContent = hl.note || hl.text
-          note.title = 'Type your note — click away to save, leave blank to delete'
+          note.title = 'Click to select (Delete removes) · double-click to edit'
+          const removeNote = () => {
+            highlightsRef.current = highlightsRef.current.filter(h => h.id !== hl.id)
+            redrawOverlays(); void saveHighlights(citekey, highlightsRef.current)
+          }
+          const enterEdit = () => {
+            note.contentEditable = 'true'; note.style.cursor = 'text'; note.style.outline = `2px solid ${INK}`
+            note.focus()
+            const rng = document.createRange(); rng.selectNodeContents(note); rng.collapse(false)
+            const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(rng)
+          }
+          note.addEventListener('click', () => { if (note.contentEditable !== 'true') { note.style.outline = `2px solid ${INK}`; note.focus() } })
+          note.addEventListener('dblclick', enterEdit)
           note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
           note.addEventListener('keydown', (ev) => {
-            ev.stopPropagation() // keep note typing out of the page/editor shortcuts
-            if (ev.key === 'Escape') { ev.preventDefault(); note.blur() }
+            if (note.contentEditable === 'true') {
+              ev.stopPropagation() // keep note typing out of the page/editor shortcuts
+              if (ev.key === 'Escape') { ev.preventDefault(); note.blur() }
+            } else {
+              if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); removeNote() }
+              else if (ev.key === 'Enter') { ev.preventDefault(); enterEdit() }
+            }
           })
           note.addEventListener('blur', () => {
+            note.style.outline = 'none'
+            if (note.contentEditable !== 'true') return
             const v = (note.textContent ?? '').trim()
-            if (!v) { highlightsRef.current = highlightsRef.current.filter(h => h.id !== hl.id); redrawOverlays() }
-            else { hl.note = v; hl.text = v }
-            void saveHighlights(citekey, highlightsRef.current)
+            if (!v) removeNote()
+            else { hl.note = v; hl.text = v; note.contentEditable = 'false'; note.style.cursor = 'pointer'; void saveHighlights(citekey, highlightsRef.current) }
           })
+          if (editNoteIdRef.current === hl.id) { editNoteIdRef.current = null; requestAnimationFrame(enterEdit) }
           pg.hlLayer.appendChild(note)
           continue
         }
@@ -590,9 +611,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     }
   }
 
-  // Text tool: click-DRAG on a page to set the note box's WIDTH; depth is flexible (the box grows down
-  // as you type). A plain click (tiny drag) falls back to a default width. Live dashed preview.
+  // Text tool: click-DRAG on a page to set the note box's WIDTH and HEIGHT (both axes); it still grows
+  // downward if the text overflows. A plain click (tiny drag) falls back to a default size. Dotted preview.
   const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
+  const editNoteIdRef = useRef<string | null>(null) // note id to auto-enter-edit after the next redraw
   function onPdfMouseDown(e: React.MouseEvent) {
     if (toolRef.current !== 'text') return
     if (!pagesRef.current.length) return
@@ -615,7 +637,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const pr = pagesRef.current[idx].wrapper.getBoundingClientRect()
     // A clearly DOTTED preview rectangle tracks the drag so the gesture is discoverable.
     const preview = document.createElement('div')
-    preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:22px;width:0;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
+    preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:0;width:0;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
     document.body.appendChild(preview)
     textDragRef.current = { pageIdx: idx, startX: e.clientX, startY: e.clientY, preview, pr }
     document.addEventListener('mousemove', onTextDragMove)
@@ -624,8 +646,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   function onTextDragMove(ev: MouseEvent) {
     const d = textDragRef.current
     if (!d) return
+    // 2-D rubber band — both horizontal and vertical.
     d.preview.style.left = `${Math.min(ev.clientX, d.startX)}px`
+    d.preview.style.top = `${Math.min(ev.clientY, d.startY)}px`
     d.preview.style.width = `${Math.abs(ev.clientX - d.startX)}px`
+    d.preview.style.height = `${Math.abs(ev.clientY - d.startY)}px`
   }
   function onTextDragUp(ev: MouseEvent) {
     const d = textDragRef.current
@@ -635,22 +660,20 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     d.preview.remove()
     textDragRef.current = null
     const pr = d.pr
-    const left = Math.min(ev.clientX, d.startX)
-    const widthPx = Math.abs(ev.clientX - d.startX)
-    const wFrac = widthPx < 24 ? 0.3 : Math.min(1.2, widthPx / pr.width) // tiny drag = click → default
+    const left = Math.min(ev.clientX, d.startX), top = Math.min(ev.clientY, d.startY)
+    const widthPx = Math.abs(ev.clientX - d.startX), heightPx = Math.abs(ev.clientY - d.startY)
+    const wFrac = widthPx < 24 ? 0.3 : Math.min(1.2, widthPx / pr.width)   // tiny drag = click → default
+    const hFrac = heightPx < 16 ? 0 : heightPx / pr.height                 // 0 → auto-height (grows with text)
     // x/y are NOT clamped to [0,1] — a note may sit in the page margin (negative x = left of the sheet).
     const hl: PdfHighlight = {
       id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '', size: noteSizeRef.current,
-      rects: [{ x: (left - pr.left) / pr.width, y: (d.startY - pr.top) / pr.height, w: wFrac, h: 0.05 }],
+      rects: [{ x: (left - pr.left) / pr.width, y: (top - pr.top) / pr.height, w: wFrac, h: hFrac }],
       createdAt: new Date().toISOString(),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
+    editNoteIdRef.current = hl.id // redraw auto-enters edit mode on it
     redrawOverlays()
     void saveHighlights(citekey, highlightsRef.current)
-    requestAnimationFrame(() => {
-      const el = pagesRef.current[d.pageIdx]?.hlLayer?.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
-      el?.focus()
-    })
   }
 
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
