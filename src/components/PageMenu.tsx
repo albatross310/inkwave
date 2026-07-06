@@ -152,7 +152,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
       {open && createPortal(
         <>
           <div role="dialog" aria-label="Page settings"
-            className="z-[91] bg-white shadow-xl font-serif text-sm text-stone-600"
+            className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600"
             style={{ ...menuStyle(), width: 384, border: `1px solid ${INK}55`, borderRadius: 14 }}
             onMouseDown={e => e.stopPropagation()}>
 

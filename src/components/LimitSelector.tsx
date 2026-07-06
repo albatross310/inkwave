@@ -56,7 +56,7 @@ export function LimitSelector({ value, onChange }: LimitSelectorProps) {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-[2.25rem] mb-2 z-[60] w-24 py-1 bg-white shadow-md text-sm text-stone-600 font-serif"
+          className="absolute bottom-full left-[2.25rem] mb-2 z-[60] w-24 py-1 iw-nightable bg-white shadow-md text-sm text-stone-600 font-serif"
           style={{ border: `1px solid ${INK}66`, borderRadius: '8px' }}
         >
           {OPTIONS.map(o => (

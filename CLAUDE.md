@@ -165,6 +165,36 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   panel), keep-same-words-on-the-midline OR snap-to-biggest-change dotted-line modes, shift-wheel
   fast scrub, per-version summaries (Haiku). Grow-only + deterministic pmToText apply here too.
 
+## Theming / colour schemes (MANDATORY for every new panel — 2026-07-07)
+
+Night mode (and future colour schemes) is driven by ONE switch: `src/editor/theme.ts` sets
+`<html data-theme="night">` (applied pre-hydration in `entry.client.tsx`; toggled from Settings). All
+colours live as CSS custom properties in the **NIGHT MODE block at the bottom of `src/styles/index.css`**
+— never scatter per-component night overrides. Adding a new scheme later = one more `:root[data-theme="…"]`
+block; components don't change.
+
+**THE RULE — every floating panel/menu/modal MUST:**
+1. Put `iw-nightable` on its outer container (alongside its `bg-white`/`shadow` classes). That class opts
+   it into the themed surface: dolphin-grey background, light text, themed inputs/borders, dark hover
+   fills — all automatic. This is the single most important step; a panel without it renders white-on-
+   white in night mode.
+2. For any CUSTOM inline colour, use a theme **token var with a day fallback**, NOT a hard-coded hex:
+   - `var(--iw-ink, #5c2d8a)` — primary purple text/icons
+   - `var(--iw-light, #9b5ccc)` — lighter purple accent
+   - `var(--iw-cite-color, #5c2d8a)` — citation/link colour (light blue in night)
+   - `var(--iw-pill-fg, #78716c)` — muted label/pill text
+   - `var(--iw-nightable-border, …)` — inline borders (light in night)
+   - `var(--iw-verified, #15803d)`, `var(--iw-newbtn-fg, …)`, `var(--iw-addbtn-*)` — specific accents
+   Define a NEW token in the night block when you need a new custom colour — don't inline a night hex.
+3. The `.iw-nightable` block already remaps Tailwind `text-stone*/gray*/neutral*`, `bg-white`,
+   `border-stone*`, `hover:bg-stone-50/100`, inputs/selects, and any `[class*="5c2d8a"]`/`[class*="9b5ccc"]`
+   arbitrary purple class. So plain Tailwind utility panels theme themselves once they have `iw-nightable`.
+
+Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
+OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
+VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar. When you add a
+panel, add it here too.
+
 ## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
 
 A big doc (thesis + embedded PDFs, ~20 MB `.studio`) was lagging ~10s on every load / hard refresh.

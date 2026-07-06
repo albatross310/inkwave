@@ -118,7 +118,7 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label="Insignia" onMouseDown={(e) => e.stopPropagation()}
-        className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[85vh] overflow-auto font-serif">
+        className="relative iw-nightable bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[85vh] overflow-auto font-serif">
         <button type="button" aria-label="Close" onClick={onClose}
           className="absolute top-3 right-3 text-stone-400 hover:text-[#5c2d8a] text-2xl leading-none z-10">×</button>
         <div className="flex items-center justify-center gap-2">

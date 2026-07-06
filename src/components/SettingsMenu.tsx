@@ -64,7 +64,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
           <div
             role="dialog"
             aria-label="Settings"
-            className="z-[91] w-52 bg-white shadow-lg font-serif text-sm text-stone-600"
+            className="iw-nightable z-[91] w-52 bg-white shadow-lg font-serif text-sm text-stone-600"
             style={{ ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
             onMouseDown={e => e.stopPropagation()}
           >

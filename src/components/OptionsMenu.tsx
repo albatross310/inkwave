@@ -225,7 +225,7 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"
@@ -469,7 +469,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     <div className="fixed inset-0 z-[100] flex items-end justify-end pb-20 pr-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
-        className="relative bg-white w-full max-w-sm p-6 flex flex-col shadow-xl"
+        className="relative iw-nightable bg-white w-full max-w-sm p-6 flex flex-col shadow-xl"
         style={{ border: `1px solid ${INK}bf`, borderRadius: '14px' }}
       >
         <div className="flex items-center justify-between">

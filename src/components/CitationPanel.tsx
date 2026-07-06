@@ -311,7 +311,7 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
       <div className="fixed inset-0 z-[100] bg-black/20" onMouseDown={onClose} />
       <div
         role="dialog" aria-label="Edit citation"
-        className="fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+        className="iw-nightable fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
@@ -847,7 +847,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             const src = SOURCE_BADGE[itemSource(item)]
             const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
-              <div key={item.id} className="py-2.5 border-b border-stone-100 last:border-0">
+              <div key={item.id} className="py-1.5 border-b border-stone-100 last:border-0">
                 <div className="flex items-start gap-2">
                   {refMode === 'manual' && (
                     <input type="checkbox" checked={manualKeys.has(item.id)} onChange={() => toggleManual(item)}
@@ -866,10 +866,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
                         : <span className="text-[11px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>}
                       <span className="text-[11px] text-stone-400">{typeLabel}</span>
-                      {used && <span className="text-[11px] text-green-600 ml-auto">● used</span>}
                     </div>
-                    <div className="text-[16px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
-                    <div className="text-[14px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
+                    <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
+                    <div className="text-[16px] text-stone-400 leading-snug truncate">{simpleInText([item])}</div>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
@@ -921,19 +920,23 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   const iw = (item as { _iw?: IwCitationMeta })._iw
                   const changelog = iw?.changelog ?? []
                   const open = expanded.has(item.id)
-                  if (!iw?.deadUrl && changelog.length === 0 && !iw?.lastVerified) return null
+                  if (!iw?.deadUrl && changelog.length === 0 && !iw?.lastVerified && !used) return null
                   return (
                     <>
-                      <div className="mt-1 pl-1 flex items-center gap-2 flex-wrap">
-                        {iw?.deadUrl && <span className="text-[9px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
+                      <div className="mt-0.5 pl-1 flex items-center gap-2 flex-wrap">
+                        {iw?.deadUrl && <span className="text-[10px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
                         {changelog.length > 0 && (
                           <button type="button" onClick={() => toggleExpand(item.id)}
                             title="Show the correction history (old → new) for this citation"
-                            className="text-[9px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+                            className="text-[10px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
-                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[9px] text-stone-400 ml-auto" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
+                        {/* "used" + "checked today" together, right-aligned and on the same line. */}
+                        <span className="ml-auto flex items-center gap-2">
+                          {used && <span className="text-[10px] text-green-600">● used</span>}
+                          {iw?.lastVerified && !iw?.deadUrl && <span className="text-[10px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
+                        </span>
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">

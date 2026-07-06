@@ -80,7 +80,7 @@ export function VerifyModal({
         aria-modal="true"
         aria-label="Verify record"
         onMouseDown={(e) => e.stopPropagation()}
-        className="relative w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-white shadow-2xl font-serif"
+        className="relative w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto iw-nightable bg-white shadow-2xl font-serif"
         style={{
           borderRadius: '18px 18px 0 0',
           borderTop: `2px solid ${INK}`,
