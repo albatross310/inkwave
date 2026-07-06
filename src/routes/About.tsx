@@ -28,37 +28,38 @@ export function About() {
           <AppIcon size={160} />
           <div>
             <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave Zero</h1>
-            <p className="mt-2 text-lg text-stone-500">A calm place to write.</p>
+            <p className="mt-2 text-lg text-stone-500">A calm writing studio for academics and students.</p>
           </div>
         </header>
 
         <div className="mt-12 space-y-10 text-[1.05rem] leading-relaxed">
           <section>
             <p>
-              Inkwave is a quiet writing surface for short academic and philosophical work.
-              Open it and begin — there is no sign-up, no dashboard, and nothing between you
-              and the page. Your words stay in your browser.
+              Inkwave Zero is a quiet place to do serious writing. Open it and begin — no
+              sign-up, no dashboard, nothing between you and the page. Your work stays on your
+              own device, and nothing you write is kept on our servers. The name is the promise:
+              zero data retention.
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl mb-2" style={{ color: INK }}>Gentle friction, on purpose</h2>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>A studio, not just a page</h2>
             <p>
-              As you write, words outside a quietly shifting active vocabulary glow softly in
-              purple. You can cycle through close alternatives and choose a better fit, or keep
-              what you had. It is a small, optional resistance — enough to make you deliberate,
-              never enough to break your flow. We call it <em>SCAS</em>: Stochastically
-              Constrained And Suggested.
+              Your writing shouldn't live apart from the sources it rests on. In the studio your
+              PDFs, references and citations sit alongside the draft — read a paper, highlight a
+              passage, and cite it without leaving the page. One calm workspace holds the whole
+              project.
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl mb-2" style={{ color: INK }}>Provenance you can verify</h2>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>AI that stays out of the way</h2>
             <p>
-              That friction leaves an honest trace. Inkwave signs your composition as it happens
-              and anchors snapshots to the Bitcoin blockchain, producing a tamper-evident record
-              of a real session written against unpredictable constraints — without surveilling a
-              single keystroke. Anyone can confirm it.
+              AI helps at the edges — tidying citations, offering a closer word — but it never
+              watches you work and never trains on what you write. Instead of surveilling
+              keystrokes, Inkwave keeps a light, honest record of a genuine writing session and
+              anchors it to the Bitcoin blockchain: provenance you can prove, without being
+              watched to earn it.
             </p>
             <p className="mt-3">
               <Link to="/verify" className="underline" style={{ color: LIGHT }}>
@@ -68,11 +69,20 @@ export function About() {
           </section>
 
           <section>
-            <h2 className="text-xl mb-2" style={{ color: INK }}>Private by design</h2>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>Zero retention, by design</h2>
             <p>
-              Verification runs entirely in your browser, against Inkwave's published signing key.
-              No login, nothing uploaded. The proof confirms an authentic, live composition — not
-              that a human wrote every word, and never by watching you.
+              Everything that matters happens in your browser. Verification runs against our
+              published signing key — nothing uploaded, nothing stored. The proof confirms an
+              authentic composition; it never claims to have read over your shoulder.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>Where it's heading</h2>
+            <p>
+              Soon your studio will open outward: a public view where you can share a finished
+              document — and the verifiable record behind it — with the world, entirely on your
+              terms. Private by default, shareable when you're ready.
             </p>
           </section>
         </div>
