@@ -515,6 +515,9 @@
   @page { size: A4; margin: 0; }
 }
 
+/* Find-in-PDF: a matched text-layer span gets a yellow highlight (the transparent glyphs sit on top). */
+.iw-pdf-find-hit { background-color: rgba(255, 213, 0, 0.5); border-radius: 2px; }
+
 /* ─────────────────────────────  NIGHT MODE  ─────────────────────────────────
    Toggled from Settings (src/editor/theme.ts sets <html data-theme="night">). Kept UNLAYERED so it
    overrides the @layer base defaults above. Peter's palette: black background, grey-on-black waves,

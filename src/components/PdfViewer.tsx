@@ -60,6 +60,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const colorRef = useRef(color); colorRef.current = color
   const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
 
+  // Find-in-PDF (Ctrl+F) — searches the real text layer, scrolls to matches, highlights them.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [matchInfo, setMatchInfo] = useState<{ cur: number; total: number }>({ cur: 0, total: 0 })
+  const matchesRef = useRef<number[]>([]) // page index per match occurrence
+  const searchBoxRef = useRef<HTMLInputElement>(null)
+
   const removeHighlight = (id: string) => {
     highlightsRef.current = highlightsRef.current.filter(h => h.id !== id)
     redrawOverlays()
@@ -324,6 +331,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           if (n > 0) setTimeout(() => requestAnimationFrame(() => settle(n - 1)), 120)
         }
         requestAnimationFrame(() => settle(3))
+        // Citation "→ go": find + highlight the cited sentence in the real text (same as Ctrl+F).
+        if (initialQuote) setTimeout(() => { if (!cancelled) void runSearch(initialQuote) }, 220)
       } catch {
         if (!cancelled) setStatus('error')
       }
@@ -338,6 +347,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, citekey])
+
+  // Ctrl/Cmd+F while the pointer is over the PDF viewer → open the in-PDF find bar (not the browser's).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && hoverRef.current) {
+        e.preventDefault()
+        setSearchOpen(true)
+        requestAnimationFrame(() => { searchBoxRef.current?.focus(); searchBoxRef.current?.select() })
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   // ── Zoom: re-render at fitScale*zoom, keeping the point UNDER THE CURSOR fixed ──
   // The wheel handler records the pointer position; we track the content fraction under it on both
@@ -442,6 +464,70 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     el.style.cssText = `position:absolute;left:${r.x * pw}px;top:${r.y * ph}px;width:${r.w * pw}px;height:${r.h * ph}px;outline:2px solid ${INK};border-radius:2px;pointer-events:none;`
     pg.hlLayer.appendChild(el)
     setTimeout(() => el.remove(), 1800)
+  }
+
+  // ── Find in PDF ───────────────────────────────────────────────────────────────
+  const normText = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const searchPattern = (q: string) => new RegExp(normText(q).split(' ').filter(Boolean).map(escapeRe).join('\\s+'), 'gi')
+  function clearFindHits() { document.querySelectorAll('.iw-pdf-find-hit').forEach(n => n.classList.remove('iw-pdf-find-hit')) }
+
+  // Search every page's text (via getTextContent — no render needed), record one entry per match,
+  // then jump to the first. Same mechanism the citation "→ go" pinpoint uses.
+  async function runSearch(query: string) {
+    const nq = normText(query)
+    matchesRef.current = []
+    clearFindHits()
+    if (!nq) { setMatchInfo({ cur: 0, total: 0 }); return }
+    const per: number[] = []
+    for (let i = 0; i < pagesRef.current.length; i++) {
+      const tc = await pagesRef.current[i].page.getTextContent()
+      const text = normText((tc.items as Array<{ str?: string }>).map(it => it.str ?? '').join(' '))
+      const re = searchPattern(nq)
+      while (re.exec(text)) { per.push(i); if (re.lastIndex === 0) break }
+    }
+    matchesRef.current = per
+    setMatchInfo({ cur: per.length ? 1 : 0, total: per.length })
+    if (per.length) gotoMatch(0, query)
+  }
+
+  function gotoMatch(i: number, query = searchQuery) {
+    const pageIdx = matchesRef.current[i]
+    if (pageIdx == null) return
+    const container = scrollRef.current
+    const pg = pagesRef.current[pageIdx]
+    if (!container || !pg) return
+    void renderOnePage(pageIdx, renderTokenRef.current).then(() => {
+      const top = container.scrollTop + (pg.wrapper.getBoundingClientRect().top - container.getBoundingClientRect().top) - 60
+      container.scrollTop = Math.max(0, top)
+      flashQueryOnPage(pg, query)
+    })
+  }
+
+  // Highlight (find-style) every occurrence of the query in a page's text layer.
+  function flashQueryOnPage(pg: PageRef, query: string) {
+    clearFindHits()
+    const nq = normText(query)
+    if (!nq) return
+    const spans = Array.from(pg.textLayer.querySelectorAll('span')) as HTMLElement[]
+    let full = ''
+    const ranges: Array<{ span: HTMLElement; start: number; end: number }> = []
+    for (const s of spans) { const t = s.textContent ?? ''; ranges.push({ span: s, start: full.length, end: full.length + t.length }); full += t + ' ' }
+    const re = searchPattern(nq)
+    let m: RegExpExecArray | null
+    while ((m = re.exec(full))) {
+      const s = m.index, e = s + m[0].length
+      for (const r of ranges) if (r.end > s && r.start < e) r.span.classList.add('iw-pdf-find-hit')
+      if (re.lastIndex === m.index) re.lastIndex++
+    }
+  }
+
+  function stepMatch(delta: number) {
+    const total = matchInfo.total
+    if (!total) return
+    const next = ((matchInfo.cur - 1 + delta) % total + total) % total
+    setMatchInfo({ cur: next + 1, total })
+    gotoMatch(next)
   }
 
   // Read the current selection into normalised, page-grouped rects (or null if none in the viewer).
@@ -604,6 +690,35 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       </div>
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+      {/* Find-in-PDF bar (Ctrl+F) */}
+      {searchOpen && (
+        <div className="iw-nightable" style={{
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+          display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: `1px solid ${INK}44`,
+          borderRadius: 8, boxShadow: '0 2px 10px rgba(0,0,0,0.18)', padding: '5px 8px',
+        }}>
+          <input
+            ref={searchBoxRef}
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); void runSearch(e.target.value) }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1) }
+              if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false); clearFindHits() }
+            }}
+            placeholder="Find in PDF…"
+            style={{ width: 180, fontSize: '13px', border: `1px solid ${INK}33`, borderRadius: 5, padding: '3px 7px', outline: 'none' }}
+          />
+          <span style={{ fontSize: '11px', color: '#78716c', minWidth: 42, textAlign: 'center' }}>
+            {matchInfo.total ? `${matchInfo.cur}/${matchInfo.total}` : (searchQuery ? '0/0' : '')}
+          </span>
+          <button type="button" onClick={() => stepMatch(-1)} title="Previous (Shift+Enter)"
+            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', borderRadius: 5, fontSize: '0.9rem' }}>‹</button>
+          <button type="button" onClick={() => stepMatch(1)} title="Next (Enter)"
+            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', borderRadius: 5, fontSize: '0.9rem' }}>›</button>
+          <button type="button" onClick={() => { setSearchOpen(false); clearFindHits() }} title="Close (Esc)"
+            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: '#78716c', cursor: 'pointer', borderRadius: 5, fontSize: '0.95rem' }}>×</button>
+        </div>
+      )}
       <div ref={scrollRef} onMouseUp={onMouseUp} onMouseDown={onPdfMouseDown}
         style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12 }}>
         <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
