@@ -518,6 +518,11 @@
 /* Find-in-PDF: a matched text-layer span gets a yellow highlight (the transparent glyphs sit on top). */
 .iw-pdf-find-hit { background-color: rgba(255, 213, 0, 0.5); border-radius: 2px; }
 
+/* Page logo: day PNG vs the night SVG (light ring), toggled by theme. */
+.iw-night-logo { display: none; }
+:root[data-theme="night"] .iw-day-logo { display: none; }
+:root[data-theme="night"] .iw-night-logo { display: inline; }
+
 /* ─────────────────────────────  NIGHT MODE  ─────────────────────────────────
    Toggled from Settings (src/editor/theme.ts sets <html data-theme="night">). Kept UNLAYERED so it
    overrides the @layer base defaults above. Peter's palette: black background, grey-on-black waves,
@@ -533,10 +538,14 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='2.4'/%3E%3C/svg%3E");
 }
 
-/* Charcoal paper. */
+/* Charcoal paper. Sheets are a touch lighter than the black surround so pages read as distinct. */
 :root[data-theme="night"] .scroll-paper,
-:root[data-theme="night"] .inkwave-sheet { background-color: #26272c; }
-:root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
+:root[data-theme="night"] .inkwave-sheet { background-color: #2c2e35; }
+:root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
+/* In GAPPED mode the scroll-paper must stay transparent (the real sheets are the .inkwave-sheet panels,
+   the gaps show the black surface + grey waves) — override the charcoal fill above, which otherwise wins
+   on specificity and paints the whole area, killing the discrete-page look. */
+:root[data-theme="night"] .scroll-paper.inkwave-gapped { background-color: transparent; }
 
 /* Light-grey body text; page numbers match it; inline citations go light blue (via the cite var). */
 :root[data-theme="night"] { --iw-cite-color: #93c5fd; }

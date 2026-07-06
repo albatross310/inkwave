@@ -1,0 +1,26 @@
+<svg width="1000" height="1000" viewBox="0 0 1000 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Night variant: same mark, plus a thin light ring so the circle's dark bottom reads on a black bg. -->
+<path d="M490.5 923C724.393 923 914 738.541 914 511C914 283.459 724.393 99 490.5 99C256.607 99 67 283.459 67 511C67 738.541 256.607 923 490.5 923Z" fill="url(#paint0_linear_1_2)" stroke="#c6c8cd" stroke-width="12"/>
+<path d="M516 434.5C381 552 251.5 624.5 147.5 587C112 574.2 45.5 466.5 114.5 320L133 290L162 250L218 213.5L348.5 129L516 99L732.5 158L865.5 314L882.5 353L898.5 397.5C843 556.5 760.5 586 671.5 604C552.985 627.969 541 504 516 434.5Z" fill="url(#paint1_linear_1_2)"/>
+<path d="M865 313H125C199.798 159.172 332.01 84 495.988 84C659.967 84 799.476 177.67 865 313Z" fill="url(#paint2_linear_1_2)"/>
+<path d="M532 405C549.121 405 563 390.673 563 373C563 355.327 549.121 341 532 341C514.879 341 501 355.327 501 373C501 390.673 514.879 405 532 405Z" fill="#08004B"/>
+<defs>
+<linearGradient id="paint0_linear_1_2" x1="753.635" y1="797.203" x2="145.489" y2="620.867" gradientUnits="userSpaceOnUse">
+  <stop offset="0.0"  stop-color="#00BFA8"/>
+  <stop offset="0.12" stop-color="#0099AA"/>
+  <stop offset="0.22" stop-color="#007EB9"/>
+  <stop offset="0.33" stop-color="#003580"/>
+  <stop offset="0.45" stop-color="#0A0065"/>
+  <stop offset="0.65" stop-color="#0E0028"/>
+  <stop offset="1.0"  stop-color="#060012"/>
+</linearGradient>
+<linearGradient id="paint1_linear_1_2" x1="133.2" y1="279.5" x2="910.8" y2="728.501" gradientUnits="userSpaceOnUse">
+<stop stop-color="#9DBCE0"/>
+<stop offset="1" stop-color="#FFDDE9"/>
+</linearGradient>
+<linearGradient id="paint2_linear_1_2" x1="184.446" y1="268.981" x2="938.021" y2="684.594" gradientUnits="userSpaceOnUse">
+<stop stop-color="#9DBCE0"/>
+<stop offset="1" stop-color="#FFDDE9"/>
+</linearGradient>
+</defs>
+</svg>

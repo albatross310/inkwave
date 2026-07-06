@@ -220,15 +220,14 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       {/* Logo at top-right of every page (n=1: top=0, n>1: top=bottom of prev page) */}
       {marks.map(({ n }) => {
         const pageTop = n === 1 ? 0 : (marks[n - 2]?.y ?? 0)
+        const logoStyle = { position: 'absolute' as const, right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }
+        // Two variants toggled by CSS: the day PNG and a night SVG with a light ring (so the mark's dark
+        // bottom reads on the black night surface). See index.css .iw-day-logo / .iw-night-logo.
         return (
-          <img
-            key={`logo-${n}`}
-            src="/inkwave-logo-v7.png"
-            width={logoSize}
-            height={logoSize}
-            alt=""
-            style={{ position: 'absolute', right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }}
-          />
+          <span key={`logo-${n}`}>
+            <img className="iw-day-logo" src="/inkwave-logo-v7.png" width={logoSize} height={logoSize} alt="" style={logoStyle} />
+            <img className="iw-night-logo" src="/inkwave-logo-night.svg" width={logoSize} height={logoSize} alt="" style={logoStyle} />
+          </span>
         )
       })}
       {/* Page 1 label — right of the logo, vertically aligned with it */}
