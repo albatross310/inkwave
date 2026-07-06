@@ -127,9 +127,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           note.addEventListener('blur', () => {
             note.style.outline = 'none'
             if (note.contentEditable !== 'true') return
+            // Persist the box even if empty (it stays as a coloured, dashed placeholder) — clicking away
+            // must NOT delete it; removal is explicit (select + Delete). This is why a freshly dragged
+            // box used to vanish: it blurred empty and self-deleted.
             const v = (note.textContent ?? '').trim()
-            if (!v) removeNote()
-            else { hl.note = v; hl.text = v; note.contentEditable = 'false'; note.style.cursor = 'pointer'; void saveHighlights(citekey, highlightsRef.current) }
+            hl.note = v; hl.text = v
+            note.contentEditable = 'false'; note.style.cursor = 'pointer'
+            void saveHighlights(citekey, highlightsRef.current)
           })
           if (editNoteIdRef.current === hl.id) { editNoteIdRef.current = null; requestAnimationFrame(enterEdit) }
           pg.hlLayer.appendChild(note)
