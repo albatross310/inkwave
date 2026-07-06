@@ -87,7 +87,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           note.setAttribute('contenteditable', 'true')
           note.spellcheck = false
           // Width comes from the drag (r0.w); depth is flexible — the box wraps text and grows downward.
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
+          // Empty notes get a dotted border (a clear "type here" affordance); filled ones a solid one.
+          const emptyNote = !(hl.note || hl.text)
+          const noteBorder = emptyNote ? `1.5px dashed ${INK}` : '1px solid rgba(0,0,0,0.2)'
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Type your note — click away to save, leave blank to delete'
           note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
@@ -489,18 +492,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
   function onPdfMouseDown(e: React.MouseEvent) {
     if (toolRef.current !== 'text') return
-    for (let i = 0; i < pagesRef.current.length; i++) {
-      const pr = pagesRef.current[i].wrapper.getBoundingClientRect()
-      if (e.clientX < pr.left || e.clientX > pr.right || e.clientY < pr.top || e.clientY > pr.bottom) continue
-      e.preventDefault()
-      const preview = document.createElement('div')
-      preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:22px;width:0;border:1.5px dashed ${INK};background:${colorRef.current}55;z-index:30;pointer-events:none;border-radius:4px;`
-      document.body.appendChild(preview)
-      textDragRef.current = { pageIdx: i, startX: e.clientX, startY: e.clientY, preview, pr }
-      document.addEventListener('mousemove', onTextDragMove)
-      document.addEventListener('mouseup', onTextDragUp)
-      return
+    if (!pagesRef.current.length) return
+    // Pick the page under the cursor; if the cursor is in the MARGIN (outside every page), anchor to the
+    // vertically-nearest page so notes can live outside the sheet (x fraction may be <0 or >1).
+    let idx = pagesRef.current.findIndex(pg => {
+      const r = pg.wrapper.getBoundingClientRect()
+      return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    })
+    if (idx < 0) {
+      let best = Infinity
+      pagesRef.current.forEach((pg, i) => {
+        const r = pg.wrapper.getBoundingClientRect()
+        const dy = e.clientY < r.top ? r.top - e.clientY : e.clientY > r.bottom ? e.clientY - r.bottom : 0
+        if (dy < best) { best = dy; idx = i }
+      })
     }
+    if (idx < 0) return
+    e.preventDefault()
+    const pr = pagesRef.current[idx].wrapper.getBoundingClientRect()
+    // A clearly DOTTED preview rectangle tracks the drag so the gesture is discoverable.
+    const preview = document.createElement('div')
+    preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:22px;width:0;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
+    document.body.appendChild(preview)
+    textDragRef.current = { pageIdx: idx, startX: e.clientX, startY: e.clientY, preview, pr }
+    document.addEventListener('mousemove', onTextDragMove)
+    document.addEventListener('mouseup', onTextDragUp)
   }
   function onTextDragMove(ev: MouseEvent) {
     const d = textDragRef.current
@@ -518,10 +534,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const pr = d.pr
     const left = Math.min(ev.clientX, d.startX)
     const widthPx = Math.abs(ev.clientX - d.startX)
-    const wFrac = widthPx < 24 ? 0.3 : Math.min(0.95, widthPx / pr.width) // tiny drag = click → default
+    const wFrac = widthPx < 24 ? 0.3 : Math.min(1.2, widthPx / pr.width) // tiny drag = click → default
+    // x/y are NOT clamped to [0,1] — a note may sit in the page margin (negative x = left of the sheet).
     const hl: PdfHighlight = {
       id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '', size: noteSizeRef.current,
-      rects: [{ x: Math.max(0, (left - pr.left) / pr.width), y: Math.max(0, (d.startY - pr.top) / pr.height), w: wFrac, h: 0.05 }],
+      rects: [{ x: (left - pr.left) / pr.width, y: (d.startY - pr.top) / pr.height, w: wFrac, h: 0.05 }],
       createdAt: new Date().toISOString(),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
