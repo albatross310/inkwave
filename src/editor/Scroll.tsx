@@ -218,7 +218,8 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => ro.disconnect()
   }, [sheetRef, paperSize, orientation, gapped])
 
-  const logoSize = 32
+  const logoSize = gapped ? 46 : 32           // bigger mark in the discrete-sheet (gapped) view
+  const pageNumSize = gapped ? '1.5rem' : '1.1rem'
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
@@ -237,12 +238,12 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       })}
       {/* Page 1 label — right of the logo, vertically aligned with it */}
       {marks.length > 0 && (
-        <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>1</div>
+        <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>1</div>
       )}
       {marks.map(({ y, n, rule }) => (
         <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
           {rule && <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />}
-          <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>
+          <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>
             {n + 1}
           </div>
         </div>

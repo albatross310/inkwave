@@ -207,8 +207,8 @@ export function VerifyModal({
 function Row({ label, ok, detail }: { label: string; ok?: boolean; detail?: string }) {
   return (
     <div className="flex items-baseline gap-3 py-1.5 border-b" style={{ borderColor: '#eee' }}>
-      <span className="w-5 shrink-0">{ok === undefined ? '·' : ok ? '✓' : '✗'}</span>
-      <span className="w-36 shrink-0 text-sm" style={{ color: INK }}>{label}</span>
+      <span className="w-5 shrink-0" style={{ color: ok ? 'var(--iw-verify-tick, #246b24)' : ok === false ? '#9b2226' : undefined }}>{ok === undefined ? '·' : ok ? '✓' : '✗'}</span>
+      <span className="w-36 shrink-0 text-sm" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{label}</span>
       <span className="text-sm text-stone-500 flex-1">{detail}</span>
     </div>
   )
@@ -217,7 +217,7 @@ function Row({ label, ok, detail }: { label: string; ok?: boolean; detail?: stri
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
     <div>
-      <div className="text-2xl leading-none" style={{ color: INK }}>{value}</div>
+      <div className="text-2xl leading-none" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{value}</div>
       <div className="text-xs text-stone-500 mt-1">{label}</div>
       {hint ? <div className="text-[11px] text-stone-400">{hint}</div> : null}
     </div>
