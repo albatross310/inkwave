@@ -73,6 +73,18 @@
   }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-thumb:hover { background: #6f6f77; }
 
+  /* Scrollbar bleed fix WITHOUT a transparent surface: the fill surface keeps its OPAQUE aqua base +
+     fixed ::before waves, so it scrolls on the compositor (a transparent surface over a separate fixed
+     waves layer forced slow MAIN-THREAD scrolling — classic fixed-background jitter, worst during the
+     busy first seconds after load). To keep the fixed ::before (a descendant Chromium paints over the
+     scrollbar) OFF the scrollbar, inset it from the right/bottom gutters by the scrollbar width (+ any
+     PDF-panel room); scrollbar-gutter reserves the gutter so the inset strip sits under the scrollbar. */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) { scrollbar-gutter: stable; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone)::before {
+    right: calc(var(--iw-pdf-room, 0px) + 16px);
+    bottom: calc(var(--iw-pdf-room-bottom, 0px) + 16px);
+  }
+
   /* Review comments: commented text gets a soft amber underline (the sticky note is drawn in the
      gutter by CommentNotes). Subtle so it never competes with SCAS/citation colours. */
   .iw-comment {
@@ -80,37 +92,10 @@
     border-bottom: 1.5px solid rgba(214, 158, 46, 0.65);
     border-radius: 2px 2px 0 0;
   }
-
-  /* Track changes (live suggestion mode). Insertions = green underline; deletions = red strike, kept
-     visible until accepted/rejected. */
+  /* Track changes (live suggestion mode). Insertions = green underline; deletions = red strike. */
   ins.iw-ins { text-decoration: none; color: #15803d; border-bottom: 2px solid rgba(21, 128, 61, 0.55); background: rgba(21, 128, 61, 0.08); }
   del.iw-del { text-decoration: line-through; text-decoration-color: rgba(185, 28, 28, 0.8); color: #b91c1c; background: rgba(185, 28, 28, 0.07); }
   .iw-change-current { outline: 2px solid #5c2d8a; outline-offset: 1px; border-radius: 2px; }
-
-  /* FILL-mode waves on a SEPARATE fixed layer BEHIND the (transparent) scroll container. A fixed
-     ::before is a DESCENDANT of the scroll box and Chromium paints it IN FRONT of that box's
-     scrollbar (the real cause of the wave-over-scrollbar bleed — a layering issue, not opacity). As a
-     sibling behind, the surface's scrollbar always paints over these waves. */
-  .iw-waves-layer {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background-color: #cfe9ec;
-    background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='white' stroke-opacity='0.38' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='2.4'/%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='white' stroke-opacity='0.38' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='2.4'/%3E%3C/svg%3E");
-    background-size: 140px 140px, 140px 140px;
-    background-position: var(--wave-x, 0px) 0px, calc(-1 * var(--wave-x, 0px)) 0px;
-    will-change: background-position;
-  }
-  /* Fill surface goes transparent (the layer behind provides the aqua); its own ::before waves are
-     dropped (the .iw-waves-layer replaces them). It sits above the waves layer purely by DOM ORDER
-     (the layer is rendered before it) — do NOT add z-index here: a positive z-index lifts the whole
-     surface above the footer toolbar (z-index auto), hiding it AND stealing its pointer events, which
-     also thrashes the footer's visibility logic into a scroll/typing lag. */
-  .inkwave-editor-surface.iw-fill:not(.is-phone) { background-color: transparent; }
-  .inkwave-editor-surface.iw-fill:not(.is-phone)::before { display: none; }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
