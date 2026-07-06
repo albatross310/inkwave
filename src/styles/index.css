@@ -90,9 +90,12 @@
     background-position: var(--wave-x, 0px) 0px, calc(-1 * var(--wave-x, 0px)) 0px;
     will-change: background-position;
   }
-  /* Fill surface goes transparent (the layer behind provides the aqua) and sits ABOVE the layer so its
-     scrollbar wins; its own ::before waves are dropped (the layer replaces them). */
-  .inkwave-editor-surface.iw-fill:not(.is-phone) { background-color: transparent; z-index: 1; }
+  /* Fill surface goes transparent (the layer behind provides the aqua); its own ::before waves are
+     dropped (the .iw-waves-layer replaces them). It sits above the waves layer purely by DOM ORDER
+     (the layer is rendered before it) — do NOT add z-index here: a positive z-index lifts the whole
+     surface above the footer toolbar (z-index auto), hiding it AND stealing its pointer events, which
+     also thrashes the footer's visibility logic into a scroll/typing lag. */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) { background-color: transparent; }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::before { display: none; }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
