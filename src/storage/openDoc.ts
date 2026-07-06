@@ -12,6 +12,7 @@ import { setOneDriveFilename, adoptOneDriveFile, fetchPdfSidecars, type OneDrive
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
 import { restoreSnapshotsFromBundle } from '../provenance/snapshots'
+import { applyViewSettings } from '../editor/viewSettings'
 import { bibProvider } from '../citations/bibProvider'
 import { loadLibrary, persistLibrary } from '../citations/library'
 import { savePdf, base64ToBlob } from '../citations/pdfStore'
@@ -53,6 +54,9 @@ export async function openInkwaveFile(
   // Restore provenance history from the bundle when OPFS has fewer snapshots (device transfer).
   // Local OPFS wins if it already has all snapshots.
   if (data.snapshots?.length) await restoreSnapshotsFromBundle(id, data.snapshots)
+
+  // Restore the view settings that travelled with the doc (theme, gapped pages, paper/margins, zoom).
+  applyViewSettings((data as { viewSettings?: Record<string, string> }).viewSettings)
 
   // Restore the embedded citation library (+ any embedded PDFs) so citations resolve and their
   // sources/annotations travel with the doc. Merge with any existing local library, then persist.
