@@ -189,6 +189,14 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
         props: {
           decorations(state) { return RED_HIGHLIGHT_KEY.getState(state)?.decorations },
         },
+        // Turning the SCAS DISPLAY on/off (Settings) is a live toggle now — no page reload. It flips
+        // localStorage and fires this event; we re-run buildDecorations (which honours
+        // scasSuggestionsOff) by dispatching a HINT_META tick. The engine/session are never touched.
+        view(editorView) {
+          const onChange = () => editorView.dispatch(editorView.state.tr.setMeta(SCAS_HINT_META, true))
+          window.addEventListener('inkwave:scas-display-changed', onChange)
+          return { destroy() { window.removeEventListener('inkwave:scas-display-changed', onChange) } }
+        },
       }),
     ]
   },

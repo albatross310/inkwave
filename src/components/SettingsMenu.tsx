@@ -103,13 +103,15 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
             />
 
-            {/* SCAS on/off — turn the vocabulary suggestions (green words) off entirely */}
+            {/* SCAS suggestions — turn the DISPLAY of the vocabulary suggestions off/on. Live toggle
+                (no reload): only the highlight decorations are suppressed; the SCAS engine keeps running. */}
             <Row
               label="SCAS suggestions"
               checked={!(typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:scasOff') === '1')}
               onChange={() => {
                 try { localStorage.setItem('inkwave:scasOff', localStorage.getItem('inkwave:scasOff') === '1' ? '0' : '1') } catch { /* private mode */ }
-                window.location.reload()
+                window.dispatchEvent(new Event('inkwave:scas-display-changed'))
+                rerender(n => n + 1) // update this toggle's checked state
               }}
             />
 
