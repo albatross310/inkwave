@@ -767,11 +767,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         </div>
 
         <div className="px-4 py-2 border-b border-stone-100">
+          {/* All controls share h-7 so they line up; the sort-direction, re-verify-all, and + New are
+              square/compact and sit together at the right. */}
           <div className="flex items-center gap-1.5">
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
                 key={m} type="button" onClick={() => setMode(m)}
-                className="text-[11px] px-2 py-1 rounded border"
+                className="h-7 text-[11px] px-2 rounded border flex items-center"
                 style={refMode === m
                   ? { background: `${INK}12`, borderColor: INK, color: INK }
                   : { borderColor: '#e7e5e4', color: '#78716c' }}
@@ -780,24 +782,31 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               </button>
             ))}
             <select value={citationStyle} onChange={e => onStyleChange(e.target.value)}
-              className="text-[11px] text-stone-600 border border-stone-200 rounded px-2 py-1 bg-white flex-1 min-w-0">
+              className="h-7 text-[11px] text-stone-600 border border-stone-200 rounded px-2 bg-white flex-1 min-w-0">
               {CSL_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
             {/* Sort — sits just left of + New, per Peter's spec. */}
             <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
               title="Sort the library"
-              className="text-[11px] text-stone-600 border border-stone-200 rounded px-1.5 py-1 bg-white">
+              className="h-7 text-[11px] text-stone-600 border border-stone-200 rounded px-1.5 bg-white">
               <option value="added">Recently added</option>
               <option value="alpha">Alphabetical</option>
               <option value="author">Author</option>
             </select>
             <button type="button" onClick={toggleSortDir}
               title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
-              className="text-[11px] px-1.5 py-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+              className="h-7 w-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
+            {/* Re-verify all — square button, curly arrow, tooltip on hover. */}
+            <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
+              title="Re-verify all sources against their origins"
+              className="h-7 w-7 flex items-center justify-center rounded border disabled:opacity-50 hover:bg-[#5c2d8a0d]"
+              style={{ borderColor: `${INK}55`, color: INK }}>
+              {recheckingAll ? '…' : '↻'}
+            </button>
             <button type="button" onClick={openNewRef}
-              className="text-[11px] px-2 py-1 rounded border whitespace-nowrap"
+              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
               style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: '#0369a1' }}>
               + New
             </button>
@@ -808,16 +817,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <div className="flex items-center gap-2 mb-1">
             <div className="text-[11px] uppercase tracking-wide text-stone-400">Library ({bibProvider.getAll().length})</div>
             {!helpDismissed && <div className="text-[11px] text-stone-400">· type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert</div>}
-            {/* One big "re-verify all" button — replaces the per-row ↻. */}
-            <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
-              title="Re-verify every source against its origin (updates changed fields, flags dead links)"
-              className="ml-auto text-[11px] px-2.5 py-1 rounded border whitespace-nowrap disabled:opacity-50 hover:bg-[#5c2d8a0d]"
-              style={{ borderColor: `${INK}55`, color: INK }}>
-              {recheckingAll ? '↻ Re-verifying…' : '↻ Re-verify all'}
-            </button>
             {!helpDismissed && (
               <button type="button" onClick={dismissHelp} title="Hide these tips"
-                className="text-stone-400 hover:text-stone-600 text-base leading-none">×</button>
+                className="ml-auto text-stone-400 hover:text-stone-600 text-base leading-none">×</button>
             )}
           </div>
           {!helpDismissed && (
