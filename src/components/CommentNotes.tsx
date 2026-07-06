@@ -35,13 +35,15 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
 
-  // Re-collect on edits + set changes.
+  // Re-collect on edits (DEBOUNCED — the doc scan is O(n), so never run it per-keystroke) + set changes.
   useEffect(() => {
     const collect = () => setComments(collectComments(editor))
     collect()
-    editor.on('update', collect)
+    let t: ReturnType<typeof setTimeout> | undefined
+    const debounced = () => { clearTimeout(t); t = setTimeout(collect, 250) }
+    editor.on('update', debounced)
     const off = onReviewChanged(collect)
-    return () => { editor.off('update', collect); off() }
+    return () => { clearTimeout(t); editor.off('update', debounced); off() }
   }, [editor])
 
   // A newly-added comment (from the ReviewBar) opens straight into edit mode so you can type the note.

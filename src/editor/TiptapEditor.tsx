@@ -1424,9 +1424,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           hideTrigger={isTouch || keyboardUp}
         />
 
-        {/* Review layer: sticky-note comments (always visible when present) + the review control bar
-            (only while the R button is toggled on). Comments live on the CommentMark in the doc. */}
-        {editor && <CommentNotes editor={editor} paperRef={paperRef} />}
+        {/* Review layer — mounted ONLY while the R button is on, so it does ZERO work during normal
+            writing (it rescans the doc for comment marks, which was per-keystroke lag otherwise). */}
+        {editor && reviewOpen && <CommentNotes editor={editor} paperRef={paperRef} />}
         {editor && reviewOpen && <ReviewBar editor={editor} bottom={88} onClose={() => setReviewOpen(false)} />}
 
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/
