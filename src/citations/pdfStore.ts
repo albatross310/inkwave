@@ -19,6 +19,12 @@ async function pdfDir(create: boolean): Promise<FileSystemDirectoryHandle | null
 }
 
 /** Store (or replace) the PDF bytes for a citekey. Throws if OPFS is unavailable. */
+// In-memory version per citekey, bumped on every save/delete, so the export-bundle base64 cache can
+// tell when a PDF actually changed and otherwise skip re-reading + re-encoding it.
+const _pdfVersion = new Map<string, number>()
+export const pdfVersion = (citekey: string): number => _pdfVersion.get(citekey) ?? 0
+const bumpPdfVersion = (citekey: string) => _pdfVersion.set(citekey, pdfVersion(citekey) + 1)
+
 export async function savePdf(citekey: string, file: Blob): Promise<void> {
   const dir = await pdfDir(true)
   if (!dir) throw new Error('Storage unavailable — cannot embed the PDF on this device.')
@@ -26,6 +32,7 @@ export async function savePdf(citekey: string, file: Blob): Promise<void> {
   const w = await handle.createWritable()
   await w.write(file)
   await w.close()
+  bumpPdfVersion(citekey)
 }
 
 /** Read the stored PDF for a citekey, or null if none. */
@@ -44,15 +51,20 @@ export async function deletePdf(citekey: string): Promise<void> {
   const dir = await pdfDir(false)
   if (!dir) return
   try { await dir.removeEntry(fileName(citekey)) } catch { /* already gone */ }
+  bumpPdfVersion(citekey)
 }
 
 // ── base64 <-> Blob (for embedding PDFs in the .studio bundle) ──
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const buf = new Uint8Array(await blob.arrayBuffer())
-  let binary = ''
-  const chunk = 0x8000 // chunk to avoid String.fromCharCode arg-count limits on big files
-  for (let i = 0; i < buf.length; i += chunk) binary += String.fromCharCode(...buf.subarray(i, i + chunk))
-  return btoa(binary)
+export function blobToBase64(blob: Blob): Promise<string> {
+  // FileReader.readAsDataURL encodes in the browser's NATIVE code (off the JS main thread) — the old
+  // arrayBuffer + String.fromCharCode-loop + btoa did a 20 MB string build + encode on the main thread
+  // every save, which was the editing/load lag. We strip the "data:...;base64," prefix it adds.
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => { const s = String(r.result); resolve(s.slice(s.indexOf(',') + 1)) }
+    r.onerror = () => reject(r.error ?? new Error('read failed'))
+    r.readAsDataURL(blob)
+  })
 }
 
 export function base64ToBlob(b64: string, type = 'application/pdf'): Blob {

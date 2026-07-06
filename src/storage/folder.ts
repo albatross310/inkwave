@@ -5,7 +5,7 @@
 // download (and/or OneDrive).
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 
 const DB_NAME = 'inkwave-folder'
@@ -108,15 +108,23 @@ export async function setSaveFileHandle(docId: string, handle: FileSystemFileHan
   await idbSet(keyFor(docId), handle)
 }
 
-/** Read back the saved file's heartbeat (which device last wrote it, and when) for the multi-device
- *  guard. null if no file / unreadable. */
+const WRITE_AT_KEY = (docId: string) => `inkwave:folderWriteAt:${docId}`
+
+/** Multi-device guard, WITHOUT reading the (possibly 20 MB) file. We only need "did another device
+ *  write it after us?" — the File's lastModified answers that against the time WE last wrote (recorded
+ *  in writeBundleToFile). Reading + JSON-parsing the whole file here was a big load-time / 45s-interval
+ *  CPU hit. Returns a foreign-session heartbeat only when the file changed well after our last write. */
 export async function readLocalHeartbeat(docId: string): Promise<{ session?: string; exportedAt?: string } | null> {
   const handle = await getSaveFileHandle(docId, false)
   if (!handle) return null
   try {
-    const text = await (await handle.getFile()).text()
-    const bundle = parseTraceFile(text)
-    return { session: bundle.session, exportedAt: bundle.exportedAt }
+    const file = await handle.getFile() // metadata only — no content read
+    let ourWrite = 0
+    try { ourWrite = Number(localStorage.getItem(WRITE_AT_KEY(docId))) || 0 } catch { /* private mode */ }
+    if (ourWrite && file.lastModified > ourWrite + 4000) {
+      return { session: 'other-device', exportedAt: new Date(file.lastModified).toISOString() }
+    }
+    return null // we wrote it last (or haven't written this session yet) → no conflict
   } catch {
     return null
   }
@@ -139,13 +147,13 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
         markWritebackMerged(key)
       } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }
     }
-    // LEAN write (no embedded PDF bytes) — the auto-save must NOT base64-encode ~20 MB of PDFs on every
-    // save (and especially not on the FIRST save right after load: that's the "loads everything at once"
-    // startup lag). PDFs live in OPFS as sidecars and are referenced by name; a self-contained copy with
-    // the PDFs embedded is produced only on explicit Export / Save-a-copy (buildExportBundleWithPdfs).
+    // Self-contained write (PDFs embedded) — buildExportBundleWithPdfs reuses a per-PDF base64 cache so
+    // it doesn't re-encode unchanged PDFs on every save (the ~20 MB re-encode was the lag). The initial
+    // save-on-load is also skipped upstream, so nothing encodes until the doc actually changes.
     const writable = await handle.createWritable()
-    await writable.write(composeTraceFile(buildExportBundle(doc, merged)))
+    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, merged)))
     await writable.close()
+    try { localStorage.setItem(WRITE_AT_KEY(doc.id), String(Date.now())) } catch { /* private mode */ } // heartbeat baseline
     if (merged.length > snapshots.length) await restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return true
   } catch {
