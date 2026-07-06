@@ -187,7 +187,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const local = fileName?.replace(/\.(inkwave|studio|json)$/i, '')
     const cloud = oneDriveFilename(doc.id)?.replace(/\.(inkwave|studio|json)$/i, '')
     const tabName = local || cloud || (doc.title ? doc.title.slice(0, 40) : 'Untitled')
-    document.title = `Inkwave Solo: ${tabName}`
+    document.title = `Inkwave Zero: ${tabName}`
   }, [doc.title, doc.id, fileName])
 
   // Swap to a document-style favicon while a studio file is open so browser tabs are
