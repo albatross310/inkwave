@@ -28,6 +28,14 @@ export function VerifyModal({
   const [busy, setBusy] = useState(false)
   const [verifiedTitle, setVerifiedTitle] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  // Countdown from 10 while verifying, so a slow check doesn't feel stuck (holds at 1 if it overruns).
+  const [countdown, setCountdown] = useState(10)
+  useEffect(() => {
+    if (!busy) return
+    setCountdown(10)
+    const id = setInterval(() => setCountdown(c => (c > 1 ? c - 1 : 1)), 1000)
+    return () => clearInterval(id)
+  }, [busy])
 
   async function runBundle(bundle: ExportBundle) {
     setError(null); setReport(null); setAnalytics(null); setVerifiedTitle(null); setBusy(true)
@@ -106,7 +114,7 @@ export function VerifyModal({
 
         <div className="px-5 py-4 text-stone-700">
           {busy && (
-            <p className="text-stone-500 mb-4">Verifying…</p>
+            <p className="text-stone-500 mb-4">Verifying… <span className="tabular-nums" style={{ color: INK }}>{countdown}</span></p>
           )}
           {error && (
             <p className="text-red-700 mb-4">⚠ {error}</p>
