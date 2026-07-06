@@ -566,6 +566,32 @@ function SplitDiffView({
   const anchorRatioRef  = useRef(0.5)
   const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
   const sigTickRef      = useRef(false)                // throttle signature recompute to 1/frame
+
+  // Own Ctrl+wheel zoom for the diff view (like the PDF viewer): scales the diff text and — crucially —
+  // preventDefaults so it never triggers the browser's whole-page zoom. Cursor-anchored per pane.
+  const [diffZoom, setDiffZoom] = useState(() => { try { return Number(localStorage.getItem('inkwave:diffZoom')) || 1 } catch { return 1 } })
+  const dzAnchor = useRef<{ el: HTMLDivElement; offY: number; fracY: number } | null>(null)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      const pane = leftScrollRef.current?.contains(e.target as Node) ? leftScrollRef.current
+        : rightScrollRef.current?.contains(e.target as Node) ? rightScrollRef.current : null
+      if (pane) { const offY = e.clientY - pane.getBoundingClientRect().top; dzAnchor.current = { el: pane, offY, fracY: pane.scrollHeight ? (pane.scrollTop + offY) / pane.scrollHeight : 0 } }
+      else dzAnchor.current = null
+      setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+  useEffect(() => {
+    const a = dzAnchor.current
+    if (!a) return
+    const id = requestAnimationFrame(() => { a.el.scrollTop = Math.max(0, a.fracY * a.el.scrollHeight - a.offY) })
+    return () => cancelAnimationFrame(id)
+  }, [diffZoom])
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
 
@@ -764,7 +790,9 @@ function SplitDiffView({
         }} />
         <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
           <Scroll phone={isPhone}>
-            <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
+            <div style={{ zoom: diffZoom } as React.CSSProperties}>
+              <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
+            </div>
           </Scroll>
         </div>
       </div>
@@ -793,7 +821,8 @@ function SplitDiffView({
         flex: 1, overflow: 'hidden', background: '#f9f7f4',
         borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
         borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
-      }}>
+        zoom: diffZoom,
+      } as React.CSSProperties}>
         <InlineDiffView
           ops={ops}
           prevSnap={prevSnap}
