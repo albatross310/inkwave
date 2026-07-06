@@ -598,6 +598,8 @@
   --iw-addbtn-border: #a68fd6;
   --iw-toggle-on: #8b6fc8;                    /* switch track — on / off in night */
   --iw-toggle-off: #5c6672;
+  --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
+  --iw-badge-manual: #a8b0bc;
 }
 /* Catch Tailwind arbitrary purple text/border classes (text-[#5c2d8a] etc.) that inline-lose to iw-ink
    otherwise — so purple toolbar buttons / labels don't vanish on the dark chrome. */

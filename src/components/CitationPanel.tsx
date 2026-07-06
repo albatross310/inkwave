@@ -36,9 +36,9 @@ interface Props {
 }
 
 const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
-  crossref: { label: 'verified', color: '#15803d' },
-  ai:       { label: 'AI',       color: '#b45309' },
-  manual:   { label: 'manual',   color: '#6b7280' },
+  crossref: { label: 'verified', color: 'var(--iw-verified, #15803d)' },
+  ai:       { label: 'AI',       color: 'var(--iw-badge-ai, #b45309)' },
+  manual:   { label: 'manual',   color: 'var(--iw-badge-manual, #6b7280)' },
 }
 
 // Re-export for consumers that previously imported from here.
@@ -848,10 +848,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
               <div key={item.id} className="py-1.5 border-b border-stone-100 last:border-0">
-                <div className="flex items-start gap-2">
+                {/* Top line: key + badges on the left, action buttons on the right. */}
+                <div className="flex items-center gap-2">
                   {refMode === 'manual' && (
                     <input type="checkbox" checked={manualKeys.has(item.id)} onChange={() => toggleManual(item)}
-                      className="mt-1" aria-label={`Include ${item.id} in references`} />
+                      aria-label={`Include ${item.id} in references`} />
                   )}
                   <button
                     type="button"
@@ -859,16 +860,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     onClick={() => setEditItem(item)}
                     title="Click to edit"
                   >
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[15px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[17px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
                       {/* Verified sources → a compact ✓ box (tooltip on hover); others keep their label. */}
                       {itemSource(item) === 'crossref'
-                        ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
-                        : <span className="text-[11px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>}
-                      <span className="text-[11px] text-stone-400">{typeLabel}</span>
+                        ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded flex-shrink-0" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
+                        : <span className="text-[11px] px-1 rounded flex-shrink-0" style={{ color: src.color, borderColor: src.color, borderWidth: 1, borderStyle: 'solid' }}>{src.label}</span>}
+                      <span className="text-[11px] text-stone-400 flex-shrink-0">{typeLabel}</span>
                     </div>
-                    <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
-                    <div className="text-[16px] text-stone-400 leading-snug truncate">{simpleInText([item])}</div>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
@@ -916,6 +915,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
                 </div>
+                {/* Title + author flow the FULL width beneath the buttons (title wraps to 2 lines so more
+                    of it is readable). Author only renders when present — no empty line. */}
+                <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
+                  className="block w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors mt-0.5">
+                  {!!String(item.title ?? '') && <div className="text-[16px] text-stone-500 leading-snug line-clamp-2">{String(item.title ?? '')}</div>}
+                  {!!simpleInText([item]) && <div className="text-[15px] text-stone-400 leading-snug truncate">{simpleInText([item])}</div>}
+                </button>
                 {(() => {
                   const iw = (item as { _iw?: IwCitationMeta })._iw
                   const changelog = iw?.changelog ?? []
@@ -924,31 +930,31 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   return (
                     <>
                       <div className="mt-0.5 pl-1 flex items-center gap-2 flex-wrap">
-                        {iw?.deadUrl && <span className="text-[10px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
+                        {iw?.deadUrl && <span className="text-[12px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
                         {changelog.length > 0 && (
                           <button type="button" onClick={() => toggleExpand(item.id)}
                             title="Show the correction history (old → new) for this citation"
-                            className="text-[10px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+                            className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
                         {/* "used" + "checked today" together, right-aligned and on the same line. */}
                         <span className="ml-auto flex items-center gap-2">
-                          {used && <span className="text-[10px] text-green-600">● used</span>}
-                          {iw?.lastVerified && !iw?.deadUrl && <span className="text-[10px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
+                          {used && <span className="text-[12px] text-green-600">● used</span>}
+                          {iw?.lastVerified && !iw?.deadUrl && <span className="text-[12px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
                         </span>
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">
                           {changelog.map((c, i) => (
-                            <div key={i} className="text-[10px] text-stone-500 flex items-center gap-1.5">
+                            <div key={i} className="text-[12px] text-stone-500 flex items-center gap-1.5">
                               <span className="font-medium text-stone-600 flex-shrink-0">{(CSL_FIELD_LABELS_MAP as Record<string, string>)[c.field] ?? c.field}</span>
                               <span className="text-stone-400 line-through truncate max-w-[80px]">{fmtVal(c.field, c.old)}</span>
                               <span className="text-stone-300 flex-shrink-0">→</span>
-                              <span className="truncate max-w-[80px]" style={{ color: INK }}>{fmtVal(c.field, c.new)}</span>
-                              <span className="text-[9px] text-stone-300 flex-shrink-0">{c.source}</span>
+                              <span className="truncate max-w-[80px]" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{fmtVal(c.field, c.new)}</span>
+                              <span className="text-[11px] text-stone-300 flex-shrink-0">{c.source}</span>
                               <button type="button" onClick={() => void revert(item, i)}
-                                className="text-[9px] text-stone-400 hover:text-[#5c2d8a] ml-auto flex-shrink-0">revert</button>
+                                className="text-[11px] text-stone-400 hover:text-[#5c2d8a] ml-auto flex-shrink-0">revert</button>
                             </div>
                           ))}
                         </div>
