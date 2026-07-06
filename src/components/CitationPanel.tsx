@@ -422,8 +422,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     return () => { unsub(); editor.off('update', onUpdate) }
   }, [editor, rerender])
 
+  const searchInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !editItem) onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !editItem) onClose()
+      // Ctrl/Cmd+F while the panel is open → focus the library search instead of the browser find.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !editItem) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      }
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, editItem])
@@ -735,11 +744,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         <div className="px-4 pt-3 pb-2 border-b border-stone-100">
           <div className="flex gap-2">
             <input
+              ref={searchInputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && captureable) { e.preventDefault(); void doCapture() } }}
-              placeholder="Paste a DOI, arXiv, URL, or search…"
-              className="flex-1 text-xs border border-stone-200 rounded px-2 py-1.5 focus:outline-none focus:border-[#5c2d8a]"
+              placeholder="Paste a DOI, arXiv, URL, or search… (Ctrl+F)"
+              className="flex-1 text-sm border border-stone-200 rounded px-3 py-2 focus:outline-none focus:border-[#5c2d8a]"
             />
             <button
               type="button" disabled={!captureable || busy} onClick={() => void doCapture()}
@@ -773,12 +783,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               className="text-[11px] text-stone-600 border border-stone-200 rounded px-2 py-1 bg-white flex-1 min-w-0">
               {CSL_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
-            {!refCfg && (
-              <button type="button" onClick={() => cmd(() => editor.chain().focus().insertReferenceList().run())}
-                className="text-[11px] px-2 py-1 rounded border border-stone-200 text-stone-500 hover:border-stone-300 whitespace-nowrap">
-                + Refs
-              </button>
-            )}
             {/* Sort — sits just left of + New, per Peter's spec. */}
             <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
               title="Sort the library"

@@ -634,6 +634,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editor.on('update', count)
     return () => { editor.off('update', count) }
   }, [editor])
+  // Ctrl/Cmd+Shift+> / Ctrl/Cmd+Shift+< — step the selection's font size up / down through the same
+  // ladder the style bar uses (stored in em, base 18px, so it matches the size picker's readout).
+  useEffect(() => {
+    if (!editor) return
+    const SIZES_PT = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
+    const BASE = 18, PT_PX = 96 / 72
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return
+      const up = e.key === '>' || e.key === '.'
+      const down = e.key === '<' || e.key === ','
+      if ((!up && !down) || !editor.isFocused) return
+      e.preventDefault()
+      const raw = editor.getAttributes('textStyle').fontSize as string | undefined
+      const px = raw ? (raw.endsWith('em') ? parseFloat(raw) * BASE : parseInt(raw, 10) || BASE) : BASE
+      const curPt = Math.round(px / PT_PX)
+      let idx = 0, best = Infinity
+      SIZES_PT.forEach((s, i) => { const d = Math.abs(s - curPt); if (d < best) { best = d; idx = i } })
+      const next = SIZES_PT[Math.max(0, Math.min(SIZES_PT.length - 1, idx + (up ? 1 : -1)))]
+      editor.chain().focus().setMark('textStyle', { fontSize: `${+((next * PT_PX) / BASE).toFixed(4)}em` }).run()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [editor])
   // When the keyboard opens, the caret may already be behind it — lift it once.
   useEffect(() => {
     if (keyboardUp) requestAnimationFrame(() => keepCaretRef.current())
@@ -1348,10 +1371,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
+  // A single atom node (citation / reference list / math) selected via click-hold shouldn't summon the
+  // TEXT formatting bar — those have their own popovers (e.g. the citation locator card). Treat that as
+  // "no text selection" for the style bar.
+  const selNode = (editor?.state.selection as unknown as { node?: { type: { name: string } } } | undefined)?.node
+  const selIsAtomNode = !!selNode && ['citation', 'referenceList', 'mathInline', 'mathBlock'].includes(selNode.type.name)
   // On phone with keyboard up + text selected: show ONLY the style bar (not the full toolbar).
   // styleBarOpen keeps the main row alive while the user is actively formatting.
-  const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty
-  const selectionOnDesktop = !isTouch && !!(editor?.state.selection && !editor.state.selection.empty)
+  const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty && !selIsAtomNode
+  const selectionOnDesktop = !isTouch && !!(editor?.state.selection && !editor.state.selection.empty) && !selIsAtomNode
   const showMainRow = !isTouch || !keyboardUp || styleBarOpen
   // Style bar auto-expands on phone text selection or desktop text selection.
   const styleBarExpanded = (selectionOnPhone || selectionOnDesktop || styleBarOpen) && !!editor

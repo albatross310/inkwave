@@ -18,6 +18,7 @@ export interface PdfHighlight {
   kind?: HighlightKind    // fill (default), underline, or strikethrough
   text: string            // the selected text (used for search fallback + display)
   note?: string           // optional annotation note
+  size?: number           // text-note font size in px (defaults to 12)
   citekey?: string        // set when this highlight is linked to an in-text citation's pinpoint
   createdAt: string
 }
