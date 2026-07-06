@@ -554,7 +554,15 @@
 :root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(147, 197, 253, 0.26); }
 
 /* Light purple / light green highlights. */
-:root[data-theme="night"] .scas-red { color: #86e6a6; }               /* unresolved kicked word */
+:root[data-theme="night"] .scas-red { color: #86e6a6; }               /* unresolved kicked word (green) */
+/* Committed / resolved / focused SCAS words are purple — lighten from #6f3b9e (too dark on charcoal). */
+:root[data-theme="night"] .scas-secondary,
+:root[data-theme="night"] .scas-focused,
+:root[data-theme="night"] .scas-red[data-scas-old] { color: #c9a9ff; }
+/* Reference-list back-ref links + note buttons → very light purple. */
+:root[data-theme="night"] .iw-cite-link,
+:root[data-theme="night"] .iw-backref-group .iw-cite-link,
+:root[data-theme="night"] .iw-note-add { color: #d6c6f5 !important; border-color: #d6c6f5 !important; }
 :root[data-theme="night"] .iw-comment { border-bottom-color: #c9a9ff; }
 :root[data-theme="night"] ins.iw-ins { color: #86e6a6; border-bottom-color: rgba(134, 230, 166, 0.6); background: rgba(134, 230, 166, 0.1); }
 :root[data-theme="night"] del.iw-del { color: #ff9b9b; text-decoration-color: rgba(255, 155, 155, 0.8); background: rgba(255, 155, 155, 0.1); }
@@ -576,6 +584,8 @@
   --iw-addbtn-bg: #7c5bb0;                    /* Add button — lighter purple + light outline in night */
   --iw-addbtn-fg: #f4f0fb;
   --iw-addbtn-border: #a68fd6;
+  --iw-toggle-on: #8b6fc8;                    /* switch track — on / off in night */
+  --iw-toggle-off: #5c6672;
 }
 /* Catch Tailwind arbitrary purple text/border classes (text-[#5c2d8a] etc.) that inline-lose to iw-ink
    otherwise — so purple toolbar buttons / labels don't vanish on the dark chrome. */

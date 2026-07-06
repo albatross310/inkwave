@@ -148,7 +148,7 @@ function Row({ label, checked, onChange }: { label: string; checked: boolean; on
       <span>{label}</span>
       <span
         className="w-8 h-4 rounded-full flex items-center transition-colors relative"
-        style={{ background: checked ? INK : '#d1d5db' }}
+        style={{ background: checked ? 'var(--iw-toggle-on, #5c2d8a)' : 'var(--iw-toggle-off, #d1d5db)' }}
       >
         <span
           className="absolute w-3 h-3 bg-white rounded-full shadow-sm transition-transform"
