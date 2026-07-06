@@ -84,7 +84,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           note.dataset.hlId = hl.id
           note.setAttribute('contenteditable', 'true')
           note.spellcheck = false
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;min-width:40px;max-width:42%;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;outline:none;`
+          // Width comes from the drag (r0.w); depth is flexible — the box wraps text and grows downward.
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;background:${hl.color};border:1px solid rgba(0,0,0,0.2);border-radius:4px;padding:3px 6px;font-size:12px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:text;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Type your note — click away to save, leave blank to delete'
           note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
@@ -241,6 +242,44 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Freeze the CURRENT on-screen render into a fixed overlay of cloned canvases — a pixel-perfect
+  // still of what the user sees right now. Used to cover the (brief) teardown+repaint on a zoom-settle
+  // re-render so the page never blanks. Returns a remover.
+  function freezeViewport(): () => void {
+    const scroller = scrollRef.current
+    if (!scroller) return () => {}
+    const sRect = scroller.getBoundingClientRect()
+    const overlay = document.createElement('div')
+    overlay.style.cssText = `position:fixed;left:${sRect.left}px;top:${sRect.top}px;width:${sRect.width}px;height:${sRect.height}px;z-index:5;pointer-events:none;overflow:hidden;`
+    for (const pg of pagesRef.current) {
+      const c = pg.canvasWrap.querySelector('canvas')
+      if (!c) continue
+      const r = c.getBoundingClientRect()
+      if (r.bottom < sRect.top || r.top > sRect.bottom) continue // offscreen — skip
+      const clone = document.createElement('canvas')
+      clone.width = c.width; clone.height = c.height
+      clone.style.cssText = `position:absolute;left:${r.left - sRect.left}px;top:${r.top - sRect.top}px;width:${r.width}px;height:${r.height}px;`
+      clone.getContext('2d')?.drawImage(c, 0, 0)
+      overlay.appendChild(clone)
+    }
+    document.body.appendChild(overlay)
+    return () => overlay.remove()
+  }
+
+  // Synchronously render every page currently in the scroller viewport, and await them — so a caller
+  // can guarantee the visible region is painted before revealing it.
+  async function renderVisibleNow(token: number) {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const sRect = scroller.getBoundingClientRect()
+    const jobs: Promise<void>[] = []
+    pagesRef.current.forEach((pg, idx) => {
+      const r = pg.wrapper.getBoundingClientRect()
+      if (r.bottom >= sRect.top - 200 && r.top <= sRect.bottom + 200) jobs.push(renderOnePage(idx, token))
+    })
+    await Promise.all(jobs)
+  }
+
   // ── Load document (on open) → render at fit scale → scroll to the cited sentence ──
   useEffect(() => {
     let cancelled = false
@@ -332,16 +371,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       // drifted a little each time, which read as flicker).
       const ratio = zoom / renderedZoomRef.current
       const sl = el.scrollLeft, st = el.scrollTop
-      void renderPages(fitScaleRef.current * zoom).then(() => {
+      // Freeze the current view so the teardown+repaint below never shows a blank (the end-of-zoom
+      // flash). The frozen still stays on top until the fresh, sharp visible pages are actually painted.
+      const unfreeze = freezeViewport()
+      void renderPages(fitScaleRef.current * zoom).then(async () => {
         viewer.style.transform = ''
         viewer.style.transformOrigin = ''
         zoomBaseRef.current = null
         renderedZoomRef.current = zoom
-        requestAnimationFrame(() => {
-          el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
-          el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
-        })
-      })
+        el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
+        el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
+        await renderVisibleNow(renderTokenRef.current) // paint the visible pages BEFORE lifting the freeze
+        requestAnimationFrame(() => requestAnimationFrame(unfreeze))
+      }).catch(unfreeze)
     }, 170)
     return () => clearTimeout(zoomSettleRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,14 +466,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     return { text, page, rects, x: last.right - box.left, y: last.bottom - box.top }
   }
 
-  function onMouseUp(e: React.MouseEvent) {
+  function onMouseUp() {
     const info = selectionInfo()
-    // Text tool: a click (no selection) drops a note where you clicked.
-    if (toolRef.current === 'text') {
-      if (!info) placeTextNote(e.clientX, e.clientY)
-      setPending(null)
-      return
-    }
+    // Text tool placement is a click-drag (onPdfMouseDown → the box's width is dragged), handled by its
+    // own document listeners — nothing to do here for it.
+    if (toolRef.current === 'text') { setPending(null); return }
     if (!info) { setPending(null); return }
     // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
     if (toolRef.current) {
@@ -443,25 +482,53 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     }
   }
 
-  function placeTextNote(clientX: number, clientY: number) {
+  // Text tool: click-DRAG on a page to set the note box's WIDTH; depth is flexible (the box grows down
+  // as you type). A plain click (tiny drag) falls back to a default width. Live dashed preview.
+  const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
+  function onPdfMouseDown(e: React.MouseEvent) {
+    if (toolRef.current !== 'text') return
     for (let i = 0; i < pagesRef.current.length; i++) {
       const pr = pagesRef.current[i].wrapper.getBoundingClientRect()
-      if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
-      // Drop an EMPTY editable note at the click and focus it — the writer types straight into the page
-      // (no prompt). It persists on blur, or vanishes if left blank (see the contenteditable box above).
-      const hl: PdfHighlight = {
-        id: uuidv4(), page: i + 1, color: colorRef.current, kind: 'text', text: '', note: '',
-        rects: [{ x: (clientX - pr.left) / pr.width, y: (clientY - pr.top) / pr.height, w: 0.22, h: 0.05 }],
-        createdAt: new Date().toISOString(),
-      }
-      highlightsRef.current = [...highlightsRef.current, hl]
-      redrawOverlays()
-      requestAnimationFrame(() => {
-        const el = pagesRef.current[i]?.hlLayer?.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
-        el?.focus()
-      })
+      if (e.clientX < pr.left || e.clientX > pr.right || e.clientY < pr.top || e.clientY > pr.bottom) continue
+      e.preventDefault()
+      const preview = document.createElement('div')
+      preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:22px;width:0;border:1.5px dashed ${INK};background:${colorRef.current}55;z-index:30;pointer-events:none;border-radius:4px;`
+      document.body.appendChild(preview)
+      textDragRef.current = { pageIdx: i, startX: e.clientX, startY: e.clientY, preview, pr }
+      document.addEventListener('mousemove', onTextDragMove)
+      document.addEventListener('mouseup', onTextDragUp)
       return
     }
+  }
+  function onTextDragMove(ev: MouseEvent) {
+    const d = textDragRef.current
+    if (!d) return
+    d.preview.style.left = `${Math.min(ev.clientX, d.startX)}px`
+    d.preview.style.width = `${Math.abs(ev.clientX - d.startX)}px`
+  }
+  function onTextDragUp(ev: MouseEvent) {
+    const d = textDragRef.current
+    document.removeEventListener('mousemove', onTextDragMove)
+    document.removeEventListener('mouseup', onTextDragUp)
+    if (!d) return
+    d.preview.remove()
+    textDragRef.current = null
+    const pr = d.pr
+    const left = Math.min(ev.clientX, d.startX)
+    const widthPx = Math.abs(ev.clientX - d.startX)
+    const wFrac = widthPx < 24 ? 0.3 : Math.min(0.95, widthPx / pr.width) // tiny drag = click → default
+    const hl: PdfHighlight = {
+      id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '',
+      rects: [{ x: Math.max(0, (left - pr.left) / pr.width), y: Math.max(0, (d.startY - pr.top) / pr.height), w: wFrac, h: 0.05 }],
+      createdAt: new Date().toISOString(),
+    }
+    highlightsRef.current = [...highlightsRef.current, hl]
+    redrawOverlays()
+    void saveHighlights(citekey, highlightsRef.current)
+    requestAnimationFrame(() => {
+      const el = pagesRef.current[d.pageIdx]?.hlLayer?.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
+      el?.focus()
+    })
   }
 
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
@@ -512,7 +579,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       </div>
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-      <div ref={scrollRef} onMouseUp={onMouseUp}
+      <div ref={scrollRef} onMouseUp={onMouseUp} onMouseDown={onPdfMouseDown}
         style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12 }}>
         <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
@@ -534,7 +601,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
             renderedZoomRef.current = zoom
             void renderPages(fitScaleRef.current * zoom)
           }}
-          style={{ minWidth: 26, height: 26, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '0.95rem', borderRadius: 5 }}>
+          style={{ minWidth: 34, height: 34, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '1.35rem', borderRadius: 5, lineHeight: 1 }}>
           ⟳
         </button>
         {([['−', () => { zoomAnchorRef.current = null; setZoom(z => Math.max(ZOOM_MIN, z / 1.2)) }], [`${Math.round(zoom * 100)}%`, () => { zoomAnchorRef.current = null; setZoom(1) }], ['+', () => { zoomAnchorRef.current = null; setZoom(z => Math.min(ZOOM_MAX, z * 1.2)) }]] as const).map(([label, fn], i) => (
