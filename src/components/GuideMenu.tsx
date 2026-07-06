@@ -110,6 +110,7 @@ export function GuideMenu() {
             role="dialog"
             aria-modal="true"
             aria-label="Guide"
+            className="iw-nightable"
             onMouseDown={e => e.stopPropagation()}
             style={{
               position: 'relative',
