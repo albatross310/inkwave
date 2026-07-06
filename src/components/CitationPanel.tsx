@@ -704,7 +704,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         ref={panelRef}
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ ...panelStyle(), width: 'min(520px, 96vw)', maxHeight: '85vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        style={{ ...panelStyle(), width: 520, height: '80vh', minWidth: 360, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         <div
@@ -767,9 +767,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         </div>
 
         <div className="px-4 py-2 border-b border-stone-100">
-          {/* All controls share h-7 so they line up; the sort-direction, re-verify-all, and + New are
-              square/compact and sit together at the right. */}
-          <div className="flex items-center gap-1.5">
+          {/* All controls share h-7 so they line up; wrap (never clip) if the panel is narrow. */}
+          <div className="flex items-center gap-1.5 flex-wrap">
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
                 key={m} type="button" onClick={() => setMode(m)}
@@ -798,11 +797,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               className="h-7 w-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
-            {/* Re-verify all — square button, curly arrow, tooltip on hover. */}
+            {/* Re-verify all — square button, curly arrow, tooltip on hover. Colour via the theme var so
+                it stays visible in night mode (inline INK was invisible on the dolphin-grey panel). */}
             <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
               title="Re-verify all sources against their origins"
-              className="h-7 w-7 flex items-center justify-center rounded border disabled:opacity-50 hover:bg-[#5c2d8a0d]"
-              style={{ borderColor: `${INK}55`, color: INK }}>
+              className="h-7 w-7 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
+              style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
               {recheckingAll ? '…' : '↻'}
             </button>
             <button type="button" onClick={openNewRef}
@@ -849,13 +849,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     title="Click to edit"
                   >
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm font-medium truncate" style={{ color: INK }}>{item.id}</span>
-                      <span className="text-[10px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
-                      <span className="text-[10px] text-stone-400">{typeLabel}</span>
-                      {used && <span className="text-[10px] text-green-600">● used</span>}
+                      <span className="text-[15px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
+                      <span className="text-[11px] px-1 rounded" style={{ color: src.color, border: `1px solid ${src.color}55` }}>{src.label}</span>
+                      <span className="text-[11px] text-stone-400">{typeLabel}</span>
+                      {used && <span className="text-[11px] text-green-600">● used</span>}
                     </div>
-                    <div className="text-[13px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
-                    <div className="text-[12px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
+                    <div className="text-[14px] text-stone-500 leading-snug truncate mt-0.5">{String(item.title ?? '')}</div>
+                    <div className="text-[13px] text-stone-400 mt-0.5">{simpleInText([item])}</div>
                   </button>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button type="button" onClick={() => cite(item)}
