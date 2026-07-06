@@ -1585,7 +1585,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         >
           <div
             ref={footerRef}
-            className={`pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
             onPointerDown={isTouch ? (e) => {
               // Prevent the toolbar from stealing focus from the editor on iOS.
               // Without this, tapping a toolbar button dismisses the text selection

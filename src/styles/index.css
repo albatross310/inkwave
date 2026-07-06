@@ -547,10 +547,11 @@
 :root[data-theme="night"] .inkwave-sheet { background-color: #26272c; }
 :root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
 
-/* Very-light-blue text. */
-:root[data-theme="night"] .ProseMirror { color: #dbe6ff; }
-:root[data-theme="night"] .inkwave-sheet-num { color: #b79be0; }
-:root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(155, 130, 220, 0.28); }
+/* Light-grey body text; page numbers match it; inline citations go light blue (via the cite var). */
+:root[data-theme="night"] { --iw-cite-color: #93c5fd; }
+:root[data-theme="night"] .ProseMirror { color: #c6c8cd; }
+:root[data-theme="night"] .inkwave-sheet-num { color: #c6c8cd; }
+:root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(147, 197, 253, 0.26); }
 
 /* Light purple / light green highlights. */
 :root[data-theme="night"] .scas-red { color: #86e6a6; }               /* unresolved kicked word */
@@ -558,3 +559,25 @@
 :root[data-theme="night"] ins.iw-ins { color: #86e6a6; border-bottom-color: rgba(134, 230, 166, 0.6); background: rgba(134, 230, 166, 0.1); }
 :root[data-theme="night"] del.iw-del { color: #ff9b9b; text-decoration-color: rgba(255, 155, 155, 0.8); background: rgba(255, 155, 155, 0.1); }
 :root[data-theme="night"] .iw-change-current { outline-color: #c9a9ff; }
+
+/* ── Chrome (toolbars, popups, pills): "dolphin-back grey" panels with light-grey text. Panels opt in
+   with the `iw-nightable` class; scoping the sweeping overrides to it keeps the blast radius small. ── */
+:root[data-theme="night"] .iw-nightable {
+  background-color: #454e59 !important;   /* dolphin-back grey */
+  color: #dfe3e9 !important;
+  border-color: #5c6672 !important;
+  --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
+}
+/* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey. */
+:root[data-theme="night"] .iw-nightable .bg-white,
+:root[data-theme="night"] .iw-nightable [style*="background: #fff"],
+:root[data-theme="night"] .iw-nightable [style*="background:#fff"] { background-color: #3c444e !important; }
+:root[data-theme="night"] .iw-nightable [class*="text-stone"],
+:root[data-theme="night"] .iw-nightable [class*="text-gray"],
+:root[data-theme="night"] .iw-nightable [class*="text-neutral"] { color: #dfe3e9 !important; }
+:root[data-theme="night"] .iw-nightable [class*="border-stone"],
+:root[data-theme="night"] .iw-nightable [class*="border-gray"] { border-color: #5c6672 !important; }
+:root[data-theme="night"] .iw-nightable input,
+:root[data-theme="night"] .iw-nightable select,
+:root[data-theme="night"] .iw-nightable textarea { background-color: #3c444e !important; color: #eef1f5 !important; border-color: #5c6672 !important; }
+:root[data-theme="night"] .iw-nightable input::placeholder { color: #9aa3af !important; }
