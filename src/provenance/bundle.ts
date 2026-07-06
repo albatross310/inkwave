@@ -11,6 +11,7 @@ import { loadPdf, blobToBase64, pdfVersion } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
 import { POOL_ID } from '../scas/pool'
 import { deviceId } from '../sync/presence'
+import { collectViewSettings } from '../editor/viewSettings'
 
 // Render an in-text citation as readable text from the node's OWN attrs only — deterministic and
 // library-independent. pmToText feeds the verifiable bundle header (verify/index.ts recomputes it and
@@ -111,6 +112,7 @@ export interface ExportBundle {
   // travels with its sources + annotations. See buildExportBundleWithPdfs / openInkwaveFile.
   bibliography?: CSLItem[]
   pdfs?: Record<string, { name: string; data: string }>
+  viewSettings?: Record<string, string> // theme / gapped / paper / margins / zoom — travels with the doc
 }
 
 // The library entries a document depends on (cited in-text or shown in its reference list), so a
@@ -173,6 +175,7 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     poolId: doc.scasPoolId ?? POOL_ID,
     session: deviceId(),
     bibliography: citedItems(doc.contentJson),
+    viewSettings: collectViewSettings(),
   }
 }
 
