@@ -257,6 +257,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / baseVp.width))
 
         await renderPages(fitScaleRef.current)
+        renderedZoomRef.current = 1 // pages are drawn at fit (zoom 1) → baseline for the CSS-zoom ratio
         if (cancelled) return
         setStatus('ready')
         // Direct scroll (placeholder sizes are final, so no reflow to fight). Re-apply a couple of
@@ -290,21 +291,45 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   // axes and restore it after re-render, so zooming grows/shrinks around the cursor. The −/+ buttons
   // leave no pointer, so those fall back to the viewport centre.
   const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null)
+  const renderedZoomRef = useRef(1)                                  // the zoom the canvases are drawn at
+  const zoomSettleRef = useRef<ReturnType<typeof setTimeout>>()
+  const zoomBaseRef = useRef<{ left: number; top: number } | null>(null) // untransformed viewer origin
   useEffect(() => {
     if (!docRef.current || status !== 'ready') return
-    const el = scrollRef.current!
-    const box = el.getBoundingClientRect()
+    const el = scrollRef.current!, viewer = viewerRef.current
+    if (!viewer) return
     const a = zoomAnchorRef.current
-    const ax = a ? a.x - box.left : el.clientWidth / 2   // anchor offset within the viewport
-    const ay = a ? a.y - box.top  : el.clientHeight / 2
-    const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + ay) / el.scrollHeight : 0
-    const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + ax) / el.scrollWidth  : 0
-    void renderPages(fitScaleRef.current * zoom).then(() => {
-      requestAnimationFrame(() => {
-        el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - ay)
-        el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - ax)
+    // INSTANT visual zoom: CSS-scale the CURRENT render around the pointer — no clear, so the page
+    // never goes blank. Capture the viewer's untransformed origin once per gesture (scroll is frozen
+    // during Ctrl+wheel) so transform-origin stays correct across ticks.
+    if (!zoomBaseRef.current) { const vr = viewer.getBoundingClientRect(); zoomBaseRef.current = { left: vr.left, top: vr.top } }
+    const base = zoomBaseRef.current
+    const ratio = zoom / renderedZoomRef.current
+    const cx = a ? a.x : el.getBoundingClientRect().left + el.clientWidth / 2
+    const cy = a ? a.y : el.getBoundingClientRect().top + el.clientHeight / 2
+    viewer.style.transformOrigin = `${cx - base.left}px ${cy - base.top}px`
+    viewer.style.transform = `scale(${ratio})`
+    // Once the gesture settles, re-render SHARP at the new scale, then drop the CSS transform and
+    // restore the pointer anchor. (The one re-render replaces the constant per-tick clear-and-blank.)
+    clearTimeout(zoomSettleRef.current)
+    zoomSettleRef.current = setTimeout(() => {
+      const box = el.getBoundingClientRect()
+      const ax = a ? a.x - box.left : el.clientWidth / 2
+      const ay = a ? a.y - box.top  : el.clientHeight / 2
+      const cyFrac = el.scrollHeight > el.clientHeight ? (el.scrollTop + ay) / el.scrollHeight : 0
+      const cxFrac = el.scrollWidth  > el.clientWidth  ? (el.scrollLeft + ax) / el.scrollWidth  : 0
+      void renderPages(fitScaleRef.current * zoom).then(() => {
+        viewer.style.transform = ''
+        viewer.style.transformOrigin = ''
+        zoomBaseRef.current = null
+        renderedZoomRef.current = zoom
+        requestAnimationFrame(() => {
+          el.scrollTop  = Math.max(0, cyFrac * el.scrollHeight - ay)
+          el.scrollLeft = Math.max(0, cxFrac * el.scrollWidth  - ax)
+        })
       })
-    })
+    }, 170)
+    return () => clearTimeout(zoomSettleRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom])
 
