@@ -5,7 +5,7 @@
 // download (and/or OneDrive).
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 
 const DB_NAME = 'inkwave-folder'
@@ -139,8 +139,12 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
         markWritebackMerged(key)
       } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }
     }
+    // LEAN write (no embedded PDF bytes) — the auto-save must NOT base64-encode ~20 MB of PDFs on every
+    // save (and especially not on the FIRST save right after load: that's the "loads everything at once"
+    // startup lag). PDFs live in OPFS as sidecars and are referenced by name; a self-contained copy with
+    // the PDFs embedded is produced only on explicit Export / Save-a-copy (buildExportBundleWithPdfs).
     const writable = await handle.createWritable()
-    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, merged)))
+    await writable.write(composeTraceFile(buildExportBundle(doc, merged)))
     await writable.close()
     if (merged.length > snapshots.length) await restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return true
