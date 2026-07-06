@@ -87,6 +87,28 @@
   del.iw-del { text-decoration: line-through; text-decoration-color: rgba(185, 28, 28, 0.8); color: #b91c1c; background: rgba(185, 28, 28, 0.07); }
   .iw-change-current { outline: 2px solid #5c2d8a; outline-offset: 1px; border-radius: 2px; }
 
+  /* FILL-mode waves on a SEPARATE fixed layer BEHIND the (transparent) scroll container. A fixed
+     ::before is a DESCENDANT of the scroll box and Chromium paints it IN FRONT of that box's
+     scrollbar (the real cause of the wave-over-scrollbar bleed — a layering issue, not opacity). As a
+     sibling behind, the surface's scrollbar always paints over these waves. */
+  .iw-waves-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: #cfe9ec;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='white' stroke-opacity='0.38' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='2.4'/%3E%3C/svg%3E"),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='white' stroke-opacity='0.38' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='white' stroke-opacity='0.5' stroke-width='2.4'/%3E%3C/svg%3E");
+    background-size: 140px 140px, 140px 140px;
+    background-position: var(--wave-x, 0px) 0px, calc(-1 * var(--wave-x, 0px)) 0px;
+    will-change: background-position;
+  }
+  /* Fill surface goes transparent (the layer behind provides the aqua) and sits ABOVE the layer so its
+     scrollbar wins; its own ::before waves are dropped (the layer replaces them). */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) { background-color: transparent; z-index: 1; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone)::before { display: none; }
+
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the

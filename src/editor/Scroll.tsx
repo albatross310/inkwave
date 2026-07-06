@@ -36,6 +36,7 @@ export function Scroll({
   // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
   // with no vertical movement. rAF-throttled.
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const wavesRef = useRef<HTMLDivElement>(null) // fill mode: waves live on a SEPARATE fixed layer BEHIND
   const sheetRef = useRef<HTMLDivElement>(null)
   // Gapped mode draws a separate-sheet drop shadow at EACH page break (the rounded caps in
   // PaginationExtension); the single tall outer shadow would otherwise bleed continuously down the
@@ -95,7 +96,9 @@ export function Scroll({
     const apply = () => {
       raf = 0
       const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(y * 0.09).toFixed(1)}px`) // horizontal sway
+      // In fill mode the waves are on the separate behind-layer (wavesRef); elsewhere on the surface's
+      // own ::before. Set --wave-x on whichever carries them.
+      ;(wavesRef.current ?? el).style.setProperty('--wave-x', `${(y * 0.09).toFixed(1)}px`) // horizontal sway
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
@@ -104,6 +107,12 @@ export function Scroll({
   }, [phone])
 
   return (
+    <>
+    {/* Fill (live editor) mode: the waves are a SEPARATE fixed layer BEHIND the scroll container, not
+        the surface's own ::before — a fixed ::before is a descendant of the scroll box and Chromium
+        paints it IN FRONT of that box's scrollbar. As a sibling behind (transparent surface on top),
+        the surface's scrollbar always paints over the waves. */}
+    {fill && !phone && <div ref={wavesRef} className="iw-waves-layer" aria-hidden="true" />}
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
@@ -165,6 +174,7 @@ export function Scroll({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
