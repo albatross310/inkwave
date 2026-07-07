@@ -50,6 +50,21 @@ export function Privacy() {
           </section>
 
           <section>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>Accounts and payments</h2>
+            <p>
+              Ordinary use needs no account. If you choose to sign in — through Clerk, our authentication
+              provider — the only personal information we hold is your email address. It exists solely to
+              identify you for a subscription, and we never email you except to help you recover your
+              account.
+            </p>
+            <p className="mt-3">
+              Signing in supports <em>Insignia</em>, our paid deep-provenance tier, which is still in
+              development and not required for everyday writing. Subscription payments are handled entirely
+              by Stripe and PayPal; we never see your card or billing details.
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-xl mb-2" style={{ color: INK }}>Data sharing</h2>
             <p>
               We don't sell or trade your data. The only external services contacted are those above,
