@@ -42,7 +42,7 @@ interface PageRef {
   page: any; viewport: any // eslint-disable-line @typescript-eslint/no-explicit-any
   rendered: boolean; rendering: boolean
 }
-interface Pending { text: string; page: number; rects: HighlightRect[]; x: number; y: number }
+interface Pending { text: string; page: number; rects: HighlightRect[]; groups: Array<{ page: number; rects: HighlightRect[] }>; x: number; y: number }
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -670,8 +670,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     if (!text || !viewerRef.current?.contains(sel.anchorNode)) return null
     const clientRects = Array.from(sel.getRangeAt(0).getClientRects())
     if (!clientRects.length) return null
-    let page = 1
-    const rects: HighlightRect[] = []
+    // Group the selection's rects BY PAGE — a selection spanning a page break must highlight BOTH pages,
+    // so we make one highlight per page (a highlight carries a single page).
+    const byPage = new Map<number, HighlightRect[]>()
     for (const cr of clientRects) {
       // Skip spurious rects — a page-tall or zero rect (e.g. pdf.js's .endOfContent, which the selection
       // range picks up) is what paints the WHOLE page when you only dragged over a few words.
@@ -680,16 +681,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
         const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2
         if (cx >= pr.left && cx <= pr.right && cy >= pr.top && cy <= pr.bottom) {
-          page = i + 1
-          rects.push({ x: (cr.left - pr.left) / pr.width, y: (cr.top - pr.top) / pr.height, w: cr.width / pr.width, h: cr.height / pr.height })
+          const arr = byPage.get(i + 1) ?? []
+          arr.push({ x: (cr.left - pr.left) / pr.width, y: (cr.top - pr.top) / pr.height, w: cr.width / pr.width, h: cr.height / pr.height })
+          byPage.set(i + 1, arr)
           break
         }
       }
     }
-    if (!rects.length) return null
+    if (!byPage.size) return null
+    const groups = [...byPage.entries()].sort((a, b) => a[0] - b[0]).map(([page, rects]) => ({ page, rects }))
     const last = clientRects[clientRects.length - 1]
     const box = scrollRef.current!.getBoundingClientRect()
-    return { text, page, rects, x: last.right - box.left, y: last.bottom - box.top }
+    return { text, page: groups[0].page, rects: groups[0].rects, groups, x: last.right - box.left, y: last.bottom - box.top }
   }
 
   function onMouseUp() {
@@ -820,16 +823,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
-    const hl: PdfHighlight = {
-      id: uuidv4(), page: info.page, rects: info.rects, color, kind,
+    // One highlight per page the selection spans (link/citekey attaches to the first page only).
+    const made: PdfHighlight[] = info.groups.map((grp, g) => ({
+      id: uuidv4(), page: grp.page, rects: grp.rects, color, kind,
       text: info.text, createdAt: new Date().toISOString(),
       ...(instanceIdRef.current && !noRefRef.current ? { instanceId: instanceIdRef.current } : {}),
-      ...(noRefRef.current ? { noRef: true } : {}), ...(link ? { citekey } : {}),
-    }
-    highlightsRef.current = [...highlightsRef.current, hl]
+      ...(noRefRef.current ? { noRef: true } : {}), ...(link && g === 0 ? { citekey } : {}),
+    }))
+    highlightsRef.current = [...highlightsRef.current, ...made]
     redrawOverlays()
     await saveHighlights(citekey, highlightsRef.current)
-    if (link) onLinkToCitation?.(info.text, info.page)
+    if (link) onLinkToCitation?.(info.text, info.groups[0].page)
   }
 
   async function commitPending(color: string, link: boolean) {

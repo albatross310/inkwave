@@ -319,8 +319,8 @@ function InlineDiffView({
         display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
         background: 'rgba(249,247,244,0.98)',
       }}>
-        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>Initial snapshot</span>}
-        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>No changes from previous snapshot</span>}
+        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>Initial snapshot</span>}
+        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>No changes from previous snapshot</span>}
         {prevSnap && hasChange && (
           <>
             <span style={{ color: '#15803d', fontWeight: 700, fontSize: '1.15rem' }}>+{added}</span>
@@ -909,7 +909,7 @@ function SplitDiffView({
           borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
         }}>
           {midline}
-          <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
+          <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
               <div style={{ zoom: diffZoom } as React.CSSProperties}>
                 <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
@@ -1196,7 +1196,7 @@ export function SnapshotView() {
       {/* Fixed header */}
       <div
         className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 36 }}
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 48 }}
       >
         <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
@@ -1216,19 +1216,14 @@ export function SnapshotView() {
           </span>
         )}
 
-        <span className="flex items-center gap-2 ml-auto flex-shrink-0">
-          {allSnapshots.length > 1 && (
-            <span className="text-stone-400 tabular-nums">
-              {`s${idx + 1}/${allSnapshots.length}`}
-            </span>
-          )}
-        </span>
+        {/* Centred, jazzed action buttons */}
+        <div className="flex-1 flex items-center justify-center gap-2.5 flex-wrap">
         <button
           type="button"
           onClick={toggleLineMode}
-          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.85rem',
+            fontSize: '0.92rem', fontWeight: 500,
             background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -1253,9 +1248,9 @@ export function SnapshotView() {
               await clearAllSnapshotSummaries(docId)
               setGenSeed((n) => n + 1)
             }}
-            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+            className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.92rem', fontWeight: 500,
               background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
               border: '1px solid rgba(92, 45, 138, 0.35)',
               color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
@@ -1282,9 +1277,9 @@ export function SnapshotView() {
               navigate(`/snapshot?${p.toString()}`)
               setAllSnapshots(remaining)
             }}
-            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif"
+            className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm"
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.92rem', fontWeight: 500,
               background: 'rgba(185,28,28,0.07)',
               border: '1px solid rgba(185,28,28,0.25)',
               color: '#b91c1c',
@@ -1298,9 +1293,9 @@ export function SnapshotView() {
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.85rem',
+            fontSize: '0.92rem', fontWeight: 500,
             background: 'rgba(92, 45, 138, 0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -1310,10 +1305,15 @@ export function SnapshotView() {
         >
           ← editor
         </button>
+        </div>
+        {/* Snapshot index, right */}
+        {allSnapshots.length > 1 && (
+          <span className="text-stone-400 tabular-nums flex-shrink-0">{`s${idx + 1}/${allSnapshots.length}`}</span>
+        )}
       </div>
 
       {/* Spacer for fixed header */}
-      <div style={{ height: 36, flexShrink: 0 }} />
+      <div style={{ height: 48, flexShrink: 0 }} />
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
