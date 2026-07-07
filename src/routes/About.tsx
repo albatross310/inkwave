@@ -19,7 +19,7 @@ function AppIcon({ size }: { size: number }) {
 
 export function About() {
   return (
-    <div className="min-h-screen font-serif py-8 sm:py-14 px-4" style={{ background: 'radial-gradient(120% 120% at top left, #12263f 0%, #1f6f7a 22%, #9fd9c8 55%)', color: '#3a3a3a' }}>
+    <div className="min-h-screen font-serif py-8 sm:py-14 px-4" style={{ background: 'radial-gradient(130% 110% at 0% 72%, #070b12 0%, #133a45 20%, #9fd9c8 52%)', color: '#3a3a3a' }}>
       <div className="mx-auto max-w-2xl px-6 sm:px-10 py-12 sm:py-16" style={{ background: '#f7f2e8', borderRadius: 10, boxShadow: '0 8px 32px rgba(80,50,10,0.18)' }}>
         <Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }}
           className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#f3eefb]"
@@ -102,10 +102,10 @@ export function About() {
         </div>
 
         <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(92,45,138,0.14)' }}>
-          <Link to="/" className="inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors" style={{ background: INK, color: '#fff' }}>Start writing</Link>
+          <Link to="/" className="inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: INK, background: '#fff' }}>Start writing</Link>
           <div className="flex gap-2.5">
-            <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: '#8a7a9e', background: '#fff' }}>Privacy</Link>
-            <Link to="/verify" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: '#fff' }}>Verify a record</Link>
+            <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline font-medium transition-colors hover:brightness-110" style={{ background: INK, color: '#fff' }}>Privacy</Link>
+            <Link to="/verify" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline font-medium transition-colors hover:brightness-110" style={{ background: INK, color: '#fff' }}>Verify a record</Link>
           </div>
         </footer>
       </div>
