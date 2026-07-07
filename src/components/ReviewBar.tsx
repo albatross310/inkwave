@@ -159,10 +159,10 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
       {nChanges > 0 && (
         <div className="flex items-center gap-1 pl-1" style={{ borderLeft: '1px solid #e5e5e8' }}>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current - 1)}
-            className="flex items-center justify-center w-7 h-7 rounded-full text-stone-500 hover:bg-stone-100" title="Previous change (Alt+←)">‹</button>
-          <span className="text-xs text-stone-500 tabular-nums">{Math.min(navIdxRef.current + 1, nChanges)}/{nChanges}</span>
+            className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-stone-100" style={{ color: INK, fontSize: '1.15rem', lineHeight: 1 }} title="Previous change (Alt+←)">‹</button>
+          <span className="tabular-nums font-serif" style={{ fontSize: '0.9rem', color: '#57534e', minWidth: '2.4em', textAlign: 'center' }}>{Math.min(navIdxRef.current + 1, nChanges)} <span style={{ color: '#b8b0a4' }}>/</span> {nChanges}</span>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current + 1)}
-            className="flex items-center justify-center w-7 h-7 rounded-full text-stone-500 hover:bg-stone-100" title="Next change (Alt+→)">›</button>
+            className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-stone-100" style={{ color: INK, fontSize: '1.15rem', lineHeight: 1 }} title="Next change (Alt+→)">›</button>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('accept')}
             className="flex items-center justify-center w-7 h-7 rounded-full text-green-700 hover:bg-green-50" title="Accept (Alt+A)">✓</button>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('reject')}
