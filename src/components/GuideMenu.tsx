@@ -57,7 +57,20 @@ export function GuideMenu() {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
+
+  // Default position: centred above the "i" button, PANEL_GAP-ish above the toolbar.
+  function defaultAnchor(): React.CSSProperties {
+    const br = btnRef.current?.getBoundingClientRect()
+    const center = br ? br.left + br.width / 2 : window.innerWidth / 2
+    const HALF = 240
+    return {
+      left: Math.round(Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, center))),
+      bottom: 70,
+      transform: 'translateX(-50%)',
+    }
+  }
 
   function onHeaderDown(e: React.MouseEvent) {
     const d = dialogRef.current?.getBoundingClientRect()
@@ -82,6 +95,7 @@ export function GuideMenu() {
   return (
     <div className="relative flex items-center font-serif">
       <button
+        ref={btnRef}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -103,8 +117,8 @@ export function GuideMenu() {
             className="iw-nightable fixed z-[100]"
             onMouseDown={e => e.stopPropagation()}
             style={{
-              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 62, transform: 'translateX(-50%)' }),
-              width: 470, maxWidth: '92vw', height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)',
+              ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),
+              width: 470, maxWidth: '92vw', height: 'calc(100vh - 92px)', maxHeight: 'calc(100vh - 92px)',
               resize: 'both', overflow: 'auto',
               padding: '14px 20px 20px',
               background: 'white',

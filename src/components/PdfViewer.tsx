@@ -76,7 +76,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     window.dispatchEvent(new Event('inkwave:pdf-hide-pref-changed'))
   }, [hideOnEditorClick])
   // Hovering a compact control shows its explanation down in the status line (keeps the bar squished).
-  const [hint, setHint] = useState<string | null>(null)
+  const setHint = (_?: string | null) => {} // hints now live in each control's tooltip; keep the calls no-op
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -888,8 +888,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         </select>
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {COLORS.map(c => (
-          <button key={c} type="button" title="Colour" onMouseEnter={() => setHint('highlight / note colour')} onClick={() => setColor(c)}
-            style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+          <button key={c} type="button" onClick={() => setColor(c)}
+            style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, transform: 'translateY(-3px)', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {/* Scroll-highlighted navigator */}
@@ -904,8 +904,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
             border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
         {/* "Don't add pages to inline" toggle — lights up purple when on. */}
-        <button type="button" disabled={!!noRef} title="Don't add pages to inline citations"
-          onMouseEnter={() => setHint("when on, highlights won't add page numbers to inline citations, wherever you opened from")}
+        <button type="button" disabled={!!noRef} title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
           onClick={() => setDontAddPages(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
             border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e', textDecoration: 'line-through' }}>#</button>
@@ -915,9 +914,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onClick={() => setHideOnEditorClick(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
             border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
-        <span style={{ marginLeft: 'auto', minWidth: 0, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : '')}
-        </span>
+        {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
+        <span style={{ marginLeft: 'auto' }} />
         {dockButton}
       </div>
 
