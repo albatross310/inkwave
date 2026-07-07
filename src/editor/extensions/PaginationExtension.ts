@@ -261,12 +261,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
             // resize → pageH; margin settings). Our own setMeta dispatches below don't change these,
             // so they can't loop.
-            // Editor font-zoom (--iw-editor-zoom) reflows the text taller/shorter WITHOUT changing doc
-            // size or pageH — include it, else zoom leaves stale page regions. Read the INLINE style on
-            // the surface (cheap) not getComputedStyle (a forced style recalc on every recompute = lag).
-            const surface = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
-            const zoomVar = Math.round((parseFloat(surface?.style.getPropertyValue('--iw-editor-zoom') || '') || 1) * 100)
-            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}:${zoomVar}`
+            // NB: editor font-zoom is deliberately NOT in this signature. Re-measuring DURING the zoom
+            // gesture moves the page breaks while the cursor anchor (set in Scroll.tsx) was computed
+            // against the old layout, so the text lurches. Instead Scroll.tsx fires a single
+            // 'inkwave:page-settings-changed' when the zoom SETTLES → one clean re-measure (settingsCb).
+            const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
             if (inputSig === lastInputSig) { schedulePaint(); return }
             lastInputSig = inputSig
 
