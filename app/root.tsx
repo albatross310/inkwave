@@ -18,9 +18,10 @@ const TAB_TITLES = [
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  // .ico first — Firefox is the most reliable with a real multi-res .ico (it was showing the generic
-  // page icon off the PNG-only links). v bumped to bust its aggressive favicon cache.
-  { rel: 'icon', href: '/favicon.ico?v=17', sizes: 'any' },
+  // SVG first — Firefox prefers a scalable icon and caches it under a fresh URL it hasn't seen, which
+  // finally displaces the stale generic-page icon its favicon store was pinning.
+  { rel: 'icon', type: 'image/svg+xml', href: '/inkwave-logo.svg?v=18' },
+  { rel: 'icon', href: '/favicon.ico?v=18', sizes: 'any' },
   { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=17' },
   { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=17' },
   { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=17' },
