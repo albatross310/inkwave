@@ -1678,7 +1678,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 {(() => {
                   const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
                   return (
-                    <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl border border-stone-100 flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
+                    <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
+                      style={{ border: '1px solid rgba(92,45,138,0.75)' }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">
@@ -1688,8 +1689,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           title="More options coming">
                           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
                         </button>
-                        {oppsOpen && (
-                          <span className="pr-3 text-xs italic text-stone-400 whitespace-nowrap">New opps coming</span>
+                        {oppsOpen && createPortal(
+                          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 font-serif" onMouseDown={() => setOppsOpen(false)}>
+                            <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
+                            <div className="relative iw-nightable bg-white rounded-2xl shadow-xl px-12 py-10 text-center" style={{ border: `1px solid ${INK}bf` }} onMouseDown={e => e.stopPropagation()}>
+                              <p className="text-2xl" style={{ color: INK }}>New features coming soon</p>
+                              <p className="mt-6 text-stone-400 italic">~ The Developer</p>
+                            </div>
+                          </div>,
+                          document.body,
                         )}
                       </div>
                       {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}

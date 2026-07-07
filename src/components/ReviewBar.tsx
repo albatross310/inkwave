@@ -103,7 +103,6 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
       style={{ bottom, border: `1px solid ${INK}44` }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <span className="text-[11px] uppercase tracking-wide text-stone-400 pl-1">Review</span>
 
       <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addComment}
         disabled={!hasSelection}
