@@ -178,9 +178,10 @@ function buildDiffNodes(
     const page = Math.floor(words / 250) + 1
     const pageStr = page > 1 ? ` · p.${page}` : ''
     nodes.push(<span key={`lbl${k++}`} style={{
-      display: 'block', fontSize: '0.7rem',
-      color: 'rgba(92,45,138,0.5)', userSelect: 'none',
-      padding: '5px 0 1px', fontStyle: 'normal', letterSpacing: '0.03em',
+      display: 'block', fontSize: '1.05rem', fontWeight: 600,
+      color: INK, userSelect: 'none',
+      fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
+      padding: '8px 0 2px', fontStyle: 'normal', letterSpacing: '0.02em',
     }}>¶{p + 1}{pageStr}</span>)
   }
 
@@ -318,7 +319,7 @@ function InlineDiffView({
         className="iw-snap-scroll"
         style={{
           flex: 1, overflowY: 'scroll', overflowX: 'auto', padding: '1rem 1.5rem',
-          lineHeight: 1.85, fontSize: '1rem', whiteSpace: 'pre-wrap',
+          lineHeight: 1.7, fontSize: '0.88rem', whiteSpace: 'pre-wrap',
           fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
         }}
       >
