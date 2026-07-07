@@ -2,6 +2,7 @@
 // Reached from the options menu (and linked from /verify). Prerendered to static HTML.
 
 import { Link } from 'react-router'
+import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
 const INK = '#5c2d8a'
 const LIGHT = '#9b5ccc'
@@ -19,8 +20,8 @@ function AppIcon({ size }: { size: number }) {
 
 export function About() {
   return (
-    <div className="min-h-screen font-serif py-8 sm:py-14 px-4" style={{ background: 'radial-gradient(130% 110% at 0% 72%, #070b12 0%, #133a45 20%, #9fd9c8 52%)', color: '#3a3a3a' }}>
-      <div className="mx-auto max-w-2xl px-6 sm:px-10 py-12 sm:py-16" style={{ background: '#f7f2e8', borderRadius: 10, boxShadow: '0 8px 32px rgba(80,50,10,0.18)' }}>
+    <div className="min-h-screen font-serif py-8 sm:py-14 px-4" style={{ background: PAGE_GRADIENT, color: '#3a3a3a' }}>
+      <div className="mx-auto max-w-2xl px-6 sm:px-10 py-12 sm:py-16" style={{ background: PAGE_PARCHMENT, borderRadius: PAGE_CARD_RADIUS, boxShadow: PAGE_CARD_SHADOW }}>
         <Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }}
           className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#f3eefb]"
           style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#6d5a86', background: '#fff' }}>← Back to writing</Link>
@@ -97,6 +98,17 @@ export function About() {
               Inkwave Cubed documents and to PDFs. The result is a space for academic and personal
               essay networks: writing that cites, connects, and builds on other writing, with a
               verifiable spine underneath.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>An open standard</h2>
+            <p>
+              The guarantees here aren't meant to be Inkwave's alone. They're being written up as an
+              open specification any writing tool can adopt and any reader can check — the{' '}
+              <a href="https://writingstudiostandard.org" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: LIGHT }}>
+                Writing Studio Standard
+              </a>.
             </p>
           </section>
         </div>

@@ -6,9 +6,9 @@ import { extractSlotMemory, type SlotMemory } from '../verify/slotMemory'
 import { ActivityGraph } from '../verify/ActivityGraph'
 import { signingPublicKeyHex } from '../provenance/receipts'
 import { parseTraceFile } from '../provenance/bundle'
+import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
 const INK = '#5c2d8a'
-const LIGHT = '#9b5ccc'
 
 // Open verification page (M5). Drop in an Inkwave export bundle; everything runs in YOUR browser
 // against the published signing key — no Inkwave login, nothing sent anywhere.
@@ -60,18 +60,18 @@ export function Verify() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a', background: '#e7eefb' }}>
-      <div className="w-full max-w-3xl">
+    <div className="min-h-screen flex flex-col items-center px-4 py-8 sm:py-14 font-serif" style={{ color: '#3a3a3a', background: PAGE_GRADIENT }}>
+      <div className="w-full max-w-3xl px-6 sm:px-10 py-10 sm:py-14 text-[1.05rem]" style={{ background: PAGE_PARCHMENT, borderRadius: PAGE_CARD_RADIUS, boxShadow: PAGE_CARD_SHADOW }}>
         <div className="flex items-start gap-4 mb-5">
           <img src="/inkwave-logo-v7.png" alt="Inkwave" width={72} height={72} style={{ display: 'block' }} />
           <div>
-            <h1 className="text-2xl mb-1" style={{ color: INK }}>Verify an Inkwave record</h1>
-            <p className="text-sm text-stone-500">
+            <h1 className="text-3xl mb-1.5" style={{ color: INK }}>Verify an Inkwave record</h1>
+            <p className="text-base text-stone-500">
               Runs entirely in your browser against Inkwave's published signing key — and, for anchored
               snapshots, against the Bitcoin blockchain via independent explorers. No sign-in, nothing
               uploaded.
-              {' '}<Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }} className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: "#fff" }}>← editor</Link>
-              {' '}<Link to="/about" className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: "#fff" }}>about</Link>
+              {' '}<Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }} className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline font-medium transition-colors hover:brightness-110" style={{ background: INK, color: '#fff' }}>← editor</Link>
+              {' '}<Link to="/about" className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline font-medium transition-colors hover:brightness-110" style={{ background: INK, color: '#fff' }}>about</Link>
             </p>
           </div>
         </div>
