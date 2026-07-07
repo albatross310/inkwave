@@ -38,7 +38,7 @@ interface Props {
 const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
   crossref: { label: 'verified', color: 'var(--iw-verified, #15803d)' },
   ai:       { label: 'AI',       color: 'var(--iw-badge-ai, #b45309)' },
-  manual:   { label: 'manual',   color: 'var(--iw-badge-manual, #6b7280)' },
+  manual:   { label: 'M',        color: 'var(--iw-badge-manual, #6b7280)' },
 }
 
 // Re-export for consumers that previously imported from here.
