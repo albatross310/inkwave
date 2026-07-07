@@ -46,16 +46,44 @@ export function ensureNavStyles(): void {
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
     .iw-esp { font-style: italic; color: #3a1e5e; font-size: 0.95em; }
+    .iw-cite-biblink {
+      margin-left: 0.1em; font-size: 0.62em; vertical-align: super; line-height: 0;
+      color: var(--iw-cite-color, ${INK}); opacity: 0.55; cursor: pointer; border: none;
+      background: transparent; padding: 0 0.1em; user-select: none; font-family: inherit;
+    }
+    .iw-cite-biblink:hover { opacity: 1; }
   `
   document.head.appendChild(el)
 }
 
 // ── Navigate + flash ────────────────────────────────────────────────────────────
 
+// The reader's last position BEFORE a citation jump, so clicking a citation can bring them straight
+// back to where they were reading. Stored as the editor scroll container's scrollTop (or window scrollY
+// on phone). Remembered on every navigate; restored by goToLastPosition().
+let returnScroll: { el: HTMLElement | Window; top: number } | null = null
+function editorScroller(): HTMLElement | Window {
+  return (document.querySelector('.inkwave-editor-surface.iw-fill') as HTMLElement | null)
+    ?? (document.querySelector('.inkwave-editor-surface') as HTMLElement | null)
+    ?? window
+}
+export function rememberReturn(): void {
+  const s = editorScroller()
+  returnScroll = { el: s, top: s === window ? window.scrollY : (s as HTMLElement).scrollTop }
+}
+/** Scroll back to where the reader was before their last citation jump. */
+export function goToLastPosition(): void {
+  if (!returnScroll) return
+  const { el, top } = returnScroll
+  if (el === window) window.scrollTo({ top, behavior: 'smooth' })
+  else (el as HTMLElement).scrollTo({ top, behavior: 'smooth' })
+}
+
 let flashTimer: number | undefined
 export function navigateToAnchor(id: string): void {
   const el = document.getElementById(id)
   if (!el) return
+  rememberReturn() // so a citation click can return the reader to here
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   // Clear any prior flash, force reflow, re-add so the animation restarts even on repeat clicks.
   document.querySelectorAll('.iw-cite-flash').forEach(n => n.classList.remove('iw-cite-flash'))
