@@ -111,6 +111,15 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
             />
 
+            {/* Debug: highlight all (dev only) */}
+            {import.meta.env.DEV && (
+              <Row
+                label="Debug: highlight all"
+                checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
+                onChange={() => { try { const on = localStorage.getItem('inkwave:debugHighlightAll') === '1'; localStorage.setItem('inkwave:debugHighlightAll', on ? '0' : '1') } catch { /* private */ } window.location.reload() }}
+              />
+            )}
+
             {/* SCAS suggestions — turn the DISPLAY of the vocabulary suggestions off/on. Live toggle
                 (no reload): only the highlight decorations are suppressed; the SCAS engine keeps running. */}
             <Row

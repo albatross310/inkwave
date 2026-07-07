@@ -165,12 +165,12 @@ export function OptionsMenu({
   const items: Array<{ label: string; run: () => void }> = [
     { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
     { label: 'Open…', run: () => setModal('upload') },
-    { label: 'Open Recent', run: () => setModal('recent') },
+    { label: 'Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
-    { label: 'Save a copy…', run: () => setModal('savecopy') },
+    { label: 'Save as…', run: () => setModal('savecopy') },
     { label: 'Export…', run: () => setModal('export') },
     { label: 'Print', run: () => onPrint?.() },
-    { label: 'Verify a record', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
+    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
     { label: 'Privacy', run: () => navigate('/privacy') },
   ]
@@ -182,13 +182,6 @@ export function OptionsMenu({
         const { outcome } = await (installPrompt as any).userChoice
         if (outcome === 'accepted') { /* parent clears prompt via appinstalled event */ }
       },
-    })
-  }
-  if (import.meta.env.DEV) {
-    const on = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'
-    items.push({
-      label: `Debug: highlight all ${on ? '✓' : '✗'}`,
-      run: () => { try { localStorage.setItem('inkwave:debugHighlightAll', on ? '0' : '1') } catch { /* private */ } window.location.reload() },
     })
   }
 

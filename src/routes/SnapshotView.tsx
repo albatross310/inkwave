@@ -575,10 +575,10 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
 }
 
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
-  lineMode: 'center' | 'longest'; summary?: string | null
+  lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
@@ -909,6 +909,14 @@ function SplitDiffView({
           borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
         }}>
           {midline}
+          {counter && (
+            <div style={{
+              position: 'absolute', top: 12, left: 14, zIndex: 6, pointerEvents: 'none',
+              background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700,
+              borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit',
+              boxShadow: '0 2px 8px rgba(80,50,10,0.15)',
+            }}>{counter}</div>
+          )}
           <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
               <div style={{ zoom: diffZoom } as React.CSSProperties}>
@@ -1306,10 +1314,6 @@ export function SnapshotView() {
           ← editor
         </button>
         </div>
-        {/* Snapshot index, right */}
-        {allSnapshots.length > 1 && (
-          <span className="text-stone-400 tabular-nums flex-shrink-0">{`s${idx + 1}/${allSnapshots.length}`}</span>
-        )}
       </div>
 
       {/* Spacer for fixed header */}
@@ -1331,6 +1335,7 @@ export function SnapshotView() {
             isNarrow={!isWide}
             lineMode={lineMode}
             summary={currentDiff}
+            counter={allSnapshots.length > 1 ? `s${idx + 1}/${allSnapshots.length}` : undefined}
           />
         )}
       </div>
