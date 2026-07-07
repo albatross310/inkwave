@@ -373,9 +373,9 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] uppercase tracking-wide text-stone-500">{f.label}</span>
                   {f.required
-                    ? <span className="text-[9px] px-1 rounded" style={{ color: missing ? '#b91c1c' : '#15803d', background: missing ? '#fef2f2' : '#f0fdf4' }}>
-                        {missing ? 'required — missing' : 'required ✓'}
-                      </span>
+                    ? <span title={missing ? 'required — still missing' : 'required — provided'}
+                        className="inline-flex items-center justify-center rounded-full flex-shrink-0"
+                        style={{ width: 15, height: 15, fontSize: '11px', lineHeight: 1, color: missing ? '#dc2626' : '#15803d', border: `1.5px solid ${missing ? '#dc2626' : '#15803d'}` }}>∗</span>
                     : <span className="text-[10px] text-stone-400">optional</span>}
                   {f.styles && <span className="text-[10px] text-stone-400">{f.styles}</span>}
                 </div>
@@ -908,7 +908,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             const src = SOURCE_BADGE[itemSource(item)]
             const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
-              <div key={item.id} className="py-1.5 border-b border-stone-100 last:border-0">
+              <div key={item.id} className="py-1 border-b border-stone-100 last:border-0">
                 {/* Top line: key + badges on the left, action buttons on the right. */}
                 <div className="flex items-center gap-2">
                   {refMode === 'manual' && (
@@ -984,12 +984,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
                 </div>
-                {/* Title + author flow the FULL width beneath the buttons (title wraps to 2 lines so more
-                    of it is readable). Author only renders when present — no empty line. */}
-                <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
-                  className="block w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors -mt-0.5">
-                  {!!String(item.title ?? '') && <div className="text-[16px] text-stone-500 leading-snug line-clamp-2">{String(item.title ?? '')}</div>}
-                </button>
+                {/* Title on ONE line, truncated with an ellipsis; full title on hover. */}
+                {!!String(item.title ?? '') && (
+                  <button type="button" onClick={() => setEditItem(item)} title={String(item.title ?? '')}
+                    className="block max-w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors">
+                    <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
+                  </button>
+                )}
                 {(() => {
                   const iw = (item as { _iw?: IwCitationMeta })._iw
                   const changelog = iw?.changelog ?? []
