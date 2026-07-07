@@ -488,6 +488,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   snapKey: string
 }) {
   const [pages, setPages] = useState(1)
+  const [maxPages, setMaxPages] = useState(1) // largest page count seen → keep the grid structure stable
   const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean }>>([])
   const pageHRef = useRef(1000)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -501,6 +502,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     pageHRef.current = pageH
     const n = Math.max(1, Math.round(el.scrollHeight / pageH))
     setPages(n)
+    setMaxPages(m => Math.max(m, n))
     const er = el.getBoundingClientRect()
     const m: Array<{ page: number; frac: number; add: boolean }> = []
     el.querySelectorAll('[data-opidx]').forEach(o => {
@@ -522,8 +524,11 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     return () => ro.disconnect()
   }, [measure, leftRef])
 
-  const height = stackHeight(pages)
-  const cols = Math.ceil(pages / height)
+  // Grid keeps the LONGEST snapshot's structure; a shorter snapshot leaves the extra slots EMPTY rather
+  // than showing pages that aren't there.
+  const total = Math.max(pages, maxPages)
+  const height = stackHeight(total)
+  const cols = Math.ceil(total / height)
   const GAP = 4
 
   // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
@@ -560,15 +565,20 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
         gridTemplateRows: `repeat(${height}, 1fr)`, gap: GAP, touchAction: 'none',
       }}
     >
-      {Array.from({ length: pages }, (_, p) => (
-        <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
-          {marks.filter(m => m.page === p).map((m, i) => (
-            <div key={i} aria-hidden="true" style={{
-              position: 'absolute', left: 1, right: 1, top: `${m.frac * 100}%`, height: 2,
-              background: m.add ? '#16a34a' : '#dc2626', borderRadius: 1,
-            }} />
-          ))}
-        </div>
+      {Array.from({ length: total }, (_, p) => (
+        p < pages ? (
+          <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
+            {marks.filter(m => m.page === p).map((m, i) => (
+              <div key={i} aria-hidden="true" style={{
+                position: 'absolute', left: 1, right: 1, top: `${m.frac * 100}%`, height: 2,
+                background: m.add ? '#16a34a' : '#dc2626', borderRadius: 1,
+              }} />
+            ))}
+          </div>
+        ) : (
+          // A page this shorter snapshot doesn't have — an empty slot, keeping the grid stable.
+          <div key={p} style={{ borderRadius: 2, minHeight: 6, border: '1px dashed rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)' }} />
+        )
       ))}
     </div>
   )
