@@ -536,19 +536,29 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     await removeFromLibrary(item.id)
   }
 
-  // Rename a citation's key. Blocked while it's cited in the document (the in-text nodes reference the
-  // old key), so remove those first — keeps every citation resolvable.
+  // Rename a citation's key. If it's cited in the document, every in-text @old instance is rewritten to
+  // @new in the same pass (the citation nodes reference the key by citekeys), so nothing is left dangling.
   async function renameCitation(item: CSLItem) {
-    if (usedKeys.has(item.id)) {
-      setNotice({ text: `"${item.id}" is cited — remove the in-text citations before renaming.`, kind: 'err' })
-      return
-    }
     const next = window.prompt('Rename citation to:', item.id)?.trim()
     if (!next || next === item.id) return
     if (bibProvider.get(next)) { setNotice({ text: `"${next}" already exists.`, kind: 'err' }); return }
+
+    // Rewrite in-text citation nodes that reference the old key.
+    let changed = 0
+    const tr = editor.state.tr
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name !== 'citation') return
+      const keys = (node.attrs.citekeys as string[] | undefined) ?? []
+      if (keys.includes(item.id)) {
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, citekeys: keys.map(k => (k === item.id ? next : k)) })
+        changed++
+      }
+    })
+    if (changed) editor.view.dispatch(tr)
+
     await removeFromLibrary(item.id)
     await addToLibrary({ ...item, id: next })
-    setNotice({ text: `Renamed to "${next}".`, kind: 'ok' })
+    setNotice({ text: `Renamed to "${next}"${changed ? ` — ${changed} in-text ${changed === 1 ? 'citation' : 'citations'} updated` : ''}.`, kind: 'ok' })
   }
 
   // ── Embedded PDFs ────────────────────────────────────────────────────────────
