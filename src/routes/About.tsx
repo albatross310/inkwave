@@ -107,7 +107,8 @@ export function About() {
               link back to their verified counterparts here in Zero — and hyperlink freely to other
               Inkwave Cubed documents and to PDFs. The result is a space for academic and personal
               essay networks: writing that cites, connects, and builds on other writing, with a
-              verifiable spine underneath.
+              verifiable spine underneath. <span className="text-stone-500">Inkwave Cubed is still in
+              development.</span>
             </p>
           </section>
 
