@@ -19,6 +19,12 @@ export function openPdf(detail: OpenPdfDetail): void {
   window.dispatchEvent(new CustomEvent<OpenPdfDetail>(OPEN_PDF_EVENT, { detail }))
 }
 
+// Last viewed page per source PDF, so clicking a citation's author-year reopens where the reader left
+// off. Module-level (survives the viewer unmounting); the viewer reports its top visible page here.
+const lastPageByKey = new Map<string, number>()
+export function setLastPdfPage(citekey: string, page: number): void { if (page > 0) lastPageByKey.set(citekey, page) }
+export function getLastPdfPage(citekey: string): number | null { return lastPageByKey.get(citekey) ?? null }
+
 // Extract the first page number from a citation locator ("45", "p. 45", "pp. 45–47", "ch. 3, 45").
 // Returns null when there's no numeric page (e.g. "ch. 3" alone) — the viewer then opens at page 1.
 export function pageFromLocator(locator?: string | null): number | null {

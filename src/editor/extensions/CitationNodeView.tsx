@@ -15,9 +15,9 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
-  citeAnchorId, navigateToBibEntry, goToLastPosition, occurrencesAt, ensureNavStyles, mergePages,
+  citeAnchorId, navigateToBibEntry, occurrencesAt, ensureNavStyles, mergePages,
 } from '../../citations/citationNav'
-import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
+import { openPdf, pageFromLocator, getLastPdfPage } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
 import { pageOffsetOf } from '../../citations/pageOffset'
 import { hasPdf } from '../../citations/pdfSource'
@@ -103,9 +103,11 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
       if (item && !firstPdf && hasPdf(item)) firstPdf = key
-      // Displayed pages = manual locator ∪ printed pages that carry a highlight (PDF sheet + offset).
+      // Displayed pages = manual locator ∪ printed pages carrying a highlight made from THIS citation
+      // occurrence (per-instance) — highlights from other inlines / the bib don't add pages here.
       const off = pageOffsetOf(item)
-      const pages = item ? mergePages(a.locator, highlightPages(item).map(p => p + off)) : ''
+      const iid = (a as { instanceId?: string | null }).instanceId ?? null
+      const pages = item ? mergePages(a.locator, highlightPages(item, iid).map(p => p + off)) : ''
       const pageLabel = pages ? (/[–-]/.test(pages) || /,/.test(pages) ? `pp. ${pages}` : `p. ${pages}`) : ''
       return item
         // text is author-year only (pages passed empty) so the page can be its OWN clickable link.
@@ -115,6 +117,21 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     setSegs(next)
     setPdfKey(firstPdf)
   }, [editor, getPos]) // reads attrs from attrsRef
+
+  // The sentence in the editor immediately before this citation — shown in the PDF viewer so the reader
+  // knows what claim they're sourcing. Text from the block start to the citation, last sentence only.
+  const precedingSentence = useCallback((): string | null => {
+    try {
+      const pos = typeof getPos === 'function' ? getPos() : null
+      if (pos == null) return null
+      const $pos = editor.state.doc.resolve(pos)
+      const before = editor.state.doc.textBetween($pos.start(), pos, ' ', ' ').trim()
+      if (!before) return null
+      const m = before.match(/[^.!?]*$/)
+      const sent = (m && m[0].trim() ? m[0] : before).trim()
+      return sent.length > 160 ? `…${sent.slice(-160)}` : sent
+    } catch { return null }
+  }, [editor, getPos])
 
   // Keep a ref so the subscription closure always calls the current version.
   const buildLabelRef = useRef(buildLabel)
@@ -198,12 +215,13 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                 <span key={s.key + i}>
                   {s.found ? (
                     <>
-                      {/* Author-year — click RETURNS the reader to where they last were; click & hold sets pages. */}
+                      {/* Author-year — click opens the SOURCE PDF where the reader last left off (or the
+                          reference entry if there's no PDF); click & hold sets pages. */}
                       <span
                         id={citeAnchorId(s.key, s.occ)}
                         className="iw-cite-link"
                         style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
-                        title="Click: back to where you were · Click & hold: set page(s)"
+                        title={s.hasPdf ? 'Click: open the source where you left off · Click & hold: set page(s)' : 'Click: go to the reference · Click & hold: set page(s)'}
                         onPointerDown={e => {
                           e.stopPropagation()
                           heldRef.current = false
@@ -218,12 +236,17 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         onClick={e => {
                           e.stopPropagation()
                           if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
-                          goToLastPosition()
+                          const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
+                          if (s.hasPdf) {
+                            openPdf({ citekey: s.key, page: getLastPdfPage(s.key), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
+                          } else {
+                            navigateToBibEntry(s.key, s.occ)
+                          }
                         }}
                       >
                         {s.text}
                       </span>
-                      {/* Page(s) — clickable link that opens the SOURCE (PDF) at that page. */}
+                      {/* Page(s) — clickable link that opens the SOURCE (PDF) at that page/passage. */}
                       {s.pages && (
                         s.hasPdf ? (
                           <>
@@ -233,7 +256,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                               onPointerDown={e => e.stopPropagation()}
                               onClick={e => {
                                 e.stopPropagation()
-                                openPdf({ citekey: s.key, page: s.pageNum ?? pageFromLocator(attrs.locator), quote: attrs.quote, label: s.text, onLink: (quote) => updateAttributes({ quote }) })
+                                const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
+                                openPdf({ citekey: s.key, page: s.pageNum ?? pageFromLocator(attrs.locator), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
                               }}
                             >{s.pages}</span>
                           </>

@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
 import { pageOffsetOf } from '../citations/pageOffset'
+import { setLastPdfPage } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
 import type { IwCitationMeta } from '../types/document'
 
@@ -300,6 +301,27 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     observerRef.current = io
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Remember the top visible page per source, so a citation's author-year can reopen where the reader
+  // left off (getLastPdfPage). rAF-throttled; reads geometry only.
+  useEffect(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    let raf = 0
+    const report = () => {
+      raf = 0
+      const top = sc.getBoundingClientRect().top
+      let best = 1, bestDist = Infinity
+      for (let i = 0; i < pagesRef.current.length; i++) {
+        const d = Math.abs(pagesRef.current[i].wrapper.getBoundingClientRect().top - top)
+        if (d < bestDist) { bestDist = d; best = i + 1 }
+      }
+      setLastPdfPage(citekey, best)
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(report) }
+    sc.addEventListener('scroll', onScroll, { passive: true })
+    return () => { sc.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
+  }, [citekey])
 
   // Freeze the CURRENT on-screen render into a fixed overlay of cloned canvases — a pixel-perfect
   // still of what the user sees right now. Used to cover the (brief) teardown+repaint on a zoom-settle
