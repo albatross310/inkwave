@@ -780,22 +780,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={fullscreen
-          ? { position: 'fixed', top: 14, bottom: 76, left: '50%', transform: 'translateX(-50%)', width: 'min(760px, 94vw)', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }
+          ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: 'min(1080px, 96vw)', overflow: 'hidden', borderRadius: 0, borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }
           : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Drag grip (+ fullscreen toggle at the right). */}
+        {/* Slim drag grip (fullscreen toggle lives beside the × in the Add row). */}
         <div
-          className="relative flex items-center justify-center pt-2 pb-1"
+          className="flex items-center justify-center pt-2 pb-1"
           style={{ cursor: fullscreen ? 'default' : 'grab' }}
           onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
         >
           {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
-          <button type="button" title={fullscreen ? 'Exit full screen' : 'Full screen'}
-            onMouseDown={e => e.stopPropagation()} onClick={() => setFullscreen(f => !f)}
-            className="absolute right-2 top-1 w-6 h-6 flex items-center justify-center rounded text-stone-400 hover:text-[#5c2d8a] text-sm">
-            {fullscreen ? '🗗' : '⛶'}
-          </button>
         </div>
 
         {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
@@ -841,6 +836,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               {busy ? '…' : 'Add'}
             </button>
             {/* Close — big ×, next to Add (the old titled header bar is gone). */}
+            <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
+              className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-400 hover:text-[#5c2d8a] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
             <button type="button" onClick={onClose} title="Close (Esc)"
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-400 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
           </div>
@@ -906,9 +903,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-2">
+        <div className={`iw-snap-scroll flex-1 overflow-y-auto px-4 py-2 ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
           {!helpDismissed && (
-            <div className="flex items-start gap-2 mb-2">
+            <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-400">
                 type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert · <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
               </div>
@@ -917,7 +914,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             </div>
           )}
           {entries.length === 0 ? (
-            <div className="py-6 text-center text-xs text-stone-400">
+            <div className={`py-6 text-center text-xs text-stone-400 ${fullscreen ? 'col-span-2' : ''}`}>
               {query ? 'No matches.' : 'Paste a DOI or URL above to add your first source.'}
             </div>
           ) : entries.map(item => {
