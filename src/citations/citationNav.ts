@@ -31,10 +31,14 @@ export function ensureNavStyles(): void {
   el.textContent = `
     .iw-cite-link { cursor: pointer; border-radius: 3px; text-decoration: none; transition: background-color 120ms ease; }
     .iw-cite-link:hover { background-color: rgba(92,45,138,0.14); }
-    .iw-cite-flash { animation: iw-cite-flash-kf 1.6s ease-out forwards; border-radius: 3px; }
+    /* Destination flash: a DARK purple wash that decays roughly exponentially over ~1.6s to orient the
+       reader after a jump. The keyframe stops approximate e^-t (big early drop, long tail). */
+    .iw-cite-flash { animation: iw-cite-flash-kf 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; border-radius: 3px; }
     @keyframes iw-cite-flash-kf {
-      0%, 55% { outline: 2px solid ${INK}; outline-offset: 2px; background-color: rgba(92,45,138,0.12); }
-      100%    { outline: 2px solid transparent; outline-offset: 2px; background-color: transparent; }
+      0%   { background-color: rgba(92,45,138,0.42); color: #fff; box-shadow: 0 0 0 3px rgba(92,45,138,0.42); }
+      25%  { background-color: rgba(92,45,138,0.24); box-shadow: 0 0 0 3px rgba(92,45,138,0.24); }
+      55%  { background-color: rgba(92,45,138,0.10); box-shadow: 0 0 0 3px rgba(92,45,138,0.10); }
+      100% { background-color: transparent; color: inherit; box-shadow: 0 0 0 3px transparent; }
     }
     .iw-backref-group { margin-left: 0.5em; font-size: 1em; color: ${INK}99; user-select: none; white-space: nowrap; }
     .iw-backref-group .iw-backref-arrow { font-size: 1.15em; }
