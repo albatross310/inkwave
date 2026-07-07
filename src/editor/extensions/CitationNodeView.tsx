@@ -257,11 +257,13 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         ) : <>{', '}{s.pages}</>
                       )}
                       {/* Side button → the bibliography entry (moved off the whole inline). */}
+                      {', '}
                       <button type="button" contentEditable={false} className="iw-cite-biblink"
+                        data-iw-biblink={citeAnchorId(s.key, s.occ)}
                         title="Go to the reference-list entry"
                         onPointerDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); navigateToBibEntry(s.key, s.occ) }}
-                      >⤵</button>
+                      ><span className="iw-biblink-arrow">⤵</span></button>
                     </>
                   ) : (
                     <span id={citeAnchorId(s.key, s.occ)} style={{ color: '#b91c1c' }} title={`Unresolved: ${s.key}`}>
