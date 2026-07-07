@@ -2,7 +2,7 @@
 // on demand through the CORS proxy at /api/pdf?proxy=). Callers get an ArrayBuffer either way, so the
 // viewer + page-offset detection treat both the same.
 
-import { loadPdf } from './pdfStore'
+import { loadPdf, loadCachedUrlPdf, cacheUrlPdf } from './pdfStore'
 import { bibProvider } from './bibProvider'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 
@@ -27,10 +27,15 @@ export async function getPdfData(citekey: string): Promise<ArrayBuffer | null> {
   if (blob) return blob.arrayBuffer()
   const url = pdfUrlOf(citekey)
   if (!url) return null
+  // Instant second load: serve from the device-local URL cache if we've fetched this URL before.
+  const cached = await loadCachedUrlPdf(url)
+  if (cached) return cached.arrayBuffer()
   try {
     const res = await fetch(`/api/pdf?proxy=${encodeURIComponent(url)}`)
     if (!res.ok) return null
-    return await res.arrayBuffer()
+    const buf = await res.arrayBuffer()
+    void cacheUrlPdf(url, new Blob([buf], { type: 'application/pdf' })) // fire-and-forget cache for next time
+    return buf
   } catch {
     return null
   }
