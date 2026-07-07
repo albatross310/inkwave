@@ -8,11 +8,9 @@
 // opens an indented notes panel (persisted to the source's _iw.note). Navigation + note-toggle for
 // the injected CSL html are event-delegated (React onClick can't bind inside dangerouslySetInnerHTML).
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
-import { gappedPagesEnabled } from '../pageView'
-import { MARGIN_TOP, MARGIN_BOTTOM } from './PaginationExtension'
 import { bibProvider } from '../../citations/bibProvider'
 import { addToLibrary } from '../../citations/library'
 import { referenceListKeys } from '../../citations/resolve'
@@ -227,52 +225,6 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     el.querySelectorAll<HTMLElement>('.csl-entry').forEach(e => { e.style.margin = '0'; e.style.display = 'inline' })
   }
 
-  // ── Self-paginate the bibliography (gapped mode) ──────────────────────────────
-  // The reference list is a single atom node, so the paginator can't insert a page break INSIDE it — a
-  // long bibliography would spill across the sheet gaps. Fix (Peter's "break it where the page break is"):
-  // read the already-painted sheet grid (.inkwave-sheet panels) and nudge any entry that would overflow a
-  // sheet's text area down to the top of the next sheet's text area, via margin-top. Pure DOM styling in
-  // gapped mode only — no effect on the doc content, pmToText, or provenance. Idempotent + convergence-
-  // guarded (re-applying the same margins doesn't resize, so the ResizeObserver settles).
-  const bodyRef = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const body = bodyRef.current
-    const clear = () => body?.querySelectorAll<HTMLElement>('.iw-bib-entry').forEach(e => { e.style.marginTop = '' })
-    if (!body || !gappedPagesEnabled()) { clear(); return }
-    const paper = body.closest('.scroll-paper') as HTMLElement | null
-    if (!paper) return
-    let raf = 0
-    const relayout = () => {
-      raf = 0
-      const sheets = Array.from(paper.querySelectorAll<HTMLElement>('.inkwave-sheet'))
-      const entries = Array.from(body.querySelectorAll<HTMLElement>('.iw-bib-entry'))
-      if (!sheets.length || !entries.length) return
-      entries.forEach(e => { e.style.marginTop = '' })       // reset, then measure natural flow
-      void body.offsetHeight
-      const sr = sheets.map(s => s.getBoundingClientRect())
-      for (const entry of entries) {
-        const r = entry.getBoundingClientRect()
-        // The sheet this entry currently starts on (top within [sheetTop, sheetBottom)).
-        const si = sr.findIndex(s => r.top >= s.top - 1 && r.top < s.bottom - 1)
-        if (si < 0 || si + 1 >= sr.length) continue
-        const contentBottom = sr[si].bottom - MARGIN_BOTTOM  // last usable Y on this sheet
-        if (r.bottom > contentBottom) {
-          const push = Math.round((sr[si + 1].top + MARGIN_TOP) - r.top)
-          if (push > 0) { entry.style.marginTop = `${push}px`; void body.offsetHeight } // reflow so the next entry measures post-push
-        }
-      }
-      // No manual reschedule: if these margins grew the page, the paginator repaints (adds a sheet) and
-      // the ResizeObserver below fires one more pass. When the margins stop changing the layout, the RO
-      // goes quiet — a natural fixed point (no rAF loop).
-    }
-    const schedule = () => { if (!raf) raf = requestAnimationFrame(relayout) }
-    schedule()
-    const ro = new ResizeObserver(() => schedule())
-    ro.observe(paper)
-    window.addEventListener('inkwave:page-settings-changed', schedule)
-    return () => { if (raf) cancelAnimationFrame(raf); ro.disconnect(); window.removeEventListener('inkwave:page-settings-changed', schedule); clear() }
-  }, [entries, plain, usingCsl, openNotes])
-
   return (
     <NodeViewWrapper
       as="section"
@@ -294,7 +246,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           No references yet — cite a source and it will appear here.
         </p>
       ) : usingCsl ? (
-        <div ref={bodyRef} className="csl-bib-body" style={{ fontSize: '0.92em', lineHeight: 1.5 }} onClick={onBodyClick}>
+        <div className="csl-bib-body" style={{ fontSize: '0.92em', lineHeight: 1.5 }} onClick={onBodyClick}>
           {entries.map(e => (
             <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.75em' }}>
               <div ref={styleEntry} dangerouslySetInnerHTML={{ __html: e.html }} />
@@ -303,7 +255,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           ))}
         </div>
       ) : (
-        <div ref={bodyRef} style={{ fontSize: '0.92em', lineHeight: 1.5 }} onClick={onBodyClick}>
+        <div style={{ fontSize: '0.92em', lineHeight: 1.5 }} onClick={onBodyClick}>
           {plain.map(p => (
             <div key={p.id} className="iw-bib-entry" style={{ marginBottom: '0.6em' }}>
               <p id={bibAnchorId(p.id)} style={{ margin: 0, paddingLeft: '1.5em', textIndent: '-1.5em' }}>

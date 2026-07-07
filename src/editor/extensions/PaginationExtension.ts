@@ -91,12 +91,25 @@ function compute(view: EditorView, pageH: number, topM: number): { set: Decorati
   // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
   // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
   const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM)
+  // The reference list always starts on a fresh page: find its top-level position, then force a break
+  // before it (unless it already begins a page). It's an atom the paginator can't split internally, so
+  // this at least guarantees a clean start (Peter's call).
+  let refListPos = -1
+  doc.descendants((n, pos) => { if (refListPos < 0 && n.type.name === 'referenceList') refListPos = pos; return refListPos < 0 })
+  let refBroken = false
   const decos: Decoration[] = []
   const sig: string[] = []
   let used = 0
   let pageNo = 1
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
+    // Force the reference list onto a fresh page (before the normal overflow check).
+    if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
+      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
+      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
+      sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
+      pageNo++; used = 0; refBroken = true
+    }
     // Break before the LINE that would overflow the text area — splitting the paragraph if mid-block.
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
       // Parchment left below the last line on this page (its bottom margin), at least MARGIN_BOTTOM.
@@ -112,7 +125,9 @@ function compute(view: EditorView, pageH: number, topM: number): { set: Decorati
         const $at = doc.resolve(Math.min(at, doc.content.size - 1))
         if ($at.depth >= 1) at = $at.before(1)
       } catch { /* keep original at if resolve fails */ }
-      if (at > 0) {
+      // Don't re-break at the reference-list boundary (already forced above; the atom can't split, so a
+      // repeat here would double the gap / not converge).
+      if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its
         // height into cursor/selection coordinate mapping so a click at the page-above end jumps
         // the caret past the gap. stopEvent: clicks on the gap aren't editor input. side:-1: keeps
@@ -246,10 +261,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
             // resize → pageH; margin settings). Our own setMeta dispatches below don't change these,
             // so they can't loop.
-            // Editor font-zoom (--iw-editor-zoom, inherited onto the doc) reflows the text taller/shorter
-            // WITHOUT changing doc size or pageH — so include it, else zoom leaves stale page regions (an
-            // empty tail below the text and uneven page lengths). Rounded so tiny float jitter doesn't loop.
-            const zoomVar = Math.round((parseFloat(getComputedStyle(view.dom).getPropertyValue('--iw-editor-zoom')) || 1) * 100)
+            // Editor font-zoom (--iw-editor-zoom) reflows the text taller/shorter WITHOUT changing doc
+            // size or pageH — include it, else zoom leaves stale page regions. Read the INLINE style on
+            // the surface (cheap) not getComputedStyle (a forced style recalc on every recompute = lag).
+            const surface = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+            const zoomVar = Math.round((parseFloat(surface?.style.getPropertyValue('--iw-editor-zoom') || '') || 1) * 100)
             const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}:${zoomVar}`
             if (inputSig === lastInputSig) { schedulePaint(); return }
             lastInputSig = inputSig
@@ -260,6 +276,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // the gaps first so the DOM reflows to its NATURAL wrapping, measure THAT, then re-add the
             // gaps. All synchronous within this one rAF tick, so the cleared state never paints (no
             // flicker) — getClientRects forces layout, not paint.
+            // Preserve scroll across the clear→re-add: clearing every gap widget shrinks the doc
+            // momentarily, so the browser clamps scrollTop — a big jump (to the top) when zoom just
+            // changed the whole doc height. Save it now, restore after the gaps are back.
+            const scroller = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+            const savedScroll = scroller ? scroller.scrollTop : (typeof window !== 'undefined' ? window.scrollY : 0)
             const cur = KEY.getState(view.state)
             if (cur && cur !== DecorationSet.empty) {
               view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
@@ -275,6 +296,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               lastSet = set
             }
             view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
+            // Restore the scroll position clamped away by the momentary clear (esp. on zoom).
+            if (scroller) { if (scroller.scrollTop !== savedScroll) scroller.scrollTop = savedScroll }
+            else if (typeof window !== 'undefined' && window.scrollY !== savedScroll) window.scrollTo(0, savedScroll)
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             schedulePaint()
           }
