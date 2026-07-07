@@ -18,11 +18,14 @@ const TAB_TITLES = [
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=16' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=16' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=16' },
-  { rel: 'shortcut icon', href: '/fav-32.png?v=16' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=16' },
+  // .ico first — Firefox is the most reliable with a real multi-res .ico (it was showing the generic
+  // page icon off the PNG-only links). v bumped to bust its aggressive favicon cache.
+  { rel: 'icon', href: '/favicon.ico?v=17', sizes: 'any' },
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=17' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=17' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=17' },
+  { rel: 'shortcut icon', href: '/favicon.ico?v=17' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=17' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
