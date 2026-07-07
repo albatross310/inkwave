@@ -34,6 +34,8 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
   const [, tick] = useState(0)          // bump to re-read DOM rects (scroll/resize)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  const toggleCollapse = (id: string) => setCollapsed(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   // Re-collect on edits (DEBOUNCED — the doc scan is O(n), so never run it per-keystroke) + set changes.
   useEffect(() => {
@@ -96,6 +98,20 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
         const r = el.getBoundingClientRect()
         if (r.bottom < 0 || r.top > (window.innerHeight || 0)) return null // off-screen
         const editing = editingId === c.id
+
+        // Collapsed → a small yellow "+" circle on the right, clear of the text. Click to expand.
+        if (collapsed.has(c.id) && !editing) {
+          return (
+            <button key={c.id} type="button" onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => toggleCollapse(c.id)} title={c.body ? c.body : 'Show comment'}
+              style={{
+                position: 'absolute', top: Math.round(r.top), left, width: 26, height: 26, borderRadius: '50%',
+                pointerEvents: 'auto', background: '#fde047', border: `1px solid ${INK}66`, color: INK,
+                boxShadow: '0 2px 6px rgba(80,50,10,0.22)', fontSize: 15, lineHeight: 1, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>+</button>
+          )
+        }
         return (
           <div
             key={c.id}
@@ -108,6 +124,10 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
               fontFamily: "'EB Garamond', Georgia, serif", fontSize: '0.86rem', lineHeight: 1.4, color: '#3a2a1a',
             }}
           >
+            {!editing && (
+              <button type="button" onClick={() => toggleCollapse(c.id)} title="Collapse to a dot"
+                style={{ position: 'absolute', top: 2, right: 4, border: 'none', background: 'transparent', color: '#b0a08c', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>−</button>
+            )}
             {editing ? (
               <textarea
                 autoFocus
