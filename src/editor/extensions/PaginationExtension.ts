@@ -275,11 +275,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // the gaps first so the DOM reflows to its NATURAL wrapping, measure THAT, then re-add the
             // gaps. All synchronous within this one rAF tick, so the cleared state never paints (no
             // flicker) — getClientRects forces layout, not paint.
-            // Preserve scroll across the clear→re-add: clearing every gap widget shrinks the doc
-            // momentarily, so the browser clamps scrollTop — a big jump (to the top) when zoom just
-            // changed the whole doc height. Save it now, restore after the gaps are back.
-            const scroller = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
-            const savedScroll = scroller ? scroller.scrollTop : (typeof window !== 'undefined' ? window.scrollY : 0)
             const cur = KEY.getState(view.state)
             if (cur && cur !== DecorationSet.empty) {
               view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
@@ -295,9 +290,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               lastSet = set
             }
             view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
-            // Restore the scroll position clamped away by the momentary clear (esp. on zoom).
-            if (scroller) { if (scroller.scrollTop !== savedScroll) scroller.scrollTop = savedScroll }
-            else if (typeof window !== 'undefined' && window.scrollY !== savedScroll) window.scrollTo(0, savedScroll)
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             schedulePaint()
           }
