@@ -80,9 +80,12 @@ export function About() {
           <section>
             <h2 className="text-xl mb-2" style={{ color: INK }}>Where it's heading</h2>
             <p>
-              Soon your studio will open outward: a public view where you can share a finished
-              document — and the verifiable record behind it — with the world, entirely on your
-              terms. Private by default, shareable when you're ready.
+              Inkwave Zero is the verified ground floor. Above it, <em>Inkwave Cubed</em> opens the
+              studio outward: living documents that don't carry the provenance record inside them, but
+              link back to their verified counterparts here in Zero — and hyperlink freely to other
+              Inkwave Cubed documents and to PDFs. The result is a space for academic and personal
+              essay networks: writing that cites, connects, and builds on other writing, with a
+              verifiable spine underneath. All of it free.
             </p>
           </section>
         </div>
