@@ -55,9 +55,13 @@ function bindStopPM(el: HTMLTextAreaElement | null): void {
 // Module-scope so its component identity is STABLE across the parent's re-renders. Defining it inside
 // ReferenceListNodeView made it a fresh type on every setState (i.e. every keystroke → setDraft),
 // which remounts the textarea and drops focus after one character.
-function NotePanel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function NotePanel({ value, onChange, onDelete }: { value: string; onChange: (v: string) => void; onDelete: () => void }) {
   return (
-    <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44` }}>
+    <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44`, position: 'relative' }}>
+      <button
+        type="button" contentEditable={false} onClick={onDelete} title="Delete note" aria-label="Delete note"
+        style={{ position: 'absolute', top: 2, right: 4, background: 'transparent', border: 'none', color: '#9d174d', fontWeight: 700, fontSize: '1.15rem', lineHeight: 1, cursor: 'pointer', padding: '0 3px', zIndex: 1 }}
+      >×</button>
       <textarea
         ref={bindStopPM}
         value={value}
@@ -68,7 +72,7 @@ function NotePanel({ value, onChange }: { value: string; onChange: (v: string) =
           width: '100%', resize: 'vertical', boxSizing: 'border-box',
           fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: '#4a4a4a',
           background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
-          padding: '0.4em 0.55em', outline: 'none',
+          padding: '0.4em 1.6em 0.4em 0.55em', outline: 'none',
         }}
       />
     </div>
@@ -212,6 +216,18 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       void addToLibrary({ ...item, _iw: iw })
     }, 500)
   }, [])
+
+  const onDeleteNote = useCallback((id: string) => {
+    clearTimeout(persistTimers.current[id])
+    setDraft(d => ({ ...d, [id]: '' }))
+    setOpenNotes(prev => { const n = new Set(prev); n.delete(id); return n })
+    const item = bibProvider.get(id)
+    if (item) {
+      const iw: IwCitationMeta = { ...((item as { _iw?: IwCitationMeta })._iw ?? {}) }
+      delete iw.note
+      void addToLibrary({ ...item, _iw: iw })
+    }
+  }, [])
   useEffect(() => () => { Object.values(persistTimers.current).forEach(clearTimeout) }, [])
 
   // Event-delegated nav + note-toggle for the injected CSL html.
@@ -272,7 +288,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           {entries.map(e => (
             <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.75em' }}>
               <div ref={styleEntry} dangerouslySetInnerHTML={{ __html: e.html }} />
-              {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} />}
+              {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} onDelete={() => onDeleteNote(e.id)} />}
             </div>
           ))}
         </div>
@@ -294,7 +310,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
                 <button type="button" className="iw-note-add" data-iw-note={p.id}
                   title={p.note.trim() ? 'Edit note' : 'Add note'}>{p.note.trim() ? '✎' : '+'}</button>
               </p>
-              {openNotes.has(p.id) && <NotePanel value={draft[p.id] ?? p.note} onChange={v => onNoteChange(p.id, v)} />}
+              {openNotes.has(p.id) && <NotePanel value={draft[p.id] ?? p.note} onChange={v => onNoteChange(p.id, v)} onDelete={() => onDeleteNote(p.id)} />}
             </div>
           ))}
         </div>
