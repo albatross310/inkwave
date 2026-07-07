@@ -734,27 +734,40 @@ function SplitDiffView({
         if (cur) { const s = midlineSignature(cur); if (s) anchorSigRef.current = s }
       })
     }
-    // Follow: scroll the right (hunk) pane so the change nearest the LEFT midline sits on the RIGHT
-    // midline too — both panes share a reading line. rAF-throttled; left drives right (one-directional).
+    // Follow the right (hunk) pane via a BIJECTION whose lock points are the diffs ("traffic lights"):
+    // each change's TOP in the document pane maps to that change's TOP in the diff pane, so both are in
+    // exact sync as you pass a change, and interpolate (accelerate/decelerate) smoothly between them.
     if (!syncTickRef.current) {
       syncTickRef.current = true
       requestAnimationFrame(() => {
         syncTickRef.current = false
         const L = leftScrollRef.current, R = rightScrollRef.current
         if (!L || !R) return
-        const midY = L.getBoundingClientRect().top + L.clientHeight / 2
-        let bestIdx: string | null = null, bestDist = Infinity
-        L.querySelectorAll('[data-opidx]').forEach(o => {
-          const r = (o as HTMLElement).getBoundingClientRect()
-          const d = Math.abs((r.top + r.height / 2) - midY)
-          if (d < bestDist) { bestDist = d; bestIdx = (o as HTMLElement).getAttribute('data-opidx') }
+        const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
+        const knots: Array<{ ly: number; ry: number }> = []
+        L.querySelectorAll('[data-opidx]').forEach(le => {
+          const idx = (le as HTMLElement).getAttribute('data-opidx')
+          const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
+          if (!re) return
+          knots.push({
+            ly: (le as HTMLElement).getBoundingClientRect().top - lRect.top + L.scrollTop,
+            ry: re.getBoundingClientRect().top - rRect.top + R.scrollTop,
+          })
         })
-        if (bestIdx == null) return
-        const target = R.querySelector(`[data-opidx="${bestIdx}"]`) as HTMLElement | null
-        if (!target) return
-        const rRect = R.getBoundingClientRect(), tRect = target.getBoundingClientRect()
-        const topInContent = tRect.top - rRect.top + R.scrollTop
-        R.scrollTop = Math.max(0, topInContent - R.clientHeight / 2)
+        if (!knots.length) return
+        knots.sort((a, b) => a.ly - b.ly)
+        const lMid = L.scrollTop + L.clientHeight / 2
+        let ry: number
+        if (lMid <= knots[0].ly) ry = knots[0].ry - (knots[0].ly - lMid)                       // before first lock point: 1:1
+        else if (lMid >= knots[knots.length - 1].ly) ry = knots[knots.length - 1].ry + (lMid - knots[knots.length - 1].ly)
+        else {
+          let i = 0
+          while (i < knots.length - 1 && knots[i + 1].ly <= lMid) i++
+          const a = knots[i], b = knots[i + 1]
+          const t = (lMid - a.ly) / Math.max(1, b.ly - a.ly)
+          ry = a.ry + t * (b.ry - a.ry)
+        }
+        R.scrollTop = Math.max(0, ry - R.clientHeight / 2)
       })
     }
   }, [])
