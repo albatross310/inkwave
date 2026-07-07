@@ -1937,9 +1937,9 @@ const ML_SHORTCUT_SECTIONS: { title: string; rows: [string, string, string][] }[
 ]
 
 const ALIGN_OPTS = [
-  { value: 'aligned', label: '=',  title: 'Align at =' },
-  { value: 'center',  label: '⊙', title: 'Centre'     },
-  { value: 'left',    label: '◁',  title: 'Left'       },
+  { value: 'aligned', label: '=',  title: 'Block alignment — align at =' },
+  { value: 'center',  label: '⊙', title: 'Block alignment — centre'     },
+  { value: 'left',    label: '◁',  title: 'Block alignment — left'       },
 ] as const
 
 function MathMenuButton({ editor }: { editor: Editor | null }) {
@@ -2000,7 +2000,7 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
-      <span style={{ fontSize: '0.9rem', color: '#3a3330' }}>{label}</span>
+      <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
       <span style={{ fontSize: '0.7rem', color: '#a89d96', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{hint}</span>
     </button>
   )
@@ -2028,9 +2028,8 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
             <>
               {MATH_ITEMS.map(item => btn(item.label, item.hint, () => { setOpen(false); if (editor) item.action(editor) }))}
               <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
-              {/* Alignment — relevant when cursor is in a block math */}
+              {/* Block alignment — the label lives in each button's hover toast (title), not a header */}
               <div style={{ padding: '2px 8px 4px' }}>
-                <div style={{ fontSize: '0.6rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '4px' }}>block alignment</div>
                 <div style={{ display: 'flex', gap: '4px' }}>
                   {ALIGN_OPTS.map(o => {
                     const cur = editor?.getAttributes('mathBlock').align
