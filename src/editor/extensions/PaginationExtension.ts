@@ -47,13 +47,19 @@ function gapEl(botMargin: number, topMargin: number): HTMLElement {
 // correct even when a gap renders NESTED inside a paragraph (a mid-paragraph break); otherwise that
 // gap's height is missed and the measured page heights drift/oscillate. Intrinsic tops are invariant
 // to the gaps, so the pagination is a stable fixpoint.
-function collectLines(view: EditorView, editorTop: number): Array<{ top: number; pos: number }> {
+// `scale` = the current transform-magnify on the parchment (hybrid zoom). getBoundingClientRect returns
+// VISUAL (scaled) coordinates, but pageH is derived from clientWidth which the transform DOESN'T scale —
+// so divide all measured distances by `scale` to bring lines into the parchment's own (unscaled) coords.
+// Height-only gap heights (set in unscaled px) also render scaled, so accumAbove is scaled too → the
+// single division keeps everything consistent. scale=1 (no magnify / reflow zone) is a no-op.
+function collectLines(view: EditorView, editorTop: number, scale: number): Array<{ top: number; pos: number }> {
   const dom = view.dom as HTMLElement
+  const s = scale > 0.01 ? scale : 1
   const gaps = Array.from(dom.querySelectorAll('.inkwave-page-gap')).map((g) => {
     const r = g.getBoundingClientRect(); return { top: r.top, h: r.height }
   })
   const accumAbove = (top: number): number => {
-    let s = 0; for (const g of gaps) if (g.top <= top - 2) s += g.h; return s
+    let acc = 0; for (const g of gaps) if (g.top <= top - 2) acc += g.h; return acc
   }
   const lines: Array<{ top: number; pos: number }> = []
   for (const child of Array.from(dom.children) as HTMLElement[]) {
@@ -63,28 +69,29 @@ function collectLines(view: EditorView, editorTop: number): Array<{ top: number;
     if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
       const r = child.getBoundingClientRect()
       const at = view.posAtCoords({ left: r.left + 1, top: r.top + Math.min(8, r.height / 2) })?.pos
-      lines.push({ top: r.top - editorTop - accumAbove(r.top), pos: at != null && at > 0 ? at : 0 })
+      lines.push({ top: (r.top - editorTop - accumAbove(r.top)) / s, pos: at != null && at > 0 ? at : 0 })
       continue
     }
     let lastTop = -1e9
     for (const r of rects) {
-      // dedup inline rects on the same line; skip tall boxes (a nested gap widget, not a text line)
-      if (r.width < 1 || r.height < 1 || r.height > 80 || r.top - lastTop <= 3) continue
+      // dedup inline rects on the same line; skip tall boxes (a nested gap widget, not a text line).
+      // Height thresholds are in SCREEN px, so scale them by `s` to match the magnified rendering.
+      if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
       lastTop = r.top
       const at = view.posAtCoords({ left: r.left + 1, top: r.top + r.height / 2 })?.pos
-      lines.push({ top: r.top - editorTop - accumAbove(r.top), pos: at != null && at > 0 ? at : 0 })
+      lines.push({ top: (r.top - editorTop - accumAbove(r.top)) / s, pos: at != null && at > 0 ? at : 0 })
     }
   }
   lines.sort((a, b) => a.top - b.top)
   return lines
 }
 
-function compute(view: EditorView, pageH: number, topM: number): { set: DecorationSet; sig: string } {
+function compute(view: EditorView, pageH: number, topM: number, scale: number): { set: DecorationSet; sig: string } {
   if (pageH <= 0) return { set: DecorationSet.empty, sig: 'empty' }
   const editorTop = (view.dom as HTMLElement).getBoundingClientRect().top
   const doc = view.state.doc
 
-  const lines = collectLines(view, editorTop)
+  const lines = collectLines(view, editorTop, scale)
   if (!lines.length) return { set: DecorationSet.empty, sig: 'empty' }
 
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
@@ -105,20 +112,25 @@ function compute(view: EditorView, pageH: number, topM: number): { set: Decorati
   // break to a block boundary is nice for a couple of orphan lines, but pushing a TALL block whole
   // leaves the page half-empty (the short-page artifact). So snap only small orphans; otherwise break
   // mid-block to fill the page (stable because we measure the natural, gap-free wrapping).
-  let blockStart = -1, blockStartUsed = 0
-  const blockOf = (pos: number): number => {
-    try { const $p = doc.resolve(Math.min(pos, doc.content.size - 1)); return $p.depth >= 1 ? $p.before(1) : pos } catch { return pos }
-  }
+  // Resolve the top-level block boundaries ONCE PER BLOCK (its [start,end) pos range), not per line —
+  // a per-line doc.resolve() over a long document was per-keystroke lag.
+  let blockStart = -1, blockEnd = -1, blockStartUsed = 0
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    const lb = blockOf(lines[i].pos)
-    if (lb !== blockStart) { blockStart = lb; blockStartUsed = used }
+    const p = lines[i].pos
+    if (p < blockStart || p >= blockEnd) {
+      try {
+        const $p = doc.resolve(Math.min(p, doc.content.size - 1))
+        if ($p.depth >= 1) { blockStart = $p.before(1); blockEnd = $p.after(1) } else { blockStart = p; blockEnd = p + 1 }
+      } catch { blockStart = p; blockEnd = p + 1 }
+      blockStartUsed = used
+    }
     // Force the reference list onto a fresh page (before the normal overflow check).
     if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
       const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
-      pageNo++; used = 0; blockStart = -1; refBroken = true
+      pageNo++; used = 0; blockStart = -1; blockEnd = -1; refBroken = true
     }
     // Break before the LINE that would overflow the text area.
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
@@ -135,7 +147,7 @@ function compute(view: EditorView, pageH: number, topM: number): { set: Decorati
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
-        blockStart = -1           // recompute the block on the new page
+        blockStart = -1; blockEnd = -1  // recompute the block on the new page
       }
     }
     used += lh
@@ -279,7 +291,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (cur && cur !== DecorationSet.empty) {
               view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
             }
-            const { set, sig } = compute(view, pageH, topM)
+            const scaleEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+            const magnifyScale = parseFloat(scaleEl?.style.getPropertyValue('--iw-magnify') || '') || 1
+            const { set, sig } = compute(view, pageH, topM, magnifyScale)
             // Only update the set when gap positions actually changed (sig differs). When sig is the
             // same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating any
             // sub-pixel rounding differences in botMargin — the main cause of page-height flicker on
