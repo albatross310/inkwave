@@ -906,8 +906,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {/* "Don't add pages to inline" toggle — lights up purple when on. */}
         <button type="button" disabled={!!noRef} title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
           onClick={() => setDontAddPages(v => !v)}
-          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
-            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e', textDecoration: 'line-through' }}>#</button>
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '1rem',
+            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e' }}>
+          {/* # with a strike drawn at the exact vertical centre → symmetric. */}
+          <span style={{ position: 'relative', lineHeight: 1 }}>#
+            <span aria-hidden="true" style={{ position: 'absolute', left: -2, right: -2, top: '50%', height: 1.5, background: 'currentColor', transform: 'translateY(-50%)' }} />
+          </span>
+        </button>
         {/* Hide-on-editor-click toggle (full screen) — lights up purple when on; off by default. */}
         <button type="button" title="In full screen, hide the PDF when you click back into the editor"
           onMouseEnter={() => setHint('in full screen, clicking back into the editor drops the PDF viewer (off by default)')}
