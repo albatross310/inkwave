@@ -5,7 +5,9 @@ export const QUEUE_KEY = 'inkwave:citeQueue'
 // Temporary watch list: when app opens a source URL we store the capture data here
 // so tabs.onUpdated can show the panel even after the item has been flushed from the queue.
 export const WATCH_KEY = 'inkwave:panelWatch'
-// Persists captured URL + basic metadata even after queue flush, so the popup can
-// show "Already in library" when the user revisits the source page.
+// Short-lived capture history: keeps captured URL + basic metadata briefly after queue flush, so
+// the popup can show "Already in library" / "Show on page" right after a capture. Privacy: entries
+// EXPIRE after HISTORY_TTL_MS — the extension keeps no lasting record of pages you captured.
 export const HISTORY_KEY = 'inkwave:captureHistory'
+export const HISTORY_TTL_MS = 5 * 60 * 1000
 export const MAILTO = 'hello@inkwave.studio'

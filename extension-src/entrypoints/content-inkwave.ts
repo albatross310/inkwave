@@ -3,7 +3,7 @@
 // (app validates origin + source, writes to OPFS library, then acks → dequeue).
 // UUID-idempotent: a re-flush re-acks without double-adding.
 
-import { QUEUE_KEY, HISTORY_KEY } from '../utils/constants'
+import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
 
@@ -62,7 +62,8 @@ export default defineContentScript({
             missingRequired: [],
             capture: prev?.capture, // preserve the full CaptureMsg written by background on enqueue
           }
-          const nextHist = [he, ...hist.filter(h => h.sourceUrl !== entry.sourceUrl)].slice(0, 50)
+          // Prune expired entries on every write — history is short-lived by design (privacy).
+          const nextHist = [he, ...hist.filter(h => h.sourceUrl !== entry.sourceUrl && Date.now() - h.at < HISTORY_TTL_MS)].slice(0, 50)
           await browser.storage.local.set({ [HISTORY_KEY]: nextHist })
         }
         await browser.storage.local.set({ [QUEUE_KEY]: q.filter(x => x.uuid !== d.uuid) })

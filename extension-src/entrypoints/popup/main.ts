@@ -1,4 +1,4 @@
-import { QUEUE_KEY, HISTORY_KEY } from '../../utils/constants'
+import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../../utils/constants'
 import { REQUIRED_BY_TYPE, FIELD_LABELS, ITEM_TYPE_LABELS } from '@inkwave/citations/requiredFields'
 import type { CaptureMsg } from '../background'
 
@@ -52,7 +52,8 @@ async function loadCurrentCapture() {
     browser.storage.local.get(HISTORY_KEY),
   ])
   const q: QueueEntry[] = (qStore[QUEUE_KEY] as QueueEntry[]) ?? []
-  const hist: HistoryEntry[] = (hStore[HISTORY_KEY] as HistoryEntry[]) ?? []
+  // Expired history entries are invisible even if a write hasn't pruned them yet.
+  const hist: HistoryEntry[] = ((hStore[HISTORY_KEY] as HistoryEntry[]) ?? []).filter(e => Date.now() - e.at < HISTORY_TTL_MS)
 
   const match = [...q].reverse().find(e => e.sourceUrl && tab.url?.startsWith(e.sourceUrl.split('?')[0]))
 

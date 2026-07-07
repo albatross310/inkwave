@@ -9,7 +9,7 @@ import { lookupIdentifier } from '@inkwave/citations/lookup'
 import { extractToCsl, parseAuthor, parseDate } from '@inkwave/citations/capture'
 import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
-import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY } from '../utils/constants'
+import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
 
@@ -214,7 +214,8 @@ async function enqueue(item: object, sourceUrl: string, fields?: Record<string, 
     return !(fields as Record<string, { value?: string }>)?.[f]?.value && !r[f]
   })
   const entry: HistoryEntry = { id: String(r.id ?? ''), sourceUrl, type, title: String(r.title ?? ''), at: Date.now(), missingRequired, capture }
-  const next = [entry, ...hist.filter(h => h.sourceUrl !== sourceUrl)].slice(0, 50)
+  // Prune expired entries on every write — history is short-lived by design (privacy).
+  const next = [entry, ...hist.filter(h => h.sourceUrl !== sourceUrl && Date.now() - h.at < HISTORY_TTL_MS)].slice(0, 50)
   await browser.storage.local.set({ [HISTORY_KEY]: next })
   // Poke any open Inkwave tab to flush immediately.
   const tabs = await browser.tabs.query({})
