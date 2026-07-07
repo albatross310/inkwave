@@ -303,8 +303,7 @@ function InlineDiffView({
   onHoverOp: (opIdx: number | null) => void
   scrollBodyRef?: React.RefObject<HTMLDivElement>
 }) {
-  const { added, removed } = ops ? diffStats(ops) : { added: 0, removed: 0 }
-  const hasChange = added > 0 || removed > 0
+  const hasChange = ops ? ops.some(o => o.type !== 'same') : false
   const nodes = useMemo(
     () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -313,26 +312,11 @@ function InlineDiffView({
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
-      <div style={{
-        flexShrink: 0,
-        padding: '8px 16px', borderBottom: '1px solid rgba(92,45,138,0.08)',
-        display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
-        background: 'rgba(249,247,244,0.98)',
-      }}>
-        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>Initial snapshot</span>}
-        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>No changes from previous snapshot</span>}
-        {prevSnap && hasChange && (
-          <>
-            <span style={{ color: '#15803d', fontWeight: 700, fontSize: '1.15rem' }}>+{added}</span>
-            <span style={{ color: '#b91c1c', fontWeight: 700, fontSize: '1.15rem' }}>−{removed}</span>
-            <span style={{ fontSize: '0.95rem', color: '#666' }}>words vs previous</span>
-          </>
-        )}
-      </div>
       <div
         ref={scrollBodyRef}
+        className="iw-snap-scroll"
         style={{
-          flex: 1, overflow: 'auto', padding: '1rem 1.5rem',
+          flex: 1, overflowY: 'scroll', overflowX: 'auto', padding: '1rem 1.5rem',
           lineHeight: 1.85, fontSize: '1rem', whiteSpace: 'pre-wrap',
           fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
         }}
@@ -910,7 +894,7 @@ function SplitDiffView({
 
         {/* ── Diff pane (left) ── */}
         <div style={{
-          [vertical ? 'height' : 'width']: `${splitPct}%`, flexShrink: 0, position: 'relative',
+          [vertical ? 'height' : 'width']: `${splitPct}%`, flexShrink: 0, position: 'relative', zIndex: 1,
           overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom,
         } as React.CSSProperties}>
           {midline}
@@ -946,7 +930,7 @@ function SplitDiffView({
               boxShadow: '0 2px 8px rgba(80,50,10,0.15)',
             }}>{counter}</div>
           )}
-          <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
+          <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
               <div style={{ zoom: diffZoom } as React.CSSProperties}>
                 <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
@@ -972,7 +956,7 @@ function SplitDiffView({
 
       {/* ── Side panel (both modes): AI summary (scrollable) + document minimap ── */}
       <div style={{
-        [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, display: 'flex', flexDirection: 'column',
+        [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column',
         background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden',
       } as React.CSSProperties}>
         <div style={{
@@ -1201,6 +1185,14 @@ export function SnapshotView() {
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
   const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
+  // Words added/removed vs the previous snapshot — now shown in the top header (not a bar over the diff).
+  const headerDiff = useMemo(() => {
+    if (!snapshot || !prevSnap) return null
+    const before = pmToText(prevSnap.contentJson, true)
+    const after = pmToText(snapshot.contentJson, true)
+    return diffStats(diffWords(before, after))
+  }, [snapshot?.id, prevSnap?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // AI summary — now shown in the RHS side panel (no longer floating over the document).
   const currentDiff = snapshot?.diffSummary?.bullets ?? null
 
@@ -1232,10 +1224,10 @@ export function SnapshotView() {
       )}
       {/* Fixed header */}
       <div
-        className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 48 }}
+        className="z-50 flex items-center gap-x-2.5 px-3 py-1.5 bg-white/95 backdrop-blur"
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem', height: 48 }}
       >
-        <span style={{ color: INK, fontWeight: 500 }}>
+        <span style={{ color: INK, fontWeight: 600 }}>
           ◈ {snapshot
             ? `${versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
             : 'Snapshot'} · read-only
@@ -1251,6 +1243,17 @@ export function SnapshotView() {
           <span className="text-stone-400 tabular-nums">
             {`v${groupIdx + 1}.${snapInGroup}/v${groups.length}.${lastGroup?.items.length ?? 1}`}
           </span>
+        )}
+
+        {/* Words vs previous — moved here from the diff pane so that pane sits higher */}
+        {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
+          <span className="flex items-baseline gap-x-1.5 tabular-nums" title="words added / removed vs the previous snapshot">
+            <span style={{ color: '#15803d', fontWeight: 700 }}>+{headerDiff.added}</span>
+            <span style={{ color: '#b91c1c', fontWeight: 700 }}>−{headerDiff.removed}</span>
+          </span>
+        )}
+        {prevSnap && headerDiff && headerDiff.added === 0 && headerDiff.removed === 0 && (
+          <span className="text-stone-400 italic">no change</span>
         )}
 
         {/* Centred, jazzed action buttons */}
