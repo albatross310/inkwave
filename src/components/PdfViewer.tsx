@@ -4,7 +4,7 @@
 // drives text-layer positioning/selection. Highlights are our own overlay divs (normalised rects),
 // stored on the source's _iw.highlights — not baked into the PDF.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
@@ -46,7 +46,7 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; x: numbe
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, dockButton, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
@@ -54,6 +54,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   instanceId?: string | null   // the citation occurrence — new highlights are tagged with it
   context?: string | null      // the sentence before the citation, shown for context
   noRef?: boolean              // opened from the bib → annotations must not become page refs
+  dockButton?: ReactNode       // the panel's dock-orientation toggle, rendered inside this single toolbar
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
   const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
@@ -64,6 +65,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // the document position (the citation occurrence) each highlight belongs to.
   const hlNavRef = useRef(-1)
   const [syncEditor, setSyncEditor] = useState(false)
+  // Hovering a compact control shows its explanation down in the status line (keeps the bar squished).
+  const [hint, setHint] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -833,29 +836,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
-      {/* "Scroll highlighted" bar — step through this source's highlights in order (+ optional editor sync). */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${INK}18`, background: '#f3eefa', fontSize: '0.78rem', color: '#6b5b7e' }}>
-        <button type="button" title="Previous highlight" onClick={() => stepHighlight(-1)}
-          style={{ width: 26, height: 24, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: INK, cursor: 'pointer' }}>‹</button>
-        <span style={{ fontWeight: 600 }}>scroll highlighted</span>
-        <button type="button" title="Next highlight" onClick={() => stepHighlight(1)}
-          style={{ width: 26, height: 24, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: INK, cursor: 'pointer' }}>›</button>
-        <label title="Also snap the editor to the document position where this highlight is cited (when the highlight belongs to an inline citation — not when opened from the bib)"
-          style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6, cursor: 'pointer', userSelect: 'none' }}>
-          <input type="checkbox" checked={syncEditor} onChange={e => setSyncEditor(e.target.checked)} style={{ cursor: 'pointer' }} />
-          sync editor
-        </label>
-      </div>
-
-      {/* Persistent markup toolbar */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>
+      {/* Single consolidated toolbar. Secondary controls are compact (icon + checkbox); their labels
+          live in the status line on hover (setHint) so the bar stays squished. */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'nowrap' }}
+        onMouseLeave={() => setHint(null)}>
         {TOOLS.map(t => {
           const active = tool === t.kind
           return (
             <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
+              onMouseEnter={() => setHint(`${t.title}`)}
               onClick={() => setTool(active ? null : t.kind)}
               style={{
-                width: 30, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem',
+                width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
                 color: t.kind === 'highlight' ? '#eab308' : INK,
@@ -864,32 +856,47 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           )
         })}
         {/* Text-note font size */}
-        <select value={noteSize} title="Text note size"
+        <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
           onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer' }}>
+          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
         </select>
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 2px' }} />
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {COLORS.map(c => (
-          <button key={c} type="button" title="Colour" onClick={() => setColor(c)}
-            style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+          <button key={c} type="button" title="Colour" onMouseEnter={() => setHint('highlight / note colour')} onClick={() => setColor(c)}
+            style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
-        {/* R10: force annotations to NOT become inline page references (bib entry sets this implicitly). */}
-        <label title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
-          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', color: noRef ? '#a89db8' : '#6b5b7e', cursor: noRef ? 'default' : 'pointer', userSelect: 'none' }}>
-          <input type="checkbox" checked={!!noRef || dontAddPages} disabled={!!noRef}
-            onChange={e => setDontAddPages(e.target.checked)} style={{ cursor: 'inherit' }} />
-          don't add pages to inline
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        {/* Scroll-highlighted navigator */}
+        <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
+          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
+        <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
+          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+        {/* Sync editor (compact) */}
+        <label title="Sync the editor to where this highlight is cited" onMouseEnter={() => setHint('sync editor: snap the editor to where this highlight is cited')}
+          style={{ display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', userSelect: 'none', flexShrink: 0 }}>
+          <input type="checkbox" checked={syncEditor} onChange={e => setSyncEditor(e.target.checked)} style={{ cursor: 'pointer' }} />
+          <span style={{ fontSize: '0.9em', color: INK }}>⇄</span>
         </label>
-        <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
+        {/* Don't add pages to inline (compact) */}
+        <label title="Don't add pages to inline citations" onMouseEnter={() => setHint("don't add pages to inline: highlights won't add page numbers to inline citations, wherever you opened from")}
+          style={{ display: 'flex', alignItems: 'center', gap: 2, cursor: noRef ? 'default' : 'pointer', userSelect: 'none', flexShrink: 0, opacity: noRef ? 0.75 : 1 }}>
+          <input type="checkbox" checked={!!noRef || dontAddPages} disabled={!!noRef} onChange={e => setDontAddPages(e.target.checked)} style={{ cursor: 'inherit' }} />
+          <span style={{ fontSize: '0.82em', color: '#6b5b7e', textDecoration: 'line-through' }}>#</span>
+        </label>
+        <span style={{ marginLeft: 'auto', minWidth: 30, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text')}
         </span>
+        {dockButton}
       </div>
 
-      {/* Context: the sentence in the editor just before the citation, so you know what claim you're sourcing. */}
+      {/* Context: the sentence in the editor just before the citation. Clicking it jumps to that citation
+          in the document (via its instanceId). */}
       {context && (
-        <div style={{ flexShrink: 0, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18` }}>
-          <span style={{ opacity: 0.6, fontStyle: 'normal' }}>Sourcing: </span>
+        <div
+          onClick={() => { if (instanceIdRef.current) window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: instanceIdRef.current } })) }}
+          title={instanceIdRef.current ? 'Go to this citation in the document' : undefined}
+          style={{ flexShrink: 0, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
           <span style={{ fontStyle: 'italic' }}>“…{context}”</span>
         </div>
       )}

@@ -74,7 +74,6 @@ interface Seg {
 export function CitationNodeView({ node, editor, selected, getPos, updateAttributes }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
-  const [pdfKey, setPdfKey] = useState<string | null>(null)  // first cited source with an embedded PDF
   const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number } | null>(null)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
@@ -99,10 +98,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     const a = attrsRef.current
     const pos = typeof getPos === 'function' ? getPos() : null
     const occMap = pos != null ? occurrencesAt(editor.state.doc, pos) : new Map<string, number>()
-    let firstPdf: string | null = null
     const next: Seg[] = a.citekeys.map(key => {
       const item = bibProvider.get(key)
-      if (item && !firstPdf && hasPdf(item)) firstPdf = key
       // Displayed pages = manual locator ∪ printed pages carrying a highlight made from THIS citation
       // occurrence (per-instance) — highlights from other inlines / the bib don't add pages here.
       const off = pageOffsetOf(item)
@@ -115,7 +112,6 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
         : { key, text: `?${key}`, pages: '', pageNum: null, hasPdf: false, occ: occMap.get(key) ?? 1, found: false }
     })
     setSegs(next)
-    setPdfKey(firstPdf)
   }, [editor, getPos]) // reads attrs from attrsRef
 
   // The sentence in the editor immediately before this citation — shown in the PDF viewer so the reader
@@ -178,7 +174,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   function goToPinpoint() {
     if (!pageEdit) return
     const key = pageEdit.key
-    if (pdfKey === key) {
+    if (hasPdf(bibProvider.get(key))) {
       openPdf({
         citekey: key, page: pageFromLocator(attrs.locator), quote: attrs.quote,
         label: segs.find(s => s.key === key)?.text ?? key,
@@ -236,12 +232,9 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         onClick={e => {
                           e.stopPropagation()
                           if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
+                          // Always pop the panel — it shows "No attachment" when the source has no PDF.
                           const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
-                          if (s.hasPdf) {
-                            openPdf({ citekey: s.key, page: getLastPdfPage(s.key), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
-                          } else {
-                            navigateToBibEntry(s.key, s.occ)
-                          }
+                          openPdf({ citekey: s.key, page: getLastPdfPage(s.key), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
                         }}
                       >
                         {s.text}
@@ -282,34 +275,6 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
             </>
           )}
       </span>
-      {/* 📄 opens the PDF — only when there's no page shown (else the page number itself is the link). */}
-      {pdfKey && !segs.some(s => s.pages) && (
-        <button
-          type="button"
-          contentEditable={false}
-          onClick={e => {
-            e.stopPropagation()
-            openPdf({
-              citekey: pdfKey,
-              page: pageFromLocator(attrs.locator),
-              quote: attrs.quote,
-              label: segs.find(s => s.key === pdfKey)?.text ?? pdfKey,
-              // Selecting a sentence in the PDF sets this citation's pinpoint (quote + page).
-              // Only store the quote; the page shows via the highlight (offset-corrected), so we
-              // don't also write a raw-PDF-page locator that would double-count.
-              onLink: (quote) => updateAttributes({ quote }),
-            })
-          }}
-          title={attrs.quote ? 'Open PDF at the linked sentence' : `Open PDF${attrs.locator ? ` at ${attrs.locator}` : ''} — select a sentence to link it`}
-          style={{
-            marginLeft: 2, padding: '0 2px', border: 'none', background: 'transparent',
-            cursor: 'pointer', fontSize: '0.82em', lineHeight: 1, verticalAlign: 'baseline',
-            userSelect: 'none',
-          }}
-        >
-          📄
-        </button>
-      )}
       {pageEdit && createPortal(
         <span
           data-iw-pagepop=""
@@ -339,18 +304,18 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           {/* Go to the cited sentence: opens the embedded PDF at that quote if there is one, otherwise
               deep-links the web source (#:~:text=). Enter in the box or the → go button both navigate —
               typing a quote alone used to just STORE it (nothing happened), which is the bug Peter hit. */}
-          {(pdfKey === pageEdit.key || pageEditUrl) && (
+          {(hasPdf(bibProvider.get(pageEdit.key)) || pageEditUrl) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 ref={bindStopPM}
                 value={attrs.quote ?? ''}
                 onChange={e => updateAttributes({ quote: e.target.value || null })}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); goToPinpoint() } }}
-                placeholder={pdfKey === pageEdit.key ? 'cited sentence (opens the PDF there)' : 'cited sentence (opens the source there)'}
+                placeholder={hasPdf(bibProvider.get(pageEdit.key)) ? 'cited sentence (opens the PDF there)' : 'cited sentence (opens the source there)'}
                 style={{ flex: 1, minWidth: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
               />
               <button type="button"
-                title={pdfKey === pageEdit.key ? 'Open the PDF at this sentence' : 'Open the source in your browser at this sentence'}
+                title={hasPdf(bibProvider.get(pageEdit.key)) ? 'Open the PDF at this sentence' : 'Open the source in your browser at this sentence'}
                 onClick={goToPinpoint}
                 style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 → go
