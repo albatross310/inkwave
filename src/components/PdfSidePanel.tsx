@@ -71,6 +71,22 @@ export function PdfSidePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  // On a BOTTOM-docked PDF (phone / narrow / half-screen), tapping back into the editor drops the PDF
+  // back down so you can read/type — like coming "back" to the page. Armed after a short delay so the
+  // very tap that opened the PDF (on an in-text citation) doesn't immediately close it.
+  useEffect(() => {
+    if (!open || orientation !== 'bottom') return
+    const pm = document.querySelector('.ProseMirror')
+    if (!pm) return
+    let armed = false
+    const arm = setTimeout(() => { armed = true }, 600)
+    const onEditorInteract = () => { if (armed) close() }
+    pm.addEventListener('pointerdown', onEditorInteract)
+    pm.addEventListener('focusin', onEditorInteract)
+    return () => { clearTimeout(arm); pm.removeEventListener('pointerdown', onEditorInteract); pm.removeEventListener('focusin', onEditorInteract) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, orientation])
+
   // Make room: side → padding-right; bottom → padding-bottom (+ shift the footer toolbar up).
   useEffect(() => {
     const root = document.documentElement

@@ -198,9 +198,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
     // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
     // only adds resolution where the page is still small (the default fit view, where the blur shows).
-    const MAX_CANVAS = 4096
+    // Higher supersampling for crisper glyphs at the fit view (pdf.js is the same renderer Firefox uses,
+    // so quality is a function of resolution): render at ≥3× CSS size, capped at 4608px/side for memory.
+    const MAX_CANVAS = 4608
     const outputScale = Math.max(1, Math.min(
-      3, Math.max(2, window.devicePixelRatio || 1),
+      4, Math.max(3, window.devicePixelRatio || 1),
       MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
     ))
     const canvas = document.createElement('canvas')
@@ -208,8 +210,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     canvas.height = Math.floor(pg.viewport.height * outputScale)
     canvas.style.cssText = `width:${Math.floor(pg.viewport.width)}px;height:${Math.floor(pg.viewport.height)}px;display:block;`
     pg.canvasWrap.appendChild(canvas)
+    const ctx = canvas.getContext('2d')!
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high' // high-quality scaling of embedded images
     await pg.page.render({
-      canvas, canvasContext: canvas.getContext('2d')!, viewport: pg.viewport,
+      canvas, canvasContext: ctx, viewport: pg.viewport,
       transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
     }).promise.catch(() => {})
     if (token !== renderTokenRef.current) return
