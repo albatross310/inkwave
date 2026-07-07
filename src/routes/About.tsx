@@ -60,6 +60,16 @@ export function About() {
               to just its open-source file with one click, for when you need to share a document more
               publicly.)</span>
             </p>
+            <p className="mt-3">
+              The guarantees here aren't meant to be Inkwave's alone. They're being written up as an
+              open specification any writing tool can adopt and any reader can check — the{' '}
+              <a href="https://writingstudiostandard.org" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: LIGHT }}>
+                Writing Studio Standard
+              </a>. Your work saves as a plain <code className="text-[0.9em]" style={{ color: INK }}>.studio</code> file:
+              a specific form of JSON whose Markdown header carries the document's full text — so anyone
+              can read the raw file without Inkwave, and an AI can read it far more easily than a
+              <code className="text-[0.9em]" style={{ color: INK }}> .docx</code> or PDF.
+            </p>
           </section>
 
           <section>
@@ -73,7 +83,7 @@ export function About() {
             </p>
             <p className="mt-4">
               <Link to="/verify"
-                className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 no-underline font-medium shadow-sm transition-all hover:shadow-md hover:brightness-105"
+                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm no-underline font-medium shadow-sm transition-all hover:shadow-md hover:brightness-105"
                 style={{ background: `linear-gradient(135deg, ${INK}, ${LIGHT})`, color: '#fff' }}>
                 Verify an Inkwave record <span aria-hidden="true">→</span>
               </Link>
@@ -101,16 +111,6 @@ export function About() {
             </p>
           </section>
 
-          <section>
-            <h2 className="text-xl mb-2" style={{ color: INK }}>An open standard</h2>
-            <p>
-              The guarantees here aren't meant to be Inkwave's alone. They're being written up as an
-              open specification any writing tool can adopt and any reader can check — the{' '}
-              <a href="https://writingstudiostandard.org" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: LIGHT }}>
-                Writing Studio Standard
-              </a>.
-            </p>
-          </section>
         </div>
 
         <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(92,45,138,0.14)' }}>

@@ -6,6 +6,8 @@ export const PAGE_LIGHT = '#9b5ccc'        // lighter purple accent
 export const PAGE_PARCHMENT = '#f7f2e8'    // the content "page" surface (matches the editor page)
 export const PAGE_TEXT = '#3a3a3a'
 // Deep-black → aquamarine surround behind the page (no waves). ~20° declension, top-left origin.
-export const PAGE_GRADIENT = 'linear-gradient(112deg, #070b12 5%, #163540 26%, #9fd9c8 60%)'
+// Emulates the Inkwave logo's gradient (its exact stops, reversed so the near-black end sits in the
+// dark corner): near-black → deep indigo → royal blue → blue → teal → the page aquamarine.
+export const PAGE_GRADIENT = 'linear-gradient(122deg, #060012 -4%, #0A0065 9%, #003580 17%, #007EB9 26%, #00BFA8 40%, #9fd9c8 58%)'
 export const PAGE_CARD_SHADOW = '0 8px 32px rgba(80,50,10,0.18)'
 export const PAGE_CARD_RADIUS = 10
