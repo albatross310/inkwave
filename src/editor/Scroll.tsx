@@ -230,8 +230,8 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => ro.disconnect()
   }, [sheetRef, paperSize, orientation, gapped])
 
-  const logoSize = gapped ? 46 : 32           // bigger mark in the discrete-sheet (gapped) view
-  const pageNumSize = gapped ? '1.5rem' : '1.1rem'
+  const logoSize = gapped ? 76 : 32           // bigger mark in the discrete-sheet (gapped) view
+  const pageNumSize = gapped ? '2.6rem' : '1.1rem'
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">

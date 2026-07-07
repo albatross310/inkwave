@@ -38,7 +38,7 @@ interface Props {
 const SOURCE_BADGE: Record<FieldSource, { label: string; color: string }> = {
   crossref: { label: 'verified', color: 'var(--iw-verified, #15803d)' },
   ai:       { label: 'AI',       color: 'var(--iw-badge-ai, #b45309)' },
-  manual:   { label: 'manual',   color: 'var(--iw-badge-manual, #6b7280)' },
+  manual:   { label: 'M',        color: 'var(--iw-badge-manual, #6b7280)' },
 }
 
 // Re-export for consumers that previously imported from here.
@@ -414,6 +414,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const dismissHelp = () => { setHelpDismissed(true); try { localStorage.setItem('inkwave:citeHelpDismissed', '1') } catch { /* private */ } }
   const changeSort = (by: 'added' | 'alpha' | 'author') => { setSortBy(by); try { localStorage.setItem('inkwave:citeSortBy', by) } catch { /* private */ } }
   const toggleSortDir = () => setSortDir(d => { const n = d === 'asc' ? 'desc' : 'asc'; try { localStorage.setItem('inkwave:citeSortDir', n) } catch { /* private */ }; return n })
+  // Click-and-hold the purple citekey to rename it (replaces the "ren" button); a short click edits.
+  const keyHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keyHeld = useRef(false)
 
   useEffect(() => {
     const unsub = bibProvider.subscribe(rerender)
@@ -857,11 +860,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   <button
                     type="button"
                     className="flex-1 min-w-0 text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors"
-                    onClick={() => setEditItem(item)}
-                    title="Click to edit"
+                    title="Click to edit · click & hold the key to rename"
+                    onPointerDown={() => { keyHeld.current = false; keyHoldTimer.current = setTimeout(() => { keyHeld.current = true; void renameCitation(item) }, 500) }}
+                    onPointerUp={() => { if (keyHoldTimer.current) clearTimeout(keyHoldTimer.current) }}
+                    onPointerLeave={() => { if (keyHoldTimer.current) clearTimeout(keyHoldTimer.current) }}
+                    onClick={() => { if (keyHeld.current) { keyHeld.current = false; return } setEditItem(item) }}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[17px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
+                      <span className="text-[13px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
                       {/* Verified sources → a compact ✓ box (tooltip on hover); others keep their label. */}
                       {itemSource(item) === 'crossref'
                         ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded flex-shrink-0" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
@@ -918,7 +924,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 {/* Title + author flow the FULL width beneath the buttons (title wraps to 2 lines so more
                     of it is readable). Author only renders when present — no empty line. */}
                 <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
-                  className="block w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors mt-0.5">
+                  className="block w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors -mt-0.5">
                   {!!String(item.title ?? '') && <div className="text-[16px] text-stone-500 leading-snug line-clamp-2">{String(item.title ?? '')}</div>}
                   {!!simpleInText([item]) && <div className="text-[15px] text-stone-400 leading-snug truncate">{simpleInText([item])}</div>}
                 </button>

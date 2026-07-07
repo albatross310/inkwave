@@ -20,6 +20,8 @@ export interface PdfHighlight {
   note?: string           // optional annotation note
   size?: number           // text-note font size in px (defaults to 12)
   citekey?: string        // set when this highlight is linked to an in-text citation's pinpoint
+  instanceId?: string     // the citation OCCURRENCE this highlight belongs to (scopes page refs per inline)
+  noRef?: boolean         // made from the bib window / with "don't add pages" on → never a page reference
   createdAt: string
 }
 
@@ -28,10 +30,19 @@ export function highlightsOf(item: CSLItem | undefined): PdfHighlight[] {
   return Array.isArray(hs) ? hs : []
 }
 
-/** Distinct, sorted PDF pages that carry any highlight/annotation for a source. */
-export function highlightPages(item: CSLItem | undefined): number[] {
+/** Distinct, sorted PDF pages that carry a highlight for a source. When `instanceId` is given, only
+ *  highlights tagged to THAT citation occurrence (plus legacy untagged ones) count — so each inline
+ *  citation shows the pages IT pinpointed, not every highlight ever made on the source. */
+export function highlightPages(item: CSLItem | undefined, instanceId?: string | null): number[] {
   const set = new Set<number>()
-  for (const h of highlightsOf(item)) if (h.page > 0) set.add(h.page)
+  const want = instanceId ?? null
+  for (const h of highlightsOf(item)) {
+    if (h.page <= 0 || h.noRef) continue          // noRef = never a page reference
+    // Per-instance: the highlight's instance must match EXACTLY (both null = legacy doc). An untagged
+    // highlight no longer leaks onto every citation, and a fresh inline starts with no auto pages.
+    if ((h.instanceId ?? null) !== want) continue
+    set.add(h.page)
+  }
   return [...set].sort((a, b) => a - b)
 }
 

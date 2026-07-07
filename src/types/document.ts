@@ -45,6 +45,8 @@ export interface IwCitationMeta {
   note?: string           // free-text reading notes shown indented under the bibliography entry
   pdfName?: string        // original filename of an embedded PDF (bytes live in OPFS library/pdfs/)
   pdfUrl?: string         // a public PDF URL fetched on demand via the proxy (annotate in-app, no bytes stored)
+  publiclyAvailable?: boolean // the source's PDF is open/public → the "publicly available" export can strip it
+
   pageOffset?: number     // printed page = PDF sheet index + this offset (Haiku-detected, one-time)
   pageOffsetFlag?: 'verified' | 'raw' // 'raw' = detection failed → showing the PDF's own page numbers
   // Overlay annotations on the embedded PDF — normalised rects + text; see citations/pdfHighlights.

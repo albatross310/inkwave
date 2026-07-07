@@ -16,11 +16,13 @@ import { addToLibrary } from '../../citations/library'
 import { referenceListKeys } from '../../citations/resolve'
 import { formatReferenceEntries, simpleRefList } from '../../citations/format'
 import { highlightPages } from '../../citations/pdfHighlights'
+import { hasPdf } from '../../citations/pdfSource'
+import { openPdf, getLastPdfPage } from '../../citations/pdfViewer'
 import { pageOffsetOf } from '../../citations/pageOffset'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
-  citedPages, formatPages, occurrencePages,
+  citedPages, formatPages, occurrencePages, occurrenceQuotes,
 } from '../../citations/citationNav'
 import type { CSLItem, IwCitationMeta } from '../../types/document'
 import type { RefMode } from '../../citations/resolve'
@@ -53,9 +55,13 @@ function bindStopPM(el: HTMLTextAreaElement | null): void {
 // Module-scope so its component identity is STABLE across the parent's re-renders. Defining it inside
 // ReferenceListNodeView made it a fresh type on every setState (i.e. every keystroke → setDraft),
 // which remounts the textarea and drops focus after one character.
-function NotePanel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function NotePanel({ value, onChange, onDelete }: { value: string; onChange: (v: string) => void; onDelete: () => void }) {
   return (
-    <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44` }}>
+    <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44`, position: 'relative' }}>
+      <button
+        type="button" contentEditable={false} onClick={onDelete} title="Delete note" aria-label="Delete note"
+        style={{ position: 'absolute', top: 2, right: 4, background: 'transparent', border: 'none', color: '#9d174d', fontWeight: 700, fontSize: '1.15rem', lineHeight: 1, cursor: 'pointer', padding: '0 3px', zIndex: 1 }}
+      >×</button>
       <textarea
         ref={bindStopPM}
         value={value}
@@ -66,7 +72,7 @@ function NotePanel({ value, onChange }: { value: string; onChange: (v: string) =
           width: '100%', resize: 'vertical', boxSizing: 'border-box',
           fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: '#4a4a4a',
           background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
-          padding: '0.4em 0.55em', outline: 'none',
+          padding: '0.4em 1.6em 0.4em 0.55em', outline: 'none',
         }}
       />
     </div>
@@ -76,21 +82,28 @@ function NotePanel({ value, onChange }: { value: string; onChange: (v: string) =
 // Back-reference markers — the DOCUMENT pages where a source is cited (from the pagination guides),
 // each snapping back to that in-text citation. Falls back to occurrence ordinals when pages can't be
 // measured (scroll / gapped mode). Pages are deduped so each appears once.
-function backrefHtml(key: string, occPages: Array<{ occ: number; page: number | null }>): string {
+const escHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+const firstWords = (q: string, n = 3) => q.trim().split(/\s+/).filter(Boolean).slice(0, n).join(' ')
+
+// Back-refs label each in-text occurrence by its DOCUMENT PAGE (falling back to occurrence ordinal when
+// pages can't be measured). Two citations on the same page become "3.1", "3.2" — both hyperlinked. Each
+// shows the first few words of its pinpoint quote (if any) so the reader recalls which one it is.
+function backrefHtml(key: string, occPages: Array<{ occ: number; page: number | null }>, quotes: string[]): string {
   if (!occPages.length) return ''
   const anyPage = occPages.some(o => o.page != null)
-  const seen = new Set<number>()
-  const marks: string[] = []
-  for (const { occ, page } of occPages) {
-    if (anyPage) {
-      if (page == null || seen.has(page)) continue
-      seen.add(page)
-      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to page ${page}">${page}</a>`)
-    } else {
-      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to citation ${occ}">${occ}</a>`)
-    }
-  }
-  if (!marks.length) return ''
+  const total = new Map<number, number>()
+  if (anyPage) for (const o of occPages) if (o.page != null) total.set(o.page, (total.get(o.page) ?? 0) + 1)
+  const running = new Map<number, number>()
+  const marks = occPages.map(({ occ, page }) => {
+    let label: string
+    if (anyPage && page != null) {
+      if ((total.get(page) ?? 1) > 1) { const i = (running.get(page) ?? 0) + 1; running.set(page, i); label = `${page}.${i}` }
+      else label = `${page}`
+    } else label = `${occ}`
+    const words = firstWords(quotes[occ - 1] ?? '')
+    const preview = words ? ` <span class="iw-backref-quote">${escHtml(words)}…</span>` : ''
+    return `<a class="iw-cite-link iw-backref-mark" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to ${anyPage && page != null ? `p. ${page}` : `citation ${occ}`}">${label}${preview}</a>`
+  })
   return `<span class="iw-backref-group" contenteditable="false"><span class="iw-backref-arrow">↩</span> ${marks.join(' ')}</span>`
 }
 
@@ -109,9 +122,9 @@ function espHtml(pages: number[], raw: boolean): string {
 }
 
 // Inject the entry anchor id + esp-pages + back-refs + note button into a single `.csl-entry` html.
-function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[], raw: boolean): string {
+function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[], raw: boolean, quotes: string[]): string {
   let out = html.replace(/^(\s*<[a-z]+)/i, `$1 id="${bibAnchorId(id)}"`)
-  const trailing = espHtml(pages, raw) + backrefHtml(id, occPages) + noteButtonHtml(id, hasNote)
+  const trailing = espHtml(pages, raw) + backrefHtml(id, occPages, quotes) + noteButtonHtml(id, hasNote)
   out = out.replace(/<\/[a-z]+>\s*$/i, m => `${trailing}${m}`)
   return out
 }
@@ -162,7 +175,8 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
         const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(it).map(p => p + off)])].sort((a, b) => a - b)
         const raw = pages.length > 0 && (it as { _iw?: IwCitationMeta })?._iw?.pageOffsetFlag === 'raw'
         const occPages = occurrencePages(id, counts.get(id) ?? 0)
-        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages, raw), occ: counts.get(id) ?? 0, note }
+        const quotes = occurrenceQuotes(editor.state.doc, id)
+        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages, raw, quotes), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)
       setPlain([])
@@ -202,6 +216,18 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       void addToLibrary({ ...item, _iw: iw })
     }, 500)
   }, [])
+
+  const onDeleteNote = useCallback((id: string) => {
+    clearTimeout(persistTimers.current[id])
+    setDraft(d => ({ ...d, [id]: '' }))
+    setOpenNotes(prev => { const n = new Set(prev); n.delete(id); return n })
+    const item = bibProvider.get(id)
+    if (item) {
+      const iw: IwCitationMeta = { ...((item as { _iw?: IwCitationMeta })._iw ?? {}) }
+      delete iw.note
+      void addToLibrary({ ...item, _iw: iw })
+    }
+  }, [])
   useEffect(() => () => { Object.values(persistTimers.current).forEach(clearTimeout) }, [])
 
   // Event-delegated nav + note-toggle for the injected CSL html.
@@ -216,6 +242,18 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     if (noteBtn) {
       e.preventDefault(); e.stopPropagation()
       const id = noteBtn.getAttribute('data-iw-note'); if (id) toggleNote(id)
+      return
+    }
+    // Clicking the reference entry itself opens its PDF where the reader last left off. Opened from the
+    // bib → noRef, so any annotations made here never create inline page references (R6).
+    const entry = (e.target as HTMLElement).closest('[id^="iwbib-"]') as HTMLElement | null
+    if (entry) {
+      const key = entry.id.slice('iwbib-'.length)
+      const item = bibProvider.get(key)
+      if (key && hasPdf(item)) {
+        e.preventDefault(); e.stopPropagation()
+        openPdf({ citekey: key, page: getLastPdfPage(key), label: key, noRef: true, instanceId: null })
+      }
     }
   }
 
@@ -250,7 +288,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           {entries.map(e => (
             <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.75em' }}>
               <div ref={styleEntry} dangerouslySetInnerHTML={{ __html: e.html }} />
-              {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} />}
+              {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} onDelete={() => onDeleteNote(e.id)} />}
             </div>
           ))}
         </div>
@@ -272,7 +310,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
                 <button type="button" className="iw-note-add" data-iw-note={p.id}
                   title={p.note.trim() ? 'Edit note' : 'Add note'}>{p.note.trim() ? '✎' : '+'}</button>
               </p>
-              {openNotes.has(p.id) && <NotePanel value={draft[p.id] ?? p.note} onChange={v => onNoteChange(p.id, v)} />}
+              {openNotes.has(p.id) && <NotePanel value={draft[p.id] ?? p.note} onChange={v => onNoteChange(p.id, v)} onDelete={() => onDeleteNote(p.id)} />}
             </div>
           ))}
         </div>

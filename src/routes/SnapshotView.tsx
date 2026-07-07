@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
@@ -16,65 +16,6 @@ const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 
-// ── Summary panel ─────────────────────────────────────────────────────────────
-// Collapses to a 6px-wide vertical strip (width-collapse). On wide screens always
-// open. On narrow/phone flashes open for 1s when flashKey changes (not on mount).
-function SummaryPanel({ text, isWide, isPhone, flashKey }: {
-  text: string; isWide: boolean; isPhone: boolean; flashKey: string
-}) {
-  const [hovered, setHovered] = useState(false)
-  const [flashing, setFlashing] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>()
-  const isFirstRender = useRef(true)
-
-  useEffect(() => {
-    // Skip the initial mount — only flash when flashKey actually increments
-    if (isFirstRender.current) { isFirstRender.current = false; return }
-    if (isWide) return
-    setFlashing(true)
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => setFlashing(false), 1000)
-    return () => clearTimeout(timer.current)
-  }, [flashKey, isWide])
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const expanded = isWide || hovered || flashing
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
-
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        width: expanded ? '195px' : '10px',
-        minHeight: 36,
-        overflow: 'hidden',
-        background: expanded
-          ? (isPhone ? 'rgba(237,229,247,0.82)' : '#ede5f7')
-          : '#5c2d8a',
-        border: expanded ? '1px solid rgba(92,45,138,0.22)' : 'none',
-        borderRadius: 8,
-        padding: expanded ? '5px 7px' : 0,
-        fontSize: '1rem',
-        lineHeight: 1.45,
-        color: INK,
-        cursor: expanded ? 'default' : 'pointer',
-        userSelect: 'none',
-        pointerEvents: 'auto',
-        transition: 'width 220ms ease, padding 220ms ease, background 220ms ease',
-        flexShrink: 0,
-        textAlign: 'left',
-      }}
-    >
-      {expanded && (
-        <div style={{ width: 178 }}>
-          {lines.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Nav side ─────────────────────────────────────────────────────────────────
 // Buttons always visible. Each button has a summary panel above it that collapses
 // to a thin strip. Panels flash open individually based on which nav action fired.
@@ -82,20 +23,14 @@ function NavSide({
   side, snapDir,
   onSnap, snapDisabled,
   onVer, verDisabled,
-  hasVersions, isPhone, isWide,
-  summary, versionSummary,
-  snapFlashKey, verFlashKey,
+  hasVersions, isPhone,
   overridePos,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
   onSnap: () => void; snapDisabled: boolean
   onVer: () => void;  verDisabled: boolean
-  hasVersions: boolean; isPhone: boolean; isWide: boolean
-  summary: string | null
-  versionSummary: string | null
-  snapFlashKey: string
-  verFlashKey: string
+  hasVersions: boolean; isPhone: boolean
   overridePos?: React.CSSProperties
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
@@ -134,31 +69,14 @@ function NavSide({
       top: '50%', transform: 'translateY(-50%)',
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
-      {/* Snapshot section: snap panel ABOVE the < button */}
+      {/* Snapshot nav. Summaries no longer float over the document — they live in the RHS side panel. */}
       <div style={{ position: 'relative' }}>
-        {summary && (
-          <div style={{
-            position: 'absolute', bottom: '100%', marginBottom: 5,
-            [side]: 0, zIndex: 1, pointerEvents: 'none',
-          }}>
-            <SummaryPanel text={summary} isWide={isWide} isPhone={isPhone} flashKey={snapFlashKey} />
-          </div>
-        )}
         <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
       </div>
 
-      {/* Version section: << button, ver panel BELOW */}
       {showVer && (
         <div style={{ position: 'relative' }}>
           <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
-          {versionSummary && (
-            <div style={{
-              position: 'absolute', top: '100%', marginTop: 5,
-              [side]: 0, zIndex: 1, pointerEvents: 'none',
-            }}>
-              <SummaryPanel text={versionSummary} isWide={isWide} isPhone={isPhone} flashKey={verFlashKey} />
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -401,8 +319,8 @@ function InlineDiffView({
         display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
         background: 'rgba(249,247,244,0.98)',
       }}>
-        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>Initial snapshot</span>}
-        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.85rem', color: '#888' }}>No changes from previous snapshot</span>}
+        {!prevSnap && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>Initial snapshot</span>}
+        {prevSnap && !hasChange && <span style={{ fontStyle: 'italic', fontSize: '0.92rem', fontWeight: 500, color: '#888' }}>No changes from previous snapshot</span>}
         {prevSnap && hasChange && (
           <>
             <span style={{ color: '#15803d', fontWeight: 700, fontSize: '1.15rem' }}>+{added}</span>
@@ -551,21 +469,129 @@ function longestChangeOpIdx(ops: DiffOp[] | null): number | null {
   return best
 }
 
+// Column stack-height for the minimap: pages stack this many high per column, then wrap into columns.
+// ≤2→1, 3–6→2, 7–9→3, 10–16→4, 17+→5 (then ≈√pages). Peter's spec.
+function stackHeight(pages: number): number {
+  if (pages <= 2) return 1
+  if (pages <= 6) return 2
+  if (pages <= 9) return 3
+  if (pages <= 16) return 4
+  return Math.ceil(Math.sqrt(pages))
+}
+
+// A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
+// (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
+// Click or drag scrolls the panes so that point sits on the midline.
+function MinimapPanel({ leftRef, ops, snapKey }: {
+  leftRef: React.RefObject<HTMLDivElement | null>
+  ops: DiffOp[] | null
+  snapKey: string
+}) {
+  const [pages, setPages] = useState(1)
+  const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean }>>([])
+  const pageHRef = useRef(1000)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  const measure = useCallback(() => {
+    const el = leftRef.current
+    if (!el || !el.scrollHeight) return
+    const paper = el.querySelector('.scroll-paper') as HTMLElement | null
+    const pw = paper?.clientWidth || el.clientWidth || 1
+    const pageH = Math.max(200, pw * Math.SQRT2) // A4 portrait ratio, matching the pagination
+    pageHRef.current = pageH
+    const n = Math.max(1, Math.round(el.scrollHeight / pageH))
+    setPages(n)
+    const er = el.getBoundingClientRect()
+    const m: Array<{ page: number; frac: number; add: boolean }> = []
+    el.querySelectorAll('[data-opidx]').forEach(o => {
+      const op = ops?.[Number((o as HTMLElement).getAttribute('data-opidx'))]
+      if (!op || op.type === 'same') return
+      const r = (o as HTMLElement).getBoundingClientRect()
+      const y = r.top - er.top + el.scrollTop
+      const page = Math.max(0, Math.min(n - 1, Math.floor(y / pageH)))
+      m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add' })
+    })
+    setMarks(m)
+  }, [ops, leftRef])
+
+  useLayoutEffect(() => { measure(); const t = setTimeout(measure, 350); return () => clearTimeout(t) }, [measure, snapKey])
+  useEffect(() => {
+    const el = leftRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => measure()); ro.observe(el)
+    return () => ro.disconnect()
+  }, [measure, leftRef])
+
+  const height = stackHeight(pages)
+  const cols = Math.ceil(pages / height)
+  const GAP = 4
+
+  // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
+  // then follows the diff pane). Column-major: down a column, then the next column.
+  const seekTo = useCallback((clientX: number, clientY: number) => {
+    const grid = gridRef.current, el = leftRef.current
+    if (!grid || !el) return
+    const gr = grid.getBoundingClientRect()
+    const colW = gr.width / cols
+    const cellH = (gr.height - (height - 1) * GAP) / height + GAP
+    const c = Math.max(0, Math.min(cols - 1, Math.floor((clientX - gr.left) / colW)))
+    const rRaw = (clientY - gr.top)
+    const r = Math.max(0, Math.min(height - 1, Math.floor(rRaw / cellH)))
+    const page = c * height + r
+    if (page >= pages) return
+    const fracInCell = Math.max(0, Math.min(1, (rRaw - r * cellH) / (cellH - GAP)))
+    const y = (page + fracInCell) * pageHRef.current
+    el.scrollTo({ top: Math.max(0, y - el.clientHeight / 2), behavior: 'auto' })
+  }, [cols, height, pages, leftRef])
+
+  const dragging = useRef(false)
+  const onDown = (e: React.PointerEvent) => { dragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); seekTo(e.clientX, e.clientY) }
+  const onMove = (e: React.PointerEvent) => { if (dragging.current) seekTo(e.clientX, e.clientY) }
+  const onUp = () => { dragging.current = false }
+
+  return (
+    <div
+      ref={gridRef}
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+      title="Click or drag to scroll"
+      style={{
+        flex: 1, minHeight: 0, background: '#9fd9c8', borderRadius: 6, padding: 6, cursor: 'pointer',
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoFlow: 'column',
+        gridTemplateRows: `repeat(${height}, 1fr)`, gap: GAP, touchAction: 'none',
+      }}
+    >
+      {Array.from({ length: pages }, (_, p) => (
+        <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
+          {marks.filter(m => m.page === p).map((m, i) => (
+            <div key={i} aria-hidden="true" style={{
+              position: 'absolute', left: 1, right: 1, top: `${m.frac * 100}%`, height: 2,
+              background: m.add ? '#16a34a' : '#dc2626', borderRadius: 1,
+            }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
-  lineMode: 'center' | 'longest'
+  lineMode: 'center' | 'longest'; summary?: string | null
 }) {
   const vertical = isPhone || isNarrow
-  const [splitPct, setSplitPct] = useState(50)
+  const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
+  const [sidePanelPx, setSidePanelPx] = useState(240)
   const dragging   = useRef(false)
+  const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const leftScrollRef  = useRef<HTMLDivElement>(null)
   const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
   const anchorRatioRef  = useRef(0.5)
   const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
   const sigTickRef      = useRef(false)                // throttle signature recompute to 1/frame
+  const syncTickRef     = useRef(false)                // throttle right-pane follow to 1/frame
 
   // Own Ctrl+wheel zoom for the diff view (like the PDF viewer): scales the diff text and — crucially —
   // preventDefaults so it never triggers the browser's whole-page zoom. Cursor-anchored per pane.
@@ -699,6 +725,10 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+    // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
+    // the Scroll surface, so its own scroll handler never fires.
+    const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
+    if (surf) surf.style.setProperty('--wave-x', `${(el.scrollTop * 0.06).toFixed(1)}px`)
     // caret hit-testing is comparatively costly — recompute the signature at most once per frame
     if (!sigTickRef.current) {
       sigTickRef.current = true
@@ -706,6 +736,42 @@ function SplitDiffView({
         sigTickRef.current = false
         const cur = leftScrollRef.current
         if (cur) { const s = midlineSignature(cur); if (s) anchorSigRef.current = s }
+      })
+    }
+    // Follow the right (hunk) pane via a BIJECTION whose lock points are the diffs ("traffic lights"):
+    // each change's TOP in the document pane maps to that change's TOP in the diff pane, so both are in
+    // exact sync as you pass a change, and interpolate (accelerate/decelerate) smoothly between them.
+    if (!syncTickRef.current) {
+      syncTickRef.current = true
+      requestAnimationFrame(() => {
+        syncTickRef.current = false
+        const L = leftScrollRef.current, R = rightScrollRef.current
+        if (!L || !R) return
+        const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
+        const knots: Array<{ ly: number; ry: number }> = []
+        L.querySelectorAll('[data-opidx]').forEach(le => {
+          const idx = (le as HTMLElement).getAttribute('data-opidx')
+          const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
+          if (!re) return
+          knots.push({
+            ly: (le as HTMLElement).getBoundingClientRect().top - lRect.top + L.scrollTop,
+            ry: re.getBoundingClientRect().top - rRect.top + R.scrollTop,
+          })
+        })
+        if (!knots.length) return
+        knots.sort((a, b) => a.ly - b.ly)
+        const lMid = L.scrollTop + L.clientHeight / 2
+        let ry: number
+        if (lMid <= knots[0].ly) ry = knots[0].ry - (knots[0].ly - lMid)                       // before first lock point: 1:1
+        else if (lMid >= knots[knots.length - 1].ly) ry = knots[knots.length - 1].ry + (lMid - knots[knots.length - 1].ly)
+        else {
+          let i = 0
+          while (i < knots.length - 1 && knots[i + 1].ly <= lMid) i++
+          const a = knots[i], b = knots[i + 1]
+          const t = (lMid - a.ly) / Math.max(1, b.ly - a.ly)
+          ry = a.ry + t * (b.ry - a.ry)
+        }
+        R.scrollTop = Math.max(0, ry - R.clientHeight / 2)
       })
     }
   }, [])
@@ -771,65 +837,117 @@ function SplitDiffView({
     void startX; void startY
   }, [vertical])
 
+  // Side-panel resize (its own divider). Width in wide mode, height in vertical mode.
+  const startSideDrag = useCallback(() => {
+    sideDragging.current = true
+    const onMove = (x: number, y: number) => {
+      if (!sideDragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const px = vertical ? (rect.bottom - y) : (rect.right - x)
+      setSidePanelPx(Math.max(150, Math.min(vertical ? rect.height - 120 : rect.width - 200, Math.round(px))))
+    }
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
+    const onTouchMove = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY) }
+    const onUp = () => {
+      sideDragging.current = false
+      window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onUp)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onUp)
+  }, [vertical])
+
+  // A dotted reading-line at the pane centre (both panes share it).
+  const midline = (
+    <div aria-hidden="true" style={{
+      position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+      borderTop: '1px dashed rgba(92,45,138,0.38)', pointerEvents: 'none', transform: 'translateY(-0.5px)',
+    }} />
+  )
+  const gripDots = (
+    <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
+      {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
+    </div>
+  )
+
   return (
     <div ref={containerRef} style={{
-      display: 'flex', flexDirection: vertical ? 'column' : 'row',
-      height: '100%', overflow: 'hidden',
+      display: 'flex', flexDirection: vertical ? 'column' : 'row', height: '100%', overflow: 'hidden',
     }}>
+      {/* Main split area: DIFF (left/top) + EDITOR document (middle/bottom). Editor is 5/3 × the diff. */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: vertical ? 'column' : 'row', overflow: 'hidden' }}>
 
-      {/* ── Left / top pane: full annotated document + midline ── */}
-      <div style={{
-        [vertical ? 'height' : 'width']: `${splitPct}%`,
-        flexShrink: 0, position: 'relative', overflow: 'hidden',
-      }}>
-        {/* Dotted midline — fixed at 50% of the pane height */}
-        <div aria-hidden="true" style={{
-          position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
-          borderTop: '1px dashed rgba(92,45,138,0.38)',
-          pointerEvents: 'none', transform: 'translateY(-0.5px)',
-        }} />
-        <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
-          <Scroll phone={isPhone}>
-            <div style={{ zoom: diffZoom } as React.CSSProperties}>
-              <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
-            </div>
-          </Scroll>
+        {/* ── Diff pane (left) ── */}
+        <div style={{
+          [vertical ? 'height' : 'width']: `${splitPct}%`, flexShrink: 0, position: 'relative',
+          overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom,
+        } as React.CSSProperties}>
+          {midline}
+          <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
+        </div>
+
+        {/* ── Diff↔editor divider ── */}
+        <div
+          style={{
+            [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
+            background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
+          }}
+          onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
+          onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
+          onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+          title="Drag to resize"
+        >{gripDots}</div>
+
+        {/* ── Editor document pane (middle) ── */}
+        <div style={{
+          flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden',
+          borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
+          borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
+        }}>
+          {midline}
+          <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
+            <Scroll phone={isPhone}>
+              <div style={{ zoom: diffZoom } as React.CSSProperties}>
+                <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
+              </div>
+            </Scroll>
+          </div>
         </div>
       </div>
 
-      {/* ── Drag divider ── */}
+      {/* ── Side-panel resize divider (both modes) ── */}
       <div
         style={{
           [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
           background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'background 0.12s', userSelect: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
         }}
-        onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
-        onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
+        onMouseDown={(e) => { e.preventDefault(); startSideDrag() }}
+        onTouchStart={(e) => { e.preventDefault(); startSideDrag() }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
-        onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
-        title="Drag to resize"
-      >
-        <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
-          {[0,1,2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
-        </div>
-      </div>
+        onMouseLeave={(e) => { if (!sideDragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+        title="Drag to resize the side panel"
+      >{gripDots}</div>
 
-      {/* ── Right / bottom pane: compact hunk diff ── */}
+      {/* ── Side panel (both modes): AI summary (scrollable) + document minimap ── */}
       <div style={{
-        flex: 1, overflow: 'hidden', background: '#f9f7f4',
-        borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
-        borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
-        zoom: diffZoom,
+        [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, display: 'flex', flexDirection: 'column',
+        background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden',
       } as React.CSSProperties}>
-        <InlineDiffView
-          ops={ops}
-          prevSnap={prevSnap}
-          onChangeClick={handleClickOp}
-          onHoverOp={handleHoverOp}
-          scrollBodyRef={rightScrollRef}
-        />
+        <div style={{
+          flex: '0 0 44%', minHeight: 0, overflow: 'auto', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
+          border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
+        }}>
+          <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
+          {summary && summary.trim()
+            ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
+            : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
+        </div>
+        <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
       </div>
     </div>
   )
@@ -848,14 +966,14 @@ export function SnapshotView() {
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [libReady, setLibReady] = useState(false)
-  const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
+  const [, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
   const [isRegenerating, setIsRegenerating] = useState(false)
-  // Flash counters: each increments only when that specific panel should pop open (1s)
-  const [leftSnapFlash,  setLeftSnapFlash]  = useState(0)
-  const [rightSnapFlash, setRightSnapFlash] = useState(0)
-  const [leftVerFlash,   setLeftVerFlash]   = useState(0)
-  const [rightVerFlash,  setRightVerFlash]  = useState(0)
+  // Nav flash setters kept (no-op now the floating summary panels are gone; harmless, may return).
+  const [, setLeftSnapFlash]  = useState(0)
+  const [, setRightSnapFlash] = useState(0)
+  const [, setLeftVerFlash]   = useState(0)
+  const [, setRightVerFlash]  = useState(0)
   // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
   // above the biggest change in each snapshot. Persisted.
   const [lineMode, setLineMode] = useState<'center' | 'longest'>(() => {
@@ -1046,14 +1164,8 @@ export function SnapshotView() {
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
   const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
-  // AI summary side panels
-  const currentGroup = groupIdx >= 0 ? groups[groupIdx] : null
-  const currentDiff    = snapshot?.diffSummary?.bullets ?? null
-  const currentVerDiff = currentGroup?.versionSnap?.versionSummary ?? null
-  const leftSummary         = navDir === 'back' ? currentDiff    : null
-  const rightSummary        = navDir === 'fwd'  ? currentDiff    : null
-  const leftVersionSummary  = navDir === 'back' ? currentVerDiff : null
-  const rightVersionSummary = navDir === 'fwd'  ? currentVerDiff : null
+  // AI summary — now shown in the RHS side panel (no longer floating over the document).
+  const currentDiff = snapshot?.diffSummary?.bullets ?? null
 
   return (
     // height:100dvh so the split pane fills the screen without page scroll
@@ -1084,7 +1196,7 @@ export function SnapshotView() {
       {/* Fixed header */}
       <div
         className="z-50 flex items-center gap-x-2 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 36 }}
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.82rem', height: 48 }}
       >
         <span style={{ color: INK, fontWeight: 500 }}>
           ◈ {snapshot
@@ -1104,19 +1216,14 @@ export function SnapshotView() {
           </span>
         )}
 
-        <span className="flex items-center gap-2 ml-auto flex-shrink-0">
-          {allSnapshots.length > 1 && (
-            <span className="text-stone-400 tabular-nums">
-              {`s${idx + 1}/${allSnapshots.length}`}
-            </span>
-          )}
-        </span>
+        {/* Centred, jazzed action buttons */}
+        <div className="flex-1 flex items-center justify-center gap-2.5 flex-wrap">
         <button
           type="button"
           onClick={toggleLineMode}
-          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.85rem',
+            fontSize: '0.92rem', fontWeight: 500,
             background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -1141,9 +1248,9 @@ export function SnapshotView() {
               await clearAllSnapshotSummaries(docId)
               setGenSeed((n) => n + 1)
             }}
-            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+            className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.92rem', fontWeight: 500,
               background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
               border: '1px solid rgba(92, 45, 138, 0.35)',
               color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
@@ -1170,9 +1277,9 @@ export function SnapshotView() {
               navigate(`/snapshot?${p.toString()}`)
               setAllSnapshots(remaining)
             }}
-            className="flex-shrink-0 px-3 py-1 rounded-lg font-serif"
+            className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm"
             style={{
-              fontSize: '0.85rem',
+              fontSize: '0.92rem', fontWeight: 500,
               background: 'rgba(185,28,28,0.07)',
               border: '1px solid rgba(185,28,28,0.25)',
               color: '#b91c1c',
@@ -1186,9 +1293,9 @@ export function SnapshotView() {
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="flex-shrink-0 px-3 py-1 rounded-lg font-serif transition-colors"
+          className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.85rem',
+            fontSize: '0.92rem', fontWeight: 500,
             background: 'rgba(92, 45, 138, 0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -1198,10 +1305,15 @@ export function SnapshotView() {
         >
           ← editor
         </button>
+        </div>
+        {/* Snapshot index, right */}
+        {allSnapshots.length > 1 && (
+          <span className="text-stone-400 tabular-nums flex-shrink-0">{`s${idx + 1}/${allSnapshots.length}`}</span>
+        )}
       </div>
 
       {/* Spacer for fixed header */}
-      <div style={{ height: 36, flexShrink: 0 }} />
+      <div style={{ height: 48, flexShrink: 0 }} />
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -1218,6 +1330,7 @@ export function SnapshotView() {
             isPhone={isPhone}
             isNarrow={!isWide}
             lineMode={lineMode}
+            summary={currentDiff}
           />
         )}
       </div>
@@ -1229,17 +1342,13 @@ export function SnapshotView() {
             side="left" snapDir="back"
             onSnap={goBack} snapDisabled={!canBack}
             onVer={goVerBack} verDisabled={!canVerBack}
-            hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
-            summary={leftSummary} versionSummary={leftVersionSummary}
-            snapFlashKey={String(leftSnapFlash)} verFlashKey={String(leftVerFlash)}
+            hasVersions={hasVersions} isPhone={isPhone}
           />
           <NavSide
             side="right" snapDir="fwd"
             onSnap={goFwd} snapDisabled={!canFwd}
             onVer={goVerFwd} verDisabled={!canVerFwd}
-            hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
-            summary={rightSummary} versionSummary={rightVersionSummary}
-            snapFlashKey={String(rightSnapFlash)} verFlashKey={String(rightVerFlash)}
+            hasVersions={hasVersions} isPhone={isPhone}
             overridePos={isWide && !isPhone
               ? { left: 'calc(var(--snap-split-pct, 50%) - 60px)' }
               : undefined}

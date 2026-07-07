@@ -8,7 +8,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { getPdfData } from '../citations/pdfSource'
+import { getPdfData, hasPdf } from '../citations/pdfSource'
+import { bibProvider } from '../citations/bibProvider'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
 
@@ -18,6 +19,7 @@ const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
+  instanceId?: string | null; context?: string | null; noRef?: boolean; restoreScroll?: boolean
   onLink?: (quote: string, page: number) => void
 }
 
@@ -25,6 +27,7 @@ export function PdfSidePanel() {
   const [viewing, setViewing] = useState<Viewing | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [noAttachment, setNoAttachment] = useState<string | null>(null) // label when the source has no PDF
   const [width, setWidth] = useState(560)
   const [height, setHeight] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.5))
   const [dragging, setDragging] = useState(false)
@@ -43,7 +46,7 @@ export function PdfSidePanel() {
   }, [])
   const orientation: 'bottom' | 'side' = isWide ? storedOrient : 'bottom'
 
-  const open = !!(viewing || error || loading)
+  const open = !!(viewing || error || loading || noAttachment)
 
   useEffect(() => {
     const onOpen = (e: Event) => {
@@ -51,13 +54,16 @@ export function PdfSidePanel() {
       if (!detail?.citekey) return
       setError(null)
       setViewing(null)
+      setNoAttachment(null)
+      // The panel still pops up for a source with no PDF — it just says "No attachment".
+      if (!hasPdf(bibProvider.get(detail.citekey))) { setLoading(false); setNoAttachment(detail.label || detail.citekey); return }
       setLoading(true)
       void (async () => {
         const data = await getPdfData(detail.citekey)
         setLoading(false)
         if (!data) { setError('Couldn’t load this source’s PDF (no embedded file, or the URL didn’t load).'); return }
         const page = detail.page && detail.page > 0 ? detail.page : 1
-        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, onLink: detail.onLink })
+        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, restoreScroll: detail.restoreScroll ?? false, onLink: detail.onLink })
       })()
     }
     window.addEventListener(OPEN_PDF_EVENT, onOpen)
@@ -100,7 +106,7 @@ export function PdfSidePanel() {
     return () => set('0px', '0px')
   }, [open, orientation, width, height])
 
-  function close() { setViewing(null); setError(null); setLoading(false) }
+  function close() { setViewing(null); setError(null); setLoading(false); setNoAttachment(null) }
   function toggleOrient() {
     setStoredOrient(o => {
       const next = o === 'side' ? 'bottom' : 'side'
@@ -145,20 +151,15 @@ export function PdfSidePanel() {
               select text to highlight{viewing.onLink ? ' or link' : ''}
             </span>
           )}
-          {isWide && (
-            <button type="button" onClick={toggleOrient}
-              style={{ marginLeft: 'auto', border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.72rem', borderRadius: 5, padding: '2px 7px', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}
-              title={side ? 'Dock to bottom' : 'Dock to the side'}>
-              {side ? '▭ bottom' : '▯ side'}
-            </button>
-          )}
           <button type="button" onClick={close}
-            style={{ marginLeft: isWide ? 4 : 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
+            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
             title="Close (Esc)">×</button>
         </div>
 
         {loading && !viewing ? (
           <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#9ca3af' }}>Loading PDF…</div>
+        ) : noAttachment ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '1rem', fontStyle: 'italic' }}>No attachment</div>
         ) : error ? (
           <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>{error}</div>
         ) : viewing ? (
@@ -169,6 +170,16 @@ export function PdfSidePanel() {
               citekey={viewing.citekey}
               initialPage={viewing.page}
               initialQuote={viewing.quote}
+              instanceId={viewing.instanceId}
+              context={viewing.context}
+              noRef={viewing.noRef}
+              restoreScroll={viewing.restoreScroll}
+              dockButton={isWide ? (
+                <button type="button" onClick={toggleOrient} title={side ? 'Dock to bottom' : 'Dock to the side'}
+                  style={{ border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.9rem', borderRadius: 5, padding: '2px 6px', cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+                  {side ? '▭' : '▯'}
+                </button>
+              ) : null}
               onLinkToCitation={viewing.onLink}
             />
           </div>

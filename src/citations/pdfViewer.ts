@@ -7,6 +7,10 @@ export interface OpenPdfDetail {
   page?: number | null
   label?: string        // human label for the panel header (e.g. the in-text citation text)
   quote?: string | null // a stored pinpoint sentence to scroll to + highlight on open
+  instanceId?: string | null // the citation OCCURRENCE — scopes highlights/page refs to this inline
+  context?: string | null    // the sentence in the editor just before the citation (shown for context)
+  noRef?: boolean            // opened from the bibliography → annotations must NOT create page refs/links
+  restoreScroll?: boolean    // open at the reader's LAST viewed scroll position (author-year click)
   onLink?: (quote: string, page: number) => void // present when opened from a citation → set its pinpoint
 }
 
@@ -16,6 +20,17 @@ export function openPdf(detail: OpenPdfDetail): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent<OpenPdfDetail>(OPEN_PDF_EVENT, { detail }))
 }
+
+// Last viewed page per source PDF, so clicking a citation's author-year reopens where the reader left
+// off. Module-level (survives the viewer unmounting); the viewer reports its top visible page here.
+const lastPageByKey = new Map<string, number>()
+export function setLastPdfPage(citekey: string, page: number): void { if (page > 0) lastPageByKey.set(citekey, page) }
+export function getLastPdfPage(citekey: string): number | null { return lastPageByKey.get(citekey) ?? null }
+// Exact scroll offset (px) per source, updated continuously while viewing, so author-year reopens at the
+// precise spot the reader left off — not just the top of the page.
+const lastScrollByKey = new Map<string, number>()
+export function setLastPdfScroll(citekey: string, top: number): void { lastScrollByKey.set(citekey, Math.max(0, top)) }
+export function getLastPdfScroll(citekey: string): number | null { return lastScrollByKey.get(citekey) ?? null }
 
 // Extract the first page number from a citation locator ("45", "p. 45", "pp. 45–47", "ch. 3, 45").
 // Returns null when there's no numeric page (e.g. "ch. 3" alone) — the viewer then opens at page 1.

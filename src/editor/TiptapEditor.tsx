@@ -23,6 +23,10 @@ import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { ScasSlotMark } from './extensions/ScasSlotMark'
+import { CommentMark } from './extensions/CommentMark'
+import { InsertionMark, DeletionMark, TrackChanges } from './extensions/TrackChanges'
+import { CommentNotes } from '../components/CommentNotes'
+import { ReviewBar } from '../components/ReviewBar'
 import { MathInline } from './extensions/MathInline'
 import { MathBlock } from './extensions/MathBlock'
 import { MathPasteHandler } from './extensions/MathPasteHandler'
@@ -224,6 +228,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [paperRight, setPaperRight] = useState(0)
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)   // review layer: sticky-note comments + track changes
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
@@ -368,6 +373,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       ListStyle,
       PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
       ScasSlotMark,
+      CommentMark,
+      InsertionMark,
+      DeletionMark,
+      TrackChanges,
       TextStyle,
       FontFamily,
       FontSize,
@@ -634,6 +643,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editor.on('update', count)
     return () => { editor.off('update', count) }
   }, [editor])
+  // "Sync editor" from the PDF viewer: scroll to the citation OCCURRENCE a highlight belongs to.
+  useEffect(() => {
+    if (!editor) return
+    const onGoto = (e: Event) => {
+      const iid = (e as CustomEvent<{ instanceId?: string }>).detail?.instanceId
+      if (!iid) return
+      let found = -1
+      editor.state.doc.descendants((node, pos) => {
+        if (found < 0 && node.type.name === 'citation' && node.attrs.instanceId === iid) found = pos
+        return found < 0
+      })
+      if (found < 0) return
+      const dom = editor.view.nodeDOM(found) as HTMLElement | null
+      const el = dom && dom.nodeType === 1 ? dom : (dom?.parentElement ?? null)
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    }
+    window.addEventListener('inkwave:goto-citation-instance', onGoto)
+    return () => window.removeEventListener('inkwave:goto-citation-instance', onGoto)
+  }, [editor])
+
   // Ctrl/Cmd+Shift+> / Ctrl/Cmd+Shift+< — step the selection's font size up / down through the same
   // ladder the style bar uses (stored in em, base 18px, so it matches the size picker's readout).
   useEffect(() => {
@@ -1464,6 +1493,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           hideTrigger={isTouch || keyboardUp}
         />
 
+        {/* Review layer — mounted ONLY while the R button is on, so it does ZERO work during normal
+            writing (it rescans the doc for comment marks, which was per-keystroke lag otherwise). */}
+        {editor && reviewOpen && <CommentNotes editor={editor} paperRef={paperRef} />}
+        {editor && reviewOpen && <ReviewBar editor={editor} bottom={88} onClose={() => setReviewOpen(false)} />}
+
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
             keyboard is up so it never sits over the writing. */}
@@ -1690,9 +1724,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           )}
                           {id === 'receipt' && (
                             <button type="button"
-                              onClick={() => { setReceiptOpen(o => !o) }}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Provenance record"
+                              onClick={() => { setReviewOpen(o => !o) }}
+                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                              title="Review — comments & track changes"
                             >
                               <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
                             </button>
@@ -1736,9 +1770,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   )}
                   {slotId === 'receipt' && (
                     <button type="button"
-                      onClick={() => setReceiptOpen(o => !o)}
-                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${receiptOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                      title="Provenance record"
+                      onClick={() => setReviewOpen(o => !o)}
+                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+                      title="Review — comments & track changes"
                     >
                       <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
                     </button>

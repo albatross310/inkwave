@@ -186,12 +186,19 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
 // (the common case) reuses the encoded strings instead of re-reading OPFS + re-encoding ~20 MB.
 const _pdfB64Cache = new Map<string, { v: number; name: string; data: string }>()
 
-export async function buildExportBundleWithPdfs(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<ExportBundle> {
+// stripPdfs: 'all' embeds no PDFs at all ("doc without PDFs"); 'public' omits only sources ticked
+// "publicly available" (they can be re-fetched from their open source). Default embeds everything.
+export async function buildExportBundleWithPdfs(
+  doc: InkwaveDocument, snapshots: Snapshot[], stripPdfs?: 'all' | 'public',
+): Promise<ExportBundle> {
   const bundle = buildExportBundle(doc, snapshots)
+  if (stripPdfs === 'all') return bundle
   const pdfs: Record<string, { name: string; data: string }> = {}
   for (const item of bundle.bibliography ?? []) {
-    const name = (item as { _iw?: IwCitationMeta })._iw?.pdfName
+    const iw = (item as { _iw?: IwCitationMeta })._iw
+    const name = iw?.pdfName
     if (!name) continue
+    if (stripPdfs === 'public' && iw?.publiclyAvailable) continue // available elsewhere → don't embed
     const v = pdfVersion(item.id)
     const cached = _pdfB64Cache.get(item.id)
     if (cached && cached.v === v && cached.name === name) { pdfs[item.id] = { name, data: cached.data }; continue }

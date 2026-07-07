@@ -50,12 +50,29 @@ export function ensureNavStyles(): void {
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
     .iw-esp { font-style: italic; color: #3a1e5e; font-size: 0.95em; }
+    /* ⤵ bib button: a circle ~as tall as a capital letter, sitting on the text baseline (bottom fixed),
+       roomy sides, light hard-coded purple outline (visible on both the cream day + dark night surfaces).
+       The arrow matches the outline colour and is nudged up so it sits centred, not low. */
     .iw-cite-biblink {
-      margin-left: 0.1em; font-size: 0.62em; vertical-align: super; line-height: 0;
-      color: var(--iw-cite-color, ${INK}); opacity: 0.55; cursor: pointer; border: none;
-      background: transparent; padding: 0 0.1em; user-select: none; font-family: inherit;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 0.82em; height: 0.82em; margin: 0 0.34em; vertical-align: -0.02em;
+      font-size: 1em; line-height: 1; cursor: pointer; user-select: none; font-family: inherit;
+      color: #9a7dc0; font-weight: 700;
+      border: 1px solid #9a7dc0; border-radius: 50%; background: transparent;
+      transition: background-color 120ms ease;
     }
-    .iw-cite-biblink:hover { opacity: 1; }
+    .iw-cite-biblink:hover { background-color: rgba(92,45,138,0.14); }
+    .iw-biblink-arrow { font-size: 0.66em; line-height: 1; display: block; margin-top: -0.08em; }
+    /* First-few-words preview shown after each back-ref number, to jog the reader's memory. */
+    .iw-backref-quote { font-style: italic; color: #3a1e5e; font-size: 0.86em; font-weight: 500; }
+    /* "Where you came from" flash on the back-ref: light-blue wash + dark-blue box, slow ~5s exp fade. */
+    .iw-backref-flash { animation: iw-backref-flash-kf 5s cubic-bezier(0.15, 0.75, 0.2, 1) forwards; border-radius: 3px; }
+    .iw-cite-biblink.iw-backref-flash { border-radius: 50%; } /* keep the ⤵ circle round while flashing */
+    @keyframes iw-backref-flash-kf {
+      0%   { background-color: rgba(59,130,246,0.38); box-shadow: 0 0 0 2px #1e40af; }
+      35%  { background-color: rgba(59,130,246,0.16); box-shadow: 0 0 0 2px rgba(30,64,175,0.45); }
+      100% { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+    }
   `
   document.head.appendChild(el)
 }
@@ -89,12 +106,35 @@ export function navigateToAnchor(id: string): void {
   if (!el) return
   rememberReturn() // so a citation click can return the reader to here
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  // Clear any prior flash, force reflow, re-add so the animation restarts even on repeat clicks.
+  // If this target is an inline citation with a ⤵ bib-link circle (i.e. we arrived from the bib),
+  // flash THAT circle blue (slow fade) to orient the reader; otherwise flash the target itself purple.
+  let circle: HTMLElement | null = null
+  document.querySelectorAll('.iw-cite-biblink').forEach(b => { if ((b as HTMLElement).getAttribute('data-iw-biblink') === id) circle = b as HTMLElement })
+  if (circle) { flashBackref(circle); return }
   document.querySelectorAll('.iw-cite-flash').forEach(n => n.classList.remove('iw-cite-flash'))
   void (el as HTMLElement).offsetWidth
   el.classList.add('iw-cite-flash')
   if (flashTimer) window.clearTimeout(flashTimer)
   flashTimer = window.setTimeout(() => el.classList.remove('iw-cite-flash'), 1700)
+}
+
+// Apply the slow blue "you came from / arrived here" flash to a single element.
+let brefTimer: number | undefined
+function flashBackref(el: HTMLElement): void {
+  document.querySelectorAll('.iw-backref-flash').forEach(n => n.classList.remove('iw-backref-flash'))
+  void el.offsetWidth
+  el.classList.add('iw-backref-flash')
+  if (brefTimer) window.clearTimeout(brefTimer)
+  brefTimer = window.setTimeout(() => el.classList.remove('iw-backref-flash'), 5200)
+}
+
+// Jump from an in-text citation OCCURRENCE to its reference entry, flashing the entry (purple, fast) AND
+// the specific back-ref the reader came from (light blue, slow 5s fade) — so among several back-refs they
+// can see which one corresponds to where they just were.
+export function navigateToBibEntry(key: string, fromOcc: number): void {
+  navigateToAnchor(bibAnchorId(key))
+  const bref = document.querySelector(`.iw-backref-mark[data-iw-nav="${citeAnchorId(key, fromOcc)}"]`) as HTMLElement | null
+  if (bref) flashBackref(bref)
 }
 
 // ── Occurrence counting ─────────────────────────────────────────────────────────
@@ -123,6 +163,19 @@ export function occurrencePages(key: string, count: number): Array<{ occ: number
     out.push({ occ: n, page: el ? docPageOf(el) : null })
   }
   return out
+}
+
+/** Each in-text occurrence's pinpoint quote (the sentence linked from the source PDF), in document
+ *  order — so a back-ref can preview the first few words to remind the reader which citation it is. */
+export function occurrenceQuotes(doc: PMNode, key: string): string[] {
+  const quotes: string[] = []
+  doc.descendants(node => {
+    if (node.type.name !== 'citation') return
+    for (const k of (node.attrs.citekeys as string[]) ?? []) {
+      if (k === key) quotes.push((node.attrs.quote as string) || '')
+    }
+  })
+  return quotes
 }
 
 /** Total in-text occurrences per citekey across the whole document, in order. */

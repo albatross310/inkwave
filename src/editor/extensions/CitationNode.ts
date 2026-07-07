@@ -4,6 +4,7 @@
 // The node itself stores only citekeys + locators — display is always derived.
 
 import { Node, mergeAttributes } from '@tiptap/core'
+import { v4 as uuidv4 } from 'uuid'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { CitationNodeView } from './CitationNodeView'
 import { bibProvider } from '../../citations/bibProvider'
@@ -49,6 +50,11 @@ export const CitationNode = Node.create({
       locator:        { default: null },
       suppressAuthor: { default: false },
       quote:          { default: null },
+      // Stable per-INSTANCE id (set on insert). Lets pinpoints/highlights be scoped to THIS citation
+      // occurrence, not shared across every citation of the same source. Not part of pmToText.
+      instanceId:     { default: null,
+        parseHTML: el => el.getAttribute('data-iid') || null,
+        renderHTML: attrs => (attrs.instanceId ? { 'data-iid': String(attrs.instanceId) } : {}) },
     }
   },
 
@@ -73,7 +79,8 @@ export const CitationNode = Node.create({
   addCommands() {
     return {
       insertCitation: (attrs: CitationAttrs) => ({ commands }) => {
-        return commands.insertContent({ type: this.name, attrs })
+        // Stamp a per-instance id so this occurrence's pinpoints/highlights are its own.
+        return commands.insertContent({ type: this.name, attrs: { instanceId: uuidv4(), ...attrs } })
       },
     }
   },

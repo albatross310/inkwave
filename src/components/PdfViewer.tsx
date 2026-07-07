@@ -4,11 +4,12 @@
 // drives text-layer positioning/selection. Highlights are our own overlay divs (normalised rects),
 // stored on the source's _iw.highlights — not baked into the PDF.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
 import { pageOffsetOf } from '../citations/pageOffset'
+import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
 import type { IwCitationMeta } from '../types/document'
 
@@ -41,17 +42,32 @@ interface PageRef {
   page: any; viewport: any // eslint-disable-line @typescript-eslint/no-explicit-any
   rendered: boolean; rendering: boolean
 }
-interface Pending { text: string; page: number; rects: HighlightRect[]; x: number; y: number }
+interface Pending { text: string; page: number; rects: HighlightRect[]; groups: Array<{ page: number; rects: HighlightRect[] }>; x: number; y: number }
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
   initialQuote?: string | null
+  instanceId?: string | null   // the citation occurrence — new highlights are tagged with it
+  context?: string | null      // the sentence before the citation, shown for context
+  noRef?: boolean              // opened from the bib → annotations must not become page refs
+  restoreScroll?: boolean      // open at the reader's last exact scroll position (author-year click)
+  dockButton?: ReactNode       // the panel's dock-orientation toggle, rendered inside this single toolbar
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
+  const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
+  // "Don't add pages to inline" — bib entry forces it; a toolbar checkbox lets the reader force it too.
+  const [dontAddPages, setDontAddPages] = useState(false)
+  const noRefRef = useRef(false); noRefRef.current = !!noRef || dontAddPages
+  // "Scroll highlighted": step through this source's highlights in order; optionally sync the editor to
+  // the document position (the citation occurrence) each highlight belongs to.
+  const hlNavRef = useRef(-1)
+  const [syncEditor, setSyncEditor] = useState(false)
+  // Hovering a compact control shows its explanation down in the status line (keeps the bar squished).
+  const [hint, setHint] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -205,10 +221,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     pg.rendering = true
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) { pg.rendering = false; return }
-    // Render at EXACTLY the device pixel ratio → a 1:1 device-pixel canvas the browser never has to
-    // downscale. Supersampling beyond the device resolution forces a NON-INTEGER downscale to the
-    // screen, which shimmers/aliases thin glyph strokes (looked worse a beat after zooming). Matching
-    // dpr is what pdf.js's own viewer + Firefox do — reference quality, no aliasing. Capped for memory.
+    // Supersample: render the canvas at ≥2× the CSS size and let the browser downscale, so PDF text
+    // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
+    // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
+    // only adds resolution where the page is still small (the default fit view, where the blur shows).
+    // Supersample to ≥2× (capped 3×): exactly-dpr looked soft on low-dpr displays, and 3–4× shimmered
+    // on non-integer downscales. 2–3× is the sweet spot — crisp without the aliasing. Capped for memory.
     const MAX_CANVAS = 4096
     const outputScale = Math.max(1, Math.min(
       3, window.devicePixelRatio || 1,
@@ -293,6 +311,28 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     observerRef.current = io
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Remember the top visible page per source, so a citation's author-year can reopen where the reader
+  // left off (getLastPdfPage). rAF-throttled; reads geometry only.
+  useEffect(() => {
+    const sc = scrollRef.current
+    if (!sc) return
+    let raf = 0
+    const report = () => {
+      raf = 0
+      const top = sc.getBoundingClientRect().top
+      let best = 1, bestDist = Infinity
+      for (let i = 0; i < pagesRef.current.length; i++) {
+        const d = Math.abs(pagesRef.current[i].wrapper.getBoundingClientRect().top - top)
+        if (d < bestDist) { bestDist = d; best = i + 1 }
+      }
+      setLastPdfPage(citekey, best)
+      setLastPdfScroll(citekey, sc.scrollTop) // exact spot, so author-year reopens where you left off
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(report) }
+    sc.addEventListener('scroll', onScroll, { passive: true })
+    return () => { sc.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
+  }, [citekey])
 
   // Freeze the CURRENT on-screen render into a fixed overlay of cloned canvases — a pixel-perfect
   // still of what the user sees right now. Used to cover the (brief) teardown+repaint on a zoom-settle
@@ -499,6 +539,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     const toTop = (pg: PageRef, extra = 0) =>
       container.scrollTop + (pg.wrapper.getBoundingClientRect().top - cRect.top) + extra
     let top: number | null = null
+    // Author-year "open where you left off": restore the exact last scroll (placeholder page heights are
+    // correct from the start, so scrollTop is meaningful immediately).
+    if (restoreScroll) {
+      const saved = getLastPdfScroll(citekey)
+      if (saved != null) { container.scrollTop = Math.max(0, saved); return }
+    }
     if (initialQuote) {
       const hl = highlightsRef.current.find(h => h.text.trim() === initialQuote.trim())
         ?? highlightsRef.current.find(h => h.text.includes(initialQuote) || initialQuote.includes(h.text))
@@ -624,8 +670,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     if (!text || !viewerRef.current?.contains(sel.anchorNode)) return null
     const clientRects = Array.from(sel.getRangeAt(0).getClientRects())
     if (!clientRects.length) return null
-    let page = 1
-    const rects: HighlightRect[] = []
+    // Group the selection's rects BY PAGE — a selection spanning a page break must highlight BOTH pages,
+    // so we make one highlight per page (a highlight carries a single page).
+    const byPage = new Map<number, HighlightRect[]>()
     for (const cr of clientRects) {
       // Skip spurious rects — a page-tall or zero rect (e.g. pdf.js's .endOfContent, which the selection
       // range picks up) is what paints the WHOLE page when you only dragged over a few words.
@@ -634,16 +681,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
         const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
         const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2
         if (cx >= pr.left && cx <= pr.right && cy >= pr.top && cy <= pr.bottom) {
-          page = i + 1
-          rects.push({ x: (cr.left - pr.left) / pr.width, y: (cr.top - pr.top) / pr.height, w: cr.width / pr.width, h: cr.height / pr.height })
+          const arr = byPage.get(i + 1) ?? []
+          arr.push({ x: (cr.left - pr.left) / pr.width, y: (cr.top - pr.top) / pr.height, w: cr.width / pr.width, h: cr.height / pr.height })
+          byPage.set(i + 1, arr)
           break
         }
       }
     }
-    if (!rects.length) return null
+    if (!byPage.size) return null
+    const groups = [...byPage.entries()].sort((a, b) => a[0] - b[0]).map(([page, rects]) => ({ page, rects }))
     const last = clientRects[clientRects.length - 1]
     const box = scrollRef.current!.getBoundingClientRect()
-    return { text, page, rects, x: last.right - box.left, y: last.bottom - box.top }
+    return { text, page: groups[0].page, rects: groups[0].rects, groups, x: last.right - box.left, y: last.bottom - box.top }
   }
 
   function onMouseUp() {
@@ -665,6 +714,33 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   // downward if the text overflows. A plain click (tiny drag) falls back to a default size. Dotted preview.
   const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
   const editNoteIdRef = useRef<string | null>(null) // note id to auto-enter-edit after the next redraw
+  // Step through the source's highlights in reading order (page, then top-to-bottom). Scrolls the PDF to
+  // the highlight and flashes it; if "sync editor" is on and the highlight is tied to a citation
+  // occurrence (instanceId), also asks the editor to scroll to that citation.
+  function stepHighlight(dir: 1 | -1): void {
+    const ordered = highlightsRef.current
+      .filter(h => h.page > 0 && h.rects[0])
+      .sort((a, b) => a.page - b.page || (a.rects[0].y - b.rects[0].y))
+    if (!ordered.length) return
+    const next = (hlNavRef.current + dir + ordered.length) % ordered.length
+    hlNavRef.current = next
+    const hl = ordered[next]
+    const pg = pagesRef.current[hl.page - 1]
+    const sc = scrollRef.current
+    if (pg && sc) {
+      const y = pg.wrapper.offsetTop + (hl.rects[0].y * (pg.hlLayer.clientHeight || pg.h)) - 80
+      sc.scrollTo({ top: Math.max(0, y), behavior: 'smooth' })
+      // brief flash on the target highlight
+      window.setTimeout(() => {
+        const el = pg.hlLayer.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
+        if (el) { el.style.transition = 'box-shadow 200ms'; el.style.boxShadow = `0 0 0 3px ${INK}`; window.setTimeout(() => { el.style.boxShadow = 'none' }, 900) }
+      }, 260)
+    }
+    if (syncEditor && hl.instanceId) {
+      window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: hl.instanceId } }))
+    }
+  }
+
   // Eraser: click any annotation (highlight / underline / strike / note) to remove it.
   function eraseAt(clientX: number, clientY: number): void {
     for (let i = 0; i < pagesRef.current.length; i++) {
@@ -737,6 +813,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
       id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '', size: noteSizeRef.current,
       rects: [{ x: (left - pr.left) / pr.width, y: (top - pr.top) / pr.height, w: wFrac, h: hFrac }],
       createdAt: new Date().toISOString(),
+      ...(instanceIdRef.current && !noRefRef.current ? { instanceId: instanceIdRef.current } : {}),
+      ...(noRefRef.current ? { noRef: true } : {}),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
     editNoteIdRef.current = hl.id // redraw auto-enters edit mode on it
@@ -745,14 +823,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   }
 
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
-    const hl: PdfHighlight = {
-      id: uuidv4(), page: info.page, rects: info.rects, color, kind,
-      text: info.text, createdAt: new Date().toISOString(), ...(link ? { citekey } : {}),
-    }
-    highlightsRef.current = [...highlightsRef.current, hl]
+    // One highlight per page the selection spans (link/citekey attaches to the first page only).
+    const made: PdfHighlight[] = info.groups.map((grp, g) => ({
+      id: uuidv4(), page: grp.page, rects: grp.rects, color, kind,
+      text: info.text, createdAt: new Date().toISOString(),
+      ...(instanceIdRef.current && !noRefRef.current ? { instanceId: instanceIdRef.current } : {}),
+      ...(noRefRef.current ? { noRef: true } : {}), ...(link && g === 0 ? { citekey } : {}),
+    }))
+    highlightsRef.current = [...highlightsRef.current, ...made]
     redrawOverlays()
     await saveHighlights(citekey, highlightsRef.current)
-    if (link) onLinkToCitation?.(info.text, info.page)
+    if (link) onLinkToCitation?.(info.text, info.groups[0].page)
   }
 
   async function commitPending(color: string, link: boolean) {
@@ -767,38 +848,70 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
-      {/* Persistent markup toolbar */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>
+      {/* Single consolidated toolbar. Secondary controls are compact (icon + checkbox); their labels
+          live in the status line on hover (setHint) so the bar stays squished. */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'nowrap' }}
+        onMouseLeave={() => setHint(null)}>
         {TOOLS.map(t => {
           const active = tool === t.kind
           return (
             <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
+              onMouseEnter={() => setHint(`${t.title}`)}
               onClick={() => setTool(active ? null : t.kind)}
               style={{
-                width: 30, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem',
+                width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
-                // The highlight swatch is highlighter-yellow; other tools stay ink-purple.
                 color: t.kind === 'highlight' ? '#eab308' : INK,
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
         })}
         {/* Text-note font size */}
-        <select value={noteSize} title="Text note size"
+        <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
           onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer' }}>
+          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
         </select>
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 2px' }} />
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {COLORS.map(c => (
-          <button key={c} type="button" title="Colour" onClick={() => setColor(c)}
-            style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+          <button key={c} type="button" title="Colour" onMouseEnter={() => setHint('highlight / note colour')} onClick={() => setColor(c)}
+            style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        {/* Scroll-highlighted navigator */}
+        <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
+          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
+        <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
+          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+        {/* Sync-editor toggle — a box that lights up purple when on. */}
+        <button type="button" title="Scroll the editor to where the highlight is cited when you click the arrows"
+          onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
+          onClick={() => setSyncEditor(v => !v)}
+          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
+            border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
+        {/* "Don't add pages to inline" toggle — lights up purple when on. */}
+        <button type="button" disabled={!!noRef} title="Don't add pages to inline citations"
+          onMouseEnter={() => setHint("when on, highlights won't add page numbers to inline citations, wherever you opened from")}
+          onClick={() => setDontAddPages(v => !v)}
+          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
+            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e', textDecoration: 'line-through' }}>#</button>
+        <span style={{ marginLeft: 'auto', minWidth: 0, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : '')}
         </span>
+        {dockButton}
       </div>
+
+      {/* Context: the sentence in the editor just before the citation. Clicking it jumps to that citation
+          in the document (via its instanceId). */}
+      {context && (
+        <div
+          onClick={() => { if (instanceIdRef.current) window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: instanceIdRef.current } })) }}
+          title={instanceIdRef.current ? 'Go to this citation in the document' : undefined}
+          style={{ flexShrink: 0, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
+          <span style={{ fontStyle: 'italic' }}>“…{context}”</span>
+        </div>
+      )}
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
       {/* Find-in-PDF bar (Ctrl+F) */}
