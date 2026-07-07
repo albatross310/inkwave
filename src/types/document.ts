@@ -44,7 +44,7 @@ export interface IwCitationMeta {
   deadUrl?: boolean       // source URL returned 404/410/403 on the last check (dead-link flag)
   note?: string           // free-text reading notes shown indented under the bibliography entry
   pdfName?: string        // original filename of an embedded PDF (bytes live in OPFS library/pdfs/)
-  pdfUrl?: string         // a public PDF URL fetched on demand via the proxy (annotate in-app, no bytes stored)
+  pdfUrl?: string         // LEGACY (feature removed 2026-07-08): old docs may carry it; treated as inert
   publiclyAvailable?: boolean // the source's PDF is open/public → the "publicly available" export can strip it
 
   pageOffset?: number     // printed page = PDF sheet index + this offset (Haiku-detected, one-time)

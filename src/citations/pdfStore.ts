@@ -46,29 +46,8 @@ export async function loadPdf(citekey: string): Promise<Blob | null> {
   }
 }
 
-// ── URL-PDF cache ──────────────────────────────────────────────────────────────
-// A separate OPFS cache for PDFs fetched from a URL (via the proxy), keyed by a hash of the URL. Kept
-// OUT of library/pdfs so it never embeds in the .studio bundle (no bloat) — it's purely a device-local
-// speed cache so a URL PDF loads instantly the second time instead of re-fetching through the proxy.
-const URLCACHE = 'urlcache'
-const urlKey = (url: string): string => { let h = 0x811c9dc5; for (let i = 0; i < url.length; i++) { h ^= url.charCodeAt(i); h = Math.imul(h, 0x01000193) } return `${(h >>> 0).toString(16)}.pdf` }
-async function urlCacheDir(create: boolean): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const root = await navigator.storage.getDirectory()
-    const lib = await root.getDirectoryHandle(DIR, { create })
-    return await lib.getDirectoryHandle(URLCACHE, { create })
-  } catch { return null }
-}
-export async function loadCachedUrlPdf(url: string): Promise<Blob | null> {
-  const dir = await urlCacheDir(false)
-  if (!dir) return null
-  try { return await (await dir.getFileHandle(urlKey(url))).getFile() } catch { return null }
-}
-export async function cacheUrlPdf(url: string, blob: Blob): Promise<void> {
-  const dir = await urlCacheDir(true)
-  if (!dir) return
-  try { const h = await dir.getFileHandle(urlKey(url), { create: true }); const w = await h.createWritable(); await w.write(blob); await w.close() } catch { /* storage full */ }
-}
+// (The URL-PDF cache that lived here was removed with URL-linked PDFs, 2026-07-08. Stale
+// library/urlcache dirs in existing browsers are harmless orphans.)
 
 /** Remove the stored PDF for a citekey (no-op if absent). */
 export async function deletePdf(citekey: string): Promise<void> {

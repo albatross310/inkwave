@@ -57,7 +57,9 @@ export function Privacy() {
               Drive. Cloud sync writes to <em>your</em> account under your login — the file goes from
               your browser to Microsoft or Google, not to us. OneDrive sync uses the standard
               file-access permission (<code>Files.ReadWrite</code>) so you can choose any folder;
-              Google Drive uses the narrower per-file permission (<code>drive.file</code>).
+              Google Drive uses the narrower per-file permission (<code>drive.file</code>). PDFs you
+              attach to sources are stored the same way — on your device and in your own drives —
+              and reading or annotating them happens entirely in your browser.
             </p>
           </Section>
 
@@ -71,7 +73,6 @@ export function Privacy() {
               <li><strong>Provenance signing</strong> — receives cryptographic hashes only: never your text, your words, or your identity. Hashes cannot be reversed into writing.</li>
               <li><strong>Bitcoin timestamping</strong> — relays a single document hash to public OpenTimestamps calendars. Nothing personal is anchored.</li>
               <li><strong>PDF export</strong> — your document is rendered to PDF on our server and immediately discarded; nothing is logged or kept.</li>
-              <li><strong>Opening a PDF by URL</strong> — the PDF is fetched through our server (browsers block direct cross-site downloads); the file passes through and is not kept.</li>
               <li><strong>Optional AI features</strong> — see the next section; these are off until you switch them on.</li>
             </ul>
             <p className="mt-3">

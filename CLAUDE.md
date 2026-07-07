@@ -144,7 +144,9 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   stored on `_iw.highlights`, NOT baked into the PDF), select-sentence→link-to-citation, cursor-
   anchored zoom, supersampled canvas (≥2× for crispness). `PdfSidePanel` docks side/bottom.
   PDFs stored as OneDrive **sidecars** (`<base>.<citekey>.pdf`, uploaded once) + OPFS; embedded in
-  local-folder saves. URL PDFs via SSRF-guarded proxy `api/pdf.mjs?proxy=`. Haiku page-offset
+  local-folder saves. URL-linked PDFs + the `api/pdf.mjs?proxy=` relay were REMOVED 2026-07-08
+  (slow, often blocked, and the one PDF path through our server) — sources embed files only;
+  legacy `pdfUrl` metadata is inert. Haiku page-offset
   detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
 - **Editor chrome.** `Scroll.tsx` — the fixed full-region scroll container is opt-in via the `fill`
   prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make

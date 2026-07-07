@@ -640,18 +640,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     setNotice({ text: `Removed the PDF for "${item.id}".`, kind: 'ok' })
   }
 
-  async function attachPdfUrl(item: CSLItem) {
-    const url = window.prompt('Public PDF URL (opens in-app for markup, no file stored):', item.URL ? String(item.URL) : 'https://')?.trim()
-    if (!url) return
-    if (!/^https?:\/\/.+/i.test(url)) { setNotice({ text: 'That doesn’t look like a URL.', kind: 'err' }); return }
-    const cur = bibProvider.get(item.id)
-    if (!cur) return
-    const iw: IwCitationMeta = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}), pdfUrl: url }
-    await addToLibrary({ ...cur, _iw: iw })
-    void detectPageOffset(item.id)
-    setNotice({ text: `Linked PDF URL for "${item.id}" — click 📄 to open + annotate it.`, kind: 'ok' })
-  }
-
   async function saveEdit(updated: CSLItem) {
     let item = updated
     if (isNewRef) {
@@ -985,19 +973,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                    <div className="flex flex-wrap items-center justify-end gap-1">
                     {(() => {
                       const iw = (item as { _iw?: IwCitationMeta })._iw
-                      return iw?.pdfName || iw?.pdfUrl ? (
+                      return iw?.pdfName ? (
                         <>
                           <button type="button"
-                            title={iw?.pdfName ? `Open embedded PDF (${iw.pdfName})` : `Open linked PDF (${iw?.pdfUrl})`}
+                            title={`Open embedded PDF (${iw.pdfName})`}
                             className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
                             onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
-                          >{iw?.pdfName ? '📄 PDF' : '🔗 PDF'}</button>
-                          {(iw?.pdfName || iw?.pdfUrl) && (
-                            <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
-                              className="h-7 px-1.5 flex items-center gap-1 rounded border border-stone-200 text-[11px] text-stone-500 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
-                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} style={{ width: 13, height: 13 }} />pub
-                            </label>
-                          )}
+                          >📄 PDF</button>
+                          <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
+                            className="h-7 px-1.5 flex items-center gap-1 rounded border border-stone-200 text-[11px] text-stone-500 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} style={{ width: 13, height: 13 }} />pub
+                          </label>
                           <button type="button"
                             title="Remove this PDF (and its annotations)"
                             className="text-[11px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500"
@@ -1005,18 +991,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                           >✕</button>
                         </>
                       ) : (
-                        <>
-                          <button type="button"
-                            title="Embed a PDF file for this source"
-                            className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
-                            onClick={e => { e.stopPropagation(); attachPdf(item) }}
-                          >📎 PDF</button>
-                          <button type="button"
-                            title="Link a public PDF by URL (annotate in-app, no file stored)"
-                            className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
-                            onClick={e => { e.stopPropagation(); void attachPdfUrl(item) }}
-                          >🔗 URL</button>
-                        </>
+                        <button type="button"
+                          title="Embed a PDF file for this source"
+                          className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
+                          onClick={e => { e.stopPropagation(); attachPdf(item) }}
+                        >📎 PDF</button>
                       )
                     })()}
                     {/* "ren" button removed — rename is click-and-hold on the purple citekey. */}
