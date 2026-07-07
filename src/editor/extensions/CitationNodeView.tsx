@@ -18,7 +18,7 @@ import {
   citeAnchorId, navigateToBibEntry, occurrencesAt, ensureNavStyles, mergePages,
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator, getLastPdfPage } from '../../citations/pdfViewer'
-import { highlightPages } from '../../citations/pdfHighlights'
+import { highlightPages, highlightsOf, saveHighlights } from '../../citations/pdfHighlights'
 import { pageOffsetOf } from '../../citations/pageOffset'
 import { hasPdf } from '../../citations/pdfSource'
 import { sourceUrlOf, openSourceAtPinpoint } from '../../citations/sourceLink'
@@ -186,6 +186,20 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     setPageEdit(null)
   }
 
+  // Delete this citation's page reference: clear the manual locator AND drop the highlights that
+  // auto-generated pages for THIS occurrence — so the reader needn't hunt them down with the eraser.
+  function deletePageRef() {
+    if (!pageEdit) return
+    const key = pageEdit.key
+    updateAttributes({ locator: null })
+    const iid = (attrsRef.current as { instanceId?: string | null }).instanceId ?? null
+    if (iid) {
+      const item = bibProvider.get(key)
+      if (item) void saveHighlights(key, highlightsOf(item).filter(h => h.instanceId !== iid))
+    }
+    setPageEdit(null)
+  }
+
   return (
     <NodeViewWrapper as="span" style={{ display: 'inline' }}>
       <span
@@ -245,10 +259,18 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                           <>
                             {', '}
                             <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
-                              title="Open the source at this page"
-                              onPointerDown={e => e.stopPropagation()}
+                              title="Click: open the source here · Click & hold: edit / delete the page reference"
+                              onPointerDown={e => {
+                                e.stopPropagation()
+                                heldRef.current = false
+                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                                holdTimer.current = setTimeout(() => { heldRef.current = true; setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top }) }, 450)
+                              }}
+                              onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                              onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                               onClick={e => {
                                 e.stopPropagation()
+                                if (heldRef.current) { heldRef.current = false; return }
                                 const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
                                 openPdf({ citekey: s.key, page: s.pageNum ?? pageFromLocator(attrs.locator), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
                               }}
@@ -288,33 +310,30 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
             transform: 'translate(-50%, calc(-100% - 8px))', // centred directly above the citation
             background: '#fff', border: `1px solid ${INK}55`, borderRadius: 8,
             boxShadow: '0 4px 16px rgba(0,0,0,0.16)', padding: '6px 8px',
-            display: 'flex', flexDirection: 'column', gap: 6, fontSize: '12px', color: '#57534e',
+            display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, fontSize: '12px', color: '#57534e',
             fontFamily: 'system-ui, sans-serif', userSelect: 'none',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>p.</span>
-            <input
-              ref={bindStopPM}
-              autoFocus
-              value={attrs.locator ?? ''}
-              onChange={e => updateAttributes({ locator: e.target.value || null })}
-              placeholder="2, 4–6"
-              style={{ width: 60, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
-            />
-          </div>
+          <span>p.</span>
+          <input
+            ref={bindStopPM}
+            autoFocus
+            value={attrs.locator ?? ''}
+            onChange={e => updateAttributes({ locator: e.target.value || null })}
+            placeholder="2, 4–6"
+            style={{ width: 56, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
+          />
           {/* Go to the cited sentence: opens the embedded PDF at that quote if there is one, otherwise
-              deep-links the web source (#:~:text=). Enter in the box or the → go button both navigate —
-              typing a quote alone used to just STORE it (nothing happened), which is the bug Peter hit. */}
+              deep-links the web source (#:~:text=). Enter or → go both navigate. */}
           {(hasPdf(bibProvider.get(pageEdit.key)) || pageEditUrl) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <>
               <input
                 ref={bindStopPM}
                 value={attrs.quote ?? ''}
                 onChange={e => updateAttributes({ quote: e.target.value || null })}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); goToPinpoint() } }}
                 placeholder={hasPdf(bibProvider.get(pageEdit.key)) ? 'cited sentence (opens the PDF there)' : 'cited sentence (opens the source there)'}
-                style={{ flex: 1, minWidth: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
+                style={{ width: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
               />
               <button type="button"
                 title={hasPdf(bibProvider.get(pageEdit.key)) ? 'Open the PDF at this sentence' : 'Open the source in your browser at this sentence'}
@@ -322,8 +341,15 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                 style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 → go
               </button>
-            </div>
+            </>
           )}
+          {/* Delete this citation's page reference — clears the manual pages AND removes the highlights
+              (for this occurrence) that auto-generated pages, so you don't have to hunt them with the eraser. */}
+          <button type="button" title="Delete this page reference" aria-label="Delete this page reference"
+            onClick={deletePageRef}
+            style={{ fontSize: '15px', color: '#9d174d', fontWeight: 700, background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '0 2px' }}>
+            ×
+          </button>
         </span>,
         document.body,
       )}
