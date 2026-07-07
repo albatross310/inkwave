@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Editor } from '@tiptap/react'
 import { activeSet, setActiveSet, suggestOn, setSuggestOn, onReviewChanged, DEFAULT_SET } from '../editor/review/reviewState'
-import { resolveSuggestions } from '../editor/extensions/TrackChanges'
+import { resolveSuggestions, reviewerColor } from '../editor/extensions/TrackChanges'
 
 const INK = '#5c2d8a'
 
@@ -95,6 +95,15 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
     return () => window.removeEventListener('keydown', onKey)
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Set drop-up collapses on outside-click or any scroll — the same behaviour as the style menus.
+  useEffect(() => {
+    if (!setMenu) return
+    const close = () => setSetMenu(false)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, { capture: true, passive: true })
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, { capture: true } as EventListenerOptions) }
+  }, [setMenu])
+
   const pill = 'flex items-center justify-center h-8 px-3 rounded-full border text-sm font-serif transition-colors whitespace-nowrap'
 
   return createPortal(
@@ -115,7 +124,7 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
       <div className="relative">
         <button type="button" onClick={() => setSetMenu((o) => !o)}
           className={`${pill} text-stone-600 border-stone-200 hover:bg-stone-50`} title="Annotation set">
-          ◆ {cur} ▾
+          <span style={{ color: reviewerColor(cur) }}>◆</span>&nbsp;{cur} ▾
         </button>
         {setMenu && (
           <div className="absolute bottom-full mb-2 left-0 min-w-[160px] iw-nightable bg-white rounded-lg shadow-lg py-1 text-sm"
@@ -125,7 +134,7 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
                 onClick={() => { setActiveSet(s); setSetMenu(false) }}
                 className="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center justify-between"
                 style={{ color: s === cur ? INK : '#374151', fontWeight: s === cur ? 600 : 400 }}>
-                <span>◆ {s}</span>
+                <span><span style={{ color: reviewerColor(s) }}>◆</span> {s}</span>
                 {sets.length > 1 && (
                   <span role="button" title="Delete this set's comments"
                     onClick={(e) => {
