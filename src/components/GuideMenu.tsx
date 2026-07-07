@@ -53,30 +53,6 @@ const SYMBOLS: Array<{ k: string; d: string }> = [
   { k: 'Σ → Symbols',   d: 'manage & browse definitions' },
 ]
 
-type Row = { k: string; d: string }
-
-function Col({ sections }: { sections: { title: string; rows: Row[] }[] }) {
-  return (
-    <div>
-      {sections.map(({ title, rows }) => (
-        <div key={title} style={{ marginBottom: '22px' }}>
-          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: '#a89a86', marginBottom: '8px' }}>
-            {title}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '14px', rowGap: '7px' }}>
-            {rows.map(({ k, d }) => (
-              <Fragment key={k}>
-                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: '#7a6e65', textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
-                <span style={{ fontSize: '1.02rem', color: '#4a4035', lineHeight: 1.4 }}>{d}</span>
-              </Fragment>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export function GuideMenu() {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
@@ -127,8 +103,8 @@ export function GuideMenu() {
             className="iw-nightable fixed z-[100]"
             onMouseDown={e => e.stopPropagation()}
             style={{
-              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 66, transform: 'translateX(-50%)' }),
-              width: 620, maxWidth: '92vw', maxHeight: '78vh',
+              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 74, transform: 'translateX(-50%)' }),
+              width: 470, maxWidth: '92vw', maxHeight: 'calc(100vh - 96px)',
               resize: 'both', overflow: 'auto',
               padding: '14px 20px 20px',
               background: 'white',
@@ -145,8 +121,9 @@ export function GuideMenu() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
             </div>
 
-            {/* Two clean columns (sections flow across), with a faint dividing rule. */}
-            <div style={{ columnCount: 2, columnGap: '30px', columnRule: '1px solid rgba(92,45,138,0.08)' }}>
+            {/* One master column: keys right-aligned in a max-content column, descriptions left-aligned —
+                so the gap between them forms a straight vertical line through every section. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: '20px', rowGap: '7px', alignItems: 'baseline' }}>
               {([
                 { title: 'Citations', rows: CITATIONS },
                 { title: 'Word cycle', rows: CYCLE },
@@ -156,9 +133,15 @@ export function GuideMenu() {
                 { title: 'Greek keyboard (in math box)', rows: GREEK },
                 { title: 'Custom symbols', rows: SYMBOLS },
               ]).map(sec => (
-                <div key={sec.title} style={{ breakInside: 'avoid', marginBottom: '20px' }}>
-                  <Col sections={[sec]} />
-                </div>
+                <Fragment key={sec.title}>
+                  <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: '#a89a86', margin: '14px 0 3px' }}>{sec.title}</div>
+                  {sec.rows.map(({ k, d }) => (
+                    <Fragment key={k}>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: '#7a6e65', textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontSize: '1.02rem', color: '#4a4035', lineHeight: 1.4 }}>{d}</span>
+                    </Fragment>
+                  ))}
+                </Fragment>
               ))}
             </div>
           </div>
