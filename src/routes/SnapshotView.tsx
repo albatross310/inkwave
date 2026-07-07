@@ -85,7 +85,7 @@ function NavSide({
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
-const CONTEXT_WORDS = 5  // words of unchanged context shown either side of each change
+const CONTEXT_WORDS = 4  // words of unchanged context shown either side of each change
 
 function wc(text: string): number { return (text.match(/\S+/g) ?? []).length }
 
@@ -233,9 +233,10 @@ function buildDiffNodes(
 
     if (headW + tailW >= words) { emit(t); continue }
 
-    if (headW > 0)  emit(takeFirst(t, headW).trimEnd())
-    if (tailW > 0)  { gapPending = true; emit(takeLast(t, tailW)) }
-    else if (changeAfter[i]) gapPending = true
+    // Context snippets carry an ellipsis on the side that abuts elided text.
+    if (headW > 0)  emit(takeFirst(t, headW).trimEnd() + ' …')
+    if (tailW > 0)  emit('… ' + takeLast(t, tailW).trimStart())
+    else if (headW === 0 && changeAfter[i]) emit('…')
   }
 
   return nodes
