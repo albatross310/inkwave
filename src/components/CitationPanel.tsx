@@ -361,13 +361,15 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
         </div>
 
         {/* Fields */}
-        <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2.5">
+        <div className="flex-1 overflow-y-auto px-5 py-3 grid grid-cols-2 gap-x-3 gap-y-2.5 content-start">
           {fields.map(f => {
             const val = values[f.key] ?? ''
             const missing = f.required && !val.trim()
             const fetchable = f.key === 'DOI' || f.key === 'URL'
+            // Long fields span both columns; short ones sit two-per-row so the form rarely scrolls.
+            const wide = ['title', 'container-title', 'author', 'editor', 'translator', 'URL', 'event-title'].includes(f.key)
             return (
-              <label key={f.key} className="flex flex-col gap-0.5">
+              <label key={f.key} className={`flex flex-col gap-0.5 min-w-0 ${wide ? 'col-span-2' : ''}`}>
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] uppercase tracking-wide text-stone-500">{f.label}</span>
                   {f.required
@@ -987,29 +989,30 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
                   className="block w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors -mt-0.5">
                   {!!String(item.title ?? '') && <div className="text-[16px] text-stone-500 leading-snug line-clamp-2">{String(item.title ?? '')}</div>}
-                  {!!simpleInText([item]) && <div className="text-[15px] text-stone-400 leading-snug truncate">{simpleInText([item])}</div>}
                 </button>
                 {(() => {
                   const iw = (item as { _iw?: IwCitationMeta })._iw
                   const changelog = iw?.changelog ?? []
                   const open = expanded.has(item.id)
-                  if (!iw?.deadUrl && changelog.length === 0 && !iw?.lastVerified && !used) return null
+                  const authorYear = simpleInText([item])
                   return (
                     <>
-                      <div className="mt-0.5 pl-1 flex items-center gap-2 flex-wrap">
-                        {iw?.deadUrl && <span className="text-[12px] text-red-500 border border-red-200 rounded px-1">⚠ dead link</span>}
+                      {/* author/year + history + used all on ONE line, to save vertical space */}
+                      <div className="mt-0.5 pl-1 flex items-center gap-2">
+                        {!!authorYear && (
+                          <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
+                            className="text-[15px] text-stone-400 leading-snug truncate min-w-0 flex-1 text-left hover:text-stone-600">{authorYear}</button>
+                        )}
+                        {iw?.deadUrl && <span className="text-[12px] text-red-500 border border-red-200 rounded px-1 flex-shrink-0">⚠ dead link</span>}
                         {changelog.length > 0 && (
                           <button type="button" onClick={() => toggleExpand(item.id)}
                             title="Show the correction history (old → new) for this citation"
-                            className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+                            className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] flex-shrink-0">
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
-                        {/* "used" + "checked today" together, right-aligned and on the same line. */}
-                        <span className="ml-auto flex items-center gap-2">
-                          {used && <span className="text-[14px] text-green-600">● used</span>}
-                          {iw?.lastVerified && !iw?.deadUrl && <span className="text-[12px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
-                        </span>
+                        {used && <span className="text-[14px] text-green-600 flex-shrink-0">● used</span>}
+                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[12px] text-stone-400 flex-shrink-0" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ {relTime(iw.lastVerified)}</span>}
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">
