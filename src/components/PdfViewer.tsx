@@ -24,6 +24,17 @@ const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
+// A pink pencil-eraser icon (Material "eraser" glyph) for the erase tool.
+function EraserIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#f9a8d4" stroke="#9d174d" strokeWidth="1.1" strokeLinejoin="round"
+        d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0Z" />
+      <path stroke="#9d174d" strokeWidth="1.1" d="M8.5 9.9l4.95 4.95" />
+    </svg>
+  )
+}
+
 interface PageRef {
   wrapper: HTMLDivElement; canvasWrap: HTMLDivElement; textLayer: HTMLDivElement; hlLayer: HTMLDivElement
   w: number; h: number
@@ -194,15 +205,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     pg.rendering = true
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) { pg.rendering = false; return }
-    // Supersample: render the canvas at ≥2× the CSS size and let the browser downscale, so PDF text
-    // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
-    // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
-    // only adds resolution where the page is still small (the default fit view, where the blur shows).
-    // Higher supersampling for crisper glyphs at the fit view (pdf.js is the same renderer Firefox uses,
-    // so quality is a function of resolution): render at ≥3× CSS size, capped at 4608px/side for memory.
-    const MAX_CANVAS = 4608
+    // Render at EXACTLY the device pixel ratio → a 1:1 device-pixel canvas the browser never has to
+    // downscale. Supersampling beyond the device resolution forces a NON-INTEGER downscale to the
+    // screen, which shimmers/aliases thin glyph strokes (looked worse a beat after zooming). Matching
+    // dpr is what pdf.js's own viewer + Firefox do — reference quality, no aliasing. Capped for memory.
+    const MAX_CANVAS = 4096
     const outputScale = Math.max(1, Math.min(
-      4, Math.max(3, window.devicePixelRatio || 1),
+      3, window.devicePixelRatio || 1,
       MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
     ))
     const canvas = document.createElement('canvas')
@@ -767,9 +776,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
               onClick={() => setTool(active ? null : t.kind)}
               style={{
                 width: 30, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
-                color: INK, textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
-              }}>{t.label}</button>
+                // The highlight swatch is highlighter-yellow; other tools stay ink-purple.
+                color: t.kind === 'highlight' ? '#eab308' : INK,
+                textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
+              }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
         })}
         {/* Text-note font size */}
