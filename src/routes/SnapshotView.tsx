@@ -538,17 +538,48 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   const onMove = (e: React.PointerEvent) => { if (dragging.current) seekTo(e.clientX, e.clientY) }
   const onUp = () => { dragging.current = false }
 
+  // "You are here" marker — the centre of the document viewport mapped back onto the grid cell.
+  const [here, setHere] = useState<{ top: number; left: number; width: number } | null>(null)
+  const updateHere = useCallback(() => {
+    const grid = gridRef.current, el = leftRef.current
+    if (!grid || !el || !el.scrollHeight) { setHere(null); return }
+    const P = 6 // grid padding
+    const w = grid.clientWidth - 2 * P, h = grid.clientHeight - 2 * P
+    const colStride = (w - (cols - 1) * GAP) / cols
+    const cellH = (h - (height - 1) * GAP) / height
+    const pageH = pageHRef.current
+    const yc = el.scrollTop + el.clientHeight / 2
+    const p = Math.max(0, Math.min(pages - 1, Math.floor(yc / pageH)))
+    const frac = Math.max(0, Math.min(1, (yc - p * pageH) / pageH))
+    const c = Math.floor(p / height), r = p % height
+    setHere({ top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride })
+  }, [cols, height, pages, leftRef])
+  useEffect(() => {
+    const el = leftRef.current
+    if (!el) return
+    updateHere()
+    el.addEventListener('scroll', updateHere, { passive: true })
+    return () => el.removeEventListener('scroll', updateHere)
+  }, [updateHere, snapKey])
+
   return (
     <div
       ref={gridRef}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
       title="Click or drag to scroll"
       style={{
-        flex: 1, minHeight: 0, background: '#9fd9c8', borderRadius: 6, padding: 6, cursor: 'pointer',
+        flex: 1, minHeight: 0, position: 'relative', background: '#9fd9c8', borderRadius: 6, padding: 6, cursor: 'pointer',
         display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoFlow: 'column',
         gridTemplateRows: `repeat(${height}, 1fr)`, gap: GAP, touchAction: 'none',
       }}
     >
+      {here && (
+        <div aria-hidden="true" style={{ position: 'absolute', top: here.top, left: here.left, width: here.width, height: 0, zIndex: 6, pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: 5, right: 5, top: -1.5, height: 3, background: '#5c2d8a', borderRadius: 2, boxShadow: '0 0 3px rgba(92,45,138,0.75)' }} />
+          <div style={{ position: 'absolute', left: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: '#5c2d8a', color: '#fff', fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>▸</div>
+          <div style={{ position: 'absolute', right: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: '#5c2d8a', color: '#fff', fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>◂</div>
+        </div>
+      )}
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
           <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
