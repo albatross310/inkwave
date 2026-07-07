@@ -103,8 +103,8 @@ export function GuideMenu() {
             className="iw-nightable fixed z-[100]"
             onMouseDown={e => e.stopPropagation()}
             style={{
-              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 74, transform: 'translateX(-50%)' }),
-              width: 470, maxWidth: '92vw', maxHeight: 'calc(100vh - 96px)',
+              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 62, transform: 'translateX(-50%)' }),
+              width: 470, maxWidth: '92vw', height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)',
               resize: 'both', overflow: 'auto',
               padding: '14px 20px 20px',
               background: 'white',

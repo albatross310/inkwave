@@ -1966,10 +1966,12 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
     if (!open) return
     const close = () => setOpen(false)
     document.addEventListener('mousedown', close)
-    // capture:true so it also fires when the desktop editor's own scroll container scrolls.
-    window.addEventListener('scroll', close, { passive: true, capture: true })
-    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, { capture: true } as EventListenerOptions) }
-  }, [open])
+    // Close on PAGE scroll only from the short main menu; the info/symbols sub-views scroll internally, so
+    // scrolling their lists must NOT dismiss the popup (that was the "panel hides when you scroll" bug).
+    const closeOnScroll = () => { if (view === 'menu') setOpen(false) }
+    window.addEventListener('scroll', closeOnScroll, { passive: true, capture: true })
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', closeOnScroll, { capture: true } as EventListenerOptions) }
+  }, [open, view])
 
   // Listen for symbol changes from the math input boxes.
   useEffect(() => {
@@ -2058,20 +2060,19 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
           )}
 
           {view === 'info' && (
-            <div style={{ padding: '6px 4px 4px', minWidth: '320px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 8px', borderBottom: `1px solid ${INK}18` }}>
-                <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.8rem', padding: '0 2px' }}>←</button>
-                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>shortcuts</span>
-              </div>
-              <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '4px 0' }}>
+            <div style={{ padding: '4px 4px', minWidth: '340px' }}>
+              {/* Top bar removed — a subtle back arrow floats at the top-right. */}
+              <button type="button" onClick={() => setView('menu')} title="Back"
+                style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1rem', padding: '0 2px', lineHeight: 1 }}>←</button>
+              <div style={{ maxHeight: 'min(70vh, 420px)', overflowY: 'auto', padding: '4px 0' }}>
                 {ML_SHORTCUT_SECTIONS.map(({ title, rows }) => (
-                  <div key={title} style={{ marginBottom: '10px' }}>
-                    <div style={{ padding: '4px 10px 2px', fontSize: '0.58rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{title}</div>
+                  <div key={title} style={{ marginBottom: '12px' }}>
+                    <div style={{ padding: '4px 10px 3px', fontSize: '0.72rem', color: '#a89a86', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
                     {rows.map(([k, sym, d]) => (
-                      <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '8px', padding: '1px 10px', alignItems: 'center' }}>
-                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.68rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                        <span style={{ fontSize: '0.85rem', color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
-                        <span style={{ fontSize: '0.72rem', color: '#a89d96' }}>{d}</span>
+                      <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '10px', padding: '2px 10px', alignItems: 'center' }}>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.82rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                        <span style={{ fontSize: '1rem', color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
+                        <span style={{ fontSize: '0.9rem', color: '#6b6058' }}>{d}</span>
                       </div>
                     ))}
                   </div>
