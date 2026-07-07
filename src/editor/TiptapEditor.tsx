@@ -1567,7 +1567,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {...syncProps}
             />
           ) : (
-            <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1"><span style={{ fontSize: '1.45em', lineHeight: 1 }}>☁</span> …</span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
+            <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1.5"><span style={{ fontSize: '1.5em', lineHeight: 1 }}>…</span><span style={{ fontSize: '1.4em', lineHeight: 1 }}>☁</span></span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
           )
         })()}
 

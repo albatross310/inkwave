@@ -1,4 +1,4 @@
-import { startTransition, StrictMode, type ReactNode } from 'react'
+import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
 
@@ -20,8 +20,21 @@ async function bootstrap() {
   const { authRequested } = await import('../src/auth/config')
   let tree: ReactNode = <HydratedRouter />
   if (pk && authRequested()) {
-    const { ClerkProvider } = await import('@clerk/clerk-react')
-    tree = <ClerkProvider publishableKey={pk}>{tree}</ClerkProvider>
+    const { ClerkProvider, useClerk } = await import('@clerk/clerk-react')
+    // After the lazy "Sign in" armed auth + reloaded, open the sign-in modal automatically (one-click).
+    const AutoSignIn = () => {
+      const clerk = useClerk()
+      useEffect(() => {
+        try {
+          if (sessionStorage.getItem('inkwave:autoSignIn') === '1') {
+            sessionStorage.removeItem('inkwave:autoSignIn')
+            clerk.openSignIn()
+          }
+        } catch { /* private mode / not ready */ }
+      }, [clerk])
+      return null
+    }
+    tree = <ClerkProvider publishableKey={pk}><AutoSignIn />{tree}</ClerkProvider>
   }
   startTransition(() => {
     hydrateRoot(document, <StrictMode>{tree}</StrictMode>)

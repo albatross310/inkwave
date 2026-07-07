@@ -223,7 +223,7 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable z-[60] w-max min-w-[9rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable z-[60] w-44 py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"

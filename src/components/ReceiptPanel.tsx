@@ -145,7 +145,7 @@ export function ReceiptPanel({
           color: 'var(--iw-ink, #5c2d8a)',
           // Match the toolbar baseline (room-bottom + 28*zoom); transform:scale for size (see SyncStatus
           // — css `zoom` multiplied the offset, lifting the pill by room-bottom*zoom when a panel opened).
-          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
+          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom + 10)}px`} + var(--iw-pdf-room-bottom, 0px))`,
           padding: hideTrigger ? '0 1rem' : '0 10px',
           transition: 'bottom 0.18s ease',
           transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill

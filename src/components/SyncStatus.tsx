@@ -62,7 +62,7 @@ export function SyncStatus({
         // Match the footer toolbar's baseline (room-bottom + 28*zoom). Use transform:scale (NOT css
         // `zoom`) for size — css `zoom` also multiplies the bottom offset, so with a bottom-docked panel
         // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
-        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
+        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom + 10)}px`} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 10px',
         transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
         transformOrigin: 'bottom right',

@@ -1,7 +1,7 @@
 import { SignedIn, SignedOut, useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { authEnabled } from '../auth/config'
+import { authEnabled, CLERK_PUBLISHABLE_KEY } from '../auth/config'
 import { useCadenceTier, stripeClientSecret, paypalApproveUrl, refreshEntitlement, getClerkToken } from '../auth/entitlement'
 
 // On sign-in, ping the webhook-free email capture once per user. Identity is taken server-side from
@@ -185,7 +185,21 @@ function SignInItem({ onClose }: { onClose: () => void }) {
 // Account section for the OptionsMenu (hamburger) — sits alongside Save/Open. Sign-in when signed
 // out; Insignia + account actions when signed in. Renders nothing unless paid-tier auth is set up.
 export function AccountMenuItems({ onClose }: { onClose: () => void }) {
-  if (!authEnabled()) return null
+  // Auth is LAZY (opt-in) so first load stays fast — Clerk isn't mounted until asked. This "Sign in"
+  // arms it and reloads; Clerk then loads (~1–2s) and auto-opens the sign-in modal.
+  if (!authEnabled()) {
+    if (!CLERK_PUBLISHABLE_KEY) return null // auth not configured at all → no button
+    return (
+      <>
+        <div className="my-1 border-t border-stone-100" />
+        <Row onClick={() => {
+          onClose()
+          try { localStorage.setItem('inkwave:auth', '1'); sessionStorage.setItem('inkwave:autoSignIn', '1') } catch { /* private */ }
+          location.reload()
+        }}>Sign in</Row>
+      </>
+    )
+  }
   return (
     <>
       <div className="my-1 border-t border-stone-100" />
