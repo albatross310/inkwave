@@ -566,6 +566,7 @@ function SplitDiffView({
   const anchorRatioRef  = useRef(0.5)
   const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
   const sigTickRef      = useRef(false)                // throttle signature recompute to 1/frame
+  const syncTickRef     = useRef(false)                // throttle right-pane follow to 1/frame
 
   // Own Ctrl+wheel zoom for the diff view (like the PDF viewer): scales the diff text and — crucially —
   // preventDefaults so it never triggers the browser's whole-page zoom. Cursor-anchored per pane.
@@ -708,6 +709,29 @@ function SplitDiffView({
         if (cur) { const s = midlineSignature(cur); if (s) anchorSigRef.current = s }
       })
     }
+    // Follow: scroll the right (hunk) pane so the change nearest the LEFT midline sits on the RIGHT
+    // midline too — both panes share a reading line. rAF-throttled; left drives right (one-directional).
+    if (!syncTickRef.current) {
+      syncTickRef.current = true
+      requestAnimationFrame(() => {
+        syncTickRef.current = false
+        const L = leftScrollRef.current, R = rightScrollRef.current
+        if (!L || !R) return
+        const midY = L.getBoundingClientRect().top + L.clientHeight / 2
+        let bestIdx: string | null = null, bestDist = Infinity
+        L.querySelectorAll('[data-opidx]').forEach(o => {
+          const r = (o as HTMLElement).getBoundingClientRect()
+          const d = Math.abs((r.top + r.height / 2) - midY)
+          if (d < bestDist) { bestDist = d; bestIdx = (o as HTMLElement).getAttribute('data-opidx') }
+        })
+        if (bestIdx == null) return
+        const target = R.querySelector(`[data-opidx="${bestIdx}"]`) as HTMLElement | null
+        if (!target) return
+        const rRect = R.getBoundingClientRect(), tRect = target.getBoundingClientRect()
+        const topInContent = tRect.top - rRect.top + R.scrollTop
+        R.scrollTop = Math.max(0, topInContent - R.clientHeight / 2)
+      })
+    }
   }, [])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
@@ -818,11 +842,17 @@ function SplitDiffView({
 
       {/* ── Right / bottom pane: compact hunk diff ── */}
       <div style={{
-        flex: 1, overflow: 'hidden', background: '#f9f7f4',
+        flex: 1, overflow: 'hidden', background: '#f9f7f4', position: 'relative',
         borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
         borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
         zoom: diffZoom,
       } as React.CSSProperties}>
+        {/* Dotted midline — matches the document pane, so both panes share a reading line */}
+        <div aria-hidden="true" style={{
+          position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+          borderTop: '1px dashed rgba(92,45,138,0.38)',
+          pointerEvents: 'none', transform: 'translateY(-0.5px)',
+        }} />
         <InlineDiffView
           ops={ops}
           prevSnap={prevSnap}
