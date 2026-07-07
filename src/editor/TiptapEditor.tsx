@@ -50,7 +50,7 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
-import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
@@ -839,11 +839,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
   // Uses the async variant so embedded source PDFs travel inside the .studio file.
-  async function exportBundle(stripPdfs?: 'all' | 'public') {
+  async function exportBundle(stripPdfs?: 'all' | 'public', gzip?: boolean) {
     const bundle = await buildExportBundleWithPdfs(docRef.current, snapshots, stripPdfs)
     const base = bundleFilename(docRef.current)
     const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
-    downloadBundle(bundle, name)
+    if (gzip) await downloadBundleGz(bundle, name + '.gz')
+    else downloadBundle(bundle, name)
   }
 
   // Primary "Save" — works on every browser. Chromium (Chrome/Edge/Brave) mirrors to a granted

@@ -302,7 +302,10 @@ export function parseTraceFile(fileText: string): ExportBundle {
 
 /** Trigger a download of the single self-contained .trace.json file (browser only). */
 export function downloadBundle(bundle: ExportBundle, filename: string): void {
-  const blob = new Blob([composeTraceFile(bundle)], { type: 'application/json' })
+  triggerDownload(new Blob([composeTraceFile(bundle)], { type: 'application/json' }), filename)
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -311,4 +314,24 @@ export function downloadBundle(bundle: ExportBundle, filename: string): void {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// gzip the composed .studio (native CompressionStream) → a much smaller, emailable file. The JSON part
+// compresses ~5–10×; already-compressed PDFs don't shrink, so pair with a strip mode for the smallest
+// result. Inkwave reads .studio.gz back transparently (readStudioFile), so nobody unzips by hand.
+export async function downloadBundleGz(bundle: ExportBundle, filename: string): Promise<void> {
+  const text = composeTraceFile(bundle)
+  if (typeof CompressionStream === 'undefined') { downloadBundle(bundle, filename.replace(/\.gz$/, '')); return }
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))
+  triggerDownload(await new Response(stream).blob(), filename)
+}
+
+/** Read a possibly-gzipped .studio file: gunzip when it starts with the gzip magic bytes, else UTF-8. */
+export async function readStudioFile(file: File | Blob): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b && typeof DecompressionStream !== 'undefined') {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))
+    return await new Response(stream).text()
+  }
+  return new TextDecoder().decode(buf)
 }

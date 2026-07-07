@@ -4,7 +4,8 @@
 const KEY = 'inkwave:gappedPages'
 
 export function gappedPagesEnabled(): boolean {
-  try { return localStorage.getItem(KEY) === '1' } catch { return false }
+  // Default ON for new users (no stored preference); an explicit '0' keeps it off.
+  try { const v = localStorage.getItem(KEY); return v === null ? true : v === '1' } catch { return true }
 }
 
 export function setGappedPages(on: boolean): void {

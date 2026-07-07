@@ -884,7 +884,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       <span className="text-[11px] text-stone-400 flex-shrink-0">{typeLabel}</span>
                     </div>
                   </button>
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex flex-wrap items-center justify-end gap-1 flex-shrink-0 max-w-[46%]">
                     <button type="button" onClick={() => cite(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
@@ -903,8 +903,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                             className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
                             onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
                           >{iw?.pdfName ? '📄 PDF' : '🔗 PDF'}</button>
-                          {iw?.pdfName && (
-                            <label title='"Publicly available" — this PDF can be stripped on export (it stays fetchable from its open source)'
+                          {(iw?.pdfName || iw?.pdfUrl) && (
+                            <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
                               className="text-[11px] flex items-center gap-0.5 text-stone-400 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
                               <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} />pub
                             </label>

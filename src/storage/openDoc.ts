@@ -4,7 +4,7 @@
 // active-doc pointer so it also works when the editor isn't mounted yet (cold launch).
 
 import { v4 as uuidv4 } from 'uuid'
-import { parseTraceFile } from '../provenance/bundle'
+import { parseTraceFile, readStudioFile } from '../provenance/bundle'
 import { saveDocument } from './opfs'
 import { upsertMeta } from './indexeddb'
 import { withScasDefaults } from '../scas/state'
@@ -29,7 +29,7 @@ export async function openInkwaveFile(
   const { handle, googleFileId, oneDriveFile } = opts
   let data: ReturnType<typeof parseTraceFile>
   try {
-    data = parseTraceFile(await file.text())
+    data = parseTraceFile(await readStudioFile(file)) // transparently gunzips .studio.gz
   } catch {
     throw new Error(`"${file.name}" doesn't look like an Inkwave file — it may be a plain-text document that was renamed to .studio`)
   }

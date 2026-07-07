@@ -90,7 +90,7 @@ export function OptionsMenu({
 }: {
   paperRight: number
   installPrompt?: any
-  onExportBundle?: (stripPdfs?: 'all' | 'public') => void
+  onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void
   onSave?: () => void
   onSaveAs?: () => void
   folderAvailable?: boolean
@@ -218,12 +218,12 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable z-[60] w-44 py-1 bg-white shadow-md text-sm text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable z-[60] w-48 py-0.5 bg-white shadow-md text-[15px] text-stone-600 font-serif" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"
                 onClick={() => { setMenuOpen(false); it.run() }}
-                className="w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                className="w-full text-left px-4 py-2 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
               >
                 {it.label}
               </button>
@@ -337,7 +337,7 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
 // Export the finished document — a typeset PDF (server-rendered, opens in a new tab) or LaTeX source.
 function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBundle, onDone }: {
   onExportPdf?: () => void; onExportLatex?: () => void; onExportEquations?: () => void
-  onExportBundle?: (stripPdfs?: 'all' | 'public') => void; onDone: () => void
+  onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void; onDone: () => void
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
@@ -355,6 +355,8 @@ function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBu
         <>
           <MenuButton onClick={() => { onExportBundle('public'); onDone() }}>🌐 Studio, public PDFs stripped<span className="block text-xs text-stone-400">a .studio without the PDFs you've marked "publicly available" — smaller, safe to share</span></MenuButton>
           <MenuButton onClick={() => { onExportBundle('all'); onDone() }}>📄✕ Document without PDFs<span className="block text-xs text-stone-400">a .studio with no embedded PDFs at all</span></MenuButton>
+          <MenuButton onClick={() => { onExportBundle('all', true); onDone() }}>🗜 Email copy (.studio.gz)<span className="block text-xs text-stone-400">no PDFs, gzip-compressed — smallest, for emailing. Inkwave opens it directly</span></MenuButton>
+          <MenuButton onClick={() => { onExportBundle(undefined, true); onDone() }}>🗜 Compressed, with PDFs (.studio.gz)<span className="block text-xs text-stone-400">everything, gzip-compressed. Inkwave opens it directly</span></MenuButton>
         </>
       )}
     </div>
@@ -466,7 +468,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   // Portal to body so the backdrop reliably covers the viewport and catches outside clicks (not
   // trapped in the footer's pointer-events/stacking context).
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-end justify-end pb-20 pr-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
         className="relative iw-nightable bg-white w-full max-w-sm p-6 flex flex-col shadow-xl"
