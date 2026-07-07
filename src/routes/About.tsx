@@ -31,7 +31,7 @@ export function About() {
           <AppIcon size={160} />
           <div>
             <h1 className="text-4xl tracking-tight" style={{ color: INK }}>Inkwave Zero</h1>
-            <p className="mt-2 text-lg text-stone-500">A calm writing studio for academics and students.</p>
+            <p className="mt-2 text-lg text-stone-500">Calm writing studio for students and academics.</p>
           </div>
         </header>
 
@@ -46,7 +46,7 @@ export function About() {
           </section>
 
           <section>
-            <h2 className="text-xl mb-2" style={{ color: INK }}>A studio, not just a page</h2>
+            <h2 className="text-xl mb-2" style={{ color: INK }}>A studio, not just an editor</h2>
             <p>
               Your writing shouldn't live apart from the sources it rests on. In the studio your
               PDFs, references and citations sit alongside the draft — read a paper, highlight a
