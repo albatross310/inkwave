@@ -1,5 +1,7 @@
 // Single place for origin constants — centralised so a Safari port changes one file.
-export const INKWAVE_ORIGINS = ['https://inkwave.studio', 'http://localhost:5173'] as const
+// iwzero.me is the canonical app domain; inkwave.studio 301-redirects there but stays listed so
+// the bridge keeps working if the alias ever serves directly again.
+export const INKWAVE_ORIGINS = ['https://iwzero.me', 'https://inkwave.studio', 'http://localhost:5173'] as const
 export const INKWAVE_URL_PATTERNS = INKWAVE_ORIGINS.map(o => `${o}/*`)
 export const QUEUE_KEY = 'inkwave:citeQueue'
 // Temporary watch list: when app opens a source URL we store the capture data here

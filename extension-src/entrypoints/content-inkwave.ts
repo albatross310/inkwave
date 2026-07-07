@@ -8,7 +8,7 @@ import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
 
 export default defineContentScript({
-  matches: ['https://inkwave.me/*', 'http://localhost:5173/*'],
+  matches: ['https://iwzero.me/*', 'https://inkwave.studio/*', 'http://localhost:5173/*'],
   runAt: 'document_idle',
   main() {
     const inflight = new Set<string>()

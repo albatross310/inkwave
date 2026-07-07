@@ -25,11 +25,13 @@ export default defineConfig({
       },
     },
     host_permissions: [
-      'https://inkwave.studio/*',
+      'https://iwzero.me/*', // canonical app domain
+      'https://inkwave.studio/*', // legacy alias (301s to iwzero.me)
       'http://localhost:5173/*',
       'https://api.crossref.org/*',
       'https://export.arxiv.org/*',
       'https://openlibrary.org/*',
+      'https://www.googleapis.com/*', // Google Books ISBN fallback (citations/lookup.ts)
       'https://eutils.ncbi.nlm.nih.gov/*',
     ],
     ...(browser === 'firefox' ? {

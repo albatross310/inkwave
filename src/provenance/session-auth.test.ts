@@ -48,15 +48,21 @@ describe('session token authentication', () => {
     await expect(handleSign(baseBody(sessionToken, 'different-doc'), undefined)).rejects.toThrow('invalid session')
   })
 
-  it('fails CLOSED in production when signing keys are unset (no silent dev-key fallback)', async () => {
-    const saved = { env: process.env.VERCEL_ENV, sk: process.env.INKWAVE_SIGNING_SK, ms: process.env.INKWAVE_MASTER_SECRET }
+  it('fails CLOSED on any Vercel deploy when signing keys are unset (no silent dev-key fallback)', async () => {
+    const saved = { vercel: process.env.VERCEL, env: process.env.VERCEL_ENV, sk: process.env.INKWAVE_SIGNING_SK, ms: process.env.INKWAVE_MASTER_SECRET }
     try {
-      process.env.VERCEL_ENV = 'production'
       delete process.env.INKWAVE_SIGNING_SK
       delete process.env.INKWAVE_MASTER_SECRET
+      // Production deploy
+      process.env.VERCEL = '1'
+      process.env.VERCEL_ENV = 'production'
+      await expect(openSession(DOC)).rejects.toThrow('signing not configured')
+      // Preview deploy — previews are internet-reachable, so they must fail closed too
+      process.env.VERCEL_ENV = 'preview'
       await expect(openSession(DOC)).rejects.toThrow('signing not configured')
     } finally {
       // restore so other tests keep using the dev placeholders
+      saved.vercel === undefined ? delete process.env.VERCEL : (process.env.VERCEL = saved.vercel)
       saved.env === undefined ? delete process.env.VERCEL_ENV : (process.env.VERCEL_ENV = saved.env)
       if (saved.sk !== undefined) process.env.INKWAVE_SIGNING_SK = saved.sk
       if (saved.ms !== undefined) process.env.INKWAVE_MASTER_SECRET = saved.ms

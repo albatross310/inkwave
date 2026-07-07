@@ -26,11 +26,12 @@ const toHex = (u) => { let s = ''; for (const b of u) s += b.toString(16).padSta
 const fromHex = (h) => { const u = new Uint8Array(h.length / 2); for (let i = 0; i < u.length; i++) u[i] = parseInt(h.substr(i * 2, 2), 16); return u }
 const b64 = (u) => Buffer.from(u).toString('base64')
 
-// Fail CLOSED in production: the dev key/secret are committed (the public key ships in the repo), so
-// silently falling back to them on a live deploy would make every signature and session MAC forgeable.
-// In dev/preview/tests the placeholders are fine. Guards the signing entry points below.
+// Fail CLOSED on ANY Vercel deployment (production AND previews): the dev key/secret are committed
+// (the public key ships in the repo), so falling back to them on anything reachable from the
+// internet would let a preview URL mint receipts that look signed but are forgeable. Only local
+// dev/tests (no VERCEL env) may use the placeholders. Guards the signing entry points below.
 function assertKeysConfigured() {
-  if (process.env.VERCEL_ENV === 'production' && (!process.env.INKWAVE_SIGNING_SK || !process.env.INKWAVE_MASTER_SECRET)) {
+  if (process.env.VERCEL && (!process.env.INKWAVE_SIGNING_SK || !process.env.INKWAVE_MASTER_SECRET)) {
     throw new Error('signing not configured')
   }
 }
