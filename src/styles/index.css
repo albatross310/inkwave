@@ -52,7 +52,8 @@
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
     min-height: 0;
-    overflow: auto;
+    overflow-y: scroll; /* always reserve + show the vertical bar (auto let it hide) */
+    overflow-x: auto;
     transition: right 0.18s ease, bottom 0.18s ease;
     /* Give the scrollbar a SOLID track so the fixed wave ::before (which spans the whole viewport,
        scrollbar channel included) doesn't bleed through the translucent overlay scrollbar. Styling

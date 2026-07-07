@@ -725,6 +725,10 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+    // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
+    // the Scroll surface, so its own scroll handler never fires.
+    const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
+    if (surf) surf.style.setProperty('--wave-x', `${(el.scrollTop * 0.06).toFixed(1)}px`)
     // caret hit-testing is comparatively costly — recompute the signature at most once per frame
     if (!sigTickRef.current) {
       sigTickRef.current = true

@@ -880,20 +880,20 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
         <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
           style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
-        {/* Sync editor (compact) */}
-        <label title="Sync the editor to where this highlight is cited" onMouseEnter={() => setHint('sync editor: snap the editor to where this highlight is cited')}
-          style={{ display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer', userSelect: 'none', flexShrink: 0 }}>
-          <input type="checkbox" checked={syncEditor} onChange={e => setSyncEditor(e.target.checked)} style={{ cursor: 'pointer' }} />
-          <span style={{ fontSize: '0.9em', color: INK }}>⇄</span>
-        </label>
-        {/* Don't add pages to inline (compact) */}
-        <label title="Don't add pages to inline citations" onMouseEnter={() => setHint("don't add pages to inline: highlights won't add page numbers to inline citations, wherever you opened from")}
-          style={{ display: 'flex', alignItems: 'center', gap: 2, cursor: noRef ? 'default' : 'pointer', userSelect: 'none', flexShrink: 0, opacity: noRef ? 0.75 : 1 }}>
-          <input type="checkbox" checked={!!noRef || dontAddPages} disabled={!!noRef} onChange={e => setDontAddPages(e.target.checked)} style={{ cursor: 'inherit' }} />
-          <span style={{ fontSize: '0.82em', color: '#6b5b7e', textDecoration: 'line-through' }}>#</span>
-        </label>
-        <span style={{ marginLeft: 'auto', minWidth: 30, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text')}
+        {/* Sync-editor toggle — a box that lights up purple when on. */}
+        <button type="button" title="Scroll the editor to where the highlight is cited when you click the arrows"
+          onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
+          onClick={() => setSyncEditor(v => !v)}
+          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
+            border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
+        {/* "Don't add pages to inline" toggle — lights up purple when on. */}
+        <button type="button" disabled={!!noRef} title="Don't add pages to inline citations"
+          onMouseEnter={() => setHint("when on, highlights won't add page numbers to inline citations, wherever you opened from")}
+          onClick={() => setDontAddPages(v => !v)}
+          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
+            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e', textDecoration: 'line-through' }}>#</button>
+        <span style={{ marginLeft: 'auto', minWidth: 0, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : '')}
         </span>
         {dockButton}
       </div>
