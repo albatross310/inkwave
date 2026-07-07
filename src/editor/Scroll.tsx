@@ -48,111 +48,52 @@ export function Scroll({
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
 
-  // ── In-app editor zoom (Peter's spec): TRANSFORM-MAGNIFY below the fit point, FONT-REFLOW above ──
-  // Ctrl/⌘+wheel. One level `zoomU`:
-  //   zoomU ≤ 1 (magnify zone): a CSS transform scales the whole parchment from small up to filling the
-  //     window width (at zoomU=1). Font stays the selected size. Smooth/GPU; scales numbers, logos,
-  //     margins, guides uniformly for free; transform doesn't touch clientWidth so the paginator stays
-  //     correct. The parchment lives in a `scaler` box sized to the scaled dims so scroll/centre are right.
-  //   zoomU > 1 (reflow zone): the page is at full width; the FONT grows (--iw-editor-zoom) and text
-  //     reflows. Flicker accepted here — reflow can't be atomic.
-  // The snapshot view (non-fill) keeps a plain multiplicative font zoom.
-  const hybrid = fill && !phone
-  const [zoomU, setZoomU] = useState(() => {
-    try { return Number(localStorage.getItem(fill ? 'inkwave:zoomU' : 'inkwave:editorZoom')) || 1 } catch { return 1 }
+  // In-app editor zoom: Ctrl/⌘+wheel (or pinch) over the editor scales the font (so text REFLOWS,
+  // like a webpage) — isolated from the PDF panel because we preventDefault the browser zoom. Persisted.
+  const [editorZoom, setEditorZoom] = useState(() => {
+    try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
   })
-  const zoomURef = useRef(zoomU); zoomURef.current = zoomU
-
-  // fit = the transform scale at which the true-A4 parchment fills the available width. paperH = the
-  // parchment's UNSCALED height (offsetHeight — transform doesn't change it), for sizing the scaler box.
-  const basePaperPx = (() => {
-    const landscape = getOrientation() === 'landscape'
-    const ps = getPaperSize()
-    const mm = ps === 'letter' ? (landscape ? 279 : 216) : (landscape ? 297 : 210)
-    return (mm * 96) / 25.4
-  })()
-  const [fit, setFit] = useState(1)
-  const [paperH, setPaperH] = useState(0)
-  useEffect(() => {
-    if (!hybrid) return
-    const el = surfaceRef.current
-    if (!el) return
-    const compute = () => {
-      setFit(Math.max(0.2, +((Math.max(120, el.clientWidth - 24)) / basePaperPx).toFixed(4)))
-      const p = paperRef?.current
-      if (p) setPaperH(p.offsetHeight)
-    }
-    compute()
-    const roS = new ResizeObserver(compute); roS.observe(el)
-    const p = paperRef?.current
-    const roP = p ? new ResizeObserver(compute) : null; if (p && roP) roP.observe(p)
-    window.addEventListener('inkwave:page-settings-changed', compute)
-    return () => { roS.disconnect(); roP?.disconnect(); window.removeEventListener('inkwave:page-settings-changed', compute) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hybrid, basePaperPx])
-
-  const MIN_MAGNIFY = 0.4 // most zoomed-out = 40% of the fill-to-width size
-  let magnify = 1, editorZoom = 1
-  if (hybrid) {
-    if (zoomU <= 1) { magnify = fit * (MIN_MAGNIFY + (1 - MIN_MAGNIFY) * Math.max(0, zoomU)); editorZoom = 1 }
-    else            { magnify = fit; editorZoom = 1 + (zoomU - 1) } // page held at full width; font reflows
-  } else {
-    editorZoom = zoomU // snapshot view: plain font zoom
-  }
-
-  // Wheel zoom. Hybrid moves zoomU additively through the two zones; non-hybrid keeps the synchronous
-  // pointer-anchored font zoom. Anchoring in hybrid: keep the element under the cursor at the pointer.
-  const zoomAnchorRef = useRef<{ el: HTMLElement; cursorY: number; keepLeft: number } | null>(null)
+  const editorZoomRef = useRef(editorZoom); editorZoomRef.current = editorZoom
+  // Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
+  // reading the anchored element's new position, then correct scrollTop in the SAME frame — all before
+  // the browser paints. The anchor is the actual element under the cursor (exact — a fraction estimate
+  // drifts badly further down the page since reflow doesn't grow uniformly). scrollLeft is held so it
+  // never jumps to the left edge. React state is updated after, to the same value (no re-paint).
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el || phone) return
+    if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+      const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null // skips pointer-events:none guides
       const cursorY = e.clientY, keepLeft = el.scrollLeft
-      if (hybrid) {
-        zoomAnchorRef.current = target && el.contains(target) ? { el: target, cursorY, keepLeft } : null
-        setZoomU(u => {
-          const next = Math.max(0, Math.min(3.5, +(u + (e.deltaY < 0 ? 0.06 : -0.06)).toFixed(3)))
-          try { localStorage.setItem('inkwave:zoomU', String(next)) } catch { /* private mode */ }
-          return next
-        })
-      } else {
-        const next = Math.max(0.6, Math.min(2.5, +(zoomURef.current * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
-        el.style.setProperty('--iw-editor-zoom', String(next))
-        if (target && el.contains(target) && target.isConnected) {
-          const topAfter = target.getBoundingClientRect().top
-          el.scrollTop = Math.max(0, el.scrollTop + (topAfter - cursorY)); el.scrollLeft = keepLeft
-        }
-        zoomURef.current = next; setZoomU(next)
-        try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+      const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
+      el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
+      if (target && el.contains(target) && target.isConnected) {
+        const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
+        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - cursorY)) // anchor back under the pointer
+        el.scrollLeft = keepLeft
       }
+      editorZoomRef.current = next
+      setEditorZoom(next) // keep React in sync; sets the same var value, so no extra paint
+      try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+      // Deliberately do NOT re-paginate on zoom: page breaks stay pinned to the SAME text as you zoom
+      // (Peter's intent). Re-measuring during/after zoom made the breaks — and the text — jump around.
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [phone, hybrid])
-  // Hybrid: after the transform/reflow renders, bring the anchored element back under the pointer.
-  useEffect(() => {
-    if (!hybrid) return
-    const el = surfaceRef.current
-    const a = zoomAnchorRef.current
-    if (!el || !a || !a.el.isConnected) return
-    const id = requestAnimationFrame(() => {
-      const topAfter = a.el.getBoundingClientRect().top
-      el.scrollTop = Math.max(0, el.scrollTop + (topAfter - a.cursorY)); el.scrollLeft = a.keepLeft
-    })
-    return () => cancelAnimationFrame(id)
-  }, [zoomU, hybrid])
+    return () => { el.removeEventListener('wheel', onWheel) }
+  }, [phone])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
   const paraSpacingEm = getParaSpacingEm()
   const columns       = getColumns()
+  // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT jump when you ZOOM
+  // (zoom re-anchors scrollTop, which would lurch the waves). So skip the frame where the editor-zoom
+  // level changed and only sway on genuine scrolling.
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
-    // Desktop scrolls the surface itself (it's the scroll container); phone scrolls the window/body.
     const target: HTMLElement | Window = phone ? window : el
     let raf = 0
     let lastZoom = el.style.getPropertyValue('--iw-editor-zoom')
@@ -169,73 +110,67 @@ export function Scroll({
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [phone])
 
-  // The parchment. In hybrid mode it's transform-scaled (magnify zone) from its top-left and lives inside
-  // a sized `scaler` box (below); otherwise it's a normal centred A4 column.
-  const paperNode = (
-    <div
-      ref={paperRef}
-      className={phone || getPaperSize() === 'scroll' ? 'mx-auto w-full' : (hybrid ? '' : 'mx-auto')}
-      style={{
-        width: (() => {
-          if (phone) return undefined
-          const ps = getPaperSize()
-          if (ps === 'scroll') return undefined
-          if (hybrid) return `${Math.round(basePaperPx)}px` // fixed A4 px; the scaler transform sizes it
-          const landscape = getOrientation() === 'landscape'
-          if (ps === 'letter') return landscape ? '279mm' : '216mm'
-          return landscape ? '297mm' : '210mm' // a4
-        })(),
-        // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
-        // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
-        // the whole parchment on every reel frame.
-        borderRadius: phone ? 0 : '8px',
-        boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
-        // Magnify zone: transform-scale the whole parchment (smooth; scales guides/numbers/logo/margins
-        // uniformly; doesn't touch clientWidth so the paginator stays correct). top-left origin + the
-        // sized scaler below keep scroll + centring exact.
-        ...(hybrid ? { transform: `scale(${magnify})`, transformOrigin: 'top left', position: 'absolute' as const, top: 0, left: 0 } : null),
-      }}
-    >
-      {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
-          by device type, not the viewport breakpoint, so browser zoom never collapses it); a slim
-          one on phones where screen real estate is tight. */}
-      <div
-        ref={sheetRef}
-        className="scroll-paper relative pt-8 pb-24"
-        style={{
-          borderRadius: phone ? 0 : '8px',
-          paddingLeft:  phone ? '1.25rem' : `${sideMarginPx}px`,
-          paddingRight: phone ? '1.25rem' : `${sideMarginPx}px`,
-          paddingTop:   `${topMarginPx}px`,
-          paddingBottom:`${btmMarginPx}px`,
-          '--para-spacing': `${paraSpacingEm}em`,
-        } as React.CSSProperties}
-      >
-        <PageGuides sheetRef={sheetRef} />
-        <div
-          className="mx-auto w-full relative"
-          style={{
-            zIndex: 1,
-            columnCount: columns > 1 && !gapped ? columns : undefined,
-            columnGap: columns > 1 && !gapped ? '2em' : undefined,
-          }}
-          ref={containerRef}
-        >
-          {children}
-        </div>
-      </div>
-    </div>
-  )
-
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
-      style={{ '--iw-editor-zoom': editorZoom, '--iw-magnify': hybrid ? magnify : 1 } as React.CSSProperties}>
-      {hybrid
-        // Scaler box: reserves the SCALED footprint (basePaperPx × paperH, both × magnify) so scroll
-        // height + centring are exact and there's no empty space at the end. The parchment inside is
-        // absolutely positioned and transform-scaled to fill it.
-        ? <div className="mx-auto" style={{ width: Math.max(1, Math.round(basePaperPx * magnify)), height: Math.max(1, Math.round(paperH * magnify)), position: 'relative' }}>{paperNode}</div>
-        : paperNode}
+      style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
+      {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
+          fills the screen edge-to-edge, no shadow. */}
+      <div
+        ref={paperRef}
+        // FIXED page width (not max-width + w-full) so the text always reflows at true A4/Letter width.
+        // That keeps words-per-line — and therefore words-per-page — constant regardless of screen
+        // width, so the page-break guides + gapped pages fall at the SAME content on any screen (they
+        // used to move because pageH scaled with the rendered width). Narrower containers scroll
+        // horizontally instead of reflowing. Phone + 'scroll' paper keep the fluid full-width layout.
+        className={(() => {
+          if (phone || getPaperSize() === 'scroll') return 'mx-auto w-full'
+          return 'mx-auto'
+        })()}
+        style={{
+          width: (() => {
+            if (phone) return undefined
+            const ps = getPaperSize()
+            if (ps === 'scroll') return undefined
+            const landscape = getOrientation() === 'landscape'
+            if (ps === 'letter') return landscape ? '279mm' : '216mm'
+            return landscape ? '297mm' : '210mm' // a4
+          })(),
+          // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
+          // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
+          // the whole parchment on every reel frame.
+          borderRadius: phone ? 0 : '8px',
+          boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
+        }}
+      >
+        {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
+            by device type, not the viewport breakpoint, so browser zoom never collapses it); a slim
+            one on phones where screen real estate is tight. */}
+        <div
+          ref={sheetRef}
+          className="scroll-paper relative pt-8 pb-24"
+          style={{
+            borderRadius: phone ? 0 : '8px',
+            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx}px`,
+            paddingRight: phone ? '1.25rem' : `${sideMarginPx}px`,
+            paddingTop:   `${topMarginPx}px`,
+            paddingBottom:`${btmMarginPx}px`,
+            '--para-spacing': `${paraSpacingEm}em`,
+          } as React.CSSProperties}
+        >
+          <PageGuides sheetRef={sheetRef} />
+          <div
+            className="mx-auto w-full relative"
+            style={{
+              zIndex: 1,
+              columnCount: columns > 1 && !gapped ? columns : undefined,
+              columnGap: columns > 1 && !gapped ? '2em' : undefined,
+            }}
+            ref={containerRef}
+          >
+            {children}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -294,7 +229,8 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       {marks.map(({ n }) => {
         const pageTop = n === 1 ? 0 : (marks[n - 2]?.y ?? 0)
         const logoStyle = { position: 'absolute' as const, right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }
-        // Two variants toggled by CSS: the day PNG and a night SVG with a light ring. See index.css.
+        // Two variants toggled by CSS: the day PNG and a night SVG with a light ring (so the mark's dark
+        // bottom reads on the black night surface). See index.css .iw-day-logo / .iw-night-logo.
         return (
           <span key={`logo-${n}`}>
             <img className="iw-day-logo" src="/inkwave-logo-v7.png" width={logoSize} height={logoSize} alt="" style={logoStyle} />
