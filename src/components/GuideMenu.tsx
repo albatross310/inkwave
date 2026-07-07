@@ -57,17 +57,17 @@ type Row = { k: string; d: string }
 
 function Col({ sections }: { sections: { title: string; rows: Row[] }[] }) {
   return (
-    <div style={{ minWidth: '220px', flex: 1 }}>
+    <div>
       {sections.map(({ title, rows }) => (
-        <div key={title} style={{ marginBottom: '20px' }}>
-          <div style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#b0a898', marginBottom: '6px' }}>
+        <div key={title} style={{ marginBottom: '22px' }}>
+          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: '#a89a86', marginBottom: '8px' }}>
             {title}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '10px', rowGap: '5px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '14px', rowGap: '7px' }}>
             {rows.map(({ k, d }) => (
               <Fragment key={k}>
-                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', color: '#7a6e65', textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
-                <span style={{ fontSize: '0.9rem', color: '#4a4035' }}>{d}</span>
+                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: '#7a6e65', textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
+                <span style={{ fontSize: '1.02rem', color: '#4a4035', lineHeight: 1.4 }}>{d}</span>
               </Fragment>
             ))}
           </div>
@@ -115,7 +115,7 @@ export function GuideMenu() {
             style={{
               position: 'relative',
               width: '100%',
-              maxWidth: '900px',
+              maxWidth: '440px',
               padding: '24px',
               background: 'white',
               boxShadow: '0 12px 48px rgba(0,0,0,0.16)',
@@ -131,8 +131,8 @@ export function GuideMenu() {
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
             </div>
 
-            {/* 3-column layout — scrollable horizontally on narrow screens */}
-            <div style={{ display: 'flex', gap: '24px', overflowX: 'auto' }}>
+            {/* Single narrow column — scrolls vertically (see maxHeight/overflowY on the dialog). */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               <Col sections={[
                 { title: 'Citations', rows: CITATIONS },
                 { title: 'Word cycle', rows: CYCLE },
