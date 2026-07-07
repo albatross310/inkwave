@@ -1,5 +1,5 @@
 // GuideMenu — ⓘ toolbar button; opens a wide 3-column shortcut reference.
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 const INK = '#5c2d8a'
@@ -79,6 +79,22 @@ function Col({ sections }: { sections: { title: string; rows: Row[] }[] }) {
 
 export function GuideMenu() {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ dx: number; dy: number } | null>(null)
+
+  function onHeaderDown(e: React.MouseEvent) {
+    const d = dialogRef.current?.getBoundingClientRect()
+    if (!d) return
+    drag.current = { dx: e.clientX - d.left, dy: e.clientY - d.top }
+    const move = (ev: MouseEvent) => {
+      if (!drag.current) return
+      setPos({ left: ev.clientX - drag.current.dx, top: ev.clientY - drag.current.dy })
+    }
+    const up = () => { drag.current = null; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -101,54 +117,52 @@ export function GuideMenu() {
       </button>
 
       {open && createPortal(
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-          onMouseDown={() => setOpen(false)}
-        >
-          <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
+        <>
+          {/* Transparent backdrop — click outside to dismiss. The panel itself is movable + resizable. */}
+          <div className="fixed inset-0 z-[99]" onMouseDown={() => setOpen(false)} />
           <div
+            ref={dialogRef}
             role="dialog"
-            aria-modal="true"
             aria-label="Guide"
-            className="iw-nightable"
+            className="iw-nightable fixed z-[100]"
             onMouseDown={e => e.stopPropagation()}
             style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: '440px',
-              padding: '24px',
+              ...(pos ? { left: pos.left, top: pos.top } : { left: '50%', bottom: 66, transform: 'translateX(-50%)' }),
+              width: 620, maxWidth: '92vw', maxHeight: '78vh',
+              resize: 'both', overflow: 'auto',
+              padding: '14px 20px 20px',
               background: 'white',
               boxShadow: '0 12px 48px rgba(0,0,0,0.16)',
               border: `1px solid ${INK}bf`,
               borderRadius: '14px',
-              maxHeight: '90vh',
-              overflowY: 'auto',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+            {/* Drag handle */}
+            <div onMouseDown={onHeaderDown}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', cursor: 'move', userSelect: 'none' }}>
               <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: INK, margin: 0 }}>Guide</h2>
-              <button type="button" aria-label="Close" onClick={() => setOpen(false)}
+              <button type="button" aria-label="Close" onMouseDown={e => e.stopPropagation()} onClick={() => setOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
             </div>
 
-            {/* Single narrow column — scrolls vertically (see maxHeight/overflowY on the dialog). */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <Col sections={[
+            {/* Two clean columns (sections flow across), with a faint dividing rule. */}
+            <div style={{ columnCount: 2, columnGap: '30px', columnRule: '1px solid rgba(92,45,138,0.08)' }}>
+              {([
                 { title: 'Citations', rows: CITATIONS },
                 { title: 'Word cycle', rows: CYCLE },
                 { title: 'Fractions (on confirm)', rows: FRAC },
-              ]} />
-              <Col sections={[
                 { title: 'Math mode', rows: MATH },
                 { title: 'Block alignment', rows: ALIGN },
-              ]} />
-              <Col sections={[
                 { title: 'Greek keyboard (in math box)', rows: GREEK },
                 { title: 'Custom symbols', rows: SYMBOLS },
-              ]} />
+              ]).map(sec => (
+                <div key={sec.title} style={{ breakInside: 'avoid', marginBottom: '20px' }}>
+                  <Col sections={[sec]} />
+                </div>
+              ))}
             </div>
           </div>
-        </div>,
+        </>,
         document.body,
       )}
     </div>

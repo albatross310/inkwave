@@ -185,17 +185,17 @@ export function OptionsMenu({
     })
   }
 
-  // Anchor the menu's right edge to the kebab (so it comes up overlapping the toolbar), extending
-  // toward the page edge but never closer than EDGE_BUFFER — at which point it keeps that buffer.
+  // Centre the menu horizontally over the kebab, clamped to the viewport; it comes up above the toolbar.
   const EDGE_BUFFER = 10
   const menuStyle: CSSProperties = { border: `1px solid ${INK}66`, borderRadius: '10px' }
   if (menuOpen) {
     const br = btnRef.current?.getBoundingClientRect()
+    const HALF = 90 // ~half the menu's width, for edge clamping
+    const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
     menuStyle.position = 'fixed'
     menuStyle.bottom = br ? Math.round(window.innerHeight - br.top + 16) : 60 // clear the toolbar, no overlap
-    menuStyle.right = br
-      ? Math.max(EDGE_BUFFER, Math.round(window.innerWidth - br.right))
-      : Math.max(EDGE_BUFFER, Math.round(window.innerWidth - paperRight + 12))
+    menuStyle.left = Math.round(Math.max(EDGE_BUFFER + HALF, Math.min(window.innerWidth - EDGE_BUFFER - HALF, center)))
+    menuStyle.transform = 'translateX(-50%)'
   }
 
   return (
@@ -218,12 +218,12 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable z-[60] w-48 py-0.5 bg-white shadow-md text-[15px] text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable z-[60] w-max min-w-[9rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"
                 onClick={() => { setMenuOpen(false); it.run() }}
-                className="w-full text-left px-4 py-2 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                className="w-full text-left pl-4 pr-5 py-2 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
               >
                 {it.label}
               </button>
