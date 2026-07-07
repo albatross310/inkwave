@@ -90,7 +90,7 @@ export function OptionsMenu({
 }: {
   paperRight: number
   installPrompt?: any
-  onExportBundle?: () => void
+  onExportBundle?: (stripPdfs?: 'all' | 'public') => void
   onSave?: () => void
   onSaveAs?: () => void
   folderAvailable?: boolean
@@ -239,7 +239,7 @@ export function OptionsMenu({
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
-          {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onDone={() => setModal(null)} />}
+          {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
         </Modal>
       )}
@@ -335,8 +335,9 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
 }
 
 // Export the finished document — a typeset PDF (server-rendered, opens in a new tab) or LaTeX source.
-function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onDone }: {
-  onExportPdf?: () => void; onExportLatex?: () => void; onExportEquations?: () => void; onDone: () => void
+function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBundle, onDone }: {
+  onExportPdf?: () => void; onExportLatex?: () => void; onExportEquations?: () => void
+  onExportBundle?: (stripPdfs?: 'all' | 'public') => void; onDone: () => void
 }) {
   return (
     <div className="flex flex-col gap-2.5 mt-2">
@@ -349,6 +350,12 @@ function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onDone }: 
       )}
       {onExportEquations && (
         <MenuButton onClick={() => { onExportEquations(); onDone() }}>≡ Equations<span className="block text-xs text-stone-400">block equations as a numbered list (.txt)</span></MenuButton>
+      )}
+      {onExportBundle && (
+        <>
+          <MenuButton onClick={() => { onExportBundle('public'); onDone() }}>🌐 Studio, public PDFs stripped<span className="block text-xs text-stone-400">a .studio without the PDFs you've marked "publicly available" — smaller, safe to share</span></MenuButton>
+          <MenuButton onClick={() => { onExportBundle('all'); onDone() }}>📄✕ Document without PDFs<span className="block text-xs text-stone-400">a .studio with no embedded PDFs at all</span></MenuButton>
+        </>
       )}
     </div>
   )

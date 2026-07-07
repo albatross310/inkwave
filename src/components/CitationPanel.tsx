@@ -549,6 +549,15 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     }
   }
 
+  // Mark a source's PDF "publicly available" → the public-strip export can drop it (it's re-fetchable
+  // from its open source).
+  async function togglePublic(item: CSLItem) {
+    const cur = bibProvider.get(item.id) ?? item
+    const iw: IwCitationMeta = { ...((cur as { _iw?: IwCitationMeta })._iw ?? {}) }
+    if (iw.publiclyAvailable) delete iw.publiclyAvailable; else iw.publiclyAvailable = true
+    await addToLibrary({ ...cur, _iw: iw })
+  }
+
   async function removePdf(item: CSLItem) {
     await deletePdf(item.id).catch(() => {})
     const cur = bibProvider.get(item.id)
@@ -894,6 +903,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                             className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
                             onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
                           >{iw?.pdfName ? '📄 PDF' : '🔗 PDF'}</button>
+                          {iw?.pdfName && (
+                            <label title='"Publicly available" — this PDF can be stripped on export (it stays fetchable from its open source)'
+                              className="text-[11px] flex items-center gap-0.5 text-stone-400 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} />pub
+                            </label>
+                          )}
                           <button type="button"
                             title="Remove this PDF (and its annotations)"
                             className="text-[11px] px-1.5 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500"

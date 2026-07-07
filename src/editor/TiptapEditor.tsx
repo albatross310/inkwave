@@ -839,9 +839,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
   // Uses the async variant so embedded source PDFs travel inside the .studio file.
-  async function exportBundle() {
-    const bundle = await buildExportBundleWithPdfs(docRef.current, snapshots)
-    downloadBundle(bundle, bundleFilename(docRef.current))
+  async function exportBundle(stripPdfs?: 'all' | 'public') {
+    const bundle = await buildExportBundleWithPdfs(docRef.current, snapshots, stripPdfs)
+    const base = bundleFilename(docRef.current)
+    const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
+    downloadBundle(bundle, name)
   }
 
   // Primary "Save" — works on every browser. Chromium (Chrome/Edge/Brave) mirrors to a granted
