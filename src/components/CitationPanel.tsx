@@ -933,16 +933,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       <span className="text-[13px] text-stone-600 flex-shrink-0">{typeLabel}</span>
                     </div>
                   </button>
-                  <div className="flex flex-wrap items-center justify-end gap-1 flex-shrink-0 max-w-[46%]">
-                    <button type="button" onClick={() => cite(item)} title="Cite inline in the document at the cursor"
-                      className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[15px] leading-none">@</button>
-                    {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
-                      <button type="button"
-                        title="Open source page (shows verification panel if extension installed)"
-                        className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]"
-                        onClick={e => { e.stopPropagation(); visitSource(item) }}
-                      >↗</button>
-                    )}
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0 max-w-[48%]">
+                   <div className="flex flex-wrap items-center justify-end gap-1">
                     {(() => {
                       const iw = (item as { _iw?: IwCitationMeta })._iw
                       return iw?.pdfName || iw?.pdfUrl ? (
@@ -982,6 +974,19 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     {/* "ren" button removed — rename is click-and-hold on the purple citekey. */}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
+                   </div>
+                   {/* Second row: cite + visit source */}
+                   <div className="flex items-center justify-end gap-1">
+                    <button type="button" onClick={() => cite(item)} title="Cite inline in the document at the cursor"
+                      className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[15px] leading-none">@</button>
+                    {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
+                      <button type="button"
+                        title="Open source page (shows verification panel if extension installed)"
+                        className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[13px]"
+                        onClick={e => { e.stopPropagation(); visitSource(item) }}
+                      >↗</button>
+                    )}
+                   </div>
                   </div>
                 </div>
                 {/* Title on ONE line, truncated with an ellipsis; full title on hover. */}

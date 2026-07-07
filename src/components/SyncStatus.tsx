@@ -117,8 +117,10 @@ export function SyncStatus({
               </button>
             )}
             {!synced && onClick && (
-              <button type="button" onClick={onClick} className="underline hover:text-[#5c2d8a]" style={{ color: INK }}>
-                Sync now
+              <button type="button" onClick={onClick}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-white font-medium shadow-sm hover:shadow transition-all"
+                style={{ background: 'linear-gradient(135deg, #7a4fb0, #5c2d8a)' }}>
+                ☁ Sync now
               </button>
             )}
           </div>
