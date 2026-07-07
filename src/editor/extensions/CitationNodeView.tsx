@@ -15,7 +15,7 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
-  bibAnchorId, citeAnchorId, navigateToAnchor, goToLastPosition, occurrencesAt, ensureNavStyles, mergePages,
+  citeAnchorId, navigateToBibEntry, goToLastPosition, occurrencesAt, ensureNavStyles, mergePages,
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
@@ -243,8 +243,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       <button type="button" contentEditable={false} className="iw-cite-biblink"
                         title="Go to the reference-list entry"
                         onPointerDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); navigateToAnchor(bibAnchorId(s.key)) }}
-                      >▸</button>
+                        onClick={e => { e.stopPropagation(); navigateToBibEntry(s.key, s.occ) }}
+                      >⤵</button>
                     </>
                   ) : (
                     <span id={citeAnchorId(s.key, s.occ)} style={{ color: '#b91c1c' }} title={`Unresolved: ${s.key}`}>

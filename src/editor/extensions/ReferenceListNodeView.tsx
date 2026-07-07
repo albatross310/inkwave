@@ -20,7 +20,7 @@ import { pageOffsetOf } from '../../citations/pageOffset'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
   bibAnchorId, citeAnchorId, navigateToAnchor, occurrenceCounts, ensureNavStyles,
-  citedPages, formatPages, occurrencePages,
+  citedPages, formatPages, occurrencePages, occurrenceQuotes,
 } from '../../citations/citationNav'
 import type { CSLItem, IwCitationMeta } from '../../types/document'
 import type { RefMode } from '../../citations/resolve'
@@ -76,21 +76,28 @@ function NotePanel({ value, onChange }: { value: string; onChange: (v: string) =
 // Back-reference markers — the DOCUMENT pages where a source is cited (from the pagination guides),
 // each snapping back to that in-text citation. Falls back to occurrence ordinals when pages can't be
 // measured (scroll / gapped mode). Pages are deduped so each appears once.
-function backrefHtml(key: string, occPages: Array<{ occ: number; page: number | null }>): string {
+const escHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+const firstWords = (q: string, n = 3) => q.trim().split(/\s+/).filter(Boolean).slice(0, n).join(' ')
+
+// Back-refs label each in-text occurrence by its DOCUMENT PAGE (falling back to occurrence ordinal when
+// pages can't be measured). Two citations on the same page become "3.1", "3.2" — both hyperlinked. Each
+// shows the first few words of its pinpoint quote (if any) so the reader recalls which one it is.
+function backrefHtml(key: string, occPages: Array<{ occ: number; page: number | null }>, quotes: string[]): string {
   if (!occPages.length) return ''
   const anyPage = occPages.some(o => o.page != null)
-  const seen = new Set<number>()
-  const marks: string[] = []
-  for (const { occ, page } of occPages) {
-    if (anyPage) {
-      if (page == null || seen.has(page)) continue
-      seen.add(page)
-      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to page ${page}">${page}</a>`)
-    } else {
-      marks.push(`<a class="iw-cite-link" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to citation ${occ}">${occ}</a>`)
-    }
-  }
-  if (!marks.length) return ''
+  const total = new Map<number, number>()
+  if (anyPage) for (const o of occPages) if (o.page != null) total.set(o.page, (total.get(o.page) ?? 0) + 1)
+  const running = new Map<number, number>()
+  const marks = occPages.map(({ occ, page }) => {
+    let label: string
+    if (anyPage && page != null) {
+      if ((total.get(page) ?? 1) > 1) { const i = (running.get(page) ?? 0) + 1; running.set(page, i); label = `${page}.${i}` }
+      else label = `${page}`
+    } else label = `${occ}`
+    const words = firstWords(quotes[occ - 1] ?? '')
+    const preview = words ? ` <span class="iw-backref-quote">${escHtml(words)}…</span>` : ''
+    return `<a class="iw-cite-link iw-backref-mark" data-iw-nav="${citeAnchorId(key, occ)}" title="Go to ${anyPage && page != null ? `p. ${page}` : `citation ${occ}`}">${label}${preview}</a>`
+  })
   return `<span class="iw-backref-group" contenteditable="false"><span class="iw-backref-arrow">↩</span> ${marks.join(' ')}</span>`
 }
 
@@ -109,9 +116,9 @@ function espHtml(pages: number[], raw: boolean): string {
 }
 
 // Inject the entry anchor id + esp-pages + back-refs + note button into a single `.csl-entry` html.
-function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[], raw: boolean): string {
+function decorateEntry(id: string, html: string, occPages: Array<{ occ: number; page: number | null }>, hasNote: boolean, pages: number[], raw: boolean, quotes: string[]): string {
   let out = html.replace(/^(\s*<[a-z]+)/i, `$1 id="${bibAnchorId(id)}"`)
-  const trailing = espHtml(pages, raw) + backrefHtml(id, occPages) + noteButtonHtml(id, hasNote)
+  const trailing = espHtml(pages, raw) + backrefHtml(id, occPages, quotes) + noteButtonHtml(id, hasNote)
   out = out.replace(/<\/[a-z]+>\s*$/i, m => `${trailing}${m}`)
   return out
 }
@@ -162,7 +169,8 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
         const pages = [...new Set([...citedPages(editor.state.doc, id), ...highlightPages(it).map(p => p + off)])].sort((a, b) => a - b)
         const raw = pages.length > 0 && (it as { _iw?: IwCitationMeta })?._iw?.pageOffsetFlag === 'raw'
         const occPages = occurrencePages(id, counts.get(id) ?? 0)
-        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages, raw), occ: counts.get(id) ?? 0, note }
+        const quotes = occurrenceQuotes(editor.state.doc, id)
+        return { id, html: decorateEntry(id, html, occPages, !!note.trim(), pages, raw, quotes), occ: counts.get(id) ?? 0, note }
       }))
       setUsingCsl(true)
       setPlain([])
