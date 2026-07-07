@@ -16,65 +16,6 @@ const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
 
-// ── Summary panel ─────────────────────────────────────────────────────────────
-// Collapses to a 6px-wide vertical strip (width-collapse). On wide screens always
-// open. On narrow/phone flashes open for 1s when flashKey changes (not on mount).
-function SummaryPanel({ text, isWide, isPhone, flashKey }: {
-  text: string; isWide: boolean; isPhone: boolean; flashKey: string
-}) {
-  const [hovered, setHovered] = useState(false)
-  const [flashing, setFlashing] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout>>()
-  const isFirstRender = useRef(true)
-
-  useEffect(() => {
-    // Skip the initial mount — only flash when flashKey actually increments
-    if (isFirstRender.current) { isFirstRender.current = false; return }
-    if (isWide) return
-    setFlashing(true)
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => setFlashing(false), 1000)
-    return () => clearTimeout(timer.current)
-  }, [flashKey, isWide])
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const expanded = isWide || hovered || flashing
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
-
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        width: expanded ? '195px' : '10px',
-        minHeight: 36,
-        overflow: 'hidden',
-        background: expanded
-          ? (isPhone ? 'rgba(237,229,247,0.82)' : '#ede5f7')
-          : '#5c2d8a',
-        border: expanded ? '1px solid rgba(92,45,138,0.22)' : 'none',
-        borderRadius: 8,
-        padding: expanded ? '5px 7px' : 0,
-        fontSize: '1rem',
-        lineHeight: 1.45,
-        color: INK,
-        cursor: expanded ? 'default' : 'pointer',
-        userSelect: 'none',
-        pointerEvents: 'auto',
-        transition: 'width 220ms ease, padding 220ms ease, background 220ms ease',
-        flexShrink: 0,
-        textAlign: 'left',
-      }}
-    >
-      {expanded && (
-        <div style={{ width: 178 }}>
-          {lines.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Nav side ─────────────────────────────────────────────────────────────────
 // Buttons always visible. Each button has a summary panel above it that collapses
 // to a thin strip. Panels flash open individually based on which nav action fired.
@@ -82,20 +23,14 @@ function NavSide({
   side, snapDir,
   onSnap, snapDisabled,
   onVer, verDisabled,
-  hasVersions, isPhone, isWide,
-  summary, versionSummary,
-  snapFlashKey, verFlashKey,
+  hasVersions, isPhone,
   overridePos,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
   onSnap: () => void; snapDisabled: boolean
   onVer: () => void;  verDisabled: boolean
-  hasVersions: boolean; isPhone: boolean; isWide: boolean
-  summary: string | null
-  versionSummary: string | null
-  snapFlashKey: string
-  verFlashKey: string
+  hasVersions: boolean; isPhone: boolean
   overridePos?: React.CSSProperties
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
@@ -134,31 +69,14 @@ function NavSide({
       top: '50%', transform: 'translateY(-50%)',
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
-      {/* Snapshot section: snap panel ABOVE the < button */}
+      {/* Snapshot nav. Summaries no longer float over the document — they live in the RHS side panel. */}
       <div style={{ position: 'relative' }}>
-        {summary && (
-          <div style={{
-            position: 'absolute', bottom: '100%', marginBottom: 5,
-            [side]: 0, zIndex: 1, pointerEvents: 'none',
-          }}>
-            <SummaryPanel text={summary} isWide={isWide} isPhone={isPhone} flashKey={snapFlashKey} />
-          </div>
-        )}
         <Btn btn={bracket} title={snapDir === 'back' ? 'Previous snapshot (←)' : 'Next snapshot (→)'} disabled={snapDisabled} onBtn={onSnap} />
       </div>
 
-      {/* Version section: << button, ver panel BELOW */}
       {showVer && (
         <div style={{ position: 'relative' }}>
           <Btn btn={bracketVer} title={snapDir === 'back' ? 'Previous version' : 'Next version'} disabled={verDisabled} onBtn={onVer} />
-          {versionSummary && (
-            <div style={{
-              position: 'absolute', top: '100%', marginTop: 5,
-              [side]: 0, zIndex: 1, pointerEvents: 'none',
-            }}>
-              <SummaryPanel text={versionSummary} isWide={isWide} isPhone={isPhone} flashKey={verFlashKey} />
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -979,7 +897,7 @@ function SplitDiffView({
           }}>
             <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
             {summary && summary.trim()
-              ? <ul style={{ margin: 0, paddingLeft: '1.05em' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 5 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
+              ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
               : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
           </div>
           <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
@@ -1002,14 +920,14 @@ export function SnapshotView() {
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [libReady, setLibReady] = useState(false)
-  const [navDir, setNavDir] = useState<'back' | 'fwd'>('fwd')
+  const [, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
   const [isRegenerating, setIsRegenerating] = useState(false)
-  // Flash counters: each increments only when that specific panel should pop open (1s)
-  const [leftSnapFlash,  setLeftSnapFlash]  = useState(0)
-  const [rightSnapFlash, setRightSnapFlash] = useState(0)
-  const [leftVerFlash,   setLeftVerFlash]   = useState(0)
-  const [rightVerFlash,  setRightVerFlash]  = useState(0)
+  // Nav flash setters kept (no-op now the floating summary panels are gone; harmless, may return).
+  const [, setLeftSnapFlash]  = useState(0)
+  const [, setRightSnapFlash] = useState(0)
+  const [, setLeftVerFlash]   = useState(0)
+  const [, setRightVerFlash]  = useState(0)
   // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
   // above the biggest change in each snapshot. Persisted.
   const [lineMode, setLineMode] = useState<'center' | 'longest'>(() => {
@@ -1200,14 +1118,8 @@ export function SnapshotView() {
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
   const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
-  // AI summary side panels
-  const currentGroup = groupIdx >= 0 ? groups[groupIdx] : null
-  const currentDiff    = snapshot?.diffSummary?.bullets ?? null
-  const currentVerDiff = currentGroup?.versionSnap?.versionSummary ?? null
-  const leftSummary         = navDir === 'back' ? currentDiff    : null
-  const rightSummary        = navDir === 'fwd'  ? currentDiff    : null
-  const leftVersionSummary  = navDir === 'back' ? currentVerDiff : null
-  const rightVersionSummary = navDir === 'fwd'  ? currentVerDiff : null
+  // AI summary — now shown in the RHS side panel (no longer floating over the document).
+  const currentDiff = snapshot?.diffSummary?.bullets ?? null
 
   return (
     // height:100dvh so the split pane fills the screen without page scroll
@@ -1384,17 +1296,13 @@ export function SnapshotView() {
             side="left" snapDir="back"
             onSnap={goBack} snapDisabled={!canBack}
             onVer={goVerBack} verDisabled={!canVerBack}
-            hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
-            summary={leftSummary} versionSummary={leftVersionSummary}
-            snapFlashKey={String(leftSnapFlash)} verFlashKey={String(leftVerFlash)}
+            hasVersions={hasVersions} isPhone={isPhone}
           />
           <NavSide
             side="right" snapDir="fwd"
             onSnap={goFwd} snapDisabled={!canFwd}
             onVer={goVerFwd} verDisabled={!canVerFwd}
-            hasVersions={hasVersions} isPhone={isPhone} isWide={isWide}
-            summary={rightSummary} versionSummary={rightVersionSummary}
-            snapFlashKey={String(rightSnapFlash)} verFlashKey={String(rightVerFlash)}
+            hasVersions={hasVersions} isPhone={isPhone}
             overridePos={isWide && !isPhone
               ? { left: 'calc(var(--snap-split-pct, 50%) - 60px)' }
               : undefined}
