@@ -1499,7 +1499,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {/* Review layer — mounted ONLY while the R button is on, so it does ZERO work during normal
             writing (it rescans the doc for comment marks, which was per-keystroke lag otherwise). */}
         {editor && reviewOpen && <CommentNotes editor={editor} paperRef={paperRef} />}
-        {editor && reviewOpen && <ReviewBar editor={editor} bottom={88} onClose={() => setReviewOpen(false)} />}
+        {/* ReviewBar now renders as the toolbar's second row (see below) — not a floating pill. */}
 
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/
             Safari → OneDrive. The label reads clearly in every state. Hidden while the phone
@@ -1833,6 +1833,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               <InstallPromptBanner installPrompt={installPrompt} />
             </div>
             )}
+
+            {/* Review row — the SECOND row of the merged toolbar rectangle, shown while R is on. */}
+            {editor && reviewOpen && <ReviewBar editor={editor} />}
           </div>
         </div>
         {verifyOpen && (

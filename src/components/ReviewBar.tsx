@@ -3,7 +3,6 @@
 // step through changes. Styled to match the footer toolbar. Sits just above the footer.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Editor } from '@tiptap/react'
 import { activeSet, setActiveSet, suggestOn, setSuggestOn, onReviewChanged, DEFAULT_SET } from '../editor/review/reviewState'
@@ -38,7 +37,7 @@ function docSets(editor: Editor): string[] {
   return [...s]
 }
 
-export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom: number; onClose: () => void }) {
+export function ReviewBar({ editor }: { editor: Editor }) {
   const [, tick] = useState(0)
   useEffect(() => {
     const bump = () => tick((n) => n + 1)
@@ -106,20 +105,12 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
 
   const pill = 'flex items-center justify-center h-8 px-3 rounded-full border text-sm font-serif transition-colors whitespace-nowrap'
 
-  return createPortal(
+  // Rendered INLINE as the second row of the main toolbar (merged rectangle). No portal, no fixed pill.
+  return (
     <div
-      className="fixed left-1/2 -translate-x-1/2 z-[95] flex items-center gap-2 px-3 py-1.5 iw-nightable bg-white rounded-full shadow-md"
-      style={{ bottom, border: `1px solid ${INK}44` }}
+      className="flex items-center gap-2 px-3 py-1.5 border-t border-stone-200 iw-nightable"
       onMouseDown={(e) => e.stopPropagation()}
     >
-
-      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addComment}
-        disabled={!hasSelection}
-        className={`${pill} ${hasSelection ? 'text-[#5c2d8a] border-[#5c2d8a]/40 hover:bg-stone-50' : 'text-stone-300 border-stone-200 cursor-default'}`}
-        title={hasSelection ? 'Comment on the selected text' : 'Select text first, then comment'}>
-        ＋ Comment
-      </button>
-
       {/* Set (drop-up) */}
       <div className="relative">
         <button type="button" onClick={() => setSetMenu((o) => !o)}
@@ -155,31 +146,36 @@ export function ReviewBar({ editor, bottom, onClose }: { editor: Editor; bottom:
         )}
       </div>
 
-      {/* Review nav: step through tracked changes + accept/discard (Alt+A / Alt+S, Alt+←/→) */}
+      {/* Review nav — arrows bigger and baseline-aligned with the count; tight spacing (Alt+A/S, Alt+←/→) */}
       {nChanges > 0 && (
-        <div className="flex items-center gap-1 pl-1" style={{ borderLeft: '1px solid #e5e5e8' }}>
+        <div className="flex items-center gap-0.5 pl-1" style={{ borderLeft: '1px solid #e5e5e8' }}>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current - 1)}
-            className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-stone-100" style={{ color: INK, fontSize: '1.15rem', lineHeight: 1 }} title="Previous change (Alt+←)">‹</button>
-          <span className="tabular-nums font-serif" style={{ fontSize: '0.9rem', color: '#57534e', minWidth: '2.4em', textAlign: 'center' }}>{Math.min(navIdxRef.current + 1, nChanges)} <span style={{ color: '#b8b0a4' }}>/</span> {nChanges}</span>
+            className="flex items-center justify-center w-6 h-8 rounded hover:bg-stone-100" style={{ color: INK, fontSize: '1.4rem', lineHeight: 1 }} title="Previous change (Alt+←)">‹</button>
+          <span className="tabular-nums font-serif" style={{ fontSize: '1rem', color: '#57534e', minWidth: '2.1em', textAlign: 'center' }}>{Math.min(navIdxRef.current + 1, nChanges)} <span style={{ color: '#b8b0a4' }}>/</span> {nChanges}</span>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => goToChange(navIdxRef.current + 1)}
-            className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-stone-100" style={{ color: INK, fontSize: '1.15rem', lineHeight: 1 }} title="Next change (Alt+→)">›</button>
+            className="flex items-center justify-center w-6 h-8 rounded hover:bg-stone-100" style={{ color: INK, fontSize: '1.4rem', lineHeight: 1 }} title="Next change (Alt+→)">›</button>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('accept')}
-            className="flex items-center justify-center w-7 h-7 rounded-full text-green-700 hover:bg-green-50" title="Accept (Alt+A)">✓</button>
+            className="flex items-center justify-center w-7 h-8 rounded text-green-700 hover:bg-green-50" title="Accept (Alt+A)">✓</button>
           <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => resolveCurrent('reject')}
-            className="flex items-center justify-center w-7 h-7 rounded-full text-red-600 hover:bg-red-50" title="Discard (Alt+S)">✗</button>
+            className="flex items-center justify-center w-7 h-8 rounded text-red-600 hover:bg-red-50" title="Discard (Alt+S)">✗</button>
         </div>
       )}
 
-      {/* Suggest (track changes) toggle */}
+      {/* Suggest (track changes) toggle — icon only when expanded */}
       <button type="button" onClick={() => setSuggestOn(!suggest)}
-        className={`${pill} ${suggest ? 'text-white bg-[#5c2d8a] border-[#5c2d8a]' : 'text-stone-600 border-stone-200 hover:bg-stone-50'}`}
-        title="Live suggestion mode — record edits as tracked changes">
-        ✎ Suggest{suggest ? ' · on' : ''}
+        className={`flex items-center justify-center w-9 h-8 rounded-full border text-base transition-colors ${suggest ? 'text-white bg-[#5c2d8a] border-[#5c2d8a]' : 'text-stone-600 border-stone-200 hover:bg-stone-50'}`}
+        title={`Live suggestion mode${suggest ? ' — on' : ''} (record edits as tracked changes)`}>
+        ✎
       </button>
 
-      <button type="button" onClick={onClose} className="flex items-center justify-center w-7 h-7 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100" title="Close review">×</button>
-    </div>,
-    document.body,
+      {/* Comment on selection — icon only, pushed to the right edge of the bar */}
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addComment}
+        disabled={!hasSelection}
+        className={`ml-auto flex items-center justify-center w-9 h-8 rounded-full border text-lg ${hasSelection ? 'text-[#5c2d8a] border-[#5c2d8a]/40 hover:bg-stone-50' : 'text-stone-300 border-stone-200 cursor-default'}`}
+        title={hasSelection ? 'Comment on the selected text' : 'Select text first, then comment'}>
+        ＋
+      </button>
+    </div>
   )
 }
 
