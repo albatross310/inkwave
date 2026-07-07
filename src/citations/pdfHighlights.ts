@@ -21,6 +21,7 @@ export interface PdfHighlight {
   size?: number           // text-note font size in px (defaults to 12)
   citekey?: string        // set when this highlight is linked to an in-text citation's pinpoint
   instanceId?: string     // the citation OCCURRENCE this highlight belongs to (scopes page refs per inline)
+  noRef?: boolean         // made from the bib window / with "don't add pages" on → never a page reference
   createdAt: string
 }
 
@@ -35,7 +36,7 @@ export function highlightsOf(item: CSLItem | undefined): PdfHighlight[] {
 export function highlightPages(item: CSLItem | undefined, instanceId?: string | null): number[] {
   const set = new Set<number>()
   for (const h of highlightsOf(item)) {
-    if (h.page <= 0) continue
+    if (h.page <= 0 || h.noRef) continue                                    // noRef = never a page reference
     if (instanceId && h.instanceId && h.instanceId !== instanceId) continue // belongs to a different inline
     set.add(h.page)
   }

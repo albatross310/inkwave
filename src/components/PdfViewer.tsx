@@ -46,16 +46,20 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; x: numbe
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
   initialQuote?: string | null
   instanceId?: string | null   // the citation occurrence — new highlights are tagged with it
   context?: string | null      // the sentence before the citation, shown for context
+  noRef?: boolean              // opened from the bib → annotations must not become page refs
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
   const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
+  // "Don't add pages to inline" — bib entry forces it; a toolbar checkbox lets the reader force it too.
+  const [dontAddPages, setDontAddPages] = useState(false)
+  const noRefRef = useRef(false); noRefRef.current = !!noRef || dontAddPages
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -766,6 +770,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       id: uuidv4(), page: d.pageIdx + 1, color: colorRef.current, kind: 'text', text: '', note: '', size: noteSizeRef.current,
       rects: [{ x: (left - pr.left) / pr.width, y: (top - pr.top) / pr.height, w: wFrac, h: hFrac }],
       createdAt: new Date().toISOString(),
+      ...(instanceIdRef.current && !noRefRef.current ? { instanceId: instanceIdRef.current } : {}),
+      ...(noRefRef.current ? { noRef: true } : {}),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
     editNoteIdRef.current = hl.id // redraw auto-enters edit mode on it
@@ -777,7 +783,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     const hl: PdfHighlight = {
       id: uuidv4(), page: info.page, rects: info.rects, color, kind,
       text: info.text, createdAt: new Date().toISOString(),
-      ...(instanceIdRef.current ? { instanceId: instanceIdRef.current } : {}), ...(link ? { citekey } : {}),
+      ...(instanceIdRef.current && !noRefRef.current ? { instanceId: instanceIdRef.current } : {}),
+      ...(noRefRef.current ? { noRef: true } : {}), ...(link ? { citekey } : {}),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
     redrawOverlays()
@@ -824,6 +831,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           <button key={c} type="button" title="Colour" onClick={() => setColor(c)}
             style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
+        {/* R10: force annotations to NOT become inline page references (bib entry sets this implicitly). */}
+        <label title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', color: noRef ? '#a89db8' : '#6b5b7e', cursor: noRef ? 'default' : 'pointer', userSelect: 'none' }}>
+          <input type="checkbox" checked={!!noRef || dontAddPages} disabled={!!noRef}
+            onChange={e => setDontAddPages(e.target.checked)} style={{ cursor: 'inherit' }} />
+          don't add pages to inline
+        </label>
         <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
         </span>

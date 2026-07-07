@@ -18,7 +18,7 @@ const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
-  instanceId?: string | null; context?: string | null
+  instanceId?: string | null; context?: string | null; noRef?: boolean
   onLink?: (quote: string, page: number) => void
 }
 
@@ -58,7 +58,7 @@ export function PdfSidePanel() {
         setLoading(false)
         if (!data) { setError('Couldn’t load this source’s PDF (no embedded file, or the URL didn’t load).'); return }
         const page = detail.page && detail.page > 0 ? detail.page : 1
-        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, onLink: detail.onLink })
+        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, onLink: detail.onLink })
       })()
     }
     window.addEventListener(OPEN_PDF_EVENT, onOpen)
@@ -172,6 +172,7 @@ export function PdfSidePanel() {
               initialQuote={viewing.quote}
               instanceId={viewing.instanceId}
               context={viewing.context}
+              noRef={viewing.noRef}
               onLinkToCitation={viewing.onLink}
             />
           </div>

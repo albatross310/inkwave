@@ -9,6 +9,7 @@ export interface OpenPdfDetail {
   quote?: string | null // a stored pinpoint sentence to scroll to + highlight on open
   instanceId?: string | null // the citation OCCURRENCE — scopes highlights/page refs to this inline
   context?: string | null    // the sentence in the editor just before the citation (shown for context)
+  noRef?: boolean            // opened from the bibliography → annotations must NOT create page refs/links
   onLink?: (quote: string, page: number) => void // present when opened from a citation → set its pinpoint
 }
 

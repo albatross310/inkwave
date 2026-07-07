@@ -16,6 +16,8 @@ import { addToLibrary } from '../../citations/library'
 import { referenceListKeys } from '../../citations/resolve'
 import { formatReferenceEntries, simpleRefList } from '../../citations/format'
 import { highlightPages } from '../../citations/pdfHighlights'
+import { hasPdf } from '../../citations/pdfSource'
+import { openPdf, getLastPdfPage } from '../../citations/pdfViewer'
 import { pageOffsetOf } from '../../citations/pageOffset'
 import { getCitationStyle, subscribeCitationStyle } from '../../citations/citationsBus'
 import {
@@ -224,6 +226,18 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     if (noteBtn) {
       e.preventDefault(); e.stopPropagation()
       const id = noteBtn.getAttribute('data-iw-note'); if (id) toggleNote(id)
+      return
+    }
+    // Clicking the reference entry itself opens its PDF where the reader last left off. Opened from the
+    // bib → noRef, so any annotations made here never create inline page references (R6).
+    const entry = (e.target as HTMLElement).closest('[id^="iwbib-"]') as HTMLElement | null
+    if (entry) {
+      const key = entry.id.slice('iwbib-'.length)
+      const item = bibProvider.get(key)
+      if (key && hasPdf(item)) {
+        e.preventDefault(); e.stopPropagation()
+        openPdf({ citekey: key, page: getLastPdfPage(key), label: key, noRef: true, instanceId: null })
+      }
     }
   }
 
