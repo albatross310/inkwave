@@ -65,20 +65,22 @@ export function Scroll({
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      // Anchor to the SPECIFIC block under the pointer. A big container (.ProseMirror / .scroll-paper)
-      // spans the whole doc, so its top reflows to near the doc top on zoom-out → a huge negative
-      // correction that clamps scrollTop to 0 (the "jump to top" bug, zoom-out only). Reject those and
-      // fall back to preserving the scroll RATIO so the view stays put either way.
-      let target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+      // Anchor to the block at the VIEWPORT CENTRE (the horizontal + vertical midline), not the pointer —
+      // so zoom keeps the central text put. A big container (.ProseMirror / .scroll-paper) spans the whole
+      // doc, so its top reflows to near the doc top on zoom-out → a huge negative correction that clamps
+      // scrollTop to 0 (the "jump to top" bug, zoom-out only). Reject those and fall back to the scroll RATIO.
+      const vr = el.getBoundingClientRect()
+      const anchorX = vr.left + vr.width / 2, anchorY = vr.top + vr.height / 2
+      let target = document.elementFromPoint(anchorX, anchorY) as HTMLElement | null
       if (target && (!el.contains(target) || target.classList.contains('ProseMirror') || target.classList.contains('scroll-paper') || target.closest('.ProseMirror') == null)) target = null
-      const cursorY = e.clientY, keepLeft = el.scrollLeft
+      const keepLeft = el.scrollLeft
       const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)
       const ratio = el.scrollTop / denomBefore
       const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       if (target && target.isConnected) {
         const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
-        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - cursorY)) // anchor back under the pointer
+        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - anchorY)) // anchor back under the viewport centre
         el.scrollLeft = keepLeft
       } else {
         el.scrollTop = ratio * Math.max(1, el.scrollHeight - el.clientHeight) // no anchor → keep relative position

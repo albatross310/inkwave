@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
@@ -22,7 +22,7 @@ export function SyncStatus({
   label, synced, path, displayName, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact,
   open: externalOpen, onOpenChange, hideTrigger,
 }: {
-  label: string
+  label: ReactNode
   synced: boolean
   path?: string | null
   displayName?: string | null // override the filename shown in the panel (defaults to basename of path)
@@ -63,8 +63,8 @@ export function SyncStatus({
         // `zoom`) for size — css `zoom` also multiplies the bottom offset, so with a bottom-docked panel
         // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
         bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
-        padding: hideTrigger ? '0 1rem' : '0 28px',
-        transform: `scale(${zoom * 1.25})`, // ×1.25 to match the 25%-bigger toolbar pill
+        padding: hideTrigger ? '0 1rem' : '0 10px',
+        transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
         transformOrigin: 'bottom right',
         transition: 'right 0.18s ease, bottom 0.18s ease',
       }}

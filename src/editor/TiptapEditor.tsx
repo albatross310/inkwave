@@ -1567,7 +1567,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {...syncProps}
             />
           ) : (
-            <SyncStatus compact={isTouch} label="☁ disconnected" synced={false} tooltip="OneDrive — sign in to sync" onClick={syncOneDrive} {...syncProps} />
+            <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1"><span style={{ fontSize: '1.45em', lineHeight: 1 }}>☁</span> …</span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
           )
         })()}
 
@@ -1628,7 +1628,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
               // ×1.25 base = the "25% bigger pills" (buttons + text scale together).
-              transform: `scale(${zoom * 1.25})`,
+              transform: `scale(${zoom * 1.12})`,
               transformOrigin: 'bottom center',
             }}
           >
