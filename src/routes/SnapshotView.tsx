@@ -633,6 +633,25 @@ function SplitDiffView({
     }
     springRafRef.current = requestAnimationFrame(step)
   }, [])
+  // While a click-to-diff smooth-scroll is in flight, the diff pane GLIDES (tracks the target directly, at
+  // the editor's pace) instead of springing — no fridge bounce on a click.
+  const directFollowRef = useRef(false)
+  // Flash a diff green/red when its top line crosses the midline (perfectly aligned across the panes).
+  const flashedAlignRef = useRef<number | null>(null)
+  const flashCountRef = useRef(0)                    // capped at 2 flashes per scroll-wheel cycle
+  const flashResetTimerRef = useRef<number | undefined>(undefined)
+  const flashAligned = useCallback((idx: number) => {
+    for (const root of [leftScrollRef.current, rightScrollRef.current]) {
+      root?.querySelectorAll(`[data-opidx="${idx}"]`).forEach(el => {
+        const add = (el as HTMLElement).classList.contains('diff-add')
+        const del = (el as HTMLElement).classList.contains('diff-del')
+        if (!add && !del) return
+        const cls = add ? 'iw-align-flash-add' : 'iw-align-flash-del'
+        el.classList.remove(cls); void (el as HTMLElement).offsetWidth; el.classList.add(cls)
+        setTimeout(() => el.classList.remove(cls), 750)
+      })
+    }
+  }, [])
   const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const leftScrollRef  = useRef<HTMLDivElement>(null)
@@ -742,6 +761,9 @@ function SplitDiffView({
       const targetRect = target.getBoundingClientRect()
       const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
       const newScrollTop = targetTopInContent - el.clientHeight / 2
+      // Glide (no fridge bounce) while this click-driven smooth-scroll plays out.
+      directFollowRef.current = true
+      window.setTimeout(() => { directFollowRef.current = false }, 800)
       el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
       anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
     }
@@ -774,6 +796,9 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+    // Reset the aligned-flash budget once scrolling pauses (a "wheel cycle" = a continuous gesture).
+    window.clearTimeout(flashResetTimerRef.current)
+    flashResetTimerRef.current = window.setTimeout(() => { flashCountRef.current = 0 }, 220)
     // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
     // the Scroll surface, so its own scroll handler never fires.
     const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
@@ -797,17 +822,21 @@ function SplitDiffView({
         const L = leftScrollRef.current, R = rightScrollRef.current
         if (!L || !R) return
         const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
-        const knots: Array<{ ly: number; ry: number }> = []
+        const knots: Array<{ ly: number; ry: number; idx?: number }> = []
         L.querySelectorAll('[data-opidx]').forEach(le => {
           const idx = (le as HTMLElement).getAttribute('data-opidx')
           const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
           if (!re) return
-          // Lock on the MIDLINE of each diff (its vertical centre), not its top edge.
+          // Lock on the TOP line of each diff. The panes are different widths, so a diff wraps to
+          // different heights in each — centre-aligning would misalign the tops. Anchoring the tops means
+          // that as a diff's top crosses the midline, the same diff's top crosses it in the other pane too,
+          // giving one scroll position per diff where the top lines are exactly aligned.
           const lr = (le as HTMLElement).getBoundingClientRect()
           const rr = re.getBoundingClientRect()
           knots.push({
-            ly: lr.top + lr.height / 2 - lRect.top + L.scrollTop,
-            ry: rr.top + rr.height / 2 - rRect.top + R.scrollTop,
+            ly: lr.top - lRect.top + L.scrollTop,
+            ry: rr.top - rRect.top + R.scrollTop,
+            idx: Number(idx),
           })
         })
         if (!knots.length) return
@@ -829,10 +858,25 @@ function SplitDiffView({
           ry = a.ry + t * (b.ry - a.ry)
         }
         rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
-        runSpring()
+        if (directFollowRef.current) { R.scrollTop = rightTargetRef.current; springVelRef.current = 0 } // glide, no bounce
+        else runSpring()
+
+        // Aligned-flash: when a diff's top line sits on the midline (aligned across both panes), flash it.
+        let best: { idx: number; d: number } | null = null
+        for (const k of knots) {
+          if (k.idx == null) continue
+          const d = Math.abs(k.ly - lMid)
+          if (!best || d < best.d) best = { idx: k.idx, d }
+        }
+        if (best && best.d < 7) {
+          if (flashedAlignRef.current !== best.idx) {
+            flashedAlignRef.current = best.idx
+            if (flashCountRef.current < 2) { flashAligned(best.idx); flashCountRef.current++ } // ≤2 per wheel cycle
+          }
+        } else flashedAlignRef.current = null
       })
     }
-  }, [runSpring])
+  }, [runSpring, flashAligned])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
