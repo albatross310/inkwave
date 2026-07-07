@@ -6,6 +6,8 @@ import { nightModeEnabled, setNightMode } from '../editor/theme'
 import { LimitSelector } from './LimitSelector'
 
 const INK = '#5c2d8a'
+// Shared gap between a footer button and the panel it opens (keep the same across all footer panels).
+const PANEL_GAP = 14
 
 interface SettingsMenuProps {
   limitN: number | 'infinite'
@@ -28,15 +30,17 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
 
   function toggle() { setOpen(o => !o) }
 
-  // Compute popup position: anchored above the button, right-aligned to button's right edge.
-  // Clamps so the panel never overflows off-screen on phone.
+  // Centred above the button, with the shared PANEL_GAP — same model as the hamburger menu.
   function menuStyle(): React.CSSProperties {
     const br = btnRef.current?.getBoundingClientRect()
-    if (!br) return { position: 'fixed', bottom: 80, right: 10 }
+    if (!br) return { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)' }
+    const HALF = 104 // ~half the panel width, for edge clamping
+    const center = Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, br.left + br.width / 2))
     return {
       position: 'fixed',
-      bottom: Math.round(window.innerHeight - br.top + 8),
-      right: Math.max(8, Math.round(window.innerWidth - br.right)),
+      bottom: Math.round(window.innerHeight - br.top + PANEL_GAP),
+      left: Math.round(center),
+      transform: 'translateX(-50%)',
     }
   }
 

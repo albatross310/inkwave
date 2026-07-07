@@ -20,6 +20,8 @@ import { inkwaveFileName } from '../provenance/bundle'
 
 const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
+// Shared gap between a footer button and the panel it opens (same across all footer panels).
+const PANEL_GAP = 14
 
 type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export'
 const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export' }
@@ -185,18 +187,21 @@ export function OptionsMenu({
     })
   }
 
-  // Centre the menu horizontally over the kebab, clamped to the viewport; it comes up above the toolbar.
+  // Centre a panel horizontally over the kebab, clamped to the viewport, PANEL_GAP above the toolbar.
+  // Shared by the menu AND its modals so both read as one continuous panel over the button.
   const EDGE_BUFFER = 10
-  const menuStyle: CSSProperties = { border: `1px solid ${INK}66`, borderRadius: '10px' }
-  if (menuOpen) {
+  const panelAnchor = (): CSSProperties => {
     const br = btnRef.current?.getBoundingClientRect()
-    const HALF = 90 // ~half the menu's width, for edge clamping
+    const HALF = 150 // ~half the widest panel, for edge clamping
     const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
-    menuStyle.position = 'fixed'
-    menuStyle.bottom = br ? Math.round(window.innerHeight - br.top + 16) : 60 // clear the toolbar, no overlap
-    menuStyle.left = Math.round(Math.max(EDGE_BUFFER + HALF, Math.min(window.innerWidth - EDGE_BUFFER - HALF, center)))
-    menuStyle.transform = 'translateX(-50%)'
+    return {
+      position: 'fixed',
+      bottom: br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60,
+      left: Math.round(Math.max(EDGE_BUFFER + HALF, Math.min(window.innerWidth - EDGE_BUFFER - HALF, center))),
+      transform: 'translateX(-50%)',
+    }
   }
+  const menuStyle: CSSProperties = { ...(menuOpen ? panelAnchor() : {}), border: `1px solid ${INK}66`, borderRadius: '10px' }
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -235,7 +240,7 @@ export function OptionsMenu({
       )}
 
       {modal && (
-        <Modal title={MODAL_TITLES[modal]} onClose={() => setModal(null)}>
+        <Modal title={MODAL_TITLES[modal]} anchorStyle={panelAnchor()} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
@@ -459,7 +464,7 @@ function RecentPanel() {
   )
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function Modal({ title, onClose, children, anchorStyle }: { title: string; onClose: () => void; children: ReactNode; anchorStyle?: CSSProperties }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -467,13 +472,14 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   }, [onClose])
 
   // Portal to body so the backdrop reliably covers the viewport and catches outside clicks (not
-  // trapped in the footer's pointer-events/stacking context).
+  // trapped in the footer's pointer-events/stacking context). Positioned above the kebab (same anchor as
+  // the menu) so it reads as one continuous panel.
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
-        className="relative iw-nightable bg-white w-full max-w-sm p-6 flex flex-col shadow-xl"
-        style={{ border: `1px solid ${INK}bf`, borderRadius: '14px' }}
+        className="iw-nightable bg-white w-[300px] max-w-[92vw] p-5 flex flex-col shadow-xl"
+        style={{ ...anchorStyle, border: `1px solid ${INK}bf`, borderRadius: '14px' }}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-serif" style={{ color: INK }}>{title}</h2>

@@ -774,7 +774,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         ref={panelRef}
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ ...panelStyle(), width: 520, height: '80vh', minWidth: 360, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+        style={{ ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Slim drag grip in place of the old titled bar (close moved next to Add). */}
