@@ -62,6 +62,7 @@ export function Scroll({
   useEffect(() => {
     const el = surfaceRef.current
     if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
+    let settle: ReturnType<typeof setTimeout> | undefined
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
@@ -77,9 +78,13 @@ export function Scroll({
       editorZoomRef.current = next
       setEditorZoom(next) // keep React in sync; sets the same var value, so no extra paint
       try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+      // Re-paginate ONCE the zoom gesture settles (not per-tick) so page breaks re-fit the new font size
+      // without lurching the text mid-gesture. The paginator preserves scroll across this re-measure.
+      clearTimeout(settle)
+      settle = setTimeout(() => window.dispatchEvent(new Event('inkwave:page-settings-changed')), 240)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    return () => { el.removeEventListener('wheel', onWheel); clearTimeout(settle) }
   }, [phone])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
