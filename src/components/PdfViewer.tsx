@@ -34,13 +34,16 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; x: numbe
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
   initialQuote?: string | null
+  instanceId?: string | null   // the citation occurrence — new highlights are tagged with it
+  context?: string | null      // the sentence before the citation, shown for context
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
+  const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -198,11 +201,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
     // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
     // only adds resolution where the page is still small (the default fit view, where the blur shows).
-    // Higher supersampling for crisper glyphs at the fit view (pdf.js is the same renderer Firefox uses,
-    // so quality is a function of resolution): render at ≥3× CSS size, capped at 4608px/side for memory.
-    const MAX_CANVAS = 4608
+    // Render at EXACTLY the device pixel ratio → a 1:1 device-pixel canvas the browser never has to
+    // downscale. Supersampling beyond the device resolution (what the 3–4× bump did) forces a
+    // NON-INTEGER downscale to the screen, which shimmers/aliases thin glyph strokes. Matching dpr is
+    // what pdf.js's own viewer + Firefox do — reference quality, no aliasing. Capped for memory.
+    const MAX_CANVAS = 4096
     const outputScale = Math.max(1, Math.min(
-      4, Math.max(3, window.devicePixelRatio || 1),
+      3, window.devicePixelRatio || 1,
       MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
     ))
     const canvas = document.createElement('canvas')
@@ -738,7 +743,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
     const hl: PdfHighlight = {
       id: uuidv4(), page: info.page, rects: info.rects, color, kind,
-      text: info.text, createdAt: new Date().toISOString(), ...(link ? { citekey } : {}),
+      text: info.text, createdAt: new Date().toISOString(),
+      ...(instanceIdRef.current ? { instanceId: instanceIdRef.current } : {}), ...(link ? { citekey } : {}),
     }
     highlightsRef.current = [...highlightsRef.current, hl]
     redrawOverlays()
@@ -787,6 +793,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           {tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : 'pick a tool, or select text'}
         </span>
       </div>
+
+      {/* Context: the sentence in the editor just before the citation, so you know what claim you're sourcing. */}
+      {context && (
+        <div style={{ flexShrink: 0, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18` }}>
+          <span style={{ opacity: 0.6, fontStyle: 'normal' }}>Sourcing: </span>
+          <span style={{ fontStyle: 'italic' }}>“…{context}”</span>
+        </div>
+      )}
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
       {/* Find-in-PDF bar (Ctrl+F) */}
