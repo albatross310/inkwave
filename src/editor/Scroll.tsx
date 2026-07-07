@@ -155,10 +155,13 @@ export function Scroll({
     // Desktop scrolls the surface itself (it's the scroll container); phone scrolls the window/body.
     const target: HTMLElement | Window = phone ? window : el
     let raf = 0
+    let lastZoom = el.style.getPropertyValue('--iw-editor-zoom')
     const apply = () => {
       raf = 0
+      const z = el.style.getPropertyValue('--iw-editor-zoom')
+      if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(y * 0.09).toFixed(1)}px`) // horizontal sway
+      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
@@ -226,7 +229,7 @@ export function Scroll({
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
-      style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
+      style={{ '--iw-editor-zoom': editorZoom, '--iw-magnify': hybrid ? magnify : 1 } as React.CSSProperties}>
       {hybrid
         // Scaler box: reserves the SCALED footprint (basePaperPx × paperH, both × magnify) so scroll
         // height + centring are exact and there's no empty space at the end. The parchment inside is
@@ -282,32 +285,31 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => ro.disconnect()
   }, [sheetRef, paperSize, orientation, gapped])
 
-  const logoSize = 32
+  const logoSize = gapped ? 46 : 32           // bigger mark in the discrete-sheet (gapped) view
+  const pageNumSize = gapped ? '1.5rem' : '1.1rem'
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
       {/* Logo at top-right of every page (n=1: top=0, n>1: top=bottom of prev page) */}
       {marks.map(({ n }) => {
         const pageTop = n === 1 ? 0 : (marks[n - 2]?.y ?? 0)
+        const logoStyle = { position: 'absolute' as const, right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }
+        // Two variants toggled by CSS: the day PNG and a night SVG with a light ring. See index.css.
         return (
-          <img
-            key={`logo-${n}`}
-            src="/inkwave-logo-v7.png"
-            width={logoSize}
-            height={logoSize}
-            alt=""
-            style={{ position: 'absolute', right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }}
-          />
+          <span key={`logo-${n}`}>
+            <img className="iw-day-logo" src="/inkwave-logo-v7.png" width={logoSize} height={logoSize} alt="" style={logoStyle} />
+            <img className="iw-night-logo" src="/inkwave-logo-night.svg" width={logoSize} height={logoSize} alt="" style={logoStyle} />
+          </span>
         )
       })}
       {/* Page 1 label — right of the logo, vertically aligned with it */}
       {marks.length > 0 && (
-        <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>1</div>
+        <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>1</div>
       )}
       {marks.map(({ y, n, rule }) => (
         <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
           {rule && <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />}
-          <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: '1.1rem', fontWeight: 'bold', color: '#000000' }}>
+          <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>
             {n + 1}
           </div>
         </div>
