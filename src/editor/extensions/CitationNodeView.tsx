@@ -15,7 +15,7 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
-  bibAnchorId, citeAnchorId, navigateToAnchor, occurrencesAt, ensureNavStyles, mergePages,
+  bibAnchorId, citeAnchorId, navigateToAnchor, goToLastPosition, occurrencesAt, ensureNavStyles, mergePages,
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator } from '../../citations/pdfViewer'
 import { highlightPages } from '../../citations/pdfHighlights'
@@ -63,7 +63,10 @@ function oneCiteText(item: CSLItem, opts: { suppressAuthor?: boolean; pages?: st
 
 interface Seg {
   key: string
-  text: string
+  text: string       // author-year WITHOUT the page (the page is a separate link now)
+  pages: string      // "p. 5" / "pp. 3–7" — clickable, opens the source at that page
+  pageNum: number | null
+  hasPdf: boolean
   occ: number
   found: boolean
 }
@@ -103,9 +106,11 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       // Displayed pages = manual locator ∪ printed pages that carry a highlight (PDF sheet + offset).
       const off = pageOffsetOf(item)
       const pages = item ? mergePages(a.locator, highlightPages(item).map(p => p + off)) : ''
+      const pageLabel = pages ? (/[–-]/.test(pages) || /,/.test(pages) ? `pp. ${pages}` : `p. ${pages}`) : ''
       return item
-        ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages }), occ: occMap.get(key) ?? 1, found: true }
-        : { key, text: `?${key}`, occ: occMap.get(key) ?? 1, found: false }
+        // text is author-year only (pages passed empty) so the page can be its OWN clickable link.
+        ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages: '' }), pages: pageLabel, pageNum: pageFromLocator(pages) ?? null, hasPdf: hasPdf(item), occ: occMap.get(key) ?? 1, found: true }
+        : { key, text: `?${key}`, pages: '', pageNum: null, hasPdf: false, occ: occMap.get(key) ?? 1, found: false }
     })
     setSegs(next)
     setPdfKey(firstPdf)
@@ -184,31 +189,55 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               {segs.map((s, i) => (
                 <span key={s.key + i}>
                   {s.found ? (
-                    <span
-                      id={citeAnchorId(s.key, s.occ)}
-                      className="iw-cite-link"
-                      style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
-                      title="Click: go to reference · Click & hold: set page(s)"
-                      onPointerDown={e => {
-                        e.stopPropagation()
-                        heldRef.current = false
-                        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                        holdTimer.current = setTimeout(() => {
-                          heldRef.current = true
-                          // Anchor at the citation's top-centre; the popover renders directly above it.
-                          setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top })
-                        }, 450)
-                      }}
-                      onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
-                      onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
-                      onClick={e => {
-                        e.stopPropagation()
-                        if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
-                        navigateToAnchor(bibAnchorId(s.key))
-                      }}
-                    >
-                      {s.text}
-                    </span>
+                    <>
+                      {/* Author-year — click RETURNS the reader to where they last were; click & hold sets pages. */}
+                      <span
+                        id={citeAnchorId(s.key, s.occ)}
+                        className="iw-cite-link"
+                        style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                        title="Click: back to where you were · Click & hold: set page(s)"
+                        onPointerDown={e => {
+                          e.stopPropagation()
+                          heldRef.current = false
+                          const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                          holdTimer.current = setTimeout(() => {
+                            heldRef.current = true
+                            setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top })
+                          }, 450)
+                        }}
+                        onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                        onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                        onClick={e => {
+                          e.stopPropagation()
+                          if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
+                          goToLastPosition()
+                        }}
+                      >
+                        {s.text}
+                      </span>
+                      {/* Page(s) — clickable link that opens the SOURCE (PDF) at that page. */}
+                      {s.pages && (
+                        s.hasPdf ? (
+                          <>
+                            {', '}
+                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                              title="Open the source at this page"
+                              onPointerDown={e => e.stopPropagation()}
+                              onClick={e => {
+                                e.stopPropagation()
+                                openPdf({ citekey: s.key, page: s.pageNum ?? pageFromLocator(attrs.locator), quote: attrs.quote, label: s.text, onLink: (quote) => updateAttributes({ quote }) })
+                              }}
+                            >{s.pages}</span>
+                          </>
+                        ) : <>{', '}{s.pages}</>
+                      )}
+                      {/* Side button → the bibliography entry (moved off the whole inline). */}
+                      <button type="button" contentEditable={false} className="iw-cite-biblink"
+                        title="Go to the reference-list entry"
+                        onPointerDown={e => e.stopPropagation()}
+                        onClick={e => { e.stopPropagation(); navigateToAnchor(bibAnchorId(s.key)) }}
+                      >▸</button>
+                    </>
                   ) : (
                     <span id={citeAnchorId(s.key, s.occ)} style={{ color: '#b91c1c' }} title={`Unresolved: ${s.key}`}>
                       {s.text}
@@ -221,7 +250,8 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
             </>
           )}
       </span>
-      {pdfKey && (
+      {/* 📄 opens the PDF — only when there's no page shown (else the page number itself is the link). */}
+      {pdfKey && !segs.some(s => s.pages) && (
         <button
           type="button"
           contentEditable={false}
