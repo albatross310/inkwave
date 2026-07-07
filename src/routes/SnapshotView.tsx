@@ -625,7 +625,8 @@ function SplitDiffView({
       const R = rightScrollRef.current, target = rightTargetRef.current
       if (!R || target == null) { springRafRef.current = 0; return }
       const dx = target - R.scrollTop
-      springVelRef.current = springVelRef.current * 0.72 + dx * 0.24 // stiffness + damping → magnet snap
+      // Near-critical damping: a tactile magnetic snap with ~70% less bounce (lower velocity retention).
+      springVelRef.current = springVelRef.current * 0.55 + dx * 0.22
       if (Math.abs(dx) < 0.5 && Math.abs(springVelRef.current) < 0.5) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
       R.scrollTop = R.scrollTop + springVelRef.current
       springRafRef.current = requestAnimationFrame(step)
@@ -801,9 +802,12 @@ function SplitDiffView({
           const idx = (le as HTMLElement).getAttribute('data-opidx')
           const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
           if (!re) return
+          // Lock on the MIDLINE of each diff (its vertical centre), not its top edge.
+          const lr = (le as HTMLElement).getBoundingClientRect()
+          const rr = re.getBoundingClientRect()
           knots.push({
-            ly: (le as HTMLElement).getBoundingClientRect().top - lRect.top + L.scrollTop,
-            ry: re.getBoundingClientRect().top - rRect.top + R.scrollTop,
+            ly: lr.top + lr.height / 2 - lRect.top + L.scrollTop,
+            ry: rr.top + rr.height / 2 - rRect.top + R.scrollTop,
           })
         })
         if (!knots.length) return
