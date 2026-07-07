@@ -1068,8 +1068,8 @@ function SplitDiffView({
         [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column',
         background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden',
       } as React.CSSProperties}>
-        <div style={{
-          flex: '0 0 44%', minHeight: 0, overflow: 'auto', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
+        <div className="iw-snap-scroll" style={{
+          flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
           border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
         }}>
           <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
