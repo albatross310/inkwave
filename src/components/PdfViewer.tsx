@@ -46,7 +46,7 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; groups: 
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onClose, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
@@ -56,6 +56,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   noRef?: boolean              // opened from the bib → annotations must not become page refs
   restoreScroll?: boolean      // open at the reader's last exact scroll position (author-year click)
   dockButton?: ReactNode       // the panel's dock-orientation toggle, rendered inside this single toolbar
+  onClose?: () => void         // close the panel — rendered as a big × at the left of the toolbar
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
   const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
@@ -852,6 +853,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           live in the status line on hover (setHint) so the bar stays squished. */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'nowrap' }}
         onMouseLeave={() => setHint(null)}>
+        {onClose && (
+          <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
+            style={{ width: 30, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+        )}
         {TOOLS.map(t => {
           const active = tool === t.kind
           return (

@@ -139,22 +139,12 @@ export function PdfSidePanel() {
           style={{ position: 'absolute', zIndex: 2, background: dragging ? `${INK}22` : 'transparent', ...handlePos }}
         />
 
-        <div style={{
-          flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
-          padding: side ? '8px 12px 8px 16px' : '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc',
-        }}>
-          <span style={{ fontSize: '0.8rem', color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            📄 {viewing?.label ?? 'PDF'}
-          </span>
-          {viewing && (
-            <span style={{ fontSize: '0.68rem', color: '#9ca3af', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              select text to highlight{viewing.onLink ? ' or link' : ''}
-            </span>
-          )}
-          <button type="button" onClick={close}
-            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.2rem', lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
-            title="Close (Esc)">×</button>
-        </div>
+        {/* The header bar is gone — the viewer renders its close in the toolbar; the transient states
+            below get a floating × so they stay dismissible. */}
+        {!viewing && (
+          <button type="button" onClick={close} title="Close (Esc)"
+            style={{ position: 'absolute', top: 8, right: 12, zIndex: 3, border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.7rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+        )}
 
         {loading && !viewing ? (
           <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#9ca3af' }}>Loading PDF…</div>
@@ -174,6 +164,7 @@ export function PdfSidePanel() {
               context={viewing.context}
               noRef={viewing.noRef}
               restoreScroll={viewing.restoreScroll}
+              onClose={close}
               dockButton={isWide ? (
                 <button type="button" onClick={toggleOrient} title={side ? 'Dock to bottom' : 'Dock to the side'}
                   style={{ border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.9rem', borderRadius: 5, padding: '2px 6px', cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
