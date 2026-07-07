@@ -221,13 +221,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
     // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
     // only adds resolution where the page is still small (the default fit view, where the blur shows).
-    // Render at EXACTLY the device pixel ratio → a 1:1 device-pixel canvas the browser never has to
-    // downscale. Supersampling beyond the device resolution (what the 3–4× bump did) forces a
-    // NON-INTEGER downscale to the screen, which shimmers/aliases thin glyph strokes. Matching dpr is
-    // what pdf.js's own viewer + Firefox do — reference quality, no aliasing. Capped for memory.
+    // Supersample to ≥2× (capped 3×): exactly-dpr looked soft on low-dpr displays, and 3–4× shimmered
+    // on non-integer downscales. 2–3× is the sweet spot — crisp without the aliasing. Capped for memory.
     const MAX_CANVAS = 4096
     const outputScale = Math.max(1, Math.min(
-      3, window.devicePixelRatio || 1,
+      3, Math.max(2, window.devicePixelRatio || 1),
       MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
     ))
     const canvas = document.createElement('canvas')

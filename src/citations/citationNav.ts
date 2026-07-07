@@ -50,14 +50,19 @@ export function ensureNavStyles(): void {
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
     .iw-esp { font-style: italic; color: #3a1e5e; font-size: 0.95em; }
+    /* ⤵ bib button: a small circle sitting on the text baseline, a little left padding, light outline
+       (hard-coded light purple — visible on both the cream day surface and the dark night surface). */
     .iw-cite-biblink {
-      margin-left: 0.05em; font-size: 0.9em; line-height: 1; cursor: pointer; border: none;
-      background: transparent; padding: 0 0.1em; user-select: none; font-family: inherit;
-      color: var(--iw-cite-color, ${INK}); font-weight: 700; opacity: 0.9;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.02em; height: 1.02em; margin: 0 0.1em 0 0.3em; vertical-align: -0.08em;
+      font-size: 0.68em; line-height: 1; cursor: pointer; user-select: none; font-family: inherit;
+      color: var(--iw-cite-color, ${INK}); font-weight: 700;
+      border: 1px solid #b49bd4; border-radius: 50%; background: transparent;
+      transition: background-color 120ms ease;
     }
-    .iw-cite-biblink:hover { opacity: 1; }
+    .iw-cite-biblink:hover { background-color: rgba(92,45,138,0.14); }
     /* First-few-words preview shown after each back-ref number, to jog the reader's memory. */
-    .iw-backref-quote { font-style: italic; color: ${INK}88; font-size: 0.86em; font-weight: 400; }
+    .iw-backref-quote { font-style: italic; color: #3a1e5e; font-size: 0.86em; font-weight: 500; }
     /* "Where you came from" flash on the back-ref: light-blue wash + dark-blue box, slow ~5s exp fade. */
     .iw-backref-flash { animation: iw-backref-flash-kf 5s cubic-bezier(0.15, 0.75, 0.2, 1) forwards; border-radius: 3px; }
     @keyframes iw-backref-flash-kf {
