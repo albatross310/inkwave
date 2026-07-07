@@ -70,8 +70,8 @@ export function Verify() {
               Runs entirely in your browser against Inkwave's published signing key — and, for anchored
               snapshots, against the Bitcoin blockchain via independent explorers. No sign-in, nothing
               uploaded.
-              {' '}<Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }} className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>← editor</Link>
-              {' '}<Link to="/about" className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>about</Link>
+              {' '}<Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }} className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: "#fff" }}>← editor</Link>
+              {' '}<Link to="/about" className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: "#fff" }}>about</Link>
             </p>
           </div>
         </div>

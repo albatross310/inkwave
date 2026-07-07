@@ -19,11 +19,11 @@ function AppIcon({ size }: { size: number }) {
 
 export function About() {
   return (
-    <div className="min-h-screen font-serif" style={{ background: '#e7eefb', color: '#3a3a3a' }}>
-      <div className="mx-auto max-w-2xl px-5 py-12 sm:py-16">
+    <div className="min-h-screen font-serif py-8 sm:py-14 px-4" style={{ background: 'radial-gradient(120% 120% at top left, #12263f 0%, #1f6f7a 22%, #9fd9c8 55%)', color: '#3a3a3a' }}>
+      <div className="mx-auto max-w-2xl px-6 sm:px-10 py-12 sm:py-16" style={{ background: '#f7f2e8', borderRadius: 10, boxShadow: '0 8px 32px rgba(80,50,10,0.18)' }}>
         <Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }}
-          className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#5c2d8a11]"
-          style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#6d5a86' }}>← Back to writing</Link>
+          className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#f3eefb]"
+          style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#6d5a86', background: '#fff' }}>← Back to writing</Link>
 
         {/* Hero — app icon to the left of the wordmark */}
         <header className="mt-8 flex items-center gap-6">
@@ -52,6 +52,13 @@ export function About() {
               passage, and cite it without leaving the page. One calm workspace holds the whole
               project.
             </p>
+            <p className="mt-3">
+              And everything stays a single click away: jump from an in-text citation straight to the
+              exact document, page and quotation it rests on — in context, without breaking your flow —
+              and back again. <span className="text-stone-500">(You can also strip an embedded PDF back
+              to just its open-source file with one click, for when you need to share a document more
+              publicly.)</span>
+            </p>
           </section>
 
           <section>
@@ -63,9 +70,11 @@ export function About() {
               anchors it to the Bitcoin blockchain: provenance you can prove, without being
               watched to earn it.
             </p>
-            <p className="mt-3">
-              <Link to="/verify" className="underline" style={{ color: LIGHT }}>
-                Verify an Inkwave record →
+            <p className="mt-4">
+              <Link to="/verify"
+                className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 no-underline font-medium shadow-sm transition-all hover:shadow-md hover:brightness-105"
+                style={{ background: `linear-gradient(135deg, ${INK}, ${LIGHT})`, color: '#fff' }}>
+                Verify an Inkwave record <span aria-hidden="true">→</span>
               </Link>
             </p>
           </section>
@@ -95,8 +104,8 @@ export function About() {
         <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(92,45,138,0.14)' }}>
           <Link to="/" className="inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors" style={{ background: INK, color: '#fff' }}>Start writing</Link>
           <div className="flex gap-2.5">
-            <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#5c2d8a11]" style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#8a7a9e' }}>Privacy</Link>
-            <Link to="/verify" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>Verify a record</Link>
+            <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: '#8a7a9e', background: '#fff' }}>Privacy</Link>
+            <Link to="/verify" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT, background: '#fff' }}>Verify a record</Link>
           </div>
         </footer>
       </div>
