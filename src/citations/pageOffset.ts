@@ -12,6 +12,7 @@ import { getPdfData } from './pdfSource'
 import { bibProvider } from './bibProvider'
 import { addToLibrary } from './library'
 import type { IwCitationMeta, CSLItem } from '../types/document'
+import { urlLookupEnabled } from '../editor/aiSettings'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function renderPagePng(doc: any, pageNum: number): Promise<string> {
@@ -26,6 +27,9 @@ async function renderPagePng(doc: any, pageNum: number): Promise<string> {
 
 /** Detect + persist the page offset for a source's embedded PDF. Safe to fire-and-forget. */
 export async function detectPageOffset(citekey: string): Promise<void> {
+  // Privacy gate: sends rendered PDF page images to Anthropic via our server — opt-in only
+  // (bundled under the URL-lookup consent; see editor/aiSettings.ts).
+  if (!urlLookupEnabled()) return
   let offset = 0
   let flag: 'verified' | 'raw' = 'raw'
   try {

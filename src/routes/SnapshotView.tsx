@@ -7,6 +7,8 @@ import { loadDocument } from '../storage/opfs'
 import { loadLibrary } from '../citations/library'
 import { diffWords, diffStats, type DiffOp } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
+import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
+import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
 
@@ -608,10 +610,11 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
 }
 
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
+  summariesOn?: boolean; onOptInSummaries?: () => void
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
@@ -1073,7 +1076,23 @@ function SplitDiffView({
           border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
         }}>
           <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
-          {summary && summary.trim()
+          {!summariesOn ? (
+            // AI summaries are an explicit opt-in (privacy: snapshot text → Anthropic via our server).
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, paddingTop: 4 }}>
+              <button
+                type="button"
+                onClick={onOptInSummaries}
+                className="px-3.5 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
+                style={{ fontSize: '0.88rem', fontWeight: 500, background: INK, color: '#fff', border: 'none', cursor: 'pointer' }}
+              >
+                Opt in to see snapshot summaries
+              </button>
+              <a href="/privacy" target="_blank" rel="noopener"
+                className="text-xs underline" style={{ color: '#9b5ccc' }}>
+                See privacy policy
+              </a>
+            </div>
+          ) : summary && summary.trim()
             ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
             : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
         </div>
@@ -1099,6 +1118,21 @@ export function SnapshotView() {
   const [, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
   const [isRegenerating, setIsRegenerating] = useState(false)
+  // AI summaries are opt-in (off by default). Enabling — here via the panel CTA, or from the
+  // editor's Settings — bumps genSeed so the backfill effect fills every missing summary.
+  const [aiOn, setAiOn] = useState(aiSummariesEnabled)
+  const [consentOpen, setConsentOpen] = useState(false)
+  useEffect(() => {
+    const onChange = () => {
+      const on = aiSummariesEnabled()
+      setAiOn(prev => {
+        if (!prev && on) setGenSeed(n => n + 1)
+        return on
+      })
+    }
+    window.addEventListener('inkwave:ai-settings-changed', onChange)
+    return () => window.removeEventListener('inkwave:ai-settings-changed', onChange)
+  }, [])
   // Nav flash setters kept (no-op now the floating summary panels are gone; harmless, may return).
   const [, setLeftSnapFlash]  = useState(0)
   const [, setRightSnapFlash] = useState(0)
@@ -1157,6 +1191,7 @@ export function SnapshotView() {
   // snapshot navigation never cancels a run; genSeed increment forces full regeneration.
   useEffect(() => {
     if (!docId) return
+    if (!aiOn) { setIsRegenerating(false); return } // opt-in gate: no text leaves the device
     let cancelled = false
     void (async () => {
       const snaps = await listSnapshots(docId)
@@ -1194,7 +1229,7 @@ export function SnapshotView() {
     })()
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docId, genSeed])
+  }, [docId, genSeed, aiOn])
 
   const groups = useMemo(() => groupByVersion(allSnapshots), [allSnapshots])
 
@@ -1382,7 +1417,7 @@ export function SnapshotView() {
         >
           {lineMode === 'longest' ? '⇥ biggest change' : '↔ centred line'}
         </button>
-        {docId && (
+        {docId && aiOn && (
           <button
             type="button"
             disabled={isRegenerating}
@@ -1476,9 +1511,23 @@ export function SnapshotView() {
             lineMode={lineMode}
             summary={currentDiff}
             counter={allSnapshots.length > 1 ? `s${idx + 1}/${allSnapshots.length}` : undefined}
+            summariesOn={aiOn}
+            onOptInSummaries={() => setConsentOpen(true)}
           />
         )}
       </div>
+
+      {consentOpen && (
+        <AiConsentDialog
+          feature="summaries"
+          onYes={() => {
+            markAiConsent('summaries')
+            setConsentOpen(false)
+            setAiSummaries(true) // fires ai-settings-changed → aiOn flips + genSeed bump → backfill
+          }}
+          onNo={() => setConsentOpen(false)}
+        />
+      )}
 
       {/* ── Side navigation ── */}
       {allSnapshots.length > 1 && status === 'ready' && (

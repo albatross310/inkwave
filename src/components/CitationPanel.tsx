@@ -10,8 +10,10 @@ import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
 import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/resolve'
-import { captureFromInput, parseAuthor, parseDate } from '../citations/capture'
+import { captureFromInput, isUrlCapture, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
+import { urlLookupEnabled, setUrlLookup, markAiConsent } from '../editor/aiSettings'
+import { AiConsentDialog } from './AiConsentDialog'
 import { addToLibrary, removeFromLibrary } from '../citations/library'
 import { savePdf, deletePdf } from '../citations/pdfStore'
 import { openPdf } from '../citations/pdfViewer'
@@ -258,11 +260,15 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
   }))
   const [saving, setSaving] = useState(false)
   const [fetching, setFetching] = useState<null | 'DOI' | 'URL'>(null)
+  // URL-lookup consent within the edit dialog (mirrors the panel's flow).
+  const [urlConsentKind, setUrlConsentKind] = useState<null | 'URL'>(null)
 
   // Fetch/scrape metadata from a DOI or URL and fill the form. DOI → Crossref; URL → the AI scraper (Sonnet).
   async function fetchFields(kind: 'DOI' | 'URL') {
     const v = (values[kind] ?? '').trim()
     if (!v || fetching) return
+    // The AI scraper path is opt-in (sends the page to Anthropic via our server).
+    if (kind === 'URL' && isUrlCapture(v) && !urlLookupEnabled()) { setUrlConsentKind(kind); return }
     setFetching(kind)
     try {
       const res = await captureFromInput(v)
@@ -335,6 +341,17 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
 
   return createPortal(
     <>
+      {urlConsentKind && (
+        <AiConsentDialog
+          feature="url"
+          onYes={() => {
+            setUrlLookup(true); markAiConsent('url')
+            setUrlConsentKind(null)
+            void fetchFields('URL')
+          }}
+          onNo={() => setUrlConsentKind(null)}
+        />
+      )}
       <div className="fixed inset-0 z-[100] bg-black/20" onMouseDown={onClose} />
       <div
         role="dialog" aria-label="Edit citation"
@@ -438,6 +455,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
   const [editItem, setEditItem] = useState<CSLItem | null>(null)
   const [isNewRef, setIsNewRef] = useState(false)
+  // URL-lookup consent: holds the input that triggered the dialog so "yes" resumes the capture.
+  const [urlConsentPending, setUrlConsentPending] = useState<string | null>(null)
   const [recheckingAll, setRecheckingAll] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Dismissible helper banners (persisted) + library sort.
@@ -506,6 +525,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
   async function doCapture(value = query) {
     if (!value || busy) return
+    // URL captures go to Anthropic via our server — opt-in. First use pops the consent dialog;
+    // the input value is held so a "yes" resumes the capture seamlessly.
+    if (isUrlCapture(value) && !urlLookupEnabled()) { setUrlConsentPending(value); return }
     setBusy(true); setNotice(null)
     try {
       const res = await captureFromInput(value)
@@ -771,6 +793,18 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           isNew={isNewRef}
           onSave={saveEdit}
           onClose={() => { setEditItem(null); setIsNewRef(false) }}
+        />
+      )}
+      {urlConsentPending !== null && (
+        <AiConsentDialog
+          feature="url"
+          onYes={() => {
+            setUrlLookup(true); markAiConsent('url')
+            const pending = urlConsentPending
+            setUrlConsentPending(null)
+            void doCapture(pending)
+          }}
+          onNo={() => setUrlConsentPending(null)}
         />
       )}
       {/* Backdrop — in fullscreen it becomes the aquamarine wave surround (paper floats over it). */}

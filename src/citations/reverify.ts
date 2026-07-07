@@ -10,6 +10,7 @@
 // source can't produce are left alone (a flaky re-extract must not wipe good data).
 
 import type { CSLItem, FieldSource, IwCitationMeta, ChangelogEntry } from '../types/document'
+import { urlLookupEnabled } from '../editor/aiSettings'
 import { detectIdentifier } from './identifiers'
 import { lookupIdentifier } from './lookup'
 import { extractToCsl, type ExtractResponse } from './capture'
@@ -89,6 +90,8 @@ export async function reverifyEntry(item: CSLItem): Promise<ReverifyResult> {
   }
 
   // ── AI path: re-fetch + re-extract via the server; detect a dead URL. ──
+  // Privacy gate: this leg sends the URL to Anthropic via our server — opt-in only.
+  if (!urlLookupEnabled()) return { ok: false, deadUrl: false, diffs: [], checkedAt, source: 'ai', error: 'URL lookup is switched off — enable it in Settings to re-verify web sources.' }
   const url = meta(item).sourceUrl ?? (typeof item.URL === 'string' ? item.URL : '')
   if (!url) return { ok: false, deadUrl: false, diffs: [], checkedAt, source: 'ai', error: 'No source URL to re-verify against.' }
   try {

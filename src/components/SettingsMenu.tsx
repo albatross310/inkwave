@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
 import { nightModeEnabled, setNightMode } from '../editor/theme'
+import { aiSummariesEnabled, setAiSummaries, urlLookupEnabled, setUrlLookup, aiConsentGiven, markAiConsent, type AiFeature } from '../editor/aiSettings'
+import { AiConsentDialog } from './AiConsentDialog'
 import { LimitSelector } from './LimitSelector'
 
 const INK = '#5c2d8a'
@@ -18,6 +20,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const [, rerender] = useState(0)
+  const [consentFor, setConsentFor] = useState<AiFeature | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -115,6 +118,24 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
             />
 
+            {/* AI opt-ins — off by default; the first off→on shows the consent dialog. */}
+            <Row
+              label="AI summaries"
+              checked={aiSummariesEnabled()}
+              onChange={() => {
+                if (!aiSummariesEnabled() && !aiConsentGiven('summaries')) { setConsentFor('summaries'); return }
+                setAiSummaries(!aiSummariesEnabled()); rerender(n => n + 1)
+              }}
+            />
+            <Row
+              label="URL citation lookup"
+              checked={urlLookupEnabled()}
+              onChange={() => {
+                if (!urlLookupEnabled() && !aiConsentGiven('url')) { setConsentFor('url'); return }
+                setUrlLookup(!urlLookupEnabled()); rerender(n => n + 1)
+              }}
+            />
+
             {/* Debug: highlight all (dev only) */}
             {import.meta.env.DEV && (
               <Row
@@ -150,6 +171,17 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
           </div>
         </>,
         document.body,
+      )}
+      {consentFor && (
+        <AiConsentDialog
+          feature={consentFor}
+          onYes={() => {
+            markAiConsent(consentFor)
+            if (consentFor === 'summaries') setAiSummaries(true); else setUrlLookup(true)
+            setConsentFor(null); rerender(n => n + 1)
+          }}
+          onNo={() => setConsentFor(null)}
+        />
       )}
     </>
   )

@@ -141,3 +141,12 @@ export async function captureFromInput(input: string): Promise<CaptureResult> {
   if (isUrl(input)) return captureFromUrl(input)
   throw new Error('No DOI, identifier, or URL found in the input.')
 }
+
+/**
+ * True when the input would take the AI URL-extraction path (no identifier, plain URL) — the
+ * path that sends the page to Anthropic via our server. Callers use this to show the URL-lookup
+ * consent dialog before capturing (see editor/aiSettings.ts).
+ */
+export function isUrlCapture(input: string): boolean {
+  return !detectIdentifier(input) && isUrl(input)
+}

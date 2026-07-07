@@ -82,8 +82,8 @@ export function extractCandidate(html) {
   return { titleTag, metas, ld: ld.join('\n'), body }
 }
 
-async function callClaudeJson(apiKey, prompt, maxTokens = 500) {
-  const raw = await callClaude(apiKey, prompt, maxTokens, DIFF_MODEL) // Haiku 4.5
+async function callClaudeJson(apiKey, prompt, maxTokens = 500, model = DIFF_MODEL) {
+  const raw = await callClaude(apiKey, prompt, maxTokens, model)
   // Be forgiving: pull the first {...} block in case the model adds prose.
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
