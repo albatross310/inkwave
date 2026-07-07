@@ -2003,8 +2003,9 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
-      {/* Shortcut hint moved to the hover tooltip (title) — keeps the menu clean. */}
       <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
+      {/* Subtle right-aligned shortcut — reliably visible (native tooltips weren't surfacing). */}
+      {hint && <span style={{ marginLeft: 'auto', paddingLeft: 14, fontFamily: 'ui-monospace, monospace', fontSize: '0.72rem', color: '#b8afc4', whiteSpace: 'nowrap' }}>{hint}</span>}
     </button>
   )
 
