@@ -148,7 +148,7 @@ export function ReceiptPanel({
           bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
           padding: hideTrigger ? '0 1rem' : '0 28px',
           transition: 'bottom 0.18s ease',
-          transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+          transform: `scale(${zoom * 1.25})`, // ×1.25 to match the 25%-bigger toolbar pill
           transformOrigin: 'bottom left',
         }}
       >

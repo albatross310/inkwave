@@ -1627,7 +1627,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // Counter browser zoom so the pill stays a constant physical size.
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
-              transform: `scale(${zoom})`,
+              // ×1.25 base = the "25% bigger pills" (buttons + text scale together).
+              transform: `scale(${zoom * 1.25})`,
               transformOrigin: 'bottom center',
             }}
           >

@@ -64,7 +64,7 @@ export function SyncStatus({
         // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
         bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom)}px`} + var(--iw-pdf-room-bottom, 0px))`,
         padding: hideTrigger ? '0 1rem' : '0 28px',
-        transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+        transform: `scale(${zoom * 1.25})`, // ×1.25 to match the 25%-bigger toolbar pill
         transformOrigin: 'bottom right',
         transition: 'right 0.18s ease, bottom 0.18s ease',
       }}
