@@ -806,7 +806,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 Firefox
               </a>
               <button type="button" onClick={dismissExt} title="Dismiss"
-                className="text-stone-400 hover:text-stone-600 text-base leading-none ml-1">×</button>
+                className="text-stone-400 hover:text-stone-600 text-sm leading-none ml-1 flex items-center">×</button>
             </div>
           </div>
         )}
@@ -879,7 +879,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             {/* Re-verify all — square button, curly arrow, tooltip on hover. Colour via the theme var so
                 it stays visible in night mode (inline INK was invisible on the dolphin-grey panel). */}
             <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
-              title="Re-verify all sources against their origins"
+              title="Re-verify all sources against their origins (built on Claude Sonnet)"
               className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
               style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
               {recheckingAll ? '…' : '↻'}
@@ -932,8 +932,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                     </div>
                   </button>
                   <div className="flex flex-wrap items-center justify-end gap-1 flex-shrink-0 max-w-[46%]">
-                    <button type="button" onClick={() => cite(item)}
-                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">cite</button>
+                    <button type="button" onClick={() => cite(item)} title="Cite inline in the document at the cursor"
+                      className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[15px] leading-none">@</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
                         title="Open source page (shows verification panel if extension installed)"
@@ -952,8 +952,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                           >{iw?.pdfName ? '📄 PDF' : '🔗 PDF'}</button>
                           {(iw?.pdfName || iw?.pdfUrl) && (
                             <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
-                              className="text-[11px] flex items-center gap-0.5 text-stone-400 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
-                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} style={{ width: 15, height: 15 }} />pub
+                              className="h-7 px-1.5 flex items-center gap-1 rounded border border-stone-200 text-[11px] text-stone-500 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} style={{ width: 13, height: 13 }} />pub
                             </label>
                           )}
                           <button type="button"
