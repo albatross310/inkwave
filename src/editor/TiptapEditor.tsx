@@ -1996,12 +1996,13 @@ function MathMenuButton({ editor }: { editor: Editor | null }) {
       key={label}
       type="button"
       onClick={onClick}
-      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '6px 10px', borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', gap: '16px', textAlign: 'left' }}
+      title={hint ? `${label}  ·  ${hint}` : label}
+      style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '6px 10px', borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
+      {/* Shortcut hint moved to the hover tooltip (title) — keeps the menu clean. */}
       <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
-      <span style={{ fontSize: '0.7rem', color: '#a89d96', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{hint}</span>
     </button>
   )
 

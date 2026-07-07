@@ -67,6 +67,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // the document position (the citation occurrence) each highlight belongs to.
   const hlNavRef = useRef(-1)
   const [syncEditor, setSyncEditor] = useState(false)
+  // When on, clicking back into the editor while the PDF is full-screen drops the viewer. Off by default.
+  const [hideOnEditorClick, setHideOnEditorClick] = useState(() => {
+    try { return localStorage.getItem('inkwave:pdfHideOnEditorClick') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('inkwave:pdfHideOnEditorClick', hideOnEditorClick ? '1' : '0') } catch { /* private */ }
+    window.dispatchEvent(new Event('inkwave:pdf-hide-pref-changed'))
+  }, [hideOnEditorClick])
   // Hovering a compact control shows its explanation down in the status line (keeps the bar squished).
   const [hint, setHint] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -851,11 +859,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
 
       {/* Single consolidated toolbar. Secondary controls are compact (icon + checkbox); their labels
           live in the status line on hover (setHint) so the bar stays squished. */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'nowrap' }}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, rowGap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
         onMouseLeave={() => setHint(null)}>
         {onClose && (
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
-            style={{ width: 30, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
         {TOOLS.map(t => {
           const active = tool === t.kind
@@ -886,21 +894,27 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {/* Scroll-highlighted navigator */}
         <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
-          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
         <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
-          style={{ width: 22, height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
         {/* Sync-editor toggle — a box that lights up purple when on. */}
         <button type="button" title="Scroll the editor to where the highlight is cited when you click the arrows"
           onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
           onClick={() => setSyncEditor(v => !v)}
-          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
             border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
         {/* "Don't add pages to inline" toggle — lights up purple when on. */}
         <button type="button" disabled={!!noRef} title="Don't add pages to inline citations"
           onMouseEnter={() => setHint("when on, highlights won't add page numbers to inline citations, wherever you opened from")}
           onClick={() => setDontAddPages(v => !v)}
-          style={{ width: 30, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '0.92rem',
             border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e', textDecoration: 'line-through' }}>#</button>
+        {/* Hide-on-editor-click toggle (full screen) — lights up purple when on; off by default. */}
+        <button type="button" title="In full screen, hide the PDF when you click back into the editor"
+          onMouseEnter={() => setHint('in full screen, clicking back into the editor drops the PDF viewer (off by default)')}
+          onClick={() => setHideOnEditorClick(v => !v)}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
+            border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
         <span style={{ marginLeft: 'auto', minWidth: 0, fontSize: '0.72rem', color: '#a89db8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {hint ?? (tool === 'text' ? 'drag on a page to add a note' : tool ? `select text to ${tool}` : '')}
         </span>
