@@ -535,6 +535,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     if (page >= pages) return
     const fracInCell = Math.max(0, Math.min(1, (rRaw - r * cellH) / (cellH - GAP)))
     const y = (page + fracInCell) * pageHRef.current
+    window.dispatchEvent(new Event('inkwave:minimap-seek')) // → diff pane follows gently, not springily
     el.scrollTo({ top: Math.max(0, y - el.clientHeight / 2), behavior: 'auto' })
   }, [cols, height, pages, leftRef])
 
@@ -619,14 +620,17 @@ function SplitDiffView({
   const rightTargetRef = useRef<number | null>(null)
   const springVelRef = useRef(0)
   const springRafRef = useRef(0)
+  const gentleFollowRef = useRef(false) // minimap scrolling → critically damped, lower snappiness
   const runSpring = useCallback(() => {
     if (springRafRef.current) return
     const step = () => {
       const R = rightScrollRef.current, target = rightTargetRef.current
       if (!R || target == null) { springRafRef.current = 0; return }
       const dx = target - R.scrollTop
-      // Near-critical damping: a tactile magnetic snap with ~70% less bounce (lower velocity retention).
-      springVelRef.current = springVelRef.current * 0.55 + dx * 0.22
+      // Tactile magnetic snap (few % bounce). Minimap scrolling uses a gentler, critically-damped follow.
+      const ret = gentleFollowRef.current ? 0.6 : 0.55
+      const k = gentleFollowRef.current ? 0.12 : 0.22
+      springVelRef.current = springVelRef.current * ret + dx * k
       if (Math.abs(dx) < 0.5 && Math.abs(springVelRef.current) < 0.5) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
       R.scrollTop = R.scrollTop + springVelRef.current
       springRafRef.current = requestAnimationFrame(step)
@@ -636,6 +640,17 @@ function SplitDiffView({
   // While a click-to-diff smooth-scroll is in flight, the diff pane GLIDES (tracks the target directly, at
   // the editor's pace) instead of springing — no fridge bounce on a click.
   const directFollowRef = useRef(false)
+  // Minimap scrolling → gentle critically-damped follow (see runSpring); the minimap dispatches this event.
+  const gentleTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    const on = () => {
+      gentleFollowRef.current = true
+      window.clearTimeout(gentleTimerRef.current)
+      gentleTimerRef.current = window.setTimeout(() => { gentleFollowRef.current = false }, 340)
+    }
+    window.addEventListener('inkwave:minimap-seek', on)
+    return () => window.removeEventListener('inkwave:minimap-seek', on)
+  }, [])
   // Flash a diff green/red when its top line crosses the midline (perfectly aligned across the panes).
   const flashedAlignRef = useRef<number | null>(null)
   const flashCountRef = useRef(0)                    // capped at 2 flashes per scroll-wheel cycle
@@ -777,16 +792,19 @@ function SplitDiffView({
     activeOpIdxRef.current = next
     setAttr(next, 'data-active', true)
     if (next !== null) {
-      const el = rightScrollRef.current
+      // Clicking editor text CENTRES THE EDITOR on that change; the diff pane then glides to match.
+      const el = leftScrollRef.current
       if (!el) return
-      // Right pane only has data-opidx on change ops (built in buildDiffNodes)
       const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
       if (!target) return
       const elRect     = el.getBoundingClientRect()
       const targetRect = target.getBoundingClientRect()
       const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
       const newScrollTop = targetTopInContent - el.clientHeight / 2
+      directFollowRef.current = true
+      window.setTimeout(() => { directFollowRef.current = false }, 800)
       el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
+      anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
     }
   }, [setAttr])
 
