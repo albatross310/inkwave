@@ -811,6 +811,11 @@ function SplitDiffView({
           })
         })
         if (!knots.length) return
+        // Boundary knots pin the extremes: the left pane's very top maps to the right pane's very top and
+        // bottom to bottom, so scrolling to either end of the editor drives the diff to that same end
+        // (through its lead/trail whitespace) instead of stalling short.
+        knots.push({ ly: L.clientHeight / 2, ry: R.clientHeight / 2 })
+        knots.push({ ly: L.scrollHeight - L.clientHeight / 2, ry: R.scrollHeight - R.clientHeight / 2 })
         knots.sort((a, b) => a.ly - b.ly)
         const lMid = L.scrollTop + L.clientHeight / 2
         let ry: number
