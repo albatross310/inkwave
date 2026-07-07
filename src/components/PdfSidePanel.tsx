@@ -167,7 +167,7 @@ export function PdfSidePanel() {
               onClose={close}
               dockButton={isWide ? (
                 <button type="button" onClick={toggleOrient} title={side ? 'Dock to bottom' : 'Dock to the side'}
-                  style={{ border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.9rem', borderRadius: 5, padding: '2px 6px', cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
                   {side ? '▭' : '▯'}
                 </button>
               ) : null}
