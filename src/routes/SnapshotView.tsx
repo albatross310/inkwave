@@ -1063,19 +1063,22 @@ export function SnapshotView() {
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* First-open gesture hint — big, centred, one-time. */}
+      {/* First-open gesture hint — centred, one-time, with an explicit close. */}
       {showScrubHint && (
         <div
-          onClick={() => setShowScrubHint(false)}
           style={{
             position: 'fixed', top: '20%', left: '50%', transform: 'translateX(-50%)', zIndex: 200,
-            padding: '18px 30px', borderRadius: 16, cursor: 'pointer',
-            background: 'rgba(35,25,50,0.94)', color: '#fff', boxShadow: '0 10px 40px rgba(0,0,0,0.35)',
-            fontSize: 'clamp(1.25rem, 3vw, 1.9rem)', fontWeight: 500, textAlign: 'center', lineHeight: 1.35,
+            padding: '11px 44px 11px 18px', borderRadius: 10,
+            background: 'rgba(35,25,50,0.94)', color: '#fff', boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
+            fontSize: 'clamp(0.8rem, 1.8vw, 1.15rem)', fontWeight: 500, textAlign: 'center', lineHeight: 1.35,
             maxWidth: '90vw',
           }}
         >
           Press <span style={{ color: '#c9a9ff' }}>Shift&nbsp;+&nbsp;Scroll</span> to fly through snapshots
+          <button
+            onClick={() => setShowScrubHint(false)} title="Dismiss" aria-label="Dismiss"
+            style={{ position: 'absolute', top: 4, right: 8, background: 'transparent', border: 'none', color: '#fff', fontSize: '1.5rem', lineHeight: 1, cursor: 'pointer', padding: '0 2px' }}
+          >×</button>
         </div>
       )}
       {/* Fixed header */}
