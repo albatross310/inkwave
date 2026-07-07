@@ -73,6 +73,16 @@ export class SessionRunner {
    * new receipt, or null if the service is unreachable (the period stays open, retried next tick).
    */
   async closePeriod(contentHash: string, kicks: WordNudgeEvent[], cadence?: KeylogBin[], authToken?: string): Promise<SignedReceipt | null> {
+    // INVARIANT: a receipt's in-S kicks must all be members of the set it signs (lockedSet), or the
+    // verifier's nudge-consistency check fails. Historically the client could classify a kick against a
+    // stale/locally-derived S_v that disagreed with the authoritative server set, so a spurious "in-S"
+    // kick (lemma NOT in this period's set) got signed in — breaking verification. Reconcile here, BEFORE
+    // hashing/signing (kicks are committed to the signature): drop in-S kicks whose lemma isn't in this
+    // period's server set. Forced 'locked' kicks are exempt (they fire regardless of S). this.current.lemmas
+    // == bitmaskToLemmas(the lockedSet the server signs for this setVersion), so this is exact.
+    const signedSet = this.current.lemmas
+    const cleanKicks = kicks.filter((k) => k.trigger !== 'in-S' || signedSet.has(k.lemma))
+    kicks = cleanKicks
     const kh = await nudgesHash(kicks)
     // Paid (Insignia) tier: the server signs only the DIGEST (it never sees the bins); the writer
     // keeps the bins on the receipt for later, at-their-discretion analysis. Empty cadence → no
