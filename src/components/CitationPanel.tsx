@@ -726,6 +726,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  const [fullscreen, setFullscreen] = useState(false)
 
   function panelStyle(): React.CSSProperties {
     if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
@@ -771,21 +772,29 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           onClose={() => { setEditItem(null); setIsNewRef(false) }}
         />
       )}
-      <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={onClose} />
+      {/* Backdrop — in fullscreen it becomes the aquamarine wave surround (paper floats over it). */}
+      <div className={`fixed inset-0 z-[90] ${fullscreen ? 'inkwave-editor-surface' : ''}`} aria-hidden="true" onMouseDown={onClose} />
       <div
         ref={panelRef}
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+        style={fullscreen
+          ? { position: 'fixed', top: 14, bottom: 76, left: '50%', transform: 'translateX(-50%)', width: 'min(760px, 94vw)', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }
+          : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Slim drag grip in place of the old titled bar (close moved next to Add). */}
+        {/* Drag grip (+ fullscreen toggle at the right). */}
         <div
-          className="flex items-center justify-center pt-2 pb-1"
-          style={{ cursor: 'grab' }}
-          onMouseDown={onHeaderMouseDown}
+          className="relative flex items-center justify-center pt-2 pb-1"
+          style={{ cursor: fullscreen ? 'default' : 'grab' }}
+          onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
         >
-          <div className="w-9 h-1 rounded-full bg-stone-200" />
+          {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
+          <button type="button" title={fullscreen ? 'Exit full screen' : 'Full screen'}
+            onMouseDown={e => e.stopPropagation()} onClick={() => setFullscreen(f => !f)}
+            className="absolute right-2 top-1 w-6 h-6 flex items-center justify-center rounded text-stone-400 hover:text-[#5c2d8a] text-sm">
+            {fullscreen ? '🗗' : '⛶'}
+          </button>
         </div>
 
         {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
