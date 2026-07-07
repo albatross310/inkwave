@@ -727,6 +727,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [recheckTip, setRecheckTip] = useState(false)
 
   function panelStyle(): React.CSSProperties {
     if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
@@ -887,14 +888,21 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
               + New
             </button>
-            {/* Re-verify all — square button, curly arrow, tooltip on hover. Colour via the theme var so
-                it stays visible in night mode (inline INK was invisible on the dolphin-grey panel). */}
-            <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
-              title="Re-verify all sources against their origins (built on Claude Sonnet)"
-              className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
-              style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
-              {recheckingAll ? '…' : '↻'}
-            </button>
+            {/* Re-verify all — with a CUSTOM styled tooltip (bigger, deep royal blue). */}
+            <div className="relative flex-shrink-0" onMouseEnter={() => setRecheckTip(true)} onMouseLeave={() => setRecheckTip(false)}>
+              <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
+                className="h-8 w-8 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
+                style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
+                {recheckingAll ? '…' : '↻'}
+              </button>
+              {recheckTip && (
+                <div className="absolute z-[95] pointer-events-none" style={{ top: 'calc(100% + 8px)', right: 0, width: 200 }}>
+                  <div style={{ background: '#1e3a8a', color: '#fff', fontSize: '0.9rem', lineHeight: 1.35, padding: '8px 11px', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.22)' }}>
+                    Re-verify all sources against their origins (built on Claude Sonnet)
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
