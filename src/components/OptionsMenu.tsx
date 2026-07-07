@@ -192,7 +192,7 @@ export function OptionsMenu({
   if (menuOpen) {
     const br = btnRef.current?.getBoundingClientRect()
     menuStyle.position = 'fixed'
-    menuStyle.bottom = br ? Math.round(window.innerHeight - br.top + 6) : 60
+    menuStyle.bottom = br ? Math.round(window.innerHeight - br.top + 16) : 60 // clear the toolbar, no overlap
     menuStyle.right = br
       ? Math.max(EDGE_BUFFER, Math.round(window.innerWidth - br.right))
       : Math.max(EDGE_BUFFER, Math.round(window.innerWidth - paperRight + 12))
@@ -249,9 +249,9 @@ export function OptionsMenu({
 
 // ─── Panels ───────────────────────────────────────────────────────────────────
 
-function MenuButton({ onClick, children }: { onClick?: () => void; children: ReactNode }) {
+function MenuButton({ onClick, children, title }: { onClick?: () => void; children: ReactNode; title?: string }) {
   return (
-    <button type="button" onClick={onClick} disabled={!onClick}
+    <button type="button" onClick={onClick} disabled={!onClick} title={title}
       className="w-full text-left px-4 py-2.5 font-serif transition-colors disabled:opacity-40"
       style={{ border: `1px solid ${INK}55`, borderRadius: 10, color: INK }}
       onMouseOver={e => { if (onClick) e.currentTarget.style.background = '#faf7fd' }}
@@ -340,23 +340,24 @@ function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBu
   onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void; onDone: () => void
 }) {
   return (
-    <div className="flex flex-col gap-2.5 mt-2">
-      <p className="text-xs text-stone-400 px-1">Choose a format. Both match what you see on the page.</p>
+    <div className="flex flex-col gap-2 mt-2">
+      <p className="text-xs text-stone-400 px-1">Choose a format (hover for details).</p>
       {onExportPdf && (
-        <MenuButton onClick={() => { onExportPdf(); onDone() }}>📄 PDF<span className="block text-xs text-stone-400">a finished A4 document — opens in a new tab, selectable text</span></MenuButton>
+        <MenuButton onClick={() => { onExportPdf(); onDone() }} title="A finished A4 document — opens in a new tab, selectable text">📄 PDF</MenuButton>
       )}
       {onExportLatex && (
-        <MenuButton onClick={() => { onExportLatex(); onDone() }}>∑ LaTeX<span className="block text-xs text-stone-400">a .tex source file to typeset yourself</span></MenuButton>
+        <MenuButton onClick={() => { onExportLatex(); onDone() }} title="A .tex source file to typeset yourself">∑ LaTeX</MenuButton>
       )}
       {onExportEquations && (
-        <MenuButton onClick={() => { onExportEquations(); onDone() }}>≡ Equations<span className="block text-xs text-stone-400">block equations as a numbered list (.txt)</span></MenuButton>
+        <MenuButton onClick={() => { onExportEquations(); onDone() }} title="Block equations as a numbered list (.txt)">≡ Equations</MenuButton>
       )}
       {onExportBundle && (
         <>
-          <MenuButton onClick={() => { onExportBundle('public'); onDone() }}>🌐 Studio, public PDFs stripped<span className="block text-xs text-stone-400">a .studio without the PDFs you've marked "publicly available" — smaller, safe to share</span></MenuButton>
-          <MenuButton onClick={() => { onExportBundle('all'); onDone() }}>📄✕ Document without PDFs<span className="block text-xs text-stone-400">a .studio with no embedded PDFs at all</span></MenuButton>
-          <MenuButton onClick={() => { onExportBundle('all', true); onDone() }}>🗜 Email copy (.studio.gz)<span className="block text-xs text-stone-400">no PDFs, gzip-compressed — smallest, for emailing. Inkwave opens it directly</span></MenuButton>
-          <MenuButton onClick={() => { onExportBundle(undefined, true); onDone() }}>🗜 Compressed, with PDFs (.studio.gz)<span className="block text-xs text-stone-400">everything, gzip-compressed. Inkwave opens it directly</span></MenuButton>
+          <MenuButton onClick={() => { onExportBundle('public'); onDone() }} title='A .studio without the PDFs you marked "publicly available" — smaller, safe to share'>🌐 Studio, public PDFs stripped</MenuButton>
+          <MenuButton onClick={() => { onExportBundle('all'); onDone() }} title="A .studio with no embedded PDFs at all">📄✕ Document without PDFs</MenuButton>
+          <MenuButton onClick={() => { onExportBundle('all', true); onDone() }} title="No PDFs, gzip-compressed — smallest, for emailing. Inkwave opens it directly">🗜 Zipped and no PDFs (.studio.gz)</MenuButton>
+          <MenuButton onClick={() => { onExportBundle('public', true); onDone() }} title='"Publicly available" PDFs stripped, gzip-compressed. Inkwave opens it directly'>🗜 Zipped and public (.studio.gz)</MenuButton>
+          <MenuButton onClick={() => { onExportBundle(undefined, true); onDone() }} title="Everything, gzip-compressed. Inkwave opens it directly">🗜 Zipped, with PDFs (.studio.gz)</MenuButton>
         </>
       )}
     </div>

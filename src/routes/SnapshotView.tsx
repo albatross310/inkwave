@@ -594,6 +594,24 @@ function SplitDiffView({
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const dragging   = useRef(false)
+  // Spring that eases the diff pane toward its bijection target — smooth then a snappy "fridge-magnet"
+  // settle, rather than rigidly tracking every scroll pixel.
+  const rightTargetRef = useRef<number | null>(null)
+  const springVelRef = useRef(0)
+  const springRafRef = useRef(0)
+  const runSpring = useCallback(() => {
+    if (springRafRef.current) return
+    const step = () => {
+      const R = rightScrollRef.current, target = rightTargetRef.current
+      if (!R || target == null) { springRafRef.current = 0; return }
+      const dx = target - R.scrollTop
+      springVelRef.current = springVelRef.current * 0.72 + dx * 0.24 // stiffness + damping → magnet snap
+      if (Math.abs(dx) < 0.5 && Math.abs(springVelRef.current) < 0.5) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
+      R.scrollTop = R.scrollTop + springVelRef.current
+      springRafRef.current = requestAnimationFrame(step)
+    }
+    springRafRef.current = requestAnimationFrame(step)
+  }, [])
   const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const leftScrollRef  = useRef<HTMLDivElement>(null)
@@ -781,10 +799,11 @@ function SplitDiffView({
           const t = (lMid - a.ly) / Math.max(1, b.ly - a.ly)
           ry = a.ry + t * (b.ry - a.ry)
         }
-        R.scrollTop = Math.max(0, ry - R.clientHeight / 2)
+        rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
+        runSpring()
       })
     }
-  }, [])
+  }, [runSpring])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
