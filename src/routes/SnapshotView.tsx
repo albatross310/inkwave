@@ -1265,7 +1265,7 @@ export function SnapshotView() {
       {/* Fixed header */}
       <div
         className="z-50 flex items-center gap-x-2.5 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '0.95rem', height: 48 }}
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '1.02rem', height: 48 }}
       >
         <span style={{ color: INK, fontWeight: 600 }}>
           ◈ {snapshot
@@ -1274,30 +1274,29 @@ export function SnapshotView() {
         </span>
 
         {snapshot && (
-          <span className="text-stone-400">
+          <span className="text-stone-600">
             {snapshot.wordCount}w
           </span>
         )}
 
         {allSnapshots.length > 1 && (
-          <span className="text-stone-400 tabular-nums">
+          <span className="text-stone-600 tabular-nums">
             {`v${groupIdx + 1}.${snapInGroup}/v${groups.length}.${lastGroup?.items.length ?? 1}`}
           </span>
         )}
 
-        {/* Words vs previous — moved here from the diff pane so that pane sits higher */}
+        {/* Centred, jazzed action buttons — the words-diff sits just left of the first (biggest-change) toggle */}
+        <div className="flex-1 flex items-center justify-center gap-2.5 flex-wrap">
+        {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
         {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
-          <span className="flex items-baseline gap-x-1.5 tabular-nums" title="words added / removed vs the previous snapshot">
-            <span style={{ color: '#15803d', fontWeight: 700 }}>+{headerDiff.added}</span>
-            <span style={{ color: '#b91c1c', fontWeight: 700 }}>−{headerDiff.removed}</span>
+          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: '1.2rem' }} title="words added / removed vs the previous snapshot">
+            <span style={{ color: '#15803d', fontWeight: 800 }}>+{headerDiff.added}</span>
+            <span style={{ color: '#b91c1c', fontWeight: 800 }}>−{headerDiff.removed}</span>
           </span>
         )}
         {prevSnap && headerDiff && headerDiff.added === 0 && headerDiff.removed === 0 && (
-          <span className="text-stone-400 italic">no change</span>
+          <span className="text-stone-500 italic">no change</span>
         )}
-
-        {/* Centred, jazzed action buttons */}
-        <div className="flex-1 flex items-center justify-center gap-2.5 flex-wrap">
         <button
           type="button"
           onClick={toggleLineMode}

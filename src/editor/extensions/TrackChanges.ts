@@ -16,14 +16,26 @@ import { suggestOn, activeSet } from '../review/reviewState'
 
 const mk = () => ({ set: { default: 'Notes' as string } })
 
-// Each reviewer (= annotation set) gets its own colour. The first/default set is scarlet; further sets
-// take the next palette entry by name, so a new reviewer automatically reads in a new colour.
-const REVIEWER_PALETTE = ['#d21f3c', '#1d6fb8', '#0f8a5f', '#c2410c', '#7c3aed', '#b8117a', '#0891b2', '#a16207']
+// Each reviewer (= annotation set) gets its own colour. The first/default set is a warm red (slightly
+// orange); further sets take the next palette entry by name, so a new reviewer reads in a new colour.
+const REVIEWER_PALETTE = ['#e03a26', '#1d6fb8', '#0f8a5f', '#c2410c', '#7c3aed', '#b8117a', '#0891b2', '#a16207']
 export function reviewerColor(set: string): string {
-  if (!set || set === 'Notes') return REVIEWER_PALETTE[0] // scarlet — the default reviewer
+  if (!set || set === 'Notes') return REVIEWER_PALETTE[0] // warm red — the default reviewer
   let h = 0
   for (let i = 0; i < set.length; i++) h = (h * 31 + set.charCodeAt(i)) >>> 0
   return REVIEWER_PALETTE[h % REVIEWER_PALETTE.length]
+}
+// A slightly darker shade of a hex colour (for the bottom of the vertical text gradient).
+function shade(hex: string, f: number): string {
+  const m = hex.replace('#', '')
+  const r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16)
+  const s = (x: number) => Math.max(0, Math.min(255, Math.round(x * f))).toString(16).padStart(2, '0')
+  return `#${s(r)}${s(g)}${s(b)}`
+}
+// A gentle top-to-bottom gradient clipped to the glyphs. CSS `background-clip: text` is GPU-composited,
+// so it's cheap even across many marks.
+function gradientStyle(c: string, extra: string): string {
+  return `background:linear-gradient(180deg,${c},${shade(c, 0.68)});-webkit-background-clip:text;background-clip:text;color:${c};-webkit-text-fill-color:transparent;${extra}`
 }
 
 export const InsertionMark = Mark.create({
@@ -33,7 +45,7 @@ export const InsertionMark = Mark.create({
   parseHTML() { return [{ tag: 'ins[data-iw-ins]' }] },
   renderHTML({ HTMLAttributes }) {
     const c = reviewerColor((HTMLAttributes as { set?: string }).set || 'Notes')
-    return ['ins', mergeAttributes(HTMLAttributes, { 'data-iw-ins': '', class: 'iw-ins', style: `color:${c};text-decoration:none;` }), 0]
+    return ['ins', mergeAttributes(HTMLAttributes, { 'data-iw-ins': '', class: 'iw-ins', style: gradientStyle(c, 'text-decoration:none;') }), 0]
   },
 })
 
@@ -44,7 +56,7 @@ export const DeletionMark = Mark.create({
   parseHTML() { return [{ tag: 'del[data-iw-del]' }] },
   renderHTML({ HTMLAttributes }) {
     const c = reviewerColor((HTMLAttributes as { set?: string }).set || 'Notes')
-    return ['del', mergeAttributes(HTMLAttributes, { 'data-iw-del': '', class: 'iw-del', style: `color:${c};text-decoration-color:${c};` }), 0]
+    return ['del', mergeAttributes(HTMLAttributes, { 'data-iw-del': '', class: 'iw-del', style: gradientStyle(c, `text-decoration-line:line-through;text-decoration-color:${c};`) }), 0]
   },
 })
 
