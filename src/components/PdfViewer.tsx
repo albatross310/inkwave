@@ -60,6 +60,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // "Don't add pages to inline" — bib entry forces it; a toolbar checkbox lets the reader force it too.
   const [dontAddPages, setDontAddPages] = useState(false)
   const noRefRef = useRef(false); noRefRef.current = !!noRef || dontAddPages
+  // "Scroll highlighted": step through this source's highlights in order; optionally sync the editor to
+  // the document position (the citation occurrence) each highlight belongs to.
+  const hlNavRef = useRef(-1)
+  const [syncEditor, setSyncEditor] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -698,6 +702,33 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // downward if the text overflows. A plain click (tiny drag) falls back to a default size. Dotted preview.
   const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
   const editNoteIdRef = useRef<string | null>(null) // note id to auto-enter-edit after the next redraw
+  // Step through the source's highlights in reading order (page, then top-to-bottom). Scrolls the PDF to
+  // the highlight and flashes it; if "sync editor" is on and the highlight is tied to a citation
+  // occurrence (instanceId), also asks the editor to scroll to that citation.
+  function stepHighlight(dir: 1 | -1): void {
+    const ordered = highlightsRef.current
+      .filter(h => h.page > 0 && h.rects[0])
+      .sort((a, b) => a.page - b.page || (a.rects[0].y - b.rects[0].y))
+    if (!ordered.length) return
+    const next = (hlNavRef.current + dir + ordered.length) % ordered.length
+    hlNavRef.current = next
+    const hl = ordered[next]
+    const pg = pagesRef.current[hl.page - 1]
+    const sc = scrollRef.current
+    if (pg && sc) {
+      const y = pg.wrapper.offsetTop + (hl.rects[0].y * (pg.hlLayer.clientHeight || pg.h)) - 80
+      sc.scrollTo({ top: Math.max(0, y), behavior: 'smooth' })
+      // brief flash on the target highlight
+      window.setTimeout(() => {
+        const el = pg.hlLayer.querySelector(`[data-hl-id="${hl.id}"]`) as HTMLElement | null
+        if (el) { el.style.transition = 'box-shadow 200ms'; el.style.boxShadow = `0 0 0 3px ${INK}`; window.setTimeout(() => { el.style.boxShadow = 'none' }, 900) }
+      }, 260)
+    }
+    if (syncEditor && hl.instanceId) {
+      window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: hl.instanceId } }))
+    }
+  }
+
   // Eraser: click any annotation (highlight / underline / strike / note) to remove it.
   function eraseAt(clientX: number, clientY: number): void {
     for (let i = 0; i < pagesRef.current.length; i++) {
@@ -803,6 +834,20 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   return (
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
+
+      {/* "Scroll highlighted" bar — step through this source's highlights in order (+ optional editor sync). */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${INK}18`, background: '#f3eefa', fontSize: '0.78rem', color: '#6b5b7e' }}>
+        <button type="button" title="Previous highlight" onClick={() => stepHighlight(-1)}
+          style={{ width: 26, height: 24, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: INK, cursor: 'pointer' }}>‹</button>
+        <span style={{ fontWeight: 600 }}>scroll highlighted</span>
+        <button type="button" title="Next highlight" onClick={() => stepHighlight(1)}
+          style={{ width: 26, height: 24, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: INK, cursor: 'pointer' }}>›</button>
+        <label title="Also snap the editor to the document position where this highlight is cited (when the highlight belongs to an inline citation — not when opened from the bib)"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6, cursor: 'pointer', userSelect: 'none' }}>
+          <input type="checkbox" checked={syncEditor} onChange={e => setSyncEditor(e.target.checked)} style={{ cursor: 'pointer' }} />
+          sync editor
+        </label>
+      </div>
 
       {/* Persistent markup toolbar */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc' }}>

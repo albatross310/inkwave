@@ -643,6 +643,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editor.on('update', count)
     return () => { editor.off('update', count) }
   }, [editor])
+  // "Sync editor" from the PDF viewer: scroll to the citation OCCURRENCE a highlight belongs to.
+  useEffect(() => {
+    if (!editor) return
+    const onGoto = (e: Event) => {
+      const iid = (e as CustomEvent<{ instanceId?: string }>).detail?.instanceId
+      if (!iid) return
+      let found = -1
+      editor.state.doc.descendants((node, pos) => {
+        if (found < 0 && node.type.name === 'citation' && node.attrs.instanceId === iid) found = pos
+        return found < 0
+      })
+      if (found < 0) return
+      const dom = editor.view.nodeDOM(found) as HTMLElement | null
+      const el = dom && dom.nodeType === 1 ? dom : (dom?.parentElement ?? null)
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    }
+    window.addEventListener('inkwave:goto-citation-instance', onGoto)
+    return () => window.removeEventListener('inkwave:goto-citation-instance', onGoto)
+  }, [editor])
+
   // Ctrl/Cmd+Shift+> / Ctrl/Cmd+Shift+< — step the selection's font size up / down through the same
   // ladder the style bar uses (stored in em, base 18px, so it matches the size picker's readout).
   useEffect(() => {
