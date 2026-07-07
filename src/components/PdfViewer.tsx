@@ -14,11 +14,13 @@ import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
 const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#d0bcff']
-const TOOLS: Array<{ kind: HighlightKind; label: string; title: string }> = [
+type ToolKind = HighlightKind | 'erase'
+const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'highlight', label: '▮', title: 'Highlight' },
   { kind: 'underline', label: 'U', title: 'Underline' },
   { kind: 'strike', label: 'S', title: 'Strikethrough' },
   { kind: 'text', label: 'T', title: 'Text note — click on the page to place' },
+  { kind: 'erase', label: '⌫', title: 'Eraser — click any annotation to remove it' },
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
@@ -53,10 +55,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [zoom, setZoom] = useState(1)
-  const [tool, setTool] = useState<HighlightKind | null>(null) // active markup mode (null = off)
+  const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
   const [noteSize, setNoteSize] = useState<number>(() => { try { return Number(localStorage.getItem('inkwave:pdfNoteSize')) || 12 } catch { return 12 } })
-  const toolRef = useRef<HighlightKind | null>(null); toolRef.current = tool
+  const toolRef = useRef<ToolKind | null>(null); toolRef.current = tool
   const colorRef = useRef(color); colorRef.current = color
   const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
 
@@ -174,9 +176,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
           const x = document.createElement('button')
           x.textContent = '×'
           x.title = 'Remove annotation'
-          x.style.cssText = `position:absolute;left:${r0.x * pw - 7}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid ${INK}66;background:#fff;color:${INK};cursor:pointer;font-size:12px;opacity:0.35;transition:opacity 120ms;pointer-events:auto;z-index:2;`
+          x.style.cssText = `position:absolute;left:${r0.x * pw - 7}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:12px;opacity:0.7;transition:opacity 120ms;pointer-events:auto;z-index:2;`
           x.onmouseenter = () => { x.style.opacity = '1' }
-          x.onmouseleave = () => { x.style.opacity = '0.35' }
+          x.onmouseleave = () => { x.style.opacity = '0.7' }
           x.onclick = e => { e.stopPropagation(); removeHighlight(hl.id) }
           pg.hlLayer.appendChild(x)
         }
@@ -612,6 +614,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
     let page = 1
     const rects: HighlightRect[] = []
     for (const cr of clientRects) {
+      // Skip spurious rects — a page-tall or zero rect (e.g. pdf.js's .endOfContent, which the selection
+      // range picks up) is what paints the WHOLE page when you only dragged over a few words.
+      if (cr.height < 1 || cr.width < 1 || cr.height > 60) continue
       for (let i = 0; i < pagesRef.current.length; i++) {
         const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
         const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2
@@ -630,9 +635,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
 
   function onMouseUp() {
     const info = selectionInfo()
-    // Text tool placement is a click-drag (onPdfMouseDown → the box's width is dragged), handled by its
-    // own document listeners — nothing to do here for it.
-    if (toolRef.current === 'text') { setPending(null); return }
+    // Text-tool placement + eraser are click-driven (onPdfMouseDown) — nothing to do on mouse-up.
+    if (toolRef.current === 'text' || toolRef.current === 'erase') { window.getSelection()?.removeAllRanges(); setPending(null); return }
     if (!info) { setPending(null); return }
     // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
     if (toolRef.current) {
@@ -648,7 +652,25 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, onLinkToCi
   // downward if the text overflows. A plain click (tiny drag) falls back to a default size. Dotted preview.
   const textDragRef = useRef<{ pageIdx: number; startX: number; startY: number; preview: HTMLDivElement; pr: DOMRect } | null>(null)
   const editNoteIdRef = useRef<string | null>(null) // note id to auto-enter-edit after the next redraw
+  // Eraser: click any annotation (highlight / underline / strike / note) to remove it.
+  function eraseAt(clientX: number, clientY: number): void {
+    for (let i = 0; i < pagesRef.current.length; i++) {
+      const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
+      if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
+      const fx = (clientX - pr.left) / pr.width, fy = (clientY - pr.top) / pr.height
+      // topmost-first, so the eraser removes what's visually on top
+      for (let j = highlightsRef.current.length - 1; j >= 0; j--) {
+        const hl = highlightsRef.current[j]
+        if (hl.page !== i + 1) continue
+        const hit = hl.rects.some(r => fx >= r.x - 0.005 && fx <= r.x + (r.w || 0.3) + 0.005 && fy >= r.y - 0.01 && fy <= r.y + (r.h || 0.04) + 0.01)
+        if (hit) { removeHighlight(hl.id); return }
+      }
+      return
+    }
+  }
+
   function onPdfMouseDown(e: React.MouseEvent) {
+    if (toolRef.current === 'erase') { e.preventDefault(); eraseAt(e.clientX, e.clientY); return }
     if (toolRef.current !== 'text') return
     if (!pagesRef.current.length) return
     // Pick the page under the cursor; if the cursor is in the MARGIN (outside every page), anchor to the
