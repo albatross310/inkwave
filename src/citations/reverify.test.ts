@@ -2,6 +2,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { reverifyEntry, applyReverify, revertField, type ReverifyResult } from './reverify'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 
+// The AI leg is gated behind the URL-lookup opt-in (off by default; no localStorage in node).
+// These tests exercise the leg itself, so run them with the feature enabled.
+vi.mock('../editor/aiSettings', () => ({ urlLookupEnabled: () => true }))
+
 function iw(item: CSLItem): IwCitationMeta {
   return (item as { _iw?: IwCitationMeta })._iw ?? {}
 }
