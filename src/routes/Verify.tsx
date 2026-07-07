@@ -60,7 +60,7 @@ export function Verify() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a' }}>
+    <div className="min-h-screen flex flex-col items-center px-4 py-10 font-serif" style={{ color: '#3a3a3a', background: '#e7eefb' }}>
       <div className="w-full max-w-3xl">
         <div className="flex items-start gap-4 mb-5">
           <img src="/inkwave-logo-v7.png" alt="Inkwave" width={72} height={72} style={{ display: 'block' }} />
@@ -69,8 +69,9 @@ export function Verify() {
             <p className="text-sm text-stone-500">
               Runs entirely in your browser against Inkwave's published signing key — and, for anchored
               snapshots, against the Bitcoin blockchain via independent explorers. No sign-in, nothing
-              uploaded. <Link to="/" className="underline" style={{ color: LIGHT }}>← editor</Link>
-              {' · '}<Link to="/about" className="underline" style={{ color: LIGHT }}>about</Link>
+              uploaded.
+              {' '}<Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }} className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>← editor</Link>
+              {' '}<Link to="/about" className="inline-flex items-center rounded-full px-3 py-0.5 ml-1 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>about</Link>
             </p>
           </div>
         </div>

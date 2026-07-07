@@ -19,9 +19,11 @@ function AppIcon({ size }: { size: number }) {
 
 export function About() {
   return (
-    <div className="min-h-screen font-serif" style={{ background: '#fbfaf6', color: '#3a3a3a' }}>
+    <div className="min-h-screen font-serif" style={{ background: '#e7eefb', color: '#3a3a3a' }}>
       <div className="mx-auto max-w-2xl px-5 py-12 sm:py-16">
-        <Link to="/" className="text-sm text-stone-400 hover:text-[#5c2d8a]">← Back to writing</Link>
+        <Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }}
+          className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#5c2d8a11]"
+          style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#6d5a86' }}>← Back to writing</Link>
 
         {/* Hero — app icon to the left of the wordmark */}
         <header className="mt-8 flex items-center gap-6">
@@ -85,16 +87,16 @@ export function About() {
               link back to their verified counterparts here in Zero — and hyperlink freely to other
               Inkwave Cubed documents and to PDFs. The result is a space for academic and personal
               essay networks: writing that cites, connects, and builds on other writing, with a
-              verifiable spine underneath. All of it free.
+              verifiable spine underneath.
             </p>
           </section>
         </div>
 
-        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: '#eee' }}>
-          <Link to="/" style={{ color: INK }} className="underline">Start writing</Link>
-          <div className="flex gap-4">
-            <Link to="/privacy" className="text-stone-400 hover:text-[#5c2d8a] underline">Privacy</Link>
-            <Link to="/verify" style={{ color: LIGHT }} className="underline">Verify a record</Link>
+        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(92,45,138,0.14)' }}>
+          <Link to="/" className="inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors" style={{ background: INK, color: '#fff' }}>Start writing</Link>
+          <div className="flex gap-2.5">
+            <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#5c2d8a11]" style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#8a7a9e' }}>Privacy</Link>
+            <Link to="/verify" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline transition-colors hover:bg-[#9b5ccc22]" style={{ border: `1px solid ${LIGHT}`, color: LIGHT }}>Verify a record</Link>
           </div>
         </footer>
       </div>
