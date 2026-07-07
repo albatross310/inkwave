@@ -323,7 +323,12 @@ function InlineDiffView({
       >
         {!prevSnap && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
         {prevSnap && !hasChange && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
+        {/* ~13 lines of empty lead/trail whitespace: at the document's top (before the first diff's
+            position) the diff pane shows only blank — no diff in view — and the bijection spring has room
+            to "fridge-magnet" snap past the first and last diff instead of dead-ending at the pane edge. */}
+        {hasChange && <div aria-hidden="true" style={{ height: '24em' }} />}
         {nodes}
+        {hasChange && <div aria-hidden="true" style={{ height: '24em' }} />}
       </div>
     </div>
   )
