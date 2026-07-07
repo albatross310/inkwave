@@ -734,13 +734,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         style={{ ...panelStyle(), width: 520, height: '80vh', minWidth: 360, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
+        {/* Slim drag grip in place of the old titled bar (close moved next to Add). */}
         <div
-          className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100"
+          className="flex items-center justify-center pt-2 pb-1"
           style={{ cursor: 'grab' }}
           onMouseDown={onHeaderMouseDown}
         >
-          <span className="text-[12px] font-medium" style={{ color: INK }}>Inkwave Citations</span>
-          <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
+          <div className="w-9 h-1 rounded-full bg-stone-200" />
         </div>
 
         {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
@@ -750,7 +750,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         {/* Extension promo — top of panel (dismissible) */}
         {!extDismissed && (
           <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
-            <span className="text-xs text-stone-500">Download the Inkwave citation extension for single click import on any page</span>
+            <span className="text-xs text-stone-500">Download the Inkwave citation extension for single-click import on any page, using Claude Sonnet</span>
             <div className="flex gap-2 flex-shrink-0 ml-3 items-center">
               <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
                 target="_blank" rel="noopener noreferrer"
@@ -785,6 +785,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             >
               {busy ? '…' : 'Add'}
             </button>
+            {/* Close — big ×, next to Add (the old titled header bar is gone). */}
+            <button type="button" onClick={onClose} title="Close (Esc)"
+              className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-400 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
           </div>
           {notice && (
             <div className="mt-1.5 text-[11px]" style={{ color: notice.kind === 'err' ? '#b91c1c' : notice.kind === 'warn' ? '#b45309' : '#15803d' }}>
@@ -824,6 +827,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               className="h-8 w-8 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
+            {/* + New before Re-verify (swapped per Peter). */}
+            <button type="button" onClick={openNewRef}
+              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
+              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
+              + New
+            </button>
             {/* Re-verify all — square button, curly arrow, tooltip on hover. Colour via the theme var so
                 it stays visible in night mode (inline INK was invisible on the dolphin-grey panel). */}
             <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
@@ -831,11 +840,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               className="h-8 w-8 flex-shrink-0 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
               style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
               {recheckingAll ? '…' : '↻'}
-            </button>
-            <button type="button" onClick={openNewRef}
-              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
-              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
-              + New
             </button>
           </div>
         </div>
