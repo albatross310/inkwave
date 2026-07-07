@@ -16,12 +16,25 @@ import { suggestOn, activeSet } from '../review/reviewState'
 
 const mk = () => ({ set: { default: 'Notes' as string } })
 
+// Each reviewer (= annotation set) gets its own colour. The first/default set is scarlet; further sets
+// take the next palette entry by name, so a new reviewer automatically reads in a new colour.
+const REVIEWER_PALETTE = ['#d21f3c', '#1d6fb8', '#0f8a5f', '#c2410c', '#7c3aed', '#b8117a', '#0891b2', '#a16207']
+export function reviewerColor(set: string): string {
+  if (!set || set === 'Notes') return REVIEWER_PALETTE[0] // scarlet — the default reviewer
+  let h = 0
+  for (let i = 0; i < set.length; i++) h = (h * 31 + set.charCodeAt(i)) >>> 0
+  return REVIEWER_PALETTE[h % REVIEWER_PALETTE.length]
+}
+
 export const InsertionMark = Mark.create({
   name: 'insertion',
   inclusive: true,
   addAttributes: mk,
   parseHTML() { return [{ tag: 'ins[data-iw-ins]' }] },
-  renderHTML({ HTMLAttributes }) { return ['ins', mergeAttributes(HTMLAttributes, { 'data-iw-ins': '', class: 'iw-ins' }), 0] },
+  renderHTML({ HTMLAttributes }) {
+    const c = reviewerColor((HTMLAttributes as { set?: string }).set || 'Notes')
+    return ['ins', mergeAttributes(HTMLAttributes, { 'data-iw-ins': '', class: 'iw-ins', style: `color:${c};text-decoration:none;` }), 0]
+  },
 })
 
 export const DeletionMark = Mark.create({
@@ -29,7 +42,10 @@ export const DeletionMark = Mark.create({
   inclusive: false,
   addAttributes: mk,
   parseHTML() { return [{ tag: 'del[data-iw-del]' }] },
-  renderHTML({ HTMLAttributes }) { return ['del', mergeAttributes(HTMLAttributes, { 'data-iw-del': '', class: 'iw-del' }), 0] },
+  renderHTML({ HTMLAttributes }) {
+    const c = reviewerColor((HTMLAttributes as { set?: string }).set || 'Notes')
+    return ['del', mergeAttributes(HTMLAttributes, { 'data-iw-del': '', class: 'iw-del', style: `color:${c};text-decoration-color:${c};` }), 0]
+  },
 })
 
 const KEY = new PluginKey('trackChanges')

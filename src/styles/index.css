@@ -94,8 +94,10 @@
     border-radius: 2px 2px 0 0;
   }
   /* Track changes (live suggestion mode). Insertions = green underline; deletions = red strike. */
-  ins.iw-ins { text-decoration: none; color: #15803d; border-bottom: 2px solid rgba(21, 128, 61, 0.55); background: rgba(21, 128, 61, 0.08); }
-  del.iw-del { text-decoration: line-through; text-decoration-color: rgba(185, 28, 28, 0.8); color: #b91c1c; background: rgba(185, 28, 28, 0.07); }
+  /* Suggestion (insertion): coloured text only — no underline, no background. Colour is set inline,
+     per reviewer (scarlet for the first). Deletion keeps a strike, also per-reviewer coloured. */
+  ins.iw-ins { text-decoration: none; background: transparent; }
+  del.iw-del { text-decoration: line-through; background: transparent; }
   .iw-change-current { outline: 2px solid #5c2d8a; outline-offset: 1px; border-radius: 2px; }
 
   /* The gentle waves live on a FIXED ::before so the background stays put while the page scrolls.
@@ -577,8 +579,7 @@
 :root[data-theme="night"] .iw-backref-group .iw-cite-link,
 :root[data-theme="night"] .iw-note-add { color: #d6c6f5 !important; border-color: #d6c6f5 !important; }
 :root[data-theme="night"] .iw-comment { border-bottom-color: #c9a9ff; }
-:root[data-theme="night"] ins.iw-ins { color: #86e6a6; border-bottom-color: rgba(134, 230, 166, 0.6); background: rgba(134, 230, 166, 0.1); }
-:root[data-theme="night"] del.iw-del { color: #ff9b9b; text-decoration-color: rgba(255, 155, 155, 0.8); background: rgba(255, 155, 155, 0.1); }
+/* Insertion/deletion colours are set inline per reviewer, so night mode needs no colour override. */
 :root[data-theme="night"] .iw-change-current { outline-color: #c9a9ff; }
 
 /* ── Chrome (toolbars, popups, pills): "dolphin-back grey" panels with light-grey text. Panels opt in
