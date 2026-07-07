@@ -581,8 +581,10 @@ function SplitDiffView({
   lineMode: 'center' | 'longest'; summary?: string | null
 }) {
   const vertical = isPhone || isNarrow
-  const [splitPct, setSplitPct] = useState(50)
+  const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
+  const [sidePanelPx, setSidePanelPx] = useState(240)
   const dragging   = useRef(false)
+  const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const leftScrollRef  = useRef<HTMLDivElement>(null)
   const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
@@ -818,91 +820,118 @@ function SplitDiffView({
     void startX; void startY
   }, [vertical])
 
+  // Side-panel resize (its own divider). Width in wide mode, height in vertical mode.
+  const startSideDrag = useCallback(() => {
+    sideDragging.current = true
+    const onMove = (x: number, y: number) => {
+      if (!sideDragging.current || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const px = vertical ? (rect.bottom - y) : (rect.right - x)
+      setSidePanelPx(Math.max(150, Math.min(vertical ? rect.height - 120 : rect.width - 200, Math.round(px))))
+    }
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
+    const onTouchMove = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY) }
+    const onUp = () => {
+      sideDragging.current = false
+      window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onUp)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('touchend', onUp)
+  }, [vertical])
+
+  // A dotted reading-line at the pane centre (both panes share it).
+  const midline = (
+    <div aria-hidden="true" style={{
+      position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+      borderTop: '1px dashed rgba(92,45,138,0.38)', pointerEvents: 'none', transform: 'translateY(-0.5px)',
+    }} />
+  )
+  const gripDots = (
+    <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
+      {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
+    </div>
+  )
+
   return (
     <div ref={containerRef} style={{
-      display: 'flex', flexDirection: vertical ? 'column' : 'row',
-      height: '100%', overflow: 'hidden',
+      display: 'flex', flexDirection: vertical ? 'column' : 'row', height: '100%', overflow: 'hidden',
     }}>
+      {/* Main split area: DIFF (left/top) + EDITOR document (middle/bottom). Editor is 5/3 × the diff. */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: vertical ? 'column' : 'row', overflow: 'hidden' }}>
 
-      {/* ── Left / top pane: full annotated document + midline ── */}
-      <div style={{
-        [vertical ? 'height' : 'width']: `${splitPct}%`,
-        flexShrink: 0, position: 'relative', overflow: 'hidden',
-      }}>
-        {/* Dotted midline — fixed at 50% of the pane height */}
-        <div aria-hidden="true" style={{
-          position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
-          borderTop: '1px dashed rgba(92,45,138,0.38)',
-          pointerEvents: 'none', transform: 'translateY(-0.5px)',
-        }} />
-        <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
-          <Scroll phone={isPhone}>
-            <div style={{ zoom: diffZoom } as React.CSSProperties}>
-              <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
-            </div>
-          </Scroll>
+        {/* ── Diff pane (left) ── */}
+        <div style={{
+          [vertical ? 'height' : 'width']: `${splitPct}%`, flexShrink: 0, position: 'relative',
+          overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom,
+        } as React.CSSProperties}>
+          {midline}
+          <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
+        </div>
+
+        {/* ── Diff↔editor divider ── */}
+        <div
+          style={{
+            [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
+            background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
+          }}
+          onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
+          onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
+          onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+          title="Drag to resize"
+        >{gripDots}</div>
+
+        {/* ── Editor document pane (middle) ── */}
+        <div style={{
+          flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden',
+          borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
+          borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
+        }}>
+          {midline}
+          <div ref={leftScrollRef} onScroll={onLeftScroll} style={{ height: '100%', overflow: 'auto' }}>
+            <Scroll phone={isPhone}>
+              <div style={{ zoom: diffZoom } as React.CSSProperties}>
+                <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
+              </div>
+            </Scroll>
+          </div>
         </div>
       </div>
 
-      {/* ── Drag divider ── */}
+      {/* ── Side-panel resize divider (both modes) ── */}
       <div
         style={{
           [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
           background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'background 0.12s', userSelect: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
         }}
-        onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
-        onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
+        onMouseDown={(e) => { e.preventDefault(); startSideDrag() }}
+        onTouchStart={(e) => { e.preventDefault(); startSideDrag() }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
-        onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
-        title="Drag to resize"
-      >
-        <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
-          {[0,1,2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
-        </div>
-      </div>
+        onMouseLeave={(e) => { if (!sideDragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+        title="Drag to resize the side panel"
+      >{gripDots}</div>
 
-      {/* ── Right / bottom pane: compact hunk diff ── */}
+      {/* ── Side panel (both modes): AI summary (scrollable) + document minimap ── */}
       <div style={{
-        flex: 1, overflow: 'hidden', background: '#f9f7f4', position: 'relative',
-        borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
-        borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
-        zoom: diffZoom,
+        [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, display: 'flex', flexDirection: 'column',
+        background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden',
       } as React.CSSProperties}>
-        {/* Dotted midline — matches the document pane, so both panes share a reading line */}
-        <div aria-hidden="true" style={{
-          position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
-          borderTop: '1px dashed rgba(92,45,138,0.38)',
-          pointerEvents: 'none', transform: 'translateY(-0.5px)',
-        }} />
-        <InlineDiffView
-          ops={ops}
-          prevSnap={prevSnap}
-          onChangeClick={handleClickOp}
-          onHoverOp={handleHoverOp}
-          scrollBodyRef={rightScrollRef}
-        />
-      </div>
-
-      {/* ── RHS side panel (wide only): AI summaries (top, scrollable) + document minimap (bottom) ── */}
-      {!vertical && (
         <div style={{
-          width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column',
-          borderLeft: '1px solid rgba(92,45,138,0.12)', background: '#fbfaf6', padding: 10, gap: 10,
+          flex: '0 0 44%', minHeight: 0, overflow: 'auto', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
+          border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
         }}>
-          <div style={{
-            flex: '0 0 44%', minHeight: 0, overflow: 'auto', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
-            border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
-          }}>
-            <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
-            {summary && summary.trim()
-              ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
-              : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
-          </div>
-          <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
+          <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
+          {summary && summary.trim()
+            ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
+            : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
         </div>
-      )}
+        <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
+      </div>
     </div>
   )
 }
