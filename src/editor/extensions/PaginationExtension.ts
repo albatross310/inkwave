@@ -101,41 +101,41 @@ function compute(view: EditorView, pageH: number, topM: number): { set: Decorati
   const sig: string[] = []
   let used = 0
   let pageNo = 1
+  // Track the current top-level block so we know how much of it is already on this page: snapping the
+  // break to a block boundary is nice for a couple of orphan lines, but pushing a TALL block whole
+  // leaves the page half-empty (the short-page artifact). So snap only small orphans; otherwise break
+  // mid-block to fill the page (stable because we measure the natural, gap-free wrapping).
+  let blockStart = -1, blockStartUsed = 0
+  const blockOf = (pos: number): number => {
+    try { const $p = doc.resolve(Math.min(pos, doc.content.size - 1)); return $p.depth >= 1 ? $p.before(1) : pos } catch { return pos }
+  }
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
+    const lb = blockOf(lines[i].pos)
+    if (lb !== blockStart) { blockStart = lb; blockStartUsed = used }
     // Force the reference list onto a fresh page (before the normal overflow check).
     if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
       const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
-      pageNo++; used = 0; refBroken = true
+      pageNo++; used = 0; blockStart = -1; refBroken = true
     }
-    // Break before the LINE that would overflow the text area — splitting the paragraph if mid-block.
+    // Break before the LINE that would overflow the text area.
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
-      // Parchment left below the last line on this page (its bottom margin), at least MARGIN_BOTTOM.
-      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
-      let at = lines[i].pos
-      // Snap to the nearest top-level block boundary. A widget inside a <p> (mid-paragraph break)
-      // causes layout instability: its height forces line-wrapping inside that <p>, and typing near
-      // the gap changes botMargin, which changes the widget height, which re-wraps — it oscillates.
-      // Between-block positions are stable: the widget sits between <p> elements so paragraph layout
-      // is unaffected by the gap height. `before(1)` gives the position just before the top-level
-      // ancestor block containing `at` (depth 0 = between blocks, which is what we want).
-      try {
-        const $at = doc.resolve(Math.min(at, doc.content.size - 1))
-        if ($at.depth >= 1) at = $at.before(1)
-      } catch { /* keep original at if resolve fails */ }
-      // Don't re-break at the reference-list boundary (already forced above; the atom can't split, so a
-      // repeat here would double the gap / not converge).
+      const orphan = used - blockStartUsed             // height of the current block already on this page
+      const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
+      const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
+      const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
+      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
+      // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
-        // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its
-        // height into cursor/selection coordinate mapping so a click at the page-above end jumps
-        // the caret past the gap. stopEvent: clicks on the gap aren't editor input. side:-1: keeps
-        // the cursor on real text rather than stranding it inside the gap.
+        // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
+        // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
         decos.push(Decoration.widget(at, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
-        used = 0
+        used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
+        blockStart = -1           // recompute the block on the new page
       }
     }
     used += lh
