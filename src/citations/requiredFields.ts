@@ -2,6 +2,7 @@
 // background (to compute missing fields), and the in-page capture panel.
 
 export const ITEM_TYPE_LABELS: Record<string, string> = {
+  'article':           'Article',
   'article-journal':   'Journal article',
   'webpage':           'Webpage',
   'post-weblog':       'Blog post',
@@ -26,6 +27,7 @@ export const ITEM_TYPE_LABELS: Record<string, string> = {
 // Keys match CSL field names as used in CSLItem; 'year' is handled separately
 // (stored in item.issued, not a flat key) so background.ts checks it via issued?.date-parts.
 export const REQUIRED_BY_TYPE: Record<string, string[]> = {
+  'article':           ['author', 'title', 'year'],
   'article-journal':   ['author', 'title', 'container-title', 'year', 'volume', 'page'],
   'webpage':           ['title', 'URL'],
   'post-weblog':       ['author', 'title', 'year', 'URL'],

@@ -231,7 +231,7 @@ interface EditDialogProps {
   onClose: () => void
 }
 
-function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
+function EditDialog({ item, onSave, onClose }: EditDialogProps) {
   const [type, setType] = useState(item.type ?? 'webpage')
   const [values, setValues] = useState<Record<string, string>>(() => ({
     author:          authorsToString(item.author),
@@ -257,6 +257,33 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
     })(),
   }))
   const [saving, setSaving] = useState(false)
+  const [fetching, setFetching] = useState<null | 'DOI' | 'URL'>(null)
+
+  // Fetch/scrape metadata from a DOI or URL and fill the form. DOI → Crossref; URL → the AI scraper (Sonnet).
+  async function fetchFields(kind: 'DOI' | 'URL') {
+    const v = (values[kind] ?? '').trim()
+    if (!v || fetching) return
+    setFetching(kind)
+    try {
+      const res = await captureFromInput(v)
+      const it = res.item
+      setValues(prev => ({
+        ...prev,
+        author: it.author ? authorsToString(it.author) : prev.author,
+        title: strField(it, 'title') || prev.title,
+        'container-title': strField(it, 'container-title') || prev['container-title'],
+        year: String(it.issued?.['date-parts']?.[0]?.[0] ?? '') || prev.year,
+        volume: strField(it, 'volume') || prev.volume,
+        issue: strField(it, 'issue') || prev.issue,
+        page: strField(it, 'page') || prev.page,
+        DOI: strField(it, 'DOI') || prev.DOI,
+        URL: strField(it, 'URL') || prev.URL,
+        publisher: strField(it, 'publisher') || prev.publisher,
+      }))
+      if (it.type) setType(it.type)
+    } catch { /* leave the form as-is on failure */ }
+    setFetching(null)
+  }
 
   // Correct author-list fields that can't be initialized cleanly from item in useState.
   useEffect(() => {
@@ -315,25 +342,20 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
         style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-stone-100">
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-stone-400">{isNew ? 'New reference' : 'Edit citation'}</div>
-            {!isNew && <div className="text-[10px] text-stone-400 mt-0.5 font-mono">{item.id}</div>}
+        {/* Type selector — the titled header bar is gone; close (×) sits next to the dropdown. */}
+        <div className="px-5 pt-4 pb-2 border-b border-stone-100">
+          <div className="flex items-end gap-2">
+            <label className="flex flex-col gap-1 flex-1">
+              <span className="text-[11px] uppercase tracking-wide text-stone-500">Source type</span>
+              <select value={type} onChange={e => setType(e.target.value)}
+                className="text-sm border border-stone-200 rounded px-2 py-2 bg-white focus:outline-none focus:border-[#5c2d8a]">
+                {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={onClose} aria-label="Close"
+              className="flex-shrink-0 w-9 h-9 rounded border border-stone-200 text-stone-400 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
           </div>
-          <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-600 text-lg leading-none">×</button>
-        </div>
-
-        {/* Type selector */}
-        <div className="px-5 pt-3 pb-2 border-b border-stone-100">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-stone-400">Source type</span>
-            <select value={type} onChange={e => setType(e.target.value)}
-              className="text-xs border border-stone-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-[#5c2d8a]">
-              {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </label>
-          <p className="text-[10px] text-stone-400 mt-1.5">
+          <p className="text-[11px] text-stone-500 mt-1.5">
             Changing the type updates which fields are required for APA, MLA, and Chicago.
           </p>
         </div>
@@ -343,23 +365,34 @@ function EditDialog({ item, isNew, onSave, onClose }: EditDialogProps) {
           {fields.map(f => {
             const val = values[f.key] ?? ''
             const missing = f.required && !val.trim()
+            const fetchable = f.key === 'DOI' || f.key === 'URL'
             return (
               <label key={f.key} className="flex flex-col gap-0.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-stone-400">{f.label}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-stone-500">{f.label}</span>
                   {f.required
                     ? <span className="text-[9px] px-1 rounded" style={{ color: missing ? '#b91c1c' : '#15803d', background: missing ? '#fef2f2' : '#f0fdf4' }}>
                         {missing ? 'required — missing' : 'required ✓'}
                       </span>
-                    : <span className="text-[9px] text-stone-300">optional</span>}
-                  {f.styles && <span className="text-[9px] text-stone-300">{f.styles}</span>}
+                    : <span className="text-[10px] text-stone-400">optional</span>}
+                  {f.styles && <span className="text-[10px] text-stone-400">{f.styles}</span>}
                 </div>
-                <input
-                  value={val}
-                  onChange={set(f.key)}
-                  placeholder={f.placeholder}
-                  className={`text-xs border rounded px-2 py-1.5 focus:outline-none ${missing ? 'border-red-200 focus:border-red-400' : 'border-stone-200 focus:border-[#5c2d8a]'}`}
-                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={val}
+                    onChange={set(f.key)}
+                    placeholder={f.placeholder}
+                    className={`flex-1 text-sm border rounded px-2 py-2 focus:outline-none ${missing ? 'border-red-200 focus:border-red-400' : 'border-stone-200 focus:border-[#5c2d8a]'}`}
+                  />
+                  {fetchable && (
+                    <button type="button" onClick={() => void fetchFields(f.key as 'DOI' | 'URL')}
+                      disabled={!val.trim() || !!fetching}
+                      title={f.key === 'DOI' ? 'Fetch the fields from this DOI (Crossref)' : 'Scrape the fields from this URL — uses Claude Sonnet'}
+                      className="flex-shrink-0 w-9 h-9 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-40 flex items-center justify-center text-base">
+                      {fetching === f.key ? '…' : (f.key === 'DOI' ? '⤓' : '✦')}
+                    </button>
+                  )}
+                </div>
               </label>
             )
           })}
@@ -885,7 +918,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       {itemSource(item) === 'crossref'
                         ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded flex-shrink-0" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
                         : <span className="text-[11px] px-1 rounded flex-shrink-0" style={{ color: src.color, borderColor: src.color, borderWidth: 1, borderStyle: 'solid' }}>{src.label}</span>}
-                      <span className="text-[11px] text-stone-400 flex-shrink-0">{typeLabel}</span>
+                      <span className="text-[13px] text-stone-600 flex-shrink-0">{typeLabel}</span>
                     </div>
                   </button>
                   <div className="flex flex-wrap items-center justify-end gap-1 flex-shrink-0 max-w-[46%]">
@@ -910,7 +943,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                           {(iw?.pdfName || iw?.pdfUrl) && (
                             <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
                               className="text-[11px] flex items-center gap-0.5 text-stone-400 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
-                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} />pub
+                              <input type="checkbox" checked={!!iw.publiclyAvailable} onChange={() => void togglePublic(item)} style={{ width: 15, height: 15 }} />pub
                             </label>
                           )}
                           <button type="button"
@@ -934,8 +967,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         </>
                       )
                     })()}
-                    <button type="button" onClick={() => void renameCitation(item)} title="Rename this citation's key"
-                      className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">ren</button>
+                    {/* "ren" button removed — rename is click-and-hold on the purple citekey. */}
                     <button type="button" onClick={() => void del(item)}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                   </div>
@@ -965,7 +997,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         )}
                         {/* "used" + "checked today" together, right-aligned and on the same line. */}
                         <span className="ml-auto flex items-center gap-2">
-                          {used && <span className="text-[12px] text-green-600">● used</span>}
+                          {used && <span className="text-[14px] text-green-600">● used</span>}
                           {iw?.lastVerified && !iw?.deadUrl && <span className="text-[12px] text-stone-400" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ checked {relTime(iw.lastVerified)}</span>}
                         </span>
                       </div>
