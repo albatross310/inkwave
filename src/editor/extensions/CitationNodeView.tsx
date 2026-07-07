@@ -126,15 +126,23 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
     // queueMicrotask: defer setState so it never runs synchronously inside Tiptap's flushSync
     // render cycle (mirrors ReferenceListNodeView's proven subscription pattern).
     const schedule = () => queueMicrotask(() => buildLabelRef.current())
+    // DEBOUNCED rebuild for doc edits: every citation node subscribes to 'update', and each rebuild
+    // walks the whole doc (occurrencesAt) to re-number — so rebuilding all of them on EVERY keystroke
+    // is O(citations × docSize) per keystroke, the mid-editing lag on a citation-heavy thesis. Occurrence
+    // numbering only needs to catch up shortly after typing settles, so debounce it. (bib/style changes
+    // stay immediate — they're rare.)
+    let updTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleFromEdit = () => { if (updTimer) clearTimeout(updTimer); updTimer = setTimeout(schedule, 350) }
     schedule() // initial build on mount / re-mount
     const unsubBib = bibProvider.subscribe(schedule)
     const unsubStyle = subscribeCitationStyle(schedule)
-    editor.on('update', schedule)           // safety net: rebuild on any doc change (also re-numbers)
+    editor.on('update', scheduleFromEdit)
     window.addEventListener('inkwave:bib-changed', schedule)
     return () => {
       unsubBib()
       unsubStyle()
-      editor.off('update', schedule)
+      editor.off('update', scheduleFromEdit)
+      if (updTimer) clearTimeout(updTimer)
       window.removeEventListener('inkwave:bib-changed', schedule)
     }
   }, [editor]) // re-subscribe if editor instance changes
