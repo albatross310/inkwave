@@ -19,7 +19,7 @@ const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
-  instanceId?: string | null; context?: string | null; noRef?: boolean
+  instanceId?: string | null; context?: string | null; noRef?: boolean; restoreScroll?: boolean
   onLink?: (quote: string, page: number) => void
 }
 
@@ -63,7 +63,7 @@ export function PdfSidePanel() {
         setLoading(false)
         if (!data) { setError('Couldn’t load this source’s PDF (no embedded file, or the URL didn’t load).'); return }
         const page = detail.page && detail.page > 0 ? detail.page : 1
-        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, onLink: detail.onLink })
+        setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, restoreScroll: detail.restoreScroll ?? false, onLink: detail.onLink })
       })()
     }
     window.addEventListener(OPEN_PDF_EVENT, onOpen)
@@ -173,6 +173,7 @@ export function PdfSidePanel() {
               instanceId={viewing.instanceId}
               context={viewing.context}
               noRef={viewing.noRef}
+              restoreScroll={viewing.restoreScroll}
               dockButton={isWide ? (
                 <button type="button" onClick={toggleOrient} title={side ? 'Dock to bottom' : 'Dock to the side'}
                   style={{ border: `1px solid ${INK}33`, background: 'transparent', color: INK, fontSize: '0.9rem', borderRadius: 5, padding: '2px 6px', cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>

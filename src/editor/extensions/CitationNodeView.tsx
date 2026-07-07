@@ -74,7 +74,7 @@ interface Seg {
 export function CitationNodeView({ node, editor, selected, getPos, updateAttributes }: NodeViewProps & { _doc?: InkwaveDocument }) {
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
-  const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number } | null>(null)
+  const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number; fromPage?: boolean } | null>(null)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
 
@@ -247,8 +247,10 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                           e.stopPropagation()
                           if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
                           // Always pop the panel — it shows "No attachment" when the source has no PDF.
+                          // NB: no `quote` here — author/year opens where you LEFT OFF, not at the cited
+                          // pinpoint (the page-number link is what jumps to the quote).
                           const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
-                          openPdf({ citekey: s.key, page: getLastPdfPage(s.key), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
+                          openPdf({ citekey: s.key, page: getLastPdfPage(s.key), restoreScroll: true, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
                         }}
                       >
                         {s.text}
@@ -264,7 +266,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                                 e.stopPropagation()
                                 heldRef.current = false
                                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                                holdTimer.current = setTimeout(() => { heldRef.current = true; setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top }) }, 450)
+                                holdTimer.current = setTimeout(() => { heldRef.current = true; setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top, fromPage: true }) }, 450)
                               }}
                               onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                               onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
@@ -335,21 +337,17 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                 placeholder={hasPdf(bibProvider.get(pageEdit.key)) ? 'cited sentence (opens the PDF there)' : 'cited sentence (opens the source there)'}
                 style={{ width: 150, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
               />
-              <button type="button"
-                title={hasPdf(bibProvider.get(pageEdit.key)) ? 'Open the PDF at this sentence' : 'Open the source in your browser at this sentence'}
-                onClick={goToPinpoint}
-                style={{ fontSize: '11px', color: '#fff', background: INK, border: 'none', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                → go
-              </button>
             </>
           )}
-          {/* Delete this citation's page reference — clears the manual pages AND removes the highlights
-              (for this occurrence) that auto-generated pages, so you don't have to hunt them with the eraser. */}
-          <button type="button" title="Delete this page reference" aria-label="Delete this page reference"
-            onClick={deletePageRef}
-            style={{ fontSize: '15px', color: '#9d174d', fontWeight: 700, background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '0 2px' }}>
-            ×
-          </button>
+          {/* Delete this page reference — only offered when the popover was opened from a PAGE NUMBER
+              (not the author-year). Clears the manual pages AND removes this occurrence's highlights. */}
+          {pageEdit.fromPage && (
+            <button type="button" title="Delete this page reference" aria-label="Delete this page reference"
+              onClick={deletePageRef}
+              style={{ fontSize: '22px', color: '#9d174d', fontWeight: 700, background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>
+              ×
+            </button>
+          )}
         </span>,
         document.body,
       )}

@@ -35,9 +35,12 @@ export function highlightsOf(item: CSLItem | undefined): PdfHighlight[] {
  *  citation shows the pages IT pinpointed, not every highlight ever made on the source. */
 export function highlightPages(item: CSLItem | undefined, instanceId?: string | null): number[] {
   const set = new Set<number>()
+  const want = instanceId ?? null
   for (const h of highlightsOf(item)) {
-    if (h.page <= 0 || h.noRef) continue                                    // noRef = never a page reference
-    if (instanceId && h.instanceId && h.instanceId !== instanceId) continue // belongs to a different inline
+    if (h.page <= 0 || h.noRef) continue          // noRef = never a page reference
+    // Per-instance: the highlight's instance must match EXACTLY (both null = legacy doc). An untagged
+    // highlight no longer leaks onto every citation, and a fresh inline starts with no auto pages.
+    if ((h.instanceId ?? null) !== want) continue
     set.add(h.page)
   }
   return [...set].sort((a, b) => a - b)

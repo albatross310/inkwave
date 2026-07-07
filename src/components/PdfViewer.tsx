@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
 import { pageOffsetOf } from '../citations/pageOffset'
-import { setLastPdfPage } from '../citations/pdfViewer'
+import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
 import type { IwCitationMeta } from '../types/document'
 
@@ -46,7 +46,7 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; x: numbe
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, dockButton, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
@@ -54,6 +54,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   instanceId?: string | null   // the citation occurrence — new highlights are tagged with it
   context?: string | null      // the sentence before the citation, shown for context
   noRef?: boolean              // opened from the bib → annotations must not become page refs
+  restoreScroll?: boolean      // open at the reader's last exact scroll position (author-year click)
   dockButton?: ReactNode       // the panel's dock-orientation toggle, rendered inside this single toolbar
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
@@ -326,6 +327,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         if (d < bestDist) { bestDist = d; best = i + 1 }
       }
       setLastPdfPage(citekey, best)
+      setLastPdfScroll(citekey, sc.scrollTop) // exact spot, so author-year reopens where you left off
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(report) }
     sc.addEventListener('scroll', onScroll, { passive: true })
@@ -537,6 +539,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     const toTop = (pg: PageRef, extra = 0) =>
       container.scrollTop + (pg.wrapper.getBoundingClientRect().top - cRect.top) + extra
     let top: number | null = null
+    // Author-year "open where you left off": restore the exact last scroll (placeholder page heights are
+    // correct from the start, so scrollTop is meaningful immediately).
+    if (restoreScroll) {
+      const saved = getLastPdfScroll(citekey)
+      if (saved != null) { container.scrollTop = Math.max(0, saved); return }
+    }
     if (initialQuote) {
       const hl = highlightsRef.current.find(h => h.text.trim() === initialQuote.trim())
         ?? highlightsRef.current.find(h => h.text.includes(initialQuote) || initialQuote.includes(h.text))
