@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
@@ -551,11 +551,116 @@ function longestChangeOpIdx(ops: DiffOp[] | null): number | null {
   return best
 }
 
+// Column stack-height for the minimap: pages stack this many high per column, then wrap into columns.
+// ≤2→1, 3–6→2, 7–9→3, 10–16→4, 17+→5 (then ≈√pages). Peter's spec.
+function stackHeight(pages: number): number {
+  if (pages <= 2) return 1
+  if (pages <= 6) return 2
+  if (pages <= 9) return 3
+  if (pages <= 16) return 4
+  return Math.ceil(Math.sqrt(pages))
+}
+
+// A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
+// (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
+// Click or drag scrolls the panes so that point sits on the midline.
+function MinimapPanel({ leftRef, ops, snapKey }: {
+  leftRef: React.RefObject<HTMLDivElement | null>
+  ops: DiffOp[] | null
+  snapKey: string
+}) {
+  const [pages, setPages] = useState(1)
+  const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean }>>([])
+  const pageHRef = useRef(1000)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  const measure = useCallback(() => {
+    const el = leftRef.current
+    if (!el || !el.scrollHeight) return
+    const paper = el.querySelector('.scroll-paper') as HTMLElement | null
+    const pw = paper?.clientWidth || el.clientWidth || 1
+    const pageH = Math.max(200, pw * Math.SQRT2) // A4 portrait ratio, matching the pagination
+    pageHRef.current = pageH
+    const n = Math.max(1, Math.round(el.scrollHeight / pageH))
+    setPages(n)
+    const er = el.getBoundingClientRect()
+    const m: Array<{ page: number; frac: number; add: boolean }> = []
+    el.querySelectorAll('[data-opidx]').forEach(o => {
+      const op = ops?.[Number((o as HTMLElement).getAttribute('data-opidx'))]
+      if (!op || op.type === 'same') return
+      const r = (o as HTMLElement).getBoundingClientRect()
+      const y = r.top - er.top + el.scrollTop
+      const page = Math.max(0, Math.min(n - 1, Math.floor(y / pageH)))
+      m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add' })
+    })
+    setMarks(m)
+  }, [ops, leftRef])
+
+  useLayoutEffect(() => { measure(); const t = setTimeout(measure, 350); return () => clearTimeout(t) }, [measure, snapKey])
+  useEffect(() => {
+    const el = leftRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => measure()); ro.observe(el)
+    return () => ro.disconnect()
+  }, [measure, leftRef])
+
+  const height = stackHeight(pages)
+  const cols = Math.ceil(pages / height)
+  const GAP = 4
+
+  // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
+  // then follows the diff pane). Column-major: down a column, then the next column.
+  const seekTo = useCallback((clientX: number, clientY: number) => {
+    const grid = gridRef.current, el = leftRef.current
+    if (!grid || !el) return
+    const gr = grid.getBoundingClientRect()
+    const colW = gr.width / cols
+    const cellH = (gr.height - (height - 1) * GAP) / height + GAP
+    const c = Math.max(0, Math.min(cols - 1, Math.floor((clientX - gr.left) / colW)))
+    const rRaw = (clientY - gr.top)
+    const r = Math.max(0, Math.min(height - 1, Math.floor(rRaw / cellH)))
+    const page = c * height + r
+    if (page >= pages) return
+    const fracInCell = Math.max(0, Math.min(1, (rRaw - r * cellH) / (cellH - GAP)))
+    const y = (page + fracInCell) * pageHRef.current
+    el.scrollTo({ top: Math.max(0, y - el.clientHeight / 2), behavior: 'auto' })
+  }, [cols, height, pages, leftRef])
+
+  const dragging = useRef(false)
+  const onDown = (e: React.PointerEvent) => { dragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); seekTo(e.clientX, e.clientY) }
+  const onMove = (e: React.PointerEvent) => { if (dragging.current) seekTo(e.clientX, e.clientY) }
+  const onUp = () => { dragging.current = false }
+
+  return (
+    <div
+      ref={gridRef}
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+      title="Click or drag to scroll"
+      style={{
+        flex: 1, minHeight: 0, background: '#9fd9c8', borderRadius: 6, padding: 6, cursor: 'pointer',
+        display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoFlow: 'column',
+        gridTemplateRows: `repeat(${height}, 1fr)`, gap: GAP, touchAction: 'none',
+      }}
+    >
+      {Array.from({ length: pages }, (_, p) => (
+        <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
+          {marks.filter(m => m.page === p).map((m, i) => (
+            <div key={i} aria-hidden="true" style={{
+              position: 'absolute', left: 1, right: 1, top: `${m.frac * 100}%`, height: 2,
+              background: m.add ? '#16a34a' : '#dc2626', borderRadius: 1,
+            }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
-  lineMode: 'center' | 'longest'
+  lineMode: 'center' | 'longest'; summary?: string | null
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(50)
@@ -861,6 +966,22 @@ function SplitDiffView({
           scrollBodyRef={rightScrollRef}
         />
       </div>
+
+      {/* ── RHS side panel (wide only): AI summaries (top, scrollable) + document minimap (bottom) ── */}
+      {!vertical && (
+        <div style={{
+          width: 190, flexShrink: 0, display: 'flex', flexDirection: 'column',
+          borderLeft: '1px solid rgba(92,45,138,0.12)', background: '#fbfaf6', padding: 8, gap: 8,
+        }}>
+          <div style={{ flex: '0 0 42%', minHeight: 0, overflow: 'auto', fontSize: '0.78rem', lineHeight: 1.5, color: '#4a4a4a' }}>
+            <div style={{ fontWeight: 600, color: INK, marginBottom: 4, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
+            {summary && summary.trim()
+              ? <ul style={{ margin: 0, paddingLeft: '1.05em' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 3 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
+              : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
+          </div>
+          <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
+        </div>
+      )}
     </div>
   )
 }
@@ -1248,6 +1369,7 @@ export function SnapshotView() {
             isPhone={isPhone}
             isNarrow={!isWide}
             lineMode={lineMode}
+            summary={currentDiff}
           />
         )}
       </div>
