@@ -697,6 +697,18 @@ function SplitDiffView({
     try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
     return next
   })
+  // Master on/off for the whole bijection (both directions of the cross-pane follow). A ref mirrors it so
+  // the scroll handlers read the live value without re-subscribing.
+  const [bijectionOn, setBijectionOn] = useState(() => {
+    try { return localStorage.getItem('inkwave:bijection') !== '0' } catch { return true }
+  })
+  const bijectionRef = useRef(bijectionOn)
+  bijectionRef.current = bijectionOn
+  const toggleBijection = () => setBijectionOn((v) => {
+    const n = !v
+    try { localStorage.setItem('inkwave:bijection', n ? '1' : '0') } catch { /* private */ }
+    return n
+  })
   // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
   // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
   const centresRef = useRef<Centre[]>([])
@@ -842,11 +854,40 @@ function SplitDiffView({
     })
   }, [])
 
+  // Gold hover-glow auto-dims if the cursor sits still for a while (so it isn't stuck lit when you're not
+  // actively pointing); any mouse movement revives it on whatever's still hovered.
+  const hoverIdleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hoverDimmedRef = useRef(false)
+  const armHoverIdle = useCallback(() => {
+    clearTimeout(hoverIdleRef.current)
+    hoverIdleRef.current = setTimeout(() => {
+      hoverDimmedRef.current = true
+      setAttr(lastHoveredRef.current, 'data-hover', false) // dim, but remember what was hovered
+    }, 1400)
+  }, [setAttr])
+
   const handleHoverOp = useCallback((opIdx: number | null) => {
     setAttr(lastHoveredRef.current, 'data-hover', false)
     lastHoveredRef.current = opIdx
-    setAttr(opIdx, 'data-hover', true)
-  }, [setAttr])
+    hoverDimmedRef.current = false
+    clearTimeout(hoverIdleRef.current)
+    if (opIdx != null) { setAttr(opIdx, 'data-hover', true); armHoverIdle() }
+  }, [setAttr, armHoverIdle])
+
+  // Revive a dimmed glow + restart the idle countdown on any cursor movement over the split view.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onMove = () => {
+      if (hoverDimmedRef.current && lastHoveredRef.current != null) {
+        hoverDimmedRef.current = false
+        setAttr(lastHoveredRef.current, 'data-hover', true)
+      }
+      if (lastHoveredRef.current != null) armHoverIdle()
+    }
+    el.addEventListener('mousemove', onMove, { passive: true })
+    return () => el.removeEventListener('mousemove', onMove)
+  }, [armHoverIdle, setAttr])
 
   // Click from right pane: toggle active op, scroll LEFT pane so midline hits the change.
   const handleClickOp = useCallback((opIdx: number) => {
@@ -993,7 +1034,7 @@ function SplitDiffView({
             }
           }
         }
-        if (driverRef.current !== 'right') { // skip driving the diff while the DIFF is the driver (reverse sync)
+        if (driverRef.current !== 'right' && bijectionRef.current) { // skip if the DIFF drives, or bijection off
           rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
           if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
           else runSpring()
@@ -1085,7 +1126,8 @@ function SplitDiffView({
       cancelAnimationFrame(editorEaseRef.current)
       const start = L.scrollTop, dist = target - start
       if (Math.abs(dist) < 1) return
-      const t0 = performance.now(), MS = 500
+      const t0 = performance.now(), MS = 220 // much faster — "zoom zoom zoom"
+      const fade = Math.min(0.34, Math.abs(dist) / 1200) // bigger jump → dip a tad more (capped, subtle)
       const step = () => {
         // HOLD the driver lock for the whole ease — otherwise it expires mid-ease and onLeftScroll drives
         // the diff back against the still-moving editor (the "snap backwards then forward" feedback).
@@ -1094,13 +1136,17 @@ function SplitDiffView({
         const p = Math.min(1, (performance.now() - t0) / MS)
         const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2 // ease-in-out cubic (S-curve)
         L.scrollTop = start + dist * e
+        // Gaussian opacity dip while moving (1 at the ends, deepest mid-flight where it's fastest) so a fast
+        // jump doesn't strafe the eyes. Compositor-cheap (opacity only).
+        L.style.opacity = String(1 - fade * Math.exp(-(((p - 0.5) / 0.32) ** 2)))
         if (p < 1) editorEaseRef.current = requestAnimationFrame(step)
-        else { editorEaseRef.current = 0; driverTimerRef.current = setTimeout(() => { driverRef.current = null }, 150) }
+        else { L.style.opacity = '1'; editorEaseRef.current = 0; driverTimerRef.current = setTimeout(() => { driverRef.current = null }, 150) }
       }
       step()
     }
     let rTick = false
     const onRightScroll = () => {
+      if (!bijectionRef.current) return // bijection off → panes scroll independently
       if (driverRef.current !== 'right') return // the diff is just following the editor → don't drive back
       if (rTick) return
       rTick = true
@@ -1116,6 +1162,7 @@ function SplitDiffView({
       L.removeEventListener('wheel', onLeftWheel); R.removeEventListener('wheel', onRightWheel)
       R.removeEventListener('scroll', onRightScroll)
       clearTimeout(driverTimerRef.current); cancelAnimationFrame(editorEaseRef.current)
+      L.style.opacity = '1' // never leave the editor dimmed if we unmount mid-ease
     }
   }, [snapshot.id])
 
@@ -1382,6 +1429,17 @@ function SplitDiffView({
               fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
             }}>
             Snap: {snapMode === 'off' ? 'Off' : snapMode === 'warp' ? 'Speed-warp' : 'Settle-snap'}
+          </button>
+          {/* Master on/off for the whole cross-pane bijection (both directions). */}
+          <button type="button" onClick={toggleBijection}
+            title="Bijection — sync the diff panel and editor as you scroll. Off = they scroll independently."
+            style={{
+              position: 'absolute', top: 46, right: 14, zIndex: 6,
+              background: bijectionOn ? INK : '#fff', color: bijectionOn ? '#fff' : INK,
+              border: `1.5px solid ${INK}`, borderRadius: 9, padding: '3px 10px', fontSize: '0.8rem',
+              fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
+            }}>
+            Sync: {bijectionOn ? 'On' : 'Off'}
           </button>
           <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
