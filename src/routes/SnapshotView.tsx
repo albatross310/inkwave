@@ -643,31 +643,16 @@ function diffCentres(el: HTMLElement): Centre[] {
   return [...byIdx.values()].map(({ top, bot, add, len }) => ({ c: (top + bot) / 2, half: (bot - top) / 2, add, len }))
 }
 
-// Speed multiplier at scroll position `pos`: a Mexican-hat per diff — slower (<1) through the body, faster
-// (>1) in the ~40px shoulders — SUPERIMPOSED. The hat integrates to ~0, so total scroll distance is
-// preserved; it just redistributes screen-time onto the changes. Clamped so it never stalls or reverses.
-const SNAP_SHOULDER = 40, SNAP_STRENGTH = 0.55
-function scrollSpeedFactor(pos: number, centres: Array<{ c: number; half: number }>): number {
-  let s = 1
-  for (const { c, half } of centres) {
-    const reach = half + SNAP_SHOULDER
-    const x = (pos - c) / reach
-    if (Math.abs(x) > 1.4) continue
-    const hat = -(1 - 3 * x * x) * Math.exp(-2 * x * x) // -1 at centre (slow), positive in the shoulders (fast)
-    s += SNAP_STRENGTH * hat
-  }
-  return Math.min(2.2, Math.max(0.2, s))
-}
-
-// Potential-well model (Peter's): each diff is a well (attractor); motion is kinetic with LINEAR
-// resistance (velocity decays exponentially → an Apple-style fling). wellForce is −dV/dx of a Gaussian
-// well: pulls toward the centre, zero at the bottom, so a fast flick escapes but a slow one is captured
-// and settles onto the diff. Tunable constants:
-const WARP_RESIST = 0.12       // base velocity lost per frame (the fling's exponential decay)
-const WARP_WELL = 0.3          // well depth / pull strength (how hard diffs grab)
-const WARP_WELL_PAD = 20       // well half-width beyond each diff's own half-height
-const WARP_IMPULSE = 0.7       // wheel delta → velocity impulse
-const WARP_SETTLE_SPEED = 9    // below this |velocity| the damping ramps toward critical (clean settle)
+// Potential-well model (Peter's): each diff is a well; the scroll is a particle with a VELOCITY-DEPENDENT
+// resistance — LOW when fast (coasts far, no wading through dense sections) rising HIGH as it slows (settles
+// onto the nearest diff). Only the NEAREST well pulls, so concentrated diffs don't accumulate a huge
+// potential. No critical-damping-per-well coupling (that stalled it mid-nowhere and over-damped clusters).
+const WARP_RESIST_MIN = 0.04  // resistance at high speed (coast)
+const WARP_RESIST_MAX = 0.34  // resistance as it stops (clean settle)
+const WARP_V0 = 8             // velocity scale for the resistance ramp (px/frame)
+const WARP_WELL = 0.3         // well pull strength (how hard the nearest diff grabs)
+const WARP_WELL_PAD = 20      // well half-width beyond each diff's own half-height
+const WARP_IMPULSE = 0.7      // wheel delta → velocity impulse
 
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
@@ -1214,28 +1199,23 @@ function SplitDiffView({
     const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
     const tick = () => {
       const centres = centresRef.current
-      // Well force F = −dV/dx AND local stiffness k = −dF/dx, in one pass. k>0 inside a well (a spring),
-      // ≤0 out in the shoulders. Damping is max(base drag, 2√k) → at LEAST critical wherever a well grabs,
-      // so the scroll settles onto a diff monotonically and NEVER oscillates; light drag elsewhere = fling.
-      let F = 0, k = 0
-      for (const { c, half } of centres) {
-        const w = half + WARP_WELL_PAD
-        const dx = x - c
-        if (Math.abs(dx) > w * 3) continue
-        const g = Math.exp(-(dx * dx) / (2 * w * w))
-        F += -(dx / w) * g * WARP_WELL
-        k += (WARP_WELL / w) * g * (1 - (dx * dx) / (w * w))
+      // NEAREST well only — pull toward the closest diff. Summing every nearby well made concentrated diffs
+      // accumulate a huge potential (the "wading"); one well can't.
+      let nk: Centre | null = null, nd = Infinity
+      for (const c of centres) { const d = Math.abs(x - c.c); if (d < nd) { nd = d; nk = c } }
+      let F = 0
+      if (nk) {
+        const w = nk.half + WARP_WELL_PAD, dx = x - nk.c
+        if (Math.abs(dx) < w * 3) F = -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL
       }
-      // Damping RISES as speed falls (Peter): a fast fling coasts through wells with just the base drag,
-      // then as it slows near a diff the damping ramps up to (at least) critical — so it settles onto the
-      // well monotonically and never rings, without ever making the fling itself feel sticky.
-      const critical = 2 * Math.sqrt(Math.max(0, k))
-      const slowness = 1 - Math.min(1, Math.abs(v) / WARP_SETTLE_SPEED) // 0 when fast → 1 when nearly stopped
-      const damping = WARP_RESIST + slowness * Math.max(0, critical - WARP_RESIST)
-      v = v + F - damping * v
-      x = Math.max(0, Math.min(maxScroll(), x + v * scrollSpeedFactor(x, centres)))
+      // Resistance RISES as the scroll slows (Peter's model): LOW when fast (coasts far, no wading, no
+      // stalling mid-nowhere), HIGH as it stops (settles cleanly onto the nearest well). No well-stiffness
+      // coupling. x += v directly — the speed-warp is gone.
+      const resistance = WARP_RESIST_MIN + (WARP_RESIST_MAX - WARP_RESIST_MIN) * Math.exp(-Math.abs(v) / WARP_V0)
+      v = v + F - resistance * v
+      x = Math.max(0, Math.min(maxScroll(), x + v))
       el.scrollTop = x
-      if (Math.abs(v) < 0.06 && Math.abs(F) < 0.06) { v = 0; raf = 0; return } // settled (well bottom / flat)
+      if (Math.abs(v) < 0.05 && Math.abs(F) < 0.05) { v = 0; raf = 0; return } // settled
       raf = requestAnimationFrame(tick)
     }
     // FENCEPOST (mousewheel): keep the scroll's NATURAL linear destination (what it'd reach with no
