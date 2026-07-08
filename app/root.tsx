@@ -18,15 +18,17 @@ const TAB_TITLES = [
 import '../src/styles/index.css'
 
 export const links: LinksFunction = () => [
-  // SVG first — Firefox prefers a scalable icon and caches it under a fresh URL it hasn't seen, which
-  // finally displaces the stale generic-page icon its favicon store was pinning.
-  { rel: 'icon', type: 'image/svg+xml', href: '/inkwave-logo.svg?v=18' },
-  { rel: 'icon', href: '/favicon.ico?v=18', sizes: 'any' },
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=17' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=17' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=17' },
-  { rel: 'shortcut icon', href: '/favicon.ico?v=17' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=17' },
+  // NO SVG favicon: our logo SVG uses userSpaceOnUse gradients that Firefox can't rasterise at tab size —
+  // and Firefox, having "preferred" the SVG, then shows its generic page icon WITHOUT falling back to the
+  // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
+  // bump is a fresh URL that finally displaces the stale icon Firefox's favicon store (places.sqlite —
+  // NOT the web cache, so a normal cache-clear never touched it) was pinning.
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=19' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=19' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=19' },
+  { rel: 'icon', href: '/favicon.ico?v=19', sizes: 'any' },
+  { rel: 'shortcut icon', href: '/favicon.ico?v=19' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=19' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
