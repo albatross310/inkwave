@@ -313,6 +313,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               ;(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady = true
               window.dispatchEvent(new Event('inkwave:pagination-ready'))
             }
+            // Every-measure announcement (not latched): Scroll.tsx re-anchors the viewport around
+            // the post-zoom re-measure using this signal.
+            window.dispatchEvent(new Event('inkwave:pagination-measured'))
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
           const forceRecompute = () => { lastInputSig = ''; schedule() }
@@ -341,6 +344,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // Re-measure when page settings (top margin, paper size, orientation) change.
           const settingsCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
+          // Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Page breaks stay
+          // pinned DURING the gesture (deliberate — see the inputSig note above), but the gaps and
+          // sheet panels were measured at the old font size: without this, they sit misaligned with
+          // the reflowed text until the next edit — the "strange behaviour near gaps" after zooming.
+          // Scroll.tsx re-anchors the viewport around this re-measure (inkwave:pagination-measured).
+          const zoomCb = () => { if (!destroyed) forceRecompute() }
+          window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {
             update: scheduleAfterEdit,
             destroy() {
@@ -351,6 +361,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (editDebounce) clearTimeout(editDebounce)
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
+              window.removeEventListener('inkwave:zoom-settled', zoomCb)
               layer?.remove()
               sheet?.classList.remove('inkwave-gapped')
               if (sheet) { sheet.style.paddingTop = ''; sheet.style.minHeight = '' }

@@ -133,12 +133,29 @@ export function Scroll({
       editorZoomRef.current = next
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => {
-        anchorEl = null // gesture over → next gesture picks a fresh anchor under the centre
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
         try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
+        // ZOOM-SETTLE RE-MEASURE: page breaks stay pinned DURING the gesture (re-measuring live made
+        // the text lurch), but the gaps + sheet panels were measured at the OLD font size and sit
+        // misaligned with the reflowed text. One clean re-measure now — and we re-anchor the viewport
+        // around it (same held-anchor logic) so the adjustment doesn't move the text you're reading.
+        const held = anchorEl && anchorEl.isConnected ? anchorEl : null
+        anchorEl = null // gesture over → next gesture picks a fresh anchor under the centre
+        const topBeforeMeasure = held ? held.getBoundingClientRect().top : 0
+        const onMeasured = () => {
+          window.removeEventListener('inkwave:pagination-measured', onMeasured)
+          requestAnimationFrame(() => {
+            if (held && held.isConnected) {
+              const topAfterMeasure = held.getBoundingClientRect().top
+              el.scrollTop = Math.max(0, el.scrollTop + (topAfterMeasure - topBeforeMeasure))
+            }
+          })
+        }
+        window.addEventListener('inkwave:pagination-measured', onMeasured)
+        window.dispatchEvent(new Event('inkwave:zoom-settled'))
+        // Non-gapped mode: no pagination plugin listening → drop the one-shot listener shortly.
+        setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, 200)
-      // Deliberately do NOT re-paginate on zoom: page breaks stay pinned to the SAME text as you zoom
-      // (Peter's intent). Re-measuring during/after zoom made the breaks — and the text — jump around.
     }
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
