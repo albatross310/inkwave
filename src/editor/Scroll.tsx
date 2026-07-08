@@ -62,9 +62,21 @@ export function Scroll({
   useEffect(() => {
     const el = surfaceRef.current
     if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
-    const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      e.preventDefault()
+    // FRAME COALESCING (the zoom-flicker fix): trackpads/pinch emit several wheel events per frame,
+    // and each zoom step forces a FULL-document reflow (the font-size is calc'd from the zoom var).
+    // 2–3 reflows per 16ms blows the frame budget on a long doc → visible stutter. So wheel events
+    // only accumulate ±1 steps; ONE rAF applies the net step count — one reflow per painted frame,
+    // and rAF runs before paint so the synchronous anchor logic below stays single-frame/flicker-free.
+    // React state + localStorage persist are deferred to a settle timer: neither changes pixels
+    // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
+    let steps = 0
+    let raf = 0
+    let settle: ReturnType<typeof setTimeout> | undefined
+    const applyFrame = () => {
+      raf = 0
+      const net = steps
+      steps = 0
+      if (!net) return
       // Anchor to the block at the VIEWPORT CENTRE (the horizontal + vertical midline), not the pointer —
       // so zoom keeps the central text put. A big container (.ProseMirror / .scroll-paper) spans the whole
       // doc, so its top reflows to near the doc top on zoom-out → a huge negative correction that clamps
@@ -76,7 +88,8 @@ export function Scroll({
       const keepLeft = el.scrollLeft
       const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)
       const ratio = el.scrollTop / denomBefore
-      const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3)))
+      const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
+      const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       if (target && target.isConnected) {
         const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
@@ -87,13 +100,27 @@ export function Scroll({
         el.scrollLeft = keepLeft
       }
       editorZoomRef.current = next
-      setEditorZoom(next) // keep React in sync; sets the same var value, so no extra paint
-      try { localStorage.setItem('inkwave:editorZoom', String(next)) } catch { /* private mode */ }
+      if (settle) clearTimeout(settle)
+      settle = setTimeout(() => {
+        setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
+        try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
+      }, 200)
       // Deliberately do NOT re-paginate on zoom: page breaks stay pinned to the SAME text as you zoom
       // (Peter's intent). Re-measuring during/after zoom made the breaks — and the text — jump around.
     }
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      if (e.deltaY === 0) return
+      steps += e.deltaY < 0 ? 1 : -1
+      if (!raf) raf = requestAnimationFrame(applyFrame)
+    }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => { el.removeEventListener('wheel', onWheel) }
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      if (raf) cancelAnimationFrame(raf)
+      if (settle) clearTimeout(settle)
+    }
   }, [phone])
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
@@ -204,8 +231,19 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => window.removeEventListener('inkwave:page-settings-changed', handler)
   }, [])
 
+  // Pre-decode both logo variants once, so a new page appearing during zoom-out paints its logo in
+  // the same frame instead of popping in a beat late (image decode is async even from cache).
   useEffect(() => {
-    if (gapped || paperSize === 'scroll') { setMarks([]); return }
+    for (const src of ['/inkwave-logo-v7.png', '/inkwave-logo-night.svg']) {
+      const img = new Image()
+      img.src = src
+      void img.decode?.().catch(() => { /* decode hint only */ })
+    }
+  }, [])
+
+  const lastSigRef = useRef('')
+  useEffect(() => {
+    if (gapped || paperSize === 'scroll') { setMarks([]); lastSigRef.current = ''; return }
     const el = sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
@@ -218,6 +256,11 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
         ? (landscape ? 8.5 / 11 : 11 / 8.5)
         : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
       const count = Math.max(1, Math.ceil(total / pageH))
+      // Bail before setState when nothing changed — the ResizeObserver fires on every font-zoom tick
+      // and re-rendering ~2 imgs + a div per page for identical marks is pure churn on long docs.
+      const sig = `${count}:${pageH.toFixed(2)}:${total}`
+      if (sig === lastSigRef.current) return
+      lastSigRef.current = sig
       const next: Array<{ y: number; n: number; rule: boolean }> = []
       for (let i = 1; i <= count; i++) {
         // Align with gapped-page-mode break: content ends at pageH - MARGIN_BOTTOM, not pageH
