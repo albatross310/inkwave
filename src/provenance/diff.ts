@@ -44,6 +44,25 @@ export function diffWords(prev: string, next: string): DiffOp[] {
   return ops
 }
 
+/**
+ * Break each CHANGE op (add/del) that spans a paragraph return into one op per line-segment, so a change
+ * crossing a return becomes two (or three, …) separate diffs — each its own bijection lock point in the
+ * snapshot view, giving tighter alignment than a single centre for a tall multi-paragraph change. Trailing
+ * newlines stay attached to their segment (so `\n\n` paragraph breaks don't spawn empty pieces), and the
+ * concatenated `text` is byte-identical to the input, so nothing downstream of display is affected.
+ * `same` ops are left whole. O(total text length).
+ */
+export function splitChangesAtReturns(ops: DiffOp[]): DiffOp[] {
+  const out: DiffOp[] = []
+  for (const op of ops) {
+    if (op.type === 'same' || !op.text.includes('\n')) { out.push(op); continue }
+    // Each match is "text + its trailing newline run" or a final newline-less chunk → no empty pieces.
+    const segs = op.text.match(/[^\n]*\n+|[^\n]+/g) ?? [op.text]
+    for (const text of segs) out.push({ type: op.type, text })
+  }
+  return out
+}
+
 /** A compact tally for a summary line ("+N words / −M words"). */
 export function diffStats(ops: DiffOp[]): { added: number; removed: number } {
   const words = (t: string) => (t.match(/\S+/g) ?? []).length

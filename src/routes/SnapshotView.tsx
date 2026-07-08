@@ -5,7 +5,7 @@ import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotV
 import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
 import { loadDocument } from '../storage/opfs'
 import { loadLibrary } from '../citations/library'
-import { diffWords, diffStats, type DiffOp } from '../provenance/diff'
+import { diffWords, diffStats, splitChangesAtReturns, type DiffOp } from '../provenance/diff'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
@@ -731,7 +731,8 @@ function SplitDiffView({
     if (!prevSnap) return null
     const before = pmToText(prevSnap.contentJson, true)
     const after  = pmToText(snapshot.contentJson, true)
-    return diffWords(before, after)
+    // Split multi-paragraph changes at their returns → more, tighter bijection lock points.
+    return splitChangesAtReturns(diffWords(before, after))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevSnap?.id, snapshot.id])
 

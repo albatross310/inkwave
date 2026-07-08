@@ -64,3 +64,27 @@ describe('diffWords', () => {
     expect(rebuiltNext).toBe(next)
   })
 })
+
+import { splitChangesAtReturns } from './diff'
+
+describe('splitChangesAtReturns', () => {
+  const join = (ops: { text: string }[]) => ops.map(o => o.text).join('')
+
+  it('splits a change spanning a paragraph return into two, byte-identically', () => {
+    const ops = [{ type: 'add' as const, text: 'para one\n\npara two' }]
+    const out = splitChangesAtReturns(ops)
+    expect(out.map(o => o.text)).toEqual(['para one\n\n', 'para two'])
+    expect(join(out)).toBe('para one\n\npara two')
+    expect(out.every(o => o.type === 'add')).toBe(true)
+  })
+
+  it('splits across two returns into three; no empty pieces', () => {
+    const out = splitChangesAtReturns([{ type: 'del' as const, text: 'a\n\nb\n\nc' }])
+    expect(out.map(o => o.text)).toEqual(['a\n\n', 'b\n\n', 'c'])
+  })
+
+  it('leaves same ops and newline-free changes whole', () => {
+    const ops = [{ type: 'same' as const, text: 'x\n\ny' }, { type: 'add' as const, text: 'z' }]
+    expect(splitChangesAtReturns(ops)).toEqual(ops)
+  })
+})
