@@ -610,11 +610,19 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
 }
 
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries,
+  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
   summariesOn?: boolean; onOptInSummaries?: () => void
+  nav?: {
+    show: boolean
+    onBack: () => void; canBack: boolean
+    onFwd: () => void; canFwd: boolean
+    onVerBack: () => void; canVerBack: boolean
+    onVerFwd: () => void; canVerFwd: boolean
+    hasVersions: boolean
+  }
 }) {
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
@@ -1078,6 +1086,25 @@ function SplitDiffView({
               </div>
             </Scroll>
           </div>
+          {/* Snapshot nav — flanking the CENTRAL editor pane: ◂ prev on its left edge, ▸ next on its right. */}
+          {nav?.show && (
+            <>
+              <NavSide
+                side="left" snapDir="back"
+                onSnap={nav.onBack} snapDisabled={!nav.canBack}
+                onVer={nav.onVerBack} verDisabled={!nav.canVerBack}
+                hasVersions={nav.hasVersions} isPhone={isPhone}
+                overridePos={{ position: 'absolute', left: 8 }}
+              />
+              <NavSide
+                side="right" snapDir="fwd"
+                onSnap={nav.onFwd} snapDisabled={!nav.canFwd}
+                onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd}
+                hasVersions={nav.hasVersions} isPhone={isPhone}
+                overridePos={{ position: 'absolute', right: 8 }}
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -1546,6 +1573,12 @@ export function SnapshotView() {
             counter={allSnapshots.length > 1 ? `s${idx + 1}/${allSnapshots.length}` : undefined}
             summariesOn={aiOn}
             onOptInSummaries={() => setConsentOpen(true)}
+            nav={{
+              show: allSnapshots.length > 1 && status === 'ready',
+              onBack: goBack, canBack, onFwd: goFwd, canFwd,
+              onVerBack: goVerBack, canVerBack, onVerFwd: goVerFwd, canVerFwd,
+              hasVersions,
+            }}
           />
         )}
       </div>
@@ -1562,26 +1595,7 @@ export function SnapshotView() {
         />
       )}
 
-      {/* ── Side navigation ── */}
-      {allSnapshots.length > 1 && status === 'ready' && (
-        <>
-          <NavSide
-            side="left" snapDir="back"
-            onSnap={goBack} snapDisabled={!canBack}
-            onVer={goVerBack} verDisabled={!canVerBack}
-            hasVersions={hasVersions} isPhone={isPhone}
-          />
-          <NavSide
-            side="right" snapDir="fwd"
-            onSnap={goFwd} snapDisabled={!canFwd}
-            onVer={goVerFwd} verDisabled={!canVerFwd}
-            hasVersions={hasVersions} isPhone={isPhone}
-            overridePos={isWide && !isPhone
-              ? { left: 'calc(var(--snap-split-pct, 50%) - 60px)' }
-              : undefined}
-          />
-        </>
-      )}
+      {/* Side navigation now renders INSIDE the central editor pane (flanking it) — see above. */}
 
       {/* Fixed purple Verify button — bottom right, opens the verifier for this document */}
       <button
