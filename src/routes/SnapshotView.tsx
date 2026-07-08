@@ -655,9 +655,9 @@ function scrollSpeedFactor(pos: number, centres: Array<{ c: number; half: number
 // well: pulls toward the centre, zero at the bottom, so a fast flick escapes but a slow one is captured
 // and settles onto the diff. Tunable constants:
 const WARP_RESIST = 0.12     // velocity lost per frame (the fling's exponential decay)
-const WARP_WELL = 0.9        // well depth / pull strength (how hard diffs grab)
-const WARP_WELL_PAD = 45     // well half-width beyond each diff's own half-height
-const WARP_IMPULSE = 0.5     // wheel delta → velocity impulse
+const WARP_WELL = 0.3        // well depth / pull strength (how hard diffs grab)
+const WARP_WELL_PAD = 20     // well half-width beyond each diff's own half-height
+const WARP_IMPULSE = 0.7     // wheel delta → velocity impulse
 function wellForce(pos: number, centres: Array<{ c: number; half: number }>): number {
   let F = 0
   for (const { c, half } of centres) {
