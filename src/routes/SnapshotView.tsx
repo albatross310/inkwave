@@ -716,7 +716,6 @@ function SplitDiffView({
   // Which pane the user is actively scrolling ('left' = editor, 'right' = diff) — set by wheel over each,
   // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
   const driverRef = useRef<'left' | 'right'>('left') // whichever pane the cursor is over (default editor)
-  const editorEaseRef = useRef(0) // rAF id for the reverse S-curve ease of the editor
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -833,8 +832,8 @@ function SplitDiffView({
       // (!important) beats the inline base-tint's background shorthand, so the gradient layers over it.
       // The green/red fill + outline is the "normal" highlight; PLUS a golden outer ring whose strength
       // scales with --iw-align (how lit the diff already is) so the hover stays visible on the middle diffs.
-      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(200,30,30,0.30), 0 0 0 3px rgba(214,175,55, var(--iw-align, 0)) !important; outline: 2px solid rgba(185,28,28,0.95) !important; border-radius: 2px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(22,163,74,0.32), 0 0 0 3px rgba(214,175,55, var(--iw-align, 0)) !important; outline: 2px solid rgba(21,128,61,0.95) !important; border-radius: 2px !important; }`,
+      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(200,30,30,0.30), 0 0 0 2px rgba(185,28,28,0.95) !important; outline: 2.5px solid rgba(214,175,55, var(--iw-align, 0)) !important; outline-offset: 2px !important; border-radius: 2px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(22,163,74,0.32), 0 0 0 2px rgba(21,128,61,0.95) !important; outline: 2.5px solid rgba(214,175,55, var(--iw-align, 0)) !important; outline-offset: 2px !important; border-radius: 2px !important; }`,
       // active (clicked): darker + outline, both panes
       `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
       `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
@@ -1116,14 +1115,14 @@ function SplitDiffView({
     return () => { cancelAnimationFrame(id); window.removeEventListener('resize', recompute) }
   }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx])
 
-  // REVERSE SYNC: scrolling the DIFF panel trails the EDITOR via the inverse bijection, eased with a fast
-  // S-curve. The DRIVER is simply whichever pane the CURSOR is over (set on mouseenter) — so switching
-  // panes flips the direction instantly, no timing races. Whichever pane is the follower is moved
-  // programmatically; its own scroll handler sees the driver is the OTHER pane and doesn't drive back.
+  // REVERSE SYNC (bijection): scrolling the DIFF panel maps the EDITOR to the inverse-bijection position
+  // INSTANTLY — a true 1:1 bijection, no trailing. The DRIVER is simply whichever pane the CURSOR is over
+  // (mouseenter), so switching panes flips the direction immediately. The follower moves programmatically;
+  // its own scroll handler sees the driver is the OTHER pane and doesn't drive back.
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     if (!L || !R) return
-    const onLeftEnter = () => { driverRef.current = 'left'; cancelAnimationFrame(editorEaseRef.current); L.style.opacity = '1'; L.style.filter = 'none' }
+    const onLeftEnter = () => { driverRef.current = 'left' }
     const onRightEnter = () => { driverRef.current = 'right' }
     const inverse = (ry: number): number => { // diff-pane position → editor position
       const ks = knotsRef.current
@@ -1136,36 +1135,15 @@ function SplitDiffView({
       const a = ks[i], b = ks[i + 1]
       return a.ly + ((ry - a.ry) / Math.max(1, b.ry - a.ry)) * (b.ly - a.ly)
     }
-    const easeEditorTo = (target: number) => {
-      cancelAnimationFrame(editorEaseRef.current)
-      const start = L.scrollTop, dist = target - start
-      if (Math.abs(dist) < 1) return
-      const t0 = performance.now(), MS = 220 // much faster — "zoom zoom zoom"
-      const fade = Math.min(0.34, Math.abs(dist) / 1200) // bigger jump → dip a tad more (capped, subtle)
-      const step = () => {
-        if (driverRef.current !== 'right') { L.style.opacity = '1'; L.style.filter = 'none'; editorEaseRef.current = 0; return } // cursor left → user owns it
-        const p = Math.min(1, (performance.now() - t0) / MS)
-        const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2 // ease-in-out cubic (S-curve)
-        L.scrollTop = start + dist * e
-        // Gaussian dip while moving (1 at the ends, deepest mid-flight where it's fastest): fade AND blur so
-        // a fast jump doesn't strafe the eyes — both ease back to crisp at the landing.
-        const g = Math.exp(-(((p - 0.5) / 0.32) ** 2))
-        L.style.opacity = String(1 - fade * g)
-        L.style.filter = `blur(${(fade * g * 10).toFixed(2)}px)`
-        if (p < 1) editorEaseRef.current = requestAnimationFrame(step)
-        else { L.style.opacity = '1'; L.style.filter = 'none'; editorEaseRef.current = 0 }
-      }
-      step()
-    }
     let rTick = false
     const onRightScroll = () => {
-      if (bijectionRef.current === 'off') return       // no cross-pane sync
-      if (driverRef.current !== 'right') return         // cursor isn't over the diff → it's just following
+      if (bijectionRef.current === 'off') return   // no cross-pane sync
+      if (driverRef.current !== 'right') return     // cursor isn't over the diff → the diff is just following
       if (rTick) return
       rTick = true
       requestAnimationFrame(() => {
         rTick = false
-        easeEditorTo(Math.max(0, inverse(R.scrollTop + R.clientHeight / 2) - L.clientHeight / 2))
+        L.scrollTop = Math.max(0, inverse(R.scrollTop + R.clientHeight / 2) - L.clientHeight / 2)
       })
     }
     L.addEventListener('mouseenter', onLeftEnter)
@@ -1174,10 +1152,32 @@ function SplitDiffView({
     return () => {
       L.removeEventListener('mouseenter', onLeftEnter); R.removeEventListener('mouseenter', onRightEnter)
       R.removeEventListener('scroll', onRightScroll)
-      cancelAnimationFrame(editorEaseRef.current)
-      L.style.opacity = '1'; L.style.filter = 'none' // never leave the editor dimmed/blurred on unmount
     }
   }, [snapshot.id])
+
+  // Right-click-DRAG the diff pane to scroll it (for mouse users with no wheel/trackpad) — the editor flies
+  // to the matching change via the bijection. Context menu is suppressed on the pane so the drag owns it.
+  useEffect(() => {
+    const R = rightScrollRef.current
+    if (!R) return
+    let dragging = false, lastY = 0
+    const onDown = (e: MouseEvent) => { if (e.button !== 2) return; dragging = true; lastY = e.clientY; driverRef.current = 'right'; e.preventDefault() }
+    const onMove = (e: MouseEvent) => { if (!dragging) return; R.scrollTop -= (e.clientY - lastY); lastY = e.clientY }
+    const onUp = () => { dragging = false }
+    const onCtx = (e: Event) => e.preventDefault()
+    R.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    R.addEventListener('contextmenu', onCtx)
+    return () => { R.removeEventListener('mousedown', onDown); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); R.removeEventListener('contextmenu', onCtx) }
+  }, [snapshot.id])
+
+  // One-time right-drag hint toast, sequenced just AFTER the Shift+scroll hint (which runs ~6s).
+  useEffect(() => {
+    try { if (localStorage.getItem('inkwave:snapDragHintSeen') === '1') return; localStorage.setItem('inkwave:snapDragHintSeen', '1') } catch { return }
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: 'On a mouse? Right-click-drag the diff panel to fly the editor to any change.' } })), 6800)
+    return () => clearTimeout(t)
+  }, [])
 
   // Editor snap mode A — WHEEL-TAKEOVER PHYSICS: we take the wheel and integrate a particle (the scroll
   // position) moving with LINEAR RESISTANCE through a landscape of POTENTIAL WELLS at the diffs. A wheel
