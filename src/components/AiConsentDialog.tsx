@@ -9,8 +9,8 @@ const INK = '#5c2d8a'
 
 const COPY: Record<AiFeature, { title: string; body: string }> = {
   summaries: {
-    title: 'Turn on snapshot summaries?',
-    body: 'Summaries send snapshot text to Anthropic (Claude) through our servers to describe what '
+    title: 'Turn on plain-language recaps?',
+    body: 'These send snapshot text to Anthropic (Claude) through our servers to describe what '
       + 'changed between versions. Nothing is logged or retained on our servers, and Anthropic does '
       + 'not train on it.',
   },
@@ -36,7 +36,7 @@ export function AiConsentDialog({ feature, onYes, onNo }: {
         role="alertdialog" aria-modal="true" aria-label={title}
         className="iw-nightable fixed z-[131] bg-white shadow-lg font-serif text-stone-700"
         style={{
-          top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          top: '50%', left: 'min(66%, calc(100vw - 14rem))', transform: 'translate(-50%, -50%)',
           width: 'min(26rem, calc(100vw - 2rem))', borderRadius: 12, padding: '1.3rem 1.5rem',
           border: `1px solid var(--iw-nightable-border, ${INK}55)`,
         }}
@@ -55,12 +55,13 @@ export function AiConsentDialog({ feature, onYes, onNo }: {
             style={{ color: `var(--iw-pill-fg, #78716c)`, border: `1px solid var(--iw-nightable-border, ${INK}44)`, background: 'transparent', cursor: 'pointer' }}>
             Not now
           </button>
+          {/* Jazzed privacy pill, pushed to the right. */}
+          <a href="/privacy" target="_blank" rel="noopener"
+            className="ml-auto px-3.5 py-1.5 rounded-full text-sm font-medium shadow-sm transition-transform hover:scale-105"
+            style={{ color: '#fff', background: `linear-gradient(135deg, #7a4fb0, ${INK})`, textDecoration: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            Privacy ↗
+          </a>
         </div>
-        <a href="/privacy" target="_blank" rel="noopener"
-          className="inline-block mt-3 text-xs underline"
-          style={{ color: `var(--iw-light, #9b5ccc)` }}>
-          See privacy policy
-        </a>
       </div>
     </>,
     document.body,

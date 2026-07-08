@@ -14,7 +14,6 @@ import { DocView } from '../components/DocView'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
-const SUMMARY_INFO_TEXT = 'Summaries send each snapshot’s text in transit through our servers on to Anthropic (Claude), which writes a short plain-language summary. Nothing is sent until you opt in.'
 
 const INK = '#5c2d8a'
 const NAV_BG = 'rgba(140, 90, 200, 0.35)'
@@ -1506,36 +1505,23 @@ function SplitDiffView({
         }}>
           {summariesOn && <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>}
           {!summariesOn ? (
-            // AI summaries are an explicit opt-in (privacy: snapshot text → Anthropic via our server).
-            // Buttons centred both axes in the (header-less) panel.
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, height: '100%' }}>
-              {/* Opt in + info button on one row (info matches the button's height). */}
-              <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={onOptInSummaries}
-                  className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
-                  style={{ fontSize: '0.85rem', fontWeight: 500, background: INK, color: '#fff', border: `1px solid ${INK}`, cursor: 'pointer' }}
-                >
-                  Opt in
-                </button>
-                <button
-                  type="button"
-                  aria-label="About snapshot summaries"
-                  onClick={() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: SUMMARY_INFO_TEXT } }))}
-                  className="rounded-full font-serif shadow-sm transition-colors hover:brightness-95 flex items-center justify-center"
-                  style={{ aspectRatio: '1', fontSize: '0.9rem', fontWeight: 700, fontStyle: 'italic', background: '#fff', color: INK, border: `1px solid ${INK}`, cursor: 'pointer' }}
-                >
-                  i
-                </button>
-              </div>
-              <a href="/privacy" target="_blank" rel="noopener"
-                title="How Inkwave handles your data"
-                className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-95"
-                style={{ fontSize: '0.85rem', fontWeight: 500, background: '#fff', color: INK, border: `1px solid ${INK}`, textDecoration: 'none', cursor: 'pointer' }}
+            // Opt-in is now a single bold circular "i" (opens the consent dialog — what "Opt in" used to do).
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
+              <div style={{ fontSize: '0.92rem', color: INK, fontWeight: 600, textAlign: 'center', maxWidth: '14ch' }}>Plain-language recaps</div>
+              <button
+                type="button"
+                aria-label="About snapshot recaps — turn them on"
+                onClick={onOptInSummaries}
+                className="transition-transform hover:scale-105"
+                style={{
+                  width: 46, height: 46, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: '#fff', color: INK, border: `3px solid ${INK}`, cursor: 'pointer',
+                  fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontWeight: 700, fontSize: '1.7rem', lineHeight: 1,
+                  boxShadow: '0 1px 6px rgba(80,50,10,0.14)', paddingBottom: 2,
+                }}
               >
-                See privacy policy
-              </a>
+                i
+              </button>
             </div>
           ) : summary && summary.trim()
             ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
