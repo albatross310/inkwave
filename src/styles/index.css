@@ -250,18 +250,43 @@
      parchment fills the screen edge-to-edge (driven by device type, not viewport width, so zoom
      doesn't change it). */
   .inkwave-editor-surface.is-phone {
-    background-color: #f7f2e8;
+    background-color: #f1eadb; /* a shade under the sheet #f7f2e8, so gapped-mode gaps still read as bands */
     padding: 0 0 8rem;
+    /* Declarative half of the pinch contract: one-finger pans stay native (smooth body scroll) but
+       the browser's own pinch-zoom / double-tap-zoom are off over the editor — Scroll.tsx's
+       two-finger handler drives the in-app font zoom instead (and preventDefaults as the
+       imperative half, for Safaris that ignore touch-action for page zoom). */
+    touch-action: pan-x pan-y;
   }
   .inkwave-editor-surface.is-phone::before { display: none; }
 
+  /* PHONE PAINT PATH (2026-07-08). Body-scroll on iOS means a fast flick outruns rasterisation and
+     Safari fills the unpainted tiles with the ROOT background (the classic checkerboard) — which was
+     the aqua #9fd9c8, so pages "flashed blue". Parchment-tone html/body so unpainted areas read as
+     paper. Device media query (same signal as isTouchDevice) because html/body have no .is-phone
+     ancestor; the unlayered night-mode rules below still win there. */
+  @media (pointer: coarse) and (hover: none) {
+    html, body { background-color: #f1eadb; }
+  }
+
+  /* Gapped sheets on phone: each page panel's 4-side 32px-blur drop shadow (+ radius) is expensive
+     to raster on a mobile GPU — a big slice of the checkerboard/scroll-lag budget. A hairline ring
+     (zero blur = cheap) keeps the discrete-sheet look against the darker phone surface, and
+     contain:paint scopes each sheet's invalidation to its own box. (2026-07-08) */
+  .inkwave-editor-surface.is-phone .inkwave-sheet {
+    box-shadow: 0 0 0 1px rgba(80, 50, 10, 0.14);
+    border-radius: 4px;
+    contain: paint;
+  }
+
   /* Phone text: boost the apparent size so the writing is comfortable to read at arm's length.
-     PHONE FONT BOOST = 1.65 — the single constant to tune. ×1.65 over the 1.125rem desktop base
-     (was ×2; 2026-07-08 the +100% boost was toned down to +65% — "the font starts off way too big").
+     PHONE FONT BOOST = 1.25 — the single constant to tune. ×1.25 over the 1.125rem desktop base
+     (was ×2, then ×1.65; 2026-07-08 trimmed again to +25% — "way smaller" — now that pinch-to-zoom
+     lets each writer set their own size on top via --iw-editor-zoom).
      The stored document font sizes are unchanged — this is display-only CSS applied to the
      rendering layer. Custom font-size marks stay proportional (they're em-relative to this base). */
   .inkwave-editor-surface.is-phone .ProseMirror {
-    font-size: calc(1.125rem * 1.65 * var(--iw-editor-zoom, 1));
+    font-size: calc(1.125rem * 1.25 * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.55);
   }
 
@@ -643,6 +668,8 @@
 :root[data-theme="night"] .scroll-paper,
 :root[data-theme="night"] .inkwave-sheet { background-color: #2c2e35; }
 :root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
+/* Phone keeps the cheap zero-blur ring in night too (the blurred shadow is the mobile raster cost). */
+:root[data-theme="night"] .is-phone .inkwave-sheet { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
 /* In GAPPED mode the scroll-paper must stay transparent (the real sheets are the .inkwave-sheet panels,
    the gaps show the black surface + grey waves) — override the charcoal fill above, which otherwise wins
    on specificity and paints the whole area, killing the discrete-page look. */
