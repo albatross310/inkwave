@@ -11,6 +11,7 @@ import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../ty
 import { contentHash, bundleHash, bibliographyHash } from './hash'
 import { stampBundle, upgradeProof } from './ots'
 import { gunzipJsonOffThread } from '../workers/parseClient'
+import { writeOpfsFile } from '../storage/opfsWrite'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -76,16 +77,9 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
 }
 
 async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promise<void> {
-  const root = await getRoot()
-  let dir: FileSystemDirectoryHandle = root
-  for (const part of `documents/${documentId}`.split('/')) {
-    dir = await dir.getDirectoryHandle(part, { create: true })
-  }
-  const handle   = await dir.getFileHandle('snapshots.json', { create: true })
-  const writable = await handle.createWritable()
-  await writable.write(await gzipEncode(JSON.stringify(snaps)))
-  await writable.close()
-  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful close
+  // writeOpfsFile works on iOS too (no createWritable there — worker sync-access fallback).
+  await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipEncode(JSON.stringify(snaps)))
+  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful write
 }
 
 /** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back

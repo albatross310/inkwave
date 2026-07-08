@@ -35,7 +35,7 @@ function getWorker(): Worker | null {
   }
 }
 
-function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrace'; text: string }, transfer: Transferable[]): Promise<unknown> | null {
+function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrace'; text: string } | { kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }, transfer: Transferable[]): Promise<unknown> | null {
   const w = getWorker()
   if (!w) return null
   const id = ++seq
@@ -65,4 +65,13 @@ export async function parseTraceOffThread(text: string): Promise<ExportBundle> {
   const p = call({ kind: 'parseTrace', text }, [])
   if (p) { try { return (await p) as ExportBundle } catch { /* fall through to inline */ } }
   return parseTraceFile(text)
+}
+
+/** OPFS write via the worker's sync access handle — the ONLY write path iOS Safari allows.
+ *  No inline fallback: callers (storage/opfsWrite.ts) only come here when createWritable is absent. */
+export async function opfsWriteOffThread(path: string[], bytes: Uint8Array): Promise<void> {
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  const p = call({ kind: 'opfsWrite', path, bytes: buf }, [buf])
+  if (!p) throw new Error('OPFS write unavailable (no worker and no createWritable)')
+  await p
 }

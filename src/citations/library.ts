@@ -7,6 +7,8 @@
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { bibProvider } from './bibProvider'
 
+import { writeOpfsFile } from '../storage/opfsWrite'
+
 const DIR = 'library'
 const FILE = 'citations.json'
 
@@ -32,12 +34,10 @@ async function readFile(): Promise<CSLItem[]> {
 }
 
 async function writeFile(items: CSLItem[]): Promise<void> {
-  const dir = await getDir(true)
+  const dir = await getDir(true) // ensures the dir exists / bails when OPFS is absent
   if (!dir) return
-  const handle = await dir.getFileHandle(FILE, { create: true })
-  const w = await handle.createWritable()
-  await w.write(JSON.stringify(items))
-  await w.close()
+  // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
+  await writeOpfsFile([DIR, FILE], JSON.stringify(items))
 }
 
 /** Read the persisted library and load it into bibProvider. Call once on app/editor load. */

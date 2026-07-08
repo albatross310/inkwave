@@ -1,4 +1,5 @@
 import type { InkwaveDocument, TiptapJSON } from '../types/document'
+import { writeOpfsFile } from './opfsWrite'
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
@@ -35,12 +36,10 @@ async function writeJson(
   const parts = filePath.split('/')
   const fileName = parts.pop()!
   const dirPath = parts.join('/')
-  const dir = dirPath ? await ensureDir(root, dirPath) : root
+  if (dirPath) await ensureDir(root, dirPath) // keep dir creation semantics for callers
   return async (data: unknown) => {
-    const fileHandle = await dir.getFileHandle(fileName, { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(data))
-    await writable.close()
+    // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
+    await writeOpfsFile([...(dirPath ? dirPath.split('/') : []), fileName], JSON.stringify(data))
   }
 }
 

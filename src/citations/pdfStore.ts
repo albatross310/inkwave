@@ -2,6 +2,7 @@
 // The library JSON only records the original filename (_iw.pdfName); the bytes live here so they
 // never bloat the citation JSON or any provenance hash. Chromium/Firefox have OPFS; Safari too.
 
+import { writeOpfsFile } from '../storage/opfsWrite'
 const DIR = 'library'
 const SUB = 'pdfs'
 
@@ -26,12 +27,10 @@ export const pdfVersion = (citekey: string): number => _pdfVersion.get(citekey) 
 const bumpPdfVersion = (citekey: string) => _pdfVersion.set(citekey, pdfVersion(citekey) + 1)
 
 export async function savePdf(citekey: string, file: Blob): Promise<void> {
-  const dir = await pdfDir(true)
+  const dir = await pdfDir(true) // ensures the dirs exist (and errors politely when OPFS is absent)
   if (!dir) throw new Error('Storage unavailable — cannot embed the PDF on this device.')
-  const handle = await dir.getFileHandle(fileName(citekey), { create: true })
-  const w = await handle.createWritable()
-  await w.write(file)
-  await w.close()
+  // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
+  await writeOpfsFile([DIR, SUB, fileName(citekey)], new Uint8Array(await file.arrayBuffer()))
   bumpPdfVersion(citekey)
 }
 
