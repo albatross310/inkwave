@@ -11,6 +11,7 @@ import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, ty
 import { pageOffsetOf } from '../citations/pageOffset'
 import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
+import { isTouchDevice } from '../editor/Scroll'
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -60,6 +61,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
   const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
+  // Touch/iOS: inputs need ≥16px font (or Safari auto-zooms the page on focus) and the drag tools need
+  // pointer events + touch-action:none. Device-based, so it can't change mid-session.
+  const isTouch = isTouchDevice()
   // "Don't add pages to inline" — bib entry forces it; a toolbar checkbox lets the reader force it too.
   const [dontAddPages, setDontAddPages] = useState(false)
   const noRefRef = useRef(false); noRefRef.current = !!noRef || dontAddPages
@@ -131,18 +135,35 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           note.dataset.hlId = hl.id
           note.spellcheck = false
           note.tabIndex = 0 // focusable in SELECT mode too, so Delete/Backspace can remove it
-          // Two modes: SELECT (single-click → outline; Delete/Backspace removes the whole box) and EDIT
-          // (double-click / Enter → type into it). Width + initial height come from the drag; it still
+          // Two modes: SELECT (single click/tap → outline + a ✕ delete handle; Delete/Backspace also
+          // removes) and EDIT (double-click / Enter — or a SECOND TAP while selected, since touch has
+          // neither dblclick nor a Delete key). Width + initial height come from the drag; it still
           // grows downward as you type. Empty notes get a dashed "type here" border.
           const emptyNote = !(hl.note || hl.text)
           const noteBorder = emptyNote ? `1.5px dashed ${INK}` : '1px solid rgba(0,0,0,0.2)'
           const minH = (r0.h || 0) > 0.001 ? `min-height:${Math.max(20, (r0.h || 0) * ph)}px;` : ''
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${Math.max(60, (r0.w || 0.3) * pw)}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
+          const noteW = Math.max(60, (r0.w || 0.3) * pw)
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
           note.textContent = hl.note || hl.text
-          note.title = 'Click to select (Delete removes) · double-click to edit'
+          note.title = 'Click/tap to select (✕ or Delete removes) · double-click or tap again to edit'
           const removeNote = () => {
             highlightsRef.current = highlightsRef.current.filter(h => h.id !== hl.id)
             redrawOverlays(); void saveHighlights(citekey, highlightsRef.current)
+          }
+          // ✕ delete handle — a SIBLING, not a child (children of a contentEditable become editable and
+          // would pollute textContent). Same look as the annotation × handles (the sheet is white in every
+          // theme, so the hard #fff/#7f1d1d pair is correct here). Visible only while the note is
+          // selected/edited; pointerdown (not click) so it wins the race against the note's blur on touch.
+          const delBtn = document.createElement('button')
+          delBtn.textContent = '×'
+          delBtn.title = 'Remove note'
+          delBtn.style.cssText = `position:absolute;left:${r0.x * pw + noteW - 8}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:12px;pointer-events:auto;z-index:3;display:none;`
+          delBtn.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); removeNote() })
+          let selected = false
+          const setSelected = (on: boolean) => {
+            selected = on
+            delBtn.style.display = on ? 'block' : 'none'
+            note.style.outline = on ? `2px solid ${INK}` : 'none'
           }
           const enterEdit = () => {
             note.contentEditable = 'true'; note.style.cursor = 'text'; note.style.outline = `2px solid ${INK}`
@@ -150,7 +171,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const rng = document.createRange(); rng.selectNodeContents(note); rng.collapse(false)
             const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(rng)
           }
-          note.addEventListener('click', () => { if (note.contentEditable !== 'true') { note.style.outline = `2px solid ${INK}`; note.focus() } })
+          note.addEventListener('click', () => {
+            if (note.contentEditable === 'true') return
+            if (selected) { enterEdit(); return } // second tap while selected = edit (touch dblclick substitute)
+            setSelected(true); note.focus()
+          })
           note.addEventListener('dblclick', enterEdit)
           note.addEventListener('input', () => { const v = note.textContent ?? ''; hl.note = v; hl.text = v })
           note.addEventListener('keydown', (ev) => {
@@ -163,7 +188,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             }
           })
           note.addEventListener('blur', () => {
-            note.style.outline = 'none'
+            setSelected(false) // clears outline + hides the ✕ (delete taps land on pointerdown, before this)
             if (note.contentEditable !== 'true') return
             // Persist the box even if empty (it stays as a coloured, dashed placeholder) — clicking away
             // must NOT delete it; removal is explicit (select + Delete). This is why a freshly dragged
@@ -175,6 +200,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           })
           if (editNoteIdRef.current === hl.id) { editNoteIdRef.current = null; requestAnimationFrame(enterEdit) }
           pg.hlLayer.appendChild(note)
+          pg.hlLayer.appendChild(delBtn)
           continue
         }
         if (kind === 'highlight') {
@@ -706,7 +732,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
 
   function onMouseUp() {
     const info = selectionInfo()
-    // Text-tool placement + eraser are click-driven (onPdfMouseDown) — nothing to do on mouse-up.
+    // Text-tool placement + eraser are click-driven (onPdfPointerDown) — nothing to do on mouse-up.
     if (toolRef.current === 'text' || toolRef.current === 'erase') { window.getSelection()?.removeAllRanges(); setPending(null); return }
     if (!info) { setPending(null); return }
     // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
@@ -718,6 +744,40 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       setPending(info)
     }
   }
+
+  // iOS text selection (long-press + drag handles) never fires mouseup on the container, so the
+  // pending-annotation toolbar would never appear on touch. Mirror onMouseUp off document.selectionchange
+  // instead, debounced 300ms so it settles after the handles stop moving. Touch-only: on desktop the
+  // mouse path already covers it, and a >300ms pause MID-drag would misfire an armed tool.
+  // Loop guards: a programmatic removeAllRanges refires selectionchange, so (a) skip one event after our
+  // own clear and (b) never act on a collapsed/outside selection — in particular we never CLEAR pending
+  // here, because tapping a pending-toolbar button collapses the selection an instant before its click.
+  const skipSelChangeRef = useRef(false)
+  useEffect(() => {
+    if (!isTouchDevice()) return
+    let t: ReturnType<typeof setTimeout> | undefined
+    const onSelChange = () => {
+      clearTimeout(t)
+      t = setTimeout(() => {
+        if (skipSelChangeRef.current) { skipSelChangeRef.current = false; return }
+        const tool = toolRef.current
+        if (tool === 'text' || tool === 'erase') return // tap/drag-driven tools; not selection-driven
+        const info = selectionInfo()
+        if (!info) return
+        if (tool) { // armed markup tool → apply immediately, exactly like onMouseUp
+          skipSelChangeRef.current = true
+          void createHighlight(info, tool, colorRef.current, false)
+          window.getSelection()?.removeAllRanges()
+          setPending(null)
+        } else {
+          setPending(info)
+        }
+      }, 300)
+    }
+    document.addEventListener('selectionchange', onSelChange)
+    return () => { clearTimeout(t); document.removeEventListener('selectionchange', onSelChange) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Text tool: click-DRAG on a page to set the note box's WIDTH and HEIGHT (both axes); it still grows
   // downward if the text overflows. A plain click (tiny drag) falls back to a default size. Dotted preview.
@@ -767,8 +827,26 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
   }
 
-  function onPdfMouseDown(e: React.MouseEvent) {
-    if (toolRef.current === 'erase') { e.preventDefault(); eraseAt(e.clientX, e.clientY); return }
+  // ONE pointer path for mouse AND touch (pointerdown + capture): a bare tap with the note tool still
+  // creates the default-size box (tiny-drag fallback below), and the eraser works with taps and drags.
+  // The container gets touch-action:none only while one of these drag tools is armed, so the gesture
+  // never turns into a native pan; preventDefault also suppresses the compatibility mouse events.
+  function onPdfPointerDown(e: React.PointerEvent) {
+    if (toolRef.current === 'erase') {
+      e.preventDefault()
+      eraseAt(e.clientX, e.clientY)
+      e.currentTarget.setPointerCapture(e.pointerId)
+      const move = (ev: PointerEvent) => eraseAt(ev.clientX, ev.clientY) // drag-erase: keep hitting along the swipe
+      const done = () => {
+        document.removeEventListener('pointermove', move)
+        document.removeEventListener('pointerup', done)
+        document.removeEventListener('pointercancel', done)
+      }
+      document.addEventListener('pointermove', move)
+      document.addEventListener('pointerup', done)
+      document.addEventListener('pointercancel', done)
+      return
+    }
     if (toolRef.current !== 'text') return
     if (!pagesRef.current.length) return
     // Pick the page under the cursor; if the cursor is in the MARGIN (outside every page), anchor to the
@@ -787,16 +865,23 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
     if (idx < 0) return
     e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
     const pr = pagesRef.current[idx].wrapper.getBoundingClientRect()
     // A clearly DOTTED preview rectangle tracks the drag so the gesture is discoverable.
     const preview = document.createElement('div')
     preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:0;width:0;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
     document.body.appendChild(preview)
     textDragRef.current = { pageIdx: idx, startX: e.clientX, startY: e.clientY, preview, pr }
-    document.addEventListener('mousemove', onTextDragMove)
-    document.addEventListener('mouseup', onTextDragUp)
+    document.addEventListener('pointermove', onTextDragMove)
+    document.addEventListener('pointerup', onTextDragUp)
+    document.addEventListener('pointercancel', onTextDragCancel)
   }
-  function onTextDragMove(ev: MouseEvent) {
+  function detachTextDrag() {
+    document.removeEventListener('pointermove', onTextDragMove)
+    document.removeEventListener('pointerup', onTextDragUp)
+    document.removeEventListener('pointercancel', onTextDragCancel)
+  }
+  function onTextDragMove(ev: PointerEvent) {
     const d = textDragRef.current
     if (!d) return
     // 2-D rubber band — both horizontal and vertical.
@@ -805,10 +890,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     d.preview.style.width = `${Math.abs(ev.clientX - d.startX)}px`
     d.preview.style.height = `${Math.abs(ev.clientY - d.startY)}px`
   }
-  function onTextDragUp(ev: MouseEvent) {
+  function onTextDragCancel() { // gesture aborted by the system — drop the preview, create nothing
+    detachTextDrag()
+    textDragRef.current?.preview.remove()
+    textDragRef.current = null
+  }
+  function onTextDragUp(ev: PointerEvent) {
     const d = textDragRef.current
-    document.removeEventListener('mousemove', onTextDragMove)
-    document.removeEventListener('mouseup', onTextDragUp)
+    detachTextDrag()
     if (!d) return
     d.preview.remove()
     textDragRef.current = null
@@ -883,7 +972,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {/* Text-note font size */}
         <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
           onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.82rem', padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
+          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.82rem' /* <16px makes iOS auto-zoom on focus */, padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
         </select>
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
@@ -952,7 +1041,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false); clearFindHits() }
             }}
             placeholder="Find in PDF…"
-            style={{ width: 240, fontSize: '15px', border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
+            style={{ width: 240, fontSize: isTouch ? '16px' : '15px' /* <16px makes iOS auto-zoom on focus */, border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
           />
           <span style={{ fontSize: '13px', color: 'var(--iw-pill-fg, #78716c)', minWidth: 48, textAlign: 'center' }}>
             {matchInfo.total ? `${matchInfo.cur}/${matchInfo.total}` : (searchQuery ? '0/0' : '')}
@@ -965,8 +1054,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: '#78716c', cursor: 'pointer', borderRadius: 5, fontSize: '0.95rem' }}>×</button>
         </div>
       )}
-      <div ref={scrollRef} onMouseUp={onMouseUp} onMouseDown={onPdfMouseDown}
-        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12 }}>
+      {/* touch-action:none ONLY while a drag tool (note placement / eraser) is armed — normal browsing
+          keeps native pan/pinch. user-select off too, so a long-press can't start iOS text selection
+          mid-gesture. */}
+      <div ref={scrollRef} onMouseUp={onMouseUp} onPointerDown={onPdfPointerDown}
+        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12,
+          touchAction: tool === 'text' || tool === 'erase' ? 'none' : 'auto',
+          WebkitUserSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined,
+          userSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined }}>
         <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
