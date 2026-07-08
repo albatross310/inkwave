@@ -115,7 +115,7 @@ export function InstallPromptBanner({ installPrompt }: { installPrompt: any }) {
               <path d="M1 7V11C1 11.2761 1.22386 11.5 1.5 11.5H8.5C8.77614 11.5 9 11.2761 9 11V7" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
           </span>
-          &nbsp;share button just above the address bar, then <strong>Add to Home Screen</strong>
+          &nbsp;share button (just above the address bar on iPhone; top right of the toolbar on iPad), then <strong>Add to Home Screen</strong>
         </div>
       ) : (
         <button

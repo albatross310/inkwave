@@ -34,7 +34,8 @@ function loadGis(): Promise<void> {
     s.async = true
     s.defer = true
     s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Google Identity Services failed to load'))
+    // Un-cache on failure so a flaky preload (offline menu-open) doesn't poison every later click.
+    s.onerror = () => { gisLoad = null; reject(new Error('Google Identity Services failed to load')) }
     document.head.appendChild(s)
   })
   return gisLoad
@@ -50,6 +51,16 @@ async function ensureClient(): Promise<TokenClient> {
     tokenClient = gis.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID!, scope: SCOPE, callback: () => {} })
   }
   return tokenClient
+}
+
+/** Warm the GIS script + token client OFF the click path. iOS Safari revokes a tap's transient
+ *  activation while ensureClient() awaits the network script load, so requestAccessToken then runs
+ *  WITHOUT a gesture and the consent popup is silently blocked (getDriveToken resolves null with no
+ *  hint why). Fire this when the sync UI opens; by the time the writer taps "Google Drive",
+ *  ensureClient() resolves from cache and the popup opens inside the tap's activation window. */
+export function preloadGis(): void {
+  if (!CLIENT_ID) return
+  void ensureClient().catch(() => { /* offline / blocked — the click path retries the load */ })
 }
 
 /**

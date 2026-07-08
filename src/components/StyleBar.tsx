@@ -65,6 +65,9 @@ const LIST_TYPE_LABELS: Record<ListType, string> = {
 function useLongPress(onShortPress: () => void, onLongPress: () => void) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const firedRef = useRef(false)
+  const clear = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+  }
   return {
     // stopPropagation prevents the outer toolbar div's onPointerDown from calling
     // e.preventDefault(), which on iOS suppresses the subsequent click event (causing
@@ -74,8 +77,15 @@ function useLongPress(onShortPress: () => void, onLongPress: () => void) {
       firedRef.current = false
       timerRef.current = setTimeout(() => { firedRef.current = true; onLongPress() }, HOLD_MS)
     },
+    // iOS can end a press WITHOUT a click (touch cancel, scroll, system long-press UI), which used
+    // to leave the timer running → the drop-up popped open after the finger was gone. Clear on every
+    // pointer end; short-press still lives in onClick (fires after pointerup on desktop AND touch,
+    // gated by firedRef), so click behaviour is unchanged.
+    onPointerUp: clear,
+    onPointerCancel: clear,
+    onPointerLeave: clear,
     onClick: () => {
-      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+      clear()
       if (!firedRef.current) onShortPress()
     },
   }

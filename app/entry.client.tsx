@@ -68,6 +68,43 @@ if (lq && typeof lq.setConsumer === 'function') {
   })
 }
 
+// ─── Capability floor (iOS/Safari 16.4) ─────────────────────────────────────────
+// CompressionStream gates the gzip snapshot archive (provenance/snapshots.ts) and its worker reads.
+// Missing on older WebKit → snapshot creation already no-ops gracefully (see createSnapshotIfChanged);
+// this banner tells the writer WHY their history features are off. Injected after `load` (post-
+// hydration) so the extra node never disturbs React's hydration of the document.
+if (typeof CompressionStream === 'undefined') {
+  const DISMISS_KEY = 'inkwave:oldBrowserNoticeDismissed'
+  let dismissed = false
+  try { dismissed = !!localStorage.getItem(DISMISS_KEY) } catch { /* private mode */ }
+  if (!dismissed) {
+    window.addEventListener('load', () => {
+      const bar = document.createElement('div')
+      bar.setAttribute('role', 'status')
+      bar.style.cssText =
+        'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 12px);transform:translateX(-50%);' +
+        'z-index:400;max-width:min(30rem,calc(100vw - 2rem));display:flex;align-items:flex-start;gap:10px;' +
+        'background:#fff;color:#44403c;border:1px solid rgba(92,45,138,0.45);border-radius:12px;' +
+        'padding:10px 12px;font:0.8rem/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(92,45,138,0.18);'
+      const msg = document.createElement('span')
+      msg.textContent =
+        "This browser is too old for Inkwave's history features — update iOS/Safari (16.4+) or use another browser; " +
+        'writing still works, provenance snapshots are disabled.'
+      const x = document.createElement('button')
+      x.type = 'button'
+      x.setAttribute('aria-label', 'Dismiss')
+      x.textContent = '✕'
+      x.style.cssText = 'flex:none;background:none;border:none;cursor:pointer;color:#a89d96;font-size:0.9rem;line-height:1;padding:0;'
+      x.onclick = () => {
+        bar.remove()
+        try { localStorage.setItem(DISMISS_KEY, '1') } catch { /* private mode */ }
+      }
+      bar.append(msg, x)
+      document.body.appendChild(bar)
+    })
+  }
+}
+
 // Register the service worker for offline support and PWA install — PRODUCTION ONLY.
 // In dev a cache-first SW poisons the dev server: it serves a stale cached app shell and JS,
 // so live code changes never appear. So in dev we do the opposite — actively unregister any

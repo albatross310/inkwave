@@ -1737,6 +1737,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
           style={{
             paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px`,
+            // Landscape phones (viewport-fit=cover): keep the docked bar clear of the notch/home-bar
+            // side insets, matching the bottom inset above. Zero in portrait / on desktop.
+            paddingLeft: isTouch ? 'env(safe-area-inset-left)' : undefined,
+            paddingRight: isTouch ? 'env(safe-area-inset-right)' : undefined,
             // When the PDF panel is open: a side dock stops the centring box at its left edge
             // (--iw-pdf-room) so the toolbar recentres over the writing; a bottom dock lifts the whole
             // toolbar above it (--iw-pdf-room-bottom).

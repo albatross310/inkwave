@@ -14,6 +14,7 @@ import { withScasDefaults } from '../scas/state'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/Scroll'
 import { oneDriveFilename } from '../storage/onedrive'
+import { googleDriveConfigured, preloadGis } from '../storage/gdrive'
 import { AccountMenuItems } from './AccountControl'
 import { getSaveFileName } from '../storage/folder'
 import { getDocSource } from '../storage/docSource'
@@ -127,6 +128,13 @@ export function OptionsMenu({
     window.addEventListener('inkwave:open-save', open)
     return () => window.removeEventListener('inkwave:open-save', open)
   }, [])
+
+  // Warm the Google Identity script while a Drive-capable panel is open (menu, Save, Save a copy,
+  // Open) — the eventual "Google Drive" tap then finds it cached, so requestAccessToken runs inside
+  // the tap's transient activation and iOS Safari doesn't block the consent popup (see preloadGis).
+  useEffect(() => {
+    if ((menuOpen || modal === 'save' || modal === 'savecopy' || modal === 'upload') && googleDriveConfigured()) preloadGis()
+  }, [menuOpen, modal])
 
   // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open · ⌘/Ctrl+N New ·
   // ⌘/Ctrl+P Print. (Ctrl+N may be reserved by the browser for a new window and can't always be
