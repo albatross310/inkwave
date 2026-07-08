@@ -3,6 +3,7 @@
 // bottom-sheet modal so the writer never leaves the editor.
 
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/Scroll'
 import { useState, useEffect } from 'react'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
@@ -189,7 +190,7 @@ export function VerifyModal({
           >
             <input
               type="file"
-              accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json"
+              accept={isTouchDevice() ? undefined : '.studio,.inkwave,application/json,.json,.trace.json,.insig.json'}
               className="hidden"
               onChange={onFile}
             />

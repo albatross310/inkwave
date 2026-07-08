@@ -78,7 +78,15 @@ export async function writeAppJson(name: string, data: unknown): Promise<void> {
 }
 
 /** Save the full document to OPFS. */
+let _persistRequested = false
+function requestPersistence(): void {
+  if (_persistRequested) return
+  _persistRequested = true
+  try { void navigator.storage?.persist?.() } catch { /* unsupported */ }
+}
+
 export async function saveDocument(doc: InkwaveDocument): Promise<void> {
+  requestPersistence() // Safari evicts un-persisted storage after 7 days of non-use
   const root = await getRoot()
   const write = await writeJson(root, currentPath(doc.id))
   await write(doc)
@@ -119,10 +127,17 @@ export function scheduleSave(
 ): void {
   if (saveTimer !== null) clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
-    // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
-    // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
-    await saveDocument(typeof doc === 'function' ? doc() : doc)
-    onSaved?.()
+    try {
+      // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
+      // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
+      await saveDocument(typeof doc === 'function' ? doc() : doc)
+      onSaved?.()
+    } catch (err) {
+      // NEVER swallow a failed autosave (iOS quota/handle errors) — the writer must not keep
+      // typing into a document that stopped persisting. UI listens on this event.
+      console.error('[inkwave] autosave failed:', err)
+      window.dispatchEvent(new CustomEvent('inkwave:save-failed', { detail: { error: String((err as Error)?.message ?? err) } }))
+    }
   }, AUTOSAVE_DELAY_MS)
 }
 

@@ -39,7 +39,10 @@ function msSinceFirstVisit(): number {
 }
 
 function isIOS() {
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+  // iPadOS 13+ masquerades as macOS Safari — the UA says "Macintosh" but a Mac has no touch
+  // points. Without this, iPads (the platform where the PWA matters most) never saw the banner.
+  return /iPhone|iPod/i.test(navigator.userAgent)
+    || (/Macintosh|iPad/i.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 1)
 }
 
 // Should we show anything? Need either a Chrome/Edge install prompt or iOS share instructions.

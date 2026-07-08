@@ -88,7 +88,7 @@ export function setCapsMapping(key: string, shift: boolean, latex: string) {
   const k = shift ? key.toUpperCase() : key
   const custom = loadCustom()
   custom[k] = latex
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(custom))
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(custom)) } catch { /* private mode */ }
 }
 
 // Returns a merged view of built-in + custom for display in the info panel

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { isTouchDevice } from '../editor/Scroll'
 import { Link, useLocation } from 'react-router'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
@@ -84,7 +85,7 @@ export function Verify() {
           className="block border-2 border-dashed rounded-xl px-4 py-10 text-center cursor-pointer transition-colors"
           style={{ borderColor: dragOver ? INK : `${INK}55`, background: dragOver ? `${INK}0d` : undefined }}
         >
-          <input type="file" accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onFile} />
+          <input type="file" accept={isTouchDevice() ? undefined : '.studio,.inkwave,application/json,.json,.trace.json,.insig.json'} className="hidden" onChange={onFile} />
           <span style={{ color: INK }}>{dragOver ? 'Drop to verify' : 'Drop a record here, or choose one'}</span>
           <span className="block text-xs text-stone-400 mt-1">a .studio file (or .inkwave) from the editor</span>
         </label>

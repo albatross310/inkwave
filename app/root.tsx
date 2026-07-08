@@ -56,7 +56,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         }} />
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta name="theme-color" content="#2a3b5f" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#9fd9c8" />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141313" />
         <meta name="google-site-verification" content="h79VCdHP57BlmRzPhYg_vgOKBj1iMfKkq4J1gpAIvR4" />
         <meta name="robots" content="index, follow" />
         <meta name="application-name" content="Inkwave Zero" />
