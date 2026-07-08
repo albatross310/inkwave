@@ -11,6 +11,10 @@ import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiS
 import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
+import { Toast } from '../components/Toast'
+import { CITATION_TOAST_EVENT } from '../citations/citationToast'
+
+const SUMMARY_INFO_TEXT = 'Summaries send each snapshot’s text in transit through our servers on to Anthropic (Claude), which writes a short plain-language summary. Nothing is sent until you opt in.'
 
 const INK = '#5c2d8a'
 const NAV_BG = 'rgba(140, 90, 200, 0.35)'
@@ -646,6 +650,25 @@ function scrollSpeedFactor(pos: number, centres: Array<{ c: number; half: number
   return Math.min(2.2, Math.max(0.2, s))
 }
 
+// Potential-well model (Peter's): each diff is a well (attractor); motion is kinetic with LINEAR
+// resistance (velocity decays exponentially → an Apple-style fling). wellForce is −dV/dx of a Gaussian
+// well: pulls toward the centre, zero at the bottom, so a fast flick escapes but a slow one is captured
+// and settles onto the diff. Tunable constants:
+const WARP_RESIST = 0.12     // velocity lost per frame (the fling's exponential decay)
+const WARP_WELL = 0.9        // well depth / pull strength (how hard diffs grab)
+const WARP_WELL_PAD = 45     // well half-width beyond each diff's own half-height
+const WARP_IMPULSE = 0.5     // wheel delta → velocity impulse
+function wellForce(pos: number, centres: Array<{ c: number; half: number }>): number {
+  let F = 0
+  for (const { c, half } of centres) {
+    const w = half + WARP_WELL_PAD
+    const dx = pos - c
+    if (Math.abs(dx) > w * 3) continue
+    F += -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL // toward the centre; 0 at the bottom
+  }
+  return F
+}
+
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
 }: {
@@ -981,25 +1004,38 @@ function SplitDiffView({
     }
   }, [runSpring, setAlignGlow])
 
-  // Editor snap mode A — WHEEL-TAKEOVER SPEED-WARP: we drive scrollTop ourselves from a warped wheel
-  // delta, so the editor slows through a diff and speeds up in its shoulders (see scrollSpeedFactor).
-  // Ctrl/⌘+wheel is left alone (that's the diff zoom). Centres are cached and refreshed each gesture.
+  // Editor snap mode A — WHEEL-TAKEOVER PHYSICS: we take the wheel and integrate a particle (the scroll
+  // position) moving with LINEAR RESISTANCE through a landscape of POTENTIAL WELLS at the diffs. A wheel
+  // delta is an impulse to velocity; each frame: v += wellForce − resist·v (exponential-decay fling that
+  // the wells bend), then x += v · speedWarp (the Mexican-hat slow-through/fast-before layered on). Result:
+  // a fast flick coasts and decays Apple-style; a slow one is captured and settles onto the nearest diff.
+  // Ctrl/⌘+wheel is left alone (that's the diff zoom).
   useEffect(() => {
     if (snapMode !== 'warp') return
     const el = leftScrollRef.current
     if (!el) return
     let centres: Array<{ c: number; half: number }> = []
     let refreshAt = 0
+    let v = 0, x = el.scrollTop, raf = 0
+    const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
+    const tick = () => {
+      const F = wellForce(x, centres)
+      v = v + F - WARP_RESIST * v                      // kinetic + linear resistance + well attraction
+      x = Math.max(0, Math.min(maxScroll(), x + v * scrollSpeedFactor(x, centres)))
+      el.scrollTop = x
+      if (Math.abs(v) < 0.06 && Math.abs(F) < 0.06) { v = 0; raf = 0; return } // settled (well bottom / flat)
+      raf = requestAnimationFrame(tick)
+    }
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return
       e.preventDefault()
-      const now = e.timeStamp
-      if (now - refreshAt > 250) { centres = diffCentres(el); refreshAt = now } // recompute between flicks
-      const s = scrollSpeedFactor(el.scrollTop, centres)
-      el.scrollTop = el.scrollTop + e.deltaY * s
+      if (e.timeStamp - refreshAt > 250) { centres = diffCentres(el); refreshAt = e.timeStamp }
+      x = el.scrollTop                                  // resync (nav / snapshot change may have moved it)
+      v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
+      if (!raf) raf = requestAnimationFrame(tick)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf) }
   }, [snapMode, snapshot.id])
 
   // Editor snap mode B — SETTLE-SNAP: native scroll is untouched; when it STOPS, ease the nearest diff
@@ -1246,7 +1282,6 @@ function SplitDiffView({
                 <button
                   type="button"
                   onClick={onOptInSummaries}
-                  title="Generate a plain-language summary of each snapshot. This sends the snapshot text in transit through our servers and on to Anthropic (Claude), which writes the summary."
                   className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
                   style={{ fontSize: '0.85rem', fontWeight: 500, background: INK, color: '#fff', border: `1px solid ${INK}`, cursor: 'pointer' }}
                 >
@@ -1255,9 +1290,9 @@ function SplitDiffView({
                 <button
                   type="button"
                   aria-label="About snapshot summaries"
-                  title="Summaries send each snapshot's text in transit through our servers on to Anthropic (Claude), which writes a short plain-language summary. Nothing is sent until you opt in."
+                  onClick={() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: SUMMARY_INFO_TEXT } }))}
                   className="rounded-full font-serif shadow-sm transition-colors hover:brightness-95 flex items-center justify-center"
-                  style={{ aspectRatio: '1', fontSize: '0.9rem', fontWeight: 700, fontStyle: 'italic', background: '#fff', color: INK, border: `1px solid ${INK}`, cursor: 'help' }}
+                  style={{ aspectRatio: '1', fontSize: '0.9rem', fontWeight: 700, fontStyle: 'italic', background: '#fff', color: INK, border: `1px solid ${INK}`, cursor: 'pointer' }}
                 >
                   i
                 </button>
@@ -1276,6 +1311,7 @@ function SplitDiffView({
         </div>
         <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
       </div>
+      <Toast />
     </div>
   )
 }
