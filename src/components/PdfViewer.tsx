@@ -262,9 +262,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // only adds resolution where the page is still small (the default fit view, where the blur shows).
     // Supersample to ≥2× (capped 3×): exactly-dpr looked soft on low-dpr displays, and 3–4× shimmered
     // on non-integer downscales. 2–3× is the sweet spot — crisp without the aliasing. Capped for memory.
+    // Touch (iOS) caps at 2×: iPhones report dpr 3, and 3× canvases are 2.25× the bytes for no visible
+    // gain on those screens — iOS's TOTAL canvas memory budget is the scarce resource (see eviction).
     const MAX_CANVAS = 4096
     const outputScale = Math.max(1, Math.min(
-      3, window.devicePixelRatio || 1,
+      isTouch ? 2 : 3, window.devicePixelRatio || 1,
       MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
     ))
     const canvas = document.createElement('canvas')
@@ -283,6 +285,27 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     if (token !== renderTokenRef.current) return
     await new pdfjs.TextLayer({ textContentSource: tc, container: pg.textLayer, viewport: pg.viewport }).render().catch(() => {})
     pg.rendered = true
+    pg.rendering = false // allow a re-render after eviction (evicted pages flip rendered back to false)
+  }
+
+  // Evict far-away rendered pages (TOUCH ONLY). iOS caps the tab's TOTAL canvas memory; a long PDF of
+  // permanent supersampled canvases blows the budget and Safari blanks pages / jetsams the tab. Keep
+  // ~6 pages either side of the viewport; beyond that, free the canvas bitmap NOW (width=0 releases
+  // iOS's canvas accounting immediately — GC alone is too late), clear the text layer, and mark the
+  // page unrendered so the IntersectionObserver repaints it when it scrolls back near. Placeholder
+  // sizes are untouched, so eviction never reflows. hlLayer (annotations) is left alone.
+  const KEEP_PAGES = 6
+  function evictFarPages(visible: Set<number>) {
+    let lo = Infinity, hi = -Infinity
+    for (const i of visible) { if (i < lo) lo = i; if (i > hi) hi = i }
+    pagesRef.current.forEach((pg, i) => {
+      if (i >= lo - KEEP_PAGES && i <= hi + KEEP_PAGES) return
+      if (!pg.rendered || pg.rendering) return
+      const canvas = pg.canvasWrap.querySelector('canvas')
+      if (canvas) { canvas.width = 0; canvas.height = 0; canvas.remove() }
+      pg.textLayer.textContent = ''
+      pg.rendered = false
+    })
   }
 
   // Build placeholders (correct sizes, cheap) for every page, then let an IntersectionObserver paint
@@ -337,10 +360,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     if (token !== renderTokenRef.current) return
     redrawOverlays()
 
+    // `visible` tracks the indices inside the render margin so the touch-only eviction sweep knows
+    // what "near the viewport" currently means (fresh per render token — pagesRef was just rebuilt).
+    const visible = new Set<number>()
     const io = new IntersectionObserver(entries => {
       for (const e of entries) {
-        if (e.isIntersecting) void renderOnePage(Number((e.target as HTMLElement).dataset.idx), token)
+        const idx = Number((e.target as HTMLElement).dataset.idx)
+        if (e.isIntersecting) { visible.add(idx); void renderOnePage(idx, token) }
+        else visible.delete(idx)
       }
+      if (isTouch && visible.size) evictFarPages(visible)
     }, { root: scrollRef.current, rootMargin: '800px 0px' })
     for (const pg of pagesRef.current) io.observe(pg.wrapper)
     observerRef.current = io

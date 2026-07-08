@@ -316,7 +316,10 @@
     font-size: calc(1.125rem * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.618);
     color: #1a1a1a;
+    /* dvh, not vh: iOS Safari's 100vh includes the retracted URL bar, so the tap-anywhere-to-type
+       region overshot the visible page. vh line kept as the fallback for pre-dvh browsers. */
     min-height: calc(100vh - 6rem);
+    min-height: calc(100dvh - 6rem);
     cursor: text;
   }
 

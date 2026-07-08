@@ -20,6 +20,11 @@ async function getRoot(): Promise<FileSystemDirectoryHandle> {
 // ── Gzip helpers (CompressionStream, available in all target browsers) ────────
 // Snapshots JSON is highly repetitive (same contentJson structure, receipt fields)
 // and compresses ~75%, keeping storage manageable as the snapshot list grows.
+// Capability floor: CompressionStream is iOS/Safari 16.4+. Older WebKit can't write the gzip
+// archive, so createSnapshotIfChanged degrades to a no-op (warn once) instead of throwing on the
+// first resolved kick — writing keeps working, provenance is disabled. entry.client shows a banner.
+const hasCompressionStream = typeof CompressionStream !== 'undefined'
+let warnedNoCompression = false
 async function gzipEncode(json: string): Promise<Uint8Array> {
   const bytes = new TextEncoder().encode(json)
   const cs    = new CompressionStream('gzip')
@@ -218,6 +223,13 @@ export async function createSnapshotIfChanged(
   force = false,
   nudgeWord?: { from: string; to: string },
 ): Promise<Snapshot | null> {
+  if (!hasCompressionStream) {
+    if (!warnedNoCompression) {
+      warnedNoCompression = true
+      console.warn('[inkwave] CompressionStream unavailable (iOS/Safari < 16.4) — provenance snapshots are disabled; writing still works')
+    }
+    return null
+  }
   const cHash = await contentHash(doc.contentJson)
   const snaps = await readSnapshotsFile(doc.id)
   const last = snaps[snaps.length - 1]

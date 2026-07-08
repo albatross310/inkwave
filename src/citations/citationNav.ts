@@ -29,7 +29,9 @@ export function ensureNavStyles(): void {
   const el = document.createElement('style')
   el.id = STYLE_ID
   el.textContent = `
-    .iw-cite-link { cursor: pointer; border-radius: 3px; text-decoration: none; transition: background-color 120ms ease; }
+    /* user-select/touch-callout off: these are click-&-HOLD controls — without this, an iOS long-press
+       starts text selection + the callout instead of the hold action (M1/M2 in the iOS audit). */
+    .iw-cite-link { cursor: pointer; border-radius: 3px; text-decoration: none; transition: background-color 120ms ease; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     .iw-cite-link:hover { background-color: rgba(92,45,138,0.14); }
     /* Destination flash: a DARK purple wash that decays roughly exponentially over ~1.6s to orient the
        reader after a jump. The keyframe stops approximate e^-t (big early drop, long tail). */
@@ -56,7 +58,7 @@ export function ensureNavStyles(): void {
     .iw-cite-biblink {
       display: inline-flex; align-items: center; justify-content: center;
       width: 0.82em; height: 0.82em; margin: 0 0.34em; vertical-align: -0.02em;
-      font-size: 1em; line-height: 1; cursor: pointer; user-select: none; font-family: inherit;
+      font-size: 1em; line-height: 1; cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; font-family: inherit;
       color: #9a7dc0; font-weight: 700;
       border: 1px solid #9a7dc0; border-radius: 50%; background: transparent;
       transition: background-color 120ms ease;

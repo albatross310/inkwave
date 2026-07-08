@@ -243,6 +243,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         }}
                         onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                         onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                        onPointerCancel={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                         onClick={e => {
                           e.stopPropagation()
                           if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
@@ -270,6 +271,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                               }}
                               onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                               onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                              onPointerCancel={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
                               onClick={e => {
                                 e.stopPropagation()
                                 if (heldRef.current) { heldRef.current = false; return }
