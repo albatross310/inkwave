@@ -142,14 +142,14 @@
   @keyframes iw-wave-ramp-r { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(18px, 0, 0); } }
   @keyframes iw-wave-drift-l { from { transform: translate3d(-18px, 0, 0); } to { transform: translate3d(-158px, 0, 0); } }
   @keyframes iw-wave-drift-r { from { transform: translate3d(18px, 0, 0); } to { transform: translate3d(158px, 0, 0); } }
-  .inkwave-editor-surface.iw-wave-anim::before,
-  .inkwave-editor-surface.iw-wave-coast::before {
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before,
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
     left: -160px; right: -160px;
     background-image: var(--iw-wave-a); /* layer A only — layer B lives on ::after during the drift */
     background-position: 0 0;
   }
-  .inkwave-editor-surface.iw-wave-anim::after,
-  .inkwave-editor-surface.iw-wave-coast::after {
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after,
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
     content: '';
     position: fixed; inset: 0; left: -160px; right: -160px;
     z-index: -1; pointer-events: none;
@@ -157,20 +157,20 @@
     background-size: 140px 140px;
     background-position: 0 0;
   }
-  .inkwave-editor-surface.iw-wave-anim::before {
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before {
     animation:
       iw-wave-ramp-l 0.5s cubic-bezier(0.6, 0, 0.5, 0) var(--wave-ramp-delay, 0s) 1 forwards,
       iw-wave-drift-l 1.944s linear var(--wave-phase, 0.5s) infinite;
     will-change: transform;
   }
-  .inkwave-editor-surface.iw-wave-anim::after {
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after {
     animation:
       iw-wave-ramp-r 0.5s cubic-bezier(0.6, 0, 0.5, 0) var(--wave-ramp-delay, 0s) 1 forwards,
       iw-wave-drift-r 1.944s linear var(--wave-phase, 0.5s) infinite;
     will-change: transform;
   }
-  .inkwave-editor-surface.iw-wave-coast::before { transform: translate3d(var(--wave-t, 0px), 0, 0); }
-  .inkwave-editor-surface.iw-wave-coast::after  { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before { transform: translate3d(var(--wave-t, 0px), 0, 0); }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after  { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
      goes fully transparent, so the real (fixed) aqua+waves background shows through everywhere; the
