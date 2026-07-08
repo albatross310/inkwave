@@ -1078,17 +1078,21 @@ function SplitDiffView({
           <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
           {!summariesOn ? (
             // AI summaries are an explicit opt-in (privacy: snapshot text → Anthropic via our server).
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8, paddingTop: 4 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
               <button
                 type="button"
                 onClick={onOptInSummaries}
-                className="px-3.5 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
-                style={{ fontSize: '0.88rem', fontWeight: 500, background: INK, color: '#fff', border: 'none', cursor: 'pointer' }}
+                title="Generate a plain-language summary of each snapshot. This sends the snapshot text in transit through our servers and on to Anthropic (Claude), which writes the summary."
+                className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
+                style={{ fontSize: '0.85rem', fontWeight: 500, background: INK, color: '#fff', border: `1px solid ${INK}`, cursor: 'pointer' }}
               >
-                Opt in to see snapshot summaries
+                Opt in
               </button>
               <a href="/privacy" target="_blank" rel="noopener"
-                className="text-xs underline" style={{ color: '#9b5ccc' }}>
+                title="How Inkwave handles your data"
+                className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-95"
+                style={{ fontSize: '0.85rem', fontWeight: 500, background: '#fff', color: INK, border: `1px solid ${INK}`, textDecoration: 'none', cursor: 'pointer' }}
+              >
                 See privacy policy
               </a>
             </div>

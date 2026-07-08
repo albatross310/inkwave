@@ -133,7 +133,8 @@ export function SyncStatus({
         <button
           type="button"
           onClick={() => {
-            if (onClick && !synced) onClick()
+            // Just open the detail panel — DON'T fire the connect/sign-in action (e.g. the Microsoft
+            // popup) on the pill tap. The panel's "Sync now" button is where the user opts into that.
             setOpen(!open)
           }}
           title={tooltip}

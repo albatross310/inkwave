@@ -1,13 +1,11 @@
-// "Export PDF" → a real, selectable-text A4 PDF opened in a NEW TAB, with no print dialog.
+// "Export PDF" → a real, selectable-text A4 PDF, produced ENTIRELY ON THE DEVICE (nothing is uploaded).
 //
 // How: serialise the live editor's surface (incl. the page-gap widgets ProseMirror has rendered) plus
-// the page's own stylesheets into one self-contained HTML document, POST it to /api/pdf (headless
-// Chromium), and open the returned PDF blob in a new tab. Because the server re-uses the EXACT same
-// HTML + CSS (Tailwind + index.css, incl. the @media print rules and the seal), the output matches
-// the editor pixel-for-pixel — same font, wrapping, page breaks and margins as the on-screen pages.
-//
-// Works in every visitor browser (the render is server-side). If the route is unavailable (e.g. local
-// dev with no Chrome), the caller falls back to the browser print dialog.
+// the page's own stylesheets into one self-contained HTML document, open it in a new tab, and invoke
+// the browser's own print → "Save as PDF". Because it re-uses the EXACT same HTML + CSS (Tailwind +
+// index.css, incl. the @media print rules and the seal), the output matches the editor pixel-for-pixel
+// — same font, wrapping, page breaks and margins as the on-screen pages. A highly-curated wrapper over
+// the browser's native print / print-to-PDF, so the document never leaves the machine.
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
@@ -50,70 +48,25 @@ async function buildPrintHtml(title: string): Promise<string> {
   )
 }
 
-// The placeholder shown in the new tab while Chromium renders: the Inkwave logo + a 5→0 countdown
-// (no spinner). When the PDF arrives the tab navigates to it; if it overruns the countdown holds at ✓.
-// `origin` is injected so the logo (and any URL) is absolute — the tab is about:blank with no base.
-function loadingDoc(origin: string): string {
-  return (
-    '<!doctype html><meta charset="utf-8"><title>Preparing PDF…</title>' +
-    '<style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;' +
-    "font-family:'EB Garamond',Georgia,serif;background:#FBF5EC;color:#5c2d8a}" +
-    '.box{text-align:center}.box img{width:96px;height:96px;display:block;margin:0 auto 16px}' +
-    '.n{font-size:46px;line-height:1;font-variant-numeric:tabular-nums}' +
-    '.cap{margin-top:10px;font-size:15px;color:#9b5ccc}</style>' +
-    `<div class="box"><img src="${origin}/icon-192.png" alt="Inkwave">` +
-    '<div class="n" id="n">5</div><div class="cap">Preparing your PDF…</div></div>'
-    // No inline <script> here — a strict CSP (script-src without 'unsafe-inline') would block it. The
-    // opener drives the countdown instead (see exportPdfToNewTab), which is nonce-trusted app code.
-  )
-}
-
-// Returns true if it produced the PDF; false if the caller should fall back to the print dialog.
+// Returns true if it opened the print tab; false if the caller should fall back to printing this page.
 export async function exportPdfToNewTab(title: string): Promise<boolean> {
   const name = (title || 'inkwave').trim()
-  // Open the tab SYNCHRONOUSLY inside the click gesture, or the popup blocker eats it. We navigate it
-  // to the PDF once it's ready (and close it on failure so the fallback dialog isn't doubled up).
+  // Build the identical self-contained HTML the render used, but print it ON THIS DEVICE — nothing is
+  // sent anywhere. Open the tab SYNCHRONOUSLY (inside the click) so the popup blocker doesn't eat it,
+  // then write the document and trigger the browser's print → "Save as PDF". The @media print rules in
+  // the inlined CSS format it to A4 with the same fonts/wrapping/page breaks as the on-screen pages.
+  let html: string
+  try { html = await buildPrintHtml(name) } catch { return false }
   const win = window.open('', '_blank')
-  // Drive the 5→0 countdown from HERE (the opener's nonce-trusted code) by updating the popup's DOM,
-  // rather than an inline <script> in the popup that a strict CSP would block. Same-origin about:blank,
-  // so we can touch its document.
-  let countdown = 0
-  if (win) {
-    try {
-      win.document.write(loadingDoc(location.origin))
-      win.document.close()
-      let n = 5
-      countdown = window.setInterval(() => {
-        n -= 1
-        try { const el = win.document.getElementById('n'); if (el) el.textContent = n <= 0 ? '✓' : String(n) } catch { /* navigated */ }
-        if (n <= 0 && countdown) { clearInterval(countdown); countdown = 0 }
-      }, 1000)
-    } catch { /* ignore */ }
-  }
-  const stopCountdown = () => { if (countdown) { clearInterval(countdown); countdown = 0 } }
-  // Never hang the loading tab: abort after 45s and fall back to the print dialog.
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 45_000)
-  try {
-    const html = await buildPrintHtml(name)
-    const res = await fetch('/api/pdf', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ html, title: name }),
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error(`pdf route ${res.status}`)
-    const blob = await res.blob()
-    if (blob.type !== 'application/pdf') throw new Error('not a pdf')
-    const url = URL.createObjectURL(blob)
-    clearTimeout(timer); stopCountdown()
-    if (win) win.location.href = url
-    else window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60_000) // let the new tab load it first
-    return true
-  } catch {
-    clearTimeout(timer); stopCountdown()
-    if (win) { try { win.close() } catch { /* ignore */ } }
-    return false
-  }
+  if (!win) return false
+  win.document.write(html)
+  win.document.close()
+  win.focus()
+  // Print once the content has laid out (give self-hosted fonts a beat so wrapping is final). Close the
+  // tab afterwards where the browser reports it (best-effort; a few browsers never fire onafterprint).
+  win.onafterprint = () => { try { win.close() } catch { /* already closed */ } }
+  const doPrint = () => { try { win.print() } catch { /* user closed the tab */ } }
+  if (win.document.readyState === 'complete') setTimeout(doPrint, 450)
+  else win.addEventListener('load', () => setTimeout(doPrint, 450))
+  return true
 }

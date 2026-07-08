@@ -339,7 +339,7 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
   )
 }
 
-// Export the finished document — a typeset PDF (server-rendered, opens in a new tab) or LaTeX source.
+// Export the finished document — a typeset PDF (printed on-device via the browser) or LaTeX source.
 function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBundle, onDone }: {
   onExportPdf?: () => void; onExportLatex?: () => void; onExportEquations?: () => void
   onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void; onDone: () => void
@@ -348,7 +348,7 @@ function ExportPanel({ onExportPdf, onExportLatex, onExportEquations, onExportBu
     <div className="flex flex-col gap-2 mt-2">
       <p className="text-xs text-stone-400 px-1">Choose a format (hover for details).</p>
       {onExportPdf && (
-        <MenuButton onClick={() => { onExportPdf(); onDone() }} title="A finished A4 document — opens in a new tab, selectable text">📄 PDF</MenuButton>
+        <MenuButton onClick={() => { onExportPdf(); onDone() }} title="A finished A4 document, selectable text. Our algorithm uses a highly curated version of the browser's print and print-to-PDF functions, so the document never leaves your device.">📄 PDF</MenuButton>
       )}
       {onExportLatex && (
         <MenuButton onClick={() => { onExportLatex(); onDone() }} title="A .tex source file to typeset yourself">∑ LaTeX</MenuButton>
