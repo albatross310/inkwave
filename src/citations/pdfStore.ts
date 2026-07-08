@@ -70,9 +70,9 @@ export function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-export function base64ToBlob(b64: string, type = 'application/pdf'): Blob {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return new Blob([bytes], { type })
+export async function base64ToBlob(b64: string, type = 'application/pdf'): Promise<Blob> {
+  // Native data-URL decode (off the JS heap's hot path) — the old atob + per-char loop was a
+  // 20M-iteration main-thread stall when opening a .studio with embedded PDFs.
+  const res = await fetch(`data:${type};base64,${b64}`)
+  return res.blob()
 }
