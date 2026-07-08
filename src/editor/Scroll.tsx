@@ -221,6 +221,10 @@ export function Scroll({
       el.style.setProperty('--wave-phase', `-${(((elapsed - 0.5) % 1.944)).toFixed(3)}s`)
     }
   }, [])
+  // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
+  // an effect with the decay loop — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
+  // effect and its CLEANUP cancelled the just-started rAF, leaving .iw-wave-coast stuck forever
+  // (frozen waves + background-position pinned at 0 → the scroll sway looked "broken").
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
     const el = surfaceRef.current
@@ -233,8 +237,14 @@ export function Scroll({
     } catch { /* transform unreadable → coast from 0 */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
+  }, [revealed, waveMode])
+  useEffect(() => {
+    if (waveMode !== 'coast') return
+    const el = surfaceRef.current
+    if (!el) { setWaveMode('off'); return }
     let raf = 0
     let last = performance.now()
+    let tx = parseFloat(el.style.getPropertyValue('--wave-t')) || 0
     let v = -72 // px/s leftward — the speed the CSS drift was running at
     const TAU = 0.28 // s — exponential decay; visually still in ~1s
     const tick = (now: number) => {
@@ -258,7 +268,7 @@ export function Scroll({
     }
     raf = requestAnimationFrame(tick)
     return () => { if (raf) cancelAnimationFrame(raf) }
-  }, [revealed, waveMode])
+  }, [waveMode])
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}

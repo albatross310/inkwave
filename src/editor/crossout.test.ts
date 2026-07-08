@@ -18,8 +18,8 @@ beforeEach(() => {
 })
 
 describe('crossoutMode', () => {
-  it('defaults to stacked when nothing stored', () => {
-    expect(crossoutMode()).toBe('stacked')
+  it('defaults to off when nothing stored', () => {
+    expect(crossoutMode()).toBe('off')
   })
 
   it('reads inline from localStorage', () => {
@@ -32,9 +32,9 @@ describe('crossoutMode', () => {
     expect(crossoutMode()).toBe('off')
   })
 
-  it('falls back to stacked for an unrecognised stored value', () => {
+  it('falls back to off for an unrecognised stored value', () => {
     localStorage.setItem('inkwave:crossout', 'bogus')
-    expect(crossoutMode()).toBe('stacked')
+    expect(crossoutMode()).toBe('off')
   })
 })
 
@@ -52,11 +52,11 @@ describe('setCrossoutMode', () => {
 })
 
 describe('cycleCrossoutMode', () => {
-  it('cycles stacked → inline → off → stacked', () => {
-    expect(crossoutMode()).toBe('stacked')
+  it('cycles off → stacked → inline → off (default start is off)', () => {
+    expect(crossoutMode()).toBe('off')
+    expect(cycleCrossoutMode()).toBe('stacked')
     expect(cycleCrossoutMode()).toBe('inline')
     expect(cycleCrossoutMode()).toBe('off')
-    expect(cycleCrossoutMode()).toBe('stacked')
   })
 
   it('CROSSOUT_MODES has exactly 3 entries matching the cycle order', () => {
@@ -65,8 +65,8 @@ describe('cycleCrossoutMode', () => {
 })
 
 describe('watermarkEnabled', () => {
-  it('defaults to true when nothing stored', () => {
-    expect(watermarkEnabled()).toBe(true)
+  it('defaults to false when nothing stored (Peter, 2026-07-08)', () => {
+    expect(watermarkEnabled()).toBe(false)
   })
 
   it('returns false when stored as "0"', () => {
