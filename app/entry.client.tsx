@@ -73,9 +73,18 @@ if (lq && typeof lq.setConsumer === 'function') {
 if (import.meta.env.PROD) {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      // Versioned URL: a new build ⇒ a "new" SW script ⇒ update → cache purge + one-time reload.
+      // Versioned URL: a new build ⇒ a "new" SW script ⇒ update → cache purge + targeted self-heal.
       navigator.serviceWorker.register(`/sw.js?v=${__BUILD_ID__}`).catch((err) => {
         console.warn('[inkwave] SW registration failed:', err)
+      })
+      // Self-heal, but only when GENUINELY stale: the activating worker broadcasts its version and
+      // we reload only if this page was built from an OLDER build. The page that just loaded the
+      // new build matches the worker and stays put — no more "loads twice" after every deploy.
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data as { type?: string; version?: string } | null
+        if (d?.type === 'inkwave-sw-version' && d.version && d.version !== __BUILD_ID__) {
+          window.location.reload()
+        }
       })
     })
   }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
 import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation } from './pageSettings'
 import { MARGIN_BOTTOM } from './extensions/PaginationExtension'
@@ -72,28 +72,39 @@ export function Scroll({
     let steps = 0
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
+    // One STABLE anchor element per gesture. Re-picking under the viewport centre every frame made
+    // the anchor flip between elements at block boundaries, and the old correction pinned the picked
+    // element's TOP to the centre line (scrollTop += topAfter - anchorY) — with multi-step coalesced
+    // frames that per-frame snap compounded into a fast drift toward the doc top in BOTH directions.
+    // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
+    // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
+    let anchorEl: HTMLElement | null = null
     const applyFrame = () => {
       raf = 0
       const net = steps
       steps = 0
       if (!net) return
-      // Anchor to the block at the VIEWPORT CENTRE (the horizontal + vertical midline), not the pointer —
-      // so zoom keeps the central text put. A big container (.ProseMirror / .scroll-paper) spans the whole
-      // doc, so its top reflows to near the doc top on zoom-out → a huge negative correction that clamps
-      // scrollTop to 0 (the "jump to top" bug, zoom-out only). Reject those and fall back to the scroll RATIO.
+      // Pick (or re-pick, if the node was destroyed) the block at the VIEWPORT CENTRE. Reject the
+      // big containers (.ProseMirror / .scroll-paper) — they span the whole doc, so their top reflows
+      // toward the doc top and a correction against them lurches (the old "jump to top" bug). No
+      // usable anchor → fall back to preserving the scroll RATIO.
       const vr = el.getBoundingClientRect()
       const anchorX = vr.left + vr.width / 2, anchorY = vr.top + vr.height / 2
-      let target = document.elementFromPoint(anchorX, anchorY) as HTMLElement | null
-      if (target && (!el.contains(target) || target.classList.contains('ProseMirror') || target.classList.contains('scroll-paper') || target.closest('.ProseMirror') == null)) target = null
+      if (!anchorEl || !anchorEl.isConnected) {
+        let t = document.elementFromPoint(anchorX, anchorY) as HTMLElement | null
+        if (t && (!el.contains(t) || t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper') || t.closest('.ProseMirror') == null)) t = null
+        anchorEl = t
+      }
       const keepLeft = el.scrollLeft
       const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)
       const ratio = el.scrollTop / denomBefore
+      const topBefore = anchorEl ? anchorEl.getBoundingClientRect().top : 0 // at the CURRENT size
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
       const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
-      if (target && target.isConnected) {
-        const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
-        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - anchorY)) // anchor back under the viewport centre
+      if (anchorEl && anchorEl.isConnected) {
+        const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
+        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - topBefore)) // hold the anchored text still
         el.scrollLeft = keepLeft
       } else {
         el.scrollTop = ratio * Math.max(1, el.scrollHeight - el.clientHeight) // no anchor → keep relative position
@@ -102,6 +113,7 @@ export function Scroll({
       editorZoomRef.current = next
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => {
+        anchorEl = null // gesture over → next gesture picks a fresh anchor under the centre
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
         try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
       }, 200)
@@ -242,7 +254,10 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   }, [])
 
   const lastSigRef = useRef('')
-  useEffect(() => {
+  // useLayoutEffect (not useEffect): compute the first set of marks BEFORE the browser paints the
+  // newly-mounted editor, so page guides + logos appear in the SAME frame as the text instead of
+  // popping in a beat later (one visible stage of the staged-load "shakiness").
+  useLayoutEffect(() => {
     if (gapped || paperSize === 'scroll') { setMarks([]); lastSigRef.current = ''; return }
     const el = sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
