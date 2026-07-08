@@ -609,6 +609,43 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   )
 }
 
+// ── Editor snap (experimental) ────────────────────────────────────────────────
+// Two ways to make the editor "grab" diffs, chosen by a 3-way toggle. Both read the diff CENTRES in the
+// editor's own content coordinates.
+export type SnapMode = 'off' | 'warp' | 'settle'
+
+function diffCentres(el: HTMLElement): Array<{ c: number; half: number }> {
+  const rect = el.getBoundingClientRect()
+  const byIdx = new Map<string, { top: number; bot: number }>()
+  el.querySelectorAll('[data-opidx]').forEach((node) => {
+    const e = node as HTMLElement
+    if (!e.classList.contains('diff-add') && !e.classList.contains('diff-del')) return
+    const idx = e.getAttribute('data-opidx')!
+    const r = e.getBoundingClientRect()
+    const top = r.top - rect.top + el.scrollTop, bot = r.bottom - rect.top + el.scrollTop
+    const prev = byIdx.get(idx)
+    if (prev) { prev.top = Math.min(prev.top, top); prev.bot = Math.max(prev.bot, bot) }
+    else byIdx.set(idx, { top, bot })
+  })
+  return [...byIdx.values()].map(({ top, bot }) => ({ c: (top + bot) / 2, half: (bot - top) / 2 }))
+}
+
+// Speed multiplier at scroll position `pos`: a Mexican-hat per diff — slower (<1) through the body, faster
+// (>1) in the ~40px shoulders — SUPERIMPOSED. The hat integrates to ~0, so total scroll distance is
+// preserved; it just redistributes screen-time onto the changes. Clamped so it never stalls or reverses.
+const SNAP_SHOULDER = 40, SNAP_STRENGTH = 0.55
+function scrollSpeedFactor(pos: number, centres: Array<{ c: number; half: number }>): number {
+  let s = 1
+  for (const { c, half } of centres) {
+    const reach = half + SNAP_SHOULDER
+    const x = (pos - c) / reach
+    if (Math.abs(x) > 1.4) continue
+    const hat = -(1 - 3 * x * x) * Math.exp(-2 * x * x) // -1 at centre (slow), positive in the shoulders (fast)
+    s += SNAP_STRENGTH * hat
+  }
+  return Math.min(2.2, Math.max(0.2, s))
+}
+
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
 }: {
@@ -627,6 +664,14 @@ function SplitDiffView({
   const vertical = isPhone || isNarrow
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
+  const [snapMode, setSnapMode] = useState<SnapMode>(() => {
+    try { return (localStorage.getItem('inkwave:editorSnap') as SnapMode) || 'off' } catch { return 'off' }
+  })
+  const cycleSnap = () => setSnapMode((m) => {
+    const next: SnapMode = m === 'off' ? 'warp' : m === 'warp' ? 'settle' : 'off'
+    try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
+    return next
+  })
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -936,6 +981,57 @@ function SplitDiffView({
     }
   }, [runSpring, setAlignGlow])
 
+  // Editor snap mode A — WHEEL-TAKEOVER SPEED-WARP: we drive scrollTop ourselves from a warped wheel
+  // delta, so the editor slows through a diff and speeds up in its shoulders (see scrollSpeedFactor).
+  // Ctrl/⌘+wheel is left alone (that's the diff zoom). Centres are cached and refreshed each gesture.
+  useEffect(() => {
+    if (snapMode !== 'warp') return
+    const el = leftScrollRef.current
+    if (!el) return
+    let centres: Array<{ c: number; half: number }> = []
+    let refreshAt = 0
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return
+      e.preventDefault()
+      const now = e.timeStamp
+      if (now - refreshAt > 250) { centres = diffCentres(el); refreshAt = now } // recompute between flicks
+      const s = scrollSpeedFactor(el.scrollTop, centres)
+      el.scrollTop = el.scrollTop + e.deltaY * s
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [snapMode, snapshot.id])
+
+  // Editor snap mode B — SETTLE-SNAP: native scroll is untouched; when it STOPS, ease the nearest diff
+  // centre onto the midline (only if it's already close, so it never yanks). Guarded against re-entrancy.
+  useEffect(() => {
+    if (snapMode !== 'settle') return
+    const el = leftScrollRef.current
+    if (!el) return
+    let timer: ReturnType<typeof setTimeout> | undefined, raf = 0, animating = false
+    const onScroll = () => {
+      if (animating) return
+      clearTimeout(timer); cancelAnimationFrame(raf)
+      timer = setTimeout(() => {
+        const mid = el.scrollTop + el.clientHeight / 2
+        let best: number | null = null, bd = Infinity
+        for (const { c } of diffCentres(el)) { const d = Math.abs(c - mid); if (d < bd) { bd = d; best = c } }
+        if (best == null || bd > 130) return // too far → don't tug
+        const target = Math.max(0, best - el.clientHeight / 2)
+        animating = true
+        const ease = () => {
+          const dx = target - el.scrollTop
+          if (Math.abs(dx) < 0.5) { el.scrollTop = target; animating = false; raf = 0; return }
+          el.scrollTop = el.scrollTop + dx * 0.18
+          raf = requestAnimationFrame(ease)
+        }
+        ease()
+      }, 150)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => { el.removeEventListener('scroll', onScroll); clearTimeout(timer); cancelAnimationFrame(raf) }
+  }, [snapMode, snapshot.id])
+
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
   //  • 'longest' — snap so the biggest change sits just BELOW the midline, i.e. the dotted line
@@ -1077,6 +1173,17 @@ function SplitDiffView({
               boxShadow: '0 2px 8px rgba(80,50,10,0.15)',
             }}>{counter}</div>
           )}
+          {/* Experimental 3-way editor-snap toggle (Off → Speed-warp → Settle-snap). */}
+          <button type="button" onClick={cycleSnap}
+            title="Editor snap to diffs — cycles Off · Speed-warp · Settle-snap"
+            style={{
+              position: 'absolute', top: 12, right: 14, zIndex: 6,
+              background: snapMode === 'off' ? '#fff' : INK, color: snapMode === 'off' ? INK : '#fff',
+              border: `1.5px solid ${INK}`, borderRadius: 9, padding: '3px 10px', fontSize: '0.8rem',
+              fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
+            }}>
+            Snap: {snapMode === 'off' ? 'Off' : snapMode === 'warp' ? 'Speed-warp' : 'Settle-snap'}
+          </button>
           <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
               <div style={{ zoom: diffZoom } as React.CSSProperties}>
