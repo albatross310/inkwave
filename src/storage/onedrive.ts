@@ -10,7 +10,8 @@
 // enters the prerender/SSR graph.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundle, bundleFilename, composeTraceFile, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { buildExportBundle, bundleFilename, composeTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { parseTraceOffThread } from '../workers/parseClient'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
@@ -221,7 +222,7 @@ export async function preMergeRemote(doc: InkwaveDocument): Promise<void> {
   try {
     const res = await fetch(contentUrl(stableFilename(doc)), { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return
-    const remote = parseTraceFile(await res.text())
+    const remote = await parseTraceOffThread(await res.text())
     if (remote.snapshots?.length) await restoreSnapshotsFromBundle(doc.id, remote.snapshots)
     markWritebackMerged(key)
   } catch { /* no remote yet → the first sync retries its own merge */ }
@@ -337,7 +338,7 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
     try {
       const res = await fetch(contentUrl(studioName), { headers: { Authorization: `Bearer ${token}` } })
       if (res.ok) {
-        const remote = parseTraceFile(await res.text())
+        const remote = await parseTraceOffThread(await res.text())
         if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots)
         markWritebackMerged(key)
       }

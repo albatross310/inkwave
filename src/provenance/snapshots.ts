@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../types/document'
 import { contentHash, bundleHash, bibliographyHash } from './hash'
 import { stampBundle, upgradeProof } from './ots'
+import { gunzipJsonOffThread } from '../workers/parseClient'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -27,14 +28,6 @@ async function gzipEncode(json: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(cs.readable).arrayBuffer())
 }
 
-async function gzipDecode(buf: ArrayBuffer): Promise<string> {
-  const ds = new DecompressionStream('gzip')
-  const w  = ds.writable.getWriter()
-  void w.write(buf)
-  void w.close()
-  return new Response(ds.readable).text()
-}
-
 // Detect gzip by magic bytes 0x1f 0x8b.
 function isGzip(buf: ArrayBuffer): boolean {
   const v = new Uint8Array(buf, 0, 2)
@@ -50,9 +43,12 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
     }
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
     const buf  = await file.arrayBuffer()
-    // Legacy uncompressed files fall through to plain UTF-8 decode.
-    const json = isGzip(buf) ? await gzipDecode(buf) : new TextDecoder().decode(buf)
-    const parsed = JSON.parse(json)
+    // Gzip archives (the normal case) gunzip + JSON.parse OFF-THREAD — a big archive is ~1s of
+    // unbreakable main-thread work otherwise, felt as typing/scroll freezes whenever it loads.
+    // Legacy uncompressed files fall through to a plain UTF-8 decode inline.
+    const parsed = isGzip(buf)
+      ? await gunzipJsonOffThread(buf)
+      : JSON.parse(new TextDecoder().decode(buf))
     if (!Array.isArray(parsed)) return []
     // Normalise legacy 'kick' trigger to 'word-nudge' on read (stored data backward compat)
     return (parsed as Snapshot[]).map((s) =>

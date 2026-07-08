@@ -5,7 +5,8 @@
 // duplicate) on every sync. Gated on VITE_GOOGLE_CLIENT_ID — inert until that's set.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { composeTraceFile, buildExportBundle, bundleFilename, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
+import { parseTraceOffThread } from '../workers/parseClient'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
@@ -238,7 +239,7 @@ export async function preMergeGDrive(docId: string): Promise<void> {
   try {
     const text = await downloadGoogleDriveFile(fileId)
     if (text) {
-      const remote = parseTraceFile(text)
+      const remote = await parseTraceOffThread(text)
       if (remote.snapshots?.length) await restoreSnapshotsFromBundle(docId, remote.snapshots)
     }
     markWritebackMerged(key)
@@ -313,7 +314,7 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (fileId && needsWritebackMerge(key)) {
     try {
       const text = await downloadGoogleDriveFile(fileId)
-      if (text) { const remote = parseTraceFile(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
+      if (text) { const remote = await parseTraceOffThread(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
       markWritebackMerged(key)
     } catch { /* unreadable → write local as-is; retry next sync */ }
   }
