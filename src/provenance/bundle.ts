@@ -279,7 +279,10 @@ export function composeTraceFile(bundle: ExportBundle): string {
     'read it — open this file at iwzero.me/verify to check it.',
     '══════════════════════════════════════════════════════════════',
     '',
-    JSON.stringify(bundle, null, 2),
+    // Compact, not pretty-printed: the wrapped text above IS the human-readable part; indenting a
+    // record that embeds every snapshot (tens of MB on big docs) roughly doubles the main-thread
+    // stringify cost and the file size — paid on every mirror/sync write.
+    JSON.stringify(bundle),
     '',
   ].join('\n')
 }

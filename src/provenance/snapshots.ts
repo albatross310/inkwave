@@ -41,7 +41,7 @@ function isGzip(buf: ArrayBuffer): boolean {
   return v[0] === 0x1f && v[1] === 0x8b
 }
 
-async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
+async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
   try {
     const root = await getRoot()
     let dir: FileSystemDirectoryHandle = root
@@ -63,6 +63,22 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
   }
 }
 
+// ── In-memory cache ─────────────────────────────────────────────────────────────
+// One parsed copy per document per session. A single doc open used to gunzip + JSON.parse the whole
+// archive up to 5 times (eager list, receipt recovery ×2, folder link, cloud resume) — 100ms–1s each
+// on a big archive. Every mutation in this app funnels through writeSnapshotsFile (and the editor
+// serialises snapshot work through one queue), so a write-through cache is safe. Reads hand out a
+// shallow COPY so a caller's in-place edits can't alias the cached array. (A second tab writing the
+// same doc's OPFS bypasses this cache — but concurrent same-doc tabs already race on the file itself;
+// the grow-only merge protects sync targets either way.)
+const _snapCache = new Map<string, Promise<Snapshot[]>>()
+
+async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
+  let p = _snapCache.get(documentId)
+  if (!p) { p = readSnapshotsFromDisk(documentId); _snapCache.set(documentId, p) }
+  return (await p).slice()
+}
+
 async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promise<void> {
   const root = await getRoot()
   let dir: FileSystemDirectoryHandle = root
@@ -73,6 +89,7 @@ async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promis
   const writable = await handle.createWritable()
   await writable.write(await gzipEncode(JSON.stringify(snaps)))
   await writable.close()
+  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful close
 }
 
 /** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back
