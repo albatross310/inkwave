@@ -229,6 +229,24 @@ export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{
 // ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
 
+/** Cheap remote-file check: validates the silent token and returns the file's link + modified time
+ *  from Drive METADATA — no upload, no download. Used by resume-on-load, which previously rebuilt
+ *  and re-uploaded the whole bundle just to re-activate sync. */
+export async function getGDriveFileInfo(docId: string): Promise<{ webUrl: string | null; modifiedAt: number } | null> {
+  const id = driveFileId(docId)
+  if (!id) return null
+  const token = await getDriveToken(false) // silent only — never a popup on load
+  if (!token) return null
+  try {
+    const res = await fetch(`${FILES_API}/${id}?fields=webViewLink,parents,modifiedTime`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return null
+    const d = (await res.json()) as { webViewLink?: string; parents?: string[]; modifiedTime?: string }
+    return { webUrl: folderUrl(d), modifiedAt: d.modifiedTime ? new Date(d.modifiedTime).getTime() : 0 }
+  } catch {
+    return null
+  }
+}
+
 // List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
 // your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
 // open via "This computer" (the mounted Drive folder) on desktop.

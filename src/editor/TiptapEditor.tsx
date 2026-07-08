@@ -52,8 +52,8 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder } from '../storage/gdrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
@@ -1060,17 +1060,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // syncing without the writer hitting Save. Silent: uses the cached/silent token; no token → no-op.
   useEffect(() => {
     if (!googleDriveConfigured() || getDocSource(docRef.current.id) !== 'gdrive' || !googleDriveFileId(docRef.current.id)) return
-    void (async () => {
-      const snaps = await listSnapshots(docRef.current.id)
-      const r = await syncToGoogleDrive(docRef.current, snaps)
-      if (r.ok) {
-        gdriveActiveRef.current = true
-        oneDriveActiveRef.current = false
-        setGdriveActive(true)
-        setLastGdriveSync(Date.now())
-        setGdriveUrl(r.webUrl)
-      }
-    })()
+    // LOAD-PATH RULE: resume must NOT rebuild + re-upload the bundle (that cost ~1s of parse/encode/
+    // network on every open of a big doc, for a byte-identical file). A metadata GET validates the
+    // token and fetches the link; the next provenance checkpoint mirrors as usual (mirrorIfActive).
+    void getGDriveFileInfo(docRef.current.id).then((info) => {
+      if (!info) return // no silent token → stay inactive until the writer clicks sync
+      gdriveActiveRef.current = true
+      oneDriveActiveRef.current = false
+      setGdriveActive(true)
+      setLastGdriveSync(Date.now()) // link verified + nothing changed locally since load ⇒ in sync
+      setGdriveUrl(info.webUrl)
+    })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reconnect a prior OneDrive session on load (also completes a sign-in we returned from).
@@ -1093,9 +1093,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           })
       } else if (acc && getDocSource(docRef.current.id) === 'onedrive' && oneDriveFilename(docRef.current.id)) {
         // A OneDrive-synced doc loaded (e.g. opened via Upload) → resume syncing it (no Save needed).
-        void listSnapshots(docRef.current.id)
-          .then((s) => syncToOneDrive(docRef.current, s))
-          .then((r) => { if (r.ok) { oneDriveActiveRef.current = true; setLastSync(Date.now()); setOneDriveUrl(r.webUrl) } })
+        // LOAD-PATH RULE: metadata GET only — no bundle rebuild/upload on open (see gdrive resume).
+        void getRemoteFileInfo(docRef.current)
+          .then((info) => { if (info) { oneDriveActiveRef.current = true; setLastSync(Date.now()); setOneDriveUrl(info.webUrl) } })
       }
     })
   }, [])
@@ -1151,8 +1151,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       folderActiveRef.current = true
       setNeedsReconnect(false)
       setFileName(h.name)
-      const snaps = await listSnapshots(docRef.current.id)
-      if (await writeBundleToFile(docRef.current, snaps)) setLastFileSave(Date.now())
+      // LOAD-PATH RULE: re-link only — do NOT rebuild + rewrite the bundle here. The old load-time
+      // write re-read/re-encoded/rewrote the whole (possibly 20 MB) file before anything changed and
+      // was most of the ~1.5s open block. The file already holds our last write and nothing local has
+      // changed since load, so the verified link means "in sync"; the next provenance checkpoint
+      // mirrors as usual (mirrorIfActive), which also runs the once-per-session grow-only merge then.
+      setLastFileSave(Date.now())
       return
     }
     // A linked file exists but we don't currently have write permission → show a clear "reconnect"

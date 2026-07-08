@@ -179,20 +179,50 @@ async function putFile(token: string, name: string, content: string): Promise<st
   return (data as { webUrl?: string }).webUrl ?? null
 }
 
-/** Read back the synced file's heartbeat (which device last wrote it, and when) for the multi-device
- *  guard. null if not signed in / no file yet. */
-export async function readRemoteHeartbeat(doc: InkwaveDocument): Promise<{ session?: string; exportedAt?: string } | null> {
+// The Graph metadata URL for the synced file (same addressing as contentUrl, minus `:/content`).
+function itemUrl(name: string): string {
+  const folder = getChosenFolder()
+  const base = folder?.id
+    ? `${GRAPH}/me/drive/items/${folder.id}:/${encodeURIComponent(name)}`
+    : `${GRAPH}/me/drive/root:/${encodeURIComponent(name)}`
+  return `${base}?$select=lastModifiedDateTime,webUrl,size`
+}
+
+// When WE last uploaded (per doc, local clock) — the baseline the metadata heartbeat compares against.
+const writeAtKey = (docId: string) => `inkwave:odWriteAt:${docId}`
+function recordOneDriveWrite(docId: string): void {
+  try { localStorage.setItem(writeAtKey(docId), String(Date.now())) } catch { /* private mode */ }
+}
+
+/** Cheap remote-file check: validates the silent token and returns the file's link + modified time
+ *  from Graph METADATA — never downloads the (possibly 20 MB) body. Used by resume-on-load and the
+ *  heartbeat, both of which previously fetched + parsed the whole file. */
+export async function getRemoteFileInfo(doc: InkwaveDocument): Promise<{ webUrl: string | null; modifiedAt: number } | null> {
   if (!CLIENT_ID) return null
   const token = await getSilentToken()
   if (!token) return null
   try {
-    const res = await fetch(contentUrl(stableFilename(doc)), { headers: { Authorization: `Bearer ${token}` } })
+    const res = await fetch(itemUrl(stableFilename(doc)), { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return null
-    const bundle = parseTraceFile(await res.text())
-    return { session: bundle.session, exportedAt: bundle.exportedAt }
+    const d = (await res.json()) as { webUrl?: string; lastModifiedDateTime?: string }
+    return { webUrl: d.webUrl ?? null, modifiedAt: d.lastModifiedDateTime ? new Date(d.lastModifiedDateTime).getTime() : 0 }
   } catch {
     return null
   }
+}
+
+/** Multi-device guard WITHOUT downloading the file — metadata only, mirroring readLocalHeartbeat's
+ *  design: the remote file having been modified well after OUR last upload means another device wrote
+ *  it. The generous margin absorbs Graph-server vs local clock skew; the guard is purely advisory. */
+export async function readRemoteHeartbeat(doc: InkwaveDocument): Promise<{ session?: string; exportedAt?: string } | null> {
+  const info = await getRemoteFileInfo(doc)
+  if (!info?.modifiedAt) return null
+  let ourWrite = 0
+  try { ourWrite = Number(localStorage.getItem(writeAtKey(doc.id))) || 0 } catch { /* private mode */ }
+  if (ourWrite && info.modifiedAt > ourWrite + 10_000) {
+    return { session: 'other-device', exportedAt: new Date(info.modifiedAt).toISOString() }
+  }
+  return null // we wrote it last (or haven't uploaded from this device yet) → no conflict
 }
 
 export interface DriveFolder { id: string; name: string }
@@ -300,6 +330,7 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   const bundle = buildExportBundle(doc, merged)
   try {
     const webUrl = await putFile(token, studioName, composeTraceFile(bundle))
+    recordOneDriveWrite(doc.id) // heartbeat baseline: metadata newer than this = another device
     setDocSource(doc.id, 'onedrive')
     void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget
     if (merged.length > snapshots.length) void restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
