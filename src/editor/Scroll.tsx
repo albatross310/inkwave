@@ -84,16 +84,31 @@ export function Scroll({
       const net = steps
       steps = 0
       if (!net) return
-      // Pick (or re-pick, if the node was destroyed) the block at the VIEWPORT CENTRE. Reject the
-      // big containers (.ProseMirror / .scroll-paper) — they span the whole doc, so their top reflows
-      // toward the doc top and a correction against them lurches (the old "jump to top" bug). No
-      // usable anchor → fall back to preserving the scroll RATIO.
+      // Pick (or re-pick, if the node was destroyed) a TEXT block near the VIEWPORT CENTRE. Reject:
+      // the big containers (.ProseMirror / .scroll-paper — they span the whole doc, so their top
+      // reflows toward the doc top and a correction against them lurches — the old "jump to top"
+      // bug) and the PAGE-GAP widgets/sheet chrome (their heights are pinned px that do NOT reflow
+      // with the font, so anchoring against one warps the correction — the "funky near page gaps"
+      // bug). When the centre line falls inside a gap, probe outward until real text is found, so
+      // the anchor is effectively the nearest text above/below the gap.
       const vr = el.getBoundingClientRect()
       const anchorX = vr.left + vr.width / 2, anchorY = vr.top + vr.height / 2
+      const pickAt = (y: number): HTMLElement | null => {
+        const t = document.elementFromPoint(anchorX, y) as HTMLElement | null
+        if (!t || !el.contains(t)) return null
+        if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
+        if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
+        if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
+        return t
+      }
       if (!anchorEl || !anchorEl.isConnected) {
-        let t = document.elementFromPoint(anchorX, anchorY) as HTMLElement | null
-        if (t && (!el.contains(t) || t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper') || t.closest('.ProseMirror') == null)) t = null
-        anchorEl = t
+        // Probe the centre first, then alternate above/below in growing steps — finds the nearest
+        // text block when the midline sits in a page gap.
+        anchorEl = pickAt(anchorY)
+        for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
+          if (anchorEl) break
+          anchorEl = pickAt(anchorY + dy)
+        }
       }
       const keepLeft = el.scrollLeft
       const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)

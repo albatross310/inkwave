@@ -174,6 +174,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
         props: { decorations(state) { return KEY.getState(state) } },
         view(view) {
           if (!enabled) return {}
+          ;(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady = false // fresh doc → re-latch
           let raf = 0
           let paintRaf = 0
           let lastInputSig  = '' // doc size + page height — only re-measure when these change
@@ -306,6 +307,12 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             schedulePaint()
+            // Latch + announce the FIRST successful measure — the editor's one-paint reveal gate
+            // (TiptapEditor `settled`) waits for it so text and page gaps appear together.
+            if (!(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady) {
+              ;(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady = true
+              window.dispatchEvent(new Event('inkwave:pagination-ready'))
+            }
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
           const forceRecompute = () => { lastInputSig = ''; schedule() }

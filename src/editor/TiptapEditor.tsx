@@ -222,6 +222,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [otherDevice, setOtherDevice] = useState(false) // another device looks active on this doc
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const [wordCount, setWordCount] = useState(0) // live document word count (shown in the record panel)
+  // ONE-PAINT REVEAL: hold the text invisible (visibility, so layout/measure still run) until fonts
+  // are ready and (gapped mode) the first pagination measure has landed — then fade it in ONCE.
+  // Kills the staged "text → font swap → gaps arrive" shakiness on load and on open-document; the
+  // parchment + background paint instantly from the prerendered shell either way. Hard 1.2s cap so
+  // a slow font can never hold the writing hostage.
+  const [settled, setSettled] = useState(false)
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
@@ -654,6 +660,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     editor.on('update', onChange)
     return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reveal gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
+  useEffect(() => {
+    if (!editor) return
+    let done = false
+    const finish = () => { if (!done) { done = true; setSettled(true) } }
+    const cap = setTimeout(finish, 1200)
+    const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
+    const paginationReady: Promise<void> = gappedPagesEnabled()
+      ? ((window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
+        ? Promise.resolve()
+        : new Promise((res) => {
+            const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
+            window.addEventListener('inkwave:pagination-ready', on)
+          }))
+      : Promise.resolve()
+    void Promise.all([fontsReady, paginationReady]).then(() =>
+      requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
+    )
+    return () => clearTimeout(cap)
+  }, [editor])
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
   // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
@@ -1253,7 +1280,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void SessionRunner.open(docId).then(async (runner) => {
       if (cancelled || !runner || docRef.current.id !== docId) return
       sessionRef.current = runner
+      // Adopt the server set + repaint IMMEDIATELY; the receipt recovery/purge below is heavy
+      // (snapshot archive reads + an Ed25519 verify per historical receipt chain) and used to run
+      // right here — landing in the first seconds after load, where it competed with first scrolls
+      // and keystrokes (part of the "shaky first 2 seconds"). It now runs at browser idle.
+      priorReceiptsRef.current = docRef.current.scasReceipts ?? []
+      scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
+      if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
 
+      const recoverAndPurge = async () => {
+      if (cancelled || docRef.current.id !== docId) return
       // Recover any receipts from previous sessions that were lost due to the cross-session
       // overwrite bug (now fixed). Scan OPFS snapshots; collect receipts from sessions that
       // appear in the snapshots but not in doc.scasReceipts. Only adds receipts from sessions
@@ -1324,8 +1360,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }
 
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
-      scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
-      if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
+      }
+      const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
+      if (w.requestIdleCallback) w.requestIdleCallback(() => void recoverAndPurge(), { timeout: 15_000 })
+      else setTimeout(() => void recoverAndPurge(), 5_000)
     })
     return () => { cancelled = true }
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1500,7 +1538,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           </div>
         )}
         <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill>
-          <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
+          <div style={{
+            '--inkwave-lh': lineHeight,
+            // One-paint reveal: visibility (not display) keeps layout live so fonts/pagination can
+            // measure the hidden text; the opacity fade makes the single appearance gentle.
+            visibility: settled ? 'visible' : 'hidden',
+            opacity: settled ? 1 : 0,
+            transition: 'opacity 140ms ease',
+          } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
           )}
