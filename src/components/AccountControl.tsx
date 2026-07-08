@@ -1,7 +1,8 @@
 import { SignedIn, SignedOut, useUser, useClerk, ClerkLoading, ClerkLoaded } from '@clerk/clerk-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { authEnabled, CLERK_PUBLISHABLE_KEY } from '../auth/config'
+import { clerkProviderMounted, CLERK_PUBLISHABLE_KEY } from '../auth/config'
+import { armHeadless, getHeadless, type HeadlessClerk } from '../auth/clerkHeadless'
 import { useCadenceTier, stripeClientSecret, paypalApproveUrl, refreshEntitlement, getClerkToken } from '../auth/entitlement'
 
 // On sign-in, ping the webhook-free email capture once per user. Identity is taken server-side from
@@ -160,9 +161,10 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-// Signed-in account rows.
-function AccountItems({ onClose }: { onClose: () => void }) {
-  const clerk = useClerk()
+// Signed-in account rows — shared by the provider (armed) and headless paths. `clerk` is whichever
+// instance is live (useClerk()'s or the lazy clerk-js singleton); both expose these two calls.
+type ClerkActions = { openUserProfile: () => void; signOut: (opts: { redirectUrl: string }) => Promise<unknown> | void }
+function AccountItems({ clerk, onClose }: { clerk: ClerkActions; onClose: () => void }) {
   const { active } = useCadenceTier()
   const [showInsignia, setShowInsignia] = useState(false)
   return (
@@ -177,28 +179,87 @@ function AccountItems({ onClose }: { onClose: () => void }) {
   )
 }
 
+// The armed-path wrapper: pulls the instance from ClerkProvider context (provider loads only then).
+function ProviderAccountItems({ onClose }: { onClose: () => void }) {
+  const clerk = useClerk()
+  return <AccountItems clerk={clerk} onClose={onClose} />
+}
+
 function SignInItem({ onClose }: { onClose: () => void }) {
   const clerk = useClerk()
   return <Row onClick={() => { onClose(); clerk.openSignIn() }}>Sign in</Row>
 }
 
+// ─── Headless (no-reload) sign-in ───────────────────────────────────────────────
+// The free tier boots WITHOUT ClerkProvider (keep-startup-fast rule), so the @clerk/clerk-react
+// hooks above are unavailable until the NEXT load. This path drives the same menu rows off the
+// lazy clerk-js singleton instead: the first "Sign in" click arms the sticky opt-in (so future
+// loads mount the real provider) and opens Clerk's modal IN THIS SESSION — no location.reload().
+
+// Once-per-user /api/sync-profile ping (headless mirror of ProfileSync). Module-level so menu
+// close/reopen doesn't re-send.
+const headlessSyncedFor = { id: null as string | null }
+
+function HeadlessAuth({ onClose }: { onClose: () => void }) {
+  const [clerk, setClerk] = useState<HeadlessClerk | null>(() => getHeadless())
+  const [signedIn, setSignedIn] = useState(() => !!getHeadless()?.user)
+  const [busy, setBusy] = useState(false)
+
+  // Re-render on auth changes (sign-in completing in the modal, sign-out). addListener fires
+  // immediately with the current state, then on every mutation; it returns its unsubscriber.
+  useEffect(() => {
+    if (!clerk) return
+    return clerk.addListener(({ user }) => {
+      setSignedIn(!!user)
+      if (user && headlessSyncedFor.id !== user.id) {
+        headlessSyncedFor.id = user.id
+        void (async () => {
+          const token = await getClerkToken()
+          if (!token) return
+          await fetch('/api/sync-profile', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+          }).catch(() => {})
+        })()
+      }
+    })
+  }, [clerk])
+
+  async function signIn() {
+    // Sticky opt-in FIRST — from the next load on, entry.client mounts ClerkProvider and the armed
+    // path takes over seamlessly (same session cookie). This session continues headlessly.
+    try { localStorage.setItem('inkwave:auth', '1') } catch { /* private mode */ }
+    setBusy(true)
+    const c = await armHeadless()
+    setBusy(false)
+    setClerk(c)
+    if (!c) return // load failed (offline / blocked) — keep the row so a later click retries
+    onClose()
+    c.openSignIn()
+  }
+
+  return (
+    <>
+      <div className="my-1 border-t border-stone-100" />
+      {busy
+        ? <Row disabled><span className="iw-subtle-flash">…</span></Row>
+        : signedIn && clerk
+          ? <AccountItems clerk={clerk} onClose={onClose} />
+          : <Row onClick={() => void signIn()}>Sign in</Row>}
+    </>
+  )
+}
+
 // Account section for the OptionsMenu (hamburger) — sits alongside Save/Open. Sign-in when signed
 // out; Insignia + account actions when signed in. Renders nothing unless paid-tier auth is set up.
 export function AccountMenuItems({ onClose }: { onClose: () => void }) {
-  // Auth is LAZY (opt-in) so first load stays fast — Clerk isn't mounted until asked. This "Sign in"
-  // arms it and reloads; Clerk then loads (~1–2s) and auto-opens the sign-in modal.
-  if (!authEnabled()) {
+  // Auth is LAZY (opt-in) so first load stays fast — entry.client mounts ClerkProvider only when
+  // the sticky flag was set BEFORE this load. Otherwise (the free-tier default) the headless path
+  // handles sign-in in-place; the flag it sets makes every later load take the armed branch. The
+  // branch is fixed for the whole session (set pre-hydration), so hooks stay unconditional.
+  if (!clerkProviderMounted()) {
     if (!CLERK_PUBLISHABLE_KEY) return null // auth not configured at all → no button
-    return (
-      <>
-        <div className="my-1 border-t border-stone-100" />
-        <Row onClick={() => {
-          onClose()
-          try { localStorage.setItem('inkwave:auth', '1'); sessionStorage.setItem('inkwave:autoSignIn', '1') } catch { /* private */ }
-          location.reload()
-        }}>Sign in</Row>
-      </>
-    )
+    return <HeadlessAuth onClose={onClose} />
   }
   return (
     <>
@@ -208,7 +269,7 @@ export function AccountMenuItems({ onClose }: { onClose: () => void }) {
       <ClerkLoading><Row disabled><span className="iw-subtle-flash">…</span></Row></ClerkLoading>
       <ClerkLoaded>
         <SignedOut><SignInItem onClose={onClose} /></SignedOut>
-        <SignedIn><AccountItems onClose={onClose} /></SignedIn>
+        <SignedIn><ProviderAccountItems onClose={onClose} /></SignedIn>
       </ClerkLoaded>
     </>
   )

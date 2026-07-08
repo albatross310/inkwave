@@ -17,9 +17,12 @@ async function bootstrap() {
   // Only mount Clerk when auth is explicitly requested (?auth) — NOT on every free-tier load, where
   // its multi-second dev-instance init is the startup CPU whir. Same gate as authEnabled() so the
   // provider is present exactly when the auth UI (AccountControl / /login) renders. See auth/config.
-  const { authRequested } = await import('../src/auth/config')
+  const { authRequested, markClerkProviderMounted } = await import('../src/auth/config')
   let tree: ReactNode = <HydratedRouter />
   if (pk && authRequested()) {
+    // Record the mount BEFORE hydration: AccountControl branches on this (provider hooks vs the
+    // headless clerk-js path) and must never see a half-set state.
+    markClerkProviderMounted()
     const { ClerkProvider, useClerk } = await import('@clerk/clerk-react')
     // After the lazy "Sign in" armed auth + reloaded, open the sign-in modal automatically (one-click).
     const AutoSignIn = () => {
