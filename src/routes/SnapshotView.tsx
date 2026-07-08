@@ -628,25 +628,22 @@ function SplitDiffView({
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const dragging   = useRef(false)
-  // Critically-damped follow (ζ=1): the diff pane eases to its bijection target with NO overshoot/bounce
-  // — a smooth settle rather than the old tactile "fridge-magnet". The local magnetic snap (see the sync
-  // step) lives in the MAP, not here, so the follow stays uniformly smooth.
+  // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
+  // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
+  // can be stiff without feeling jumpy because the LOCAL easing is baked into the target (the magnetic
+  // snap in the map) — and a pure lerp toward the target never overshoots. Minimap uses a gentler factor.
   const rightTargetRef = useRef<number | null>(null)
-  const springVelRef = useRef(0)
   const springRafRef = useRef(0)
-  const gentleFollowRef = useRef(false) // minimap scrolling → even gentler follow
+  const gentleFollowRef = useRef(false) // minimap scrolling → gentler follow
   const runSpring = useCallback(() => {
     if (springRafRef.current) return
     const step = () => {
       const R = rightScrollRef.current, target = rightTargetRef.current
       if (!R || target == null) { springRafRef.current = 0; return }
       const dx = target - R.scrollTop
-      // v += k·dx − c·v with c = 2√k → critical damping (no oscillation). Lower k = gentler.
-      const stiffness = gentleFollowRef.current ? 0.055 : 0.09
-      const damping = 2 * Math.sqrt(stiffness)
-      springVelRef.current += dx * stiffness - springVelRef.current * damping
-      if (Math.abs(dx) < 0.4 && Math.abs(springVelRef.current) < 0.4) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
-      R.scrollTop = R.scrollTop + springVelRef.current
+      const k = gentleFollowRef.current ? 0.4 : 0.85 // fraction of the gap closed each frame
+      if (Math.abs(dx) < 0.4) { R.scrollTop = target; springRafRef.current = 0; return }
+      R.scrollTop = R.scrollTop + dx * k
       springRafRef.current = requestAnimationFrame(step)
     }
     springRafRef.current = requestAnimationFrame(step)
@@ -864,13 +861,17 @@ function SplitDiffView({
           })
         })
         if (!knots.length) return
-        // Boundary knots pin the extremes: the left pane's very top maps to the right pane's very top and
-        // bottom to bottom, so scrolling to either end of the editor drives the diff to that same end
-        // (through its lead/trail whitespace) instead of stalling short.
-        knots.push({ ly: L.clientHeight / 2, ry: R.clientHeight / 2 })
-        knots.push({ ly: L.scrollHeight - L.clientHeight / 2, ry: R.scrollHeight - R.clientHeight / 2 })
+        // NO boundary knots: pinning the doc extremes to the diff-pane extremes overrode the topmost /
+        // bottommost diffs' own alignment, so they drifted apart at the ends. Instead the map is 1:1 above
+        // the first diff and below the last (see below), which keeps the extreme diffs travelling together
+        // right to the top/bottom (algebra: their screen position matches in both panes under a 1:1 map).
         knots.sort((a, b) => a.ly - b.ly)
         const lMid = L.scrollTop + L.clientHeight / 2
+        // When the editor is pinned at an extreme, the extreme diff can't reach the midline — keep it fully
+        // lit there anyway (its glow distance is clamped to 0 below).
+        const atTop = L.scrollTop <= 1
+        const atBottom = L.scrollTop >= L.scrollHeight - L.clientHeight - 1
+        const topIdx = knots[0]?.idx, botIdx = knots[knots.length - 1]?.idx
         let ry: number
         if (lMid <= knots[0].ly) ry = knots[0].ry - (knots[0].ly - lMid)                       // before first lock point: 1:1
         else if (lMid >= knots[knots.length - 1].ly) ry = knots[knots.length - 1].ry + (lMid - knots[knots.length - 1].ly)
@@ -910,7 +911,7 @@ function SplitDiffView({
           }
         }
         rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
-        if (directFollowRef.current) { R.scrollTop = rightTargetRef.current; springVelRef.current = 0 } // glide, no bounce
+        if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
         else runSpring()
 
         // Synchronised alignment glow: a CONTINUOUS Gaussian per diff — intensity 1 when its centre is on
@@ -921,7 +922,9 @@ function SplitDiffView({
         for (const k of knots) {
           if (k.idx == null) continue
           const reach = (k.lHalf ?? 0) + 40
-          const d = Math.abs(k.ly - lMid)
+          // Pinned extreme diff → clamp to 0 (fully lit) so it stays glowing at the top/bottom.
+          const pinned = (atTop && k.idx === topIdx) || (atBottom && k.idx === botIdx)
+          const d = pinned ? 0 : Math.abs(k.ly - lMid)
           if (d < reach) {
             setAlignGlow(k.idx, Math.exp(-4.5 * (d / reach) ** 2)) // Gaussian, peak at centre
             still.add(k.idx)
@@ -1131,15 +1134,27 @@ function SplitDiffView({
             // AI summaries are an explicit opt-in (privacy: snapshot text → Anthropic via our server).
             // Buttons centred both axes in the (header-less) panel.
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, height: '100%' }}>
-              <button
-                type="button"
-                onClick={onOptInSummaries}
-                title="Generate a plain-language summary of each snapshot. This sends the snapshot text in transit through our servers and on to Anthropic (Claude), which writes the summary."
-                className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
-                style={{ fontSize: '0.85rem', fontWeight: 500, background: INK, color: '#fff', border: `1px solid ${INK}`, cursor: 'pointer' }}
-              >
-                Opt in
-              </button>
+              {/* Opt in + info button on one row (info matches the button's height). */}
+              <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={onOptInSummaries}
+                  title="Generate a plain-language summary of each snapshot. This sends the snapshot text in transit through our servers and on to Anthropic (Claude), which writes the summary."
+                  className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-110"
+                  style={{ fontSize: '0.85rem', fontWeight: 500, background: INK, color: '#fff', border: `1px solid ${INK}`, cursor: 'pointer' }}
+                >
+                  Opt in
+                </button>
+                <button
+                  type="button"
+                  aria-label="About snapshot summaries"
+                  title="Summaries send each snapshot's text in transit through our servers on to Anthropic (Claude), which writes a short plain-language summary. Nothing is sent until you opt in."
+                  className="rounded-full font-serif shadow-sm transition-colors hover:brightness-95 flex items-center justify-center"
+                  style={{ aspectRatio: '1', fontSize: '0.9rem', fontWeight: 700, fontStyle: 'italic', background: '#fff', color: INK, border: `1px solid ${INK}`, cursor: 'help' }}
+                >
+                  i
+                </button>
+              </div>
               <a href="/privacy" target="_blank" rel="noopener"
                 title="How Inkwave handles your data"
                 className="px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors hover:brightness-95"
