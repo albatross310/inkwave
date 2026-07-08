@@ -621,7 +621,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
 // ── Editor snap (experimental) ────────────────────────────────────────────────
 // Two ways to make the editor "grab" diffs, chosen by a 3-way toggle. Both read the diff CENTRES in the
 // editor's own content coordinates.
-export type SnapMode = 'off' | 'warp' | 'settle'
+export type SnapMode = 'off' | 'warp'
 export type BijMode = 'both' | 'reverse' | 'off' // cross-pane sync: both directions / diff→editor only / none
 
 type Centre = { c: number; half: number; add: boolean; len: number }
@@ -688,10 +688,10 @@ function SplitDiffView({
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const [snapMode, setSnapMode] = useState<SnapMode>(() => {
-    try { return (localStorage.getItem('inkwave:editorSnap') as SnapMode) || 'off' } catch { return 'off' }
+    try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
   })
   const cycleSnap = () => setSnapMode((m) => {
-    const next: SnapMode = m === 'off' ? 'warp' : m === 'warp' ? 'settle' : 'off'
+    const next: SnapMode = m === 'off' ? 'warp' : 'off'
     try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
     return next
   })
@@ -712,7 +712,7 @@ function SplitDiffView({
   const centresRef = useRef<Centre[]>([])
   // Knots for the bijection, cached the same way: each diff's centre in BOTH panes (ly ↔ ry), sorted by
   // ly. Used forward (editor→diff, onLeftScroll) and inverse (diff→editor, the reverse sync).
-  const knotsRef = useRef<Array<{ ly: number; ry: number }>>([])
+  const knotsRef = useRef<Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }>>([])
   // Which pane the user is actively scrolling ('left' = editor, 'right' = diff) — set by wheel over each,
   // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
   const driverRef = useRef<'left' | 'right'>('left') // whichever pane the cursor is over (default editor)
@@ -760,6 +760,23 @@ function SplitDiffView({
       root?.querySelectorAll(`[data-opidx="${idx}"]`).forEach(el => (el as HTMLElement).style.setProperty('--iw-align', val))
     }
   }, [])
+  const diffFlightRef = useRef(false) // true while a click flies the DIFF pane (editor static) → glow off its midline
+  // Plateau glow driven by ANY pane's midline (from the cached knots): fully lit while the midline is inside
+  // a diff, smootherstep dropoff over 40px. Used when the diff pane scrolls on its own (a click flight),
+  // where the editor's onLeftScroll glow can't fire.
+  const setGlowFromDiffMid = useCallback((mid: number) => {
+    const still = new Set<number>()
+    for (const k of knotsRef.current) {
+      const d = Math.abs(k.ry - mid)
+      let I: number
+      if (d <= k.rHalf) I = 1
+      else if (d >= k.rHalf + 40) I = 0
+      else { const t = 1 - (d - k.rHalf) / 40; I = t * t * t * (t * (t * 6 - 15) + 10) }
+      if (I > 0.001) { setAlignGlow(k.idx, I); still.add(k.idx) }
+    }
+    for (const idx of glowSetRef.current) if (!still.has(idx)) setAlignGlow(idx, 0)
+    glowSetRef.current = still
+  }, [setAlignGlow])
   const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
   const leftScrollRef  = useRef<HTMLDivElement>(null)
@@ -900,19 +917,19 @@ function SplitDiffView({
     activeOpIdxRef.current = next
     setAttr(next, 'data-active', true)
     if (next !== null) {
-      // Clicked in the DIFF pane → scroll only the EDITOR to that change. Mark the diff pane the driver so
-      // the bijection doesn't scroll it back (it stays exactly where you clicked — no jump to the midline).
+      // Clicked in the DIFF pane → scroll only the EDITOR so that same change lands at the SAME viewport-y
+      // it's at in the diff pane (they line up). Driver pinned to the diff pane so it stays put.
       driverRef.current = 'right'
-      const el = leftScrollRef.current
-      if (!el) return
-      const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
-      if (!target) return
-      const elRect     = el.getBoundingClientRect()
-      const targetRect = target.getBoundingClientRect()
-      const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
-      const newScrollTop = targetTopInContent - el.clientHeight / 2
-      el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
-      anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
+      const R = rightScrollRef.current, L = leftScrollRef.current
+      if (!R || !L) return
+      const rEl = R.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      const lEl = L.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      if (!rEl || !lEl) return
+      const yr = rEl.getBoundingClientRect().top - R.getBoundingClientRect().top
+      const lTop = lEl.getBoundingClientRect().top - L.getBoundingClientRect().top + L.scrollTop
+      const newScrollTop = Math.max(0, lTop - yr)
+      L.scrollTo({ top: newScrollTop, behavior: 'smooth' })
+      anchorRatioRef.current = (newScrollTop + L.clientHeight / 2) / L.scrollHeight
     }
   }, [setAttr])
 
@@ -924,18 +941,20 @@ function SplitDiffView({
     activeOpIdxRef.current = next
     setAttr(next, 'data-active', true)
     if (next !== null) {
-      // Clicked in the EDITOR → scroll only the DIFF pane. Mark the editor the driver so the bijection
-      // doesn't scroll the editor back (it stays put — no jump to the midline).
+      // Clicked in the EDITOR → scroll only the DIFF pane so that change lands at the SAME viewport-y it's
+      // at in the editor. Driver pinned to the editor so it stays put. Flag the flight so the diffs light
+      // as the diff pane passes them (its own scroll handler drives the glow — see onRightScroll).
       driverRef.current = 'left'
-      const el = rightScrollRef.current
-      if (!el) return
-      const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
-      if (!target) return
-      const elRect     = el.getBoundingClientRect()
-      const targetRect = target.getBoundingClientRect()
-      const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
-      const newScrollTop = targetTopInContent - el.clientHeight / 2
-      el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
+      diffFlightRef.current = true
+      window.setTimeout(() => { diffFlightRef.current = false }, 900)
+      const L = leftScrollRef.current, R = rightScrollRef.current
+      if (!L || !R) return
+      const lEl = L.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      const rEl = R.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
+      if (!lEl || !rEl) return
+      const yl = lEl.getBoundingClientRect().top - L.getBoundingClientRect().top
+      const rTop = rEl.getBoundingClientRect().top - R.getBoundingClientRect().top + R.scrollTop
+      R.scrollTo({ top: Math.max(0, rTop - yl), behavior: 'smooth' })
     }
   }, [setAttr])
 
@@ -1081,13 +1100,19 @@ function SplitDiffView({
       centresRef.current = diffCentres(L)
       if (R) {
         const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
-        const ks: Array<{ ly: number; ry: number }> = []
+        const ks: Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }> = []
         L.querySelectorAll('[data-opidx]').forEach((le) => {
-          const idx = (le as HTMLElement).getAttribute('data-opidx')
+          const el = le as HTMLElement
+          if (!el.classList.contains('diff-add') && !el.classList.contains('diff-del')) return
+          const idx = el.getAttribute('data-opidx')
           const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
-          if (!re) return
-          const lr = (le as HTMLElement).getBoundingClientRect(), rr = re.getBoundingClientRect()
-          ks.push({ ly: (lr.top + lr.height / 2) - lRect.top + L.scrollTop, ry: (rr.top + rr.height / 2) - rRect.top + R.scrollTop })
+          if (!re || idx == null) return
+          const lr = el.getBoundingClientRect(), rr = re.getBoundingClientRect()
+          ks.push({
+            ly: (lr.top + lr.height / 2) - lRect.top + L.scrollTop, lHalf: lr.height / 2,
+            ry: (rr.top + rr.height / 2) - rRect.top + R.scrollTop, rHalf: rr.height / 2,
+            idx: Number(idx),
+          })
         })
         ks.sort((a, b) => a.ly - b.ly)
         knotsRef.current = ks
@@ -1120,6 +1145,9 @@ function SplitDiffView({
     }
     let rTick = false
     const onRightScroll = () => {
+      // While a click flies the diff pane (editor static), light diffs off the DIFF pane's own midline —
+      // onLeftScroll's glow can't fire because the editor isn't moving.
+      if (diffFlightRef.current) setGlowFromDiffMid(R.scrollTop + R.clientHeight / 2)
       // Clamp the USER's diff-panel scroll so it ENDS at the first/last diff lock — no over-scroll into the
       // lead/trail whitespace (keeps the extremes consistent with the editor). Only while the diff drives,
       // so it never fights the forward-drive spring.
@@ -1252,36 +1280,6 @@ function SplitDiffView({
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); if (fenceRaf) cancelAnimationFrame(fenceRaf) }
-  }, [snapMode, snapshot.id])
-
-  // Editor snap mode B — SETTLE-SNAP: native scroll is untouched; when it STOPS, ease the nearest diff
-  // centre onto the midline (only if it's already close, so it never yanks). Guarded against re-entrancy.
-  useEffect(() => {
-    if (snapMode !== 'settle') return
-    const el = leftScrollRef.current
-    if (!el) return
-    let timer: ReturnType<typeof setTimeout> | undefined, raf = 0, animating = false
-    const onScroll = () => {
-      if (animating) return
-      clearTimeout(timer); cancelAnimationFrame(raf)
-      timer = setTimeout(() => {
-        const mid = el.scrollTop + el.clientHeight / 2
-        let best: number | null = null, bd = Infinity
-        for (const { c } of centresRef.current) { const d = Math.abs(c - mid); if (d < bd) { bd = d; best = c } }
-        if (best == null || bd > 130) return // too far → don't tug
-        const target = Math.max(0, best - el.clientHeight / 2)
-        animating = true
-        const ease = () => {
-          const dx = target - el.scrollTop
-          if (Math.abs(dx) < 0.5) { el.scrollTop = target; animating = false; raf = 0; return }
-          el.scrollTop = el.scrollTop + dx * 0.18
-          raf = requestAnimationFrame(ease)
-        }
-        ease()
-      }, 150)
-    }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => { el.removeEventListener('scroll', onScroll); clearTimeout(timer); cancelAnimationFrame(raf) }
   }, [snapMode, snapshot.id])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
@@ -1417,15 +1415,7 @@ function SplitDiffView({
           borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
         }}>
           {midline}
-          {counter && (
-            <div style={{
-              position: 'absolute', top: 12, left: 14, zIndex: 6, pointerEvents: 'none',
-              background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700,
-              borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit',
-              boxShadow: '0 2px 8px rgba(80,50,10,0.15)',
-            }}>{counter}</div>
-          )}
-          {/* Scroll-behaviour toggles — a padded vertical stack, text vertically centred. */}
+          {/* Counter + scroll-behaviour toggles: ONE centred vertical stack with even gaps. */}
           {(() => {
             const btn = (on: boolean): React.CSSProperties => ({
               display: 'flex', alignItems: 'center', height: 30, padding: '0 12px',
@@ -1434,9 +1424,12 @@ function SplitDiffView({
               fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
             })
             return (
-              <div style={{ position: 'absolute', top: 48, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-                <button type="button" onClick={cycleSnap} title="Editor snap to diffs — Off · Speed-warp · Settle-snap" style={btn(snapMode !== 'off')}>
-                  Snap: {snapMode === 'off' ? 'Off' : snapMode === 'warp' ? 'Speed-warp' : 'Settle-snap'}
+              <div style={{ position: 'absolute', top: 12, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+                {counter && (
+                  <div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>
+                )}
+                <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={btn(snapMode !== 'off')}>
+                  Snap: {snapMode === 'off' ? 'Off' : 'On'}
                 </button>
                 <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff (left) drives editor (right) only · Off" style={btn(bijMode !== 'off')}>
                   {bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}
