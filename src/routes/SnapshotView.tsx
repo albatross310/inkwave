@@ -695,6 +695,9 @@ function SplitDiffView({
     try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
     return next
   })
+  // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
+  // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
+  const centresRef = useRef<Array<{ c: number; half: number }>>([])
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -1004,21 +1007,32 @@ function SplitDiffView({
     }
   }, [runSpring, setAlignGlow])
 
+  // Cache the diff centres — recomputed ONLY on layout change (snapshot / zoom / orientation / pane sizes
+  // / resize), never during scroll. So the snap physics reads centresRef.current with zero per-frame
+  // getBoundingClientRect. rAF so it reads AFTER the new layout has painted.
+  useEffect(() => {
+    const el = leftScrollRef.current
+    if (!el) return
+    const recompute = () => { const l = leftScrollRef.current; if (l) centresRef.current = diffCentres(l) }
+    const id = requestAnimationFrame(recompute)
+    window.addEventListener('resize', recompute)
+    return () => { cancelAnimationFrame(id); window.removeEventListener('resize', recompute) }
+  }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx])
+
   // Editor snap mode A — WHEEL-TAKEOVER PHYSICS: we take the wheel and integrate a particle (the scroll
   // position) moving with LINEAR RESISTANCE through a landscape of POTENTIAL WELLS at the diffs. A wheel
   // delta is an impulse to velocity; each frame: v += wellForce − resist·v (exponential-decay fling that
   // the wells bend), then x += v · speedWarp (the Mexican-hat slow-through/fast-before layered on). Result:
   // a fast flick coasts and decays Apple-style; a slow one is captured and settles onto the nearest diff.
-  // Ctrl/⌘+wheel is left alone (that's the diff zoom).
+  // Ctrl/⌘+wheel is left alone (that's the diff zoom). Centres come from the cache → zero layout per frame.
   useEffect(() => {
     if (snapMode !== 'warp') return
     const el = leftScrollRef.current
     if (!el) return
-    let centres: Array<{ c: number; half: number }> = []
-    let refreshAt = 0
     let v = 0, x = el.scrollTop, raf = 0
     const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
     const tick = () => {
+      const centres = centresRef.current
       const F = wellForce(x, centres)
       v = v + F - WARP_RESIST * v                      // kinetic + linear resistance + well attraction
       x = Math.max(0, Math.min(maxScroll(), x + v * scrollSpeedFactor(x, centres)))
@@ -1029,7 +1043,6 @@ function SplitDiffView({
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return
       e.preventDefault()
-      if (e.timeStamp - refreshAt > 250) { centres = diffCentres(el); refreshAt = e.timeStamp }
       x = el.scrollTop                                  // resync (nav / snapshot change may have moved it)
       v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
       if (!raf) raf = requestAnimationFrame(tick)
@@ -1051,7 +1064,7 @@ function SplitDiffView({
       timer = setTimeout(() => {
         const mid = el.scrollTop + el.clientHeight / 2
         let best: number | null = null, bd = Infinity
-        for (const { c } of diffCentres(el)) { const d = Math.abs(c - mid); if (d < bd) { bd = d; best = c } }
+        for (const { c } of centresRef.current) { const d = Math.abs(c - mid); if (d < bd) { bd = d; best = c } }
         if (best == null || bd > 130) return // too far → don't tug
         const target = Math.max(0, best - el.clientHeight / 2)
         animating = true
