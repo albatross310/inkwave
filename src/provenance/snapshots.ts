@@ -10,6 +10,8 @@ import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../types/document'
 import { contentHash, bundleHash, bibliographyHash } from './hash'
 import { stampBundle, upgradeProof } from './ots'
+import { gunzipJsonOffThread } from '../workers/parseClient'
+import { writeOpfsFile } from '../storage/opfsWrite'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -27,14 +29,6 @@ async function gzipEncode(json: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(cs.readable).arrayBuffer())
 }
 
-async function gzipDecode(buf: ArrayBuffer): Promise<string> {
-  const ds = new DecompressionStream('gzip')
-  const w  = ds.writable.getWriter()
-  void w.write(buf)
-  void w.close()
-  return new Response(ds.readable).text()
-}
-
 // Detect gzip by magic bytes 0x1f 0x8b.
 function isGzip(buf: ArrayBuffer): boolean {
   const v = new Uint8Array(buf, 0, 2)
@@ -50,9 +44,12 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
     }
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
     const buf  = await file.arrayBuffer()
-    // Legacy uncompressed files fall through to plain UTF-8 decode.
-    const json = isGzip(buf) ? await gzipDecode(buf) : new TextDecoder().decode(buf)
-    const parsed = JSON.parse(json)
+    // Gzip archives (the normal case) gunzip + JSON.parse OFF-THREAD — a big archive is ~1s of
+    // unbreakable main-thread work otherwise, felt as typing/scroll freezes whenever it loads.
+    // Legacy uncompressed files fall through to a plain UTF-8 decode inline.
+    const parsed = isGzip(buf)
+      ? await gunzipJsonOffThread(buf)
+      : JSON.parse(new TextDecoder().decode(buf))
     if (!Array.isArray(parsed)) return []
     // Normalise legacy 'kick' trigger to 'word-nudge' on read (stored data backward compat)
     return (parsed as Snapshot[]).map((s) =>
@@ -80,16 +77,9 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
 }
 
 async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promise<void> {
-  const root = await getRoot()
-  let dir: FileSystemDirectoryHandle = root
-  for (const part of `documents/${documentId}`.split('/')) {
-    dir = await dir.getDirectoryHandle(part, { create: true })
-  }
-  const handle   = await dir.getFileHandle('snapshots.json', { create: true })
-  const writable = await handle.createWritable()
-  await writable.write(await gzipEncode(JSON.stringify(snaps)))
-  await writable.close()
-  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful close
+  // writeOpfsFile works on iOS too (no createWritable there — worker sync-access fallback).
+  await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipEncode(JSON.stringify(snaps)))
+  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful write
 }
 
 /** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back

@@ -5,7 +5,8 @@
 // duplicate) on every sync. Gated on VITE_GOOGLE_CLIENT_ID — inert until that's set.
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { composeTraceFile, buildExportBundle, bundleFilename, parseTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
+import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
+import { parseTraceOffThread } from '../workers/parseClient'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
@@ -229,6 +230,22 @@ export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{
 // ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
 
+/** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
+ *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now). */
+export async function preMergeGDrive(docId: string): Promise<void> {
+  const key = `gdrive:${docId}`
+  const fileId = driveFileId(docId)
+  if (!fileId || !needsWritebackMerge(key)) return
+  try {
+    const text = await downloadGoogleDriveFile(fileId)
+    if (text) {
+      const remote = await parseTraceOffThread(text)
+      if (remote.snapshots?.length) await restoreSnapshotsFromBundle(docId, remote.snapshots)
+    }
+    markWritebackMerged(key)
+  } catch { /* unreadable → the first sync retries its own merge */ }
+}
+
 /** Cheap remote-file check: validates the silent token and returns the file's link + modified time
  *  from Drive METADATA — no upload, no download. Used by resume-on-load, which previously rebuilt
  *  and re-uploaded the whole bundle just to re-activate sync. */
@@ -254,7 +271,9 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ i
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
-  let q = "(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+  // Broad on purpose (matches the OneDrive opener): .studio.gz matches "contains '.studio'";
+  // .json/.txt catch pre-.studio-era saves and iOS renames. The opener validates by content.
+  let q = "(name contains '.studio' or name contains '.inkwave' or name contains '.json' or name contains '.txt') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
   if (parentId) q += ` and '${parentId}' in parents`
   const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return []
@@ -262,13 +281,24 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ i
   return d.files ?? []
 }
 
-/** Download a Drive file's text by id (the app has drive.file access to files it created/opened). */
+/** Download a Drive file's text by id (the app has drive.file access to files it created/opened).
+ *  For the grow-only merge paths, which only ever read back our own plain-text .studio uploads. */
 export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
   const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return null
   return res.text()
+}
+
+/** Download a Drive file's raw bytes by id. Bytes, NOT text: the file OPENER may pick a .studio.gz,
+ *  and text-decoding gzip corrupts it before readStudioFile can sniff the 1f 8b magic. */
+export async function downloadGoogleDriveFileBlob(id: string): Promise<Blob | null> {
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
+  if (!token) return null
+  const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return null
+  return res.blob()
 }
 /** Adopt an opened Drive file as this doc's sync target, so future syncs UPDATE it (no Save needed). */
 export function adoptGoogleDriveFile(docId: string, fileId: string): void {
@@ -297,7 +327,7 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (fileId && needsWritebackMerge(key)) {
     try {
       const text = await downloadGoogleDriveFile(fileId)
-      if (text) { const remote = parseTraceFile(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
+      if (text) { const remote = await parseTraceOffThread(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
       markWritebackMerged(key)
     } catch { /* unreadable → write local as-is; retry next sync */ }
   }

@@ -9,7 +9,7 @@ import { simpleInText } from '../citations/format'
 import { usedCitekeys, referenceListKeys } from '../citations/resolve'
 import { loadPdf, blobToBase64, pdfVersion } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
-import { POOL_ID } from '../scas/pool'
+import { POOL_ID_STATIC } from '../scas/poolId'
 import { deviceId } from '../sync/presence'
 import { collectViewSettings } from '../editor/viewSettings'
 
@@ -172,7 +172,7 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     // A reference to the key the writer's client used; a verifier should still check against the
     // INDEPENDENTLY published key (src/verify defaults to it), not blindly trust this field.
     signingKey: { keyId: 'inkwave-signing-v1', alg: 'Ed25519', publicKeyHex: signingPublicKeyHex() },
-    poolId: doc.scasPoolId ?? POOL_ID,
+    poolId: doc.scasPoolId ?? POOL_ID_STATIC,
     session: deviceId(),
     bibliography: citedItems(doc.contentJson),
     viewSettings: collectViewSettings(),
@@ -259,14 +259,10 @@ export function bundleFilename(doc: InkwaveDocument): string {
 
 // The .trace.json file is a hybrid: the WRITING first (wrapped — real line + paragraph breaks, so
 // you open the file and read it immediately), then this marker, then the verifiable JSON record.
-// composeTraceFile() writes that shape; parseTraceFile() reads it back (and still accepts a legacy
-// pure-JSON file). The box-drawing rule makes the marker unmistakable and ~impossible to hit in prose.
-const TRACE_DATA_MARKER = '══════ INKWAVE RECORD · verify at iwzero.me/verify ══════'
-// Older domains, still accepted on read so files exported before the iwzero.me migration keep opening.
-const TRACE_DATA_MARKERS_LEGACY = [
-  '══════ INKWAVE RECORD · verify at inkwave.studio/verify ══════',
-  '══════ INKWAVE RECORD · verify at inkwave.me/verify ══════',
-]
+// composeTraceFile() writes that shape; parseTraceFile (in traceParse.ts, worker-safe) reads it
+// back. The marker constants live there too.
+import { TRACE_DATA_MARKER, parseTraceFile } from './traceParse'
+export { parseTraceFile }
 
 /** Serialize a bundle to the single .trace.json file: readable writing on top, JSON record below. */
 export function composeTraceFile(bundle: ExportBundle): string {
@@ -287,21 +283,6 @@ export function composeTraceFile(bundle: ExportBundle): string {
   ].join('\n')
 }
 
-// Cap the dropped-file size before JSON.parse (audit F7): a real record is well under this, so a
-// huge file is either a mistake or a DoS attempt — reject it cheaply rather than parse it.
-const MAX_TRACE_BYTES = 120_000_000 // 120 MB — allows a few base64-embedded source PDFs
-
-/** Read a .trace.json file back into a bundle (hybrid text-header format OR a legacy pure-JSON file). */
-export function parseTraceFile(fileText: string): ExportBundle {
-  if (fileText.length > MAX_TRACE_BYTES) throw new Error('file too large to be an Inkwave record')
-  // Anchor on the FULL marker line, not a substring an attacker could plant earlier in the prose
-  // to redirect the JSON slice (audit F7). Accept both the current domain and the legacy one so
-  // files exported before the inkwave.studio domain continue to open.
-  let i = fileText.indexOf(TRACE_DATA_MARKER)
-  if (i < 0) for (const m of TRACE_DATA_MARKERS_LEGACY) { i = fileText.indexOf(m); if (i >= 0) break }
-  const json = i < 0 ? fileText : fileText.slice(fileText.indexOf('{', i))
-  return JSON.parse(json) as ExportBundle
-}
 
 /** Trigger a download of the single self-contained .trace.json file (browser only). */
 export function downloadBundle(bundle: ExportBundle, filename: string): void {

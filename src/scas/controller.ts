@@ -14,7 +14,6 @@ import type { ScasState } from '../types/document'
 import {
   deriveSet,
   lemmaOf,
-  classifyCommit,
   recordKick,
   markSatisfied,
   lock,
@@ -32,6 +31,7 @@ interface ScannedWord {
   lemma: string
   slotOriginalLemma: string | null
   isSubstitution: boolean // carries a slot mark whose current lemma differs from its original
+  committed: boolean      // false = the word under the cursor, still being typed (no boundary yet)
 }
 
 /**
@@ -55,17 +55,22 @@ function scanCommitted(pmDoc: PMNode, cursorPos: number): ScannedWord[] {
         if (word.length < 2) continue
         const from = pos + 1 + offset + match.index
         const to = from + word.length
-        // Skip the uncommitted word under the cursor (no boundary char right after it yet).
+        // The word under the cursor (no boundary char after it yet) is UNCOMMITTED: excluded from
+        // kick/resolution decisions, but still visible to the deletion pass — with the deferred
+        // 120ms tick, treating it as absent made "backspace somewhere + cursor mid-word on a kicked
+        // lemma" read as a deletion → spurious lock + snapshot.
+        let committed = true
         if (cursorPos >= from && cursorPos <= to) {
           const nextChar = text[match.index + word.length] ?? null
-          if (!nextChar || !BOUNDARY_RE.test(nextChar)) continue
+          if (!nextChar || !BOUNDARY_RE.test(nextChar)) committed = false
         }
         const lemma = lemmaOf(word)
         const slotOriginalLemma = slotOriginal ? lemmaOf(slotOriginal) : null
         out.push({
           lemma,
           slotOriginalLemma,
-          isSubstitution: slotOriginalLemma !== null && slotOriginalLemma !== lemma,
+          isSubstitution: committed && slotOriginalLemma !== null && slotOriginalLemma !== lemma,
+          committed,
         })
       }
     })
@@ -176,21 +181,29 @@ export class ScasController {
     // 2. Fresh word nudges — a committed in-S lemma (not immune/locked) becomes an outstanding nudge.
     //    Stamp the moment it FIRST turns purple (kickTimes) — the slot's true "first-written" time,
     //    persisted with the state so it survives reload (read later via firstNudgeAt).
+    //    Set views built ONCE per pass: classifyCommit's array scans (locked.includes +
+    //    satisfied.find) made this loop O(words × session-state) on every keystroke. The inline
+    //    checks below are classifyCommit's exact decision order — locked → skip (loop 2 only acts
+    //    on 'in-S'), immune-this-version → skip, in-S → kick, else pass. locked/satisfied can't
+    //    change inside this loop (recordKick touches only liveKicks/kickTimes), so the views hold.
+    const lockedSet = new Set(st.locked)
+    const immuneSet = new Set(st.satisfied.filter((s) => s.satisfiedAtVersion === st.version).map((s) => s.lemma))
+    const liveKickSet = new Set(st.liveKicks)
     for (const w of words) {
-      const v = classifyCommit(st, w.lemma, this.inSv(w.lemma))
-      if (v.kicks && v.trigger === 'in-S') {
-        const fresh = !st.liveKicks.includes(w.lemma)
-        st = recordKick(st, w.lemma)
-        if (fresh && !st.kickTimes?.[w.lemma]) {
-          st = { ...st, kickTimes: { ...st.kickTimes, [w.lemma]: Date.now() } }
-        }
+      if (!w.committed) continue // still being typed — not a commit yet
+      if (lockedSet.has(w.lemma) || immuneSet.has(w.lemma) || !this.inSv(w.lemma)) continue
+      const fresh = !liveKickSet.has(w.lemma)
+      st = recordKick(st, w.lemma)
+      liveKickSet.add(w.lemma)
+      if (fresh && !st.kickTimes?.[w.lemma]) {
+        st = { ...st, kickTimes: { ...st.kickTimes, [w.lemma]: Date.now() } }
       }
     }
 
     // 3. Deletions — a nudged lemma that vanished (and wasn't resolved via a slot) is a dodge → lock.
     //    Gated on an actual deletion so merely-not-yet-committed words aren't mistaken for deletes.
     if (hadDeletion) {
-      const present = new Set(words.map((w) => w.lemma))
+      const present = new Set(words.map((w) => w.lemma)) // includes the uncommitted cursor word
       const slotRefs = new Set(words.map((w) => w.slotOriginalLemma).filter(Boolean) as string[])
       for (const L of before.liveKicks) {
         if (!present.has(L) && !slotRefs.has(L)) {

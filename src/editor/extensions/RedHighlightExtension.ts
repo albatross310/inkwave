@@ -149,10 +149,15 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
             const built = buildDecorations(state.doc, inkDoc, state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, initFlagged, savedAnchors)
             return { decorations: built.decorations, reveals: EMPTY_REVEALS, flagged: built.flagged }
           },
-          apply(tr, old, prev, next): RedHighlightState {
+          apply(tr, old, _prev, next): RedHighlightState {
             const revealMeta = tr.getMeta(SCAS_REVEAL_META) as { pos?: number; clear?: boolean } | undefined
-            const rebuild = tr.docChanged || !tr.selection.eq(prev.selection) || !!tr.getMeta(SCAS_HINT_META) || !!revealMeta
-            if (!rebuild) return old
+            // CONSOLE-SNAPPY RULE: a keystroke never triggers the full O(doc) rebuild. Ordinary
+            // edits + caret moves only position-MAP the existing decorations (cheap); the editor's
+            // deferred SCAS tick dispatches SCAS_HINT_META ~120ms after the last input, and THAT
+            // (or a reveal) is what rebuilds. Verdicts are frozen at commit anyway, so a ≤120ms
+            // repaint delay changes nothing semantically.
+            const rebuild = !!tr.getMeta(SCAS_HINT_META) || !!revealMeta
+            if (!rebuild && !tr.docChanged) return old
 
             // Remap the reveal anchors across the edit, then fold in this tr's reveal meta.
             let reveals = old.reveals
@@ -180,6 +185,11 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
                 if (!m.deleted) mf.set(m.pos, orig)
               })
               flagged = mf
+            }
+
+            if (!rebuild) {
+              // Edit without a tick: ride the mapping. Decorations/anchors stay glued to their text.
+              return { decorations: old.decorations.map(tr.mapping, tr.doc), reveals, flagged }
             }
 
             const built = buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged)

@@ -17,9 +17,12 @@ async function bootstrap() {
   // Only mount Clerk when auth is explicitly requested (?auth) — NOT on every free-tier load, where
   // its multi-second dev-instance init is the startup CPU whir. Same gate as authEnabled() so the
   // provider is present exactly when the auth UI (AccountControl / /login) renders. See auth/config.
-  const { authRequested } = await import('../src/auth/config')
+  const { authRequested, markClerkProviderMounted } = await import('../src/auth/config')
   let tree: ReactNode = <HydratedRouter />
   if (pk && authRequested()) {
+    // Record the mount BEFORE hydration: AccountControl branches on this (provider hooks vs the
+    // headless clerk-js path) and must never see a half-set state.
+    markClerkProviderMounted()
     const { ClerkProvider, useClerk } = await import('@clerk/clerk-react')
     // After the lazy "Sign in" armed auth + reloaded, open the sign-in modal automatically (one-click).
     const AutoSignIn = () => {
@@ -73,9 +76,18 @@ if (lq && typeof lq.setConsumer === 'function') {
 if (import.meta.env.PROD) {
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      // Versioned URL: a new build ⇒ a "new" SW script ⇒ update → cache purge + one-time reload.
+      // Versioned URL: a new build ⇒ a "new" SW script ⇒ update → cache purge + targeted self-heal.
       navigator.serviceWorker.register(`/sw.js?v=${__BUILD_ID__}`).catch((err) => {
         console.warn('[inkwave] SW registration failed:', err)
+      })
+      // Self-heal, but only when GENUINELY stale: the activating worker broadcasts its version and
+      // we reload only if this page was built from an OLDER build. The page that just loaded the
+      // new build matches the worker and stays put — no more "loads twice" after every deploy.
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data as { type?: string; version?: string } | null
+        if (d?.type === 'inkwave-sw-version' && d.version && d.version !== __BUILD_ID__) {
+          window.location.reload()
+        }
       })
     })
   }

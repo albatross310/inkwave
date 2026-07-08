@@ -5,7 +5,8 @@
 // download (and/or OneDrive).
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, parseTraceFile } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile } from '../provenance/bundle'
+import { parseTraceOffThread } from '../workers/parseClient'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 
 const DB_NAME = 'inkwave-folder'
@@ -130,6 +131,21 @@ export async function readLocalHeartbeat(docId: string): Promise<{ session?: str
   }
 }
 
+/** Warm the once-per-session grow-only merge at IDLE, without writing. The first mirror fires on a
+ *  provenance checkpoint MID-TYPING, so paying the whole-file read+parse there was a typing spike.
+ *  Healing OPFS here makes the local set the superset; the first real write then skips its merge. */
+export async function preMergeSaveFile(docId: string): Promise<void> {
+  const key = `folder:${docId}`
+  if (!needsWritebackMerge(key)) return
+  const handle = await getSaveFileHandle(docId, false)
+  if (!handle) return
+  try {
+    const existing = await parseTraceOffThread(await (await handle.getFile()).text())
+    if (existing.snapshots?.length) await restoreSnapshotsFromBundle(docId, existing.snapshots)
+    markWritebackMerged(key)
+  } catch { /* unreadable / new file → the first save retries its own merge */ }
+}
+
 /** Write the current bundle to the document's chosen file (silent — no prompt). True on success. */
 export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<boolean> {
   const handle = await getSaveFileHandle(doc.id, false)
@@ -142,7 +158,7 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
     const key = `folder:${doc.id}`
     if (needsWritebackMerge(key)) {
       try {
-        const existing = parseTraceFile(await (await handle.getFile()).text())
+        const existing = await parseTraceOffThread(await (await handle.getFile()).text())
         if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
         markWritebackMerged(key)
       } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }

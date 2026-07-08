@@ -10,8 +10,8 @@
 // anchors on both ends line up.
 
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { getPaperSize, getOrientation } from '../editor/pageSettings'
-import { gappedPagesEnabled } from '../editor/pageView'
+import { getPaperSize, getOrientation, getTopMarginPx, MARGIN_BOTTOM } from '../editor/pageSettings'
+import { pageBoxPx } from '../editor/pageModel'
 
 const INK = '#5c2d8a'
 const STYLE_ID = 'iw-citation-nav-styles'
@@ -139,20 +139,33 @@ export function navigateToBibEntry(key: string, fromOcc: number): void {
 
 // ── Occurrence counting ─────────────────────────────────────────────────────────
 
-// Document page (1-based) a citation element sits on, per the NONGAPPED pagination guides (page height
-// = sheet width × paper ratio, same as Scroll.tsx's PageGuides). null when pages don't apply (scroll /
-// gapped mode) or it can't be measured — callers then fall back to occurrence ordinals.
+// Document page (1-based) a citation element sits on. Counts the pagination extension's break
+// widgets above the element — the SAME line-measured breaks that number the visible pages (gapped
+// sheets AND ungapped guides, see pageModel.ts) — so back-ref page numbers always match what the
+// reader sees. Falls back to the uniform canonical model when no breaks exist yet (single page /
+// pagination not measured). null when pages don't apply ('scroll' paper) or it can't be measured —
+// callers then fall back to occurrence ordinals.
 function docPageOf(el: HTMLElement): number | null {
-  if (typeof document === 'undefined' || gappedPagesEnabled()) return null
+  if (typeof document === 'undefined') return null
   const paper = getPaperSize()
   if (paper === 'scroll') return null
   const sheet = el.closest('.scroll-paper') as HTMLElement | null
-  if (!sheet || !sheet.clientWidth) return null
-  const landscape = getOrientation() === 'landscape'
-  const ratio = paper === 'letter' ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2)
-  const pageH = sheet.clientWidth * ratio
-  const y = el.getBoundingClientRect().top - sheet.getBoundingClientRect().top
-  return Math.max(1, Math.floor(y / pageH) + 1)
+  if (!sheet) return null
+  const top = el.getBoundingClientRect().top
+  const gaps = sheet.querySelectorAll('.inkwave-page-gap')
+  if (gaps.length) {
+    let page = 1
+    gaps.forEach((g) => { if (g.getBoundingClientRect().top <= top) page++ })
+    return page
+  }
+  const { textAreaPx } = pageBoxPx({
+    paperSize: paper === 'letter' ? 'letter' : 'a4',
+    orientation: getOrientation(),
+    topMarginPx: getTopMarginPx(),
+    bottomMarginPx: MARGIN_BOTTOM,
+  })
+  const y = top - sheet.getBoundingClientRect().top - getTopMarginPx()
+  return Math.max(1, Math.floor(y / textAreaPx) + 1)
 }
 
 /** For each in-text occurrence of a citekey, the document page it sits on (measured from the DOM). */

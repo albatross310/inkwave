@@ -1,4 +1,5 @@
 import type { InkwaveDocument, TiptapJSON } from '../types/document'
+import { writeOpfsFile } from './opfsWrite'
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
@@ -35,12 +36,10 @@ async function writeJson(
   const parts = filePath.split('/')
   const fileName = parts.pop()!
   const dirPath = parts.join('/')
-  const dir = dirPath ? await ensureDir(root, dirPath) : root
+  if (dirPath) await ensureDir(root, dirPath) // keep dir creation semantics for callers
   return async (data: unknown) => {
-    const fileHandle = await dir.getFileHandle(fileName, { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(data))
-    await writable.close()
+    // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
+    await writeOpfsFile([...(dirPath ? dirPath.split('/') : []), fileName], JSON.stringify(data))
   }
 }
 
@@ -115,12 +114,14 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 const AUTOSAVE_DELAY_MS = 200
 
 export function scheduleSave(
-  doc: InkwaveDocument,
+  doc: InkwaveDocument | (() => InkwaveDocument),
   onSaved?: () => void,
 ): void {
   if (saveTimer !== null) clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
-    await saveDocument(doc)
+    // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
+    // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
+    await saveDocument(typeof doc === 'function' ? doc() : doc)
     onSaved?.()
   }, AUTOSAVE_DELAY_MS)
 }

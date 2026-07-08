@@ -32,9 +32,13 @@ self.addEventListener('activate', (event) => {
     await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
     await self.clients.claim()
     if (isUpdate) {
+      // Don't blanket-reload: the tab that JUST loaded the new build registers this worker and would
+      // get reloaded ~2s in for nothing (the visible "loads twice" on every deploy). Instead tell
+      // each tab our version; the page compares against its own build id and reloads ONLY if it's
+      // genuinely stale (an old tab stranded on the previous build). See entry.client.tsx.
       const clients = await self.clients.matchAll({ type: 'window' })
       for (const c of clients) {
-        try { c.navigate(c.url) } catch { /* navigate unsupported / cross-origin — ignore */ }
+        try { c.postMessage({ type: 'inkwave-sw-version', version: VERSION }) } catch { /* ignore */ }
       }
     }
   })())

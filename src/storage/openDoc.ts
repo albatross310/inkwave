@@ -68,7 +68,7 @@ export async function openInkwaveFile(
     await persistLibrary()
     // Embedded PDFs (explicit-download bundles) restore directly...
     for (const [key, p] of Object.entries(pdfs ?? {})) {
-      try { await savePdf(key, base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
+      try { await savePdf(key, await base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
     }
     // ...OneDrive-synced docs keep PDFs as sidecars — fetch them for the cited sources.
     if (oneDriveFile && bib?.length) {
@@ -87,12 +87,10 @@ export async function openInkwaveFile(
   await upsertMeta({ id, title: doc.title, updatedAt: doc.updatedAt })
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
 
-  // With a writable handle, switch IN PLACE (no reload) so the just-granted file permission survives.
-  // Without one, reload so the editor loads the doc cleanly (also covers PWA cold launch).
-  if (handle) {
-    window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
-    window.dispatchEvent(new Event('inkwave:save-file-linked'))
-  } else {
-    window.location.reload()
-  }
+  // Switch IN PLACE for every open (Edit.tsx listens for inkwave:open-doc and remounts the editor
+  // via key={doc.id}). The old non-handle path did window.location.reload() — the file was parsed,
+  // written to OPFS, then the WHOLE APP re-booted and re-parsed it from OPFS: double the work and
+  // most of the 2-3s first-open. The in-place path also keeps a just-granted file permission alive.
+  window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
+  if (handle) window.dispatchEvent(new Event('inkwave:save-file-linked'))
 }

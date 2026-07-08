@@ -1,6 +1,16 @@
-// Gapped pages (opt-in). A ProseMirror plugin that measures the document and inserts a full-bleed
-// "page gap" widget at each A4 boundary — content reflows onto separate sheets (breaks only at
-// top-level block boundaries, so a line is never cut), with a centred page number in each gap.
+// Page-break measurement for BOTH page modes. A ProseMirror plugin that measures the document's
+// real line layout and places a widget at each page boundary (breaks land at line starts, so a
+// line is never cut; small orphans snap to the block start):
+//   gapped   → a full-bleed "page gap" widget — content reflows onto separate parchment sheets,
+//              with the sheet panels + page numbers painted behind the text.
+//   ungapped → an invisible zero-size break MARKER at the SAME measured positions — the Scroll
+//              PageGuides draw the dashed rule + page number at it, and the print stylesheet
+//              breaks the page there. One shared break model → toggling the gapped switch never
+//              moves content across pages, and screen breaks = print/PDF breaks in both modes.
+//
+// Page height comes from pageModel (physical mm through the canonical 96dpi px), NOT from
+// sheet.clientWidth — clientWidth's integer rounding flips with browser zoom / DPR, which made
+// the pagination browser-zoom-dependent (see pageModel.ts).
 //
 // Measurement is loop-free: block positions are read as INTRINSIC (the gap-widget heights are
 // subtracted back out), so adding gaps never changes the measured layout. A signature guard stops
@@ -9,29 +19,45 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation, getTopMarginPx } from '../pageSettings'
+import { getPaperSize, getOrientation, getTopMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
+import { pageBoxPx } from '../pageModel'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
-export const MARGIN_BOTTOM = 72 // px parchment margin at the bottom of every page (page numbers sit here)
+export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
-export interface PaginationOptions { enabled: boolean }
+export interface PaginationOptions {
+  enabled: boolean // measure page breaks at all (the live editor; off for headless/snapshot use)
+  gapped: boolean  // true: tall gap widgets + sheet panels; false: zero-size break markers
+}
 
 // The gap widget reserves the vertical space between the last line of one page and the first line of
 // the next: [ bottom margin of page above | GAP (transparent) | top margin of page below ]. It hosts
 // an (empty) band marker at the gap offset so the paint() pass can measure exactly where the
 // transparent gap is and lay the parchment sheet panels around it. No visible parts of its own —
 // the panels paint the parchment, the page number is a footer inside each panel.
-function gapEl(botMargin: number, topMargin: number): HTMLElement {
+function gapEl(botMargin: number, topMargin: number, gapped: boolean): HTMLElement {
   // SPAN, not div: a page break can land mid-paragraph, and a block-level <div> is invalid as a
   // child of <p> — the browser then reparents/splits the paragraph in the rendered DOM, scrambling
   // caret placement (the caret jumps across the gap, edits land on the wrong page). A <span> is valid
   // phrasing content inside <p>; CSS gives it `display:block` so it still reserves the vertical gap.
   const el = document.createElement('span')
   el.className = 'inkwave-page-gap'
-  el.style.height = `${Math.round(botMargin + GAP + topMargin)}px`
+  // @media print turns every widget into the NEXT page's top margin (break-before: page +
+  // height: var(--iw-print-topm)) — carry the live setting so the printed margin matches the
+  // screen (it was hard-coded 72px, wrong whenever the top-margin setting differs).
+  el.style.setProperty('--iw-print-topm', `${Math.round(topMargin)}px`)
   el.contentEditable = 'false'
+  if (!gapped) {
+    // Ungapped: an invisible zero-HEIGHT break marker (see .iw-break-marker in index.css). Still a
+    // block, so the break it forces coincides with the line start it sits at (a visual no-op at
+    // steady state) and its rect top IS the page boundary — PageGuides draws the dashed rule
+    // there, and the print stylesheet breaks the page there. No vertical space is reserved.
+    el.classList.add('iw-break-marker')
+    return el
+  }
+  el.style.height = `${Math.round(botMargin + GAP + topMargin)}px`
   const band = document.createElement('span')
   band.className = 'inkwave-page-gap-band'
   band.style.top = `${Math.round(botMargin)}px`
@@ -86,7 +112,7 @@ function collectLines(view: EditorView, editorTop: number, scale: number): Array
   return lines
 }
 
-function compute(view: EditorView, pageH: number, topM: number, scale: number): { set: DecorationSet; sig: string } {
+function compute(view: EditorView, pageH: number, topM: number, scale: number, gapped: boolean): { set: DecorationSet; sig: string } {
   if (pageH <= 0) return { set: DecorationSet.empty, sig: 'empty' }
   const editorTop = (view.dom as HTMLElement).getBoundingClientRect().top
   const doc = view.state.doc
@@ -128,7 +154,7 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number): 
     // Force the reference list onto a fresh page (before the normal overflow check).
     if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
       const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
-      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
+      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
       pageNo++; used = 0; blockStart = -1; blockEnd = -1; refBroken = true
     }
@@ -143,7 +169,7 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number): 
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
         // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, topM), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
@@ -156,11 +182,20 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number): 
   return { set: DecorationSet.create(doc, decos), sig: sig.join('|') }
 }
 
+// True on touch phones/tablets — same media query as Scroll.isTouchDevice (duplicated here so the
+// pagination chunk doesn't import the React shell). Phone paper is edge-to-edge (no fixed mm
+// width), so page height falls back to the paper RATIO on the rendered width.
+function isTouchLike(): boolean {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
+}
+
 export const PaginationExtension = Extension.create<PaginationOptions>({
   name: 'pagination',
-  addOptions() { return { enabled: false } },
+  addOptions() { return { enabled: false, gapped: false } },
   addProseMirrorPlugins() {
     const enabled = this.options.enabled
+    const gapped = this.options.gapped
     return [
       new Plugin<DecorationSet>({
         key: KEY,
@@ -174,6 +209,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
         props: { decorations(state) { return KEY.getState(state) } },
         view(view) {
           if (!enabled) return {}
+          ;(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady = false // fresh doc → re-latch
           let raf = 0
           let paintRaf = 0
           let lastInputSig  = '' // doc size + page height — only re-measure when these change
@@ -192,7 +228,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // Resolved LAZILY: at plugin-view construction the editor isn't inside .scroll-paper yet.
           const ensureSheet = () => {
             if (!sheet) sheet = (view.dom as HTMLElement).closest('.scroll-paper') as HTMLElement | null
-            if (sheet && !layer) {
+            if (sheet && !layer && gapped) {
               layer = document.createElement('div')
               layer.className = 'inkwave-sheets'
               layer.setAttribute('aria-hidden', 'true')
@@ -206,7 +242,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             paintRaf = 0
             if (!sheet || !layer) return
             const sheetTop = sheet.getBoundingClientRect().top
+            // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
+            // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
+            // (taller) panels held the old height and every repaint re-measured its own stale
+            // extent — a self-sustaining fixpoint ("space below the page never retracts", gapped
+            // only, cleared by refresh/toggle because those rebuild the layer). Hiding the layer
+            // for one read costs one reflow per (debounced) paint pass.
+            layer.style.display = 'none'
             const total = sheet.scrollHeight
+            layer.style.display = ''
             const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
             const segs: Array<{ top: number; height: number }> = []
             let cursor = 0
@@ -250,15 +294,50 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           }
           const schedulePaint = () => { if (!paintRaf) paintRaf = requestAnimationFrame(paint) }
 
+          // Latch + announce the FIRST successful measure — the editor's one-paint reveal gate
+          // (TiptapEditor `settled`) waits for it so text and page marks appear together. Plus the
+          // every-measure announcement (not latched): Scroll.tsx re-anchors the viewport around
+          // the post-zoom re-measure, and PageGuides re-reads the marker positions, off this signal.
+          const announceMeasured = () => {
+            if (!(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady) {
+              ;(window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady = true
+              window.dispatchEvent(new Event('inkwave:pagination-ready'))
+            }
+            window.dispatchEvent(new Event('inkwave:pagination-measured'))
+          }
           const recompute = () => {
             raf = 0
             ensureSheet()
-            const landscape = getOrientation() === 'landscape'
-            const letter    = getPaperSize() === 'letter'
+            const paper = getPaperSize()
             const topM = getTopMarginPx()
-            const pageH = (sheet ? sheet.clientWidth : 794) *
-              (letter ? (landscape ? 8.5 / 11 : 11 / 8.5) : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
-            if (sheet) {
+            // Marker mode bails where pages don't apply: continuous 'scroll' paper, and
+            // multi-column layouts (column flow can't be line-measured into pages — the guides
+            // fall back to the uniform canonical model in Scroll.tsx). Gapped mode keeps its
+            // historical behaviour: 'scroll' paper still paginates (at the rendered width;
+            // columns are disabled by Scroll.tsx while gapped).
+            if (!gapped && (paper === 'scroll' || getColumns() > 1)) {
+              const cur = KEY.getState(view.state)
+              if (cur && cur !== DecorationSet.empty) {
+                view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
+                lastLayoutSig = ''; lastSet = DecorationSet.empty
+              }
+              lastInputSig = ''
+              announceMeasured()
+              return
+            }
+            // CANONICAL page height (pageModel): physical mm through the 96dpi reference px —
+            // NOT sheet.clientWidth, whose integer rounding flips with browser zoom / DPR (and
+            // even at 100% baked a per-page error in vs the printed 297mm page). Phone paper and
+            // 'scroll' paper have no fixed mm width → keep the paper ratio on the rendered width.
+            const fluid = paper === 'scroll' || isTouchLike()
+            const { pageHeightPx: pageH } = pageBoxPx({
+              paperSize: paper === 'letter' ? 'letter' : 'a4',
+              orientation: getOrientation(),
+              topMarginPx: topM,
+              bottomMarginPx: MARGIN_BOTTOM,
+              fluidWidthPx: fluid && sheet ? sheet.clientWidth : undefined,
+            })
+            if (sheet && gapped) {
               sheet.classList.add('inkwave-gapped')
               // Keep paddingTop in sync with the user's top-margin setting so page 1 content
               // starts at the same Y as in non-gapped mode — this makes the gap land at
@@ -278,7 +357,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // against the old layout, so the text lurches. Instead Scroll.tsx fires a single
             // 'inkwave:page-settings-changed' when the zoom SETTLES → one clean re-measure (settingsCb).
             const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
-            if (inputSig === lastInputSig) { schedulePaint(); return }
+            if (inputSig === lastInputSig) { if (gapped) schedulePaint(); return }
             lastInputSig = inputSig
 
             // The gap widgets are display:block, so they FORCE line breaks — which means a word can't
@@ -293,7 +372,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             }
             const scaleEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
             const magnifyScale = parseFloat(scaleEl?.style.getPropertyValue('--iw-magnify') || '') || 1
-            const { set, sig } = compute(view, pageH, topM, magnifyScale)
+            const { set, sig } = compute(view, pageH, topM, magnifyScale, gapped)
             // Only update the set when gap positions actually changed (sig differs). When sig is the
             // same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating any
             // sub-pixel rounding differences in botMargin — the main cause of page-height flicker on
@@ -305,10 +384,22 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             }
             view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
-            schedulePaint()
+            if (gapped) schedulePaint()
+            announceMeasured()
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
           const forceRecompute = () => { lastInputSig = ''; schedule() }
+          // INPUT PRIORITY: edit-driven re-measures are debounced OFF the keystroke. recompute forces
+          // a full-document layout read (clientWidth + getClientRects per block) and dispatches two
+          // meta transactions — per keystroke that was the single biggest stutter source (and worst on
+          // backspace, where line heights shrink). The existing gap decorations are position-mapped
+          // through each edit in apply(), so the gaps ride along correctly while we wait; the breaks
+          // re-settle 150ms after typing pauses. Resize/fonts/settings still re-measure immediately.
+          let editDebounce: ReturnType<typeof setTimeout> | undefined
+          const scheduleAfterEdit = () => {
+            if (editDebounce) clearTimeout(editDebounce)
+            editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, 150)
+          }
           schedule()
           // Web fonts (EB Garamond) load AFTER first paint and reflow the text, moving every line —
           // but a font swap changes neither the doc size nor the page width, so the inputSig guard
@@ -323,18 +414,31 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // Re-measure when page settings (top margin, paper size, orientation) change.
           const settingsCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
+          // Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Page breaks stay
+          // pinned DURING the gesture (deliberate — see the inputSig note above), but the gaps and
+          // sheet panels were measured at the old font size: without this, they sit misaligned with
+          // the reflowed text until the next edit — the "strange behaviour near gaps" after zooming.
+          // Scroll.tsx re-anchors the viewport around this re-measure (inkwave:pagination-measured).
+          const zoomCb = () => { if (!destroyed) forceRecompute() }
+          window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {
-            update: schedule,
+            update: scheduleAfterEdit,
             destroy() {
               destroyed = true
               ro?.disconnect()
               if (raf) cancelAnimationFrame(raf)
               if (paintRaf) cancelAnimationFrame(paintRaf)
+              if (editDebounce) clearTimeout(editDebounce)
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
+              window.removeEventListener('inkwave:zoom-settled', zoomCb)
               layer?.remove()
-              sheet?.classList.remove('inkwave-gapped')
-              if (sheet) { sheet.style.paddingTop = ''; sheet.style.minHeight = '' }
+              if (gapped) {
+                sheet?.classList.remove('inkwave-gapped')
+                // Marker mode never touched these — clearing them there would wipe the inline
+                // paddingTop React (Scroll.tsx) owns.
+                if (sheet) { sheet.style.paddingTop = ''; sheet.style.minHeight = '' }
+              }
             },
           }
         },

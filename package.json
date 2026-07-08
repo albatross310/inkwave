@@ -17,6 +17,7 @@
     "@citation-js/core": "^0.7.21",
     "@citation-js/plugin-csl": "^0.7.22",
     "@clerk/backend": "^3.7.0",
+    "@clerk/clerk-js": "^5.127.0",
     "@clerk/clerk-react": "^5.61.3",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.2.0",

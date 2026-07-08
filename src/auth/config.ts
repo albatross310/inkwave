@@ -21,3 +21,11 @@ export function authRequested(): boolean {
 export function authEnabled(): boolean {
   return !!CLERK_PUBLISHABLE_KEY && authRequested()
 }
+
+// Whether entry.client actually mounted <ClerkProvider> at boot. authEnabled() can flip true
+// MID-SESSION (the headless sign-in sets the sticky flag) but the provider only mounts on load —
+// components gating on @clerk/clerk-react hooks must check THIS, not authEnabled(), or they'd
+// render provider-dependent hooks with no provider and throw. Set once, before hydration.
+let providerMounted = false
+export function markClerkProviderMounted(): void { providerMounted = true }
+export function clerkProviderMounted(): boolean { return providerMounted }

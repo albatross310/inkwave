@@ -45,18 +45,29 @@ function mulberry32(seed: number): () => number {
  * lowercased surface (an out-of-game word in N-mode — its own key, so the state machine still
  * behaves consistently if it is ever forced via the locked set).
  */
+// Memo: lemmaOf is pure and is called for EVERY word of the document by BOTH the decoration
+// renderer and the controller scan, per keystroke. Prose vocabulary is highly repetitive, so a
+// cap-bounded map removes nearly all stemmer work from the typing path.
+const _lemmaMemo = new Map<string, string>()
+const LEMMA_MEMO_CAP = 20_000
+
 export function lemmaOf(surface: string): string {
+  const w = surface.toLowerCase()
+  const hit = _lemmaMemo.get(w)
+  if (hit !== undefined) return hit
   // Collapse inflections to one key: among the candidate stems that are in P, take the SHORTEST
   // (the most reduced base form) — so "work"/"works"/"working" share a lemma and ban-credit can't
   // be dodged by inflecting. The frequency-list pool holds inflected forms as separate entries, so
   // a surface-first rule would keep them distinct. (The crude stemmer occasionally over-collapses;
   // the real product ships a curated surface→lemma map here — this is the seam for it.)
-  const w = surface.toLowerCase()
   let best: string | null = null
   for (const s of getStems(surface)) {
     if (POOL_SET.has(s) && (best === null || s.length < best.length)) best = s
   }
-  return best ?? w
+  const lemma = best ?? w
+  if (_lemmaMemo.size >= LEMMA_MEMO_CAP) _lemmaMemo.clear() // crude cap; refills instantly in use
+  _lemmaMemo.set(w, lemma)
+  return lemma
 }
 
 /** Is this lemma in the game at all (N-mode: rare words are out of the game)? */

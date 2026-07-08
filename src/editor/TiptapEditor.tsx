@@ -52,9 +52,9 @@ import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
-import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo } from '../storage/gdrive'
+import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
@@ -222,6 +222,37 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [otherDevice, setOtherDevice] = useState(false) // another device looks active on this doc
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const [wordCount, setWordCount] = useState(0) // live document word count (shown in the record panel)
+  // ONE-PAINT REVEAL: hold the text invisible (visibility, so layout/measure still run) until fonts
+  // are ready and (gapped mode) the first pagination measure has landed — then fade it in ONCE.
+  // Kills the staged "text → font swap → gaps arrive" shakiness on load and on open-document; the
+  // parchment + background paint instantly from the prerendered shell either way. Hard 1.2s cap so
+  // a slow font can never hold the writing hostage.
+  const [settled, setSettled] = useState(false)
+  // Console-snappy typing (see onTransaction): keystrokes do no O(doc) work. These carry the
+  // deferred-tick + lazy-doc-build machinery.
+  const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
+  const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
+  const lastNotifiedTitleRef = useRef('')     // shell re-renders only when the title actually changes
+  // QUIET SCHEDULER: heavy background work (archive pre-merge, receipt verification) runs only after
+  // the writer has been genuinely idle for a stretch. requestIdleCallback alone still fires
+  // mid-interaction (its timeout forces it), and a 20MB JSON.parse can't be interrupted — that was
+  // the "scroll just stops for a while" right after load. Nothing is dropped: attempts re-arm until
+  // a quiet window arrives, so everything still loads eventually.
+  const lastActivityRef = useRef(Date.now())
+  useEffect(() => {
+    const bump = () => { lastActivityRef.current = Date.now() }
+    const evs = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
+    evs.forEach((ev) => window.addEventListener(ev, bump, { passive: true, capture: true }))
+    return () => evs.forEach((ev) => window.removeEventListener(ev, bump, { capture: true } as EventListenerOptions))
+  }, [])
+  function runWhenQuiet(fn: () => void, quietMs = 4000) {
+    const attempt = () => {
+      if (Date.now() - lastActivityRef.current >= quietMs) fn()
+      else setTimeout(attempt, quietMs)
+    }
+    setTimeout(attempt, quietMs)
+  }
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
@@ -371,7 +402,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       Highlight.configure({ multicolor: true }),
       Underline,
       ListStyle,
-      PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
+      // Always measure page breaks (shared canonical model — see pageModel.ts): gapped mode gets
+      // the tall gap widgets + sheet panels, ungapped gets zero-size break markers the PageGuides
+      // rules + the print stylesheet break at. Same breaks either way, so toggling the switch
+      // never moves content across pages.
+      PaginationExtension.configure({ enabled: true, gapped: gappedPagesEnabled() }),
       ScasSlotMark,
       CommentMark,
       InsertionMark,
@@ -408,8 +443,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       },
     },
     onTransaction: ({ editor: e, transaction }) => {
-      const current = docRef.current
-
       // ── Insignia (paid): keystroke-cadence tap ───────────────────────────────
       // Fold this transaction's steps into the current 0.5s cadence bin. Counts only — never chars.
       // Inert for the free tier (cadenceTierActive() false → tap never created).
@@ -418,41 +451,58 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         cadenceTapRef.current.record(transaction.steps)
       }
 
-      // ── SCAS: drive the engine off the committed words ───────────────────────
-      // Only on a real content change (skip the no-op SCAS_HINT_META repaint we dispatch below,
-      // which would otherwise re-enter here with docChanged=false).
-      let scasState = current.scasState
-      if (transaction.docChanged) {
-        const scas = scasRef.current!
-        const size = e.state.doc.content.size
-        const hadDeletion = prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current
-        prevDocSizeRef.current = size
-        if (scas.processDoc(e.state.doc, e.state.selection.from, hadDeletion)) {
-          scasState = scas.state
-          // The decoration plugin already ran for THIS transaction with the pre-update lookup;
-          // repaint with the new state in a microtask (avoids dispatching mid-dispatch).
-          queueMicrotask(() => {
-            if (!e.isDestroyed) e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
-          })
+      // ── SCAS tick (deferred): CONSOLE-SNAPPY RULE — a keystroke does no O(doc) work. ──────────
+      // The engine scan (processDoc walks every committed word) and the decoration rebuild both
+      // move to ONE debounced tick ~120ms after the last input; the decoration plugin meanwhile
+      // just position-maps its existing marks through each edit (see RedHighlightExtension.apply).
+      // Deletion tracking accumulates across the debounce window so the lock-on-delete rule still
+      // sees every deletion. The tick's own repaint transaction carries SCAS_HINT_META → never re-arms.
+      if (!transaction.getMeta(SCAS_HINT_META) && (transaction.docChanged || transaction.selectionSet)) {
+        if (transaction.docChanged) {
+          const size = e.state.doc.content.size
+          if (prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current) scasHadDeletionRef.current = true
+          prevDocSizeRef.current = size
         }
+        if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
+        scasTickTimerRef.current = setTimeout(() => {
+          if (e.isDestroyed) return
+          const hadDeletion = scasHadDeletionRef.current
+          scasHadDeletionRef.current = false
+          scasRef.current!.processDoc(e.state.doc, e.state.selection.from, hadDeletion)
+          // Always repaint: the deferred decorations need it after edits, and it refreshes the
+          // cursor-word suppression after pure caret moves.
+          e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
+        }, 120)
       }
 
-      const base: InkwaveDocument = {
-        ...current,
-        contentJson: e.getJSON(),
-        updatedAt: new Date().toISOString(),
-        title: deriveTitle(e.getText()) || current.title,
-        scasState,
-        scasGreenAnchors: getGreenAnchors(e.state),
-      }
-      const { doc: updated } = embedBibliography(base)
-      docRef.current = updated
-      onDocChange(updated)
-      scheduleSave(updated)
-      void upsertMeta({
-        id: updated.id,
-        title: updated.title,
-        updatedAt: updated.updatedAt,
+      // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
+      // a paragraph), so it stays above the docChanged gate. O(caret) walk; React bails on same value.
+      const { $from } = e.state.selection
+      let pIdx = 0
+      e.state.doc.nodesBetween(0, $from.pos, (node) => {
+        if (node.type.name === 'paragraph') pIdx++
+      })
+      setCurrentParagraphIndex(Math.max(0, pIdx - 1))
+
+      // ── docChanged gate (THE typing-lag fix) ─────────────────────────────────
+      // Everything below serializes the document / re-renders the shell — and this handler fires for
+      // EVERY transaction: caret moves, the SCAS hint repaint above, and the pagination extension's
+      // two per-keystroke meta dispatches. Paying full-doc getJSON + a React re-render + an IndexedDB
+      // write up to 3× per keystroke was the dominant lag source. Selection-only transactions stop here.
+      if (!transaction.docChanged) return
+
+      // CONSOLE-SNAPPY RULE: no serialization on the keystroke either. The document object is
+      // rebuilt lazily (ensureDocFresh: getJSON + title + bibliography) at the first point that
+      // actually needs it — the 200ms save beat, any snapshot/signing work, or a mirror. The beat
+      // stays data-only; the shell re-renders only when the title changed.
+      docStaleRef.current = true
+      scheduleSave(() => ensureDocFresh(), () => {
+        const d = docRef.current
+        if (d.title !== lastNotifiedTitleRef.current) {
+          lastNotifiedTitleRef.current = d.title
+          onDocChange(d)
+        }
+        void upsertMeta({ id: d.id, title: d.title, updatedAt: d.updatedAt })
       })
 
       // Prefetch synonyms for all visible red words after a short pause.
@@ -464,26 +514,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         if (words.length > 0) prefetchSynonyms([...new Set(words)])
       }, 600)
 
-      const { $from } = e.state.selection
-      let pIdx = 0
-      e.state.doc.nodesBetween(0, $from.pos, (node) => {
-        if (node.type.name === 'paragraph') pIdx++
-      })
-      setCurrentParagraphIndex(Math.max(0, pIdx - 1))
-
       // ── Paragraph snapshot: fire when Enter creates a new top-level paragraph ──
-      if (transaction.docChanged) {
-        // Collect all top-level paragraphs so we can extract the just-completed one.
-        const allParas: string[] = []
-        e.state.doc.forEach((node) => {
-          if (node.type.name === 'paragraph') allParas.push(node.textContent)
-        })
-        const paraCount = allParas.length
+      // (Already behind the docChanged gate above.) Cheap top-level count first; only collect the
+      // paragraph TEXTS when the count actually grew by one — the full textContent collection on
+      // every keystroke was an O(doc) walk for a check that's almost always false.
+      {
+        let paraCount = 0
+        e.state.doc.forEach((node) => { if (node.type.name === 'paragraph') paraCount++ })
         const prev = prevParaCountRef.current
         prevParaCountRef.current = paraCount
 
         // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
         if (paraCount === prev + 1 && pIdx >= 2) {
+          const allParas: string[] = []
+          e.state.doc.forEach((node) => {
+            if (node.type.name === 'paragraph') allParas.push(node.textContent)
+          })
           // pIdx-1 is the 0-based current (new empty) paragraph; pIdx-2 is the just-completed one.
           const completedText = (allParas[pIdx - 2] ?? '').trim()
           if (completedText.length > 0) {
@@ -635,13 +681,38 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Live word count for the record panel.
+  // Reveal gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
   useEffect(() => {
     if (!editor) return
+    let done = false
+    const finish = () => { if (!done) { done = true; setSettled(true) } }
+    const cap = setTimeout(finish, 1200)
+    const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
+    // The pagination extension measures in BOTH page modes now (gap widgets / break markers), so
+    // always wait for its first measure — the 1.2s cap covers any mode where it never fires.
+    const paginationReady: Promise<void> =
+      (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
+        ? Promise.resolve()
+        : new Promise((res) => {
+            const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
+            window.addEventListener('inkwave:pagination-ready', on)
+          })
+    void Promise.all([fontsReady, paginationReady]).then(() =>
+      requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
+    )
+    return () => clearTimeout(cap)
+  }, [editor])
+
+  // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
+  // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
+  useEffect(() => {
+    if (!editor) return
+    let timer: ReturnType<typeof setTimeout> | undefined
     const count = () => { const m = editor.getText().match(/[\p{L}\p{N}]+/gu); setWordCount(m ? m.length : 0) }
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(count, 300) }
     count()
-    editor.on('update', count)
-    return () => { editor.off('update', count) }
+    editor.on('update', schedule)
+    return () => { editor.off('update', schedule); if (timer) clearTimeout(timer) }
   }, [editor])
   // "Sync editor" from the PDF viewer: scroll to the citation OCCURRENCE a highlight belongs to.
   useEffect(() => {
@@ -742,11 +813,35 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Rebuild docRef from the live editor if a keystroke left it stale (the lazy half of the
+  // console-snappy rule). Called at every point that consumes the document: the autosave beat,
+  // ALL snapshot work (via enqueueSnapshotWork), period signing, and mirrors — so provenance
+  // always hashes the exact current content; between those points docRef may lag by ≤200ms.
+  function ensureDocFresh(): InkwaveDocument {
+    if (!docStaleRef.current) return docRef.current
+    const e = editorRef.current
+    if (!e || e.isDestroyed) return docRef.current
+    docStaleRef.current = false
+    const base: InkwaveDocument = {
+      ...docRef.current,
+      contentJson: e.getJSON(),
+      updatedAt: new Date().toISOString(),
+      // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
+      title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
+      scasState: scasRef.current?.state ?? docRef.current.scasState,
+      scasGreenAnchors: getGreenAnchors(e.state),
+    }
+    const { doc: updated } = embedBibliography(base)
+    docRef.current = updated
+    return updated
+  }
+
   // Serialise all snapshot-file mutations through one promise chain (avoids OPFS read-modify-write
-  // races between snapshot creation, OTS stamping, and upgrades).
+  // races between snapshot creation, OTS stamping, and upgrades). Freshness guard: every snapshot
+  // consumes docRef, so the queue itself guarantees the lazy doc build has run first.
   function enqueueSnapshotWork(work: () => Promise<void>) {
     snapQueueRef.current = snapQueueRef.current
-      .then(work)
+      .then(async () => { ensureDocFresh(); await work() })
       .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
   }
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
@@ -858,6 +953,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // (any browser). No-op if neither is active. OneDrive auto-sync is silent (no popup); if the
   // token has expired it simply skips until the next explicit sync.
   function mirrorIfActive() {
+    ensureDocFresh() // mirrors write docRef — never a stale one
     if (folderActiveRef.current) {
       void listSnapshots(docRef.current.id)
         .then((snaps) => writeBundleToFile(docRef.current, snaps))
@@ -1020,11 +1116,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
   }
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
-    const text = await downloadGoogleDriveFile(f.id)
-    if (!text) return
+    // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
+    const blob = await downloadGoogleDriveFileBlob(f.id)
+    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
-      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+      await openInkwaveFile(new File([blob], f.name), { googleFileId: f.id })
+      setGdriveOpenerOpen(false) // see OneDrive note — same-id opens don't remount the editor
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1036,11 +1134,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setOdOpenerOpen(true)
   }
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
-    const text = await downloadOneDriveFile(f.itemId)
-    if (!text) return
+    // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
+    const blob = await downloadOneDriveFile(f.itemId)
+    // NEVER fail silently ("tapped the file, nothing happened" on phone): every exit is visible.
+    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
     void addRecentFolder(f.folder)
     try {
-      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
+      await openInkwaveFile(new File([blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })
+      // Close the opener explicitly: opening a doc with the SAME id as the active one doesn't
+      // remount the editor (key unchanged), so nothing else would dismiss the panel.
+      setOdOpenerOpen(false)
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1182,6 +1285,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => window.removeEventListener('inkwave:save-file-linked', onLinked)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Warm the once-per-session grow-only merges at IDLE. The first mirror to a linked target fires on
+  // a provenance checkpoint MID-TYPING, so paying the whole-archive read+parse there was an
+  // inconsistent typing spike. Doing it here heals OPFS while the writer is idle; if the idle pass
+  // doesn't run (no permission yet / offline), the first sync still merges as before.
+  useEffect(() => {
+    let cancelled = false
+    runWhenQuiet(() => {
+      if (cancelled) return
+      void preMergeSaveFile(docRef.current.id)
+      if (oneDriveActiveRef.current) void preMergeRemote(docRef.current)
+      if (gdriveActiveRef.current) void preMergeGDrive(docRef.current.id)
+    })
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if
   // ANOTHER device wrote it recently — i.e. it looks open on another computer. Never locks: the doc
   // stays editable and saved locally. Resets the dismissal when the document switches.
@@ -1215,7 +1333,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void SessionRunner.open(docId).then(async (runner) => {
       if (cancelled || !runner || docRef.current.id !== docId) return
       sessionRef.current = runner
+      // Adopt the server set + repaint IMMEDIATELY; the receipt recovery/purge below is heavy
+      // (snapshot archive reads + an Ed25519 verify per historical receipt chain) and used to run
+      // right here — landing in the first seconds after load, where it competed with first scrolls
+      // and keystrokes (part of the "shaky first 2 seconds"). It now runs at browser idle.
+      priorReceiptsRef.current = docRef.current.scasReceipts ?? []
+      scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
+      if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
 
+      const recoverAndPurge = async () => {
+      if (cancelled || docRef.current.id !== docId) return
       // Recover any receipts from previous sessions that were lost due to the cross-session
       // overwrite bug (now fixed). Scan OPFS snapshots; collect receipts from sessions that
       // appear in the snapshots but not in doc.scasReceipts. Only adds receipts from sessions
@@ -1267,6 +1394,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         receipts.sort((a, b) => a.counter - b.counter)
         const v = await verifyChain(receipts, token, pubKey)
         if (!v.ok) badSessions.add(token)
+        // Yield between chains: the Ed25519 sweep is main-thread crypto — unsliced it was the
+        // "on-and-off 1s lags 5-10s after refresh" once the quiet scheduler let it run.
+        await new Promise((r) => setTimeout(r, 0))
+        if (cancelled || docRef.current.id !== docId) return
       }
       if (badSessions.size && !cancelled && docRef.current.id === docId) {
         const cleanReceipts = (docRef.current.scasReceipts ?? []).filter(
@@ -1275,6 +1406,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         // Remove snapshots that only embed bad-session receipts (so content integrity passes)
         const snapsAfterRecovery = await listSnapshots(docId)
         for (const s of snapsAfterRecovery) {
+          await new Promise((r) => setTimeout(r, 0)) // slice the rewrite loop too
           const snapReceipts = s.receipts ?? []
           const allBad = snapReceipts.length > 0 && snapReceipts.every((r) => badSessions.has(r.sessionToken))
           if (allBad) await deleteSnapshot(docId, s.id)
@@ -1286,8 +1418,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }
 
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
-      scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
-      if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
+      }
+      runWhenQuiet(() => void recoverAndPurge(), 5000)
     })
     return () => { cancelled = true }
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1302,6 +1434,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   runPeriodRef.current = async () => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
+    ensureDocFresh() // the receipt hashes the exact current content
     const runner = sessionRef.current
     if (runner) {
       const kicks = [...periodKicksRef.current] // snapshot — a second nudge must not mutate this
@@ -1461,7 +1594,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </button>
           </div>
         )}
-        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill>
+        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled}>
           <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
@@ -1630,8 +1763,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // Counter browser zoom so the pill stays a constant physical size.
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
-              // ×1.25 base = the "25% bigger pills" (buttons + text scale together).
-              transform: `scale(${zoom * 1.12})`,
+              // ×1.12 = the "bigger pills" boost — desktop only. On a phone the bar is w-full, so
+              // any upscale makes it VISUALLY 12% wider than the screen and the end buttons clip.
+              transform: `scale(${zoom * (isTouch ? 1 : 1.12)})`,
               transformOrigin: 'bottom center',
             }}
           >
@@ -1651,9 +1785,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
-            {/* Main toolbar row */}
+            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) caps every button's 44px
+                min-WIDTH at 37px so the nine circles fit a 360px screen; px-1 + justify-between
+                distribute the remaining slack.
+                Width arithmetic @360px: 8 (px-1) + ◈36 + ▲36 + 4×37 slots + S37 + ⚙37 + ⋮36 = 338. */}
             {showMainRow && (
-            <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
+            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-1' : 'gap-0.5 px-2'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
@@ -1663,7 +1800,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   style={{ color: '#5c2d8a' }}
                   title="Provenance record"
                 >
-                  <span className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
                 </button>
               )}
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
@@ -1755,7 +1892,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
-                  style={isTouch ? { maxWidth: '40px' } : undefined}
                   draggable
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}

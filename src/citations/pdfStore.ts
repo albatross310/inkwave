@@ -2,6 +2,7 @@
 // The library JSON only records the original filename (_iw.pdfName); the bytes live here so they
 // never bloat the citation JSON or any provenance hash. Chromium/Firefox have OPFS; Safari too.
 
+import { writeOpfsFile } from '../storage/opfsWrite'
 const DIR = 'library'
 const SUB = 'pdfs'
 
@@ -26,12 +27,10 @@ export const pdfVersion = (citekey: string): number => _pdfVersion.get(citekey) 
 const bumpPdfVersion = (citekey: string) => _pdfVersion.set(citekey, pdfVersion(citekey) + 1)
 
 export async function savePdf(citekey: string, file: Blob): Promise<void> {
-  const dir = await pdfDir(true)
+  const dir = await pdfDir(true) // ensures the dirs exist (and errors politely when OPFS is absent)
   if (!dir) throw new Error('Storage unavailable — cannot embed the PDF on this device.')
-  const handle = await dir.getFileHandle(fileName(citekey), { create: true })
-  const w = await handle.createWritable()
-  await w.write(file)
-  await w.close()
+  // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
+  await writeOpfsFile([DIR, SUB, fileName(citekey)], new Uint8Array(await file.arrayBuffer()))
   bumpPdfVersion(citekey)
 }
 
@@ -70,9 +69,9 @@ export function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-export function base64ToBlob(b64: string, type = 'application/pdf'): Blob {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return new Blob([bytes], { type })
+export async function base64ToBlob(b64: string, type = 'application/pdf'): Promise<Blob> {
+  // Native data-URL decode (off the JS heap's hot path) — the old atob + per-char loop was a
+  // 20M-iteration main-thread stall when opening a .studio with embedded PDFs.
+  const res = await fetch(`data:${type};base64,${b64}`)
+  return res.blob()
 }

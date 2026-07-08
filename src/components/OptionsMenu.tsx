@@ -12,6 +12,7 @@ import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
 import { openInkwaveFile } from '../storage/openDoc'
+import { isTouchDevice } from '../editor/Scroll'
 import { oneDriveFilename } from '../storage/onedrive'
 import { AccountMenuItems } from './AccountControl'
 import { getSaveFileName } from '../storage/folder'
@@ -205,8 +206,12 @@ export function OptionsMenu({
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
-      {/* Hidden input: "Open…" clicks it directly so the OS file dialog opens immediately (no drop zone). */}
-      <input ref={fileInputRef} type="file" accept=".studio,.inkwave,application/json,.json,.trace.json,.insig.json" className="hidden" onChange={onOpenFile} />
+      {/* Hidden input: "Open…" clicks it directly so the OS file dialog opens immediately (no drop zone).
+          NO accept on touch/iOS: Safari maps accept extensions to registered UTIs, and .studio/.inkwave
+          have none — every Inkwave file showed GREYED OUT in the iOS picker. Omitting accept makes all
+          files selectable; openInkwaveFile validates by CONTENT, so a wrong pick just errors politely.
+          Desktop keeps the extension filter for a tidier dialog. */}
+      <input ref={fileInputRef} type="file" accept={isTouchDevice() ? undefined : '.studio,.inkwave,application/json,.json,.trace.json,.insig.json'} className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}

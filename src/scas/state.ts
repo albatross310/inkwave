@@ -4,47 +4,9 @@
 // the value-level concerns: sane defaults, normalisation of loaded state, a fast read model for
 // the renderer, and the suggestion-suppression rule. The transition logic is in engine.ts.
 
-import type { InkwaveDocument, ScasState } from '../types/document'
-import { POOL_ID } from './pool'
+import type { ScasState } from '../types/document'
 import { isImmune, isLocked } from './engine'
-
-/** Default |S| in N-mode (v4 spec §4.2: start ~300 of ~4,500). */
-export const DEFAULT_SET_SIZE = 300
-
-export function emptyScasState(): ScasState {
-  return { version: 0, locked: [], satisfied: [], liveKicks: [], kickTimes: {} }
-}
-
-/** Coerce possibly-missing/partial persisted state into a valid ScasState. */
-export function normalizeScasState(s: Partial<ScasState> | undefined | null): ScasState {
-  if (!s) return emptyScasState()
-  return {
-    version: Number.isFinite(s.version) ? (s.version as number) : 0,
-    locked: Array.isArray(s.locked) ? [...new Set(s.locked)] : [],
-    satisfied: Array.isArray(s.satisfied)
-      ? s.satisfied.filter((e) => e && typeof e.lemma === 'string')
-      : [],
-    liveKicks: Array.isArray(s.liveKicks) ? [...new Set(s.liveKicks)] : [],
-    kickTimes: s.kickTimes && typeof s.kickTimes === 'object' ? { ...s.kickTimes } : {},
-  }
-}
-
-/**
- * Ensure a document carries the M0 SCAS fields, filling defaults without clobbering existing
- * values. Called when opening/creating a document (Edit.tsx migrateDocument) so pre-M0 docs and
- * fresh docs both end up with a valid engine state. `seedRef` defaults to the existing
- * per-document session seed (the local stand-in for the server-held seed until M3).
- */
-export function withScasDefaults(doc: InkwaveDocument): InkwaveDocument {
-  return {
-    ...doc,
-    scasMode: doc.scasMode ?? 'n',
-    scasSetSize: doc.scasSetSize ?? DEFAULT_SET_SIZE,
-    scasSeedRef: doc.scasSeedRef ?? doc.scasSessionSeed,
-    scasPoolId: doc.scasPoolId ?? POOL_ID,
-    scasState: normalizeScasState(doc.scasState),
-  }
-}
+export { DEFAULT_SET_SIZE, emptyScasState, normalizeScasState, withScasDefaults } from './defaults'
 
 // ─── Fast read model for the renderer ─────────────────────────────────────────
 // classifyCommit's array scans are fine at commit time (one lemma), but the decoration builder

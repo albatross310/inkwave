@@ -12,9 +12,9 @@ export const CROSSOUT_MODES: CrossoutMode[] = ['stacked', 'inline', 'off']
 export function crossoutMode(): CrossoutMode {
   try {
     const v = localStorage.getItem(KEY)
-    if (v === 'inline' || v === 'off') return v
+    if (v === 'inline' || v === 'stacked') return v
   } catch { /* private mode */ }
-  return 'stacked'
+  return 'off' // default OFF (Peter, 2026-07-08); stored 'inline'/'stacked' keep their choice
 }
 
 export function setCrossoutMode(mode: CrossoutMode): void {
@@ -34,7 +34,7 @@ export function cycleCrossoutMode(): CrossoutMode {
 const EGG_KEY = 'inkwave:watermark'
 
 export function watermarkEnabled(): boolean {
-  try { return localStorage.getItem(EGG_KEY) !== '0' } catch { return true }  // default on
+  try { return localStorage.getItem(EGG_KEY) === '1' } catch { return false }  // default OFF (Peter, 2026-07-08)
 }
 
 export function setWatermark(on: boolean): void {

@@ -104,6 +104,12 @@
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the
      shimmer/moiré the old fast-scroll fade was working around. */
+  .inkwave-editor-surface {
+    /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
+       (opposite drift directions) without duplicating image data per theme — night just re-points these. */
+    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='14' x2='0' y2='86' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3C/svg%3E");
+    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='84' x2='0' y2='156' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3C/svg%3E");
+  }
   .inkwave-editor-surface::before {
     content: '';
     position: fixed; /* viewport-anchored → doesn't scroll with the page */
@@ -113,15 +119,63 @@
     /* TWO layers, each a 140×140 tile holding a thick+thin PAIR that moves as one. Layer A carries
        every other pair; layer B the pairs between them — given opposite --wave-x so consecutive
        pairs (every second thick line) sway opposite ways. Horizontal only, no vertical movement. */
-    background-image:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='14' x2='0' y2='86' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3C/svg%3E"),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='84' x2='0' y2='156' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3C/svg%3E");
+    background-image: var(--iw-wave-a), var(--iw-wave-b);
     background-size: 140px 140px, 140px 140px;
     background-position:
       var(--wave-x, 0px) 0px,
       calc(-1 * var(--wave-x, 0px)) 0px;
     will-change: background-position;
+    /* Own compositor layer from FIRST PAINT: the loading drift animates transform on this layer —
+       pre-promoting means its raster already exists when the animation's first frame lands, so a
+       busy main thread can't make the opening waves hitch. contain limits invalidation scope. */
+    transform: translateZ(0);
+    contain: strict;
   }
+
+  /* Loading wave drift — COMPOSITOR (transform) animations, so they start at first paint (the class
+     is in the prerendered HTML) and stay perfectly smooth however busy the main thread is while the
+     editor boots. The wave PAIR splits across the two pseudo-elements so the pairs drift in OPPOSITE
+     directions (matching the scroll sway); each slides exactly one 140px tile per loop — pattern-
+     identical, an infinite seamless drift — with a tile of slack on BOTH sides so no edge is ever
+     uncovered. --wave-phase syncs the live surface to the shell's animation mid-loop. At reveal,
+     Scroll.tsx freezes the offset into --wave-t and eases it to the nearest tile boundary (identity
+     for both directions), so dropping the classes hands back to the two-layer ::before with zero jump. */
+  /* S-curve start: a 0.5s one-shot ramp (zero start velocity, ending at exactly the cruise speed —
+     the bezier's end slope is 2, and 18px = the distance an S-ramp to 72px/s covers in 0.5s), then the
+     infinite linear loop takes over from -9px. translate3d keeps the layer on the GPU. */
+  @keyframes iw-wave-ramp-l { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-18px, 0, 0); } }
+  @keyframes iw-wave-ramp-r { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(18px, 0, 0); } }
+  @keyframes iw-wave-drift-l { from { transform: translate3d(-18px, 0, 0); } to { transform: translate3d(-158px, 0, 0); } }
+  @keyframes iw-wave-drift-r { from { transform: translate3d(18px, 0, 0); } to { transform: translate3d(158px, 0, 0); } }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before,
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
+    left: -320px; right: -320px;
+    background-image: var(--iw-wave-a); /* layer A only — layer B lives on ::after during the drift */
+    background-position: 0 0;
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after,
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
+    content: '';
+    position: fixed; inset: 0; left: -320px; right: -320px;
+    z-index: -1; pointer-events: none;
+    background-image: var(--iw-wave-b);
+    background-size: 140px 140px;
+    background-position: 0 0;
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before {
+    animation:
+      iw-wave-ramp-l 0.5s cubic-bezier(0.4, 0, 0.75, 0.5) var(--wave-ramp-delay, 0s) 1 forwards,
+      iw-wave-drift-l 1.944s linear var(--wave-phase, 0.5s) infinite;
+    will-change: transform;
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after {
+    animation:
+      iw-wave-ramp-r 0.5s cubic-bezier(0.4, 0, 0.75, 0.5) var(--wave-ramp-delay, 0s) 1 forwards,
+      iw-wave-drift-r 1.944s linear var(--wave-phase, 0.5s) infinite;
+    will-change: transform;
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before { transform: translate3d(var(--wave-t, 0px), 0, 0); }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after  { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
      goes fully transparent, so the real (fixed) aqua+waves background shows through everywhere; the
@@ -159,6 +213,17 @@
      the page, not the editor's text I-beam. */
   .inkwave-page-gap { display: block; position: relative; user-select: none; cursor: default; }
   .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; }
+  /* Ungapped mode's break MARKER (same widget, zero height): a 0-height block that pins the
+     measured break position — PageGuides draws the dashed rule at its rect, @media print breaks
+     the page at it. Block (not inline): the break sits at a line start, so the forced break is a
+     visual no-op at steady state and the marker's top IS the page boundary; an inline 0×0 box
+     would land at the END of the previous line (zero width always fits) and stop the wrap-point
+     space collapsing. Zero height → no space reserved in the continuous flow. */
+  .inkwave-page-gap.iw-break-marker {
+    height: 0;
+    padding: 0;
+    margin: 0;
+  }
   /* Page number + logo, pinned to each sheet's bottom margin (a footer) — never in the gap. */
   .inkwave-sheet-num {
     position: absolute;
@@ -190,12 +255,21 @@
   }
   .inkwave-editor-surface.is-phone::before { display: none; }
 
-  /* Phone text: double the apparent size so the writing is comfortable to read at arm's length.
+  /* Phone text: boost the apparent size so the writing is comfortable to read at arm's length.
+     PHONE FONT BOOST = 1.65 — the single constant to tune. ×1.65 over the 1.125rem desktop base
+     (was ×2; 2026-07-08 the +100% boost was toned down to +65% — "the font starts off way too big").
      The stored document font sizes are unchanged — this is display-only CSS applied to the
      rendering layer. Custom font-size marks stay proportional (they're em-relative to this base). */
   .inkwave-editor-surface.is-phone .ProseMirror {
-    font-size: calc(2.25rem * var(--iw-editor-zoom, 1));
+    font-size: calc(1.125rem * 1.65 * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.55);
+  }
+
+  /* Phone footer toolbar: nine circle buttons must fit a 360px screen. Keep the 44px tap HEIGHT
+     but cap each button's tap WIDTH at the 36px (w-9) circle +1px, so justify-between can spread
+     the remaining slack as gaps. Scoped override — desktop keeps the full 44px targets. */
+  .iw-phone-toolbar .min-w-\[44px\] {
+    min-width: 37px;
   }
 
   /* Parchment paper texture for the scroll body (the page the text sits on). UNIFORM colour: the
@@ -501,15 +575,28 @@
   html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; width: 210mm !important; }
   /* Hide floating chrome + the wavy background + the decorative parchment panels. */
   .fixed { display: none !important; }
-  .inkwave-editor-surface::before { display: none !important; }
+  .inkwave-editor-surface::before, .inkwave-editor-surface::after { display: none !important; }
   .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; }
   .inkwave-sheets, .inkwave-sheet, .inkwave-sheet-num { display: none !important; }
+  /* The ungapped page-guide overlay (dashed rules, page numbers, logos) is screen chrome — the
+     printed page breaks for real at the markers, so the guides would double up. */
+  .iw-page-guides { display: none !important; }
   .scroll-paper, .scroll-paper.inkwave-gapped { background: #fff !important; box-shadow: none !important; }
-  /* Break the page exactly where the editor's page gap is. The gap becomes the next page's TOP
-     margin (72px, matching the editor); the previous page's bottom margin falls out of the content
-     area being exactly A4 − 144px. So margins match the screen WITHOUT an @page margin (which would
-     reintroduce the browser's header/footer text). */
-  .inkwave-page-gap { break-before: page !important; height: 72px !important; min-height: 72px !important; margin: 0 !important; padding: 0 !important; }
+  /* Break the page exactly where the editor's page gap / break marker is (BOTH page modes place
+     one at every measured break — same shared model, so print pagination = screen pagination).
+     The widget becomes the next page's TOP margin: --iw-print-topm carries the live top-margin
+     setting (set inline by gapEl in PaginationExtension). The previous page's bottom margin falls
+     out of the content area being at most pageH − topM − MARGIN_BOTTOM. So margins match the
+     screen WITHOUT an @page margin (which would reintroduce the browser's header/footer text). */
+  .inkwave-page-gap {
+    display: block !important; /* the ungapped marker is inline-block 0×0 on screen */
+    width: auto !important;
+    break-before: page !important;
+    height: var(--iw-print-topm, 72px) !important;
+    min-height: var(--iw-print-topm, 72px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   .inkwave-page-gap-band { display: none !important; }
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
@@ -547,10 +634,9 @@
 :root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e; }
 
 /* Grey waves on black (same two-layer tiles, grey strokes instead of white). */
-:root[data-theme="night"] .inkwave-editor-surface::before {
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E");
+:root[data-theme="night"] .inkwave-editor-surface {
+  --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E");
+  --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E");
 }
 
 /* Charcoal paper. Sheets are a touch lighter than the black surround so pages read as distinct. */

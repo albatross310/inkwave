@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { gappedPagesEnabled } from './pageView'
-import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation } from './pageSettings'
-import { MARGIN_BOTTOM } from './extensions/PaginationExtension'
+import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation, MARGIN_BOTTOM } from './pageSettings'
+import { pageBoxPx, paperCssSize } from './pageModel'
+import { syncPrintPageStyle } from './printPageStyle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -24,6 +25,7 @@ export function Scroll({
   containerRef,
   phone = false,
   fill = false,
+  revealed = true,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -31,6 +33,10 @@ export function Scroll({
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
+  revealed?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
+                     // pagination settle — visibility, not display, so layout + measurement still run.
+                     // The editor flips it once; the loading shell passes false so page + text appear
+                     // together, atomically, instead of paper-then-text.
 }) {
   // The (fixed) background waves don't scroll with the page. As you scroll we only sway them
   // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
@@ -43,7 +49,8 @@ export function Scroll({
   const gapped = gappedPagesEnabled()
   const [, rerender] = useState(0)
   useEffect(() => {
-    const onChanged = () => rerender(n => n + 1)
+    const onChanged = () => { syncPrintPageStyle(); rerender(n => n + 1) }
+    syncPrintPageStyle() // keep the print @page size in sync with the paper settings (see printPageStyle)
     window.addEventListener('inkwave:page-settings-changed', onChanged)
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
@@ -72,28 +79,54 @@ export function Scroll({
     let steps = 0
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
+    // One STABLE anchor element per gesture. Re-picking under the viewport centre every frame made
+    // the anchor flip between elements at block boundaries, and the old correction pinned the picked
+    // element's TOP to the centre line (scrollTop += topAfter - anchorY) — with multi-step coalesced
+    // frames that per-frame snap compounded into a fast drift toward the doc top in BOTH directions.
+    // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
+    // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
+    let anchorEl: HTMLElement | null = null
     const applyFrame = () => {
       raf = 0
       const net = steps
       steps = 0
       if (!net) return
-      // Anchor to the block at the VIEWPORT CENTRE (the horizontal + vertical midline), not the pointer —
-      // so zoom keeps the central text put. A big container (.ProseMirror / .scroll-paper) spans the whole
-      // doc, so its top reflows to near the doc top on zoom-out → a huge negative correction that clamps
-      // scrollTop to 0 (the "jump to top" bug, zoom-out only). Reject those and fall back to the scroll RATIO.
+      // Pick (or re-pick, if the node was destroyed) a TEXT block near the VIEWPORT CENTRE. Reject:
+      // the big containers (.ProseMirror / .scroll-paper — they span the whole doc, so their top
+      // reflows toward the doc top and a correction against them lurches — the old "jump to top"
+      // bug) and the PAGE-GAP widgets/sheet chrome (their heights are pinned px that do NOT reflow
+      // with the font, so anchoring against one warps the correction — the "funky near page gaps"
+      // bug). When the centre line falls inside a gap, probe outward until real text is found, so
+      // the anchor is effectively the nearest text above/below the gap.
       const vr = el.getBoundingClientRect()
       const anchorX = vr.left + vr.width / 2, anchorY = vr.top + vr.height / 2
-      let target = document.elementFromPoint(anchorX, anchorY) as HTMLElement | null
-      if (target && (!el.contains(target) || target.classList.contains('ProseMirror') || target.classList.contains('scroll-paper') || target.closest('.ProseMirror') == null)) target = null
+      const pickAt = (y: number): HTMLElement | null => {
+        const t = document.elementFromPoint(anchorX, y) as HTMLElement | null
+        if (!t || !el.contains(t)) return null
+        if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
+        if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
+        if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
+        return t
+      }
+      if (!anchorEl || !anchorEl.isConnected) {
+        // Probe the centre first, then alternate above/below in growing steps — finds the nearest
+        // text block when the midline sits in a page gap.
+        anchorEl = pickAt(anchorY)
+        for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
+          if (anchorEl) break
+          anchorEl = pickAt(anchorY + dy)
+        }
+      }
       const keepLeft = el.scrollLeft
       const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)
       const ratio = el.scrollTop / denomBefore
+      const topBefore = anchorEl ? anchorEl.getBoundingClientRect().top : 0 // at the CURRENT size
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
       const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
-      if (target && target.isConnected) {
-        const topAfter = target.getBoundingClientRect().top // forces synchronous layout at the new size
-        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - anchorY)) // anchor back under the viewport centre
+      if (anchorEl && anchorEl.isConnected) {
+        const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
+        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - topBefore)) // hold the anchored text still
         el.scrollLeft = keepLeft
       } else {
         el.scrollTop = ratio * Math.max(1, el.scrollHeight - el.clientHeight) // no anchor → keep relative position
@@ -104,9 +137,27 @@ export function Scroll({
       settle = setTimeout(() => {
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
         try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
+        // ZOOM-SETTLE RE-MEASURE: page breaks stay pinned DURING the gesture (re-measuring live made
+        // the text lurch), but the gaps + sheet panels were measured at the OLD font size and sit
+        // misaligned with the reflowed text. One clean re-measure now — and we re-anchor the viewport
+        // around it (same held-anchor logic) so the adjustment doesn't move the text you're reading.
+        const held = anchorEl && anchorEl.isConnected ? anchorEl : null
+        anchorEl = null // gesture over → next gesture picks a fresh anchor under the centre
+        const topBeforeMeasure = held ? held.getBoundingClientRect().top : 0
+        const onMeasured = () => {
+          window.removeEventListener('inkwave:pagination-measured', onMeasured)
+          requestAnimationFrame(() => {
+            if (held && held.isConnected) {
+              const topAfterMeasure = held.getBoundingClientRect().top
+              el.scrollTop = Math.max(0, el.scrollTop + (topAfterMeasure - topBeforeMeasure))
+            }
+          })
+        }
+        window.addEventListener('inkwave:pagination-measured', onMeasured)
+        window.dispatchEvent(new Event('inkwave:zoom-settled'))
+        // Non-gapped mode: no pagination plugin listening → drop the one-shot listener shortly.
+        setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, 200)
-      // Deliberately do NOT re-paginate on zoom: page breaks stay pinned to the SAME text as you zoom
-      // (Peter's intent). Re-measuring during/after zoom made the breaks — and the text — jump around.
     }
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
@@ -149,8 +200,78 @@ export function Scroll({
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [phone])
 
+  // Loading wave drift — CSS/compositor does the moving (`.iw-wave-anim`, in the prerendered HTML,
+  // so it starts at FIRST PAINT and never stutters however busy the main thread is). JS only manages
+  // the phases: sync the live surface to the shell's animation phase at mount, and at reveal freeze
+  // the current offset then ease it to the nearest 140px tile boundary (pattern-identity) over ~1s —
+  // an exponential coast to rest with a zero-jump handoff back to the scroll sway.
+  const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
+  const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
+  useEffect(() => {
+    // Pick up mid-loop where the (unmounted) shell's animation was: negative delay = elapsed % loop.
+    const el = surfaceRef.current
+    if (!el || !startedHiddenRef.current) return
+    // The drift loop starts after the 0.5s S-ramp; sync both to where the shell's animation is now.
+    const elapsed = performance.now() / 1000
+    if (elapsed < 0.5) {
+      el.style.setProperty('--wave-ramp-delay', `-${elapsed.toFixed(3)}s`)
+      el.style.setProperty('--wave-phase', `${(0.5 - elapsed).toFixed(3)}s`)
+    } else {
+      el.style.setProperty('--wave-ramp-delay', '-1s') // ramp long done — fill holds it at -9px
+      el.style.setProperty('--wave-phase', `-${(((elapsed - 0.5) % 1.944)).toFixed(3)}s`)
+    }
+  }, [])
+  // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
+  // an effect with the decay loop — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
+  // effect and its CLEANUP cancelled the just-started rAF, leaving .iw-wave-coast stuck forever
+  // (frozen waves + background-position pinned at 0 → the scroll sway looked "broken").
+  useLayoutEffect(() => {
+    if (!revealed || waveMode !== 'anim') return
+    const el = surfaceRef.current
+    if (!el) { setWaveMode('off'); return }
+    // Freeze the compositor animation's current offset BEFORE the class swap paints.
+    let tx = 0
+    try {
+      const m = getComputedStyle(el, '::before').transform
+      if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
+    } catch { /* transform unreadable → coast from 0 */ }
+    el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
+    setWaveMode('coast')
+  }, [revealed, waveMode])
+  useEffect(() => {
+    if (waveMode !== 'coast') return
+    const el = surfaceRef.current
+    if (!el) { setWaveMode('off'); return }
+    let raf = 0
+    let last = performance.now()
+    let tx = parseFloat(el.style.getPropertyValue('--wave-t')) || 0
+    let v = -72 // px/s leftward — the speed the CSS drift was running at
+    const TAU = 0.28 // s — exponential decay; visually still in ~1s
+    const tick = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.1)
+      last = now
+      v *= Math.exp(-dt / TAU)
+      tx += v * dt
+      if (Math.abs(v) < 3) {
+        // Nearly at rest: glide to the nearest tile boundary, where transform ≡ none.
+        const target = Math.round(tx / 140) * 140
+        tx += (target - tx) * Math.min(1, dt * 8)
+        if (Math.abs(target - tx) < 0.4) {
+          el.style.removeProperty('--wave-t')
+          setWaveMode('off')
+          raf = 0
+          return
+        }
+      }
+      el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [waveMode])
+
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}
@@ -170,15 +291,21 @@ export function Scroll({
             if (phone) return undefined
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
-            const landscape = getOrientation() === 'landscape'
-            if (ps === 'letter') return landscape ? '279mm' : '216mm'
-            return landscape ? '297mm' : '210mm' // a4
+            // The SAME physical mm the break model (pageModel) and the print @page size use —
+            // one source of truth, so screen wrapping = print wrapping.
+            return paperCssSize(ps, getOrientation()).width
           })(),
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
           // the whole parchment on every reel frame.
           borderRadius: phone ? 0 : '8px',
           boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
+          // One-paint load: hide the entire parchment (waves only) until the editor settles, then
+          // fade page + text in together. visibility (not display) keeps layout + font/pagination
+          // measurement running underneath.
+          visibility: revealed ? 'visible' : 'hidden',
+          opacity: revealed ? 1 : 0,
+          transition: 'opacity 180ms ease',
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
@@ -196,7 +323,7 @@ export function Scroll({
             '--para-spacing': `${paraSpacingEm}em`,
           } as React.CSSProperties}
         >
-          <PageGuides sheetRef={sheetRef} />
+          <PageGuides sheetRef={sheetRef} phone={phone} />
           <div
             className="mx-auto w-full relative"
             style={{
@@ -214,12 +341,15 @@ export function Scroll({
   )
 }
 
-// Page guides: a faint divider + centred page number at each A4-proportioned interval down the
-// sheet. The page height is the sheet WIDTH × √2 (A4's 1:√2 ratio), measured in the same units the
-// text uses — so zooming reflows naturally (pages grow/shrink, the SAME words stay on each page).
-// Recomputed on any size change (typing, resize, zoom). Purely visual overlay (no content reflow).
-function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
-  const [marks, setMarks] = useState<Array<{ y: number; n: number; rule: boolean }>>([])
+// Page guides (ungapped mode): a faint dashed rule + page number at each page BREAK. The break
+// positions come from the pagination extension's zero-size break markers (.inkwave-page-gap
+// .iw-break-marker) — the SAME line-measured breaks gapped mode uses, derived from the canonical
+// physical page height in pageModel — so toggling the gapped switch never moves content across
+// pages, and the on-screen breaks are the print/PDF breaks. Falls back to the uniform canonical
+// model (topMargin + n×textArea) where no markers exist (loading shell, SnapshotView, multi-column).
+// Purely visual overlay (no content reflow).
+function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivElement>; phone?: boolean }) {
+  const [breaks, setBreaks] = useState<number[]>([]) // sheet-local y of each page boundary
   const gapped = gappedPagesEnabled()
   const [paperSize, setPaperSizeState] = useState(getPaperSize)
   const [orientation, setOrientationState] = useState(getOrientation)
@@ -242,47 +372,66 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   }, [])
 
   const lastSigRef = useRef('')
-  useEffect(() => {
-    if (gapped || paperSize === 'scroll') { setMarks([]); lastSigRef.current = ''; return }
+  // useLayoutEffect (not useEffect): compute the first set of marks BEFORE the browser paints the
+  // newly-mounted editor, so page guides + logos appear in the SAME frame as the text instead of
+  // popping in a beat later (one visible stage of the staged-load "shakiness").
+  useLayoutEffect(() => {
+    if (gapped || paperSize === 'scroll') { setBreaks([]); lastSigRef.current = ''; return }
     const el = sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
-      const w = el.clientWidth
       const total = el.scrollHeight
-      if (!w || !total) return setMarks([])
-      // Portrait A4: h/w = √2. Portrait Letter: h/w = 11/8.5. Landscape inverts the ratio.
-      const landscape = orientation === 'landscape'
-      const pageH = w * (paperSize === 'letter'
-        ? (landscape ? 8.5 / 11 : 11 / 8.5)
-        : (landscape ? 1 / Math.SQRT2 : Math.SQRT2))
-      const count = Math.max(1, Math.ceil(total / pageH))
+      if (!total) { lastSigRef.current = ''; return setBreaks([]) }
+      // Prefer the REAL break markers the pagination extension measured — same breaks as gapped
+      // mode. gBCR returns VISUAL (transform-scaled) coords; the overlay lives INSIDE the scaled
+      // paper, so divide by the magnify scale to get paper-local px (scale=1 on master).
+      const surface = el.closest('.inkwave-editor-surface') as HTMLElement | null
+      const scale = parseFloat(surface?.style.getPropertyValue('--iw-magnify') || '') || 1
+      const markers = Array.from(el.querySelectorAll('.inkwave-page-gap')) as HTMLElement[]
+      let next: number[]
+      if (markers.length) {
+        const sheetTop = el.getBoundingClientRect().top
+        next = markers
+          .map((m) => (m.getBoundingClientRect().top - sheetTop) / scale)
+          .sort((a, b) => a - b)
+      } else {
+        // No markers yet (loading shell / SnapshotView / multi-column): uniform canonical model —
+        // each page holds one text area, exactly where the measured breaks would land if every
+        // page filled perfectly. Fluid width on phone (no fixed mm parchment there).
+        const { textAreaPx } = pageBoxPx({
+          paperSize, orientation,
+          topMarginPx: getTopMarginPx(), bottomMarginPx: MARGIN_BOTTOM,
+          fluidWidthPx: phone ? el.clientWidth : undefined,
+        })
+        next = []
+        for (let y = getTopMarginPx() + textAreaPx; y < total - 4 && next.length < 500; y += textAreaPx) next.push(y)
+      }
       // Bail before setState when nothing changed — the ResizeObserver fires on every font-zoom tick
       // and re-rendering ~2 imgs + a div per page for identical marks is pure churn on long docs.
-      const sig = `${count}:${pageH.toFixed(2)}:${total}`
+      const sig = next.map((y) => Math.round(y)).join(',')
       if (sig === lastSigRef.current) return
       lastSigRef.current = sig
-      const next: Array<{ y: number; n: number; rule: boolean }> = []
-      for (let i = 1; i <= count; i++) {
-        // Align with gapped-page-mode break: content ends at pageH - MARGIN_BOTTOM, not pageH
-        const bottom = i * pageH - MARGIN_BOTTOM
-        next.push({ y: Math.min(bottom, total - 2), n: i, rule: bottom < total })
-      }
-      setMarks(next)
+      setBreaks(next)
     }
     const ro = new ResizeObserver(recompute)
     ro.observe(el)
+    // Marker positions settle/move on every pagination measure (typing is debounced 150ms there);
+    // the sheet height usually changes too (RO catches it), but not always — listen directly.
+    window.addEventListener('inkwave:pagination-measured', recompute)
     recompute()
-    return () => ro.disconnect()
-  }, [sheetRef, paperSize, orientation, gapped])
+    return () => { ro.disconnect(); window.removeEventListener('inkwave:pagination-measured', recompute) }
+  }, [sheetRef, paperSize, orientation, gapped, phone])
 
   const logoSize = gapped ? 76 : 32           // bigger mark in the discrete-sheet (gapped) view
   const pageNumSize = gapped ? '2.6rem' : '1.1rem'
+  const active = !gapped && paperSize !== 'scroll' // gapped paints its own sheets; scroll has no pages
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
-      {/* Logo at top-right of every page (n=1: top=0, n>1: top=bottom of prev page) */}
-      {marks.map(({ n }) => {
-        const pageTop = n === 1 ? 0 : (marks[n - 2]?.y ?? 0)
+    <div className="iw-page-guides absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
+      {/* Logo at top-right of every page (page 1: top=0, page n: top=break n−1) */}
+      {active && Array.from({ length: breaks.length + 1 }, (_, i) => {
+        const n = i + 1
+        const pageTop = i === 0 ? 0 : breaks[i - 1]
         const logoStyle = { position: 'absolute' as const, right: 47, top: pageTop + 12, width: logoSize, height: logoSize, opacity: 0.82 }
         // Two variants toggled by CSS: the day PNG and a night SVG with a light ring (so the mark's dark
         // bottom reads on the black night surface). See index.css .iw-day-logo / .iw-night-logo.
@@ -294,14 +443,15 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
         )
       })}
       {/* Page 1 label — right of the logo, vertically aligned with it */}
-      {marks.length > 0 && (
+      {active && (
         <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>1</div>
       )}
-      {marks.map(({ y, n, rule }) => (
-        <div key={n} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
-          {rule && <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />}
-          <div className="font-serif" style={{ position: 'absolute', right: 24, top: rule ? 14 : -16, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>
-            {n + 1}
+      {/* A dashed rule at every measured break, page n+1's number just below it */}
+      {active && breaks.map((y, i) => (
+        <div key={`break-${i}`} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
+          <div style={{ borderTop: '1px dashed rgba(92,45,138,0.45)' }} />
+          <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>
+            {i + 2}
           </div>
         </div>
       ))}

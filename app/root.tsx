@@ -48,6 +48,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
+        {/* Pre-paint theme: the prerendered HTML is day-themed and JS applies data-theme only after
+            the bundle executes — night users got a bright flash for the whole JS fetch on cold
+            loads. This runs before first paint; the CSP middleware nonces every inline script. */}
+        <script dangerouslySetInnerHTML={{ __html:
+          `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day'}catch(e){}`,
+        }} />
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="theme-color" content="#2a3b5f" />
