@@ -14,7 +14,6 @@ import type { ScasState } from '../types/document'
 import {
   deriveSet,
   lemmaOf,
-  classifyCommit,
   recordKick,
   markSatisfied,
   lock,
@@ -176,14 +175,21 @@ export class ScasController {
     // 2. Fresh word nudges — a committed in-S lemma (not immune/locked) becomes an outstanding nudge.
     //    Stamp the moment it FIRST turns purple (kickTimes) — the slot's true "first-written" time,
     //    persisted with the state so it survives reload (read later via firstNudgeAt).
+    //    Set views built ONCE per pass: classifyCommit's array scans (locked.includes +
+    //    satisfied.find) made this loop O(words × session-state) on every keystroke. The inline
+    //    checks below are classifyCommit's exact decision order — locked → skip (loop 2 only acts
+    //    on 'in-S'), immune-this-version → skip, in-S → kick, else pass. locked/satisfied can't
+    //    change inside this loop (recordKick touches only liveKicks/kickTimes), so the views hold.
+    const lockedSet = new Set(st.locked)
+    const immuneSet = new Set(st.satisfied.filter((s) => s.satisfiedAtVersion === st.version).map((s) => s.lemma))
+    const liveKickSet = new Set(st.liveKicks)
     for (const w of words) {
-      const v = classifyCommit(st, w.lemma, this.inSv(w.lemma))
-      if (v.kicks && v.trigger === 'in-S') {
-        const fresh = !st.liveKicks.includes(w.lemma)
-        st = recordKick(st, w.lemma)
-        if (fresh && !st.kickTimes?.[w.lemma]) {
-          st = { ...st, kickTimes: { ...st.kickTimes, [w.lemma]: Date.now() } }
-        }
+      if (lockedSet.has(w.lemma) || immuneSet.has(w.lemma) || !this.inSv(w.lemma)) continue
+      const fresh = !liveKickSet.has(w.lemma)
+      st = recordKick(st, w.lemma)
+      liveKickSet.add(w.lemma)
+      if (fresh && !st.kickTimes?.[w.lemma]) {
+        st = { ...st, kickTimes: { ...st.kickTimes, [w.lemma]: Date.now() } }
       }
     }
 

@@ -463,17 +463,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         scasGreenAnchors: getGreenAnchors(e.state),
       }
       const { doc: updated } = embedBibliography(base)
+      const titleChanged = updated.title !== current.title
       docRef.current = updated
-      // React shell re-render (Edit.setDoc) + the IndexedDB metadata row ride the 200ms autosave
-      // debounce instead of firing per keystroke — the UI reads live state from the editor, not `doc`.
+      // INPUT PRIORITY: the autosave beat writes DATA only — no React work rides it. Re-rendering the
+      // shell (Edit.setDoc → the whole editor tree) at every typing pause was the rhythmic "heartbeat"
+      // stutter: stringify + OPFS write + full-tree reconcile landing together every few hundred ms.
+      // Nothing in the shell reads per-keystroke doc state (panels read live editor state), so
+      // onDocChange fires only when the TITLE changes — the one doc field the shell reflects.
       scheduleSave(updated, () => {
-        onDocChange(docRef.current)
         void upsertMeta({
           id: docRef.current.id,
           title: docRef.current.title,
           updatedAt: docRef.current.updatedAt,
         })
       })
+      if (titleChanged) onDocChange(updated)
 
       // Prefetch synonyms for all visible red words after a short pause.
       if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current)

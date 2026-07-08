@@ -309,6 +309,17 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
           const forceRecompute = () => { lastInputSig = ''; schedule() }
+          // INPUT PRIORITY: edit-driven re-measures are debounced OFF the keystroke. recompute forces
+          // a full-document layout read (clientWidth + getClientRects per block) and dispatches two
+          // meta transactions — per keystroke that was the single biggest stutter source (and worst on
+          // backspace, where line heights shrink). The existing gap decorations are position-mapped
+          // through each edit in apply(), so the gaps ride along correctly while we wait; the breaks
+          // re-settle 150ms after typing pauses. Resize/fonts/settings still re-measure immediately.
+          let editDebounce: ReturnType<typeof setTimeout> | undefined
+          const scheduleAfterEdit = () => {
+            if (editDebounce) clearTimeout(editDebounce)
+            editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, 150)
+          }
           schedule()
           // Web fonts (EB Garamond) load AFTER first paint and reflow the text, moving every line —
           // but a font swap changes neither the doc size nor the page width, so the inputSig guard
@@ -324,12 +335,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const settingsCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
           return {
-            update: schedule,
+            update: scheduleAfterEdit,
             destroy() {
               destroyed = true
               ro?.disconnect()
               if (raf) cancelAnimationFrame(raf)
               if (paintRaf) cancelAnimationFrame(paintRaf)
+              if (editDebounce) clearTimeout(editDebounce)
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               layer?.remove()
