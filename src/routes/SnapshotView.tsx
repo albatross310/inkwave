@@ -654,20 +654,11 @@ function scrollSpeedFactor(pos: number, centres: Array<{ c: number; half: number
 // resistance (velocity decays exponentially → an Apple-style fling). wellForce is −dV/dx of a Gaussian
 // well: pulls toward the centre, zero at the bottom, so a fast flick escapes but a slow one is captured
 // and settles onto the diff. Tunable constants:
-const WARP_RESIST = 0.12     // velocity lost per frame (the fling's exponential decay)
-const WARP_WELL = 0.3        // well depth / pull strength (how hard diffs grab)
-const WARP_WELL_PAD = 20     // well half-width beyond each diff's own half-height
-const WARP_IMPULSE = 0.7     // wheel delta → velocity impulse
-function wellForce(pos: number, centres: Array<{ c: number; half: number }>): number {
-  let F = 0
-  for (const { c, half } of centres) {
-    const w = half + WARP_WELL_PAD
-    const dx = pos - c
-    if (Math.abs(dx) > w * 3) continue
-    F += -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL // toward the centre; 0 at the bottom
-  }
-  return F
-}
+const WARP_RESIST = 0.12       // base velocity lost per frame (the fling's exponential decay)
+const WARP_WELL = 0.3          // well depth / pull strength (how hard diffs grab)
+const WARP_WELL_PAD = 20       // well half-width beyond each diff's own half-height
+const WARP_IMPULSE = 0.7       // wheel delta → velocity impulse
+const WARP_SETTLE_SPEED = 9    // below this |velocity| the damping ramps toward critical (clean settle)
 
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
@@ -1033,8 +1024,25 @@ function SplitDiffView({
     const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
     const tick = () => {
       const centres = centresRef.current
-      const F = wellForce(x, centres)
-      v = v + F - WARP_RESIST * v                      // kinetic + linear resistance + well attraction
+      // Well force F = −dV/dx AND local stiffness k = −dF/dx, in one pass. k>0 inside a well (a spring),
+      // ≤0 out in the shoulders. Damping is max(base drag, 2√k) → at LEAST critical wherever a well grabs,
+      // so the scroll settles onto a diff monotonically and NEVER oscillates; light drag elsewhere = fling.
+      let F = 0, k = 0
+      for (const { c, half } of centres) {
+        const w = half + WARP_WELL_PAD
+        const dx = x - c
+        if (Math.abs(dx) > w * 3) continue
+        const g = Math.exp(-(dx * dx) / (2 * w * w))
+        F += -(dx / w) * g * WARP_WELL
+        k += (WARP_WELL / w) * g * (1 - (dx * dx) / (w * w))
+      }
+      // Damping RISES as speed falls (Peter): a fast fling coasts through wells with just the base drag,
+      // then as it slows near a diff the damping ramps up to (at least) critical — so it settles onto the
+      // well monotonically and never rings, without ever making the fling itself feel sticky.
+      const critical = 2 * Math.sqrt(Math.max(0, k))
+      const slowness = 1 - Math.min(1, Math.abs(v) / WARP_SETTLE_SPEED) // 0 when fast → 1 when nearly stopped
+      const damping = WARP_RESIST + slowness * Math.max(0, critical - WARP_RESIST)
+      v = v + F - damping * v
       x = Math.max(0, Math.min(maxScroll(), x + v * scrollSpeedFactor(x, centres)))
       el.scrollTop = x
       if (Math.abs(v) < 0.06 && Math.abs(F) < 0.06) { v = 0; raf = 0; return } // settled (well bottom / flat)
