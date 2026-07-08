@@ -618,20 +618,23 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
 // editor's own content coordinates.
 export type SnapMode = 'off' | 'warp' | 'settle'
 
-function diffCentres(el: HTMLElement): Array<{ c: number; half: number }> {
+type Centre = { c: number; half: number; add: boolean; len: number }
+function diffCentres(el: HTMLElement): Centre[] {
   const rect = el.getBoundingClientRect()
-  const byIdx = new Map<string, { top: number; bot: number }>()
+  const byIdx = new Map<string, { top: number; bot: number; add: boolean; len: number }>()
   el.querySelectorAll('[data-opidx]').forEach((node) => {
     const e = node as HTMLElement
-    if (!e.classList.contains('diff-add') && !e.classList.contains('diff-del')) return
+    const add = e.classList.contains('diff-add'), del = e.classList.contains('diff-del')
+    if (!add && !del) return
     const idx = e.getAttribute('data-opidx')!
     const r = e.getBoundingClientRect()
     const top = r.top - rect.top + el.scrollTop, bot = r.bottom - rect.top + el.scrollTop
+    const len = (e.textContent || '').length
     const prev = byIdx.get(idx)
-    if (prev) { prev.top = Math.min(prev.top, top); prev.bot = Math.max(prev.bot, bot) }
-    else byIdx.set(idx, { top, bot })
+    if (prev) { prev.top = Math.min(prev.top, top); prev.bot = Math.max(prev.bot, bot); prev.len += len }
+    else byIdx.set(idx, { top, bot, add, len })
   })
-  return [...byIdx.values()].map(({ top, bot }) => ({ c: (top + bot) / 2, half: (bot - top) / 2 }))
+  return [...byIdx.values()].map(({ top, bot, add, len }) => ({ c: (top + bot) / 2, half: (bot - top) / 2, add, len }))
 }
 
 // Speed multiplier at scroll position `pos`: a Mexican-hat per diff — slower (<1) through the body, faster
@@ -688,7 +691,7 @@ function SplitDiffView({
   })
   // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
   // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
-  const centresRef = useRef<Array<{ c: number; half: number }>>([])
+  const centresRef = useRef<Centre[]>([])
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -980,17 +983,22 @@ function SplitDiffView({
         // the midline, tapering to ~0 about 40px past its top/bottom edges (reach = half-height + 40). No
         // cap: every diff glows in turn as it passes. Both panes get the same --iw-align, so they light up
         // together. Clear diffs that scrolled out of reach.
+        // PLATEAU glow: fully lit (1) the whole time the midline is inside the diff body (|d| ≤ half) — so
+        // every diff is reliably, fully lit once as it passes — with a smootherstep dropoff over the next
+        // GLOW_DROP px (curved shoulders, zero slope at both ends → no visible edge).
+        const GLOW_DROP = 40
         const still = new Set<number>()
         for (const k of knots) {
           if (k.idx == null) continue
-          const reach = (k.lHalf ?? 0) + 40
+          const half = k.lHalf ?? 0
           // Pinned extreme diff → clamp to 0 (fully lit) so it stays glowing at the top/bottom.
           const pinned = (atTop && k.idx === topIdx) || (atBottom && k.idx === botIdx)
           const d = pinned ? 0 : Math.abs(k.ly - lMid)
-          if (d < reach) {
-            setAlignGlow(k.idx, Math.exp(-4.5 * (d / reach) ** 2)) // Gaussian, peak at centre
-            still.add(k.idx)
-          }
+          let I: number
+          if (d <= half) I = 1
+          else if (d >= half + GLOW_DROP) I = 0
+          else { const t = 1 - (d - half) / GLOW_DROP; I = t * t * t * (t * (t * 6 - 15) + 10) }
+          if (I > 0.001) { setAlignGlow(k.idx, I); still.add(k.idx) }
         }
         for (const idx of glowSetRef.current) if (!still.has(idx)) setAlignGlow(idx, 0)
         glowSetRef.current = still
@@ -1048,36 +1056,41 @@ function SplitDiffView({
       if (Math.abs(v) < 0.06 && Math.abs(F) < 0.06) { v = 0; raf = 0; return } // settled (well bottom / flat)
       raf = requestAnimationFrame(tick)
     }
-    // FENCEPOST step (mousewheel): a crisp critically-eased glide that lands `centre` on the midline — one
-    // diff per notch. Cancels the physics fling so a notch is a clean post-to-post hop, not a flick.
-    let fenceRaf = 0
-    const fenceTo = (centre: number) => {
-      if (raf) { cancelAnimationFrame(raf); raf = 0 } ; v = 0
-      cancelAnimationFrame(fenceRaf)
-      const target = Math.max(0, Math.min(maxScroll(), centre - el.clientHeight / 2))
-      const ease = () => {
-        const dx = target - el.scrollTop
-        if (Math.abs(dx) < 0.5) { el.scrollTop = target; x = target; fenceRaf = 0; return }
-        el.scrollTop = el.scrollTop + dx * 0.25
-        x = el.scrollTop
-        fenceRaf = requestAnimationFrame(ease)
-      }
-      ease()
+    // FENCEPOST (mousewheel): keep the scroll's NATURAL linear destination (what it'd reach with no
+    // resistance) and only nudge that landing onto a diff if one is within ±delta/2 of it — so it never
+    // wades through mud and never piles up. `natTarget` accumulates the raw linear path (no drift);
+    // `dispTarget` is that, snapped to a nearby diff. Among diffs in range pick ONE: green (add) first,
+    // then longest (ties → the first found), so exactly one diff per notch.
+    let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
+    const easeFence = () => {
+      const dx = dispTarget - el.scrollTop
+      if (Math.abs(dx) < 0.5) { el.scrollTop = dispTarget; x = dispTarget; fenceRaf = 0; return }
+      el.scrollTop = el.scrollTop + dx * 0.3
+      x = el.scrollTop
+      fenceRaf = requestAnimationFrame(easeFence)
     }
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return
       e.preventDefault()
-      x = el.scrollTop                                  // resync (nav / snapshot change may have moved it)
-      // A real MOUSEWHEEL (line-mode, or big quantised notches) → FENCEPOST: hop to the next diff centre in
-      // the scroll direction. A trackpad (small smooth pixel deltas) → the continuous well-fling above.
+      x = el.scrollTop
+      // A real MOUSEWHEEL (line-mode, or big quantised notches) → FENCEPOST. A trackpad (small smooth pixel
+      // deltas) → the continuous well-fling above.
       const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
       if (isMouseWheel) {
-        const mid = x + el.clientHeight / 2
-        const cs = centresRef.current.map((c) => c.c).sort((a, b) => a - b)
-        let target: number | undefined
-        if (e.deltaY > 0) target = cs.find((c) => c > mid + 4)
-        else for (let i = cs.length - 1; i >= 0; i--) { if (cs[i] < mid - 4) { target = cs[i]; break } }
-        if (target != null) { fenceTo(target); return } // else past the last/first diff → fall through to fling
+        if (raf) { cancelAnimationFrame(raf); raf = 0; v = 0 }  // stop any fling — we drive fenceposts
+        if (fenceRaf === 0) natTarget = el.scrollTop            // fresh gesture (settled) → resync
+        const delta = e.deltaMode !== 0 ? e.deltaY * 40 : e.deltaY
+        natTarget = Math.max(0, Math.min(maxScroll(), natTarget + delta)) // accumulate the LINEAR destination
+        const mid = natTarget + el.clientHeight / 2
+        const half = Math.abs(delta) / 2
+        let pick: Centre | null = null
+        for (const c of centresRef.current) {
+          if (Math.abs(c.c - mid) > half) continue                        // must be within ±delta/2 of the landing
+          if (!pick || (c.add !== pick.add ? c.add : c.len > pick.len)) pick = c // green first, then longest
+        }
+        dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight / 2)) : natTarget
+        if (!fenceRaf) fenceRaf = requestAnimationFrame(easeFence)
+        return
       }
       if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
       v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
