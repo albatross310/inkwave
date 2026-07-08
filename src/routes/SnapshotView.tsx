@@ -873,40 +873,30 @@ function SplitDiffView({
     })
   }, [])
 
-  // Gold hover-glow auto-dims if the cursor sits still for a while (so it isn't stuck lit when you're not
-  // actively pointing); any mouse movement revives it on whatever's still hovered.
-  const hoverIdleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const hoverDimmedRef = useRef(false)
-  const armHoverIdle = useCallback(() => {
-    clearTimeout(hoverIdleRef.current)
-    hoverIdleRef.current = setTimeout(() => {
-      hoverDimmedRef.current = true
-      setAttr(lastHoveredRef.current, 'data-hover', false) // dim, but remember what was hovered
-    }, 1400)
-  }, [setAttr])
+  // Highlight triggers ONLY when the cursor moves ONTO a diff fast enough (a static cursor or a slow drift
+  // never lights it); once lit it stays until the cursor leaves. Cursor speed (px/ms) tracked on mousemove.
+  const speedRef = useRef(0)
+  const lastPtRef = useRef<{ x: number; y: number; t: number } | null>(null)
+  const HOVER_SPEED = 0.45 // px/ms — a deliberate move, not a drift
 
   const handleHoverOp = useCallback((opIdx: number | null) => {
-    setAttr(lastHoveredRef.current, 'data-hover', false)
+    setAttr(lastHoveredRef.current, 'data-hover', false) // clear the previous
     lastHoveredRef.current = opIdx
-    hoverDimmedRef.current = false
-    clearTimeout(hoverIdleRef.current)
-    if (opIdx != null) { setAttr(opIdx, 'data-hover', true); armHoverIdle() }
-  }, [setAttr, armHoverIdle])
+    if (opIdx != null && speedRef.current >= HOVER_SPEED) setAttr(opIdx, 'data-hover', true) // fast entry only
+  }, [setAttr])
 
-  // Revive a dimmed glow + restart the idle countdown on any cursor movement over the split view.
+  // Track cursor speed across the split view (used by handleHoverOp above).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const onMove = () => {
-      if (hoverDimmedRef.current && lastHoveredRef.current != null) {
-        hoverDimmedRef.current = false
-        setAttr(lastHoveredRef.current, 'data-hover', true)
-      }
-      if (lastHoveredRef.current != null) armHoverIdle()
+    const onMove = (e: MouseEvent) => {
+      const now = performance.now(), prev = lastPtRef.current
+      if (prev) { const dt = now - prev.t; speedRef.current = dt > 0 ? Math.hypot(e.clientX - prev.x, e.clientY - prev.y) / dt : 0 }
+      lastPtRef.current = { x: e.clientX, y: e.clientY, t: now }
     }
     el.addEventListener('mousemove', onMove, { passive: true })
     return () => el.removeEventListener('mousemove', onMove)
-  }, [armHoverIdle, setAttr])
+  }, [])
 
   // Click from right pane: toggle active op, scroll LEFT pane so midline hits the change.
   const handleClickOp = useCallback((opIdx: number) => {
