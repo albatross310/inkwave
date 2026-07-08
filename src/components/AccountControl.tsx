@@ -28,7 +28,7 @@ function ProfileSync() {
 function Row({ onClick, disabled, children }: { onClick?: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button type="button" role="menuitem" disabled={disabled} onClick={onClick}
-      className="w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors disabled:opacity-50">
+      className="w-full text-left px-4 py-1 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors disabled:opacity-50">
       {children}
     </button>
   )

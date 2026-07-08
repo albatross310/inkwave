@@ -228,7 +228,7 @@ export function OptionsMenu({
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"
                 onClick={() => { setMenuOpen(false); it.run() }}
-                className="w-full text-left pl-4 pr-5 py-2 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
               >
                 {it.label}
               </button>

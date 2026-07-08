@@ -13,7 +13,7 @@ import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { DocView } from '../components/DocView'
 
 const INK = '#5c2d8a'
-const NAV_BG = 'rgba(140, 90, 200, 0.20)'
+const NAV_BG = 'rgba(140, 90, 200, 0.35)'
 const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
 const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
@@ -37,7 +37,7 @@ function NavSide({
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
   const bracketVer = snapDir === 'back' ? '<<' : '>>'
-  const btnSize    = isPhone ? 34 : 44
+  const btnSize    = isPhone ? 41 : 53   // ~20% bigger
   const showVer    = hasVersions && !isPhone
 
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
@@ -68,7 +68,7 @@ function NavSide({
     <div style={{
       position: 'fixed',
       ...(overridePos ?? { [side]: 16 }),
-      top: '50%', transform: 'translateY(-50%)',
+      top: '38%', transform: 'translateY(-50%)',   // sit ABOVE the midline
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
       {/* Snapshot nav. Summaries no longer float over the document — they live in the RHS side panel. */}
@@ -665,20 +665,13 @@ function SplitDiffView({
     window.addEventListener('inkwave:minimap-seek', on)
     return () => window.removeEventListener('inkwave:minimap-seek', on)
   }, [])
-  // Flash a diff green/red when its top line crosses the midline (perfectly aligned across the panes).
-  const flashedAlignRef = useRef<number | null>(null)
-  const flashCountRef = useRef(0)                    // capped at 2 flashes per scroll-wheel cycle
-  const flashResetTimerRef = useRef<number | undefined>(undefined)
-  const flashAligned = useCallback((idx: number) => {
+  // Synchronised alignment glow: set --iw-align (0..1) on a diff's spans in BOTH panes so they light up
+  // together, continuously, as it nears alignment (no cap — EVERY diff glows in turn). See the sync step.
+  const glowSetRef = useRef<Set<number>>(new Set())
+  const setAlignGlow = useCallback((idx: number, v: number) => {
+    const val = v <= 0.001 ? '0' : v.toFixed(3)
     for (const root of [leftScrollRef.current, rightScrollRef.current]) {
-      root?.querySelectorAll(`[data-opidx="${idx}"]`).forEach(el => {
-        const add = (el as HTMLElement).classList.contains('diff-add')
-        const del = (el as HTMLElement).classList.contains('diff-del')
-        if (!add && !del) return
-        const cls = add ? 'iw-align-flash-add' : 'iw-align-flash-del'
-        el.classList.remove(cls); void (el as HTMLElement).offsetWidth; el.classList.add(cls)
-        setTimeout(() => el.classList.remove(cls), 750)
-      })
+      root?.querySelectorAll(`[data-opidx="${idx}"]`).forEach(el => (el as HTMLElement).style.setProperty('--iw-align', val))
     }
   }, [])
   const sideDragging = useRef(false)
@@ -829,9 +822,6 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
-    // Reset the aligned-flash budget once scrolling pauses (a "wheel cycle" = a continuous gesture).
-    window.clearTimeout(flashResetTimerRef.current)
-    flashResetTimerRef.current = window.setTimeout(() => { flashCountRef.current = 0 }, 220)
     // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
     // the Scroll surface, so its own scroll handler never fires.
     const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
@@ -856,7 +846,7 @@ function SplitDiffView({
         const L = leftScrollRef.current, R = rightScrollRef.current
         if (!L || !R) return
         const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
-        const knots: Array<{ ly: number; ry: number; idx?: number }> = []
+        const knots: Array<{ ly: number; ry: number; idx?: number; lHalf?: number }> = []
         L.querySelectorAll('[data-opidx]').forEach(le => {
           const idx = (le as HTMLElement).getAttribute('data-opidx')
           const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
@@ -870,6 +860,7 @@ function SplitDiffView({
             ly: (lr.top + lr.height / 2) - lRect.top + L.scrollTop,
             ry: (rr.top + rr.height / 2) - rRect.top + R.scrollTop,
             idx: Number(idx),
+            lHalf: lr.height / 2, // editor-pane half-height → the glow's reach is this + 40px past each edge
           })
         })
         if (!knots.length) return
@@ -922,22 +913,25 @@ function SplitDiffView({
         if (directFollowRef.current) { R.scrollTop = rightTargetRef.current; springVelRef.current = 0 } // glide, no bounce
         else runSpring()
 
-        // Aligned-flash: when a diff's centre sits on the midline (aligned across both panes), flash it.
-        let best: { idx: number; d: number } | null = null
+        // Synchronised alignment glow: a CONTINUOUS Gaussian per diff — intensity 1 when its centre is on
+        // the midline, tapering to ~0 about 40px past its top/bottom edges (reach = half-height + 40). No
+        // cap: every diff glows in turn as it passes. Both panes get the same --iw-align, so they light up
+        // together. Clear diffs that scrolled out of reach.
+        const still = new Set<number>()
         for (const k of knots) {
           if (k.idx == null) continue
+          const reach = (k.lHalf ?? 0) + 40
           const d = Math.abs(k.ly - lMid)
-          if (!best || d < best.d) best = { idx: k.idx, d }
-        }
-        if (best && best.d < 7) {
-          if (flashedAlignRef.current !== best.idx) {
-            flashedAlignRef.current = best.idx
-            if (flashCountRef.current < 2) { flashAligned(best.idx); flashCountRef.current++ } // ≤2 per wheel cycle
+          if (d < reach) {
+            setAlignGlow(k.idx, Math.exp(-4.5 * (d / reach) ** 2)) // Gaussian, peak at centre
+            still.add(k.idx)
           }
-        } else flashedAlignRef.current = null
+        }
+        for (const idx of glowSetRef.current) if (!still.has(idx)) setAlignGlow(idx, 0)
+        glowSetRef.current = still
       })
     }
-  }, [runSpring, flashAligned])
+  }, [runSpring, setAlignGlow])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
@@ -1132,10 +1126,11 @@ function SplitDiffView({
           flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
           border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
         }}>
-          <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>
+          {summariesOn && <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>}
           {!summariesOn ? (
             // AI summaries are an explicit opt-in (privacy: snapshot text → Anthropic via our server).
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 4 }}>
+            // Buttons centred both axes in the (header-less) panel.
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, height: '100%' }}>
               <button
                 type="button"
                 onClick={onOptInSummaries}
