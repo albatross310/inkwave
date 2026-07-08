@@ -290,7 +290,11 @@ export async function createOneDriveFolder(parentId: string | null, name: string
 }
 
 // ─── Open a file FROM OneDrive (Upload — esp. phone, where OneDrive isn't a mounted folder) ───────
-/** List the .studio/.inkwave FILES in a folder (null/'' = root) for the file opener. */
+// Broad on purpose: real Inkwave files show up as .studio.gz (zipped exports), .trace.json/.json
+// (pre-.studio era), or .txt (iOS "rename on share" mangling). The opener validates by CONTENT
+// (parseTraceFile anchors on the record marker), so listing broadly is safe — a wrong pick errors.
+const OPENABLE_FILE_RE = /\.(studio|studio\.gz|inkwave|trace\.json|insig\.json|json|txt)$/i
+/** List the openable FILES in a folder (null/'' = root) for the file opener. */
 export async function listOneDriveFiles(parentId: string | null): Promise<DriveFolder[]> {
   const token = await getSilentToken()
   if (!token) throw new Error('not signed in')
@@ -298,16 +302,17 @@ export async function listOneDriveFiles(parentId: string | null): Promise<DriveF
   const res = await fetch(`${base}?$select=id,name,file&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
   const data = (await res.json()) as { value: Array<{ id: string; name: string; file?: unknown }> }
-  return data.value.filter((it) => it.file && /\.(studio|inkwave)$/i.test(it.name)).map((it) => ({ id: it.id, name: it.name }))
+  return data.value.filter((it) => it.file && OPENABLE_FILE_RE.test(it.name)).map((it) => ({ id: it.id, name: it.name }))
 }
 
-/** Download a OneDrive file's text by item id. */
-export async function downloadOneDriveFile(itemId: string): Promise<string | null> {
+/** Download a OneDrive file's raw bytes by item id. Bytes, NOT text: a .studio.gz is gzip binary,
+ *  and text-decoding it corrupts the stream before readStudioFile can sniff the 1f 8b magic. */
+export async function downloadOneDriveFile(itemId: string): Promise<Blob | null> {
   const token = await getSilentToken()
   if (!token) return null
   const res = await fetch(`${GRAPH}/me/drive/items/${itemId}/content`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return null
-  return res.text()
+  return res.blob()
 }
 
 /** Adopt an opened OneDrive file as this doc's sync target so future syncs UPDATE it (no Save). */
