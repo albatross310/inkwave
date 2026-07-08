@@ -402,7 +402,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       Highlight.configure({ multicolor: true }),
       Underline,
       ListStyle,
-      PaginationExtension.configure({ enabled: gappedPagesEnabled() }),
+      // Always measure page breaks (shared canonical model — see pageModel.ts): gapped mode gets
+      // the tall gap widgets + sheet panels, ungapped gets zero-size break markers the PageGuides
+      // rules + the print stylesheet break at. Same breaks either way, so toggling the switch
+      // never moves content across pages.
+      PaginationExtension.configure({ enabled: true, gapped: gappedPagesEnabled() }),
       ScasSlotMark,
       CommentMark,
       InsertionMark,
@@ -684,14 +688,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const finish = () => { if (!done) { done = true; setSettled(true) } }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
-    const paginationReady: Promise<void> = gappedPagesEnabled()
-      ? ((window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
+    // The pagination extension measures in BOTH page modes now (gap widgets / break markers), so
+    // always wait for its first measure — the 1.2s cap covers any mode where it never fires.
+    const paginationReady: Promise<void> =
+      (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
         ? Promise.resolve()
         : new Promise((res) => {
             const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
             window.addEventListener('inkwave:pagination-ready', on)
-          }))
-      : Promise.resolve()
+          })
     void Promise.all([fontsReady, paginationReady]).then(() =>
       requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
     )
