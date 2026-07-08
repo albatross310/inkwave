@@ -1048,15 +1048,43 @@ function SplitDiffView({
       if (Math.abs(v) < 0.06 && Math.abs(F) < 0.06) { v = 0; raf = 0; return } // settled (well bottom / flat)
       raf = requestAnimationFrame(tick)
     }
+    // FENCEPOST step (mousewheel): a crisp critically-eased glide that lands `centre` on the midline — one
+    // diff per notch. Cancels the physics fling so a notch is a clean post-to-post hop, not a flick.
+    let fenceRaf = 0
+    const fenceTo = (centre: number) => {
+      if (raf) { cancelAnimationFrame(raf); raf = 0 } ; v = 0
+      cancelAnimationFrame(fenceRaf)
+      const target = Math.max(0, Math.min(maxScroll(), centre - el.clientHeight / 2))
+      const ease = () => {
+        const dx = target - el.scrollTop
+        if (Math.abs(dx) < 0.5) { el.scrollTop = target; x = target; fenceRaf = 0; return }
+        el.scrollTop = el.scrollTop + dx * 0.25
+        x = el.scrollTop
+        fenceRaf = requestAnimationFrame(ease)
+      }
+      ease()
+    }
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return
       e.preventDefault()
       x = el.scrollTop                                  // resync (nav / snapshot change may have moved it)
+      // A real MOUSEWHEEL (line-mode, or big quantised notches) → FENCEPOST: hop to the next diff centre in
+      // the scroll direction. A trackpad (small smooth pixel deltas) → the continuous well-fling above.
+      const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
+      if (isMouseWheel) {
+        const mid = x + el.clientHeight / 2
+        const cs = centresRef.current.map((c) => c.c).sort((a, b) => a - b)
+        let target: number | undefined
+        if (e.deltaY > 0) target = cs.find((c) => c > mid + 4)
+        else for (let i = cs.length - 1; i >= 0; i--) { if (cs[i] < mid - 4) { target = cs[i]; break } }
+        if (target != null) { fenceTo(target); return } // else past the last/first diff → fall through to fling
+      }
+      if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
       v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
       if (!raf) raf = requestAnimationFrame(tick)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf) }
+    return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); if (fenceRaf) cancelAnimationFrame(fenceRaf) }
   }, [snapMode, snapshot.id])
 
   // Editor snap mode B — SETTLE-SNAP: native scroll is untouched; when it STOPS, ease the nearest diff
