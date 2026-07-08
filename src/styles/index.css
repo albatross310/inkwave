@@ -250,12 +250,21 @@
   }
   .inkwave-editor-surface.is-phone::before { display: none; }
 
-  /* Phone text: double the apparent size so the writing is comfortable to read at arm's length.
+  /* Phone text: boost the apparent size so the writing is comfortable to read at arm's length.
+     PHONE FONT BOOST = 1.65 — the single constant to tune. ×1.65 over the 1.125rem desktop base
+     (was ×2; 2026-07-08 the +100% boost was toned down to +65% — "the font starts off way too big").
      The stored document font sizes are unchanged — this is display-only CSS applied to the
      rendering layer. Custom font-size marks stay proportional (they're em-relative to this base). */
   .inkwave-editor-surface.is-phone .ProseMirror {
-    font-size: calc(2.25rem * var(--iw-editor-zoom, 1));
+    font-size: calc(1.125rem * 1.65 * var(--iw-editor-zoom, 1));
     line-height: var(--inkwave-lh, 1.55);
+  }
+
+  /* Phone footer toolbar: nine circle buttons must fit a 360px screen. Keep the 44px tap HEIGHT
+     but cap each button's tap WIDTH at the 36px (w-9) circle +1px, so justify-between can spread
+     the remaining slack as gaps. Scoped override — desktop keeps the full 44px targets. */
+  .iw-phone-toolbar .min-w-\[44px\] {
+    min-width: 37px;
   }
 
   /* Parchment paper texture for the scroll body (the page the text sits on). UNIFORM colour: the

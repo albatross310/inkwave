@@ -54,7 +54,7 @@ import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
@@ -1116,11 +1116,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
   }
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
-    const text = await downloadGoogleDriveFile(f.id)
-    if (!text) return
+    // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
+    const blob = await downloadGoogleDriveFileBlob(f.id)
+    if (!blob) return
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
-      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { googleFileId: f.id })
+      await openInkwaveFile(new File([blob], f.name), { googleFileId: f.id })
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1132,11 +1133,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setOdOpenerOpen(true)
   }
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
-    const text = await downloadOneDriveFile(f.itemId)
-    if (!text) return
+    // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
+    const blob = await downloadOneDriveFile(f.itemId)
+    if (!blob) return
     void addRecentFolder(f.folder)
     try {
-      await openInkwaveFile(new File([text], f.name, { type: 'text/plain' }), { oneDriveFile: { folder: f.folder, name: f.name } })
+      await openInkwaveFile(new File([blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1751,8 +1753,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // Counter browser zoom so the pill stays a constant physical size.
               // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
               // the pill to drift up/down on zoom. transform does not affect the offset.
-              // ×1.25 base = the "25% bigger pills" (buttons + text scale together).
-              transform: `scale(${zoom * 1.12})`,
+              // ×1.12 = the "bigger pills" boost — desktop only. On a phone the bar is w-full, so
+              // any upscale makes it VISUALLY 12% wider than the screen and the end buttons clip.
+              transform: `scale(${zoom * (isTouch ? 1 : 1.12)})`,
               transformOrigin: 'bottom center',
             }}
           >
@@ -1772,9 +1775,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
-            {/* Main toolbar row */}
+            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) caps every button's 44px
+                min-WIDTH at 37px so the nine circles fit a 360px screen; px-1 + justify-between
+                distribute the remaining slack.
+                Width arithmetic @360px: 8 (px-1) + ◈36 + ▲36 + 4×37 slots + S37 + ⚙37 + ⋮36 = 338. */}
             {showMainRow && (
-            <div className={`flex items-center px-2 py-0.5 ${isTouch ? 'justify-between' : 'gap-0.5'}`}>
+            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-1' : 'gap-0.5 px-2'}`}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
@@ -1784,7 +1790,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   style={{ color: '#5c2d8a' }}
                   title="Provenance record"
                 >
-                  <span className="flex items-center justify-center w-[30px] h-[30px] rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
                 </button>
               )}
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
@@ -1876,7 +1882,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
-                  style={isTouch ? { maxWidth: '40px' } : undefined}
                   draggable
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}

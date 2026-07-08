@@ -271,7 +271,9 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ i
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
-  let q = "(name contains '.studio' or name contains '.inkwave') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
+  // Broad on purpose (matches the OneDrive opener): .studio.gz matches "contains '.studio'";
+  // .json/.txt catch pre-.studio-era saves and iOS renames. The opener validates by content.
+  let q = "(name contains '.studio' or name contains '.inkwave' or name contains '.json' or name contains '.txt') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
   if (parentId) q += ` and '${parentId}' in parents`
   const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return []
@@ -279,13 +281,24 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ i
   return d.files ?? []
 }
 
-/** Download a Drive file's text by id (the app has drive.file access to files it created/opened). */
+/** Download a Drive file's text by id (the app has drive.file access to files it created/opened).
+ *  For the grow-only merge paths, which only ever read back our own plain-text .studio uploads. */
 export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
   const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return null
   return res.text()
+}
+
+/** Download a Drive file's raw bytes by id. Bytes, NOT text: the file OPENER may pick a .studio.gz,
+ *  and text-decoding gzip corrupts it before readStudioFile can sniff the 1f 8b magic. */
+export async function downloadGoogleDriveFileBlob(id: string): Promise<Blob | null> {
+  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
+  if (!token) return null
+  const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) return null
+  return res.blob()
 }
 /** Adopt an opened Drive file as this doc's sync target, so future syncs UPDATE it (no Save needed). */
 export function adoptGoogleDriveFile(docId: string, fileId: string): void {

@@ -94,15 +94,17 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
     setOpen(true)
   }, [])
 
+  // Outside-close is a portal BACKDROP (below, same model as SettingsMenu), NOT a document
+  // mousedown listener: React delegates events on document too, so the trigger's stopPropagation
+  // couldn't block a sibling document listener — mousedown closed the menu, then the click
+  // re-opened it, and the ∑ button never toggled shut.
   useEffect(() => {
     if (!open) return
-    const close = () => setOpen(false)
-    document.addEventListener('mousedown', close)
     // Close on PAGE scroll only from the short main menu; the info/symbols sub-views scroll internally, so
     // scrolling their lists must NOT dismiss the popup (that was the "panel hides when you scroll" bug).
     const closeOnScroll = () => { if (view === 'menu') setOpen(false) }
     window.addEventListener('scroll', closeOnScroll, { passive: true, capture: true })
-    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('scroll', closeOnScroll, { capture: true } as EventListenerOptions) }
+    return () => { window.removeEventListener('scroll', closeOnScroll, { capture: true } as EventListenerOptions) }
   }, [open, view])
 
   // Listen for symbol changes from the math input boxes.
@@ -155,6 +157,10 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
       </button>
 
       {open && createPortal(
+        <>
+        {/* Backdrop — dismiss on outside press. Pressing ∑ again lands here too, so it CLOSES
+            (the trigger's onClick never fires while open — exactly how SettingsMenu toggles). */}
+        <div className="fixed inset-0 z-[199]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
         <div
           className="iw-nightable"
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
@@ -292,7 +298,8 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
               </div>
             </div>
           )}
-        </div>,
+        </div>
+        </>,
         document.body,
       )}
     </>
