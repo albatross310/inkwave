@@ -229,6 +229,22 @@ export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{
 // ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
 
+/** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
+ *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now). */
+export async function preMergeGDrive(docId: string): Promise<void> {
+  const key = `gdrive:${docId}`
+  const fileId = driveFileId(docId)
+  if (!fileId || !needsWritebackMerge(key)) return
+  try {
+    const text = await downloadGoogleDriveFile(fileId)
+    if (text) {
+      const remote = parseTraceFile(text)
+      if (remote.snapshots?.length) await restoreSnapshotsFromBundle(docId, remote.snapshots)
+    }
+    markWritebackMerged(key)
+  } catch { /* unreadable → the first sync retries its own merge */ }
+}
+
 /** Cheap remote-file check: validates the silent token and returns the file's link + modified time
  *  from Drive METADATA — no upload, no download. Used by resume-on-load, which previously rebuilt
  *  and re-uploaded the whole bundle just to re-activate sync. */

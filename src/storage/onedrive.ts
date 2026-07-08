@@ -211,6 +211,22 @@ export async function getRemoteFileInfo(doc: InkwaveDocument): Promise<{ webUrl:
   }
 }
 
+/** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
+ *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now). */
+export async function preMergeRemote(doc: InkwaveDocument): Promise<void> {
+  const key = `onedrive:${doc.id}`
+  if (!CLIENT_ID || !needsWritebackMerge(key)) return
+  const token = await getSilentToken()
+  if (!token) return
+  try {
+    const res = await fetch(contentUrl(stableFilename(doc)), { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return
+    const remote = parseTraceFile(await res.text())
+    if (remote.snapshots?.length) await restoreSnapshotsFromBundle(doc.id, remote.snapshots)
+    markWritebackMerged(key)
+  } catch { /* no remote yet → the first sync retries its own merge */ }
+}
+
 /** Multi-device guard WITHOUT downloading the file — metadata only, mirroring readLocalHeartbeat's
  *  design: the remote file having been modified well after OUR last upload means another device wrote
  *  it. The generous margin absorbs Graph-server vs local clock skew; the guard is purely advisory. */

@@ -193,11 +193,16 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     // Defer rebuilds to a microtask so the setState never runs synchronously inside a ProseMirror
     // transaction dispatch (which would provoke React's flushSync-during-render warning).
     const schedule = () => queueMicrotask(() => void rebuild())
+    // Editor UPDATES (typing) get a 350ms debounce on top — same fix CitationNodeView already has:
+    // a rebuild is O(entries × docSize) (getJSON + occurrence/quote walks per entry + citeproc),
+    // which is real mid-typing lag on a citation-heavy doc. Bib/style changes stay immediate.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const scheduleDebounced = () => { if (timer) clearTimeout(timer); timer = setTimeout(schedule, 350) }
     schedule()
     const unsubBib = bibProvider.subscribe(schedule)
     const unsubStyle = subscribeCitationStyle(schedule)
-    editor.on('update', schedule)
-    return () => { unsubBib(); unsubStyle(); editor.off('update', schedule) }
+    editor.on('update', scheduleDebounced)
+    return () => { unsubBib(); unsubStyle(); editor.off('update', scheduleDebounced); if (timer) clearTimeout(timer) }
   }, [rebuild, editor, node.attrs])
 
   // ── Notes ──────────────────────────────────────────────────────────────────

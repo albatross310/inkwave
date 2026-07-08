@@ -52,9 +52,9 @@ import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
-import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo } from '../storage/gdrive'
+import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFile, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
@@ -437,22 +437,42 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         }
       }
 
+      // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
+      // a paragraph), so it stays above the docChanged gate. O(caret) walk; React bails on same value.
+      const { $from } = e.state.selection
+      let pIdx = 0
+      e.state.doc.nodesBetween(0, $from.pos, (node) => {
+        if (node.type.name === 'paragraph') pIdx++
+      })
+      setCurrentParagraphIndex(Math.max(0, pIdx - 1))
+
+      // ── docChanged gate (THE typing-lag fix) ─────────────────────────────────
+      // Everything below serializes the document / re-renders the shell — and this handler fires for
+      // EVERY transaction: caret moves, the SCAS hint repaint above, and the pagination extension's
+      // two per-keystroke meta dispatches. Paying full-doc getJSON + a React re-render + an IndexedDB
+      // write up to 3× per keystroke was the dominant lag source. Selection-only transactions stop here.
+      if (!transaction.docChanged) return
+
       const base: InkwaveDocument = {
         ...current,
         contentJson: e.getJSON(),
         updatedAt: new Date().toISOString(),
-        title: deriveTitle(e.getText()) || current.title,
+        // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
+        title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || current.title,
         scasState,
         scasGreenAnchors: getGreenAnchors(e.state),
       }
       const { doc: updated } = embedBibliography(base)
       docRef.current = updated
-      onDocChange(updated)
-      scheduleSave(updated)
-      void upsertMeta({
-        id: updated.id,
-        title: updated.title,
-        updatedAt: updated.updatedAt,
+      // React shell re-render (Edit.setDoc) + the IndexedDB metadata row ride the 200ms autosave
+      // debounce instead of firing per keystroke — the UI reads live state from the editor, not `doc`.
+      scheduleSave(updated, () => {
+        onDocChange(docRef.current)
+        void upsertMeta({
+          id: docRef.current.id,
+          title: docRef.current.title,
+          updatedAt: docRef.current.updatedAt,
+        })
       })
 
       // Prefetch synonyms for all visible red words after a short pause.
@@ -464,26 +484,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         if (words.length > 0) prefetchSynonyms([...new Set(words)])
       }, 600)
 
-      const { $from } = e.state.selection
-      let pIdx = 0
-      e.state.doc.nodesBetween(0, $from.pos, (node) => {
-        if (node.type.name === 'paragraph') pIdx++
-      })
-      setCurrentParagraphIndex(Math.max(0, pIdx - 1))
-
       // ── Paragraph snapshot: fire when Enter creates a new top-level paragraph ──
-      if (transaction.docChanged) {
-        // Collect all top-level paragraphs so we can extract the just-completed one.
-        const allParas: string[] = []
-        e.state.doc.forEach((node) => {
-          if (node.type.name === 'paragraph') allParas.push(node.textContent)
-        })
-        const paraCount = allParas.length
+      // (Already behind the docChanged gate above.) Cheap top-level count first; only collect the
+      // paragraph TEXTS when the count actually grew by one — the full textContent collection on
+      // every keystroke was an O(doc) walk for a check that's almost always false.
+      {
+        let paraCount = 0
+        e.state.doc.forEach((node) => { if (node.type.name === 'paragraph') paraCount++ })
         const prev = prevParaCountRef.current
         prevParaCountRef.current = paraCount
 
         // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
         if (paraCount === prev + 1 && pIdx >= 2) {
+          const allParas: string[] = []
+          e.state.doc.forEach((node) => {
+            if (node.type.name === 'paragraph') allParas.push(node.textContent)
+          })
           // pIdx-1 is the 0-based current (new empty) paragraph; pIdx-2 is the just-completed one.
           const completedText = (allParas[pIdx - 2] ?? '').trim()
           if (completedText.length > 0) {
@@ -635,13 +651,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Live word count for the record panel.
+  // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
+  // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
   useEffect(() => {
     if (!editor) return
+    let timer: ReturnType<typeof setTimeout> | undefined
     const count = () => { const m = editor.getText().match(/[\p{L}\p{N}]+/gu); setWordCount(m ? m.length : 0) }
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(count, 300) }
     count()
-    editor.on('update', count)
-    return () => { editor.off('update', count) }
+    editor.on('update', schedule)
+    return () => { editor.off('update', schedule); if (timer) clearTimeout(timer) }
   }, [editor])
   // "Sync editor" from the PDF viewer: scroll to the citation OCCURRENCE a highlight belongs to.
   useEffect(() => {
@@ -1180,6 +1199,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const onLinked = () => void linkSaveFileNow() // fired by "Open…" so a same-id open re-links live
     window.addEventListener('inkwave:save-file-linked', onLinked)
     return () => window.removeEventListener('inkwave:save-file-linked', onLinked)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Warm the once-per-session grow-only merges at IDLE. The first mirror to a linked target fires on
+  // a provenance checkpoint MID-TYPING, so paying the whole-archive read+parse there was an
+  // inconsistent typing spike. Doing it here heals OPFS while the writer is idle; if the idle pass
+  // doesn't run (no permission yet / offline), the first sync still merges as before.
+  useEffect(() => {
+    const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }
+    const run = () => {
+      void preMergeSaveFile(docRef.current.id)
+      if (oneDriveActiveRef.current) void preMergeRemote(docRef.current)
+      if (gdriveActiveRef.current) void preMergeGDrive(docRef.current.id)
+    }
+    const id = w.requestIdleCallback ? w.requestIdleCallback(run, { timeout: 8000 }) : window.setTimeout(run, 3000)
+    return () => { w.cancelIdleCallback ? w.cancelIdleCallback(id as number) : clearTimeout(id) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if
