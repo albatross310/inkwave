@@ -257,11 +257,12 @@ function buildDiffNodes(
 // would be needed for mark-level fidelity (future work).
 // onOpClick: called with opIdx when a change span is clicked (reverse hyperlink to right pane).
 function FullDiffView({
-  ops, snapshot, onOpClick,
+  ops, snapshot, onOpClick, onHoverOp,
 }: {
   ops: DiffOp[] | null
   snapshot: Snapshot
   onOpClick?: (opIdx: number) => void
+  onHoverOp?: (opIdx: number | null) => void
 }) {
   if (!ops) {
     return (
@@ -270,6 +271,9 @@ function FullDiffView({
       </div>
     )
   }
+  const hover = onHoverOp
+    ? { onMouseEnter: (i: number) => onHoverOp(i), onMouseLeave: () => onHoverOp(null) }
+    : null
   const spans = ops.map((op, i) => {
     if (op.type === 'del') return (
       <span key={i} className="diff-del" data-opidx={String(i)}
@@ -278,6 +282,8 @@ function FullDiffView({
           cursor: onOpClick ? 'pointer' : undefined,
         }}
         onClick={onOpClick ? () => onOpClick(i) : undefined}
+        onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
+        onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
         title={onOpClick ? 'Jump to this change in diff panel' : undefined}
       >{op.text}</span>
     )
@@ -288,6 +294,8 @@ function FullDiffView({
           cursor: onOpClick ? 'pointer' : undefined,
         }}
         onClick={onOpClick ? () => onOpClick(i) : undefined}
+        onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
+        onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
         title={onOpClick ? 'Jump to this change in diff panel' : undefined}
       >{op.text}</span>
     )
@@ -803,9 +811,11 @@ function SplitDiffView({
     if (el) el.setAttribute('data-dv', uid)
     const style = document.createElement('style')
     style.textContent = [
-      // hover: darker background, both panes
-      `[data-dv="${uid}"] span.diff-del[data-hover] { background: rgba(185,28,28,0.22) !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { background: rgba(22,163,74,0.32)  !important; }`,
+      // hover: the alignment GLOW, a touch more prominent + a gradient + soft halo, on BOTH panes. Gives
+      // wheel users a way to preview the pairing without scrolling a diff onto the midline. background-image
+      // (!important) beats the inline base-tint's background shorthand, so the gradient layers over it.
+      `[data-dv="${uid}"] span.diff-del[data-hover] { background-image: linear-gradient(180deg, rgba(200,30,30,0.18), rgba(200,30,30,0.46)) !important; outline: 2px solid rgba(185,28,28,0.85) !important; box-shadow: 0 0 8px 1px rgba(220,38,38,0.42) !important; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { background-image: linear-gradient(180deg, rgba(22,163,74,0.22), rgba(22,163,74,0.52)) !important; outline: 2px solid rgba(21,128,61,0.85) !important; box-shadow: 0 0 8px 1px rgba(34,197,94,0.46) !important; border-radius: 3px !important; }`,
       // active (clicked): darker + outline, both panes
       `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
       `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
@@ -1285,7 +1295,7 @@ function SplitDiffView({
           <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
             <Scroll phone={isPhone}>
               <div style={{ zoom: diffZoom } as React.CSSProperties}>
-                <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} />
+                <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} />
               </div>
             </Scroll>
           </div>
