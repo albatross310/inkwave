@@ -43,11 +43,17 @@ export function Privacy() {
 
         <div className="mt-10 space-y-8 text-[1.05rem] leading-relaxed text-stone-700">
           <p>
-            Inkwave Zero is local-first: your writing lives on your device and in the files and
-            drives you choose — never in a database of ours. It works without an account, we run
-            no analytics, and our servers keep no copy of anything you write. This policy explains
-            exactly what does leave your device, where it goes, and why. It covers the web app and
-            the optional Citation Capture browser extension.
+            <strong style={{ color: INK }}>Zero data retention — and minimal data in transit — is
+            our number one priority. It's in our very name.</strong> Inkwave Zero is local-first:
+            your writing lives on your device and in the files and drives you choose, never in a
+            database of ours. It works without an account and we run no analytics. We do not retain
+            any of your data. At all, period.
+          </p>
+          <p>
+            That said, honesty requires caveats: a small number of features do pass data through
+            our servers, or to named services, on its way somewhere else. This policy sets out each
+            one — what leaves your device, where it goes, and why. It covers the web app and the
+            optional Citation Capture browser extension.
           </p>
 
           <Section title="Where your writing lives">
