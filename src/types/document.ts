@@ -172,6 +172,16 @@ export interface Snapshot {
   versionSummary?: string           // AI bullet-point summary of changes across the full version (stored on manual snap)
 }
 
+// The "snapshot memory diet" projection: everything the editor chrome renders (labels, OTS
+// status, summaries, hashes) WITHOUT the heavy payload — contentJson, the receipts array, and
+// the frozen bibliography can each be MBs, and hundreds of snapshots × full content in React
+// state was hundreds of MB resident (GC pauses). The full array lives ONCE in the snapshots.ts
+// cache; consumers fetch it via listSnapshots() at action time (export, verify, diff).
+// Derived via toSnapshotMeta() in provenance/snapshots.ts.
+export type SnapshotMeta = Omit<Snapshot, 'contentJson' | 'receipts' | 'bibliography'> & {
+  receiptCount: number              // receipts?.length — the UI only ever shows counts
+}
+
 export interface OtsProofState {
   status: 'unstamped' | 'pending' | 'confirmed'
   proofBase64?: string

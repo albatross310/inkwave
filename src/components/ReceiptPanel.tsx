@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Snapshot } from '../types/document'
+import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 
@@ -46,7 +46,7 @@ function getShortPeriod(createdAt: string): string {
 }
 
 // ── Version + snapshot-within-version label ───────────────────────────────────
-function computeVersionLabel(snap: Snapshot, groups: SnapshotGroup[]): string {
+function computeVersionLabel(snap: SnapshotMeta, groups: SnapshotGroup<SnapshotMeta>[]): string {
   for (const group of groups) {
     const i = group.items.findIndex(s => s.id === snap.id)
     if (i >= 0) return group.label ? `${group.label}.${i + 1}` : `0.${i + 1}`
@@ -68,7 +68,9 @@ export function ReceiptPanel({
   onOpened,
   hideTrigger,
 }: {
-  snapshots: Snapshot[]
+  // Metadata only (the snapshot memory diet) — the panel renders labels/OTS/summaries and must
+  // never hold full contentJson/receipts in React state. Heavy actions fetch via listSnapshots.
+  snapshots: SnapshotMeta[]
   onCheckBitcoin?: () => void
   onSaveVersion?: () => void
   receiptCount?: number

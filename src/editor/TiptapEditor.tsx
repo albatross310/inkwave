@@ -45,7 +45,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { createSnapshotIfChanged, listSnapshots, listSnapshotMeta, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
@@ -81,7 +81,7 @@ import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
-import type { Snapshot, SignedReceipt, WordNudgeEvent } from '../types/document'
+import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
 
 // No wall-clock resample timer — S_v rotation and receipt signing happen on word nudge only.
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
@@ -146,9 +146,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Snapshots (the provenance record). Loaded per document; appended when a resolved kick changes
   // the content. createSnapshotIfChanged is serialised through a promise chain so rapid kicks can't
-  // race the OPFS read-modify-write.
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
-  const snapshotsRef = useRef<Snapshot[]>([])
+  // race the OPFS read-modify-write. MEMORY DIET: React state holds SnapshotMeta ONLY — a full
+  // Snapshot embeds its whole contentJson (+ receipts), so hundreds of snapshots on a thesis-scale
+  // doc would keep hundreds of MB resident here. Heavy consumers (export, verify, mirrors, diff
+  // summaries) fetch full snapshots via listSnapshots() at action time (cached, cheap).
+  const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([])
+  const snapshotsRef = useRef<SnapshotMeta[]>([])
   // Keep ref in sync so async snapshot-queue closures can read the latest list without stale closure.
   snapshotsRef.current = snapshots
   const snapQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -539,16 +542,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               enqueueSnapshotWork(async () => {
                 const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
                 if (!snap) return
-                setSnapshots((prev) => [...prev, snap])
+                setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
                 const stamped = await stampSnapshot(snap.documentId, snap.id)
-                if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+                if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
                 mirrorIfActive()
                 // Async summary — patch when it resolves (does not block the snapshot chain).
                 summaryFn().then((summary) => {
                   if (!summary) return
                   enqueueSnapshotWork(async () => {
                     const patched = await patchSnapshotSummary(docRef.current.id, snap.id, summary)
-                    if (patched) setSnapshots((prev) => prev.map((s) => (s.id === patched.id ? patched : s)))
+                    if (patched) setSnapshots((prev) => prev.map((s) => (s.id === patched.id ? toSnapshotMeta(patched) : s)))
                   })
                 }).catch(() => {})
               })
@@ -844,7 +847,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       .then(async () => { ensureDocFresh(); await work() })
       .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
   }
-  const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
+  const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshotMeta(docId)) }
 
   // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid snapshot
   // scrubbing is a core feature, so the reviewer never waits for it. The OTS Bitcoin re-check does NOT
@@ -854,7 +857,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
-    void listSnapshots(docId).then((s) => { if (!cancelled) setSnapshots(s) })
+    // listSnapshotMeta reads through the same cache, so this still warms the full list for scrubbing.
+    void listSnapshotMeta(docId).then((s) => { if (!cancelled) setSnapshots(s) })
     return () => { cancelled = true }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -865,16 +869,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!editor) return
     const off = scasRef.current!.nudges.on((event) => {
       periodKicksRef.current.push(event) // buffer this kick for the signing call below
-      const prevSnap = snapshotsRef.current[snapshotsRef.current.length - 1] ?? null
       enqueueSnapshotWork(async () => {
         // Sign now so the snapshot's bundleHash anchors the receipt covering this kick (M3).
         await runPeriodRef.current()
         const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
+        // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
+        const before = await listSnapshots(docRef.current.id)
+        const prevSnap = before[before.length - 1] ?? null
         const snap = await createSnapshotIfChanged(docRef.current, 'word-nudge', [...priorReceiptsRef.current, ...(sessionRef.current?.receipts ?? [])], undefined, false, nudgeWord)
         if (!snap) return
-        setSnapshots((prev) => [...prev, snap])
+        setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
         const stamped = await stampSnapshot(snap.documentId, snap.id) // pending proof
-        if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+        if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
         mirrorIfActive()
         // Background diff summary (Haiku, fire-and-forget)
         if (prevSnap) void summariseDiff(pmToText(prevSnap.contentJson), pmToText(snap.contentJson)).then(async (ds) => {
@@ -889,13 +895,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Manual "save version" — always creates a snapshot regardless of whether content changed.
   function saveVersion() {
-    const prevSnap = snapshotsRef.current[snapshotsRef.current.length - 1] ?? null
     enqueueSnapshotWork(async () => {
+      // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
+      const before = await listSnapshots(docRef.current.id)
+      const prevSnap = before[before.length - 1] ?? null
       const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
       if (!snap) return
-      setSnapshots((prev) => [...prev, snap])
+      setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
       const stamped = await stampSnapshot(snap.documentId, snap.id)
-      if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? stamped : s)))
+      if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
       mirrorIfActive()
       // Background diff summary (Haiku, fire-and-forget)
       if (prevSnap) void summariseDiff(pmToText(prevSnap.contentJson), pmToText(snap.contentJson)).then(async (ds) => {
@@ -935,7 +943,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
   // Uses the async variant so embedded source PDFs travel inside the .studio file.
   async function exportBundle(stripPdfs?: 'all' | 'public', gzip?: boolean) {
-    const bundle = await buildExportBundleWithPdfs(docRef.current, snapshots, stripPdfs)
+    // Full snapshots fetched AT ACTION TIME (cached read) — state holds metadata only.
+    const snaps = await listSnapshots(docRef.current.id)
+    const bundle = await buildExportBundleWithPdfs(docRef.current, snaps, stripPdfs)
     const base = bundleFilename(docRef.current)
     const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
     if (gzip) await downloadBundleGz(bundle, name + '.gz')
@@ -1985,7 +1995,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {verifyOpen && (
           <VerifyModal
             doc={docRef.current}
-            snapshots={snapshots}
             onClose={() => setVerifyOpen(false)}
           />
         )}

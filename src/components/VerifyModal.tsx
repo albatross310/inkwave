@@ -10,17 +10,16 @@ import { computeAnalytics, type Analytics } from '../verify/analytics'
 import { ActivityGraph } from '../verify/ActivityGraph'
 import { signingPublicKeyHex } from '../provenance/receipts'
 import { parseTraceFile, buildExportBundle, type ExportBundle } from '../provenance/bundle'
-import type { InkwaveDocument, Snapshot } from '../types/document'
+import { listSnapshots } from '../provenance/snapshots'
+import type { InkwaveDocument } from '../types/document'
 
 const INK = '#5c2d8a'
 
 export function VerifyModal({
   doc,
-  snapshots,
   onClose,
 }: {
   doc: InkwaveDocument
-  snapshots: Snapshot[]
   onClose: () => void
 }) {
   const [report, setReport] = useState<VerifyReport | null>(null)
@@ -54,9 +53,10 @@ export function VerifyModal({
     }
   }
 
-  // Auto-verify the current document immediately on open.
+  // Auto-verify the current document immediately on open. Full snapshots are fetched here AT
+  // ACTION TIME (cached read) — the editor's React state carries only SnapshotMeta.
   useEffect(() => {
-    void runBundle(buildExportBundle(doc, snapshots))
+    void listSnapshots(doc.id).then((snaps) => runBundle(buildExportBundle(doc, snaps)))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {

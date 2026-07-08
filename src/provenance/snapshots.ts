@@ -7,7 +7,7 @@
 // The folder-mirror to a writer-granted directory arrives in M4.
 
 import { v4 as uuidv4 } from 'uuid'
-import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON } from '../types/document'
+import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt, TiptapJSON } from '../types/document'
 import { contentHash, bundleHash, bibliographyHash } from './hash'
 import { stampBundle, upgradeProof } from './ots'
 import { gunzipJsonOffThread } from '../workers/parseClient'
@@ -115,6 +115,25 @@ export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
 }
 
+// ─── Metadata projection (the snapshot memory diet) ──────────────────────────
+// React state must never hold the full snapshot array — every Snapshot embeds its whole
+// contentJson (+ receipts + frozen bibliography), so hundreds of snapshots would keep hundreds
+// of MB resident just to render a 210px list. The cache above keeps the full array ONCE
+// (unavoidable — rapid scrubbing needs it hot); UI state holds only this cheap projection.
+
+/** Project a Snapshot to its UI metadata — drop contentJson / receipts / bibliography,
+ *  keep a receipt COUNT (all the panel ever shows). */
+export function toSnapshotMeta(s: Snapshot): SnapshotMeta {
+  const { contentJson: _c, receipts, bibliography: _b, ...rest } = s
+  return { ...rest, receiptCount: Array.isArray(receipts) ? receipts.length : 0 }
+}
+
+/** Metadata-only listing for React state. Same cached read as listSnapshots (so the eager
+ *  load still warms the scrub cache), but hands back only the lightweight projection. */
+export async function listSnapshotMeta(documentId: string): Promise<SnapshotMeta[]> {
+  return (await readSnapshotsFile(documentId)).map(toSnapshotMeta)
+}
+
 /** Permanently remove one snapshot by ID. The remaining snapshots are unaffected. */
 export async function deleteSnapshot(documentId: string, snapId: string): Promise<void> {
   const snaps = await readSnapshotsFile(documentId)
@@ -146,17 +165,18 @@ export async function latestSnapshot(documentId: string): Promise<Snapshot | nul
 // snapshots (kick/paragraph) that follow it — until the next manual save — are
 // its "species". Snapshots before the first manual save form a pre-version draft.
 
-export interface SnapshotGroup {
-  versionSnap: Snapshot | null  // null = pre-version draft
-  items: Snapshot[]             // versionSnap is items[0] when present
+export interface SnapshotGroup<T extends Pick<Snapshot, 'trigger'> = Snapshot> {
+  versionSnap: T | null         // null = pre-version draft
+  items: T[]                    // versionSnap is items[0] when present
   label: string                 // 'v1', 'v2', … or '' for the pre-version draft
 }
 
-/** Group an ordered (oldest-first) snapshot list into version buckets. */
-export function groupByVersion(snapshots: Snapshot[]): SnapshotGroup[] {
-  const groups: SnapshotGroup[] = []
+/** Group an ordered (oldest-first) snapshot list into version buckets.
+ *  Generic so it works on full Snapshots (SnapshotView) and SnapshotMeta (ReceiptPanel). */
+export function groupByVersion<T extends Pick<Snapshot, 'trigger'>>(snapshots: T[]): SnapshotGroup<T>[] {
+  const groups: SnapshotGroup<T>[] = []
   let versionCount = 0
-  let current: SnapshotGroup = { versionSnap: null, items: [], label: '' }
+  let current: SnapshotGroup<T> = { versionSnap: null, items: [], label: '' }
 
   for (const snap of snapshots) {
     if (snap.trigger === 'manual') {
