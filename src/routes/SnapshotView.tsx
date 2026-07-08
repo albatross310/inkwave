@@ -700,6 +700,14 @@ function SplitDiffView({
   // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
   // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
   const centresRef = useRef<Centre[]>([])
+  // Knots for the bijection, cached the same way: each diff's centre in BOTH panes (ly ↔ ry), sorted by
+  // ly. Used forward (editor→diff, onLeftScroll) and inverse (diff→editor, the reverse sync).
+  const knotsRef = useRef<Array<{ ly: number; ry: number }>>([])
+  // Which pane the user is actively scrolling ('left' = editor, 'right' = diff) — set by wheel over each,
+  // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
+  const driverRef = useRef<'left' | 'right' | null>(null)
+  const driverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const editorEaseRef = useRef(0) // rAF id for the reverse S-curve ease of the editor
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -985,9 +993,11 @@ function SplitDiffView({
             }
           }
         }
-        rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
-        if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
-        else runSpring()
+        if (driverRef.current !== 'right') { // skip driving the diff while the DIFF is the driver (reverse sync)
+          rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
+          if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
+          else runSpring()
+        }
 
         // Synchronised alignment glow: a CONTINUOUS Gaussian per diff — intensity 1 when its centre is on
         // the midline, tapering to ~0 about 40px past its top/bottom edges (reach = half-height + 40). No
@@ -1022,11 +1032,87 @@ function SplitDiffView({
   useEffect(() => {
     const el = leftScrollRef.current
     if (!el) return
-    const recompute = () => { const l = leftScrollRef.current; if (l) centresRef.current = diffCentres(l) }
+    const recompute = () => {
+      const L = leftScrollRef.current, R = rightScrollRef.current
+      if (!L) return
+      centresRef.current = diffCentres(L)
+      if (R) {
+        const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
+        const ks: Array<{ ly: number; ry: number }> = []
+        L.querySelectorAll('[data-opidx]').forEach((le) => {
+          const idx = (le as HTMLElement).getAttribute('data-opidx')
+          const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
+          if (!re) return
+          const lr = (le as HTMLElement).getBoundingClientRect(), rr = re.getBoundingClientRect()
+          ks.push({ ly: (lr.top + lr.height / 2) - lRect.top + L.scrollTop, ry: (rr.top + rr.height / 2) - rRect.top + R.scrollTop })
+        })
+        ks.sort((a, b) => a.ly - b.ly)
+        knotsRef.current = ks
+      }
+    }
     const id = requestAnimationFrame(recompute)
     window.addEventListener('resize', recompute)
     return () => { cancelAnimationFrame(id); window.removeEventListener('resize', recompute) }
   }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx])
+
+  // REVERSE SYNC: scrolling the DIFF panel trails the EDITOR via the inverse bijection. The diff pane is
+  // compressed, so a small diff-scroll can imply a big editor jump — we ease it with a fast S-curve (~0.5s)
+  // so it's quick but not jarring. A driver lock (set by wheel over each pane, cleared after idle) stops the
+  // two follows fighting: the editor only trails while the DIFF is the one being driven (and vice-versa,
+  // onLeftScroll skips driving the diff while the diff drives — see below).
+  useEffect(() => {
+    const L = leftScrollRef.current, R = rightScrollRef.current
+    if (!L || !R) return
+    const mark = (who: 'left' | 'right') => {
+      driverRef.current = who
+      clearTimeout(driverTimerRef.current)
+      driverTimerRef.current = setTimeout(() => { driverRef.current = null }, 260)
+    }
+    const onLeftWheel = () => mark('left')
+    const onRightWheel = () => mark('right')
+    const inverse = (ry: number): number => { // diff-pane position → editor position
+      const ks = knotsRef.current
+      if (!ks.length) return ry
+      if (ry <= ks[0].ry) return ks[0].ly - (ks[0].ry - ry)
+      const last = ks[ks.length - 1]
+      if (ry >= last.ry) return last.ly + (ry - last.ry)
+      let i = 0
+      while (i < ks.length - 1 && ks[i + 1].ry <= ry) i++
+      const a = ks[i], b = ks[i + 1]
+      return a.ly + ((ry - a.ry) / Math.max(1, b.ry - a.ry)) * (b.ly - a.ly)
+    }
+    const easeEditorTo = (target: number) => {
+      cancelAnimationFrame(editorEaseRef.current)
+      const start = L.scrollTop, dist = target - start
+      if (Math.abs(dist) < 1) return
+      const t0 = performance.now(), MS = 500
+      const step = () => {
+        const p = Math.min(1, (performance.now() - t0) / MS)
+        const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2 // ease-in-out cubic (S-curve)
+        L.scrollTop = start + dist * e
+        editorEaseRef.current = p < 1 ? requestAnimationFrame(step) : 0
+      }
+      step()
+    }
+    let rTick = false
+    const onRightScroll = () => {
+      if (driverRef.current !== 'right') return // the diff is just following the editor → don't drive back
+      if (rTick) return
+      rTick = true
+      requestAnimationFrame(() => {
+        rTick = false
+        easeEditorTo(Math.max(0, inverse(R.scrollTop + R.clientHeight / 2) - L.clientHeight / 2))
+      })
+    }
+    L.addEventListener('wheel', onLeftWheel, { passive: true })
+    R.addEventListener('wheel', onRightWheel, { passive: true })
+    R.addEventListener('scroll', onRightScroll, { passive: true })
+    return () => {
+      L.removeEventListener('wheel', onLeftWheel); R.removeEventListener('wheel', onRightWheel)
+      R.removeEventListener('scroll', onRightScroll)
+      clearTimeout(driverTimerRef.current); cancelAnimationFrame(editorEaseRef.current)
+    }
+  }, [snapshot.id])
 
   // Editor snap mode A — WHEEL-TAKEOVER PHYSICS: we take the wheel and integrate a particle (the scroll
   // position) moving with LINEAR RESISTANCE through a landscape of POTENTIAL WELLS at the diffs. A wheel
