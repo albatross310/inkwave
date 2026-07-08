@@ -125,33 +125,9 @@ export function scheduleSave(
   }, AUTOSAVE_DELAY_MS)
 }
 
-// ─── Append-only event log (provenance, Week 3) ───────────────────────────────
-
-export async function appendEventLog(
-  documentId: string,
-  line: string,
-): Promise<void> {
-  try {
-    const root = await getRoot()
-    await ensureDir(root, docDir(documentId))
-    const dir = await root.getDirectoryHandle(docDir(documentId))
-    const fileHandle = await dir.getFileHandle('events.jsonl', { create: true })
-    // OPFS doesn't support append natively — read + write pattern for now.
-    // Week 3 can optimise with a write-stream if needed.
-    let existing = ''
-    try {
-      const file = await fileHandle.getFile()
-      existing = await file.text()
-    } catch {
-      // New file — starts empty.
-    }
-    const writable = await fileHandle.createWritable()
-    await writable.write(existing + line + '\n')
-    await writable.close()
-  } catch (err) {
-    console.warn('[inkwave] appendEventLog failed:', err)
-  }
-}
+// (The Week-3 appendEventLog stub that lived here was deleted 2026-07-08: zero callers, and its
+// read-whole-file-per-append pattern was an O(n²) trap. The provenance record is snapshots +
+// signed receipts; if a per-event log is ever needed, design it append-friendly from the start.)
 
 // ─── Helper: default empty TiptapJSON document ────────────────────────────────
 

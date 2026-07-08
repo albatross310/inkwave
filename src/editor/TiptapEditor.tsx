@@ -225,7 +225,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
-  const [, setCycleActive] = useState(false)
   const [paperRight, setPaperRight] = useState(0)
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
@@ -1476,7 +1475,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               paragraphIndex={currentParagraphIndex}
               containerEl={containerRef as RefObject<HTMLDivElement>}
               onHintChange={handleHintChange}
-              onCycleChange={setCycleActive}
               isLockedLemma={(lemma) => scasRef.current!.lookup().locked.has(lemma)}
               firstNudgeAt={(word) => scasRef.current!.firstNudgeAt(word)}
             />

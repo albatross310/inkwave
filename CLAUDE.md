@@ -215,6 +215,7 @@ timers; the main thread only blocks ~1.5s now):
   snapshots still stamp on creation; "check Bitcoin" forces it.
 - **Multi-device heartbeat read+JSON-parsed the whole 20 MB file** on load AND every 45s. Now
   `readLocalHeartbeat` compares the File's `lastModified` to our recorded last write — metadata only,
+  and (2026-07-08) `readRemoteHeartbeat` does the same via a Graph metadata GET (`getRemoteFileInfo`),
   no content read.
 - **`blobToBase64` built a 20 MB string + `btoa` on the main thread** every save. Now native
   `FileReader.readAsDataURL` (off-thread) + a per-PDF base64 cache keyed by `pdfVersion` (bumped on
@@ -256,23 +257,22 @@ src/
         popoverFallbacks.tsx           #   buildSynonyms, displayFor (⌫)
         popoverConstants.ts            #   CYCLE_SIZE=8, DELETE_SENTINEL, CycleState type
   scas/
-    ranking.ts                         # mulberry32 PRNG, getActiveVocab, isInVocab, getStems
+    stems.ts                           # getStems — candidate base forms (all that survives of ranking.ts)
     compliance.ts                      # accepted/(accepted+ignored) ratio, React context
   data/wordFrequency.ts                # ~30k-word Norvig/Google list (one big string[])
   storage/
-    opfs.ts                            # document persistence + appendEventLog stub
+    opfs.ts                            # document persistence (OPFS)
     indexeddb.ts                       # {id,title,updatedAt} metadata index for fast listing
   components/LimitSelector.tsx         # the N selector (500–5000 or infinite)
 ```
 
 ## Non-obvious conventions & invariants (READ BEFORE EDITING)
 
-- **SCAS ranking must never retroactively re-highlight prior text.** Vocabulary is keyed
-  on `(scasSessionSeed, paragraphIndex, N)` in `ranking.ts`. Changing N only affects
-  paragraphs written after the change. `clearRankCacheFrom` exists to enforce this. This
-  is the single most important behavioural invariant — preserve it.
-- **`infinite` mode** returns a `Proxy`-backed `FULL_VOCAB` whose `.has()` always returns
-  true, avoiding a 30k-entry Set. Default N for a fresh doc is `'infinite'`.
+- **SCAS must never retroactively re-flag committed text.** In the engine model
+  (`scas/engine.ts` — the Week-2 per-paragraph `ranking.ts` vocab model was deleted 2026-07-08,
+  only `getStems` survives in `scas/stems.ts`): verdicts FREEZE at commit, so S_v rotation never
+  reflows committed text; delete a kicked word → it locks. This is the single most important
+  behavioural invariant — preserve it.
 - **Enter = new paragraph; Shift+Enter = hard break.** Standard Tiptap/StarterKit
   behaviour (the inverted `enterBehavior` extension was removed so paragraph spacing works
   on Enter-separated text, not only pasted content).
@@ -280,18 +280,20 @@ src/
   Cycle slots: index 0 = the original word, 1–6 = synonyms (cycled if Datamuse returns
   fewer), 7 = ⌫ delete sentinel. j decrements index, k increments; current sits in the
   middle row, prev above, next below.
-- **`isInVocab` filter is intentionally NOT applied to suggestions** — all Datamuse
-  candidates are shown and the writer decides fit (a deliberate Stage A decision).
+- **No vocabulary filter is applied to suggestions** — all Datamuse candidates are shown
+  and the writer decides fit (a deliberate Stage A decision).
 - **Line compression** (`computeLineCompressionRange`) tightens letter-spacing around a
   focused word to absorb its min-width expansion *in place*, so the popover doesn't reflow
   the paragraph. This is fiddly, pixel-measured, and has had many regression fixes — change
   it carefully and test wrapped lines + first-word-on-line cases.
-- **Provenance events** should funnel through `compliance.ts` (accept/ignore) and the
-  `appendEventLog` stub now, so the Week 3 event log can adopt them without rework.
+- **Provenance events** funnel through `compliance.ts` (accept/ignore). (The unused
+  `appendEventLog` stub was deleted 2026-07-08; the provenance record is snapshots +
+  signed receipts.)
 - **Document IDs are stable UUIDs** — they become room identifiers in the future room
   model (Phase 2+). Don't change the ID scheme.
-- **No automated tests exist yet.** `ranking.ts` (`getStems`, `getActiveVocab`) and
-  `thesaurus.ts` form-matching are the highest-value pure-function unit-test targets.
+- **Tests exist and must pass** — `pnpm test` runs ~35 vitest files (~400 tests) covering
+  scas engine/pool/stems, provenance (hash/receipts/cadence/session-auth), verify, and
+  citations. UI/storage/sync are the untested areas — extract logic there before relying on it.
 
 ## Style
 

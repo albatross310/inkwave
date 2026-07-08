@@ -11,7 +11,7 @@
 //      events to these; the verifier replays the same functions over the logged kick events.
 
 import { POOL, POOL_SET } from './pool'
-import { getStems } from './ranking'
+import { getStems } from './stems'
 import type { ScasState } from '../types/document'
 
 // ─── PRNG (mulberry32 + FNV-1a string→seed) ───────────────────────────────────

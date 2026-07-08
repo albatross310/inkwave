@@ -42,7 +42,7 @@ interface ThesaurusPopoverProps {
   paragraphIndex: number
   containerEl: React.RefObject<HTMLDivElement>
   onHintChange: OnHintChange
-  onCycleChange: (active: boolean) => void
+  onCycleChange?: (active: boolean) => void // optional — no current caller consumes it
   isLockedLemma?: (lemma: string) => boolean
   firstNudgeAt?: (word: string) => number | undefined
 }
@@ -65,7 +65,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // (an overlap double-images at zoom → stray lines). Cleared after the fade.
   const [ghosts, setGhosts] = useState<Array<{ top: number; left: number; rowH: number; text: React.ReactNode; color: string; fontFamily: string; fontSize: string }> | null>(null)
 
-  useEffect(() => { onCycleChange(!!cycle); if (!cycle) setCommitting(false) }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onCycleChange?.(!!cycle); if (!cycle) setCommitting(false) }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const redWords = () => Array.from(editor.view.dom.querySelectorAll<HTMLElement>('.scas-red'))
 
