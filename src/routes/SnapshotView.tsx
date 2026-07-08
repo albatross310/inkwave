@@ -699,7 +699,7 @@ function SplitDiffView({
   // 3-way cross-pane bijection: 'both' (each drives the other), 'reverse' (diff→editor only, right-to-left),
   // or 'off'. A ref mirrors it so the scroll handlers read the live value without re-subscribing.
   const [bijMode, setBijMode] = useState<BijMode>(() => {
-    try { const s = localStorage.getItem('inkwave:bijection'); return s === 'reverse' || s === 'off' ? s : 'both' } catch { return 'both' }
+    try { const s = localStorage.getItem('inkwave:bijection'); return s === 'both' || s === 'reverse' || s === 'off' ? s : 'reverse' } catch { return 'reverse' }
   })
   const bijectionRef = useRef<BijMode>(bijMode)
   bijectionRef.current = bijMode
@@ -1124,7 +1124,7 @@ function SplitDiffView({
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     if (!L || !R) return
-    const onLeftEnter = () => { driverRef.current = 'left'; cancelAnimationFrame(editorEaseRef.current); L.style.opacity = '1' }
+    const onLeftEnter = () => { driverRef.current = 'left'; cancelAnimationFrame(editorEaseRef.current); L.style.opacity = '1'; L.style.filter = 'none' }
     const onRightEnter = () => { driverRef.current = 'right' }
     const inverse = (ry: number): number => { // diff-pane position → editor position
       const ks = knotsRef.current
@@ -1144,15 +1144,17 @@ function SplitDiffView({
       const t0 = performance.now(), MS = 220 // much faster — "zoom zoom zoom"
       const fade = Math.min(0.34, Math.abs(dist) / 1200) // bigger jump → dip a tad more (capped, subtle)
       const step = () => {
-        if (driverRef.current !== 'right') { L.style.opacity = '1'; editorEaseRef.current = 0; return } // cursor left → user owns it
+        if (driverRef.current !== 'right') { L.style.opacity = '1'; L.style.filter = 'none'; editorEaseRef.current = 0; return } // cursor left → user owns it
         const p = Math.min(1, (performance.now() - t0) / MS)
         const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2 // ease-in-out cubic (S-curve)
         L.scrollTop = start + dist * e
-        // Gaussian opacity dip while moving (1 at the ends, deepest mid-flight where it's fastest) so a fast
-        // jump doesn't strafe the eyes. Compositor-cheap (opacity only).
-        L.style.opacity = String(1 - fade * Math.exp(-(((p - 0.5) / 0.32) ** 2)))
+        // Gaussian dip while moving (1 at the ends, deepest mid-flight where it's fastest): fade AND blur so
+        // a fast jump doesn't strafe the eyes — both ease back to crisp at the landing.
+        const g = Math.exp(-(((p - 0.5) / 0.32) ** 2))
+        L.style.opacity = String(1 - fade * g)
+        L.style.filter = `blur(${(fade * g * 10).toFixed(2)}px)`
         if (p < 1) editorEaseRef.current = requestAnimationFrame(step)
-        else { L.style.opacity = '1'; editorEaseRef.current = 0 }
+        else { L.style.opacity = '1'; L.style.filter = 'none'; editorEaseRef.current = 0 }
       }
       step()
     }
@@ -1174,7 +1176,7 @@ function SplitDiffView({
       L.removeEventListener('mouseenter', onLeftEnter); R.removeEventListener('mouseenter', onRightEnter)
       R.removeEventListener('scroll', onRightScroll)
       cancelAnimationFrame(editorEaseRef.current)
-      L.style.opacity = '1' // never leave the editor dimmed if we unmount mid-ease
+      L.style.opacity = '1'; L.style.filter = 'none' // never leave the editor dimmed/blurred on unmount
     }
   }, [snapshot.id])
 
@@ -1445,7 +1447,7 @@ function SplitDiffView({
                   Snap: {snapMode === 'off' ? 'Off' : snapMode === 'warp' ? 'Speed-warp' : 'Settle-snap'}
                 </button>
                 <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff (left) drives editor (right) only · Off" style={btn(bijMode !== 'off')}>
-                  {bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L → R' : 'Off'}
+                  {bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}
                 </button>
               </div>
             )
