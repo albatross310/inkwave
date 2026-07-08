@@ -1537,15 +1537,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </button>
           </div>
         )}
-        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill>
-          <div style={{
-            '--inkwave-lh': lineHeight,
-            // One-paint reveal: visibility (not display) keeps layout live so fonts/pagination can
-            // measure the hidden text; the opacity fade makes the single appearance gentle.
-            visibility: settled ? 'visible' : 'hidden',
-            opacity: settled ? 1 : 0,
-            transition: 'opacity 140ms ease',
-          } as React.CSSProperties}><EditorContent editor={editor} /></div>
+        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled}>
+          <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
           )}

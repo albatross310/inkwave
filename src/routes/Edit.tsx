@@ -96,7 +96,7 @@ export function Edit() {
   // real editor mounts in its place with no visual jump.
   if (!doc) {
     return (
-      <Scroll phone={isTouchDevice()} fill>
+      <Scroll phone={isTouchDevice()} fill revealed={false}>
         <EmptyEditorSurface />
       </Scroll>
     )

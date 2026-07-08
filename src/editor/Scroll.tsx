@@ -24,6 +24,7 @@ export function Scroll({
   containerRef,
   phone = false,
   fill = false,
+  revealed = true,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -31,6 +32,10 @@ export function Scroll({
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
+  revealed?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
+                     // pagination settle — visibility, not display, so layout + measurement still run.
+                     // The editor flips it once; the loading shell passes false so page + text appear
+                     // together, atomically, instead of paper-then-text.
 }) {
   // The (fixed) background waves don't scroll with the page. As you scroll we only sway them
   // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
@@ -157,6 +162,7 @@ export function Scroll({
   // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT jump when you ZOOM
   // (zoom re-anchors scrollTop, which would lurch the waves). So skip the frame where the editor-zoom
   // level changed and only sway on genuine scrolling.
+  const waveBaseRef = useRef(0) // loading-drift offset — scroll sway ADDS to it, so no snap at reveal
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
@@ -168,13 +174,40 @@ export function Scroll({
       const z = el.style.getPropertyValue('--iw-editor-zoom')
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
+      el.style.setProperty('--wave-x', `${(waveBaseRef.current + y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
     target.addEventListener('scroll', onScroll, { passive: true })
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [phone])
+
+  // While the parchment is hidden (loading), sway the waves as if scrolling down at a steady linear
+  // rate — the page feels alive instead of frozen. At reveal the sway doesn't stop dead: velocity
+  // decays exponentially (~1s to visually still), like a scroll coasting to rest. The drift
+  // accumulates into waveBaseRef, which the scroll handler above ADDS to — no jump at handover.
+  const revealedRef = useRef(revealed); revealedRef.current = revealed
+  const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
+  useEffect(() => {
+    if (!startedHiddenRef.current) return
+    const el = surfaceRef.current
+    if (!el) return
+    let raf = 0
+    let last = performance.now()
+    let v = 36 // px/s in wave space ≙ scrolling ~600px/s (600 × the 0.06 sway factor)
+    const TAU = 0.28 // s — exp decay constant; ~1s from reveal to visually still
+    const tick = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.1) // clamp tab-suspend gaps
+      last = now
+      if (revealedRef.current) v *= Math.exp(-dt / TAU)
+      if (v < 0.2) { raf = 0; return } // at rest — the scroll handler owns the waves from here
+      waveBaseRef.current += dt * v
+      el.style.setProperty('--wave-x', `${waveBaseRef.current.toFixed(1)}px`)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => { if (raf) cancelAnimationFrame(raf) }
+  }, [])
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
@@ -206,6 +239,12 @@ export function Scroll({
           // the whole parchment on every reel frame.
           borderRadius: phone ? 0 : '8px',
           boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
+          // One-paint load: hide the entire parchment (waves only) until the editor settles, then
+          // fade page + text in together. visibility (not display) keeps layout + font/pagination
+          // measurement running underneath.
+          visibility: revealed ? 'visible' : 'hidden',
+          opacity: revealed ? 1 : 0,
+          transition: 'opacity 180ms ease',
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
