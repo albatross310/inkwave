@@ -620,23 +620,24 @@ function SplitDiffView({
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const dragging   = useRef(false)
-  // Spring that eases the diff pane toward its bijection target — smooth then a snappy "fridge-magnet"
-  // settle, rather than rigidly tracking every scroll pixel.
+  // Critically-damped follow (ζ=1): the diff pane eases to its bijection target with NO overshoot/bounce
+  // — a smooth settle rather than the old tactile "fridge-magnet". The local magnetic snap (see the sync
+  // step) lives in the MAP, not here, so the follow stays uniformly smooth.
   const rightTargetRef = useRef<number | null>(null)
   const springVelRef = useRef(0)
   const springRafRef = useRef(0)
-  const gentleFollowRef = useRef(false) // minimap scrolling → critically damped, lower snappiness
+  const gentleFollowRef = useRef(false) // minimap scrolling → even gentler follow
   const runSpring = useCallback(() => {
     if (springRafRef.current) return
     const step = () => {
       const R = rightScrollRef.current, target = rightTargetRef.current
       if (!R || target == null) { springRafRef.current = 0; return }
       const dx = target - R.scrollTop
-      // Tactile magnetic snap (few % bounce). Minimap scrolling uses a gentler, critically-damped follow.
-      const ret = gentleFollowRef.current ? 0.6 : 0.55
-      const k = gentleFollowRef.current ? 0.12 : 0.22
-      springVelRef.current = springVelRef.current * ret + dx * k
-      if (Math.abs(dx) < 0.5 && Math.abs(springVelRef.current) < 0.5) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
+      // v += k·dx − c·v with c = 2√k → critical damping (no oscillation). Lower k = gentler.
+      const stiffness = gentleFollowRef.current ? 0.055 : 0.09
+      const damping = 2 * Math.sqrt(stiffness)
+      springVelRef.current += dx * stiffness - springVelRef.current * damping
+      if (Math.abs(dx) < 0.4 && Math.abs(springVelRef.current) < 0.4) { R.scrollTop = target; springVelRef.current = 0; springRafRef.current = 0; return }
       R.scrollTop = R.scrollTop + springVelRef.current
       springRafRef.current = requestAnimationFrame(step)
     }
@@ -836,8 +837,9 @@ function SplitDiffView({
       })
     }
     // Follow the right (hunk) pane via a BIJECTION whose lock points are the diffs ("traffic lights"):
-    // each change's TOP in the document pane maps to that change's TOP in the diff pane, so both are in
-    // exact sync as you pass a change, and interpolate (accelerate/decelerate) smoothly between them.
+    // each change's CENTRE in the document pane maps to that change's CENTRE in the diff pane, so both are
+    // in exact sync as a change passes the midline, interpolating smoothly between locks (with a local
+    // slope-1 magnetic snap right at each lock — see below).
     if (!syncTickRef.current) {
       syncTickRef.current = true
       requestAnimationFrame(() => {
@@ -850,15 +852,14 @@ function SplitDiffView({
           const idx = (le as HTMLElement).getAttribute('data-opidx')
           const re = R.querySelector(`[data-opidx="${idx}"]`) as HTMLElement | null
           if (!re) return
-          // Lock on the TOP line of each diff. The panes are different widths, so a diff wraps to
-          // different heights in each — centre-aligning would misalign the tops. Anchoring the tops means
-          // that as a diff's top crosses the midline, the same diff's top crosses it in the other pane too,
-          // giving one scroll position per diff where the top lines are exactly aligned.
+          // Lock MIDLINE-to-MIDLINE: each diff's vertical centre in the editor maps to that same diff's
+          // vertical centre in the diff pane. So the scroll position where a diff's centre sits on the
+          // editor midline is exactly where that diff's centre sits on the diff pane's midline.
           const lr = (le as HTMLElement).getBoundingClientRect()
           const rr = re.getBoundingClientRect()
           knots.push({
-            ly: lr.top - lRect.top + L.scrollTop,
-            ry: rr.top - rRect.top + R.scrollTop,
+            ly: (lr.top + lr.height / 2) - lRect.top + L.scrollTop,
+            ry: (rr.top + rr.height / 2) - rRect.top + R.scrollTop,
             idx: Number(idx),
           })
         })
@@ -880,11 +881,39 @@ function SplitDiffView({
           const t = (lMid - a.ly) / Math.max(1, b.ly - a.ly)
           ry = a.ry + t * (b.ry - a.ry)
         }
+        // Local magnetic snap: within ±W of a diff LOCK POINT, blend the linear map toward a slope-1 line
+        // through the lock, so both midlines move in lockstep AT the lock (dry/dlMid = 1, d²ry/dlMid² = 0 —
+        // Taylor-matched to 2nd order), easing back to linear by the window edge. smootherstep gives zero
+        // 1st AND 2nd derivative at both ends → no kink where it hands back to the linear segments. The
+        // window is capped to half the gap to the nearest neighbouring lock so adjacent windows never
+        // overlap (they meet at u=0, staying continuous). This is what makes passing a change feel like it
+        // "clicks in" without the whole follow being snappy.
+        {
+          const MAXW = 40
+          let nk: { ly: number; ry: number; idx?: number } | null = null, nd = Infinity
+          for (const k of knots) { if (k.idx == null) continue; const d = Math.abs(k.ly - lMid); if (d < nd) { nd = d; nk = k } }
+          if (nk && nd < MAXW) {
+            let gapPrev = Infinity, gapNext = Infinity
+            for (const k of knots) {
+              if (k === nk || k.idx == null) continue
+              const dd = k.ly - nk.ly
+              if (dd < 0) gapPrev = Math.min(gapPrev, -dd)
+              else if (dd > 0) gapNext = Math.min(gapNext, dd)
+            }
+            const W = Math.min(MAXW, gapPrev / 2, gapNext / 2)
+            if (nd < W) {
+              const p = 1 - nd / W                             // 1 at the lock, 0 at the window edge
+              const u = p * p * p * (p * (p * 6 - 15) + 10)     // smootherstep → u' = u'' = 0 at both ends
+              const mag = nk.ry + (lMid - nk.ly)               // slope-1 line through the lock
+              ry = u * mag + (1 - u) * ry
+            }
+          }
+        }
         rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
         if (directFollowRef.current) { R.scrollTop = rightTargetRef.current; springVelRef.current = 0 } // glide, no bounce
         else runSpring()
 
-        // Aligned-flash: when a diff's top line sits on the midline (aligned across both panes), flash it.
+        // Aligned-flash: when a diff's centre sits on the midline (aligned across both panes), flash it.
         let best: { idx: number; d: number } | null = null
         for (const k of knots) {
           if (k.idx == null) continue
