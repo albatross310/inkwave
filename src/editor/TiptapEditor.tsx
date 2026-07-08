@@ -1118,10 +1118,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const blob = await downloadGoogleDriveFileBlob(f.id)
-    if (!blob) return
+    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
       await openInkwaveFile(new File([blob], f.name), { googleFileId: f.id })
+      setGdriveOpenerOpen(false) // see OneDrive note — same-id opens don't remount the editor
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1135,10 +1136,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const blob = await downloadOneDriveFile(f.itemId)
-    if (!blob) return
+    // NEVER fail silently ("tapped the file, nothing happened" on phone): every exit is visible.
+    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
     void addRecentFolder(f.folder)
     try {
       await openInkwaveFile(new File([blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })
+      // Close the opener explicitly: opening a doc with the SAME id as the active one doesn't
+      // remount the editor (key unchanged), so nothing else would dismiss the panel.
+      setOdOpenerOpen(false)
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
@@ -1389,6 +1394,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         receipts.sort((a, b) => a.counter - b.counter)
         const v = await verifyChain(receipts, token, pubKey)
         if (!v.ok) badSessions.add(token)
+        // Yield between chains: the Ed25519 sweep is main-thread crypto — unsliced it was the
+        // "on-and-off 1s lags 5-10s after refresh" once the quiet scheduler let it run.
+        await new Promise((r) => setTimeout(r, 0))
+        if (cancelled || docRef.current.id !== docId) return
       }
       if (badSessions.size && !cancelled && docRef.current.id === docId) {
         const cleanReceipts = (docRef.current.scasReceipts ?? []).filter(
@@ -1397,6 +1406,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         // Remove snapshots that only embed bad-session receipts (so content integrity passes)
         const snapsAfterRecovery = await listSnapshots(docId)
         for (const s of snapsAfterRecovery) {
+          await new Promise((r) => setTimeout(r, 0)) // slice the rewrite loop too
           const snapReceipts = s.receipts ?? []
           const allBad = snapReceipts.length > 0 && snapReceipts.every((r) => badSessions.has(r.sessionToken))
           if (allBad) await deleteSnapshot(docId, s.id)

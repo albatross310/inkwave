@@ -88,7 +88,10 @@ export function Edit() {
     const onOpen = (e: Event) => {
       const id = (e as CustomEvent<{ id: string }>).detail?.id
       if (!id) return
-      void loadDocument(id).then((loaded) => { if (loaded) setDoc(migrateDocument(loaded)) })
+      void loadDocument(id).then((loaded) => {
+        if (loaded) setDoc(migrateDocument(loaded))
+        else console.warn('[inkwave] open-doc: document not found in OPFS after import:', id)
+      })
     }
     window.addEventListener('inkwave:open-doc', onOpen as EventListener)
     return () => window.removeEventListener('inkwave:open-doc', onOpen as EventListener)
