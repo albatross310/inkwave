@@ -78,7 +78,7 @@ export function Privacy() {
             <ul className="list-disc pl-5 space-y-2 mt-3">
               <li><strong>Provenance signing</strong> — receives cryptographic hashes only: never your text, your words, or your identity. Hashes cannot be reversed into writing.</li>
               <li><strong>Bitcoin timestamping</strong> — relays a single document hash to public OpenTimestamps calendars. Nothing personal is anchored.</li>
-              <li><strong>PDF export</strong> — your document is rendered to PDF on our server and immediately discarded; nothing is logged or kept. If you'd rather keep the export fully local, Print → "Save as PDF" produces the same quality without anything leaving your device — you just manage and save the file yourself.</li>
+              <li><strong>PDF export</strong> — your document is rendered to PDF on our server and immediately discarded; nothing is logged or kept. If you'd rather keep the export fully local, Print → "Save as PDF" produces the same quality without anything leaving your device — you just manage and save the file yourself. We are also exploring making the one-click export fully local in the coming weeks.</li>
               <li><strong>Optional AI features</strong> — see the next section; these are off until you switch them on.</li>
             </ul>
             <p className="mt-3">
@@ -108,7 +108,7 @@ export function Privacy() {
 
           <Section title="Other services your browser talks to">
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Thesaurus</strong> — word suggestions come from the public Datamuse API: individual flagged words (never sentences or passages) are sent as lookups from your browser.</li>
+              <li><strong>Thesaurus</strong> — word suggestions come from the public Datamuse API: individual flagged words (never sentences or passages) are sent as lookups from your browser. We are exploring an on-device thesaurus in the coming weeks so these lookups never leave your machine.</li>
               <li><strong>Citation registries</strong> — DOI, ISBN, arXiv and PubMed lookups go directly from your browser to CrossRef, Open Library, Google Books, arXiv and PubMed; each learns only the identifier you looked up. CrossRef and PubMed requests include our contact email, as those services request.</li>
               <li><strong>Verification</strong> — checking a record at <Link to="/verify" style={{ color: INK }} className="underline">/verify</Link> runs entirely in your browser; nothing is uploaded. Confirming a Bitcoin timestamp queries two public block explorers for block information only.</li>
               <li><strong>Citation styles</strong> — choosing a non-default citation style downloads the style file from a public CDN (jsDelivr).</li>
