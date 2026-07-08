@@ -822,8 +822,8 @@ function SplitDiffView({
       // hover: the alignment GLOW, a touch more prominent + a gradient + soft halo, on BOTH panes. Gives
       // wheel users a way to preview the pairing without scrolling a diff onto the midline. background-image
       // (!important) beats the inline base-tint's background shorthand, so the gradient layers over it.
-      `[data-dv="${uid}"] span.diff-del[data-hover] { background-image: linear-gradient(180deg, rgba(200,30,30,0.18), rgba(200,30,30,0.46)) !important; outline: 2px solid rgba(185,28,28,0.85) !important; box-shadow: 0 0 8px 1px rgba(220,38,38,0.42) !important; border-radius: 3px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { background-image: linear-gradient(180deg, rgba(22,163,74,0.22), rgba(22,163,74,0.52)) !important; outline: 2px solid rgba(21,128,61,0.85) !important; box-shadow: 0 0 8px 1px rgba(34,197,94,0.46) !important; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-del[data-hover] { background-image: linear-gradient(180deg, rgba(200,120,70,0.24), rgba(212,175,55,0.54)) !important; outline: 2px solid rgba(198,150,40,0.9) !important; border-radius: 3px !important; animation: iw-hover-shimmer 1.4s ease-in-out infinite !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { background-image: linear-gradient(180deg, rgba(120,175,90,0.26), rgba(212,175,55,0.56)) !important; outline: 2px solid rgba(198,150,40,0.9) !important; border-radius: 3px !important; animation: iw-hover-shimmer 1.4s ease-in-out infinite !important; }`,
       // active (clicked): darker + outline, both panes
       `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
       `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
@@ -1087,10 +1087,15 @@ function SplitDiffView({
       if (Math.abs(dist) < 1) return
       const t0 = performance.now(), MS = 500
       const step = () => {
+        // HOLD the driver lock for the whole ease — otherwise it expires mid-ease and onLeftScroll drives
+        // the diff back against the still-moving editor (the "snap backwards then forward" feedback).
+        driverRef.current = 'right'
+        clearTimeout(driverTimerRef.current)
         const p = Math.min(1, (performance.now() - t0) / MS)
         const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2 // ease-in-out cubic (S-curve)
         L.scrollTop = start + dist * e
-        editorEaseRef.current = p < 1 ? requestAnimationFrame(step) : 0
+        if (p < 1) editorEaseRef.current = requestAnimationFrame(step)
+        else { editorEaseRef.current = 0; driverTimerRef.current = setTimeout(() => { driverRef.current = null }, 150) }
       }
       step()
     }

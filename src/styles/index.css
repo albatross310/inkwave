@@ -735,3 +735,9 @@
 /* Subtle flashing placeholder (loading states — sign-in while Clerk mounts, OneDrive "connecting"). */
 @keyframes iw-subtle-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
 .iw-subtle-flash { animation: iw-subtle-flash 1.35s ease-in-out infinite; }
+
+/* Golden hover-glow shimmer for aligned diffs (SnapshotView cross-pane hover). */
+@keyframes iw-hover-shimmer {
+  0%, 100% { box-shadow: 0 0 6px 1px rgba(212,175,55,0.34); }
+  50%      { box-shadow: 0 0 12px 2px rgba(214,175,55,0.62); }
+}
