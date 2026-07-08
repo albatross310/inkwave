@@ -8,6 +8,9 @@
 // Offline or API failure returns an empty list (no suggestions shown).
 
 const CACHE = new Map<string, string[]>()
+// Cap the synonym cache: strings only, but a very long session prefetching every red word could
+// grow it unboundedly. Clearing at the cap is fine — hot words refill on the next prefetch pass.
+const CACHE_CAP = 4000
 // Return up to this many candidates — caller filters further by vocab.
 const MAX_CANDIDATES = 40
 
@@ -85,6 +88,7 @@ export async function getSynonyms(word: string): Promise<string[]> {
     // Form-matched ml words fill first; rel_syn words top up if ml falls short.
     const unique = [...mlWords, ...synWords].slice(0, MAX_CANDIDATES)
 
+    if (CACHE.size >= CACHE_CAP) CACHE.clear()
     CACHE.set(key, unique)
     return unique
   } catch {
@@ -102,12 +106,13 @@ export async function getSynonyms(word: string): Promise<string[]> {
 const PREFETCH_BATCH = 20
 const PREFETCH_GAP_MS = 30
 const prefetchQueue: string[] = []
+const prefetchQueued = new Set<string>() // O(1) dedup — .includes() was O(n) per candidate word
 let prefetchDraining = false
 
 export function prefetchSynonyms(words: string[]): void {
   for (const word of words) {
     const key = word.toLowerCase()
-    if (!CACHE.has(key) && !prefetchQueue.includes(key)) prefetchQueue.push(key)
+    if (!CACHE.has(key) && !prefetchQueued.has(key)) { prefetchQueued.add(key); prefetchQueue.push(key) }
   }
   if (!prefetchDraining) void drainPrefetchQueue()
 }
@@ -117,6 +122,7 @@ async function drainPrefetchQueue(): Promise<void> {
   try {
     while (prefetchQueue.length > 0) {
       const batch = prefetchQueue.splice(0, PREFETCH_BATCH).filter(w => !CACHE.has(w))
+      batch.forEach(w => prefetchQueued.delete(w))
       if (batch.length) await Promise.all(batch.map(w => getSynonyms(w).catch(() => {})))
       if (prefetchQueue.length > 0) await new Promise(r => setTimeout(r, PREFETCH_GAP_MS))
     }
