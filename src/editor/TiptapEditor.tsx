@@ -228,6 +228,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // parchment + background paint instantly from the prerendered shell either way. Hard 1.2s cap so
   // a slow font can never hold the writing hostage.
   const [settled, setSettled] = useState(false)
+  // Console-snappy typing (see onTransaction): keystrokes do no O(doc) work. These carry the
+  // deferred-tick + lazy-doc-build machinery.
+  const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
+  const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
+  const lastNotifiedTitleRef = useRef('')     // shell re-renders only when the title actually changes
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
@@ -414,8 +420,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       },
     },
     onTransaction: ({ editor: e, transaction }) => {
-      const current = docRef.current
-
       // ── Insignia (paid): keystroke-cadence tap ───────────────────────────────
       // Fold this transaction's steps into the current 0.5s cadence bin. Counts only — never chars.
       // Inert for the free tier (cadenceTierActive() false → tap never created).
@@ -424,23 +428,28 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         cadenceTapRef.current.record(transaction.steps)
       }
 
-      // ── SCAS: drive the engine off the committed words ───────────────────────
-      // Only on a real content change (skip the no-op SCAS_HINT_META repaint we dispatch below,
-      // which would otherwise re-enter here with docChanged=false).
-      let scasState = current.scasState
-      if (transaction.docChanged) {
-        const scas = scasRef.current!
-        const size = e.state.doc.content.size
-        const hadDeletion = prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current
-        prevDocSizeRef.current = size
-        if (scas.processDoc(e.state.doc, e.state.selection.from, hadDeletion)) {
-          scasState = scas.state
-          // The decoration plugin already ran for THIS transaction with the pre-update lookup;
-          // repaint with the new state in a microtask (avoids dispatching mid-dispatch).
-          queueMicrotask(() => {
-            if (!e.isDestroyed) e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
-          })
+      // ── SCAS tick (deferred): CONSOLE-SNAPPY RULE — a keystroke does no O(doc) work. ──────────
+      // The engine scan (processDoc walks every committed word) and the decoration rebuild both
+      // move to ONE debounced tick ~120ms after the last input; the decoration plugin meanwhile
+      // just position-maps its existing marks through each edit (see RedHighlightExtension.apply).
+      // Deletion tracking accumulates across the debounce window so the lock-on-delete rule still
+      // sees every deletion. The tick's own repaint transaction carries SCAS_HINT_META → never re-arms.
+      if (!transaction.getMeta(SCAS_HINT_META) && (transaction.docChanged || transaction.selectionSet)) {
+        if (transaction.docChanged) {
+          const size = e.state.doc.content.size
+          if (prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current) scasHadDeletionRef.current = true
+          prevDocSizeRef.current = size
         }
+        if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
+        scasTickTimerRef.current = setTimeout(() => {
+          if (e.isDestroyed) return
+          const hadDeletion = scasHadDeletionRef.current
+          scasHadDeletionRef.current = false
+          scasRef.current!.processDoc(e.state.doc, e.state.selection.from, hadDeletion)
+          // Always repaint: the deferred decorations need it after edits, and it refreshes the
+          // cursor-word suppression after pure caret moves.
+          e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
+        }, 120)
       }
 
       // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
@@ -459,31 +468,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // write up to 3× per keystroke was the dominant lag source. Selection-only transactions stop here.
       if (!transaction.docChanged) return
 
-      const base: InkwaveDocument = {
-        ...current,
-        contentJson: e.getJSON(),
-        updatedAt: new Date().toISOString(),
-        // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
-        title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || current.title,
-        scasState,
-        scasGreenAnchors: getGreenAnchors(e.state),
-      }
-      const { doc: updated } = embedBibliography(base)
-      const titleChanged = updated.title !== current.title
-      docRef.current = updated
-      // INPUT PRIORITY: the autosave beat writes DATA only — no React work rides it. Re-rendering the
-      // shell (Edit.setDoc → the whole editor tree) at every typing pause was the rhythmic "heartbeat"
-      // stutter: stringify + OPFS write + full-tree reconcile landing together every few hundred ms.
-      // Nothing in the shell reads per-keystroke doc state (panels read live editor state), so
-      // onDocChange fires only when the TITLE changes — the one doc field the shell reflects.
-      scheduleSave(updated, () => {
-        void upsertMeta({
-          id: docRef.current.id,
-          title: docRef.current.title,
-          updatedAt: docRef.current.updatedAt,
-        })
+      // CONSOLE-SNAPPY RULE: no serialization on the keystroke either. The document object is
+      // rebuilt lazily (ensureDocFresh: getJSON + title + bibliography) at the first point that
+      // actually needs it — the 200ms save beat, any snapshot/signing work, or a mirror. The beat
+      // stays data-only; the shell re-renders only when the title changed.
+      docStaleRef.current = true
+      scheduleSave(() => ensureDocFresh(), () => {
+        const d = docRef.current
+        if (d.title !== lastNotifiedTitleRef.current) {
+          lastNotifiedTitleRef.current = d.title
+          onDocChange(d)
+        }
+        void upsertMeta({ id: d.id, title: d.title, updatedAt: d.updatedAt })
       })
-      if (titleChanged) onDocChange(updated)
 
       // Prefetch synonyms for all visible red words after a short pause.
       if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current)
@@ -792,11 +789,35 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Rebuild docRef from the live editor if a keystroke left it stale (the lazy half of the
+  // console-snappy rule). Called at every point that consumes the document: the autosave beat,
+  // ALL snapshot work (via enqueueSnapshotWork), period signing, and mirrors — so provenance
+  // always hashes the exact current content; between those points docRef may lag by ≤200ms.
+  function ensureDocFresh(): InkwaveDocument {
+    if (!docStaleRef.current) return docRef.current
+    const e = editorRef.current
+    if (!e || e.isDestroyed) return docRef.current
+    docStaleRef.current = false
+    const base: InkwaveDocument = {
+      ...docRef.current,
+      contentJson: e.getJSON(),
+      updatedAt: new Date().toISOString(),
+      // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
+      title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
+      scasState: scasRef.current?.state ?? docRef.current.scasState,
+      scasGreenAnchors: getGreenAnchors(e.state),
+    }
+    const { doc: updated } = embedBibliography(base)
+    docRef.current = updated
+    return updated
+  }
+
   // Serialise all snapshot-file mutations through one promise chain (avoids OPFS read-modify-write
-  // races between snapshot creation, OTS stamping, and upgrades).
+  // races between snapshot creation, OTS stamping, and upgrades). Freshness guard: every snapshot
+  // consumes docRef, so the queue itself guarantees the lazy doc build has run first.
   function enqueueSnapshotWork(work: () => Promise<void>) {
     snapQueueRef.current = snapQueueRef.current
-      .then(work)
+      .then(async () => { ensureDocFresh(); await work() })
       .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
   }
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshots(docId)) }
@@ -908,6 +929,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // (any browser). No-op if neither is active. OneDrive auto-sync is silent (no popup); if the
   // token has expired it simply skips until the next explicit sync.
   function mirrorIfActive() {
+    ensureDocFresh() // mirrors write docRef — never a stale one
     if (folderActiveRef.current) {
       void listSnapshots(docRef.current.id)
         .then((snaps) => writeBundleToFile(docRef.current, snaps))
@@ -1378,6 +1400,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   runPeriodRef.current = async () => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
+    ensureDocFresh() // the receipt hashes the exact current content
     const runner = sessionRef.current
     if (runner) {
       const kicks = [...periodKicksRef.current] // snapshot — a second nudge must not mutate this

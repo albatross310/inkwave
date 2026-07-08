@@ -115,12 +115,14 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 const AUTOSAVE_DELAY_MS = 200
 
 export function scheduleSave(
-  doc: InkwaveDocument,
+  doc: InkwaveDocument | (() => InkwaveDocument),
   onSaved?: () => void,
 ): void {
   if (saveTimer !== null) clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
-    await saveDocument(doc)
+    // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
+    // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
+    await saveDocument(typeof doc === 'function' ? doc() : doc)
     onSaved?.()
   }, AUTOSAVE_DELAY_MS)
 }
