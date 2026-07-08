@@ -234,6 +234,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
   const lastNotifiedTitleRef = useRef('')     // shell re-renders only when the title actually changes
+  // QUIET SCHEDULER: heavy background work (archive pre-merge, receipt verification) runs only after
+  // the writer has been genuinely idle for a stretch. requestIdleCallback alone still fires
+  // mid-interaction (its timeout forces it), and a 20MB JSON.parse can't be interrupted — that was
+  // the "scroll just stops for a while" right after load. Nothing is dropped: attempts re-arm until
+  // a quiet window arrives, so everything still loads eventually.
+  const lastActivityRef = useRef(Date.now())
+  useEffect(() => {
+    const bump = () => { lastActivityRef.current = Date.now() }
+    const evs = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
+    evs.forEach((ev) => window.addEventListener(ev, bump, { passive: true, capture: true }))
+    return () => evs.forEach((ev) => window.removeEventListener(ev, bump, { capture: true } as EventListenerOptions))
+  }, [])
+  function runWhenQuiet(fn: () => void, quietMs = 4000) {
+    const attempt = () => {
+      if (Date.now() - lastActivityRef.current >= quietMs) fn()
+      else setTimeout(attempt, quietMs)
+    }
+    setTimeout(attempt, quietMs)
+  }
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
@@ -1259,14 +1278,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // inconsistent typing spike. Doing it here heals OPFS while the writer is idle; if the idle pass
   // doesn't run (no permission yet / offline), the first sync still merges as before.
   useEffect(() => {
-    const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }
-    const run = () => {
+    let cancelled = false
+    runWhenQuiet(() => {
+      if (cancelled) return
       void preMergeSaveFile(docRef.current.id)
       if (oneDriveActiveRef.current) void preMergeRemote(docRef.current)
       if (gdriveActiveRef.current) void preMergeGDrive(docRef.current.id)
-    }
-    const id = w.requestIdleCallback ? w.requestIdleCallback(run, { timeout: 8000 }) : window.setTimeout(run, 3000)
-    return () => { w.cancelIdleCallback ? w.cancelIdleCallback(id as number) : clearTimeout(id) }
+    })
+    return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if
@@ -1383,9 +1402,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
       }
-      const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
-      if (w.requestIdleCallback) w.requestIdleCallback(() => void recoverAndPurge(), { timeout: 15_000 })
-      else setTimeout(() => void recoverAndPurge(), 5_000)
+      runWhenQuiet(() => void recoverAndPurge(), 5000)
     })
     return () => { cancelled = true }
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps

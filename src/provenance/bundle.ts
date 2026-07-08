@@ -9,7 +9,7 @@ import { simpleInText } from '../citations/format'
 import { usedCitekeys, referenceListKeys } from '../citations/resolve'
 import { loadPdf, blobToBase64, pdfVersion } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
-import { POOL_ID } from '../scas/pool'
+import { POOL_ID_STATIC } from '../scas/poolId'
 import { deviceId } from '../sync/presence'
 import { collectViewSettings } from '../editor/viewSettings'
 
@@ -172,7 +172,7 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
     // A reference to the key the writer's client used; a verifier should still check against the
     // INDEPENDENTLY published key (src/verify defaults to it), not blindly trust this field.
     signingKey: { keyId: 'inkwave-signing-v1', alg: 'Ed25519', publicKeyHex: signingPublicKeyHex() },
-    poolId: doc.scasPoolId ?? POOL_ID,
+    poolId: doc.scasPoolId ?? POOL_ID_STATIC,
     session: deviceId(),
     bibliography: citedItems(doc.contentJson),
     viewSettings: collectViewSettings(),

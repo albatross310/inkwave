@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
-import { TiptapEditor } from '../editor/TiptapEditor'
+// CRITICAL-PATH SPLIT: the editor graph (Tiptap/PM, KaTeX, the 30k-word list, citations, Clerk)
+// is the bulk of the app's JS. Lazy-loading it means the tiny shell chunk hydrates immediately —
+// waves + drift on screen — while the editor chunk downloads IN PARALLEL with the OPFS document
+// read, instead of everything executing serially before anything can mount.
+const TiptapEditor = lazy(() => import('../editor/TiptapEditor').then(m => ({ default: m.TiptapEditor })))
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
 import { loadDocument, emptyTiptapDoc } from '../storage/opfs'
 import { listMeta } from '../storage/indexeddb'
-import { withScasDefaults } from '../scas/state'
+import { withScasDefaults } from '../scas/defaults'
 
 // The active document ID is persisted in localStorage so the same document
 // reopens on refresh. (Content itself is in OPFS — this is just the pointer.)
@@ -103,6 +107,11 @@ export function Edit() {
   }
 
   // key={doc.id} → switching documents in place cleanly remounts the editor (sessions, snapshots,
-  // sync reconnect all re-run for the new doc).
-  return <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
+  // sync reconnect all re-run for the new doc). Suspense fallback = the same waves-only shell, so
+  // the editor chunk streaming in changes nothing visually until the one-paint reveal.
+  return (
+    <Suspense fallback={<Scroll phone={isTouchDevice()} fill revealed={false}><EmptyEditorSurface /></Scroll>}>
+      <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
+    </Suspense>
+  )
 }

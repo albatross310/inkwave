@@ -54,3 +54,8 @@ export function getOrientation(): Orientation {
 export function setOrientation(v: Orientation): void {
   try { localStorage.setItem('inkwave:orientation', v) } catch { /* private mode */ }
 }
+
+// Parchment margin (px) at the bottom of every page — page numbers sit here. Lives HERE (not in
+// PaginationExtension) so the shell chunk (Scroll/PageGuides) can import it without dragging the
+// whole ProseMirror pagination graph (~200KB) onto the critical path.
+export const MARGIN_BOTTOM = 72

@@ -9,12 +9,12 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation, getTopMarginPx } from '../pageSettings'
+import { getPaperSize, getOrientation, getTopMarginPx, MARGIN_BOTTOM } from '../pageSettings'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
-export const MARGIN_BOTTOM = 72 // px parchment margin at the bottom of every page (page numbers sit here)
+export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
 export interface PaginationOptions { enabled: boolean }
 
