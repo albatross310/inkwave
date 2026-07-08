@@ -72,7 +72,7 @@ export function Privacy() {
             <ul className="list-disc pl-5 space-y-2 mt-3">
               <li><strong>Provenance signing</strong> — receives cryptographic hashes only: never your text, your words, or your identity. Hashes cannot be reversed into writing.</li>
               <li><strong>Bitcoin timestamping</strong> — relays a single document hash to public OpenTimestamps calendars. Nothing personal is anchored.</li>
-              <li><strong>PDF export</strong> — your document is rendered to PDF on our server and immediately discarded; nothing is logged or kept.</li>
+              <li><strong>PDF export</strong> — your document is rendered to PDF on our server and immediately discarded; nothing is logged or kept. If you'd rather keep the export fully local, Print → "Save as PDF" produces the same quality without anything leaving your device — you just manage and save the file yourself.</li>
               <li><strong>Optional AI features</strong> — see the next section; these are off until you switch them on.</li>
             </ul>
             <p className="mt-3">
