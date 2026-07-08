@@ -1120,6 +1120,16 @@ function SplitDiffView({
     }
     let rTick = false
     const onRightScroll = () => {
+      // Clamp the USER's diff-panel scroll so it ENDS at the first/last diff lock — no over-scroll into the
+      // lead/trail whitespace (keeps the extremes consistent with the editor). Only while the diff drives,
+      // so it never fights the forward-drive spring.
+      const ks = knotsRef.current
+      if (ks.length && driverRef.current === 'right') {
+        const minS = Math.max(0, ks[0].ry - R.clientHeight / 2)
+        const maxS = ks[ks.length - 1].ry - R.clientHeight / 2
+        if (R.scrollTop < minS) { R.scrollTop = minS; return }
+        if (maxS > minS && R.scrollTop > maxS) { R.scrollTop = maxS; return }
+      }
       if (bijectionRef.current === 'off') return   // no cross-pane sync
       if (driverRef.current !== 'right') return     // cursor isn't over the diff → the diff is just following
       if (rTick) return
