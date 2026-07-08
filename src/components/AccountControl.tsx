@@ -1,4 +1,4 @@
-import { SignedIn, SignedOut, useUser, useClerk } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, useUser, useClerk, ClerkLoading, ClerkLoaded } from '@clerk/clerk-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { authEnabled, CLERK_PUBLISHABLE_KEY } from '../auth/config'
@@ -204,8 +204,12 @@ export function AccountMenuItems({ onClose }: { onClose: () => void }) {
     <>
       <div className="my-1 border-t border-stone-100" />
       <ProfileSync />
-      <SignedOut><SignInItem onClose={onClose} /></SignedOut>
-      <SignedIn><AccountItems onClose={onClose} /></SignedIn>
+      {/* While Clerk is still initialising, a subtly flashing "…" stands in for the sign-in row. */}
+      <ClerkLoading><Row disabled><span className="iw-subtle-flash">…</span></Row></ClerkLoading>
+      <ClerkLoaded>
+        <SignedOut><SignInItem onClose={onClose} /></SignedOut>
+        <SignedIn><AccountItems onClose={onClose} /></SignedIn>
+      </ClerkLoaded>
     </>
   )
 }

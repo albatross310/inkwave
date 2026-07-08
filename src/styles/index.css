@@ -643,3 +643,7 @@
 }
 .iw-align-flash-add { animation: iw-align-flash-add 0.75s ease-out; border-radius: 2px; }
 .iw-align-flash-del { animation: iw-align-flash-del 0.75s ease-out; border-radius: 2px; }
+
+/* Subtle flashing placeholder (loading states — sign-in while Clerk mounts, OneDrive "connecting"). */
+@keyframes iw-subtle-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
+.iw-subtle-flash { animation: iw-subtle-flash 1.35s ease-in-out infinite; }
