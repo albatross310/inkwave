@@ -208,6 +208,17 @@
      the page, not the editor's text I-beam. */
   .inkwave-page-gap { display: block; position: relative; user-select: none; cursor: default; }
   .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; }
+  /* Ungapped mode's break MARKER (same widget, zero height): a 0-height block that pins the
+     measured break position — PageGuides draws the dashed rule at its rect, @media print breaks
+     the page at it. Block (not inline): the break sits at a line start, so the forced break is a
+     visual no-op at steady state and the marker's top IS the page boundary; an inline 0×0 box
+     would land at the END of the previous line (zero width always fits) and stop the wrap-point
+     space collapsing. Zero height → no space reserved in the continuous flow. */
+  .inkwave-page-gap.iw-break-marker {
+    height: 0;
+    padding: 0;
+    margin: 0;
+  }
   /* Page number + logo, pinned to each sheet's bottom margin (a footer) — never in the gap. */
   .inkwave-sheet-num {
     position: absolute;
@@ -553,12 +564,25 @@
   .inkwave-editor-surface::before, .inkwave-editor-surface::after { display: none !important; }
   .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; }
   .inkwave-sheets, .inkwave-sheet, .inkwave-sheet-num { display: none !important; }
+  /* The ungapped page-guide overlay (dashed rules, page numbers, logos) is screen chrome — the
+     printed page breaks for real at the markers, so the guides would double up. */
+  .iw-page-guides { display: none !important; }
   .scroll-paper, .scroll-paper.inkwave-gapped { background: #fff !important; box-shadow: none !important; }
-  /* Break the page exactly where the editor's page gap is. The gap becomes the next page's TOP
-     margin (72px, matching the editor); the previous page's bottom margin falls out of the content
-     area being exactly A4 − 144px. So margins match the screen WITHOUT an @page margin (which would
-     reintroduce the browser's header/footer text). */
-  .inkwave-page-gap { break-before: page !important; height: 72px !important; min-height: 72px !important; margin: 0 !important; padding: 0 !important; }
+  /* Break the page exactly where the editor's page gap / break marker is (BOTH page modes place
+     one at every measured break — same shared model, so print pagination = screen pagination).
+     The widget becomes the next page's TOP margin: --iw-print-topm carries the live top-margin
+     setting (set inline by gapEl in PaginationExtension). The previous page's bottom margin falls
+     out of the content area being at most pageH − topM − MARGIN_BOTTOM. So margins match the
+     screen WITHOUT an @page margin (which would reintroduce the browser's header/footer text). */
+  .inkwave-page-gap {
+    display: block !important; /* the ungapped marker is inline-block 0×0 on screen */
+    width: auto !important;
+    break-before: page !important;
+    height: var(--iw-print-topm, 72px) !important;
+    min-height: var(--iw-print-topm, 72px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   .inkwave-page-gap-band { display: none !important; }
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
