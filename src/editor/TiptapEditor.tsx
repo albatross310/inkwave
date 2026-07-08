@@ -1788,6 +1788,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
+            {/* Review row — stacks ABOVE the main toolbar (like the style bar): the pill is
+                bottom-anchored, so this grows upward and the main row never moves. */}
+            {editor && reviewOpen && <ReviewBar editor={editor} />}
+
             {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) caps every button's 44px
                 min-WIDTH at 37px so the nine circles fit a 360px screen; px-1 + justify-between
                 distribute the remaining slack.
@@ -1976,8 +1980,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </div>
             )}
 
-            {/* Review row — the SECOND row of the merged toolbar rectangle, shown while R is on. */}
-            {editor && reviewOpen && <ReviewBar editor={editor} />}
           </div>
         </div>
         {verifyOpen && (
