@@ -125,6 +125,11 @@
       var(--wave-x, 0px) 0px,
       calc(-1 * var(--wave-x, 0px)) 0px;
     will-change: background-position;
+    /* Own compositor layer from FIRST PAINT: the loading drift animates transform on this layer —
+       pre-promoting means its raster already exists when the animation's first frame lands, so a
+       busy main thread can't make the opening waves hitch. contain limits invalidation scope. */
+    transform: translateZ(0);
+    contain: strict;
   }
 
   /* Loading wave drift — COMPOSITOR (transform) animations, so they start at first paint (the class
