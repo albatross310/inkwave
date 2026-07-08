@@ -209,7 +209,15 @@ export function Scroll({
     // Pick up mid-loop where the (unmounted) shell's animation was: negative delay = elapsed % loop.
     const el = surfaceRef.current
     if (!el || !startedHiddenRef.current) return
-    el.style.setProperty('--wave-phase', `-${((performance.now() / 1000) % 3.9).toFixed(3)}s`)
+    // The drift loop starts after the 0.5s S-ramp; sync both to where the shell's animation is now.
+    const elapsed = performance.now() / 1000
+    if (elapsed < 0.5) {
+      el.style.setProperty('--wave-ramp-delay', `-${elapsed.toFixed(3)}s`)
+      el.style.setProperty('--wave-phase', `${(0.5 - elapsed).toFixed(3)}s`)
+    } else {
+      el.style.setProperty('--wave-ramp-delay', '-1s') // ramp long done — fill holds it at -9px
+      el.style.setProperty('--wave-phase', `-${(((elapsed - 0.5) % 1.944)).toFixed(3)}s`)
+    }
   }, [])
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
@@ -225,7 +233,7 @@ export function Scroll({
     setWaveMode('coast')
     let raf = 0
     let last = performance.now()
-    let v = -36 // px/s leftward — the speed the CSS drift was running at
+    let v = -72 // px/s leftward — the speed the CSS drift was running at
     const TAU = 0.28 // s — exponential decay; visually still in ~1s
     const tick = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.1)

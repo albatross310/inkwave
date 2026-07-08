@@ -207,7 +207,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             paintRaf = 0
             if (!sheet || !layer) return
             const sheetTop = sheet.getBoundingClientRect().top
+            // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
+            // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
+            // (taller) panels held the old height and every repaint re-measured its own stale
+            // extent — a self-sustaining fixpoint ("space below the page never retracts", gapped
+            // only, cleared by refresh/toggle because those rebuild the layer). Hiding the layer
+            // for one read costs one reflow per (debounced) paint pass.
+            layer.style.display = 'none'
             const total = sheet.scrollHeight
+            layer.style.display = ''
             const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
             const segs: Array<{ top: number; height: number }> = []
             let cursor = 0
