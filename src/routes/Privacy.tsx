@@ -93,8 +93,8 @@ export function Privacy() {
             </ul>
             <p className="mt-3">
               In both cases our server processes the request transiently — nothing is logged or
-              retained — and Anthropic does not train on data sent through its API. Both switches
-              live in Settings and can be turned off at any time. As Inkwave develops we are also
+              retained — and Anthropic does not train on data sent through its API. Both settings are
+              switched off by default and can be adjusted at any time in Settings. As Inkwave develops we are also
               exploring browser-local AI models for these features, so that this data truly never
               leaves your device.
             </p>
