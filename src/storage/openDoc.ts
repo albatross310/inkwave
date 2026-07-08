@@ -26,6 +26,24 @@ export async function openInkwaveFile(
   file: File,
   opts: { handle?: FileSystemFileHandle; googleFileId?: string; oneDriveFile?: { folder: OneDriveFolder; name: string } } = {},
 ): Promise<void> {
+  // OPEN CHOREOGRAPHY (Peter's spec): the moment an open starts, the current page hides and the
+  // waves drift (Edit.tsx listens for open-begin → setDoc(null) → the loading shell); on success
+  // the new page + text reveal atomically; on ANY failure open-failed restores the previous doc
+  // so a bad file never strands a blank shell. Cloud handlers fire open-begin even earlier
+  // (before the download); this one covers the local-file path and is idempotent.
+  window.dispatchEvent(new Event('inkwave:open-begin'))
+  try {
+    await openInkwaveFileInner(file, opts)
+  } catch (err) {
+    window.dispatchEvent(new Event('inkwave:open-failed'))
+    throw err
+  }
+}
+
+async function openInkwaveFileInner(
+  file: File,
+  opts: { handle?: FileSystemFileHandle; googleFileId?: string; oneDriveFile?: { folder: OneDriveFolder; name: string } } = {},
+): Promise<void> {
   const { handle, googleFileId, oneDriveFile } = opts
   let data: ReturnType<typeof parseTraceFile>
   try {
@@ -58,24 +76,6 @@ export async function openInkwaveFile(
   // Restore the view settings that travelled with the doc (theme, gapped pages, paper/margins, zoom).
   applyViewSettings((data as { viewSettings?: Record<string, string> }).viewSettings)
 
-  // Restore the embedded citation library (+ any embedded PDFs) so citations resolve and their
-  // sources/annotations travel with the doc. Merge with any existing local library, then persist.
-  const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
-  const pdfs = (data as { pdfs?: Record<string, { name: string; data: string }> }).pdfs
-  if (bib?.length || pdfs) {
-    await loadLibrary()
-    for (const it of bib ?? []) bibProvider.upsert(it, 'library')
-    await persistLibrary()
-    // Embedded PDFs (explicit-download bundles) restore directly...
-    for (const [key, p] of Object.entries(pdfs ?? {})) {
-      try { await savePdf(key, await base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
-    }
-    // ...OneDrive-synced docs keep PDFs as sidecars — fetch them for the cited sources.
-    if (oneDriveFile && bib?.length) {
-      await fetchPdfSidecars(oneDriveFile.folder, oneDriveFile.name, bib)
-    }
-  }
-
   const now = new Date().toISOString()
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
@@ -93,4 +93,27 @@ export async function openInkwaveFile(
   // most of the 2-3s first-open. The in-place path also keeps a just-granted file permission alive.
   window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
   if (handle) window.dispatchEvent(new Event('inkwave:save-file-linked'))
+
+  // Restore the embedded citation library (+ any embedded PDFs) AFTER the document is showing —
+  // this used to run before the reveal and was most of the wait on PDF-heavy bundles. bibProvider
+  // is reactive, so citations resolve the moment the library lands; PDFs/sidecars stream in behind.
+  const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
+  const pdfs = (data as { pdfs?: Record<string, { name: string; data: string }> }).pdfs
+  if (bib?.length || pdfs) {
+    void (async () => {
+      try {
+        await loadLibrary()
+        for (const it of bib ?? []) bibProvider.upsert(it, 'library')
+        await persistLibrary()
+        // Embedded PDFs (explicit-download bundles) restore directly...
+        for (const [key, p] of Object.entries(pdfs ?? {})) {
+          try { await savePdf(key, await base64ToBlob(p.data)) } catch { /* storage full / unavailable */ }
+        }
+        // ...OneDrive-synced docs keep PDFs as sidecars — fetch them for the cited sources.
+        if (oneDriveFile && bib?.length) {
+          await fetchPdfSidecars(oneDriveFile.folder, oneDriveFile.name, bib)
+        }
+      } catch { /* library restore is best-effort; the document itself is already open */ }
+    })()
+  }
 }

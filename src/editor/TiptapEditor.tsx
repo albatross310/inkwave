@@ -1116,9 +1116,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
   }
   async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
+    window.dispatchEvent(new Event('inkwave:open-begin')) // see OneDrive note
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const blob = await downloadGoogleDriveFileBlob(f.id)
-    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
+    if (!blob) { window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
       await openInkwaveFile(new File([blob], f.name), { googleFileId: f.id })
@@ -1134,10 +1135,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setOdOpenerOpen(true)
   }
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
+    // Choreography: page hides + waves drift for the WHOLE load, download included.
+    window.dispatchEvent(new Event('inkwave:open-begin'))
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const blob = await downloadOneDriveFile(f.itemId)
     // NEVER fail silently ("tapped the file, nothing happened" on phone): every exit is visible.
-    if (!blob) { setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
+    if (!blob) { window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
     void addRecentFolder(f.folder)
     try {
       await openInkwaveFile(new File([blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })

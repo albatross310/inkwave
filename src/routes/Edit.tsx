@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 // CRITICAL-PATH SPLIT: the editor graph (Tiptap/PM, KaTeX, the 30k-word list, citations, Clerk)
 // is the bulk of the app's JS. Lazy-loading it means the tiny shell chunk hydrates immediately —
@@ -81,6 +81,22 @@ export function Edit() {
   function handleDocChange(updated: InkwaveDocument) {
     setDoc(updated)
   }
+
+  // OPEN CHOREOGRAPHY: the instant an open starts, hide the current page (doc → null renders the
+  // waves-only loading shell, drift running) for the WHOLE load; the new doc then reveals
+  // atomically via the normal settled gate. A failed open restores the stashed doc — never a
+  // stranded blank shell.
+  const stashedDocRef = useRef<InkwaveDocument | null>(null)
+  useEffect(() => {
+    const onBegin = () => setDoc((d) => { if (d) stashedDocRef.current = d; return null })
+    const onFailed = () => setDoc((d) => d ?? stashedDocRef.current)
+    window.addEventListener('inkwave:open-begin', onBegin)
+    window.addEventListener('inkwave:open-failed', onFailed)
+    return () => {
+      window.removeEventListener('inkwave:open-begin', onBegin)
+      window.removeEventListener('inkwave:open-failed', onFailed)
+    }
+  }, [])
 
   // Switch documents IN PLACE (no full reload) when asked — used by "Open…" with a writable file
   // handle, so the just-granted file permission survives (a reload would drop it → no auto-save).
