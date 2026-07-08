@@ -873,27 +873,21 @@ function SplitDiffView({
     })
   }, [])
 
-  // Highlight triggers ONLY when the cursor moves ONTO a diff fast enough (a static cursor or a slow drift
-  // never lights it); once lit it stays until the cursor leaves. Cursor speed (px/ms) tracked on mousemove.
-  const speedRef = useRef(0)
-  const lastPtRef = useRef<{ x: number; y: number; t: number } | null>(null)
-  const HOVER_SPEED = 0.45 // px/ms — a deliberate move, not a drift
+  // Highlight triggers when the cursor is IN MOTION as it reaches a diff (any speed) — a truly STATIC
+  // cursor never lights it. Once lit it stays until the cursor leaves. lastMoveRef = last mousemove time.
+  const lastMoveRef = useRef(0)
 
   const handleHoverOp = useCallback((opIdx: number | null) => {
     setAttr(lastHoveredRef.current, 'data-hover', false) // clear the previous
     lastHoveredRef.current = opIdx
-    if (opIdx != null && speedRef.current >= HOVER_SPEED) setAttr(opIdx, 'data-hover', true) // fast entry only
+    if (opIdx != null && performance.now() - lastMoveRef.current < 150) setAttr(opIdx, 'data-hover', true) // moving, not static
   }, [setAttr])
 
-  // Track cursor speed across the split view (used by handleHoverOp above).
+  // Mark the cursor as in-motion across the split view (used by handleHoverOp above).
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const onMove = (e: MouseEvent) => {
-      const now = performance.now(), prev = lastPtRef.current
-      if (prev) { const dt = now - prev.t; speedRef.current = dt > 0 ? Math.hypot(e.clientX - prev.x, e.clientY - prev.y) / dt : 0 }
-      lastPtRef.current = { x: e.clientX, y: e.clientY, t: now }
-    }
+    const onMove = () => { lastMoveRef.current = performance.now() }
     el.addEventListener('mousemove', onMove, { passive: true })
     return () => el.removeEventListener('mousemove', onMove)
   }, [])
@@ -906,6 +900,9 @@ function SplitDiffView({
     activeOpIdxRef.current = next
     setAttr(next, 'data-active', true)
     if (next !== null) {
+      // Clicked in the DIFF pane → scroll only the EDITOR to that change. Mark the diff pane the driver so
+      // the bijection doesn't scroll it back (it stays exactly where you clicked — no jump to the midline).
+      driverRef.current = 'right'
       const el = leftScrollRef.current
       if (!el) return
       const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
@@ -914,15 +911,12 @@ function SplitDiffView({
       const targetRect = target.getBoundingClientRect()
       const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
       const newScrollTop = targetTopInContent - el.clientHeight / 2
-      // Glide (no fridge bounce) while this click-driven smooth-scroll plays out.
-      directFollowRef.current = true
-      window.setTimeout(() => { directFollowRef.current = false }, 800)
       el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
       anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
     }
   }, [setAttr])
 
-  // Click from left pane: toggle active op, scroll RIGHT pane so the hunk is centred.
+  // Click from left (EDITOR) pane: toggle active op, scroll only the RIGHT (diff) pane to the change.
   const handleLeftPaneClick = useCallback((opIdx: number) => {
     const prev = activeOpIdxRef.current
     const next = prev === opIdx ? null : opIdx
@@ -930,8 +924,10 @@ function SplitDiffView({
     activeOpIdxRef.current = next
     setAttr(next, 'data-active', true)
     if (next !== null) {
-      // Clicking editor text CENTRES THE EDITOR on that change; the diff pane then glides to match.
-      const el = leftScrollRef.current
+      // Clicked in the EDITOR → scroll only the DIFF pane. Mark the editor the driver so the bijection
+      // doesn't scroll the editor back (it stays put — no jump to the midline).
+      driverRef.current = 'left'
+      const el = rightScrollRef.current
       if (!el) return
       const target = el.querySelector(`[data-opidx="${next}"]`) as HTMLElement | null
       if (!target) return
@@ -939,10 +935,7 @@ function SplitDiffView({
       const targetRect = target.getBoundingClientRect()
       const targetTopInContent = targetRect.top - elRect.top + el.scrollTop
       const newScrollTop = targetTopInContent - el.clientHeight / 2
-      directFollowRef.current = true
-      window.setTimeout(() => { directFollowRef.current = false }, 800)
       el.scrollTo({ top: Math.max(0, newScrollTop), behavior: 'smooth' })
-      anchorRatioRef.current = (Math.max(0, newScrollTop) + el.clientHeight / 2) / el.scrollHeight
     }
   }, [setAttr])
 
@@ -1431,7 +1424,7 @@ function SplitDiffView({
               fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
             })
             return (
-              <div style={{ position: 'absolute', top: 12, right: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end' }}>
+              <div style={{ position: 'absolute', top: 48, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
                 <button type="button" onClick={cycleSnap} title="Editor snap to diffs — Off · Speed-warp · Settle-snap" style={btn(snapMode !== 'off')}>
                   Snap: {snapMode === 'off' ? 'Off' : snapMode === 'warp' ? 'Speed-warp' : 'Settle-snap'}
                 </button>
