@@ -55,8 +55,9 @@ export function Scroll({
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
 
-  // In-app editor zoom: Ctrl/⌘+wheel (or pinch) over the editor scales the font (so text REFLOWS,
-  // like a webpage) — isolated from the PDF panel because we preventDefault the browser zoom. Persisted.
+  // In-app editor zoom: Ctrl/⌘+wheel (desktop) or two-finger pinch (phone) over the editor scales
+  // the font (so text REFLOWS, like a webpage) — isolated from the PDF panel because we
+  // preventDefault the browser zoom. Persisted; both inputs share the same key + pipeline.
   const [editorZoom, setEditorZoom] = useState(() => {
     try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
   })
@@ -68,7 +69,7 @@ export function Scroll({
   // never jumps to the left edge. React state is updated after, to the same value (no re-paint).
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el || phone) return // desktop surface-scroll only; phone is body-scroll + touch (no pointer)
+    if (!el) return // desktop: Ctrl/⌘+wheel on the surface; phone: two-finger pinch (body-scroll, below)
     // FRAME COALESCING (the zoom-flicker fix): trackpads/pinch emit several wheel events per frame,
     // and each zoom step forces a FULL-document reflow (the font-size is calc'd from the zoom var).
     // 2–3 reflows per 16ms blows the frame budget on a long doc → visible stutter. So wheel events
@@ -76,9 +77,27 @@ export function Scroll({
     // and rAF runs before paint so the synchronous anchor logic below stays single-frame/flicker-free.
     // React state + localStorage persist are deferred to a settle timer: neither changes pixels
     // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
-    let steps = 0
+    let steps = 0 // wheel: ±1 per event; phone pinch: FRACTIONAL (log of the distance ratio) — same 1.08^steps curve
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
+    // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
+    // never scrolls there (el.scrollTop is always 0). One pair of helpers keeps applyFrame +
+    // the settle re-anchor identical for both scrollers.
+    const getScrollTop = () => (phone ? window.scrollY : el.scrollTop)
+    const setScrollTop = (y: number) => {
+      if (phone) window.scrollTo(window.scrollX, Math.max(0, y))
+      else el.scrollTop = Math.max(0, y)
+    }
+    const scrollRange = () => {
+      if (!phone) return Math.max(1, el.scrollHeight - el.clientHeight)
+      const se = document.scrollingElement || document.documentElement
+      return Math.max(1, se.scrollHeight - window.innerHeight)
+    }
+    // Pinch state (phone): the gesture-START midpoint picks the anchor block; holding that element
+    // and correcting by its actual displacement keeps the pinched-on text stationary for the whole
+    // gesture (the same held-anchor rule as the wheel path, midpoint instead of viewport centre).
+    let pinchDist = 0
+    let pinchX = 0, pinchY = 0
     // One STABLE anchor element per gesture. Re-picking under the viewport centre every frame made
     // the anchor flip between elements at block boundaries, and the old correction pinned the picked
     // element's TOP to the centre line (scrollTop += topAfter - anchorY) — with multi-step coalesced
@@ -99,7 +118,8 @@ export function Scroll({
       // bug). When the centre line falls inside a gap, probe outward until real text is found, so
       // the anchor is effectively the nearest text above/below the gap.
       const vr = el.getBoundingClientRect()
-      const anchorX = vr.left + vr.width / 2, anchorY = vr.top + vr.height / 2
+      const anchorX = phone ? pinchX : vr.left + vr.width / 2
+      const anchorY = phone ? pinchY : vr.top + vr.height / 2
       const pickAt = (y: number): HTMLElement | null => {
         const t = document.elementFromPoint(anchorX, y) as HTMLElement | null
         if (!t || !el.contains(t)) return null
@@ -117,20 +137,19 @@ export function Scroll({
           anchorEl = pickAt(anchorY + dy)
         }
       }
-      const keepLeft = el.scrollLeft
-      const denomBefore = Math.max(1, el.scrollHeight - el.clientHeight)
-      const ratio = el.scrollTop / denomBefore
+      const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
+      const ratio = getScrollTop() / scrollRange()
       const topBefore = anchorEl ? anchorEl.getBoundingClientRect().top : 0 // at the CURRENT size
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
       const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       if (anchorEl && anchorEl.isConnected) {
         const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
-        el.scrollTop = Math.max(0, el.scrollTop + (topAfter - topBefore)) // hold the anchored text still
-        el.scrollLeft = keepLeft
+        setScrollTop(getScrollTop() + (topAfter - topBefore)) // hold the anchored text still
+        if (!phone) el.scrollLeft = keepLeft
       } else {
-        el.scrollTop = ratio * Math.max(1, el.scrollHeight - el.clientHeight) // no anchor → keep relative position
-        el.scrollLeft = keepLeft
+        setScrollTop(ratio * scrollRange()) // no anchor → keep relative position
+        if (!phone) el.scrollLeft = keepLeft
       }
       editorZoomRef.current = next
       if (settle) clearTimeout(settle)
@@ -149,7 +168,7 @@ export function Scroll({
           requestAnimationFrame(() => {
             if (held && held.isConnected) {
               const topAfterMeasure = held.getBoundingClientRect().top
-              el.scrollTop = Math.max(0, el.scrollTop + (topAfterMeasure - topBeforeMeasure))
+              setScrollTop(getScrollTop() + (topAfterMeasure - topBeforeMeasure))
             }
           })
         }
@@ -166,9 +185,51 @@ export function Scroll({
       steps += e.deltaY < 0 ? 1 : -1
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
-    el.addEventListener('wheel', onWheel, { passive: false })
+    // PHONE PINCH-TO-ZOOM — the same pipeline as the wheel path (same rAF coalescing, clamps,
+    // persistence and settle re-measure), driven by the two-finger distance ratio instead of wheel
+    // steps. preventDefault is what stops Safari's own page pinch (the viewport meta deliberately
+    // leaves browser zoom enabled, so without it every pinch would double-zoom the whole chrome);
+    // .is-phone also sets touch-action: pan-x pan-y as the declarative half of the same contract.
+    const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return
+      e.preventDefault()
+      pinchDist = touchDist(e.touches)
+      pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      anchorEl = null // fresh gesture → applyFrame picks the text block under THIS midpoint
+      steps = 0
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinchDist) return
+      e.preventDefault() // our zoom replaces the browser's — stop the double-zoom
+      const d = touchDist(e.touches)
+      if (d < 8) return // fingers (nearly) touching — the ratio is degenerate noise
+      steps += Math.log(d / pinchDist) / Math.log(1.08) // fractional steps on the wheel's 1.08 curve
+      pinchDist = d
+      if (!raf) raf = requestAnimationFrame(applyFrame)
+    }
+    const onTouchEnd = (e: TouchEvent) => { if (e.touches.length < 2) pinchDist = 0 } // settle timer already armed
+    // iOS Safari's non-standard gesture events drive the native pinch — suppress them over the editor.
+    const onGesture = (e: Event) => e.preventDefault()
+    if (phone) {
+      el.addEventListener('touchstart', onTouchStart, { passive: false })
+      el.addEventListener('touchmove', onTouchMove, { passive: false })
+      el.addEventListener('touchend', onTouchEnd)
+      el.addEventListener('touchcancel', onTouchEnd)
+      el.addEventListener('gesturestart', onGesture)
+      el.addEventListener('gesturechange', onGesture)
+    } else {
+      el.addEventListener('wheel', onWheel, { passive: false })
+    }
     return () => {
       el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+      el.removeEventListener('gesturestart', onGesture)
+      el.removeEventListener('gesturechange', onGesture)
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
     }
@@ -183,16 +244,17 @@ export function Scroll({
   // level changed and only sway on genuine scrolling.
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el) return
-    const target: HTMLElement | Window = phone ? window : el
+    // Phone: the wave ::before is display:none (see .is-phone in index.css), so the sway var would be
+    // a style-recalc per scroll frame for nothing — don't attach the listener at all (scroll-lag fix).
+    if (!el || phone) return
+    const target: HTMLElement | Window = el
     let raf = 0
     let lastZoom = el.style.getPropertyValue('--iw-editor-zoom')
     const apply = () => {
       raf = 0
       const z = el.style.getPropertyValue('--iw-editor-zoom')
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
-      const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
+      el.style.setProperty('--wave-x', `${(el.scrollTop * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
