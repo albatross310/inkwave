@@ -123,6 +123,28 @@
     will-change: background-position;
   }
 
+  /* Loading wave drift — a COMPOSITOR (transform) animation, so it starts at first paint (the class
+     is in the prerendered HTML) and stays perfectly smooth no matter how busy the main thread is
+     while the editor boots. It slides the whole layer by exactly one 140px tile per loop, which is
+     pattern-identical — a seamless infinite drift. --wave-phase lets the live editor's surface pick
+     up mid-loop where the shell's animation was (negative delay), so the swap doesn't jump.
+     At reveal, Scroll.tsx freezes the offset into --wave-t (.iw-wave-coast) and eases it to the
+     nearest tile boundary (== identity) — the class drops with zero visual jump. */
+  @keyframes iw-wave-drift {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-140px); }
+  }
+  .inkwave-editor-surface.iw-wave-anim::before {
+    right: -140px; /* one extra tile so the slide never reveals a bare edge */
+    animation: iw-wave-drift 3.9s linear infinite; /* ~36px/s — a calm steady scroll */
+    animation-delay: var(--wave-phase, 0s);
+    will-change: transform;
+  }
+  .inkwave-editor-surface.iw-wave-coast::before {
+    right: -140px;
+    transform: translateX(var(--wave-t, 0px));
+  }
+
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
      goes fully transparent, so the real (fixed) aqua+waves background shows through everywhere; the
      parchment is painted by real per-page panels (.inkwave-sheet) in a background layer behind the

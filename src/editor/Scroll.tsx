@@ -179,7 +179,6 @@ export function Scroll({
   // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT jump when you ZOOM
   // (zoom re-anchors scrollTop, which would lurch the waves). So skip the frame where the editor-zoom
   // level changed and only sway on genuine scrolling.
-  const waveBaseRef = useRef(0) // loading-drift offset — scroll sway ADDS to it, so no snap at reveal
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return
@@ -191,7 +190,7 @@ export function Scroll({
       const z = el.style.getPropertyValue('--iw-editor-zoom')
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       const y = phone ? window.scrollY : el.scrollTop
-      el.style.setProperty('--wave-x', `${(waveBaseRef.current + y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
+      el.style.setProperty('--wave-x', `${(y * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
@@ -199,35 +198,60 @@ export function Scroll({
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [phone])
 
-  // While the parchment is hidden (loading), sway the waves as if scrolling down at a steady linear
-  // rate — the page feels alive instead of frozen. At reveal the sway doesn't stop dead: velocity
-  // decays exponentially (~1s to visually still), like a scroll coasting to rest. The drift
-  // accumulates into waveBaseRef, which the scroll handler above ADDS to — no jump at handover.
-  const revealedRef = useRef(revealed); revealedRef.current = revealed
+  // Loading wave drift — CSS/compositor does the moving (`.iw-wave-anim`, in the prerendered HTML,
+  // so it starts at FIRST PAINT and never stutters however busy the main thread is). JS only manages
+  // the phases: sync the live surface to the shell's animation phase at mount, and at reveal freeze
+  // the current offset then ease it to the nearest 140px tile boundary (pattern-identity) over ~1s —
+  // an exponential coast to rest with a zero-jump handoff back to the scroll sway.
   const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
+  const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
   useEffect(() => {
-    if (!startedHiddenRef.current) return
+    // Pick up mid-loop where the (unmounted) shell's animation was: negative delay = elapsed % loop.
     const el = surfaceRef.current
-    if (!el) return
+    if (!el || !startedHiddenRef.current) return
+    el.style.setProperty('--wave-phase', `-${((performance.now() / 1000) % 3.9).toFixed(3)}s`)
+  }, [])
+  useLayoutEffect(() => {
+    if (!revealed || waveMode !== 'anim') return
+    const el = surfaceRef.current
+    if (!el) { setWaveMode('off'); return }
+    // Freeze the compositor animation's current offset BEFORE the class swap paints.
+    let tx = 0
+    try {
+      const m = getComputedStyle(el, '::before').transform
+      if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
+    } catch { /* transform unreadable → coast from 0 */ }
+    el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
+    setWaveMode('coast')
     let raf = 0
     let last = performance.now()
-    let v = 36 // px/s in wave space ≙ scrolling ~600px/s (600 × the 0.06 sway factor)
-    const TAU = 0.28 // s — exp decay constant; ~1s from reveal to visually still
+    let v = -36 // px/s leftward — the speed the CSS drift was running at
+    const TAU = 0.28 // s — exponential decay; visually still in ~1s
     const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.1) // clamp tab-suspend gaps
+      const dt = Math.min((now - last) / 1000, 0.1)
       last = now
-      if (revealedRef.current) v *= Math.exp(-dt / TAU)
-      if (v < 0.2) { raf = 0; return } // at rest — the scroll handler owns the waves from here
-      waveBaseRef.current += dt * v
-      el.style.setProperty('--wave-x', `${waveBaseRef.current.toFixed(1)}px`)
+      v *= Math.exp(-dt / TAU)
+      tx += v * dt
+      if (Math.abs(v) < 3) {
+        // Nearly at rest: glide to the nearest tile boundary, where transform ≡ none.
+        const target = Math.round(tx / 140) * 140
+        tx += (target - tx) * Math.min(1, dt * 8)
+        if (Math.abs(target - tx) < 0.4) {
+          el.style.removeProperty('--wave-t')
+          setWaveMode('off')
+          raf = 0
+          return
+        }
+      }
+      el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => { if (raf) cancelAnimationFrame(raf) }
-  }, [])
+  }, [revealed, waveMode])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}
