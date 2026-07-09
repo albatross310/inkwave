@@ -728,22 +728,25 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
           <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)', overflow: 'hidden' }}>
-            {marks.filter(m => m.page === p).map((m, i) => {
-              const base = m.add ? '#16a34a' : '#dc2626', dark = m.add ? '#0d6b30' : '#8f1414'
-              // Wrapper is a taller transparent hit target; the inner bar widens + darkens on hover.
-              return (
-                <div key={i} title="Jump both panes to this change"
-                  onClick={(e) => { e.stopPropagation(); seekToY((m.page + m.frac) * pageHRef.current) }}
-                  onMouseEnter={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '5px'; b.style.background = dark }}
-                  onMouseLeave={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '2px'; b.style.background = base }}
-                  style={{ position: 'absolute', left: 0, right: 0, top: `${m.frac * 100}%`, transform: 'translateY(-50%)', height: 10, display: 'flex', alignItems: 'center', cursor: 'pointer', zIndex: 4 }}
-                >
-                  <div style={{ width: '100%', height: 2, background: base, borderRadius: 1, transition: 'height 0.1s, background 0.1s' }} />
-                </div>
-              )
-            })}
-            {/* page number + tiny logo, bottom-middle; font scales with the panel */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 2, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+            {/* Text block (marks) inset with page-like margins — top/left/right, and a clear bottom margin
+                that leaves room for the logo + number below it (so they're never buried under a diff tick). */}
+            <div style={{ position: 'absolute', top: 5, left: 4, right: 4, bottom: numFont + 9 }}>
+              {marks.filter(m => m.page === p).map((m, i) => {
+                const base = m.add ? '#16a34a' : '#dc2626', dark = m.add ? '#0d6b30' : '#8f1414'
+                return (
+                  <div key={i} title="Jump both panes to this change"
+                    onClick={(e) => { e.stopPropagation(); seekToY((m.page + m.frac) * pageHRef.current) }}
+                    onMouseEnter={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '5px'; b.style.background = dark }}
+                    onMouseLeave={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '2px'; b.style.background = base }}
+                    style={{ position: 'absolute', left: 0, right: 0, top: `${m.frac * 100}%`, transform: 'translateY(-50%)', height: 10, display: 'flex', alignItems: 'center', cursor: 'pointer', zIndex: 4 }}
+                  >
+                    <div style={{ width: '100%', height: 2, background: base, borderRadius: 1, transition: 'height 0.1s, background 0.1s' }} />
+                  </div>
+                )
+              })}
+            </div>
+            {/* logo + number in the clear bottom margin */}
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
               <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 0.85, height: numFont * 0.85, opacity: 0.66 }} />
               {p + 1}
             </div>
@@ -803,6 +806,7 @@ function SplitDiffView({
     show: boolean
     onBack: () => void; canBack: boolean
     onFwd: () => void; canFwd: boolean
+    onScrub: (steps: number) => void
     onVerBack: () => void; canVerBack: boolean
     onVerFwd: () => void; canVerFwd: boolean
     hasVersions: boolean
@@ -1479,30 +1483,29 @@ function SplitDiffView({
     return () => cleanups.forEach((fn) => fn())
   }, [snapMode, snapshot.id])
 
-  // Trackpad TWO-FINGER HORIZONTAL swipe over the editor or diff pane → snapshot scrub (mirrors the phone
-  // swipe + shift+wheel). Distance-quantised: a quick flick ≈ one snapshot, a long deliberate slide steps
-  // through many. Vertical wheels are untouched (the warp/native scroll owns those).
+  // Trackpad TWO-FINGER HORIZONTAL swipe over the editor or diff pane → snapshot scrub — a pure position
+  // scrubber (Apple-Photos style): NO flick/momentum. A small detent (FIRST) commits the first snap, then
+  // every REST px is another, applied as a NET hop per event so a light swipe flies through 10-30. A pause
+  // resets the gesture so the next swipe re-arms the detent. Vertical wheels are untouched.
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
-    let accum = 0
-    const STEP = 34 // deltaX px per snapshot — small, so a deliberate swipe flies through ~10 and the
-                    // trackpad's own momentum stream (decaying deltaX after a flick) tapers off naturally
+    let accum = 0, started = false, idle: ReturnType<typeof setTimeout> | undefined
+    const FIRST = 34, REST = 7
     const onWheel = (e: WheelEvent) => {
       if (e.shiftKey || e.ctrlKey || e.metaKey) return
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.3) return // not a horizontal swipe
       e.preventDefault()
+      clearTimeout(idle)
+      idle = setTimeout(() => { started = false; accum = 0 }, 140) // pause → re-arm the detent
       accum += e.deltaX
-      // One step per event (idx is fixed within an event); the trackpad's momentum stream supplies the many
-      // events for a fast flick + the taper as deltaX decays. Drain by STEP (keep remainder) so it's smooth.
-      if (Math.abs(accum) >= STEP) {
-        const dir = accum > 0 ? 1 : -1 // swipe left (deltaX>0) → next; right → previous
-        accum -= dir * STEP
-        if (dir > 0) nav?.onFwd(); else nav?.onBack()
-      }
+      let net = 0
+      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // reversed: right → previous
+      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
+      if (net) nav?.onScrub(net)
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
     R?.addEventListener('wheel', onWheel, { passive: false })
-    return () => { L?.removeEventListener('wheel', onWheel); R?.removeEventListener('wheel', onWheel) }
+    return () => { clearTimeout(idle); L?.removeEventListener('wheel', onWheel); R?.removeEventListener('wheel', onWheel) }
   }, [nav, snapshot.id])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
@@ -1875,6 +1878,16 @@ export function SnapshotView() {
   // scrolling still flies because the OS streams many notches, but each is a single, legible step.
   const idxRef = useRef(idx); idxRef.current = idx
   const allRef = useRef(allSnapshots); allRef.current = allSnapshots
+  // Scrub by a NET number of snapshots at once (positive = forward). idxRef is stale within a frame, so the
+  // swipe handlers accumulate a net delta and apply it in one hop.
+  const scrubBy = useCallback((steps: number) => {
+    const cur = idxRef.current, all = allRef.current
+    if (!steps || cur < 0 || !all.length) return
+    const target = Math.max(0, Math.min(all.length - 1, cur + steps))
+    if (target === cur) return
+    setNavDir(steps > 0 ? 'fwd' : 'back')
+    goTo(all[target])
+  }, [goTo])
   const wheelAccum = useRef(0)
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -1905,35 +1918,16 @@ export function SnapshotView() {
   }, [goTo])
 
   // ── Touch swipe → snapshot scrub (phone) ──────────────────────────────────────
-  // A roughly-HORIZONTAL drag scrubs snapshots; vertical stays native scroll. Distance-quantised like the
-  // wheel: at most one step per move event, accumulator reset on each step → a quick flick ≈ 1 snapshot, a
-  // slow deliberate slide steps through many. Works starting on either pane (listener is on the container).
+  // A roughly-HORIZONTAL drag scrubs snapshots — a PURE position-based scrubber (like Apple Photos): NO
+  // flick/momentum. A small detent (FIRST) to commit the first snap, then every REST px is another — so a
+  // normal drag sweeps through 10-30. Vertical stays native scroll. Works starting on either pane.
   const swipeRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = swipeRef.current
     if (!el) return
-    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, vel = 0, lastT = 0, flingRaf = 0
-    const STEP = 34 // px per snapshot — small, so a deliberate swipe flies through ~10
-    // Advance by the NET number of steps in one go (idxRef is stale within a frame, so we can't step one at
-    // a time). Positive `steps` = slid right = go BACK. Returns the crossed step count, draining `accum`.
-    const applySteps = (steps: number) => {
-      if (!steps) return
-      const cur = idxRef.current, all = allRef.current
-      if (cur < 0 || !all.length) return
-      const target = Math.max(0, Math.min(all.length - 1, cur - steps))
-      if (target === cur) return
-      setNavDir(steps < 0 ? 'fwd' : 'back')
-      goTo(all[target])
-    }
-    const drain = (get: () => number, set: (n: number) => void) => {
-      let steps = 0, a = get()
-      while (Math.abs(a) >= STEP) { const s = a > 0 ? 1 : -1; a -= s * STEP; steps += s }
-      set(a); applySteps(steps)
-    }
-    const onStart = (e: TouchEvent) => {
-      cancelAnimationFrame(flingRaf); flingRaf = 0
-      dir = '?'; accum = 0; vel = 0; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY; lastT = performance.now()
-    }
+    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
+    const FIRST = 38, REST = 9 // detent for the first snap, then heaps
+    const onStart = (e: TouchEvent) => { dir = '?'; accum = 0; started = false; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY }
     const onMove = (e: TouchEvent) => {
       const x = e.touches[0].clientX, y = e.touches[0].clientY
       if (dir === '?') {
@@ -1942,32 +1936,19 @@ export function SnapshotView() {
         dir = Math.abs(dx) > Math.abs(dy) * 1.7 ? 'h' : 'v'         // must be pretty horizontal
       }
       if (dir !== 'h') return                                        // vertical → let the pane scroll natively
-      e.preventDefault()                                             // own the horizontal gesture
-      const t = performance.now(), dt = Math.max(1, t - lastT), move = x - lastX
-      vel = 0.55 * vel + 0.45 * (move / dt)                          // smoothed px/ms
-      accum += move; lastX = x; lastT = t
-      drain(() => accum, (n) => { accum = n })
+      e.preventDefault()
+      accum += x - lastX; lastX = x
+      let net = 0
+      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // slide right → previous
+      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
+      if (net) scrubBy(net)
     }
-    // Fling on release: coast through more snapshots, decaying exponentially → "a few keep flashing, slows down".
-    const onEnd = () => {
-      if (dir === 'h' && Math.abs(vel) > 0.35) {
-        let v = vel, fAccum = 0, last = performance.now()
-        const TAU = 180 // ms
-        const tick = (t: number) => {
-          const dt = Math.min(48, t - last); last = t
-          fAccum += v * dt; v *= Math.exp(-dt / TAU)
-          drain(() => fAccum, (n) => { fAccum = n })
-          flingRaf = Math.abs(v) > 0.02 ? requestAnimationFrame(tick) : 0
-        }
-        flingRaf = requestAnimationFrame(tick)
-      }
-      dir = '?'
-    }
+    const onEnd = () => { dir = '?' }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
-    return () => { cancelAnimationFrame(flingRaf); el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove); el.removeEventListener('touchend', onEnd) }
-  }, [goTo])
+    return () => { el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove); el.removeEventListener('touchend', onEnd) }
+  }, [scrubBy])
 
   const isPhone = isTouchDevice()
   const [isWide, setIsWide] = useState(() =>
@@ -2175,7 +2156,7 @@ export function SnapshotView() {
             onOptInSummaries={() => setConsentOpen(true)}
             nav={{
               show: allSnapshots.length > 1 && status === 'ready',
-              onBack: goBack, canBack, onFwd: goFwd, canFwd,
+              onBack: goBack, canBack, onFwd: goFwd, canFwd, onScrub: scrubBy,
               onVerBack: goVerBack, canVerBack, onVerFwd: goVerFwd, canVerFwd,
               hasVersions,
             }}
