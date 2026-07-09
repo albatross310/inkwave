@@ -689,14 +689,28 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     if (!editor) return
     let done = false
-    const finish = () => {
-      if (done) return
-      done = true
+    let revealTimer: ReturnType<typeof setTimeout> | undefined
+    const reveal = () => {
       setSettled(true)
       // Same-task dispatch → React batches Edit's loading-shell unmount with this reveal into ONE
       // commit: the shell disappears in the exact frame the parchment fades in + the wave coast
       // starts on this surface (which the shell was covering, already phase-synced + rastered).
       window.dispatchEvent(new Event('inkwave:editor-revealed'))
+    }
+    const finish = () => {
+      if (done) return
+      done = true
+      // PHONE (Peter's spec): waves decelerate FIRST, page pops as they reach rest. At gate-ready,
+      // 'inkwave:reveal-imminent' starts the 2s coast on every drifting surface (the visible shell
+      // + this editor's own surface, in lockstep — see Scroll.tsx); the atomic reveal (shell
+      // unmount + parchment) is delayed by the coast duration so it lands at wave-rest.
+      // Desktop is unchanged: coast starts at revealed, reveal is immediate.
+      if (isTouchDevice()) {
+        window.dispatchEvent(new Event('inkwave:reveal-imminent'))
+        revealTimer = setTimeout(reveal, 2000)
+        return
+      }
+      reveal()
     }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
@@ -712,7 +726,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void Promise.all([fontsReady, paginationReady]).then(() =>
       requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
     )
-    return () => clearTimeout(cap)
+    return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer) }
   }, [editor])
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel

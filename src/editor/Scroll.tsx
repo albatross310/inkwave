@@ -248,8 +248,9 @@ export function Scroll({
   const waveBaseRef = useRef(0)
   useEffect(() => {
     const el = surfaceRef.current
-    // Phone: the wave ::before is display:none (see .is-phone in index.css), so the sway var would be
-    // a style-recalc per scroll frame for nothing — don't attach the listener at all (scroll-lag fix).
+    // Phone: waves exist only DURING load (.iw-wave-anim/.iw-wave-coast in index.css) — at rest the
+    // surface returns to parchment (::before display:none), so the sway var would be a style-recalc
+    // per scroll frame for nothing — don't attach the listener at all (scroll-lag fix).
     if (!el || phone) return
     const target: HTMLElement | Window = el
     let raf = 0
@@ -312,10 +313,11 @@ export function Scroll({
   // before the browser paints — the first coast frame is already easing from the frozen offset, so
   // there is no dead frame (and no intermediate render ever lacks both classes: waveMode swaps
   // 'anim' → 'coast' atomically in one state).
-  useLayoutEffect(() => {
-    if (!revealed || waveMode !== 'anim') return
+  // Freeze the compositor animation's current offset into --wave-t and swap to the coast class —
+  // shared by the desktop trigger (revealed, below) and the phone trigger ('inkwave:reveal-imminent').
+  const freezeToCoast = () => {
     const el = surfaceRef.current
-    if (!el || phone) { setWaveMode('off'); return } // phone: waves are display:none — nothing to coast
+    if (!el) { setWaveMode('off'); return }
     // Freeze the compositor animation's current offset BEFORE the class swap paints.
     let tx = 0
     try {
@@ -327,7 +329,24 @@ export function Scroll({
     } catch { /* transform unreadable → coast from 0 */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
-  }, [revealed, waveMode, phone])
+  }
+  useLayoutEffect(() => {
+    if (!revealed || waveMode !== 'anim') return
+    freezeToCoast()
+    // On phone this path is normally a no-op fallback: 'inkwave:reveal-imminent' (below) already
+    // swapped to 'coast' 2s before revealed flips — but if the event never fired, coast at reveal.
+  }, [revealed, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  // PHONE (Peter's spec): the waves decelerate FIRST. TiptapEditor dispatches
+  // 'inkwave:reveal-imminent' at gate-ready and delays the reveal by the 2s phone coast, so the
+  // parchment pops atomically as the waves reach rest. Every drifting surface listens — the visible
+  // loading SHELL (revealed is never true there; it just unmounts at the reveal) and the editor's
+  // own surface underneath coast in lockstep (same --wave-phase clock → same frozen offset).
+  useEffect(() => {
+    if (!phone || waveMode !== 'anim') return
+    const onImminent = () => freezeToCoast()
+    window.addEventListener('inkwave:reveal-imminent', onImminent)
+    return () => window.removeEventListener('inkwave:reveal-imminent', onImminent)
+  }, [phone, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
   // Coast END → sway handoff. The 2s ease-out itself is pure CSS (iw-wave-coast-l/r); JS wakes only
   // at animationend to hand over: the final offset (--wave-t − 72px, the keyframes' end value) is
   // written into --wave-x in the same commit the coast class drops. Because the coast geometry's
@@ -342,7 +361,11 @@ export function Scroll({
     const finish = () => {
       if (done) return
       done = true
-      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - 72
+      // Coast distance matches the keyframes' --wave-coast-dist: 72px on desktop (3s), 48px on
+      // phone (2s). On phone the waves cease to exist the moment the classes drop (parchment
+      // surface, ::before display:none), so the sway base/--wave-x write is inert there — kept
+      // unconditional for one code path.
+      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 72)
       waveBaseRef.current = txFinal - el.scrollTop * 0.06
       el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
@@ -351,7 +374,7 @@ export function Scroll({
     el.addEventListener('animationend', onEnd)
     const cap = setTimeout(finish, 3300) // safety net if the animation never ran (e.g. reduced paint states)
     return () => { el.removeEventListener('animationend', onEnd); clearTimeout(cap) }
-  }, [waveMode])
+  }, [waveMode, phone])
   // --wave-t is inert once the coast class is gone; tidy it away after the 'off' commit (removing it
   // BEFORE the class dropped was the old backward-jump bug — the still-coasting transform fell to 0).
   useEffect(() => {
