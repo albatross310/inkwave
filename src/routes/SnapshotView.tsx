@@ -600,7 +600,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
   const GAP = 4
   // Page-number + logo size scales with the cell height (panel resolution).
   const cellApproxH = panelDims.h > 0 ? (panelDims.h - 12 - (height - 1) * GAP) / height : 40
-  const numFont = Math.max(5, Math.min(13, cellApproxH * 0.16))
+  const numFont = Math.max(8, Math.min(22, cellApproxH * 0.28))
 
   // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
   // then follows the diff pane). Column-major: down a column, then the next column.
@@ -648,7 +648,8 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     const p = Math.max(0, Math.min(pages - 1, Math.floor(yc / pageH)))
     const frac = Math.max(0, Math.min(1, (yc - p * pageH) / pageH))
     const c = Math.floor(p / height), r = p % height
-    setHere({ top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride })
+    const next = { top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride }
+    setHere(prev => (prev && Math.abs(prev.top - next.top) < 0.4 && Math.abs(prev.left - next.left) < 0.4 && Math.abs(prev.width - next.width) < 0.4) ? prev : next)
   }, [cols, height, pages, leftRef, midFrac])
   useEffect(() => {
     const el = leftRef.current, grid = gridRef.current
@@ -663,8 +664,8 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     return () => { el.removeEventListener('scroll', updateHere); ro?.disconnect(); cancelAnimationFrame(raf) }
   }, [updateHere, snapKey])
 
-  // Wheel over the minimap scrolls the document — one cell-height of wheel ≈ one page, so you sweep DOWN the
-  // current column (and on into the next) straight from the minimap.
+  // Wheel over the minimap scrolls the WHOLE document linearly (through every page/column, no column limit) —
+  // a moderate multiplier so it's quicker than the pane but not a lurch.
   useEffect(() => {
     const grid = gridRef.current
     if (!grid) return
@@ -672,15 +673,12 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
       const el = leftRef.current
       if (!el) return
       e.preventDefault()
-      const h = grid.clientHeight - 12
-      const cellH = (h - (height - 1) * GAP) / height
-      const factor = pageHRef.current / Math.max(1, cellH) // minimap px → document px (1 cell = 1 page)
-      window.dispatchEvent(new Event('inkwave:minimap-seek'))
-      el.scrollTop += e.deltaY * factor
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // line/page → px
+      el.scrollTop += e.deltaY * unit * 3 // moderate; the editor's own scroll handlers take it from here
     }
     grid.addEventListener('wheel', onWheel, { passive: false })
     return () => grid.removeEventListener('wheel', onWheel)
-  }, [leftRef, height])
+  }, [leftRef])
 
   return (
     <div
@@ -718,8 +716,8 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
               )
             })}
             {/* page number + tiny logo, bottom-middle; font scales with the panel */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.5)', fontSize: numFont, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
-              <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 1.15, height: numFont * 1.15, opacity: 0.5 }} />
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.3, color: 'rgba(92,45,138,0.62)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+              <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 1.3, height: numFont * 1.3, opacity: 0.62 }} />
               {p + 1}
             </div>
           </div>
