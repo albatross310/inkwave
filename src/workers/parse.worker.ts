@@ -3,11 +3,12 @@
 // thread (the post-load "lags in the first seconds" report). Here the main thread pays only the
 // structured-clone of the parsed result.
 
-import { parseTraceFile } from '../provenance/traceParse'
+import { parseTraceFile, parseStudioBuffer } from '../provenance/traceParse'
 
 type Req =
   | { id: number; kind: 'gunzipJson'; buf: ArrayBuffer }
   | { id: number; kind: 'parseTrace'; text: string }
+  | { id: number; kind: 'parseStudio'; buf: ArrayBuffer }
   | { id: number; kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }
 type Res = { id: number; ok?: unknown; err?: string }
 
@@ -55,6 +56,7 @@ self.onmessage = (e: MessageEvent<Req>) => {
     try {
       const ok = m.kind === 'gunzipJson' ? await gunzipJson(m.buf)
         : m.kind === 'opfsWrite' ? await opfsWrite(m.path, m.bytes)
+        : m.kind === 'parseStudio' ? await parseStudioBuffer(m.buf)
         : parseTraceFile(m.text)
       ;(self as unknown as Worker).postMessage({ id: m.id, ok } satisfies Res)
     } catch (err) {

@@ -278,7 +278,13 @@ export async function getGDriveFileInfo(docId: string): Promise<{ webUrl: string
 // List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
 // your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
 // open via "This computer" (the mounted Drive folder) on desktop.
-export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ id: string; name: string }>> {
+
+/** An openable Drive file, with the change-tag the open cache keys on: md5Checksum changes only
+ *  with the CONTENT; `version` (which also bumps on metadata changes — over-invalidates, always
+ *  safe) is the fallback for files without an md5. */
+export interface GDriveFileEntry { id: string; name: string; tag?: string; size?: number; modifiedAt?: number }
+
+export async function listGoogleDriveFiles(parentId?: string): Promise<GDriveFileEntry[]> {
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
@@ -286,10 +292,16 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<Array<{ i
   // .json/.txt catch pre-.studio-era saves and iOS renames. The opener validates by content.
   let q = "(name contains '.studio' or name contains '.inkwave' or name contains '.json' or name contains '.txt') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
   if (parentId) q += ` and '${parentId}' in parents`
-  const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name,md5Checksum,version,size,modifiedTime)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return []
-  const d = (await res.json()) as { files?: Array<{ id: string; name: string }> }
-  return d.files ?? []
+  const d = (await res.json()) as { files?: Array<{ id: string; name: string; md5Checksum?: string; version?: string; size?: string; modifiedTime?: string }> }
+  return (d.files ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    tag: f.md5Checksum ?? (f.version ? `v${f.version}` : undefined),
+    size: f.size ? Number(f.size) : undefined,
+    modifiedAt: f.modifiedTime ? Date.parse(f.modifiedTime) : undefined,
+  }))
 }
 
 /** Download a Drive file's text by id (the app has drive.file access to files it created/opened).
@@ -300,6 +312,20 @@ export async function downloadGoogleDriveFile(id: string): Promise<string | null
   const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) return null
   return res.text()
+}
+
+/** The LIVE change-tag for one file (metadata GET, no body) — the open cache verifies a cached
+ *  copy against this when the picker's listing itself came from cache (a stale listing tag must
+ *  never produce a false cache hit). null on any failure (offline / no token). */
+export async function getGDriveFileTag(id: string): Promise<string | null> {
+  try {
+    const token = await getDriveToken(false) // silent only
+    if (!token) return null
+    const res = await fetch(`${FILES_API}/${id}?fields=md5Checksum,version`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return null
+    const d = (await res.json()) as { md5Checksum?: string; version?: string }
+    return d.md5Checksum ?? (d.version ? `v${d.version}` : null)
+  } catch { return null }
 }
 
 /** Download a Drive file's raw bytes by id. Bytes, NOT text: the file OPENER may pick a .studio.gz,

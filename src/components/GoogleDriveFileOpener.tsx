@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, createGoogleDriveFolder, type GDriveRecent } from '../storage/gdrive'
+import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, createGoogleDriveFolder, type GDriveRecent, type GDriveFileEntry } from '../storage/gdrive'
+import { getListing, putListing, listingKey, type CachedListing } from '../storage/openCache'
 
 // Open a .studio/.inkwave file FROM Google Drive — folder-navigable (matches the OneDrive opener).
 // drive.file only lets Inkwave see files/folders IT created, so this browses the app's own folders +
@@ -36,12 +37,15 @@ type Crumb = { id: string; name: string }
 type Item = { id: string; name: string }
 
 export function GoogleDriveFileOpener({ onOpen, onClose }: {
-  onOpen: (f: { id: string; name: string; folderId: string; folderName: string }) => void | Promise<void>
+  onOpen: (f: { id: string; name: string; folderId: string; folderName: string; tag?: string; fresh?: boolean }) => void | Promise<void>
   onClose: () => void
 }) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
   const [folders, setFolders] = useState<Item[] | null>(null)
-  const [files, setFiles] = useState<Item[] | null>(null)
+  const [files, setFiles] = useState<GDriveFileEntry[] | null>(null)
+  // Whether the SHOWING listing came from the live API (vs the instant cached seed) — the open
+  // cache only trusts a fresh listing's tag directly; a cached one is re-verified before a hit.
+  const [listingFresh, setListingFresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<GDriveRecent[]>([])
@@ -57,10 +61,36 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
 
   useEffect(() => {
     let cancelled = false
-    setFolders(null); setFiles(null); setError(null)
+    let gotFresh = false
+    setFolders(null); setFiles(null); setError(null); setListingFresh(false)
+    const key = listingKey('gd', currentId)
+    type L = CachedListing<Item, GDriveFileEntry>
+    // Cached listing → instant paint (the idle warm pass pre-populates it); the fresh fetch below
+    // replaces it in the background. Skipped on explicit reloads (new-folder create).
+    if (!reload) {
+      void getListing<L>(key).then((c) => {
+        if (!cancelled && !gotFresh && c) { setFolders(c.value.folders); setFiles(c.value.files) }
+      })
+    }
     Promise.all([listGoogleDriveFolders(currentId), listGoogleDriveFiles(currentId)])
-      .then(([fo, fi]) => { if (!cancelled) { setFolders(fo); setFiles(fi) } })
-      .catch((e) => { if (!cancelled) setError((e as Error).message) })
+      .then(([fo, fi]) => {
+        if (cancelled) return
+        gotFresh = true
+        setFolders(fo); setFiles(fi); setListingFresh(true)
+        // drive.file returns [] both for "empty" and "token lapsed" — never let an auth blip wipe a
+        // good cached listing (genuinely-empty folders are cheap to refetch, so skipping them is fine).
+        if (fo.length || fi.length) putListing(key, { folders: fo, files: fi } satisfies L)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        // Offline: keep (or restore) the cached listing so the picker still works — opening then
+        // falls back to the OPFS byte cache. Error only when there's nothing to show.
+        void getListing<L>(key).then((c) => {
+          if (cancelled || gotFresh) return
+          if (c) { setFolders(c.value.folders); setFiles(c.value.files) }
+          else setError((e as Error).message)
+        })
+      })
     return () => { cancelled = true }
   }, [currentId, reload])
 
@@ -78,9 +108,10 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  async function open(file: Item) {
+  async function open(file: GDriveFileEntry) {
     setOpening(true)
-    try { await onOpen({ id: file.id, name: file.name, folderId: currentId, folderName: currentPath || 'My Drive (root)' }) }
+    // The change-tag (md5/version) rides along so the open path can serve cached bytes when unchanged.
+    try { await onOpen({ id: file.id, name: file.name, folderId: currentId, folderName: currentPath || 'My Drive (root)', tag: file.tag, fresh: listingFresh }) }
     finally { onClose() }
   }
 

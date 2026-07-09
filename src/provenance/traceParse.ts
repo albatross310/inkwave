@@ -15,6 +15,22 @@ export const TRACE_DATA_MARKERS_LEGACY = [
 // huge file is either a mistake or a DoS attempt — reject it cheaply rather than parse it.
 export const MAX_TRACE_BYTES = 120_000_000 // 120 MB — allows a few base64-embedded source PDFs
 
+/** Raw .studio bytes → bundle: sniff the gzip magic (1f 8b), gunzip if present, decode, parse.
+ *  Worker-safe (DecompressionStream + TextDecoder exist in workers) — the parse worker runs this so
+ *  a 20 MB open never text-decodes or JSON.parses on the main thread. */
+export async function parseStudioBuffer(buf: ArrayBuffer): Promise<ExportBundle> {
+  if (buf.byteLength > MAX_TRACE_BYTES) throw new Error('file too large to be an Inkwave record')
+  const bytes = new Uint8Array(buf)
+  let text: string
+  if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b && typeof DecompressionStream !== 'undefined') {
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))
+    text = await new Response(stream).text()
+  } else {
+    text = new TextDecoder().decode(bytes)
+  }
+  return parseTraceFile(text)
+}
+
 /** Read a .trace.json file back into a bundle (hybrid text-header format OR a legacy pure-JSON file). */
 export function parseTraceFile(fileText: string): ExportBundle {
   if (fileText.length > MAX_TRACE_BYTES) throw new Error('file too large to be an Inkwave record')
