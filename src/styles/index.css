@@ -842,6 +842,18 @@
      forced breaks would over/underfill the printed pages. !important beats the inline zoom var
      (Ctrl+wheel / pinch writes it on the surface's style attribute). */
   .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; --iw-editor-zoom: 1 !important; --iw-magnify: 1 !important; }
+  /* THE "1 of 1" FIX (2026-07-09, proven with a headless page.pdf() + pdftotext harness): on screen
+     the live editor's surface is a FIXED, viewport-height scroll container (.iw-fill above). Printed
+     as-is, the UA lays the whole document into that one viewport-tall clipped box — the print preview
+     offers a single page holding whatever was scrolled into view. Print must be normal block flow all
+     the way down: static, auto height, no scroll clipping, no reserved scrollbar gutter (the gutter
+     stole 15px of the 210mm and mis-centred the paper). */
+  .inkwave-editor-surface.iw-fill:not(.is-phone) {
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    scrollbar-gutter: auto !important;
+  }
   /* Print at magnify 1 too: kill the transform and the wrapper's imperative visual sizing so the
      paper prints at its true mm width (same canonical layout the breaks were measured in). */
   .inkwave-editor-surface.iw-magnified .iw-magnify-box > div { transform: none !important; }
