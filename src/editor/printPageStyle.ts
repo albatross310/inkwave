@@ -5,7 +5,7 @@
 // every <style> tag's text, so the export tab inherits the override automatically — and a plain
 // Ctrl+P / the footer "print" action on the live page picks it up too.
 
-import { getPaperSize, getOrientation } from './pageSettings'
+import { getPaperSize, getOrientation, getSideMarginPx } from './pageSettings'
 import { paperCssSize } from './pageModel'
 
 const STYLE_ID = 'iw-print-page'
@@ -16,10 +16,15 @@ export function syncPrintPageStyle(): void {
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null
   if (paper === 'scroll') { el?.remove(); return } // continuous scroll: print on the A4 defaults
   const { width, height } = paperCssSize(paper, getOrientation())
+  // Phone parity: breaks are measured in the canonical context with the DESKTOP side margins
+  // (canonicalMeasure.ts), but the phone renders a slim inline 1.25rem padding on .scroll-paper —
+  // !important here restores the canonical wrapping when printing from a phone.
+  const side = getSideMarginPx()
   const css =
     `@media print{` +
     `html,body,.inkwave-editor-surface{width:${width} !important;}` +
     `@page{size:${width} ${height};margin:0;}` +
+    `.inkwave-editor-surface.is-phone .scroll-paper{padding-left:${side}px !important;padding-right:${side}px !important;}` +
     `}`
   if (!el) {
     el = document.createElement('style')

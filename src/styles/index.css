@@ -604,7 +604,13 @@
   /* Hide floating chrome + the wavy background + the decorative parchment panels. */
   .fixed { display: none !important; }
   .inkwave-editor-surface::before, .inkwave-editor-surface::after { display: none !important; }
-  .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; }
+  /* CANONICAL PRINT LAYOUT: breaks are measured in the canonical context (zoom 1, base font,
+     desktop margins — see canonicalMeasure.ts), so print must wrap the text the same way or the
+     forced breaks would over/underfill the printed pages. !important beats the inline zoom var
+     (Ctrl+wheel / pinch writes it on the surface's style attribute). */
+  .inkwave-editor-surface { background: #fff !important; padding: 0 !important; min-height: 0 !important; width: 210mm !important; --iw-editor-zoom: 1 !important; }
+  /* Phone's ×1.25 reading boost is screen-only — print at the canonical base the breaks assume. */
+  .inkwave-editor-surface.is-phone .ProseMirror { font-size: 1.125rem !important; }
   .inkwave-sheets, .inkwave-sheet, .inkwave-sheet-num { display: none !important; }
   /* The ungapped page-guide overlay (dashed rules, page numbers, logos) is screen chrome — the
      printed page breaks for real at the markers, so the guides would double up. */
