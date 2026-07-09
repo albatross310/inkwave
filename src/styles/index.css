@@ -35,7 +35,14 @@
   /* Phone: the BAND between pages reads aquamarine (the brand backdrop, waves omitted) while the
      root/body stay parchment — that root colour is what iOS paints in unrasterised checkerboard
      tiles during fast flicks, and it must read as paper, not blue (Peter, 2026-07-09). */
-  .inkwave-editor-surface.is-phone .inkwave-page-gap-band { background: #9fd9c8; }
+  .inkwave-editor-surface.is-phone .inkwave-page-gap-band {
+    background: #9fd9c8;
+    /* Full-bleed: the band lives inside the sheet's side padding — without this it stops short of
+       the screen edges (parchment strips either side). */
+    left: 50%;
+    width: 100vw;
+    transform: translateX(-50%);
+  }
 
   .inkwave-editor-surface.is-phone {
     padding-right: calc(1rem + var(--iw-pdf-room, 0px));

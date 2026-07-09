@@ -32,6 +32,11 @@ import { forceCanonicalContext } from '../canonicalMeasure'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
+// Phone pages are content-tall with COMPACT fixed margins: break POSITIONS are canonical (same
+// text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
+// don't match the phone's taller reflowed text — they rendered as huge dead bands (2026-07-09).
+const PHONE_PAGE_MARGIN = 32
+const phoneLike = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
@@ -161,8 +166,9 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
     }
     // Force the reference list onto a fresh page (before the normal overflow check).
     if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
-      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - used)
-      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
+      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN : Math.max(MARGIN_BOTTOM, pageH - topM - used)
+      const gapTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
+      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
       pageNo++; used = 0; blockStart = -1; blockEnd = -1; refBroken = true
     }
