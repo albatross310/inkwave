@@ -775,7 +775,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         // page + chrome fade IN over the still-coasting waves for the remaining 0.5s — the fade
         // completes at 2s, the moment the waves reach rest (see Edit.tsx + the phone transition
         // in Scroll.tsx + .iw-chrome-in below).
-        revealTimer = setTimeout(reveal, 1500)
+        revealTimer = setTimeout(reveal, 1200) // 0.8s fade lands exactly in the coast tail (ends at 2s = wave rest)
         return
       }
       // Desktop: two clean frames (~33ms, imperceptible) between coast start and the heavy reveal

@@ -763,7 +763,7 @@ export function Scroll({
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the
         // wave S-decay — doc, text and pills fade in together underneath, over coasting waves.
-        ...(fadingOut ? { opacity: 0, transition: 'opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)', pointerEvents: 'none' as const } : null),
+        ...(fadingOut ? { opacity: 0, transition: 'opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1)', pointerEvents: 'none' as const } : null),
       } as React.CSSProperties}>
       {/* Twinkle host — sparkles + accent dashes live in here as generated layers, NOT on the wave
           ::before/::after (fading/blinking those would dim the wave lines too). Rendered EMPTY
@@ -771,6 +771,9 @@ export function Scroll({
           above; the layers ride the same drift/coast keyframes + --wave-phase clock as the wave
           layers, so every fleck moves in lockstep with its crest. Pure visual layer. */}
       <div ref={twinkleRef} className="iw-wave-twinkles" aria-hidden="true" />
+      {/* Print-only: position:fixed repeats on every printed page (Chromium) — the bottom-centre
+          logo. Hidden on screen (inline none; the @media print rule wins with !important). */}
+      <img className="iw-print-logo" src="/inkwave-logo-v7.png" alt="" aria-hidden="true" style={{ display: 'none' }} />
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in
           the .iw-magnify-box wrapper below — the wrapper carries the centring (mx-auto + explicit
@@ -812,7 +815,7 @@ export function Scroll({
           // the fade lands at 2.0s, the moment the waves reach rest.
           visibility: revealed ? 'visible' : 'hidden',
           opacity: revealed ? 1 : 0,
-          transition: phone ? 'opacity 500ms cubic-bezier(0.4, 0, 0.2, 1)' : 'opacity 180ms ease',
+          transition: 'opacity 800ms cubic-bezier(0.4, 0, 0.2, 1)', // both platforms: 0.8s atomic fade (Peter, 2026-07-10)
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven

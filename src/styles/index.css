@@ -1066,7 +1066,7 @@
    On phone the parchment fills the screen, so the old shell fade-OUT cross-faded the waves into
    paper — the waves seemed to die during the blend. Now the shell drops INSTANTLY at reveal
    (beneath it is an identical, phase-locked coasting water) and the page fades in via Scroll's
-   0.5s phone opacity transition. The floating chrome does the same via these classes, which
+   0.8s phone opacity transition. The floating chrome does the same via these classes, which
    TiptapEditor puts on its root: 'hold' keeps toolbar/pills invisible while the shell still
    covers (their z-indexes paint ABOVE the z:auto shell); 'in' runs a one-shot 0.5s fade-in at
    reveal, then the class is removed so later-mounted panels never replay it. The editor
@@ -1074,7 +1074,7 @@
    and decaying, while page + toolbar + pills fade in over them. */
 @keyframes iw-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .iw-chrome-hold > :not(.inkwave-editor-surface) { opacity: 0 !important; }
-.iw-chrome-in > :not(.inkwave-editor-surface) { animation: iw-fade-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) backwards; }
+.iw-chrome-in > :not(.inkwave-editor-surface) { animation: iw-fade-in 0.8s cubic-bezier(0.4, 0, 0.2, 1) backwards; }
 
 /* Golden hover-glow shimmer for aligned diffs (SnapshotView cross-pane hover). */
 @keyframes iw-hover-shimmer {
