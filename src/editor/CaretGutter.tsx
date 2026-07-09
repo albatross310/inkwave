@@ -10,6 +10,7 @@
 import { useEffect, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { Editor } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
+import { scaleFor, unscale, subscribe as subscribeMagnify } from './magnify'
 
 type Side = 'left' | 'right'
 
@@ -31,12 +32,30 @@ export function CaretGutter(
     if (!el) return
     const update = () => {
       const r = el.getBoundingClientRect()
-      const w = side === 'left' ? r.left : document.documentElement.clientWidth - r.right
-      setWidth(Math.max(0, w))
+      // Right edge = the scroll SURFACE's content edge (clientWidth excludes its scrollbar), not
+      // the raw viewport — extending under the scrollbar gutter made the strip the widest thing
+      // in the scroller and left a ~15px horizontal ghost-scroll range (breaks the fit-floor's
+      // "no horizontal scroll" guarantee).
+      const surf = el.closest('.inkwave-editor-surface') as HTMLElement | null
+      const rightEdge = surf
+        ? surf.getBoundingClientRect().left + surf.clientLeft + surf.clientWidth
+        : document.documentElement.clientWidth
+      // The measured margin is VISUAL px, but the strip renders INSIDE the (possibly
+      // transform-magnified) paper, where inline widths are layout px — unscale so the strip's
+      // rendered footprint still reaches exactly to the surface edge at any magnify.
+      const w = side === 'left' ? r.left : rightEdge - r.right
+      setWidth(Math.max(0, unscale(w, scaleFor(el))))
     }
     update()
     window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
+    // Margin width changes with the page scale. Deferred a frame: the magnify notification fires
+    // BEFORE Scroll's subscriber has written the new transform/wrapper sizes (child effects
+    // subscribe first), so measure after the DOM settles.
+    let raf = 0
+    const unsubMagnify = subscribeMagnify(() => {
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; update() })
+    })
+    return () => { window.removeEventListener('resize', update); unsubMagnify(); if (raf) cancelAnimationFrame(raf) }
   }, [containerEl, side])
 
   // The x just inside the text column on this side — the line start (left) or end (right).

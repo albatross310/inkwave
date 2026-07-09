@@ -9,6 +9,7 @@ import { posOf, measureNaturalLineRight, computeLineCompressionRange } from './p
 import { SCAS_REVEAL_META } from '../../extensions/RedHighlightExtension'
 import { buildSynonyms } from './popoverFallbacks'
 import { lemmaOf } from '../../../scas/engine'
+import { scaleFor, unscale } from '../../magnify'
 
 // The in-place expand+compress popover is the experience on every device. The opaque
 // overlay card is a dormant fallback, opt-in via ?overlay=1 only — used to compare or
@@ -57,11 +58,17 @@ export function usePopoverLayout(
       .find(el => posOf(el, editor) === from)
     const pe = fe?.closest('p')
     if (!fe || !pe) return
+    // Rects are VISUAL px under the transform-magnify; minWidth / letter-spacing / canvas text
+    // widths are LAYOUT px. Convert widths at the read (unscale) so the compression maths stay
+    // in one space (magnify.ts owns the scale). Tops/rights stay visual — the geometry helpers
+    // only ever compare them against other visual rects (same-line detection), except the slack,
+    // which computeLineCompressionRange unscales itself via the scale we pass.
+    const s = scaleFor(fe)
     const rect         = fe.getBoundingClientRect()
-    const naturalWidth = rect.width
+    const naturalWidth = unscale(rect.width, s)
     const natRight     = measureNaturalLineRight(rect, pe)
     const lineRange = computeLineCompressionRange(
-      rect.top, rect.bottom, natRight, naturalWidth, minWidth, from, to, pe, editor,
+      rect.top, rect.bottom, natRight, naturalWidth, minWidth, from, to, pe, editor, s,
     )
     const alignFraction = lineRange?.alignFraction ?? 0
     lastLineRangeRef.current = lineRange
@@ -145,14 +152,16 @@ export function usePopoverLayout(
     const live = reds.find(el => posOf(el, editor) === domPos)
     if (!live) return
 
+    const s      = scaleFor(live) // visual→layout conversion for widths (see applyLayout note)
     const rect   = live.getBoundingClientRect()
+    const wordW  = unscale(rect.width, s) // LAYOUT px — the space min-width/canvas measures live in
     const font   = getFont(live)
     const pEl    = live.closest('p')
     const natRight = pEl ? measureNaturalLineRight(rect, pEl) : rect.right
 
     // Apply provisional focus immediately (instant, no transition) to prevent the null-gap flash
     // on Tab nav and to give the open animation a clean natural starting box.
-    onHintChange(domPos, rect.width, null, false)
+    onHintChange(domPos, wordW, null, false)
     // The focus above made the word transparent SYNCHRONOUSLY (PM); the reel is React state. Because
     // this runs in a NATIVE pointerdown listener (not a React synthetic event), React would not
     // guarantee the reel mounts before the browser's next paint — leaving a frame of "transparent
@@ -162,7 +171,10 @@ export function usePopoverLayout(
       word: lookupWord, from: domPos, to: domPos + displayWord.length,
       synonyms: Array(CYCLE_SIZE).fill(displayWord),
       reelPos: 0, overlay,
-      minWidth: rect.width, naturalWidth: rect.width, naturalLeft: rect.left, alignFraction: 0.5,
+      // Widths in LAYOUT px; naturalLeft/Top/Bottom/LineRight stay VISUAL viewport px — their
+      // consumers (the geometry memo, compression) diff them against other visual rects and
+      // unscale at the point of use.
+      minWidth: wordW, naturalWidth: wordW, naturalLeft: rect.left, alignFraction: 0.5,
       naturalTop: rect.top, naturalBottom: rect.bottom, naturalLineRight: natRight,
     }))
 
@@ -180,7 +192,7 @@ export function usePopoverLayout(
       // Match the flagged word's leading case: a capitalised word keeps its capital
       // through every slot (and on commit).
       const capitalize = /^[A-Z]/.test(displayWord)
-      const { synonyms, minWidth } = buildSynonyms(lookupWord, offered, font, rect.width, capitalize)
+      const { synonyms, minWidth } = buildSynonyms(lookupWord, offered, font, wordW, capitalize)
       // Centre the reel on the word currently in the text (may differ from the original for a
       // managed slot), so reopening shows what's there, not the original.
       const cur = displayWord.toLowerCase()

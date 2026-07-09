@@ -12,6 +12,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { getPaperSize, getOrientation, getTopMarginPx, MARGIN_BOTTOM } from '../editor/pageSettings'
 import { pageBoxPx } from '../editor/pageModel'
+import { scaleFor, unscale } from '../editor/magnify'
 
 const INK = '#5c2d8a'
 const STYLE_ID = 'iw-citation-nav-styles'
@@ -156,6 +157,7 @@ function docPageOf(el: HTMLElement): number | null {
   const top = el.getBoundingClientRect().top
   const gaps = sheet.querySelectorAll('.inkwave-page-gap')
   if (gaps.length) {
+    // Purely comparative (both rects visual, same scaled subtree) — magnify-invariant as is.
     let page = 1
     gaps.forEach((g) => { if (g.getBoundingClientRect().top <= top) page++ })
     return page
@@ -166,7 +168,9 @@ function docPageOf(el: HTMLElement): number | null {
     topMarginPx: getTopMarginPx(),
     bottomMarginPx: MARGIN_BOTTOM,
   })
-  const y = top - sheet.getBoundingClientRect().top - getTopMarginPx()
+  // Visual rect distance vs canonical layout px (textAreaPx, top margin) — unscale the rect diff
+  // first (magnify.ts) so the fallback page maths hold under the transform-magnify.
+  const y = unscale(top - sheet.getBoundingClientRect().top, scaleFor(sheet)) - getTopMarginPx()
   return Math.max(1, Math.floor(y / textAreaPx) + 1)
 }
 

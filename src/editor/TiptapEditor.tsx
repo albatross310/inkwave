@@ -35,6 +35,7 @@ import { LineNumbers } from './extensions/LineNumbers'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Scroll, isTouchDevice } from './Scroll'
+import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
 import { prefetchSynonyms } from './suggestions/thesaurus'
@@ -789,6 +790,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [keyboardUp])
 
   // Track the paper's right edge in viewport coords (used to position the options menu).
+  // Viewport-space consumer (fixed chrome), so the VISUAL rect is the right value — but it moves
+  // when the page is transform-magnified, so re-read on magnify changes too (deferred a frame so
+  // Scroll's subscriber has applied the new scale first).
   useEffect(() => {
     function update() {
       if (paperRef.current)
@@ -796,7 +800,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
     update()
     window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
+    let raf = 0
+    const unsubMagnify = subscribeMagnify(() => {
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; update() })
+    })
+    return () => { window.removeEventListener('resize', update); unsubMagnify(); if (raf) cancelAnimationFrame(raf) }
   }, [])
 
 

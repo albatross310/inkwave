@@ -29,6 +29,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
+import { scaleFor } from '../magnify'
 import { bibProvider } from '../../citations/bibProvider'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
@@ -248,6 +249,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const paint = () => {
             paintRaf = 0
             if (!sheet || !layer) return
+            // Unlike the break MEASURE (which runs inside the canonical context, magnify forced
+            // to 1), this paint pass reads the LIVE, possibly transform-magnified DOM: band rects
+            // come back in VISUAL px while scrollHeight and the panel styles we write are LAYOUT
+            // px — divide the rect-derived distances by the scale (magnify.ts) to stay consistent.
+            const s = scaleFor(sheet)
             const sheetTop = sheet.getBoundingClientRect().top
             // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
             // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
@@ -263,8 +269,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             let cursor = 0
             for (const band of bands) {
               const r = band.getBoundingClientRect()
-              const top = Math.round(r.top - sheetTop)
-              const bottom = Math.round(r.top - sheetTop + r.height)
+              const top = Math.round((r.top - sheetTop) / s)
+              const bottom = Math.round((r.top - sheetTop + r.height) / s)
               if (top <= cursor) { cursor = Math.max(cursor, bottom); continue }
               segs.push({ top: cursor, height: top - cursor })
               cursor = bottom
@@ -418,8 +424,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (cur && cur !== DecorationSet.empty) {
                 view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
               }
-              // Canonical context forces --iw-magnify to 1 on BOTH paths now (fluid included), so
-              // rects always come back unscaled during the measure window.
+              // Canonical context forces --iw-magnify to 1 on BOTH paths (fluid included) — the
+              // transform is scale(var(--iw-magnify)), so inside this window the DOM is genuinely
+              // unscaled and rects come back in layout px. scale=1 here is therefore CORRECT (do
+              // NOT wire the live magnify.getMagnify() in: it describes the DOM outside this
+              // window). collectLines keeps its scale param for any future out-of-window measure.
               measured = compute(view, pageH, topM, 1, gapped)
             } finally {
               restore()
