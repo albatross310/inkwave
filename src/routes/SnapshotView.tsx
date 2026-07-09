@@ -883,19 +883,42 @@ function SplitDiffView({
 
   // Hover glow lights whenever the cursor is over a diff — EXCEPT while panning or scrolling (scrolling the
   // content under a still cursor was the case that spuriously lit it; see the scroll-suppress effect).
+  // A multi-line diff is ONE wrapped span, so the leading between its lines isn't over the span and fires a
+  // mouseleave. Treat the diff as a BLOCK: on leave, keep it lit if the cursor is still inside its bounding
+  // box (a span's getBoundingClientRect spans all its line-boxes, gaps included). Applies to both panes.
+  const mousePosRef = useRef({ x: 0, y: 0 })
+  const cursorInDiff = useCallback((idx: number) => {
+    const c = containerRef.current
+    if (!c) return false
+    const { x, y } = mousePosRef.current
+    let hit = false
+    c.querySelectorAll(`[data-opidx="${idx}"]`).forEach((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect()
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hit = true
+    })
+    return hit
+  }, [])
   const handleHoverOp = useCallback((opIdx: number | null) => {
+    if (opIdx == null) { // mouseleave — keep lit if we're still inside the diff's block (a gap between its lines)
+      const cur = lastHoveredRef.current
+      if (cur != null && cursorInDiff(cur)) return
+      setAttr(cur, 'data-hover', false)
+      lastHoveredRef.current = null
+      return
+    }
     setAttr(lastHoveredRef.current, 'data-hover', false) // clear the previous
     lastHoveredRef.current = opIdx
     if (panningRef.current || scrollingRef.current) return // no glow while panning or scrolling
-    if (opIdx != null) setAttr(opIdx, 'data-hover', true)
-  }, [setAttr])
+    setAttr(opIdx, 'data-hover', true)
+  }, [setAttr, cursorInDiff])
 
-  // Set the cross-pane DRIVER by which pane the cursor is actually over — a live hit-test each mousemove,
-  // robust where mouseenter gets dropped (the reverse sync's "doesn't register the cursor moved to the diff").
+  // Track the cursor position (for the block-hover test) AND set the cross-pane DRIVER by which pane the
+  // cursor is over — a live hit-test each mousemove, robust where mouseenter gets dropped.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const onMove = (e: MouseEvent) => {
+      mousePosRef.current.x = e.clientX; mousePosRef.current.y = e.clientY
       const t = e.target as Node, R = rightScrollRef.current, L = leftScrollRef.current
       if (R && R.contains(t)) driverRef.current = 'right'
       else if (L && L.contains(t)) driverRef.current = 'left'
