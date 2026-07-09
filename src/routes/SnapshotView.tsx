@@ -38,14 +38,15 @@ function NavSide({
   hasVersions: boolean; isPhone: boolean
   overridePos?: React.CSSProperties
 }) {
-  const bracket    = snapDir === 'back' ? '<'  : '>'
-  const bracketVer = snapDir === 'back' ? '<<' : '>>'
-  const btnSize    = isPhone ? 41 : 53   // ~20% bigger
+  const bracket    = snapDir === 'back' ? '‹'  : '›'
+  const bracketVer = snapDir === 'back' ? '«' : '»'
+  const btnW       = isPhone ? 15 : 17   // thin vertical bars flanking the editor
+  const btnH       = isPhone ? 44 : 54
   const showVer    = hasVersions && !isPhone
 
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: btnSize, height: btnSize, borderRadius: 9,
+    width: btnW, height: btnH, borderRadius: 5,
     background: disabled ? NAV_BG_DIS : NAV_BG,
     color: disabled ? NAV_FG_DIS : NAV_FG,
     border: `1px solid ${disabled ? 'rgba(140,90,200,0.10)' : 'rgba(140,90,200,0.28)'}`,
