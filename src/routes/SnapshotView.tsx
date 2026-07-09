@@ -870,13 +870,10 @@ function SplitDiffView({
     if (el) el.setAttribute('data-dv', uid)
     const style = document.createElement('style')
     style.textContent = [
-      // hover: the alignment GLOW, a touch more prominent + a gradient + soft halo, on BOTH panes. Gives
-      // wheel users a way to preview the pairing without scrolling a diff onto the midline. background-image
-      // (!important) beats the inline base-tint's background shorthand, so the gradient layers over it.
-      // The green/red fill + outline is the "normal" highlight; PLUS a golden outer ring whose strength
-      // scales with --iw-align (how lit the diff already is) so the hover stays visible on the middle diffs.
-      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(200,30,30,0.30), 0 0 0 2px rgba(185,28,28,0.95) !important; outline: 2.5px solid rgba(214,175,55, var(--iw-align, 0)) !important; outline-offset: 2px !important; border-radius: 2px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(22,163,74,0.32), 0 0 0 2px rgba(21,128,61,0.95) !important; outline: 2.5px solid rgba(214,175,55, var(--iw-align, 0)) !important; outline-offset: 2px !important; border-radius: 2px !important; }`,
+      // hover: NO gold. Just the same green/red outline, THICKENED — from 1× (unlit) up to 2× when the diff
+      // is fully lit (--iw-align=1), proportionally in between. Full-alpha so the hover reads on any diff.
+      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; outline: calc(2px * (1 + var(--iw-align, 0))) solid rgba(185,28,28,0.95) !important; outline-offset: 1px !important; border-radius: 2px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; outline: calc(2px * (1 + var(--iw-align, 0))) solid rgba(21,128,61,0.95) !important; outline-offset: 1px !important; border-radius: 2px !important; }`,
       // active (clicked): darker + outline, both panes
       `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
       `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
@@ -928,8 +925,13 @@ function SplitDiffView({
     const { x, y } = mousePosRef.current
     let hit = false
     c.querySelectorAll(`[data-opidx="${idx}"]`).forEach((el) => {
-      const r = (el as HTMLElement).getBoundingClientRect()
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hit = true
+      // Per-LINE rects — a tetris shape that wraps the actual text, NOT the bounding box (which would add
+      // the empty notch regions past the end of one line / before the start of the next). Each rect is
+      // padded vertically so the leading BETWEEN wrapped lines still counts as inside the block.
+      for (const r of (el as HTMLElement).getClientRects()) {
+        const pad = r.height * 0.45
+        if (x >= r.left && x <= r.right && y >= r.top - pad && y <= r.bottom + pad) hit = true
+      }
     })
     return hit
   }, [])
