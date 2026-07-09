@@ -424,6 +424,19 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
+      {/* ⌫¶ — clear paragraph formatting: strips stuck line styles (indent/padding/margins/line
+          height) that ride in silently on PASTED content and that undo can't reach (the attrs
+          arrived at paste time — Peter's indented title, 2026-07-10). */}
+      <button type="button"
+        onClick={() => { ping(); editor.chain().focus().setParaStyle({ lineHeight: null, marginBottom: null, marginTop: null, paddingLeft: null, paddingRight: null, textIndent: null }).run() }}
+        title="Clear line formatting (indent, spacing)"
+        className={phone
+          ? `flex-1 flex items-center justify-center self-stretch text-stone-500 text-base`
+          : `flex items-center justify-center w-8 h-8 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-xs`
+        }>
+        ⌫¶
+      </button>
+
       {/* ∀ — select all (always visible on both phone and desktop) */}
       <button type="button"
         onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
