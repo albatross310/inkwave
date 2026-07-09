@@ -29,6 +29,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
+import { bibProvider } from '../../citations/bibProvider'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
@@ -382,11 +383,20 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // restore is all synchronous inside this one rAF, extending the existing no-paint
             // window (getClientRects forces layout, not paint); cost: 2 extra full-document
             // reflows per measure, which is fine because measures are debounced (150ms after
-            // edits / zoom-settle / settings) — never per-keystroke. Fluid 'scroll' paper keeps
-            // measuring the live layout (its pages are a ratio of the rendered width by design).
+            // edits / zoom-settle / settings) — never per-keystroke.
+            //
+            // Fluid 'scroll' paper keeps its RENDERED width (its pages are a ratio of that width
+            // by design — no mm identity), but the FONT context must still be canonical: skipping
+            // the force entirely here measured the live zoomed font, so on scroll paper the words
+            // per page changed with the editor zoom at measure time — the "different amount of
+            // text per page depending on how zoomed in you are" regression (2026-07-09). Passing
+            // no paper/sheet keeps width + margins live; zoom/magnify/font are still pinned.
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
-            const restore = fluid ? null : forceCanonicalContext(
-              { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl, editor: view.dom as HTMLElement },
+            const editorEl = view.dom as HTMLElement
+            const restore = forceCanonicalContext(
+              fluid
+                ? { surface: surfaceEl, editor: editorEl }
+                : { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl, editor: editorEl },
               { pageWidthPx, sideMarginPx: getSideMarginPx() },
             )
             // The canonical layout is usually SHORTER than a zoomed/phone one, so the forced
@@ -408,16 +418,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (cur && cur !== DecorationSet.empty) {
                 view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
               }
-              // Canonical context forces --iw-magnify to 1 (rects come back unscaled); only the
-              // fluid path can still be magnified (hybrid-zoom branches).
-              const magnifyScale = restore ? 1 : parseFloat(surfaceEl?.style.getPropertyValue('--iw-magnify') || '') || 1
-              measured = compute(view, pageH, topM, magnifyScale, gapped)
+              // Canonical context forces --iw-magnify to 1 on BOTH paths now (fluid included), so
+              // rects always come back unscaled during the measure window.
+              measured = compute(view, pageH, topM, 1, gapped)
             } finally {
-              if (restore) {
-                restore()
-                if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
-                else window.scrollTo(savedLeft, savedTop)
-              }
+              restore()
+              if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
+              else window.scrollTo(savedLeft, savedTop)
             }
             const { set, sig } = measured
             // Only update the set when gap positions actually changed (sig differs). When sig is the
@@ -461,6 +468,20 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // Re-measure when page settings (top margin, paper size, orientation) change.
           const settingsCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
+          // Re-measure when the bibliography hydrates or changes. Citation labels render "?key"
+          // until the library loads, then rebuild asynchronously to their real widths ("Author &
+          // Author, 2004") — a whole-document reflow that changes NOTHING in inputSig (doc size,
+          // pageH, topM), so on a citation-heavy doc the load-time breaks stayed measured against
+          // the placeholder layout until some unrelated trigger (zoom-settle, an edit) re-measured
+          // — which read as "the pages move when you zoom". Debounced past the nodeviews' own
+          // queueMicrotask/setState rebuild; the sig guards make it a no-op when breaks didn't move.
+          let bibDebounce: ReturnType<typeof setTimeout> | undefined
+          const bibCb = () => {
+            if (destroyed) return
+            if (bibDebounce) clearTimeout(bibDebounce)
+            bibDebounce = setTimeout(() => { bibDebounce = undefined; forceRecompute() }, 180)
+          }
+          const unsubBib = bibProvider.subscribe(bibCb)
           // Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Breaks are now
           // measured in the canonical context, so this recomputes IDENTICAL document positions
           // (the stable-set guard makes the dispatch a no-op) — but it still drives the paint()
@@ -476,6 +497,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (raf) cancelAnimationFrame(raf)
               if (paintRaf) cancelAnimationFrame(paintRaf)
               if (editDebounce) clearTimeout(editDebounce)
+              if (bibDebounce) clearTimeout(bibDebounce)
+              unsubBib()
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               window.removeEventListener('inkwave:zoom-settled', zoomCb)

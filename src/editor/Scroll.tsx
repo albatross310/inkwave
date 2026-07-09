@@ -437,6 +437,17 @@ export function Scroll({
 // model (topMargin + n×textArea) where no markers exist (loading shell, SnapshotView, multi-column).
 // Purely visual overlay (no content reflow).
 function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
+  // Our OWN overlay div — the sheet is resolved as its parentElement, NOT via sheetRef. React
+  // attaches host refs bottom-up during commit, so on a fresh mount a CHILD's useLayoutEffect runs
+  // BEFORE the parent's sheetRef is attached: sheetRef.current was null here in production, the
+  // effect bailed without wiring its ResizeObserver / pagination-measured listener, and the page
+  // guides never rendered (the "dotted lines disappeared" regression, 2026-07-09 — introduced when
+  // this went useEffect → useLayoutEffect for the paint-with-the-text reveal). Dev never showed it:
+  // StrictMode's double-invoked effects re-ran after the ref attached. A component's ref to its own
+  // rendered element IS guaranteed set in its own layout effects — and parentElement is structurally
+  // the enclosing .scroll-paper, so this can never resolve to another surface (e.g. the loading
+  // shell's), either.
+  const overlayRef = useRef<HTMLDivElement>(null)
   const [breaks, setBreaks] = useState<number[]>([]) // sheet-local y of each page boundary
   // The guides depend on client-only state (paper size / gapped, both from localStorage), so the
   // prerendered shell and the client's first render disagree → hydration mismatch. Gate on a post-mount
@@ -470,7 +481,9 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   // popping in a beat later (one visible stage of the staged-load "shakiness").
   useLayoutEffect(() => {
     if (gapped || paperSize === 'scroll') { setBreaks([]); lastSigRef.current = ''; return }
-    const el = sheetRef.current
+    // Own-ref parent, not sheetRef — see overlayRef above (sheetRef is not attached yet on a fresh
+    // production mount; kept only as a fallback for exotic render orders).
+    const el = (overlayRef.current?.parentElement as HTMLDivElement | null) ?? sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
       const total = el.scrollHeight
@@ -521,7 +534,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   const active = hydrated && !gapped && paperSize !== 'scroll' // gapped paints its own sheets; scroll has no pages
 
   return (
-    <div className="iw-page-guides absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
+    <div ref={overlayRef} className="iw-page-guides absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
       {/* Logo at top-right of every page (page 1: top=0, page n: top=break n−1) */}
       {active && Array.from({ length: breaks.length + 1 }, (_, i) => {
         const n = i + 1
