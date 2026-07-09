@@ -694,7 +694,8 @@ function SplitDiffView({
   })
   // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
   // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
-  const centresRef = useRef<Centre[]>([])
+  const centresRef = useRef<Centre[]>([])   // editor-pane diff centres (for the editor warp)
+  const rCentresRef = useRef<Centre[]>([])  // diff-pane diff centres (for the diff-pane warp)
   // Knots for the bijection, cached the same way: each diff's centre in BOTH panes (ly ↔ ry), sorted by
   // ly. Used forward (editor→diff, onLeftScroll) and inverse (diff→editor, the reverse sync).
   const knotsRef = useRef<Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }>>([])
@@ -1092,6 +1093,7 @@ function SplitDiffView({
       const L = leftScrollRef.current, R = rightScrollRef.current
       if (!L) return
       centresRef.current = diffCentres(L)
+      if (R) rCentresRef.current = diffCentres(R)
       if (R) {
         const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
         const ks: Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }> = []
@@ -1196,75 +1198,70 @@ function SplitDiffView({
   // Ctrl/⌘+wheel is left alone (that's the diff zoom). Centres come from the cache → zero layout per frame.
   useEffect(() => {
     if (snapMode !== 'warp') return
-    const el = leftScrollRef.current
-    if (!el) return
-    let v = 0, x = el.scrollTop, raf = 0
-    const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
-    const tick = () => {
-      if (driverRef.current === 'right') { raf = 0; return } // diff pane drives the editor now (reverse sync) — don't fight it
-      const centres = centresRef.current
-      // NEAREST well only — pull toward the closest diff. Summing every nearby well made concentrated diffs
-      // accumulate a huge potential (the "wading"); one well can't.
-      let nk: Centre | null = null, nd = Infinity
-      for (const c of centres) { const d = Math.abs(x - c.c); if (d < nd) { nd = d; nk = c } }
-      let F = 0
-      if (nk) {
-        const w = nk.half + WARP_WELL_PAD, dx = x - nk.c
-        if (Math.abs(dx) < w * 3) F = -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL
-      }
-      // Resistance RISES as the scroll slows (Peter's model): LOW when fast (coasts far, no wading, no
-      // stalling mid-nowhere), HIGH as it stops (settles cleanly onto the nearest well). No well-stiffness
-      // coupling. x += v directly — the speed-warp is gone.
-      const resistance = WARP_RESIST_MIN + (WARP_RESIST_MAX - WARP_RESIST_MIN) * Math.exp(-Math.abs(v) / WARP_V0)
-      v = v + F - resistance * v
-      x = Math.max(0, Math.min(maxScroll(), x + v))
-      el.scrollTop = x
-      if (Math.abs(v) < 0.05 && Math.abs(F) < 0.05) { v = 0; raf = 0; return } // settled
-      raf = requestAnimationFrame(tick)
-    }
-    // FENCEPOST (mousewheel): keep the scroll's NATURAL linear destination (what it'd reach with no
-    // resistance) and only nudge that landing onto a diff if one is within ±delta/2 of it — so it never
-    // wades through mud and never piles up. `natTarget` accumulates the raw linear path (no drift);
-    // `dispTarget` is that, snapped to a nearby diff. Among diffs in range pick ONE: green (add) first,
-    // then longest (ties → the first found), so exactly one diff per notch.
-    let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
-    const easeFence = () => {
-      if (driverRef.current === 'right') { fenceRaf = 0; return } // diff pane drives the editor now
-      const dx = dispTarget - el.scrollTop
-      if (Math.abs(dx) < 0.5) { el.scrollTop = dispTarget; x = dispTarget; fenceRaf = 0; return }
-      el.scrollTop = el.scrollTop + dx * 0.3
-      x = el.scrollTop
-      fenceRaf = requestAnimationFrame(easeFence)
-    }
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) return
-      e.preventDefault()
-      x = el.scrollTop
-      // A real MOUSEWHEEL (line-mode, or big quantised notches) → FENCEPOST. A trackpad (small smooth pixel
-      // deltas) → the continuous well-fling above.
-      const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
-      if (isMouseWheel) {
-        if (raf) { cancelAnimationFrame(raf); raf = 0; v = 0 }  // stop any fling — we drive fenceposts
-        if (fenceRaf === 0) natTarget = el.scrollTop            // fresh gesture (settled) → resync
-        const delta = e.deltaMode !== 0 ? e.deltaY * 40 : e.deltaY
-        natTarget = Math.max(0, Math.min(maxScroll(), natTarget + delta)) // accumulate the LINEAR destination
-        const mid = natTarget + el.clientHeight / 2
-        const half = Math.abs(delta) / 2
-        let pick: Centre | null = null
-        for (const c of centresRef.current) {
-          if (Math.abs(c.c - mid) > half) continue                        // must be within ±delta/2 of the landing
-          if (!pick || (c.add !== pick.add ? c.add : c.len > pick.len)) pick = c // green first, then longest
+    const cleanups: Array<() => void> = []
+    // Install the SAME wheel-takeover physics on a pane: nearest-well pull, velocity-based resistance,
+    // fencepost on mousewheel. Runs only while THIS pane is the driver (cursor over it) — the other pane
+    // follows via the bijection. Editor and diff panel each get their own instance + own diff centres.
+    const install = (el: HTMLDivElement | null, getCentres: () => Centre[], drive: 'left' | 'right') => {
+      if (!el) return
+      let v = 0, x = el.scrollTop, raf = 0
+      const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
+      const tick = () => {
+        if (driverRef.current !== drive) { raf = 0; return } // not the driver → the follow owns this pane
+        const centres = getCentres()
+        let nk: Centre | null = null, nd = Infinity
+        for (const c of centres) { const d = Math.abs(x - c.c); if (d < nd) { nd = d; nk = c } }
+        let F = 0
+        if (nk) {
+          const w = nk.half + WARP_WELL_PAD, dx = x - nk.c
+          if (Math.abs(dx) < w * 3) F = -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL
         }
-        dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight / 2)) : natTarget
-        if (!fenceRaf) fenceRaf = requestAnimationFrame(easeFence)
-        return
+        const resistance = WARP_RESIST_MIN + (WARP_RESIST_MAX - WARP_RESIST_MIN) * Math.exp(-Math.abs(v) / WARP_V0)
+        v = v + F - resistance * v
+        x = Math.max(0, Math.min(maxScroll(), x + v))
+        el.scrollTop = x
+        if (Math.abs(v) < 0.05 && Math.abs(F) < 0.05) { v = 0; raf = 0; return } // settled
+        raf = requestAnimationFrame(tick)
       }
-      if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
-      v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
-      if (!raf) raf = requestAnimationFrame(tick)
+      let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
+      const easeFence = () => {
+        if (driverRef.current !== drive) { fenceRaf = 0; return }
+        const dx = dispTarget - el.scrollTop
+        if (Math.abs(dx) < 0.5) { el.scrollTop = dispTarget; x = dispTarget; fenceRaf = 0; return }
+        el.scrollTop = el.scrollTop + dx * 0.3
+        x = el.scrollTop
+        fenceRaf = requestAnimationFrame(easeFence)
+      }
+      const onWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey) return
+        e.preventDefault()
+        x = el.scrollTop
+        const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
+        if (isMouseWheel) { // FENCEPOST — hop to the next diff within ±delta/2 of the natural landing
+          if (raf) { cancelAnimationFrame(raf); raf = 0; v = 0 }
+          if (fenceRaf === 0) natTarget = el.scrollTop
+          const delta = e.deltaMode !== 0 ? e.deltaY * 40 : e.deltaY
+          natTarget = Math.max(0, Math.min(maxScroll(), natTarget + delta))
+          const mid = natTarget + el.clientHeight / 2, hw = Math.abs(delta) / 2
+          let pick: Centre | null = null
+          for (const c of getCentres()) {
+            if (Math.abs(c.c - mid) > hw) continue
+            if (!pick || (c.add !== pick.add ? c.add : c.len > pick.len)) pick = c // green first, then longest
+          }
+          dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight / 2)) : natTarget
+          if (!fenceRaf) fenceRaf = requestAnimationFrame(easeFence)
+          return
+        }
+        if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
+        v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
+        if (!raf) raf = requestAnimationFrame(tick)
+      }
+      el.addEventListener('wheel', onWheel, { passive: false })
+      cleanups.push(() => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); if (fenceRaf) cancelAnimationFrame(fenceRaf) })
     }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); if (fenceRaf) cancelAnimationFrame(fenceRaf) }
+    install(leftScrollRef.current, () => centresRef.current, 'left')    // editor pane
+    install(rightScrollRef.current, () => rCentresRef.current, 'right') // diff pane
+    return () => cleanups.forEach((fn) => fn())
   }, [snapMode, snapshot.id])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
