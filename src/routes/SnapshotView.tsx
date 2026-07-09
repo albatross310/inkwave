@@ -702,6 +702,7 @@ function SplitDiffView({
   // Which pane the user is actively scrolling ('left' = editor, 'right' = diff) — set by wheel over each,
   // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
   const driverRef = useRef<'left' | 'right'>('left') // whichever pane the cursor is over (default editor)
+  const panningRef = useRef(false) // true while a right-click pan is in progress (suppresses the hover glow)
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -885,6 +886,7 @@ function SplitDiffView({
   const handleHoverOp = useCallback((opIdx: number | null) => {
     setAttr(lastHoveredRef.current, 'data-hover', false) // clear the previous
     lastHoveredRef.current = opIdx
+    if (panningRef.current) return // no hover glow while right-click panning
     if (opIdx != null && performance.now() - lastMoveRef.current < 150) setAttr(opIdx, 'data-hover', true) // moving, not static
   }, [setAttr])
 
@@ -1112,6 +1114,13 @@ function SplitDiffView({
         })
         ks.sort((a, b) => a.ly - b.ly)
         knotsRef.current = ks
+        // Start the diff panel INSIDE the first/last diff lock, so the first scroll/drag doesn't yank-clamp
+        // from an out-of-bounds position (the "clamps to begin then works").
+        if (ks.length) {
+          const minS = Math.max(0, ks[0].ry - R.clientHeight / 2)
+          const maxS = ks[ks.length - 1].ry - R.clientHeight / 2
+          if (maxS > minS) R.scrollTop = Math.max(minS, Math.min(maxS, R.scrollTop))
+        }
       }
     }
     const id = requestAnimationFrame(recompute)
@@ -1169,24 +1178,38 @@ function SplitDiffView({
   // Right-click-DRAG the diff pane to scroll it (for mouse users with no wheel/trackpad) — the editor flies
   // to the matching change via the bijection. Context menu is suppressed on the pane so the drag owns it.
   useEffect(() => {
-    const R = rightScrollRef.current
-    if (!R) return
-    let dragging = false, lastY = 0
-    const onDown = (e: MouseEvent) => { if (e.button !== 2) return; dragging = true; lastY = e.clientY; driverRef.current = 'right'; e.preventDefault() }
-    const onMove = (e: MouseEvent) => { if (!dragging) return; R.scrollTop -= (e.clientY - lastY); lastY = e.clientY }
-    const onUp = () => { dragging = false }
-    const onCtx = (e: Event) => e.preventDefault()
-    R.addEventListener('mousedown', onDown)
+    const cleanups: Array<() => void> = []
+    let dragging: HTMLDivElement | null = null, lastY = 0
+    const onUp = () => { if (dragging) { dragging = null; panningRef.current = false; document.body.style.cursor = '' } }
+    const onMove = (e: MouseEvent) => { if (!dragging) return; dragging.scrollTop -= (e.clientY - lastY); lastY = e.clientY }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-    R.addEventListener('contextmenu', onCtx)
-    return () => { R.removeEventListener('mousedown', onDown); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); R.removeEventListener('contextmenu', onCtx) }
+    cleanups.push(() => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); document.body.style.cursor = '' })
+    // Right-drag on EITHER pane pans it (and pins the driver to it, so the other pane follows via the bijection).
+    // While panning: hand cursor everywhere + no hover glow (panningRef).
+    const installDrag = (el: HTMLDivElement | null, drive: 'left' | 'right') => {
+      if (!el) return
+      const onDown = (e: MouseEvent) => {
+        if (e.button !== 2) return
+        dragging = el; lastY = e.clientY; driverRef.current = drive
+        panningRef.current = true; document.body.style.cursor = 'grabbing'
+        setAttr(lastHoveredRef.current, 'data-hover', false) // drop any hover glow
+        e.preventDefault()
+      }
+      const onCtx = (e: Event) => e.preventDefault()
+      el.addEventListener('mousedown', onDown)
+      el.addEventListener('contextmenu', onCtx)
+      cleanups.push(() => { el.removeEventListener('mousedown', onDown); el.removeEventListener('contextmenu', onCtx) })
+    }
+    installDrag(leftScrollRef.current, 'left')
+    installDrag(rightScrollRef.current, 'right')
+    return () => cleanups.forEach((fn) => fn())
   }, [snapshot.id])
 
   // One-time right-drag hint toast, sequenced just AFTER the Shift+scroll hint (which runs ~6s).
   useEffect(() => {
     try { if (localStorage.getItem('inkwave:snapDragHintSeen') === '1') return; localStorage.setItem('inkwave:snapDragHintSeen', '1') } catch { return }
-    const t = setTimeout(() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: 'On a mouse? Right-click-drag the diff panel to fly the editor to any change.' } })), 6800)
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: 'On a mouse? Right-click-drag EITHER panel to pan it — the other flies to match.' } })), 6800)
     return () => clearTimeout(t)
   }, [])
 
