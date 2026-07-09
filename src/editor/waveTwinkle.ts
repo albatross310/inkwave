@@ -259,6 +259,17 @@ async function applySet(host: HTMLElement, token: number, setCls: string, want: 
   set.className = `iw-twk-set ${setCls}`
   set.append(...defs.map(layerNode))
   host.appendChild(set)
+  // EXACT drift-clock adoption (audit probe, 2026-07-09): twinkle layers mount post-hydration with
+  // delay 0, which left them ~35px BEHIND their surface's waves (flecks off the crests). Adopt the
+  // epoch drift animation's literal startTime, exactly like later surfaces do in Scroll.tsx.
+  const epochAnim = (window as unknown as { __iwWaveEpochAnim?: Animation }).__iwWaveEpochAnim
+  if (epochAnim && typeof epochAnim.startTime === 'number') {
+    try {
+      for (const a of set.getAnimations({ subtree: true })) {
+        if (((a as CSSAnimation).animationName ?? '').startsWith('iw-wave-drift')) a.startTime = epochAnim.startTime
+      }
+    } catch { /* not critical — the --twk-shift fallback still holds */ }
+  }
 }
 
 // ZOOM RESEED (Peter's spec): on zoom settle the visible dash set recalculates. Same node count,
