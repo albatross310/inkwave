@@ -1485,16 +1485,20 @@ function SplitDiffView({
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     let accum = 0
-    const STEP = 130 // deltaX px per snapshot step
+    const STEP = 34 // deltaX px per snapshot — small, so a deliberate swipe flies through ~10 and the
+                    // trackpad's own momentum stream (decaying deltaX after a flick) tapers off naturally
     const onWheel = (e: WheelEvent) => {
       if (e.shiftKey || e.ctrlKey || e.metaKey) return
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.3) return // not a horizontal swipe
       e.preventDefault()
       accum += e.deltaX
-      if (Math.abs(accum) < STEP) return
-      const dir = accum > 0 ? 1 : -1 // swipe left (deltaX>0) → next; right → previous
-      accum = 0
-      if (dir > 0) nav?.onFwd(); else nav?.onBack()
+      // One step per event (idx is fixed within an event); the trackpad's momentum stream supplies the many
+      // events for a fast flick + the taper as deltaX decays. Drain by STEP (keep remainder) so it's smooth.
+      if (Math.abs(accum) >= STEP) {
+        const dir = accum > 0 ? 1 : -1 // swipe left (deltaX>0) → next; right → previous
+        accum -= dir * STEP
+        if (dir > 0) nav?.onFwd(); else nav?.onBack()
+      }
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
     R?.addEventListener('wheel', onWheel, { passive: false })
@@ -1908,8 +1912,28 @@ export function SnapshotView() {
   useEffect(() => {
     const el = swipeRef.current
     if (!el) return
-    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0
-    const onStart = (e: TouchEvent) => { dir = '?'; accum = 0; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY }
+    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, vel = 0, lastT = 0, flingRaf = 0
+    const STEP = 34 // px per snapshot — small, so a deliberate swipe flies through ~10
+    // Advance by the NET number of steps in one go (idxRef is stale within a frame, so we can't step one at
+    // a time). Positive `steps` = slid right = go BACK. Returns the crossed step count, draining `accum`.
+    const applySteps = (steps: number) => {
+      if (!steps) return
+      const cur = idxRef.current, all = allRef.current
+      if (cur < 0 || !all.length) return
+      const target = Math.max(0, Math.min(all.length - 1, cur - steps))
+      if (target === cur) return
+      setNavDir(steps < 0 ? 'fwd' : 'back')
+      goTo(all[target])
+    }
+    const drain = (get: () => number, set: (n: number) => void) => {
+      let steps = 0, a = get()
+      while (Math.abs(a) >= STEP) { const s = a > 0 ? 1 : -1; a -= s * STEP; steps += s }
+      set(a); applySteps(steps)
+    }
+    const onStart = (e: TouchEvent) => {
+      cancelAnimationFrame(flingRaf); flingRaf = 0
+      dir = '?'; accum = 0; vel = 0; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY; lastT = performance.now()
+    }
     const onMove = (e: TouchEvent) => {
       const x = e.touches[0].clientX, y = e.touches[0].clientY
       if (dir === '?') {
@@ -1919,23 +1943,30 @@ export function SnapshotView() {
       }
       if (dir !== 'h') return                                        // vertical → let the pane scroll natively
       e.preventDefault()                                             // own the horizontal gesture
-      accum += x - lastX; lastX = x
-      const STEP = 95 // px of horizontal slide per snapshot step
-      if (Math.abs(accum) < STEP) return
-      const n = accum > 0 ? -1 : 1                                   // slide right → previous, slide left → next
-      accum = 0
-      const cur = idxRef.current, all = allRef.current
-      if (cur < 0 || !all.length) return
-      const target = Math.max(0, Math.min(all.length - 1, cur + n))
-      if (target === cur) return
-      setNavDir(n > 0 ? 'fwd' : 'back')
-      goTo(all[target])
+      const t = performance.now(), dt = Math.max(1, t - lastT), move = x - lastX
+      vel = 0.55 * vel + 0.45 * (move / dt)                          // smoothed px/ms
+      accum += move; lastX = x; lastT = t
+      drain(() => accum, (n) => { accum = n })
     }
-    const onEnd = () => { dir = '?' }
+    // Fling on release: coast through more snapshots, decaying exponentially → "a few keep flashing, slows down".
+    const onEnd = () => {
+      if (dir === 'h' && Math.abs(vel) > 0.35) {
+        let v = vel, fAccum = 0, last = performance.now()
+        const TAU = 180 // ms
+        const tick = (t: number) => {
+          const dt = Math.min(48, t - last); last = t
+          fAccum += v * dt; v *= Math.exp(-dt / TAU)
+          drain(() => fAccum, (n) => { fAccum = n })
+          flingRaf = Math.abs(v) > 0.02 ? requestAnimationFrame(tick) : 0
+        }
+        flingRaf = requestAnimationFrame(tick)
+      }
+      dir = '?'
+    }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
-    return () => { el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove); el.removeEventListener('touchend', onEnd) }
+    return () => { cancelAnimationFrame(flingRaf); el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove); el.removeEventListener('touchend', onEnd) }
   }, [goTo])
 
   const isPhone = isTouchDevice()
