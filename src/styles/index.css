@@ -23,10 +23,10 @@
        it) yet stays below content. Without this the waves vanish behind the opaque background. */
     isolation: isolate;
     min-height: 100vh;
-    /* The water: aquamarine → vivid cyan, left to right with a 15% downward declension
+    /* The water: vivid cyan → aquamarine, left to right with a 15% downward declension
        (atan(0.15) ≈ 8.5° past horizontal). background-color stays as the fallback/average. */
     background-color: #9fd9c8;
-    background-image: linear-gradient(98.5deg, #9fd9c8 0%, #00b4d8 100%);
+    background-image: linear-gradient(98.5deg, #00b4d8 0%, #9fd9c8 100%);
     background-attachment: fixed;
     /* ~half a line of breathing space above the parchment; sides 1rem; bottom leaves room for
        the floating footer toolbar. The top value is the single knob for page position. */
