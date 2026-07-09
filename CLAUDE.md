@@ -171,8 +171,12 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   notes over the wave (not a panel), triggered from the **R** button in the footer toolbar, review
   nav (←/→ + Alt+A accept / Alt+S discard), named annotation sets via a drop-up.
 - **Snapshot review** (`routes/SnapshotView.tsx`, `/snapshot`) — split diff (annotated doc + hunk
-  panel), keep-same-words-on-the-midline OR snap-to-biggest-change dotted-line modes, shift-wheel
-  fast scrub, per-version summaries (Haiku). Grow-only + deterministic pmToText apply here too.
+  panel) with warp physics (finite-range well, WARP_IMPULSE 0.14, snap On/Off, midline locks),
+  minimap (wheel + diff ticks + page numbers/logos), position-based swipe scrub + momentum fling
+  (multi-touch bails to the pinch — keep that guard), shift-wheel fast scrub, golden-ratio reading
+  line, narrow/phone CSS-grid layout, per-version summaries (Haiku, opt-in), LoadingVeil wave
+  choreography on open. Grow-only + deterministic pmToText apply here too. Known drift: minimap/
+  diff-panel page numbers use paper-width×√2, not canonical breaks (phone-visible).
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
