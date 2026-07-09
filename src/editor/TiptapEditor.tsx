@@ -236,6 +236,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // parchment + background paint instantly from the prerendered shell either way. Hard 1.2s cap so
   // a slow font can never hold the writing hostage.
   const [settled, setSettled] = useState(false)
+  // PHONE REVEAL CHROME (Peter, 2026-07-09): the floating chrome (toolbar/pills — z-indexed ABOVE
+  // the z:auto loading shell) is held invisible while the shell covers, then fades IN over 0.5s at
+  // reveal, over the editor's own still-coasting waves (see .iw-chrome-hold/.iw-chrome-in in
+  // index.css). 'hold' → 'in' swap in the SAME commit settled flips (no bare frame between), and
+  // 'in' is one-shot — removed after the animation so later-mounted panels never replay the fade.
+  // Desktop keeps the shell cross-fade; no hold there (the chrome lands under the fading shell).
+  const [chromeDone, setChromeDone] = useState(false)
+  useEffect(() => {
+    if (!settled) return
+    const t = setTimeout(() => setChromeDone(true), 650)
+    return () => clearTimeout(t)
+  }, [settled])
   // Console-snappy typing (see onTransaction): keystrokes do no O(doc) work. These carry the
   // deferred-tick + lazy-doc-build machinery.
   const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
@@ -721,29 +733,35 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!editor) return
     let done = false
     let revealTimer: ReturnType<typeof setTimeout> | undefined
+    let revealRaf = 0
     const reveal = () => {
       setSettled(true)
       // Same-task dispatch → React batches Edit's loading-shell unmount with this reveal into ONE
-      // commit: the shell disappears in the exact frame the parchment fades in + the wave coast
-      // starts on this surface (which the shell was covering, already phase-synced + rastered).
+      // commit: the shell disappears in the exact frame the parchment fades in on this surface
+      // (which the shell was covering, already phase-synced, coasting and rastered).
       window.dispatchEvent(new Event('inkwave:editor-revealed'))
     }
     const finish = () => {
       if (done) return
       done = true
-      // PHONE (Peter's spec): waves decelerate FIRST, page pops as they reach rest. At gate-ready,
-      // 'inkwave:reveal-imminent' starts the 2s coast on every drifting surface (the visible shell
-      // + this editor's own surface, in lockstep — see Scroll.tsx); the atomic reveal (shell
-      // unmount + parchment) is delayed by the coast duration so it lands at wave-rest.
-      // Desktop is unchanged: coast starts at revealed, reveal is immediate.
+      // BOTH platforms: start the coast FIRST, on this light frame — 'inkwave:reveal-imminent'
+      // freezes + class-swaps every drifting surface (shell + this editor's own, in lockstep —
+      // see Scroll.tsx). The freeze must NOT share the reveal commit (the busiest frame of the
+      // load): the compositor kept drifting while that commit blocked the main thread, so a
+      // same-commit freeze snapshotted a stale offset and the waves snapped ~7px BACKWARD when
+      // the coast started (the reveal flicker, Chrome + Firefox desktop, 2026-07-09).
+      window.dispatchEvent(new Event('inkwave:reveal-imminent'))
       if (isTouchDevice()) {
-        window.dispatchEvent(new Event('inkwave:reveal-imminent'))
-        // 1.5s: the reveal starts the shell's 0.5s cross-fade, which lands exactly in the coast's
-        // tail — fade completes at 2s, the moment the waves reach rest.
+        // PHONE (Peter's spec): waves decelerate first; at 1.5s the shell drops instantly and the
+        // page + chrome fade IN over the still-coasting waves for the remaining 0.5s — the fade
+        // completes at 2s, the moment the waves reach rest (see Edit.tsx + the phone transition
+        // in Scroll.tsx + .iw-chrome-in below).
         revealTimer = setTimeout(reveal, 1500)
         return
       }
-      reveal()
+      // Desktop: two clean frames (~33ms, imperceptible) between coast start and the heavy reveal
+      // commit — the coast is compositor-driven and already easing smoothly when the commit lands.
+      revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
     }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
@@ -759,7 +777,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void Promise.all([fontsReady, paginationReady]).then(() =>
       requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
     )
-    return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer) }
+    return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }
   }, [editor])
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
@@ -1676,7 +1694,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   return (
     <ComplianceContext.Provider value={compliance}>
-      <div>
+      {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
+      <div className={isTouch ? (!settled ? 'iw-chrome-hold' : !chromeDone ? 'iw-chrome-in' : undefined) : undefined}>
         {/* Faded seal on every printed/PDF page (hidden on screen; fixed → repeats per print page). */}
         <div className="print-seal" aria-hidden="true"><img src="/fav-128.png" alt="" /></div>
         {otherDevice && !conflictDismissed && (

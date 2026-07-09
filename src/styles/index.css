@@ -102,6 +102,13 @@
   }
   .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-sb-idle)::-webkit-scrollbar-thumb:hover { background: rgba(40, 40, 46, 0.65); background-clip: padding-box; border: 3px solid transparent; }
   .inkwave-editor-surface.iw-fill:not(.is-phone) { transition: scrollbar-color 0.3s ease; }
+  /* NO scrollbar-color transition while the load waves run (2026-07-09 regression fix): animating
+     scrollbar-color repaints the scroll container's bar region per frame (Firefox repaints the
+     whole scroller), and the iw-sb-idle toggles were landing at hydration and ~1.4s — the two
+     visible "jumps" in the wave drift. Scroll.tsx also arms the idle-fade only after the coast;
+     this rule is the belt to that brace (any class toggle during the waves snaps instantly). */
+  .inkwave-editor-surface.iw-fill:not(.is-phone).iw-wave-anim,
+  .inkwave-editor-surface.iw-fill:not(.is-phone).iw-wave-coast { transition: none; }
 
   /* Scrollbar bleed fix WITHOUT a transparent surface: the fill surface keeps its OPAQUE aqua base +
      fixed ::before waves, so it scrolls on the compositor (a transparent surface over a separate fixed
@@ -149,16 +156,12 @@
   .inkwave-editor-surface {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
        (opposite drift directions) without duplicating image data per theme — night just re-points these.
-       Tile anatomy (Peter, 2026-07-09): THICK seashell line on TOP, thin white line BELOW it, plus a
-       short accent dash roughly halfway between them under ONE swell per tile — a's under the x=35
-       crest, b's under the x=105 swell, so the tiled field reads organic rather than gridded. The
-       Q/T construction keeps endpoints + slopes identical at x=0/140 — the 140px seamless loop. */
-    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='-14' x2='0' y2='58' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M18 29.4 Q26.5 27.7 35 27' fill='none' stroke='%23FFF5EE' stroke-opacity='0.4' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
-    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='56' x2='0' y2='128' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M88 112.8 Q96.5 114.4 105 115' fill='none' stroke='%23FFF5EE' stroke-opacity='0.38' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
-    /* Sparkle tile for the LOADING drift only (see .iw-wave-sparkles below): bright yellow flecks
-       sitting just under tile-a's thick crest, offset ~11px past the peak (x=35 → 46) so they read
-       as light caught on the shoulder, not a bullseye. Same 140px loop; rides layer A's keyframes. */
-    --iw-wave-sparks: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cg stroke='%23ffe14d' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M46 15.8 V24.2'/%3E%3Cpath d='M41.8 20 H50.2'/%3E%3C/g%3E%3Ccircle cx='46' cy='20' r='1.4' fill='%23fffbe0'/%3E%3Ccircle cx='52.5' cy='25.5' r='1.1' fill='%23ffe14d' fill-opacity='0.9'/%3E%3Ccircle cx='47' cy='46' r='1' fill='%23ffe14d' fill-opacity='0.55'/%3E%3C/svg%3E");
+       Tile anatomy (Peter, 2026-07-09): THICK seashell line on TOP, thin white line BELOW it. The
+       Q/T construction keeps endpoints + slopes identical at x=0/140 — the 140px seamless loop.
+       The short accent dashes that used to be baked in here are DYNAMIC now: stochastic, twinkling
+       layers generated per load by src/editor/waveTwinkle.ts (see the twinkle block below). */
+    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='-14' x2='0' y2='58' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3C/svg%3E");
+    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='56' x2='0' y2='128' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3C/svg%3E");
   }
   .inkwave-editor-surface::before {
     content: '';
@@ -300,36 +303,83 @@
     will-change: transform;
   }
 
-  /* YELLOW LOADING SPARKLES (Peter's spec, 2026-07-09). Bright flecks riding just under layer A's
-     crests, alive ONLY while the load drift runs. They cannot live on the wave ::before/::after —
-     animating opacity there would dim the wave LINES too — so Scroll.tsx mounts a dedicated child
-     div (only while waveMode !== 'off') that tiles ONLY the sparkle art (--iw-wave-sparks) and runs
-     the SAME drift keyframes + inherited --wave-phase as layer A, so the flecks move in lockstep
-     with their crests. On coast it gets BOTH the layer-A coast transform (inherited --wave-t /
-     --wave-coast-dist) AND an S-curve opacity 1→0 over the same --wave-coast-T — the sparkles dim
-     exactly as the waves slow, gone at rest, and React unmounts the div when the classes drop.
-     Pure visual layer: no reveal/settled logic. z-order: a real child between the two pseudos in
-     tree order, so it paints over layer A's lines ("on the water") — the tiles never overlap
-     vertically anyway (sparks at y≈15–47, layer B's lines at y≈83–129). */
+  /* PHONE SHAPE-STABILITY (Peter, 2026-07-09): when the browser toolbar / keyboard rises, the
+     layout viewport shrinks — a fixed inset:0 layer tracks it (bottom pulled up) and the
+     fixed-attachment water gradient is viewport-sized, so the whole water visibly squashed
+     vertically. Pin every wave-field box to the LARGE viewport (100lvh is stable across
+     browser-UI and keyboard transitions): UI now superimposes over the water; nothing
+     reshapes it. Tiles were already fixed 140px — this stabilises the BOXES + the gradient. */
+  .inkwave-editor-surface.is-phone.iw-wave-anim,
+  .inkwave-editor-surface.is-phone.iw-wave-coast {
+    background-attachment: fixed;
+    background-size: 100vw 100lvh;
+    background-repeat: no-repeat;
+  }
+  .inkwave-editor-surface.is-phone.iw-wave-anim::before,
+  .inkwave-editor-surface.is-phone.iw-wave-coast::before,
+  .inkwave-editor-surface.is-phone.iw-wave-anim::after,
+  .inkwave-editor-surface.is-phone.iw-wave-coast::after,
+  .inkwave-editor-surface.is-phone .iw-wave-twinkles,
+  .inkwave-editor-surface.is-phone .iw-twk-set,
+  .inkwave-editor-surface.is-phone .iw-twk {
+    top: 0;
+    bottom: auto;
+    height: 100lvh;
+  }
+
+  /* ─── STOCHASTIC TWINKLES (Peter's spec, 2026-07-09) — sparkles + accent dashes ─────────────
+     Generated per load by src/editor/waveTwinkle.ts: N small 140px-tile layers, each carrying one
+     sparkle (or two dashes) at a PRNG position inside the band between a thick line's crest arc
+     and its inflection chord, blinking on its own keyframes (injected per layer). They cannot
+     live on the wave ::before/::after — animating opacity there would dim the wave LINES too.
+     Scroll.tsx renders a stable EMPTY container (in the prerender too, so hydration matches) and
+     populates it post-hydration, after every generated tile is decode()d — no lazy-raster pops.
+     Two sub-sets: .iw-twk-sparks (loading only; the whole set S-fades over --wave-coast-T — the
+     fade lives on the SUB-CONTAINER so it MULTIPLIES with the children's blink) and
+     .iw-twk-dashes (all stages: drift, coast, and the resting ±--wave-x scroll sway).
+     Per-layer state rules (drift/coast composition, per-layer blink delays) are generated —
+     see rulesFor() in waveTwinkle.ts; only the shared geometry lives here. */
   @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
-  .iw-wave-sparkles {
-    position: fixed; inset: 0; left: -280px; right: -280px; /* same 2-tile overdraw as the wave layers */
+  .iw-wave-twinkles,
+  .iw-twk-set {
+    position: fixed;
+    inset: 0;
     z-index: -1;
     pointer-events: none;
-    background-image: var(--iw-wave-sparks);
+  }
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-sparks {
+    animation: iw-spark-fade var(--wave-coast-T, 3s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    will-change: opacity;
+  }
+  .iw-twk {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--twk-day);
     background-size: 140px 140px;
-    background-position: 0 0;
     contain: strict;
+    transform: translateZ(0); /* pre-promoted like the wave ::before — raster exists before its blink */
   }
-  .inkwave-editor-surface.iw-wave-anim .iw-wave-sparkles {
-    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite;
-    will-change: transform;
+  :root[data-theme="night"] .iw-twk { background-image: var(--twk-night, var(--twk-day)); }
+  /* Resting sway: each group rides its wave layer's ±--wave-x, plus its own tile offset. */
+  .iw-twk-a { background-position: calc(var(--wave-x, 0px) + var(--twk-dx, 0px)) 0; }
+  .iw-twk-b { background-position: calc(-1 * var(--wave-x, 0px) + var(--twk-dx, 0px)) 0; }
+  /* Load drift/coast: same 2-tile overdraw + origin ≡ 0 (mod 140) as the wave layers, so the
+     coast→sway handoff paints identical pixels (transform +tx ≡ background-position +tx; the
+     constant --twk-dx rides both sides of the identity). Transforms come from the generated
+     per-layer rules (iw-wave-drift-l/r + coast, phase-locked via --wave-phase). */
+  .inkwave-editor-surface.iw-wave-anim .iw-twk,
+  .inkwave-editor-surface.iw-wave-coast .iw-twk {
+    left: -280px;
+    right: -280px;
+    background-position: var(--twk-dx, 0px) 0;
   }
-  .inkwave-editor-surface.iw-wave-coast .iw-wave-sparkles {
-    animation:
-      iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards,
-      iw-spark-fade   var(--wave-coast-T, 3s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
-    will-change: transform, opacity;
+  /* At rest the dashes must respect the PDF panel exactly like the wave ::before does (the
+     :not() guards keep this from fighting the ±280px overdraw rule during the load). */
+  .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-wave-anim):not(.iw-wave-coast) .iw-twk {
+    right: var(--iw-pdf-room, 0px);
+    bottom: var(--iw-pdf-room-bottom, 0px);
   }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
@@ -855,11 +905,12 @@
 :root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e;   background-image: none; /* night: solid dark surface, no day gradient */
 }
 
-/* Grey waves on black (same two-layer tiles — thick line on TOP, thin below, accent dash between —
-   grey strokes instead of white/seashell). Same geometry as the day tiles above. */
+/* Grey waves on black (same two-layer tiles — thick line on TOP, thin below — grey strokes instead
+   of white/seashell). Same geometry as the day tiles above. Accent dashes are the dynamic twinkle
+   layers (waveTwinkle.ts) — grey family in night via each node's --twk-night variant. */
 :root[data-theme="night"] .inkwave-editor-surface {
-  --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M18 29.4 Q26.5 27.7 35 27' fill='none' stroke='%239aa3af' stroke-opacity='0.36' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
-  --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M88 112.8 Q96.5 114.4 105 115' fill='none' stroke='%239aa3af' stroke-opacity='0.34' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3C/svg%3E");
+  --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3C/svg%3E");
 }
 
 /* Charcoal paper. Sheets are a touch lighter than the black surround so pages read as distinct. */
@@ -961,6 +1012,20 @@
 @keyframes iw-subtle-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
 .iw-subtle-flash { animation: iw-subtle-flash 1.35s ease-in-out infinite; }
 
+/* ─── Phone reveal choreography (Peter, 2026-07-09): fade the CONTENT IN over visible waves ───
+   On phone the parchment fills the screen, so the old shell fade-OUT cross-faded the waves into
+   paper — the waves seemed to die during the blend. Now the shell drops INSTANTLY at reveal
+   (beneath it is an identical, phase-locked coasting water) and the page fades in via Scroll's
+   0.5s phone opacity transition. The floating chrome does the same via these classes, which
+   TiptapEditor puts on its root: 'hold' keeps toolbar/pills invisible while the shell still
+   covers (their z-indexes paint ABOVE the z:auto shell); 'in' runs a one-shot 0.5s fade-in at
+   reveal, then the class is removed so later-mounted panels never replay it. The editor
+   surface's own water keeps coasting to 2.0s underneath — waves stay fully visible, drifting
+   and decaying, while page + toolbar + pills fade in over them. */
+@keyframes iw-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.iw-chrome-hold > :not(.inkwave-editor-surface) { opacity: 0 !important; }
+.iw-chrome-in > :not(.inkwave-editor-surface) { animation: iw-fade-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) backwards; }
+
 /* Golden hover-glow shimmer for aligned diffs (SnapshotView cross-pane hover). */
 @keyframes iw-hover-shimmer {
   0%, 100% { box-shadow: 0 0 6px 1px rgba(212,175,55,0.34); }
@@ -979,7 +1044,11 @@
   background-image: none;
 }
 :root:not(.iw-water-ready) .inkwave-editor-surface::before,
-:root:not(.iw-water-ready) .inkwave-editor-surface::after {
+:root:not(.iw-water-ready) .inkwave-editor-surface::after,
+:root:not(.iw-water-ready) .iw-wave-twinkles {
+  /* The twinkle container is gated with the pseudos: the OLD gate covered only ::before/::after,
+     so the sparkle layer painted yellow flecks on the neutral parchment before the water arrived —
+     the refresh flash (2026-07-09 regression). EVERY water element hides until ready now. */
   display: none;
 }
 :root[data-theme="night"]:not(.iw-water-ready),

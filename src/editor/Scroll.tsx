@@ -4,6 +4,7 @@ import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getC
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, WATER_MARGIN_PX } from './magnify'
+import { syncTwinkles } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -412,6 +413,11 @@ export function Scroll({
     let lastZoom = zoomSig()
     const apply = () => {
       raf = 0
+      // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the
+      // background-position is class-pinned anyway, but the var write dirtied style on the surface
+      // + its animated pseudos every restore-scroll frame — a mid-coast recalc hitch (Firefox
+      // re-rasters the overdraw layers on it). The coast's finish() writes the handoff value.
+      if (waveModeRef.current !== 'off') return
       const z = zoomSig()
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       el.style.setProperty('--wave-x', `${(waveBaseRef.current + el.scrollTop * 0.06).toFixed(1)}px`) // 0.06 = 2/3 of the old 0.09 sway speed
@@ -432,6 +438,10 @@ export function Scroll({
   // waves can never stop or move backward.
   const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
   const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
+  // Ref mirror for the scroll-sway rAF (declared above, runs later) — it must not write --wave-x
+  // while the drift/coast animations own the wave position.
+  const waveModeRef = useRef(waveMode)
+  waveModeRef.current = waveMode
   // useLayoutEffect: the FIRST paint of a freshly-mounted surface must already sit at the shared
   // clock. As a plain effect this ran AFTER paint, so every surface remount painted one frame at
   // ramp-start (offset ~0) then jumped to the synced phase — a visible wave flash per remount.
@@ -488,20 +498,25 @@ export function Scroll({
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
     freezeToCoast()
-    // On phone this path is normally a no-op fallback: 'inkwave:reveal-imminent' (below) already
-    // swapped to 'coast' 2s before revealed flips — but if the event never fired, coast at reveal.
+    // Normally a no-op FALLBACK on both platforms: 'inkwave:reveal-imminent' (below) already
+    // swapped to 'coast' before revealed flips — but if the event never fired, coast at reveal.
   }, [revealed, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
-  // PHONE (Peter's spec): the waves decelerate FIRST. TiptapEditor dispatches
-  // 'inkwave:reveal-imminent' at gate-ready and delays the reveal by the 2s phone coast, so the
-  // parchment pops atomically as the waves reach rest. Every drifting surface listens — the visible
-  // loading SHELL (revealed is never true there; it just unmounts at the reveal) and the editor's
-  // own surface underneath coast in lockstep (same --wave-phase clock → same frozen offset).
+  // BOTH platforms (2026-07-09, the backward-flicker fix): TiptapEditor dispatches
+  // 'inkwave:reveal-imminent' at gate-ready and the coast starts THEN, on a light frame. The old
+  // desktop path froze inside the reveal commit itself — the busiest frame of the whole load: the
+  // compositor kept drifting for the ~100ms that commit blocked the main thread, so the waves were
+  // ~7px past the frozen --wave-t when the coast finally started → a visible backward snap. Phone
+  // additionally delays the reveal by 1.5s so the page pops as the waves reach rest; desktop
+  // reveals two rAFs later (imperceptible — the coast is already easing when the heavy commit
+  // lands). Every drifting surface listens — the visible loading SHELL (revealed never flips
+  // there; it unmounts at/after the reveal) and the editor's own surface underneath coast in
+  // lockstep (same --wave-phase clock → same frozen offset), so the shell swap is seamless.
   useEffect(() => {
-    if (!phone || waveMode !== 'anim') return
+    if (waveMode !== 'anim') return
     const onImminent = () => freezeToCoast()
     window.addEventListener('inkwave:reveal-imminent', onImminent)
     return () => window.removeEventListener('inkwave:reveal-imminent', onImminent)
-  }, [phone, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
   // Coast END → sway handoff. The 2s ease-out itself is pure CSS (iw-wave-coast-l/r); JS wakes only
   // at animationend to hand over: the final offset (--wave-t − 72px, the keyframes' end value) is
   // written into --wave-x in the same commit the coast class drops. Because the coast geometry's
@@ -539,9 +554,14 @@ export function Scroll({
   // Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or when the pointer is
   // near the right edge, and fades out (via .iw-sb-idle - CSS makes it transparent) after 1.4s of
   // inactivity, so at rest only the waves remain in the channel.
+  // ARMED ONLY AFTER THE LOAD WAVES REST (waveMode 'off' — 2026-07-09 regression fix): the toggles
+  // used to land during the drift (classList.add at hydration; the restore-scroll's show() +
+  // its 1.4s re-add timer), and each one ran the 0.3s scrollbar-color transition — a per-frame
+  // repaint of the scroll container's bar region (Firefox repaints the whole scroller) that read
+  // as the "jump at ~0.7s / bigger jump at ~1.4s" in the wave drift.
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el || !fill || phone) return
+    if (!el || !fill || phone || waveMode !== 'off') return
     let t = 0
     el.classList.add('iw-sb-idle')
     const show = () => {
@@ -555,7 +575,21 @@ export function Scroll({
     el.addEventListener('scroll', show, { passive: true })
     el.addEventListener('pointermove', onMove, { passive: true })
     return () => { clearTimeout(t); el.removeEventListener('scroll', show); el.removeEventListener('pointermove', onMove) }
-  }, [fill, phone])
+  }, [fill, phone, waveMode])
+
+  // Stochastic twinkles (sparkles + accent dashes — see waveTwinkle.ts). The container div is in
+  // the JSX (and the prerender) EMPTY; the random layers are populated here, CLIENT-ONLY after
+  // hydration, so the server HTML and the first client render always match (no mismatch, and no
+  // flash: the layers are mostly-off by design, and each mounts only after its tiles decode).
+  // Live-editor surfaces only (fill): sparkles run while the load drift/coast does; the dashes
+  // decorate ALL stages on desktop (drift, coast, resting sway) but exist only during the load on
+  // phone (no waves at rest there). syncTwinkles is idempotent — anim→coast re-runs are no-ops.
+  const twinkleRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const host = twinkleRef.current
+    if (!host || !fill) return
+    syncTwinkles(host, { sparks: waveMode !== 'off', dashes: !phone || waveMode !== 'off' })
+  }, [fill, phone, waveMode])
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
@@ -565,14 +599,12 @@ export function Scroll({
         // wave S-decay — doc, text and pills fade in together underneath, over coasting waves.
         ...(fadingOut ? { opacity: 0, transition: 'opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)', pointerEvents: 'none' as const } : null),
       } as React.CSSProperties}>
-      {/* Yellow loading sparkles — a dedicated child layer, NOT the wave ::before/::after (fading
-          those would dim the wave lines too). It tiles ONLY the sparkle art and runs the same
-          drift/coast keyframes + inherited --wave-phase/--wave-t as wave layer A, so the flecks
-          ride the crests in lockstep and S-fade to nothing as the waves coast to rest (see
-          .iw-wave-sparkles in styles/index.css). Mounted only while the load animation runs —
-          pure visual layer, no reveal/settled logic (it's in the prerendered shell too, since the
-          shell mounts with waveMode 'anim', so hydration matches). */}
-      {waveMode !== 'off' && <div className="iw-wave-sparkles" aria-hidden="true" />}
+      {/* Twinkle host — sparkles + accent dashes live in here as generated layers, NOT on the wave
+          ::before/::after (fading/blinking those would dim the wave lines too). Rendered EMPTY
+          (deterministic — identical in the prerender), populated post-hydration by the effect
+          above; the layers ride the same drift/coast keyframes + --wave-phase clock as the wave
+          layers, so every fleck moves in lockstep with its crest. Pure visual layer. */}
+      <div ref={twinkleRef} className="iw-wave-twinkles" aria-hidden="true" />
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in
           the .iw-magnify-box wrapper below — the wrapper carries the centring (mx-auto + explicit
@@ -608,9 +640,13 @@ export function Scroll({
           // One-paint load: hide the entire parchment (waves only) until the editor settles, then
           // fade page + text in together. visibility (not display) keeps layout + font/pagination
           // measurement running underneath.
+          // PHONE: 0.5s (Peter, 2026-07-09) — the full-screen paper fades IN over the editor's own
+          // still-coasting water (the shell drops instantly at reveal there — see Edit.tsx), so
+          // the waves stay fully visible, drifting and decaying, while the page materialises;
+          // the fade lands at 2.0s, the moment the waves reach rest.
           visibility: revealed ? 'visible' : 'hidden',
           opacity: revealed ? 1 : 0,
-          transition: 'opacity 180ms ease',
+          transition: phone ? 'opacity 500ms cubic-bezier(0.4, 0, 0.2, 1)' : 'opacity 180ms ease',
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
