@@ -5,7 +5,7 @@ import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep } from './zoomStep'
-import { syncTwinkles } from './waveTwinkle'
+import { syncTwinkles, reportSway } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -541,6 +541,7 @@ export function Scroll({
     const target: HTMLElement | Window = el
     let raf = 0
     let lastTop = el.scrollTop
+    let lastTs = performance.now()
     const apply = () => {
       raf = 0
       // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the
@@ -549,10 +550,18 @@ export function Scroll({
       // re-rasters the overdraw layers on it). The coast's finish() writes the handoff value.
       if (waveModeRef.current !== 'off') return
       const top = el.scrollTop
+      const now = performance.now()
       // Zoom-driven scroll (gesture / settle / clamp): hold --wave-x exactly still by absorbing
       // the delta into the base. Rebased (not skipped), so sway resumes with no jump.
-      if (performance.now() < zoomHoldUntilRef.current) waveBaseRef.current -= (top - lastTop) * WAVE_SWAY
+      if (performance.now() < zoomHoldUntilRef.current) {
+        waveBaseRef.current -= (top - lastTop) * WAVE_SWAY
+      } else if (top !== lastTop) {
+        // GENUINE scroll (zoom-hold deltas excluded): the accent dashes' twinkle rate tracks the
+        // water's motion — feed the scroll velocity to the twinkle driver (waveTwinkle.ts).
+        reportSway(Math.abs(top - lastTop) / Math.max(8, now - lastTs) * 1000)
+      }
       lastTop = top
+      lastTs = now
       el.style.setProperty('--wave-x', `${(waveBaseRef.current + top * WAVE_SWAY).toFixed(1)}px`)
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
@@ -733,17 +742,19 @@ export function Scroll({
   }, [fill, phone, waveMode])
 
   // Stochastic twinkles (sparkles + accent dashes — see waveTwinkle.ts). The container div is in
-  // the JSX (and the prerender) EMPTY; the random layers are populated here, CLIENT-ONLY after
+  // the JSX (and the prerender) EMPTY; the random instances are populated here, CLIENT-ONLY after
   // hydration, so the server HTML and the first client render always match (no mismatch, and no
-  // flash: the layers are mostly-off by design, and each mounts only after its tiles decode).
-  // Live-editor surfaces only (fill): sparkles run while the load drift/coast does; the dashes
-  // decorate ALL stages on desktop (drift, coast, resting sway) but exist only during the load on
-  // phone (no waves at rest there). syncTwinkles is idempotent — anim→coast re-runs are no-ops.
+  // flash: each instance mounts only after its art decodes). Live-editor surfaces only (fill):
+  // sparkles run while the load drift/coast does; the dashes decorate ALL stages on desktop
+  // (drift, coast, resting sway — static between scrolls) but exist only during the load on phone
+  // (no waves at rest there). useLAYOUTeffect deliberately: the mode handoffs (coast start, rest
+  // transform) must land in the SAME pre-paint flush as the wave class swap — a passive effect
+  // ran after paint, leaving one visible frame where the dashes stood still against moving waves.
   const twinkleRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = twinkleRef.current
     if (!host || !fill) return
-    syncTwinkles(host, { sparks: waveMode !== 'off', dashes: !phone || waveMode !== 'off' })
+    syncTwinkles(host, { sparks: waveMode !== 'off', dashes: !phone || waveMode !== 'off', mode: waveMode, phone })
   }, [fill, phone, waveMode])
 
   return (

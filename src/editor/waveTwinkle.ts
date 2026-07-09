@@ -1,34 +1,53 @@
-// ─── Wave twinkles — stochastic sparkles + accent dashes over the wave field ────────────────
-// Owns the seeded PRNG, the per-layer SVG tile generation (day + night variants) and the injected
-// per-layer keyframe stylesheet. Scroll.tsx renders a stable empty container (.iw-wave-twinkles —
-// present in the prerender, so hydration always matches) and calls syncTwinkles() from a
-// post-hydration effect; every layer node lives OUTSIDE React. Two layer families:
+// ─── Wave twinkles — discrete sparkles + accent dashes that track the water's motion ─────────
+// v2 (Peter, 2026-07-09/10). v1 tiled 140px background layers, so every dash/sparkle repeated at
+// every tile position with identical art and identical blink phase — the field visibly repeated,
+// and the dashes flickered forever, even on still water. Now:
 //
-//   • SPARKLES — brief (~0.1s) yellow glints riding the thick-line crests. Alive only while the
-//     load drift/coast runs; a few layers sit out each load entirely; the whole set S-fades over
-//     --wave-coast-T via its sub-container's opacity (parent × child opacity MULTIPLIES, so the
-//     blink keyframes keep glinting through the die-off).
-//   • ACCENT DASHES — short strokes halfway between each thick/thin wave pair, present at ALL
-//     stages (drift, coast, and the resting --wave-x scroll sway). ~50% are lit at any instant,
-//     each twinkling ~0.4s on, and the set reseeds on 'inkwave:zoom-settled' (cheap: swap the
-//     four nodes' background-image vars + rewrite one tiny <style> — no layout, no node churn).
+// PER-INSTANCE UNIQUENESS. Twinkles are DISCRETE ELEMENTS: small absolutely-positioned divs, a
+// few per 140px wave row, each with its own PRNG position, art and blink schedule — no two
+// visible instances share either. Structure per surface (host = the empty .iw-wave-twinkles div
+// Scroll.tsx renders — present in the prerender, populated post-hydration):
+//
+//   .iw-twk-set.iw-twk-sparks      (sub-container: the coast S-fade opacity lives here so it
+//     .iw-twk-field ×2              MULTIPLIES with the instances' own blink; clips its fields)
+//   .iw-twk-set.iw-twk-dashes
+//     .iw-twk-field ×2
+//
+// The FIELDS are the only transform-composited layers (one per drift direction per set): group-a
+// instances sit on the a-rows (thick line at 140r+22 — drift LEFT, +--wave-x sway); group-b on
+// the b-rows (140r+92 — drift RIGHT, −--wave-x). Field motion mirrors the wave layers exactly:
+//   • anim  — one long linear WAAPI translate at the drift speed, startTime = the SHARED EPOCH
+//     ANIMATION's literal startTime (__iwWaveEpochAnim — see Scroll.tsx), so it is phase-exact
+//     with the tiles from whatever moment it mounts. No looping keyframes: the field is not
+//     140-periodic, a loop restart would teleport it — instead instances RECYCLE by the strip
+//     width, a multiple of 140, which preserves each instance's wave-space phase (and therefore
+//     its band-y validity) while it's offscreen.
+//   • coast — a WAAPI ease-out with the wave coast's exact cubic + distance, from the analytic
+//     drift offset at coast start (exact: same clock as the tiles' freeze).
+//   • off   — inline translate3d(calc(±var(--wave-x) + rebase)): the rebase constant makes the
+//     handoff pixel-identical, and the sway then moves the instances with the water.
+//
+// BLINK = MOTION (Peter's contract: "the rate they flicker should slow as the water slows"):
+//   • DRIFT: full rate — plain WAAPI opacity animations, startTime epoch-aligned (compositor
+//     driven, so the busy booting main thread can't stall them; also cross-surface identical).
+//   • COAST: dash playbackRate follows the wave's own velocity profile v(t)=v0·(1−t/T)² over
+//     --wave-coast-T, driven per rAF — the flicker decelerates exactly in step with the water.
+//     Sparkles keep full rate (they die with the coast fade regardless).
+//   • REST: NO flicker. As the rate reaches ~0, each dash EASES (0.35s CSS transition on the
+//     base opacity) from its mid-blink value to its STATIC state — never frozen mid-blink: a
+//     ~50% stochastic per-instance subset renders fully-on (like the original baked art), the
+//     rest off. The subset reassigns on every zoom reseed.
+//   • SCROLL: the sway handler reports genuine scrollTop velocity (zoom-hold-compensated deltas
+//     are EXCLUDED upstream — Scroll.tsx); it smooths into the same rate pathway
+//     (rate = max(coastRate, scrollRate), capped ~1.2): slow scroll = occasional lazy twinkles,
+//     brisk = lively, decaying back to static as the velocity dies.
 //
 // GEOMETRY. Every thick wave line is Q(0,c)(35,c−18)(70,c) then the T-mirrored trough. x(t)=70t
-// is LINEAR in t, so the crest arc is y(t) = c − 36·t(1−t): peak c−9 at t=½, inflections y=c at
-// t=0,1 (c=22 for tile a, 92 for tile b; the thin line is the same shape +28px). The sparkle
-// band is the lens between the crest arc and its inflection chord y=c; dashes ride the PAIR
-// MIDLINE — the shape +14px — on either the crest or trough half (±jitter).
-//
-// TILE-EDGE TRICK. Art is drawn near the CENTRE of its 140px tile (never clipped by the tile
-// edge) and the layer's random wave-coordinate is realised as a background-position-x offset
-// (--twk-dx): screen position = waveCoord because tileX + dx ≡ waveCoord (mod 140). Layers are
-// 140×140 tiles (the wave loop), so each layer's art repeats with its wave row; the aperiodic
-// feel comes from several overlaid layers, each with its own in-band art, offset, period, phase.
-//
-// PERF. Every generated data-URI is Image().decode()d BEFORE its node mounts, so a twinkle can
-// never hitch on a lazy first raster (the 2026-07-09 load-jump lesson). Animations are
-// opacity/transform only — all compositor. Day AND night URIs ride each node as CSS vars
-// (--twk-day/--twk-night); index.css picks per theme, so a theme flip needs no regeneration.
+// is LINEAR, so the crest arc is y(t) = c − 36·t(1−t) (peak c−9 at t=½; inflections y=c at
+// t=0,1). Sparkles sit in the lens between the arc and its chord y=c (past-peak biased, like the
+// original art); dashes ride the thick/thin PAIR MIDLINE — the same shape +14px — on either half
+// of the swell, ±jitter. Regeneration: whole field on resize; dashes on 'inkwave:zoom-settled'.
+// Every data-URI is decode()d before its element mounts. All animation is opacity/transform.
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
 export const SPARK_COLOR = '#ffe14d' // sparkle strokes/satellites (day)
@@ -39,29 +58,42 @@ export const DASH_COLOR = '#FFF5EE' // seashell — matches the day wave strokes
 export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night wave art
 
 // ─── Field tuning ─────────────────────────────────────────────────────────────────────────────
-const SPARK_LAYERS = 7 // generated per load…
-const SPARK_SKIP_CHANCE = 0.28 // …each with this chance of sitting the whole load out
-const SPARK_ON_S = 0.1 // a glint: ~0.1s lit
-const SPARK_PERIOD: [number, number] = [0.9, 2.0] // s between glints, per layer
-const DASH_LAYERS = 4 // 2 riding wave layer A + 2 riding B; 2 dashes per tile
+const PAD = 420 // offscreen coverage either side of the viewport (recycle headroom ≈ 5.8s of drift)
+const DASH_ROW_PX = 900 // one dash per this many px of strip width, per row, per field
+const SPARK_ROW_PX = 1600
 const DASH_ON: [number, number] = [0.35, 0.45] // s lit per twinkle
-const DASH_DUTY: [number, number] = [0.42, 0.58] // fraction of time lit ⇒ ~50% of dashes ON
+const DASH_DUTY: [number, number] = [0.42, 0.58] // lit fraction while blinking at rate 1
+const SPARK_ON_S = 0.1 // a glint
+const SPARK_PERIOD: [number, number] = [0.9, 2.2]
+const STATIC_ON_CHANCE = 0.5 // the resting fully-on subset
+const DRIFT_PX_S = 72 // must match the wave drift (140px / 1.944s)
+const V_REF = 1200 // scrollTop px/s that maps to blink rate 1
+const RATE_CAP = 1.2 // a brisk scroll maxes out slightly livelier than the drift
+const RATE_EPS = 0.02 // below this the water reads as still
+const STATIC_DWELL_MS = 250 // stillness dwell before the dashes settle static
+const SCROLL_STALE_MS = 160 // a velocity report older than this reads as "stopped"
+const COAST_EASE = 'cubic-bezier(0.33333, 1, 0.66667, 1)' // the wave coast's exact cubic
+const CREST = { a: 22, b: 92 } // thick-line inflection y within a 140px row
 
-const CREST = { a: 22, b: 92 } // thick-line inflection y per tile
 type Group = 'a' | 'b'
+type Mode = 'anim' | 'coast' | 'off'
 
-interface Layer {
-  cls: string // per-layer class; its blink keyframes/delays live in the injected stylesheet
-  group: Group // which wave layer it rides: drift direction + sway sign
-  day: string // data-URI tile (day palette)
+interface Inst {
+  kind: 'spark' | 'dash'
+  group: Group
+  x: number // field-local box left (px); field space ≡ wave space (recycle keeps it mod-140 true)
+  y: number
+  w: number
+  h: number
+  day: string
   night: string
-  dx: number // tile x-offset (px) — realises the random wave coordinate
-  period: number // blink period (s)
-  delay: number // blink phase (s, subtracted — randomised onset)
-  onS: number // lit time per period (s)
+  period: number // blink period (s) — unique per instance
+  delay: number // blink phase (s) — unique per instance
+  onS: number
+  staticOn: boolean // dash only: lit at rest?
 }
 
-// ─── PRNG — mulberry32 (tiny, seedable; seed = Date.now(), app code so that's fine) ──────────
+// ─── PRNG — mulberry32 (tiny, seedable; seeded from Date.now — app code, that's fine) ─────────
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -74,240 +106,546 @@ function mulberry32(seed: number): () => number {
 }
 
 const f1 = (n: number) => String(Math.round(n * 10) / 10)
-const svgUri = (body: string) =>
-  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>${body}</svg>`)}`
+const wrap140 = (x: number) => ((x % 140) + 140) % 140
+const svgUri = (w: number, h: number, body: string) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'>${body}</svg>`)}`
 
-// Crest arc of a thick line: y at parameter t (x = 70t on the crest half).
-const arcY = (c: number, t: number) => c - 36 * t * (1 - t)
-// Pair midline (thick+thin averaged = thick shape +14px) at any wave coordinate 0..140.
-function midY(c: number, wx: number): number {
-  const x = ((wx % 140) + 140) % 140
+// ─── Banding maths ────────────────────────────────────────────────────────────────────────────
+const arcY = (c: number, t: number) => c - 36 * t * (1 - t) // crest arc of a thick line
+function midY(c: number, wx: number): number { // thick/thin pair midline at any wave coordinate
+  const x = wrap140(wx)
   const t = (x % 70) / 70
   const bump = 36 * t * (1 - t)
   return x < 70 ? c + 14 - bump : c + 14 + bump
 }
 
-// ─── SVG generation ───────────────────────────────────────────────────────────────────────────
-// One sparkle per layer: a plus-fleck + core + 0–2 satellite dots, drawn at tile x=70 (edge-safe);
-// the layer's --twk-dx = waveX − 70 places it at the sampled wave coordinate. waveX = 70t with t
-// biased slightly past the crest peak (like the hand-placed art at x=46); y sits in the lens band
-// between the crest arc and the inflection chord y=c.
-function genSparkLayer(rnd: () => number, i: number): Layer {
-  const group: Group = rnd() < 0.5 ? 'a' : 'b'
+// ─── Instance generation ──────────────────────────────────────────────────────────────────────
+function genDash(rnd: () => number, group: Group, row: number, strip: number): Inst {
+  const w = 24, h = 16
+  const cx = -PAD + rnd() * strip // box centre — anywhere along the strip, either swell half
+  const wx = wrap140(cx)
   const c = CREST[group]
+  const y0 = midY(c, wx)
+  // Local-space quadratic through three midline samples — the dash follows its swell's slope.
+  const yl = (u: number) => midY(c, wx + u) - y0 + h / 2
+  const y1 = yl(-8.5), y2 = yl(8.5)
+  const yc = 2 * (h / 2) - (y1 + y2) / 2
+  const op = 0.32 + 0.12 * rnd()
+  const path = (col: string, o: number) =>
+    `<path d='M${f1(w / 2 - 8.5)} ${f1(y1)} Q${f1(w / 2)} ${f1(yc)} ${f1(w / 2 + 8.5)} ${f1(y2)}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2' stroke-linecap='round'/>`
+  const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
+  const duty = DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
+  const period = onS / duty
+  return {
+    kind: 'dash', group,
+    x: cx - w / 2, y: 140 * row + y0 + (rnd() - 0.5) * 5 - h / 2, w, h,
+    day: svgUri(w, h, path(DASH_COLOR, op)),
+    night: svgUri(w, h, path(DASH_COLOR_NIGHT, op * 0.92)),
+    period, delay: rnd() * period, onS,
+    staticOn: rnd() < STATIC_ON_CHANCE,
+  }
+}
+
+function genSpark(rnd: () => number, group: Group, row: number, strip: number): Inst {
+  const w = 30, h = 30
   const t = Math.min(0.92, Math.max(0.12, 0.58 + (rnd() + rnd() - 1) * 0.35)) // past-peak bias
-  const y = arcY(c, t) + (0.12 + 0.73 * rnd()) * (c - arcY(c, t))
-  const s = 0.75 + 0.4 * rnd() // glyph scale
-  const x = 70
-  const parts = (col: string, core: string) => {
+  const cells = Math.max(1, Math.floor(strip / 140))
+  const cx = -PAD + Math.floor(rnd() * cells) * 140 + 70 * t // crest half of a random swell
+  const c = CREST[group]
+  const arc = arcY(c, t)
+  const cy = arc + (0.12 + 0.73 * rnd()) * (c - arc) // inside the arc↔chord lens
+  const s = 0.75 + 0.4 * rnd()
+  const glyph = (col: string, core: string) => {
     let p =
       `<g stroke='${col}' stroke-width='${f1(1.6 * s)}' stroke-linecap='round'>` +
-      `<path d='M${f1(x)} ${f1(y - 4.2 * s)} V${f1(y + 4.2 * s)}'/>` +
-      `<path d='M${f1(x - 4.2 * s)} ${f1(y)} H${f1(x + 4.2 * s)}'/></g>` +
-      `<circle cx='${f1(x)}' cy='${f1(y)}' r='${f1(1.4 * s)}' fill='${core}'/>`
+      `<path d='M15 ${f1(15 - 4.2 * s)} V${f1(15 + 4.2 * s)}'/>` +
+      `<path d='M${f1(15 - 4.2 * s)} 15 H${f1(15 + 4.2 * s)}'/></g>` +
+      `<circle cx='15' cy='15' r='${f1(1.4 * s)}' fill='${core}'/>`
     const sats = rnd() < 0.35 ? 2 : 1
     for (let k = 0; k < sats; k++) {
       const offX = (rnd() < 0.5 ? -1 : 1) * (3 + 5 * rnd())
       const ts = Math.min(0.98, Math.max(0.02, t + offX / 70))
       const ys = arcY(c, ts) + (0.2 + 0.7 * rnd()) * (c - arcY(c, ts))
-      p += `<circle cx='${f1(x + offX)}' cy='${f1(ys)}' r='${f1(0.9 + 0.4 * rnd())}' fill='${col}' fill-opacity='${f1(0.55 + 0.35 * rnd())}'/>`
+      p += `<circle cx='${f1(15 + offX)}' cy='${f1(15 + ys - cy)}' r='${f1(0.9 + 0.4 * rnd())}' fill='${col}' fill-opacity='${f1(0.55 + 0.35 * rnd())}'/>`
     }
     return p
   }
-  // ONE consumption of rnd for both palettes: generate the day body, then substitute colours.
-  const day = parts(SPARK_COLOR, SPARK_CORE)
+  const day = glyph(SPARK_COLOR, SPARK_CORE)
   const night = day.split(SPARK_COLOR).join(SPARK_COLOR_NIGHT).split(SPARK_CORE).join(SPARK_CORE_NIGHT)
   const period = SPARK_PERIOD[0] + (SPARK_PERIOD[1] - SPARK_PERIOD[0]) * rnd()
   return {
-    cls: `iw-twk-ls${i}`,
-    group,
-    day: svgUri(day),
-    night: svgUri(night),
-    dx: Math.round(70 * t) - 70,
-    period,
-    delay: rnd() * period,
-    onS: SPARK_ON_S,
+    kind: 'spark', group,
+    x: cx - w / 2, y: 140 * row + cy - h / 2, w, h,
+    day: svgUri(w, h, day), night: svgUri(w, h, night),
+    period, delay: rnd() * period, onS: SPARK_ON_S,
+    staticOn: false,
   }
 }
 
-// Two accent dashes per layer, at tile x≈45 and x≈95 (edge-safe); each dash's wave coordinate is
-// tileX + dx, and its y/shape follow the pair midline there (either half of the swell), ±jitter —
-// PRNG-varied kin of the old hand-baked dashes (a: M18 29.4…, b: M88 112.8…), now dynamic.
-function genDashLayer(rnd: () => number, i: number, group: Group): Layer {
-  const c = CREST[group]
-  const dx = Math.floor(rnd() * 140)
-  // Same geometry for both palettes: sample the random numbers ONCE, then re-emit per colour.
-  const spots: Array<[number, number]> = [45 + (rnd() - 0.5) * 14, 95 + (rnd() - 0.5) * 14].map(
-    (tx) => [tx, 0.32 + 0.12 * rnd()] as [number, number],
-  )
-  const jits = spots.map(() => (rnd() - 0.5) * 5)
-  const emit = (col: string, dim: number) =>
-    spots
-      .map(([tx, op], k) => {
-        const wx = tx + dx
-        const y0 = midY(c, wx) + jits[k]
-        const y1 = midY(c, wx - 8.5) + jits[k]
-        const y2 = midY(c, wx + 8.5) + jits[k]
-        const yc = 2 * y0 - (y1 + y2) / 2 // quadratic through the three midline samples
-        return `<path d='M${f1(tx - 8.5)} ${f1(y1)} Q${f1(tx)} ${f1(yc)} ${f1(tx + 8.5)} ${f1(y2)}' fill='none' stroke='${col}' stroke-opacity='${f1(op * dim)}' stroke-width='2' stroke-linecap='round'/>`
-      })
-      .join('')
-  const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
-  const duty = DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
-  const period = onS / duty
-  return {
-    cls: `iw-twk-ld${i}`,
-    group,
-    day: svgUri(emit(DASH_COLOR, 1)),
-    night: svgUri(emit(DASH_COLOR_NIGHT, 0.92)),
-    dx,
-    period,
-    delay: rnd() * period,
-    onS,
-  }
-}
+// ─── Module state — ONE shared field per page: every surface mounts the SAME instances, so the
+// overlapping loading shell + editor paint pixel-identically, like the wave pseudos do ─────────
+interface SetNodes { set: HTMLElement; fields: Record<Group, HTMLElement>; els: HTMLElement[] }
+interface HostState { sparks?: SetNodes; dashes?: SetNodes; tok: { sparks: number; dashes: number } }
 
-// ─── Per-layer stylesheet ─────────────────────────────────────────────────────────────────────
-// Each layer gets its own blink keyframes + three state rules. The drift/coast transforms REUSE
-// the wave keyframes (iw-wave-drift-l/r, iw-wave-coast-l/r) so the art rides its wave layer in
-// exact lockstep; the blink rides alongside as a second animation on the same node. Delays:
-// the drift keeps var(--wave-phase) (the shared load clock); the blink subtracts the surface's
-// --twk-shift (set at container mount = −elapsed-since-epoch) so every surface — the loading
-// shell AND the editor's surface beneath it — shows the SAME blink phase, like the waves do.
-function rulesFor(l: Layer): string {
-  const pct = (s: number) => (Math.min(0.99, s / l.period) * 100).toFixed(2)
-  const ramp = l.onS <= 0.15 ? 0.03 : 0.1 // glints snap; dashes ease
-  const kf = `${l.cls}-b`
-  const P = l.period.toFixed(3)
-  const blinkDelay = `calc(var(--twk-shift, 0s) - ${l.delay.toFixed(3)}s)`
-  const drift = l.group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'
-  const coast = l.group === 'a' ? 'iw-wave-coast-l' : 'iw-wave-coast-r'
-  return (
-    `@keyframes ${kf}{0%{opacity:0}${pct(ramp)}%{opacity:1}${pct(l.onS - ramp)}%{opacity:1}${pct(l.onS)}%,100%{opacity:0}}\n` +
-    // Base (resting sway) — blink only; position tracks ±--wave-x via .iw-twk-a/b.
-    `.${l.cls}{animation:${kf} ${P}s linear infinite;animation-delay:${blinkDelay}}\n` +
-    // Load drift — blink + the wave layer's own drift keyframes (compositor, phase-locked).
-    `.inkwave-editor-surface.iw-wave-anim .${l.cls}{animation:${drift} 1.944s linear infinite,${kf} ${P}s linear infinite;animation-delay:var(--wave-phase, 0s),${blinkDelay};will-change:transform,opacity}\n` +
-    // Coast — blink + the wave layer's ease-to-rest (delay 0 like the wave pseudos').
-    `.inkwave-editor-surface.iw-wave-coast .${l.cls}{animation:${coast} var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards,${kf} ${P}s linear infinite;animation-delay:0s,${blinkDelay};will-change:transform,opacity}`
-  )
-}
+let defs: { sparks: Inst[]; dashes: Inst[] } | null = null
+let stripW = 0
+let epochMs = 0 // the wave clock zero
+const hosts = new Map<HTMLElement, HostState>()
+const elDef = new WeakMap<HTMLElement, Inst>()
+const fieldMode = new WeakMap<HTMLElement, Mode>()
+const fieldAnim = new WeakMap<HTMLElement, Animation>()
+const fieldRebase = new WeakMap<HTMLElement, number>()
+let waterMode: Mode = 'anim'
+let coast: { start: number; T: number; dist: number } | null = null
+let lastCoast: { start: number; T: number; dist: number } | null = null
+// The rest-state transform constant per group, frozen ONCE at the coast→off handoff (where
+// --wave-x ≡ the coast's end offset, so it is ≈0 mod 140). Later mounts (zoom reseed, resize)
+// MUST reuse it — recomputing against the CURRENT --wave-x would fold the accumulated scroll
+// sway into the rebase and shear the dashes off their wave rows (found in headless verify).
+let restRebase: Record<Group, number> | null = null
 
-// ─── Module state (one shared field per page load — every surface mounts the SAME layers, so
-// overlapping surfaces paint pixel-identically, exactly like the wave pseudos) ────────────────
-let sparkDefs: Layer[] | null = null
-let dashDefs: Layer[] | null = null
-let sparkStyle: HTMLStyleElement | null = null
-let dashStyle: HTMLStyleElement | null = null
-let epoch = 0 // blink clock zero (first generation) — --twk-shift aligns later mounts to it
+// Blink machinery: 'playing' = real-time full rate (drift); 'driven' = playbackRate follows the
+// water; 'static' = no animations, opacity is each dash's var(--twk-static).
+let blinkMode: 'playing' | 'driven' | 'static' = 'playing'
+const dashAnims = new Map<HTMLElement, Animation>()
+let vt = 0 // virtual blink clock (ms) — integrates the effective rate; phase base for new anims
+let lastEff = 1
+let driver = 0
+let lastStep = 0
+let rate = 0 // smoothed scroll rate
+let scrollTargetV = 0
+let scrollTs = -1e9
+let stillSince = 0
+let lastRecycle = 0
 let listening = false
-const tokens = new WeakMap<HTMLElement, number>()
 
-function decodeAll(defs: Layer[]): Promise<void> {
-  return Promise.all(
-    defs.flatMap((l) => [l.day, l.night]).map((u) => {
-      const img = new Image()
-      img.src = u
-      return img.decode().catch(() => {}) // decode() is a hint; failure must never block mounting
-    }),
-  ).then(() => {})
+function resolveEpoch(): number {
+  const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
+  const t = w.__iwWaveEpochAnim?.startTime
+  if (typeof t === 'number') return t // the literal shared animation clock — exact
+  return w.__iwWaveEpoch ?? performance.now()
 }
 
-function ensureDefs(): void {
-  if (sparkDefs) return
-  epoch = performance.now()
-  const rnd = mulberry32(Date.now() >>> 0)
-  sparkDefs = []
-  for (let i = 0; i < SPARK_LAYERS; i++) {
-    if (rnd() < SPARK_SKIP_CHANCE) continue // this sparkle sits the load out
-    sparkDefs.push(genSparkLayer(rnd, i))
+function blinkKeyframes(d: Inst): Keyframe[] {
+  const ramp = d.kind === 'spark' ? 0.03 : 0.1 // glints snap; dashes ease
+  const o = (s: number) => Math.min(0.99, s / d.period)
+  return [
+    { offset: 0, opacity: 0 },
+    { offset: o(ramp), opacity: 1 },
+    { offset: o(d.onS - ramp), opacity: 1 },
+    { offset: o(d.onS), opacity: 0 },
+    { offset: 1, opacity: 0 },
+  ]
+}
+
+// Real-time blink, phase-locked to the epoch: currentTime ≡ (now − epoch) + delay — the same
+// formula the virtual clock starts from, so the playing→driven switch is phase-seamless, and two
+// surfaces' copies of the same instance are always identical.
+function startBlink(el: HTMLElement, d: Inst): Animation {
+  const a = el.animate(blinkKeyframes(d), { duration: d.period * 1000, iterations: Infinity })
+  a.startTime = epochMs - d.delay * 1000
+  return a
+}
+
+function startDrivenBlink(el: HTMLElement, d: Inst): Animation {
+  const a = el.animate(blinkKeyframes(d), { duration: d.period * 1000, iterations: Infinity })
+  a.currentTime = Math.max(0, (vt + d.delay * 1000) % (d.period * 1000))
+  a.playbackRate = lastEff
+  return a
+}
+
+// Smooth blink→static handoff (Peter: never freeze mid-blink): cancel each dash's animation and
+// let the 0.35s CSS opacity transition ease from its current value to var(--twk-static).
+function goStatic(): void {
+  blinkMode = 'static'
+  const eased: HTMLElement[] = []
+  for (const [el, a] of dashAnims) {
+    if (el.isConnected) {
+      el.style.opacity = getComputedStyle(el).opacity
+      eased.push(el)
+    }
+    a.cancel()
   }
-  dashDefs = [0, 1, 2, 3].map((i) => genDashLayer(rnd, i, i < DASH_LAYERS / 2 ? 'a' : 'b'))
-  sparkStyle = document.createElement('style')
-  sparkStyle.textContent = sparkDefs.map(rulesFor).join('\n')
-  dashStyle = document.createElement('style')
-  dashStyle.textContent = dashDefs.map(rulesFor).join('\n')
-  document.head.append(sparkStyle, dashStyle)
+  dashAnims.clear()
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    for (const el of eased) el.style.opacity = '' // → var(--twk-static), eased by the transition
+  }))
 }
 
-function applyVars(el: HTMLElement, l: Layer): void {
-  el.style.setProperty('--twk-day', `url("${l.day}")`)
-  el.style.setProperty('--twk-night', `url("${l.night}")`)
-  el.style.setProperty('--twk-dx', `${l.dx}px`)
+function wakeFromStatic(): void {
+  if (blinkMode !== 'static') return
+  blinkMode = 'driven'
+  for (const h of hosts.values()) {
+    for (const el of h.dashes?.els ?? []) {
+      const d = elDef.get(el)
+      if (d && el.isConnected && !dashAnims.has(el)) dashAnims.set(el, startDrivenBlink(el, d))
+    }
+  }
 }
 
-function layerNode(l: Layer): HTMLDivElement {
+// ─── The driver — one rAF loop mapping water speed → dash playbackRate ───────────────────────
+// eff = max(coast velocity profile, smoothed scroll rate). Runs from first mount (it also owns
+// instance recycling) and parks completely once the water is still and the dashes are static.
+function ensureDriver(): void {
+  if (!driver) {
+    lastStep = performance.now()
+    driver = requestAnimationFrame(step)
+  }
+}
+
+function step(ts: number): void {
+  driver = 0
+  const dt = Math.min(64, Math.max(0, ts - lastStep))
+  lastStep = ts
+  if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
+  if (waterMode === 'anim') { // dashes play natively at full rate; the loop only recycles
+    driver = requestAnimationFrame(step)
+    return
+  }
+  const target = ts - scrollTs < SCROLL_STALE_MS ? scrollTargetV : 0
+  rate += (target - rate) * Math.min(1, dt / 140) // short smoothing — the rate never steps
+  let eff = rate
+  if (coast) {
+    const t = (ts - coast.start) / coast.T
+    if (t >= 1) coast = null
+    else eff = Math.max(eff, (1 - t) * (1 - t)) // the wave's own velocity: v(t) = v0·(1−t/T)²
+  }
+  vt += eff * dt
+  lastEff = eff
+  if (blinkMode === 'driven') for (const a of dashAnims.values()) a.playbackRate = eff
+  if (eff > RATE_EPS) stillSince = 0
+  else if (!stillSince) stillSince = ts
+  if (!coast && waterMode === 'off' && eff <= RATE_EPS && stillSince && ts - stillSince > STATIC_DWELL_MS) {
+    if (blinkMode === 'driven') goStatic()
+    return // park — reportSway / the next coast wakes the loop
+  }
+  driver = requestAnimationFrame(step)
+}
+
+// ─── Field transforms — mirror the wave layers exactly ───────────────────────────────────────
+function applyFieldMode(field: HTMLElement, group: Group, m: Mode, surface: HTMLElement | null): void {
+  if (fieldMode.get(field) === m) return
+  fieldMode.set(field, m)
+  const dir = group === 'a' ? -1 : 1
+  const prev = fieldAnim.get(field)
+  if (m === 'anim') {
+    // One long linear ramp — NOT a 140px loop (the field isn't periodic; a loop restart would
+    // teleport it). Backdated to the epoch → phase-exact with the tiles from any mount time.
+    const K = 600 // ~19min of drift headroom; no load approaches it
+    const a = field.animate(
+      [{ transform: 'translate3d(0,0,0)' }, { transform: `translate3d(${dir * 140 * K}px,0,0)` }],
+      { duration: 1944 * K, easing: 'linear', fill: 'forwards' },
+    )
+    a.startTime = epochMs
+    fieldAnim.set(field, a)
+    field.style.transform = '' // drop any stale rest transform (re-open) — the animation owns it now
+  } else if (m === 'coast' && coast) {
+    const x0 = dir * DRIFT_PX_S * (coast.start - epochMs) / 1000 // analytic — same clock as the tiles' freeze
+    const a = field.animate(
+      [
+        { transform: `translate3d(${x0.toFixed(2)}px,0,0)` },
+        { transform: `translate3d(${(x0 + dir * coast.dist).toFixed(2)}px,0,0)` },
+      ],
+      { duration: coast.T, easing: COAST_EASE, fill: 'forwards' },
+    )
+    a.startTime = coast.start
+    fieldAnim.set(field, a)
+  } else {
+    // REST: ride the scroll sway. rebase makes the coast→sway handoff paint identical pixels;
+    // it is ≡ 0 (mod 140) by construction (both sides derive from the same animation clock), so
+    // every instance's wave-space phase — and its band-y — stays valid. Frozen ONCE at the
+    // handoff (see restRebase) — later mounts reuse the same constant. Inline transform FIRST,
+    // cancel after, same synchronous flush (callers run in layout effects): no flash frame.
+    if (!restRebase) {
+      const c = lastCoast
+      const waveX = surface ? parseFloat(surface.style.getPropertyValue('--wave-x')) || 0 : 0
+      const xf = (g: Group) => {
+        const d2 = g === 'a' ? -1 : 1
+        return c ? d2 * DRIFT_PX_S * (c.start - epochMs) / 1000 + d2 * c.dist : 0
+      }
+      restRebase = { a: xf('a') - waveX, b: xf('b') + waveX }
+    }
+    const rebase = restRebase[group]
+    fieldRebase.set(field, rebase)
+    field.style.transform = group === 'a'
+      ? `translate3d(calc(var(--wave-x, 0px) + ${rebase.toFixed(2)}px), 0, 0)`
+      : `translate3d(calc(${rebase.toFixed(2)}px - var(--wave-x, 0px)), 0, 0)`
+    fieldAnim.delete(field)
+  }
+  prev?.cancel()
+}
+
+// Current field offset — analytic (no forced style reads).
+function currentFieldX(field: HTMLElement, group: Group): number {
+  const now = performance.now()
+  const dir = group === 'a' ? -1 : 1
+  const m = fieldMode.get(field) ?? waterMode
+  if (m === 'anim') return dir * DRIFT_PX_S * (now - epochMs) / 1000
+  if (m === 'coast') {
+    const c = coast ?? lastCoast
+    if (!c) return 0
+    const t = Math.min(1, (now - c.start) / c.T)
+    return dir * DRIFT_PX_S * (c.start - epochMs) / 1000 + dir * c.dist * (1 - (1 - t) ** 3)
+  }
+  const surface = field.closest('.inkwave-editor-surface') as HTMLElement | null
+  const waveX = surface ? parseFloat(surface.style.getPropertyValue('--wave-x')) || 0 : 0
+  const rb = fieldRebase.get(field) ?? 0
+  return group === 'a' ? waveX + rb : rb - waveX
+}
+
+// ─── Recycle — keep the strip covering the viewport as the fields translate ──────────────────
+// stripW is a MULTIPLE OF 140, so shifting an instance by ±stripW preserves its wave-space phase
+// (x mod 140) — its band-y, art and schedule stay valid; it rejoins the pattern on the other
+// side, always while offscreen. Defs are SHARED across hosts, so the shift applies to every
+// host's copy of the instance in the same pass.
+function recycle(): void {
+  if (!defs || !hosts.size) return
+  pruneHosts()
+  const vw = window.innerWidth
+  const hs = Array.from(hosts.values())
+  for (const kind of ['sparks', 'dashes'] as const) {
+    const list = defs[kind]
+    const fx: Partial<Record<Group, number>> = {}
+    for (const g of ['a', 'b'] as Group[]) {
+      const f = hs.find((h) => h[kind])?.[kind]?.fields[g]
+      if (f) fx[g] = currentFieldX(f, g)
+    }
+    list.forEach((d, i) => {
+      const x0 = fx[d.group]
+      if (x0 === undefined) return
+      const sx = d.x + x0
+      let moved = false
+      if (sx < -PAD - d.w) { d.x += stripW * Math.ceil((-PAD - d.w - sx) / stripW); moved = true }
+      else if (sx > vw + PAD) { d.x -= stripW * Math.ceil((sx - vw - PAD) / stripW); moved = true }
+      if (moved) for (const h of hs) { const el = h[kind]?.els[i]; if (el) el.style.left = `${d.x}px` }
+    })
+  }
+}
+
+function pruneHosts(): void {
+  for (const [host, h] of hosts) {
+    if (host.isConnected) continue
+    for (const el of h.dashes?.els ?? []) {
+      dashAnims.get(el)?.cancel()
+      dashAnims.delete(el)
+    }
+    hosts.delete(host)
+  }
+}
+
+// ─── DOM plumbing ─────────────────────────────────────────────────────────────────────────────
+function instEl(d: Inst): HTMLElement {
   const el = document.createElement('div')
-  // LITERAL class names, not `iw-twk-${l.group}`: Tailwind tree-shakes custom @layer base rules
-  // by scanning source for literal tokens — the interpolated form got .iw-twk-a/.iw-twk-b PURGED
-  // from the built CSS (the resting sway silently stopped tracking --wave-x).
-  el.className = `iw-twk ${l.group === 'a' ? 'iw-twk-a' : 'iw-twk-b'} ${l.cls}`
-  applyVars(el, l)
+  el.className = d.kind === 'dash' ? 'iw-twk-i iw-twk-dash-i' : 'iw-twk-i' // literal names — Tailwind scans source tokens
+  el.style.left = `${d.x}px`
+  el.style.top = `${d.y}px`
+  el.style.width = `${d.w}px`
+  el.style.height = `${d.h}px`
+  el.style.setProperty('--twk-day', `url("${d.day}")`)
+  el.style.setProperty('--twk-night', `url("${d.night}")`)
+  if (d.kind === 'dash') el.style.setProperty('--twk-static', d.staticOn ? '1' : '0')
+  elDef.set(el, d)
   return el
 }
 
-async function applySet(host: HTMLElement, token: number, setCls: string, want: boolean, defs: Layer[]): Promise<void> {
-  const existing = host.querySelector(`:scope > .${setCls}`)
-  if (!want) {
-    existing?.remove()
-    return
+const decoded = new WeakSet<Inst[]>()
+async function decodeAll(list: Inst[]): Promise<void> {
+  if (decoded.has(list)) return
+  await Promise.all(
+    list.flatMap((d) => [d.day, d.night]).map((u) => {
+      const img = new Image()
+      img.src = u
+      return img.decode().catch(() => {}) // a hint — never block mounting on it
+    }),
+  )
+  decoded.add(list)
+}
+
+function genList(rnd: () => number, kind: 'sparks' | 'dashes'): Inst[] {
+  const vh = Math.max(window.innerHeight, window.screen?.height ?? 0) // lvh-stable row coverage
+  const rows = Math.ceil(vh / 140) + 1
+  const out: Inst[] = []
+  const per = kind === 'dashes' ? DASH_ROW_PX : SPARK_ROW_PX
+  for (let r = 0; r < rows; r++) {
+    for (const g of ['a', 'b'] as Group[]) {
+      const n = Math.floor(stripW / per + rnd()) // stochastic rounding — rows differ
+      for (let i = 0; i < n; i++) out.push(kind === 'dashes' ? genDash(rnd, g, r, stripW) : genSpark(rnd, g, r, stripW))
+    }
   }
-  if (existing) return
-  await decodeAll(defs) // raster-ready BEFORE first mount — a twinkle must never hitch
-  if (tokens.get(host) !== token || host.querySelector(`:scope > .${setCls}`)) return
+  return out
+}
+
+function generate(): void {
+  stripW = Math.ceil((window.innerWidth + 2 * PAD) / 140) * 140 // ≡ 0 (mod 140) — the recycle invariant
+  const rnd = mulberry32(Date.now() >>> 0)
+  defs = { sparks: genList(rnd, 'sparks'), dashes: genList(rnd, 'dashes') }
+}
+
+function buildSet(setCls: string, list: Inst[]): SetNodes {
   const set = document.createElement('div')
   set.className = `iw-twk-set ${setCls}`
-  set.append(...defs.map(layerNode))
-  host.appendChild(set)
-  // EXACT drift-clock adoption (audit probe, 2026-07-09): twinkle layers mount post-hydration with
-  // delay 0, which left them ~35px BEHIND their surface's waves (flecks off the crests). Adopt the
-  // epoch drift animation's literal startTime, exactly like later surfaces do in Scroll.tsx.
-  const epochAnim = (window as unknown as { __iwWaveEpochAnim?: Animation }).__iwWaveEpochAnim
-  if (epochAnim && typeof epochAnim.startTime === 'number') {
-    try {
-      for (const a of set.getAnimations({ subtree: true })) {
-        if (((a as CSSAnimation).animationName ?? '').startsWith('iw-wave-drift')) a.startTime = epochAnim.startTime
-      }
-    } catch { /* not critical — the --twk-shift fallback still holds */ }
+  const fields: Record<Group, HTMLElement> = { a: document.createElement('div'), b: document.createElement('div') }
+  for (const g of ['a', 'b'] as Group[]) {
+    fields[g].className = 'iw-twk-field'
+    set.appendChild(fields[g])
+  }
+  const els = list.map((d) => {
+    const el = instEl(d)
+    fields[d.group].appendChild(el)
+    return el
+  })
+  return { set, fields, els }
+}
+
+function armBlinks(nodes: SetNodes, kind: 'sparks' | 'dashes'): void {
+  for (const el of nodes.els) {
+    const d = elDef.get(el)
+    if (!d) continue
+    if (kind === 'sparks') {
+      startBlink(el, d) // sparks always play full rate — they die with the coast fade
+    } else if (blinkMode === 'playing') {
+      dashAnims.set(el, startBlink(el, d))
+    } else if (blinkMode === 'driven') {
+      dashAnims.set(el, startDrivenBlink(el, d))
+    } // static: no animation — opacity is var(--twk-static)
   }
 }
 
-// ZOOM RESEED (Peter's spec): on zoom settle the visible dash set recalculates. Same node count,
-// same classes/groups — only the art, tile offsets, periods and phases change, and only after the
-// fresh URIs are decoded: a background-image + var swap plus one small <style> rewrite.
-function reseedDashes(): void {
-  if (!dashDefs || !dashStyle || !document.querySelector('.iw-twk-dashes')) return
-  const rnd = mulberry32((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0)
-  const next = dashDefs.map((old, i) => genDashLayer(rnd, i, old.group))
-  void decodeAll(next).then(() => {
-    if (!dashStyle) return
-    dashDefs = next
-    dashStyle.textContent = next.map(rulesFor).join('\n')
-    for (const set of Array.from(document.querySelectorAll('.iw-twk-dashes'))) {
-      next.forEach((l, i) => {
-        const node = set.children[i] as HTMLElement | undefined
-        if (node) applyVars(node, l)
-      })
-    }
+function disarmDashes(nodes: SetNodes): void {
+  for (const el of nodes.els) {
+    dashAnims.get(el)?.cancel()
+    dashAnims.delete(el)
+  }
+}
+
+function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): void {
+  const token = ++h.tok[kind]
+  const list = kind === 'sparks' ? defs!.sparks : defs!.dashes
+  void decodeAll(list).then(() => {
+    if (h.tok[kind] !== token || h[kind] || !host.isConnected || !defs) return
+    const current = kind === 'sparks' ? defs.sparks : defs.dashes
+    if (current !== list) return // regenerated while decoding — the newer mount wins
+    // Re-resolve the clock: the epoch ANIMATION may not have existed at generate() time (the
+    // atomic-water gate keeps the wave pseudos display:none until the tiles decode, and
+    // animations don't exist while un-displayed). Idempotent once it's the real startTime.
+    if (waterMode === 'anim') epochMs = resolveEpoch()
+    const nodes = buildSet(kind === 'sparks' ? 'iw-twk-sparks' : 'iw-twk-dashes', list)
+    const surface = host.parentElement
+    for (const g of ['a', 'b'] as Group[]) applyFieldMode(nodes.fields[g], g, waterMode, surface)
+    armBlinks(nodes, kind)
+    host.appendChild(nodes.set)
+    h[kind] = nodes
+    ensureDriver() // owns recycling too, so it runs from first mount
   })
 }
 
+function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): void {
+  const old = h[kind]
+  if (old) {
+    if (kind === 'dashes') disarmDashes(old)
+    old.set.remove()
+    h[kind] = undefined
+  }
+  mountSet(host, h, kind)
+}
+
+// Dashes recalculate on zoom settle (positions, art, schedules AND the static subset).
+function regenDashes(): void {
+  if (!defs || !hosts.size) return
+  const rnd = mulberry32((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0)
+  defs.dashes = genList(rnd, 'dashes')
+  pruneHosts()
+  for (const [host, h] of hosts) if (h.dashes) remount(host, h, 'dashes')
+}
+
+function regenAll(): void {
+  if (!defs || !hosts.size) return
+  generate()
+  pruneHosts()
+  for (const [host, h] of hosts) {
+    if (h.sparks) remount(host, h, 'sparks')
+    if (h.dashes) remount(host, h, 'dashes')
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────────────────────
-// Idempotent per (host, wants): call from an effect whenever the wave mode changes. Sparkles are
-// mounted while the load animation runs and removed at rest; dashes persist on desktop (they
-// decorate the resting sway too) and exist only during the load on phone (no waves at rest there).
-export function syncTwinkles(host: HTMLElement, want: { sparks: boolean; dashes: boolean }): void {
-  ensureDefs()
+// Called from a LAYOUT effect on every waveMode change (pre-paint, so the coast start / rest
+// handoff land in the same flush as the surface's wave class swap — no flash frame).
+export function syncTwinkles(
+  host: HTMLElement,
+  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean },
+): void {
+  if (!defs) {
+    epochMs = resolveEpoch()
+    generate()
+  }
   if (!listening) {
     listening = true
-    window.addEventListener('inkwave:zoom-settled', reseedDashes)
+    window.addEventListener('inkwave:zoom-settled', regenDashes)
+    let rt: ReturnType<typeof setTimeout> | undefined
+    window.addEventListener('resize', () => {
+      if (rt) clearTimeout(rt)
+      rt = setTimeout(regenAll, 300) // strip/row counts change with the viewport
+    })
   }
-  if (!host.style.getPropertyValue('--twk-shift')) {
-    // Align this surface's blink phase to the shared epoch (the wave-phase trick, for opacity).
-    host.style.setProperty('--twk-shift', `${((epoch - performance.now()) / 1000).toFixed(3)}s`)
+  pruneHosts()
+  let h = hosts.get(host)
+  if (!h) { h = { tok: { sparks: 0, dashes: 0 } }; hosts.set(host, h) }
+
+  // Global mode transition (every surface flips in the same event dispatch).
+  const prev = waterMode
+  waterMode = want.mode
+  if (want.mode === 'anim' && prev !== 'anim') {
+    // Re-open choreography: a NEW load drifts again — fresh coast/handoff state, and the dashes
+    // return to full-rate compositor blinks.
+    coast = null
+    restRebase = null
+    if (blinkMode !== 'playing') {
+      blinkMode = 'playing'
+      for (const a of dashAnims.values()) a.cancel()
+      dashAnims.clear()
+      for (const hs of hosts.values()) {
+        for (const el of hs.dashes?.els ?? []) {
+          const d = elDef.get(el)
+          if (d && el.isConnected) dashAnims.set(el, startBlink(el, d))
+        }
+      }
+    }
   }
-  const token = (tokens.get(host) ?? 0) + 1
-  tokens.set(host, token)
-  void applySet(host, token, 'iw-twk-sparks', want.sparks, sparkDefs!)
-  void applySet(host, token, 'iw-twk-dashes', want.dashes, dashDefs!)
+  if (want.mode === 'coast' && prev !== 'coast' && !coast) {
+    coast = { start: performance.now(), T: want.phone ? 2000 : 3000, dist: want.phone ? 48 : 72 }
+    lastCoast = coast
+    restRebase = null // the coming handoff freezes a fresh constant
+    if (blinkMode === 'playing') {
+      vt = performance.now() - epochMs // seamless: the playing clock IS (now − epoch) + delay
+      blinkMode = 'driven'
+    }
+    ensureDriver()
+  }
+
+  // Field transforms for the (possibly new) mode — every host, pre-paint.
+  for (const [hostEl, hs] of hosts) {
+    const surface = hostEl.parentElement
+    for (const nodes of [hs.sparks, hs.dashes]) {
+      if (!nodes) continue
+      for (const g of ['a', 'b'] as Group[]) applyFieldMode(nodes.fields[g], g, waterMode, surface)
+    }
+  }
+
+  // Mount / remove the requested sets on THIS host.
+  if (want.sparks && !h.sparks) mountSet(host, h, 'sparks')
+  else if (!want.sparks && h.sparks) { h.sparks.set.remove(); h.sparks = undefined; h.tok.sparks++ }
+  if (want.dashes && !h.dashes) mountSet(host, h, 'dashes')
+  else if (!want.dashes && h.dashes) { disarmDashes(h.dashes); h.dashes.set.remove(); h.dashes = undefined; h.tok.dashes++ }
+}
+
+// Genuine scrollTop velocity (px/s) from the sway handler — zoom-hold-compensated deltas are
+// excluded UPSTREAM (Scroll.tsx), so zoom corrections never read as water motion.
+export function reportSway(pxPerSec: number): void {
+  if (waterMode !== 'off' || !hosts.size) return
+  scrollTargetV = Math.min(RATE_CAP, pxPerSec / V_REF)
+  scrollTs = performance.now()
+  if (scrollTargetV <= 0) return
+  wakeFromStatic()
+  ensureDriver()
 }

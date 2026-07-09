@@ -320,25 +320,27 @@
   .inkwave-editor-surface.is-phone.iw-wave-anim::after,
   .inkwave-editor-surface.is-phone.iw-wave-coast::after,
   .inkwave-editor-surface.is-phone .iw-wave-twinkles,
-  .inkwave-editor-surface.is-phone .iw-twk-set,
-  .inkwave-editor-surface.is-phone .iw-twk {
+  .inkwave-editor-surface.is-phone .iw-twk-set {
     top: 0;
     bottom: auto;
     height: 100lvh;
   }
 
-  /* ─── STOCHASTIC TWINKLES (Peter's spec, 2026-07-09) — sparkles + accent dashes ─────────────
-     Generated per load by src/editor/waveTwinkle.ts: N small 140px-tile layers, each carrying one
-     sparkle (or two dashes) at a PRNG position inside the band between a thick line's crest arc
-     and its inflection chord, blinking on its own keyframes (injected per layer). They cannot
-     live on the wave ::before/::after — animating opacity there would dim the wave LINES too.
-     Scroll.tsx renders a stable EMPTY container (in the prerender too, so hydration matches) and
-     populates it post-hydration, after every generated tile is decode()d — no lazy-raster pops.
-     Two sub-sets: .iw-twk-sparks (loading only; the whole set S-fades over --wave-coast-T — the
-     fade lives on the SUB-CONTAINER so it MULTIPLIES with the children's blink) and
-     .iw-twk-dashes (all stages: drift, coast, and the resting ±--wave-x scroll sway).
-     Per-layer state rules (drift/coast composition, per-layer blink delays) are generated —
-     see rulesFor() in waveTwinkle.ts; only the shared geometry lives here. */
+  /* ─── STOCHASTIC TWINKLES (Peter's spec, 2026-07-09/10) — sparkles + accent dashes ──────────
+     Generated per load by src/editor/waveTwinkle.ts as DISCRETE instances (v2 — the 140px tiled
+     layers repeated every dash at every tile with the same blink): small absolute divs, a few per
+     wave row, each with its own PRNG position/art/blink. They cannot live on the wave
+     ::before/::after — animating opacity there would dim the wave LINES too. Scroll.tsx renders a
+     stable EMPTY container (in the prerender too, so hydration matches); waveTwinkle populates it
+     post-hydration after every data-URI decode()s — no lazy-raster pops. Two sub-sets:
+     .iw-twk-sparks (loading only; the coast S-fade lives on the SUB-CONTAINER so it MULTIPLIES
+     with the instances' own blink) and .iw-twk-dashes (all stages; STATIC between scrolls at
+     rest). Each set holds two .iw-twk-field layers — one per drift direction (a-rows / b-rows) —
+     whose transforms are WAAPI-driven by waveTwinkle.ts (drift/coast phase-exact with the tiles
+     via the shared epoch animation; rest = translate3d(calc(±--wave-x + rebase)) sway). Blink
+     rate TRACKS WATER MOTION: full during drift, decelerating through the coast, zero at rest
+     (a ~50% static subset stays lit via --twk-static), scroll-velocity-proportional while
+     swaying — all WAAPI playbackRate, owned by waveTwinkle.ts. */
   @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
   .iw-wave-twinkles,
   .iw-twk-set {
@@ -347,39 +349,36 @@
     z-index: -1;
     pointer-events: none;
   }
+  /* The set CLIPS its translated fields (they carry ±PAD offscreen coverage), and at rest it
+     insets away from the PDF panel exactly like the wave ::before does. */
+  .iw-twk-set { overflow: hidden; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-wave-anim):not(.iw-wave-coast) .iw-twk-set {
+    right: var(--iw-pdf-room, 0px);
+    bottom: var(--iw-pdf-room-bottom, 0px);
+  }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-sparks {
     animation: iw-spark-fade var(--wave-coast-T, 3s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
     will-change: opacity;
   }
-  .iw-twk {
-    position: fixed;
+  .iw-twk-field {
+    position: absolute;
     inset: 0;
-    z-index: -1;
-    pointer-events: none;
+    will-change: transform;
+    transform: translateZ(0); /* pre-promoted — raster exists before the drift's first frame */
+  }
+  .iw-twk-i {
+    position: absolute;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
     background-image: var(--twk-day);
-    background-size: 140px 140px;
-    contain: strict;
-    transform: translateZ(0); /* pre-promoted like the wave ::before — raster exists before its blink */
   }
-  :root[data-theme="night"] .iw-twk { background-image: var(--twk-night, var(--twk-day)); }
-  /* Resting sway: each group rides its wave layer's ±--wave-x, plus its own tile offset. */
-  .iw-twk-a { background-position: calc(var(--wave-x, 0px) + var(--twk-dx, 0px)) 0; }
-  .iw-twk-b { background-position: calc(-1 * var(--wave-x, 0px) + var(--twk-dx, 0px)) 0; }
-  /* Load drift/coast: same 2-tile overdraw + origin ≡ 0 (mod 140) as the wave layers, so the
-     coast→sway handoff paints identical pixels (transform +tx ≡ background-position +tx; the
-     constant --twk-dx rides both sides of the identity). Transforms come from the generated
-     per-layer rules (iw-wave-drift-l/r + coast, phase-locked via --wave-phase). */
-  .inkwave-editor-surface.iw-wave-anim .iw-twk,
-  .inkwave-editor-surface.iw-wave-coast .iw-twk {
-    left: -280px;
-    right: -280px;
-    background-position: var(--twk-dx, 0px) 0;
-  }
-  /* At rest the dashes must respect the PDF panel exactly like the wave ::before does (the
-     :not() guards keep this from fighting the ±280px overdraw rule during the load). */
-  .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-wave-anim):not(.iw-wave-coast) .iw-twk {
-    right: var(--iw-pdf-room, 0px);
-    bottom: var(--iw-pdf-room-bottom, 0px);
+  :root[data-theme="night"] .iw-twk-i { background-image: var(--twk-night, var(--twk-day)); }
+  /* Dashes at rest: no animation — opacity IS the static state (the ~50% lit subset has
+     --twk-static: 1, reassigned per zoom reseed). The transition eases every blink→static
+     handoff (coast end, scroll stop) from the mid-blink value — never a freeze, never a pop. */
+  .iw-twk-dash-i {
+    opacity: var(--twk-static, 0);
+    transition: opacity 0.35s ease;
   }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
@@ -839,6 +838,7 @@
   /* Hide floating chrome + the wavy background + the decorative parchment panels. */
   .fixed { display: none !important; }
   .inkwave-editor-surface::before, .inkwave-editor-surface::after { display: none !important; }
+  .iw-wave-twinkles { display: none !important; } /* the dash/sparkle field is screen water, never print */
   /* CANONICAL PRINT LAYOUT: breaks are measured in the canonical context (zoom 1, base font,
      desktop margins — see canonicalMeasure.ts), so print must wrap the text the same way or the
      forced breaks would over/underfill the printed pages. !important beats the inline zoom var
