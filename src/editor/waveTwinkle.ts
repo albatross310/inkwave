@@ -60,11 +60,14 @@ export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night w
 // ─── Field tuning ─────────────────────────────────────────────────────────────────────────────
 const PAD = 420 // offscreen coverage either side of the viewport (recycle headroom ≈ 5.8s of drift)
 const DASH_ROW_PX = 900 // one dash per this many px of strip width, per row, per field
-const SPARK_ROW_PX = 1600
-const DASH_ON: [number, number] = [0.35, 0.45] // s lit per twinkle
+const SPARK_ROW_PX = 800 // denser field — they were barely visible (Peter, 2026-07-10)
+const DASH_ON: [number, number] = [0.55, 0.65] // s lit per twinkle (~0.6s, Peter 2026-07-10)
+const DASH_REPEAT_CHANCE = 0.25 // subset with back-to-back blinks (high duty)
 const DASH_DUTY: [number, number] = [0.42, 0.58] // lit fraction while blinking at rate 1
-const SPARK_ON_S = 0.1 // a glint
+const SPARK_ON_S = 0.2 // a glint (0.1 read as barely visible)
 const SPARK_PERIOD: [number, number] = [0.9, 2.2]
+const SPARK_REPEAT_CHANCE = 0.3 // subset with quick re-glints
+const SPARK_REPEAT_PERIOD: [number, number] = [0.45, 0.8]
 const STATIC_ON_CHANCE = 0.5 // the resting fully-on subset
 const DRIFT_PX_S = 72 // must match the wave drift (140px / 1.944s)
 const V_REF = 1200 // scrollTop px/s that maps to blink rate 1
@@ -134,7 +137,8 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   const path = (col: string, o: number) =>
     `<path d='M${f1(w / 2 - 8.5)} ${f1(y1)} Q${f1(w / 2)} ${f1(yc)} ${f1(w / 2 + 8.5)} ${f1(y2)}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2' stroke-linecap='round'/>`
   const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
-  const duty = DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
+  // A repeat subset blinks nearly back-to-back (high duty = short dark gaps between flashes).
+  const duty = rnd() < DASH_REPEAT_CHANCE ? 0.75 + 0.1 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
   const period = onS / duty
   return {
     kind: 'dash', group,
@@ -172,7 +176,9 @@ function genSpark(rnd: () => number, group: Group, row: number, strip: number): 
   }
   const day = glyph(SPARK_COLOR, SPARK_CORE)
   const night = day.split(SPARK_COLOR).join(SPARK_COLOR_NIGHT).split(SPARK_CORE).join(SPARK_CORE_NIGHT)
-  const period = SPARK_PERIOD[0] + (SPARK_PERIOD[1] - SPARK_PERIOD[0]) * rnd()
+  const rapid = rnd() < SPARK_REPEAT_CHANCE // some glints repeat in quick succession
+  const [p0, p1] = rapid ? SPARK_REPEAT_PERIOD : SPARK_PERIOD
+  const period = p0 + (p1 - p0) * rnd()
   return {
     kind: 'spark', group,
     x: cx - w / 2, y: 140 * row + cy - h / 2, w, h,
@@ -261,7 +267,12 @@ function goStatic(): void {
   const eased: HTMLElement[] = []
   for (const [el, a] of dashAnims) {
     if (el.isConnected) {
-      el.style.opacity = getComputedStyle(el).opacity
+      const cur = parseFloat(getComputedStyle(el).opacity) || 0
+      el.style.opacity = String(cur)
+      // The resting texture = whichever dashes were ON as the water stopped (Peter, 2026-07-10):
+      // lit past half → stays on; else fades out. Overrides the prechosen random subset (which
+      // still seeds reseed-at-rest, where there is no 'before' state).
+      el.style.setProperty('--twk-static', cur > 0.5 ? '1' : '0')
       eased.push(el)
     }
     a.cancel()

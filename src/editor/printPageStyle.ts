@@ -23,10 +23,10 @@ export function syncPrintPageStyle(): void {
   const css =
     `@media print{` +
     `html,body,.inkwave-editor-surface{width:${width} !important;}` +
-    `@page{size:${width} ${height};margin:0;}` +
+    `@page{size:${width} ${height};margin:0 0 ${MARGIN_BOTTOM - 8}px 0;}` +
     // Refs pages (named page — see index.css): REAL top/bottom margins from the live settings, so
     // browser-natural breaks inside the reference list respect the same margins as everywhere.
-    `@page iw-refs{margin-top:${getTopMarginPx()}px;margin-bottom:${MARGIN_BOTTOM}px;}` +
+    `@page iw-refs{margin-top:${getTopMarginPx()}px;margin-bottom:${MARGIN_BOTTOM - 8}px;}` +
     `.inkwave-editor-surface.is-phone .scroll-paper{padding-left:${side}px !important;padding-right:${side}px !important;}` +
     `}`
   if (!el) {

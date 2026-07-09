@@ -817,7 +817,15 @@
   /* (tab / ⇧+tab hint badges removed — the visual hints feature is gone.) */
 }
 
-@page iw-refs { margin-top: 96px; margin-bottom: 72px; }
+@page {
+  margin-bottom: 64px; /* MARGIN_BOTTOM − 8: real margin for the number box; forced breaks still win */
+  @bottom-center {
+    content: counter(page);
+    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 15px; color: #000;
+    margin-bottom: 22px;
+  }
+}
+@page iw-refs { margin-top: 96px; margin-bottom: 64px; }
 
 /* ── Print / "Export PDF" ── a faithful A4 render of the EDITOR's pages, so the PDF matches the
    screen: same font + line spacing + wrapping (it's the browser laying out the same content), and
@@ -893,45 +901,23 @@
   .node-referenceList { page: iw-refs; }
   .inkwave-page-gap:has(+ .node-referenceList) { height: 0 !important; min-height: 0 !important; }
 
-  /* ── Print-native page numbers + logo (Peter, 2026-07-10: 'the exact way they appear in the
-     editor'). The on-screen .iw-page-guides layer can't print (its y-positions include screen-only
-     gap heights), so each break widget carries the NEXT page's chrome: logo top-right (right 47,
-     +12px below the page top — the widget's bottom minus the simulated top margin IS the page top)
-     and the page number (right 24, +14px), counter-driven. Page 1's chrome rides the magnify-box.
-     Known gap: pages the browser creates INSIDE the reference list get margins but no number. */
-  .scroll-paper { counter-reset: iwpage 1; }
-  .inkwave-page-gap { counter-increment: iwpage; position: relative !important; overflow: visible !important; }
-  .inkwave-page-gap::before {
-    content: '';
-    position: absolute; right: 47px;
-    top: calc(100% - var(--iw-print-topm, 72px) + 12px);
-    width: 76px; height: 76px;
-    background: url('/inkwave-logo-v7.png') center / contain no-repeat;
-    opacity: 0.82;
-  }
-  .inkwave-page-gap::after {
-    content: counter(iwpage);
-    position: absolute; right: 24px;
-    top: calc(100% - var(--iw-print-topm, 72px) + 14px);
-    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 17px; color: #000;
-  }
-  .iw-magnify-box { position: relative !important; }
-  .iw-magnify-box::before {
-    content: '';
-    position: absolute; top: 12px; right: 47px; width: 76px; height: 76px;
-    background: url('/inkwave-logo-v7.png') center / contain no-repeat;
-    opacity: 0.82;
-  }
-  .iw-magnify-box::after {
-    content: '1';
-    position: absolute; top: 14px; right: 24px;
-    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 17px; color: #000;
+  /* ── Print page chrome (Peter, 2026-07-10: bottom centre) ──
+     Logo: one FIXED element (Scroll renders .iw-print-logo) — position:fixed repeats on every
+     printed page in Chromium; sits just above the bottom margin, centred. Page numbers: the @page
+     @bottom-center margin box with counter(page) — real margin boxes need a real margin, so @page
+     gets margin-bottom (see the @page rules; 8px inside MARGIN_BOTTOM so our forced breaks always
+     land first and parity can't flip). Bonus: pages the browser breaks naturally inside the
+     reference list are numbered too. Firefox has no margin boxes — numbers are Chromium-only. */
+  .iw-print-logo {
+    display: block !important;
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    width: 56px; height: 56px; opacity: 0.82;
   }
 
-  /* No watermarks in print: strip the tea-stain egg regardless of the on-screen setting. */
-  .scas-red[data-scas-old]::after {
-    background: none !important; padding: 0 !important; left: 0 !important; border-radius: 0 !important;
-  }
+  /* No watermarks in print: the old-word stamp (egg + text) and the time badge don't print,
+     regardless of the on-screen crossout/watermark settings. */
+  .scas-red[data-scas-old]::after { content: none !important; }
+  .scas-red[data-scas-time]::before { content: none !important; }
   .inkwave-page-gap-band { display: none !important; }
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
