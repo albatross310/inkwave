@@ -45,6 +45,10 @@ interface PageRef {
   // Two-tier canvases: `base` is the cheap low-res always-there render (never evicted — fast scroll
   // falls back to it instead of white); `sharp` is the supersampled on-demand one that covers it.
   baseCanvas: HTMLCanvasElement | null; sharpCanvas: HTMLCanvasElement | null
+  // The in-flight sharp render (canvas + TEXT LAYER attached when it resolves). Lets a second caller
+  // AWAIT a render the IntersectionObserver already started instead of resolving early — the
+  // atomic-reveal barrier depends on this (see renderOnePage).
+  renderPromise: Promise<void> | null
 }
 interface Pending { text: string; page: number; rects: HighlightRect[]; groups: Array<{ page: number; rects: HighlightRect[] }>; x: number; y: number }
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
@@ -97,13 +101,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const printedKnownRef = useRef(false) // true when Haiku verified the offset
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  // ATOMIC CONTENTS REVEAL (Peter, 2026-07-09): the panel window pops instantly (PdfSidePanel), but
-  // the toolbar / page canvases / text layer / highlight overlays used to pop in piecemeal. Keep the
-  // WHOLE viewer at opacity 0 (still laid out + rendering underneath — same trick as the editor's
-  // settle gate) behind a blank-paper shimmer, and flip ONE toggle when the initial viewport is
-  // actually ready: placeholders built + overlays drawn (renderPages) + the visible pages' canvas &
-  // text layer painted (renderVisibleNow) + the initial scroll applied. Capped at 1.5s like the
-  // editor's reveal gate, so a slow/huge PDF can never hold the panel hostage.
+  // ATOMIC CONTENTS REVEAL (Peter, 2026-07-09): the panel window pops instantly (PdfSidePanel) as
+  // pure WHITE + the ✕ close button — nothing else. The WHOLE viewer (toolbar, context strip, find
+  // bar, zoom + dock controls, pages) stays at opacity 0 (still laid out + rendering underneath —
+  // same trick as the editor's settle gate) behind a white cover, and flips in ONE toggle when the
+  // initial viewport is actually ready: placeholders built + the visible pages' canvas AND text-layer
+  // spans attached (renderVisibleNow → renderOnePage's text-ready contract) + highlight overlays
+  // re-drawn + the initial scroll applied. Capped at 1.5s like the editor's reveal gate, so a
+  // slow/huge PDF can never hold the panel hostage.
   const [revealed, setRevealed] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
@@ -266,10 +271,23 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
 
   // Paint one page's canvas + text layer on demand (called by the IntersectionObserver). Placeholder
   // sizes are already correct, so this never reflows — which is also what stops the open-scroll snap.
-  async function renderOnePage(idx: number, token: number) {
+  //
+  // TEXT-READY CONTRACT (Peter, 2026-07-09 "the text takes a moment longer"): the returned promise
+  // resolves only when the canvas AND the text-layer spans are actually attached to the DOM (the
+  // TextLayer render task below is awaited before `rendered` flips). Crucially, a caller that asks
+  // for a page whose render is already IN FLIGHT — the IntersectionObserver usually starts the
+  // visible pages before renderVisibleNow asks for them — gets THAT render's promise, not an instant
+  // resolve. The old `if (rendering) return` early-out is exactly what let the atomic reveal fire
+  // with the canvas painted but the text layer still streaming in.
+  function renderOnePage(idx: number, token: number): Promise<void> {
     const pg = pagesRef.current[idx]
-    if (!pg || pg.rendered || pg.rendering) return
+    if (!pg || pg.rendered) return Promise.resolve()
+    if (pg.rendering) return pg.renderPromise ?? Promise.resolve()
     pg.rendering = true
+    pg.renderPromise = renderOnePageInner(pg, token)
+    return pg.renderPromise
+  }
+  async function renderOnePageInner(pg: PageRef, token: number) {
     sharpActiveRef.current++
     try {
     const pdfjs = await getPdfjs()
@@ -402,6 +420,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       pg.sharpCanvas = null
       pg.textLayer.textContent = ''
       pg.rendered = false
+      pg.renderPromise = null // stale (resolved) promise — the re-render on scroll-back makes a fresh one
     })
   }
 
@@ -452,7 +471,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       pageEl.appendChild(label)
 
       viewer.appendChild(pageEl)
-      pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false, baseCanvas: null, sharpCanvas: null })
+      pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false, baseCanvas: null, sharpCanvas: null, renderPromise: null })
     }
     if (token !== renderTokenRef.current) return
     redrawOverlays()
@@ -582,10 +601,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         }
         requestAnimationFrame(() => {
           settle(3) // the FIRST scrollToTarget just ran synchronously — the viewport is now the real one
-          // ATOMIC REVEAL: paint the initial viewport's canvas + text layer (overlays were drawn in
-          // renderPages), then flip the one visibility toggle. The IntersectionObserver keeps driving
-          // later scroll-in renders exactly as before — this only fronts the pages the reveal shows.
-          void renderVisibleNow(renderTokenRef.current).then(() => { if (!cancelled) setRevealed(true) })
+          // ATOMIC REVEAL BARRIER: await the visible pages' canvas AND text layer (renderVisibleNow →
+          // renderOnePage resolves only with the text-layer spans attached, INCLUDING renders the
+          // IntersectionObserver started first — see the text-ready contract on renderOnePage), then
+          // re-draw the highlight overlays against the final layout as part of the same barrier, and
+          // only then — after the commit has painted (double rAF) — flip the one visibility toggle.
+          // The IntersectionObserver keeps driving later scroll-in renders exactly as before.
+          void renderVisibleNow(renderTokenRef.current).catch(() => {}).then(() => {
+            if (cancelled) return
+            redrawOverlays()
+            requestAnimationFrame(() => requestAnimationFrame(() => { if (!cancelled) setRevealed(true) }))
+          })
         })
       } catch {
         if (!cancelled) { setStatus('error'); setRevealed(true) } // error text shows immediately — no gate
@@ -1088,13 +1114,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
-      {/* Blank-paper shimmer while the contents gate is closed — the panel window is already up;
-          toolbar + pages + text + highlights arrive together when `revealed` flips (see the load
-          effect). Sits ABOVE the opacity-0 contents so the in-progress layout never peeks through. */}
+      {/* Pre-reveal cover (Peter, 2026-07-09 refinement): the instant state is JUST a white window
+          with the ✕ in the corner — no toolbar, no shimmer, nothing else. Everything (toolbar, pages,
+          text, highlights, find bar, zoom + dock controls) arrives together when `revealed` flips.
+          The cover sits ABOVE the opacity-0 contents so the in-progress layout never peeks through;
+          the ✕ sits above the cover so the panel stays dismissible from the first frame. */}
       {!revealed && (
-        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e9e7e3' }}>
-          <div className="iw-subtle-flash" style={{ width: 'min(72%, 440px)', height: '76%', background: '#fdfdfc', borderRadius: 4, boxShadow: '0 1px 6px rgba(0,0,0,0.18)' }} />
-        </div>
+        <>
+          <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }} />
+          {onClose && (
+            <button type="button" onClick={onClose} title="Close (Esc)"
+              style={{ position: 'absolute', top: 8, right: 12, zIndex: 11, border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.7rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+          )}
+        </>
       )}
 
       {/* ONE fade for everything inside the window: toolbar, context strip, pages (canvas + text

@@ -181,11 +181,10 @@ export function PdfSidePanel() {
         )}
 
         {loading && !viewing ? (
-          // Same blank-paper shimmer the viewer shows behind its contents gate (PdfViewer), so the
-          // window pops instantly with ONE consistent interior until the atomic contents reveal.
-          <div aria-hidden="true" style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e9e7e3' }}>
-            <div className="iw-subtle-flash" style={{ width: 'min(72%, 440px)', height: '76%', background: '#fdfdfc', borderRadius: 4, boxShadow: '0 1px 6px rgba(0,0,0,0.18)' }} />
-          </div>
+          // Instant state = pure white + the floating ✕ above (Peter, 2026-07-09) — same interior the
+          // viewer's pre-reveal cover shows, so the window is ONE white surface until the atomic
+          // contents reveal. No text, no shimmer.
+          <div aria-hidden="true" style={{ flex: 1, minHeight: 0, background: '#fff' }} />
         ) : noAttachment ? (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '1rem', fontStyle: 'italic' }}>No attachment</div>
         ) : error ? (
