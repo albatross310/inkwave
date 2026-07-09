@@ -94,6 +94,16 @@ const CONTEXT_WORDS = 4  // words of unchanged context shown either side of each
 
 function wc(text: string): number { return (text.match(/\S+/g) ?? []).length }
 
+// Split a change's text into [lead whitespace, visible core, trail whitespace] so the highlight (fill +
+// outline) wraps ONLY the core — leading/trailing spaces and especially RETURNS never paint an empty
+// highlighted line. `core` is '' when the change is pure whitespace (then it's rendered plain, unhighlighted).
+function splitEdges(text: string): { lead: string; core: string; trail: string } {
+  const lead = /^\s+/.exec(text)?.[0] ?? ''
+  if (lead.length === text.length) return { lead: '', core: '', trail: text }
+  const trail = /\s+$/.exec(text)?.[0] ?? ''
+  return { lead, core: text.slice(lead.length, text.length - trail.length), trail }
+}
+
 /** First n words + their trailing horizontal whitespace. */
 function takeFirst(text: string, n: number): string {
   if (n <= 0) return ''
@@ -197,7 +207,10 @@ function buildDiffNodes(
 
   const emitChange = (text: string, style: React.CSSProperties, opIdx: number, cls: string) => {
     if (!text) return; flushGap()
+    const { lead, core, trail } = splitEdges(text)
+    if (!core) { nodes.push(<span key={`cw${k++}`}>{text}</span>); return } // pure whitespace/returns → no highlight
     const clickable = !!onChangeClick
+    if (lead) nodes.push(<span key={`cl${k++}`}>{lead}</span>)
     nodes.push(
       <span
         key={`c${k++}`}
@@ -208,8 +221,9 @@ function buildDiffNodes(
         onMouseEnter={onHoverOp ? () => onHoverOp!(opIdx) : undefined}
         onMouseLeave={onHoverOp ? () => onHoverOp!(null) : undefined}
         title={clickable ? 'Jump to this change in document' : undefined}
-      >{text}</span>
+      >{core}</span>
     )
+    if (trail) nodes.push(<span key={`ct${k++}`}>{trail}</span>)
   }
 
   for (let i = 0; i < n; i++) {
@@ -274,29 +288,27 @@ function FullDiffView({
     ? { onMouseEnter: (i: number) => onHoverOp(i), onMouseLeave: () => onHoverOp(null) }
     : null
   const spans = ops.map((op, i) => {
-    if (op.type === 'del') return (
-      <span key={i} className="diff-del" data-opidx={String(i)}
-        style={{
-          color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)',
-        }}
-        onClick={onOpClick ? () => onOpClick(i) : undefined}
-        onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
-        onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
-        title={onOpClick ? 'Jump to this change in diff panel' : undefined}
-      >{op.text}</span>
+    if (op.type === 'same') return <span key={i} data-opidx={String(i)}>{op.text}</span>
+    const { lead, core, trail } = splitEdges(op.text)
+    if (!core) return <span key={i} data-opidx={String(i)}>{op.text}</span> // whitespace/returns → plain, no highlight
+    const cls = op.type === 'del' ? 'diff-del' : 'diff-add'
+    const style: React.CSSProperties = op.type === 'del'
+      ? { color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)' }
+      : { background: 'rgba(22,163,74,0.15)', color: '#166534' }
+    // Outer span carries no highlight; the INNER core span holds the class + data-opidx so lead/trail
+    // whitespace (esp. returns) never gets outlined/filled.
+    return (
+      <span key={i}>
+        {lead}
+        <span className={cls} data-opidx={String(i)} style={style}
+          onClick={onOpClick ? () => onOpClick(i) : undefined}
+          onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
+          onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
+          title={onOpClick ? 'Jump to this change in diff panel' : undefined}
+        >{core}</span>
+        {trail}
+      </span>
     )
-    if (op.type === 'add') return (
-      <span key={i} className="diff-add" data-opidx={String(i)}
-        style={{
-          background: 'rgba(22,163,74,0.15)', color: '#166534',
-        }}
-        onClick={onOpClick ? () => onOpClick(i) : undefined}
-        onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
-        onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
-        title={onOpClick ? 'Jump to this change in diff panel' : undefined}
-      >{op.text}</span>
-    )
-    return <span key={i} data-opidx={String(i)}>{op.text}</span>
   })
   return (
     <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
@@ -928,7 +940,7 @@ function SplitDiffView({
       // the empty notch regions past the end of one line / before the start of the next). Each rect is
       // padded vertically so the leading BETWEEN wrapped lines still counts as inside the block.
       for (const r of (el as HTMLElement).getClientRects()) {
-        const pad = r.height * 0.45
+        const pad = 3 // line-boxes are contiguous; a hair of pad only bridges sub-pixel seams
         if (x >= r.left && x <= r.right && y >= r.top - pad && y <= r.bottom + pad) hit = true
       }
     })
@@ -958,10 +970,15 @@ function SplitDiffView({
       const t = e.target as Node, R = rightScrollRef.current, L = leftScrollRef.current
       if (R && R.contains(t)) driverRef.current = 'right'
       else if (L && L.contains(t)) driverRef.current = 'left'
+      // Drop the glow the instant the cursor leaves the diff's block — mouseleave can lag on a fast move.
+      const cur = lastHoveredRef.current
+      if (cur != null && !panningRef.current && !scrollingRef.current && !cursorInDiff(cur)) {
+        setAttr(cur, 'data-hover', false); lastHoveredRef.current = null
+      }
     }
     el.addEventListener('mousemove', onMove, { passive: true })
     return () => el.removeEventListener('mousemove', onMove)
-  }, [])
+  }, [cursorInDiff, setAttr])
 
   // Suppress the hover glow WHILE either pane is scrolling; re-light the hovered diff once it settles. This
   // replaces the old "must have moved onto it" velocity gate — scrolling is the case that spuriously lit it.
