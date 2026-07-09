@@ -29,7 +29,7 @@ function NavSide({
   onSnap, snapDisabled,
   onVer, verDisabled,
   hasVersions, isPhone,
-  overridePos,
+  overridePos, midPct = 50,
 }: {
   side: 'left' | 'right'
   snapDir: 'back' | 'fwd'
@@ -37,6 +37,7 @@ function NavSide({
   onVer: () => void;  verDisabled: boolean
   hasVersions: boolean; isPhone: boolean
   overridePos?: React.CSSProperties
+  midPct?: number
 }) {
   const bracket    = snapDir === 'back' ? '<'  : '>'
   const bracketVer = snapDir === 'back' ? '<<' : '>>'
@@ -71,7 +72,7 @@ function NavSide({
     <div style={{
       position: 'fixed',
       ...(overridePos ?? { [side]: 16 }),
-      top: '38%', transform: 'translateY(-50%)',   // sit ABOVE the midline
+      top: `${midPct}%`, transform: 'translateY(-50%)',   // centred on the reading line
       zIndex: 45, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
     }}>
       {/* Snapshot nav. Summaries no longer float over the document — they live in the RHS side panel. */}
@@ -716,6 +717,11 @@ function SplitDiffView({
   }
 }) {
   const vertical = isPhone || isNarrow
+  // The reading line + alignment reference sits at the GOLDEN RATIO from the top (0.382) in the wide view
+  // — aligned content lands in the upper third with more context below — and at the centre (0.5) in narrow.
+  // A ref so the sync effects (which don't re-subscribe on the flip) always read the current value.
+  const midFrac = vertical ? 0.5 : 0.382
+  const midFracRef = useRef(midFrac); midFracRef.current = midFrac
   const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const [snapMode, setSnapMode] = useState<SnapMode>(() => {
@@ -1021,7 +1027,7 @@ function SplitDiffView({
       const lTop = lEl.getBoundingClientRect().top - L.getBoundingClientRect().top + L.scrollTop
       const newScrollTop = Math.max(0, lTop - yr)
       L.scrollTo({ top: newScrollTop, behavior: 'smooth' })
-      anchorRatioRef.current = (newScrollTop + L.clientHeight / 2) / L.scrollHeight
+      anchorRatioRef.current = (newScrollTop + L.clientHeight * midFracRef.current) / L.scrollHeight
     }
   }, [setAttr])
 
@@ -1055,7 +1061,7 @@ function SplitDiffView({
   const onLeftScroll = useCallback(() => {
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
-    anchorRatioRef.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight
+    anchorRatioRef.current = (el.scrollTop + el.clientHeight * midFracRef.current) / el.scrollHeight
     // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
     // the Scroll surface, so its own scroll handler never fires.
     const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
@@ -1103,7 +1109,7 @@ function SplitDiffView({
         // the first diff and below the last (see below), which keeps the extreme diffs travelling together
         // right to the top/bottom (algebra: their screen position matches in both panes under a 1:1 map).
         knots.sort((a, b) => a.ly - b.ly)
-        const lMid = L.scrollTop + L.clientHeight / 2
+        const lMid = L.scrollTop + L.clientHeight * midFracRef.current
         // When the editor is pinned at an extreme, the extreme diff can't reach the midline — keep it fully
         // lit there anyway (its glow distance is clamped to 0 below).
         const atTop = L.scrollTop <= 1
@@ -1148,7 +1154,7 @@ function SplitDiffView({
           }
         }
         if (driverRef.current === 'left' && bijectionRef.current === 'both') { // editor drives diff (forward) only
-          rightTargetRef.current = Math.max(0, ry - R.clientHeight / 2)
+          rightTargetRef.current = Math.max(0, ry - R.clientHeight * midFracRef.current)
           if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
           else runSpring()
         }
@@ -1241,14 +1247,14 @@ function SplitDiffView({
     const onRightScroll = () => {
       // While a click flies the diff pane (editor static), light diffs off the DIFF pane's own midline —
       // onLeftScroll's glow can't fire because the editor isn't moving.
-      if (diffFlightRef.current) setGlowFromDiffMid(R.scrollTop + R.clientHeight / 2)
+      if (diffFlightRef.current) setGlowFromDiffMid(R.scrollTop + R.clientHeight * midFracRef.current)
       // Clamp the USER's diff-panel scroll so it ENDS at the first/last diff lock — no over-scroll into the
       // lead/trail whitespace (keeps the extremes consistent with the editor). Only while the diff drives,
       // so it never fights the forward-drive spring.
       const ks = knotsRef.current
       if (ks.length && driverRef.current === 'right' && !panningRef.current) { // never clamp mid right-drag (it stuck on the first move)
-        const minS = Math.max(0, ks[0].ry - R.clientHeight / 2)
-        const maxS = ks[ks.length - 1].ry - R.clientHeight / 2
+        const minS = Math.max(0, ks[0].ry - R.clientHeight * midFracRef.current)
+        const maxS = ks[ks.length - 1].ry - R.clientHeight * midFracRef.current
         if (R.scrollTop < minS) { R.scrollTop = minS; return }
         if (maxS > minS && R.scrollTop > maxS) { R.scrollTop = maxS; return }
       }
@@ -1258,7 +1264,7 @@ function SplitDiffView({
       rTick = true
       requestAnimationFrame(() => {
         rTick = false
-        L.scrollTop = Math.max(0, inverse(R.scrollTop + R.clientHeight / 2) - L.clientHeight / 2)
+        L.scrollTop = Math.max(0, inverse(R.scrollTop + R.clientHeight * midFracRef.current) - L.clientHeight * midFracRef.current)
       })
     }
     R.addEventListener('scroll', onRightScroll, { passive: true })
@@ -1355,13 +1361,13 @@ function SplitDiffView({
           if (fenceRaf === 0) natTarget = el.scrollTop
           const delta = e.deltaMode !== 0 ? e.deltaY * 40 : e.deltaY
           natTarget = Math.max(0, Math.min(maxScroll(), natTarget + delta))
-          const mid = natTarget + el.clientHeight / 2, hw = Math.abs(delta) / 2
+          const mid = natTarget + el.clientHeight * midFracRef.current, hw = Math.abs(delta) / 2
           let pick: Centre | null = null
           for (const c of getCentres()) {
             if (Math.abs(c.c - mid) > hw) continue
             if (!pick || (c.add !== pick.add ? c.add : c.len > pick.len)) pick = c // green first, then longest
           }
-          dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight / 2)) : natTarget
+          dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight * midFracRef.current)) : natTarget
           if (!fenceRaf) fenceRaf = requestAnimationFrame(easeFence)
           return
         }
@@ -1392,7 +1398,7 @@ function SplitDiffView({
           const elRect = el.getBoundingClientRect()
           const tRect  = target.getBoundingClientRect()
           const topInContent = tRect.top - elRect.top + el.scrollTop
-          el.scrollTop = Math.max(0, topInContent - el.clientHeight / 2 - 8) // diff sits just below the line
+          el.scrollTop = Math.max(0, topInContent - el.clientHeight * midFracRef.current - 8) // diff sits just below the line
           const s = midlineSignature(el); if (s) anchorSigRef.current = s
           return
         }
@@ -1401,7 +1407,7 @@ function SplitDiffView({
       const sig = anchorSigRef.current
       let target: number | null = null
       if (sig) target = scrollTopForSignature(el, sig, anchorRatioRef.current)
-      if (target == null) target = anchorRatioRef.current * el.scrollHeight - el.clientHeight / 2
+      if (target == null) target = anchorRatioRef.current * el.scrollHeight - el.clientHeight * midFracRef.current
       el.scrollTop = Math.max(0, target)
       // Refresh the anchor from the new midline so the next navigation stays locked to
       // these same words even if the user never manually scrolls.
@@ -1463,7 +1469,7 @@ function SplitDiffView({
   // A dotted reading-line at the pane centre (both panes share it).
   const midline = (
     <div aria-hidden="true" style={{
-      position: 'absolute', top: '50%', left: 0, right: 0, zIndex: 5,
+      position: 'absolute', top: `${midFrac * 100}%`, left: 0, right: 0, zIndex: 5,
       borderTop: '1px dashed rgba(92,45,138,0.38)', pointerEvents: 'none', transform: 'translateY(-0.5px)',
     }} />
   )
@@ -1492,8 +1498,8 @@ function SplitDiffView({
         <Scroll phone={isPhone}><div style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
       </div>
       {nav?.show && (<>
-        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} overridePos={{ position: 'absolute', left: 8 }} />
-        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} overridePos={{ position: 'absolute', right: 8 }} />
+        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
+        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={midFrac * 100} overridePos={{ position: 'absolute', right: 8 }} />
       </>)}
     </div>
   )
@@ -1503,7 +1509,7 @@ function SplitDiffView({
       onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
       onMouseLeave={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
       style={{
-        position: 'absolute', [side]: 6, top: '50%', transform: 'translateY(-50%)', zIndex: 8,
+        position: 'absolute', [side]: 6, top: `${midFrac * 100}%`, transform: 'translateY(-50%)', zIndex: 8,
         width: 15, height: 50, borderRadius: 5, border: `1px solid rgba(140,90,200,${disabled ? 0.1 : 0.28})`,
         background: disabled ? NAV_BG_DIS : NAV_BG, color: disabled ? NAV_FG_DIS : NAV_FG,
         cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
