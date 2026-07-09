@@ -526,6 +526,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   const [panelDims, setPanelDims] = useState({ w: 0, h: 0 }) // the minimap's own box, for the aspect-ratio grid
   const pageHRef = useRef(1000)
   const gridRef = useRef<HTMLDivElement>(null)
+  const marksSigRef = useRef('')
 
   const measure = useCallback(() => {
     const el = leftRef.current
@@ -547,6 +548,11 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
       const page = Math.max(0, Math.min(n - 1, Math.floor(y / pageH)))
       m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add' })
     })
+    // Skip the setState when the marks are identical — the observers fire on every resize tick and a fresh
+    // array would re-render the whole grid for nothing (same pattern PageGuides uses).
+    const sig = n + '|' + m.map(k => `${k.page}:${Math.round(k.frac * 100)}:${k.add ? 1 : 0}`).join(',')
+    if (sig === marksSigRef.current) return
+    marksSigRef.current = sig
     setMarks(m)
   }, [ops, leftRef])
 
@@ -554,18 +560,25 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   useEffect(() => {
     const el = leftRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => measure()); ro.observe(el)
-    return () => ro.disconnect()
+    let raf = 0
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => measure()) }) // coalesce
+    ro.observe(el)
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
   }, [measure, leftRef])
 
-  // Watch the minimap's OWN box so the grid re-solves as the panel resizes (recomputed per resize frame).
+  // Watch the minimap's OWN box so the grid re-solves as the panel resizes — coalesced + guarded so identical
+  // sizes don't re-render (the observer fires every frame during a drag).
   useEffect(() => {
     const grid = gridRef.current
     if (!grid) return
-    const set = () => setPanelDims({ w: grid.clientWidth, h: grid.clientHeight })
-    const ro = new ResizeObserver(set); ro.observe(grid)
+    let raf = 0
+    const set = () => setPanelDims(prev => {
+      const w = grid.clientWidth, h = grid.clientHeight
+      return prev.w === w && prev.h === h ? prev : { w, h }
+    })
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(set) }); ro.observe(grid)
     set()
-    return () => ro.disconnect()
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
   }, [])
 
   // Grid keeps the LONGEST snapshot's structure; a shorter snapshot leaves the extra slots EMPTY rather
@@ -1219,9 +1232,12 @@ function SplitDiffView({
         //  recompute, breaking the top/bottom lock. The wheel/pan clamp in onRightScroll handles end-at-lock.)
       }
     }
-    const id = requestAnimationFrame(recompute)
-    window.addEventListener('resize', recompute)
-    return () => { cancelAnimationFrame(id); window.removeEventListener('resize', recompute) }
+    // rAF-coalesce: a window resize fires many events per drag; run the heavy layout-read sweep at most once
+    // per frame on the settled size instead of synchronously per event.
+    let rafId = requestAnimationFrame(recompute)
+    const onResize = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recompute) }
+    window.addEventListener('resize', onResize)
+    return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', onResize) }
   }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx])
 
   // REVERSE SYNC (bijection): scrolling the DIFF panel maps the EDITOR to the inverse-bijection position
@@ -1473,11 +1489,6 @@ function SplitDiffView({
       borderTop: '1px dashed rgba(92,45,138,0.38)', pointerEvents: 'none', transform: 'translateY(-0.5px)',
     }} />
   )
-  const gripDots = (
-    <div style={{ display: 'flex', flexDirection: vertical ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
-      {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
-    </div>
-  )
 
   // ── The three panes as size-parameterised elements, so desktop (diff | editor | side) and narrow
   //    (editor on top; side + diff below) can arrange the SAME panes differently. ──
@@ -1542,48 +1553,52 @@ function SplitDiffView({
       <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
     </div>
   )
-  // Divider: desktop dividers are draggable; the narrow separators are thin fixed lines.
-  const dragDivider = (onDown: (x: number, y: number) => void, isDrag: React.MutableRefObject<boolean>, title: string) => (
-    <div style={{ [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10, background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none' }}
-      onMouseDown={(e) => { e.preventDefault(); onDown(e.clientX, e.clientY) }}
-      onTouchStart={(e) => { e.preventDefault(); onDown(e.touches[0].clientX, e.touches[0].clientY) }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
-      onMouseLeave={(e) => { if (!isDrag.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
-      title={title}>{gripDots}</div>
-  )
-  const thinSep = (axis: 'row' | 'col') => (
-    <div style={{ [axis === 'row' ? 'height' : 'width']: 3, flexShrink: 0, background: 'rgba(92,45,138,0.14)' }} />
+  // Grid divider filling its template track. Same DOM element whether draggable (resize) or a fixed thin
+  // separator, so it never remounts across the wide/narrow flip. orient picks the resize axis + grip.
+  const gridDivider = (
+    area: string, orient: 'row' | 'col', onDown: (x: number, y: number) => void,
+    isDrag: React.MutableRefObject<boolean>, draggable: boolean, title: string,
+  ) => (
+    <div style={{
+      gridArea: area, width: '100%', height: '100%', minWidth: 0, minHeight: 0, zIndex: 10,
+      background: draggable ? 'rgba(92,45,138,0.10)' : 'rgba(92,45,138,0.14)',
+      cursor: draggable ? (orient === 'row' ? 'row-resize' : 'col-resize') : 'default',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
+    }}
+      onMouseDown={draggable ? (e) => { e.preventDefault(); onDown(e.clientX, e.clientY) } : undefined}
+      onTouchStart={draggable ? (e) => { e.preventDefault(); onDown(e.touches[0].clientX, e.touches[0].clientY) } : undefined}
+      onMouseEnter={draggable ? (e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)') : undefined}
+      onMouseLeave={draggable ? (e) => { if (!isDrag.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' } : undefined}
+      title={draggable ? title : undefined}>
+      {draggable && (
+        <div style={{ display: 'flex', flexDirection: orient === 'row' ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
+          {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
+        </div>
+      )}
+    </div>
   )
 
+  // ONE stable DOM structure — the same 5 items in a constant order — placed by CSS-grid areas that differ
+  // for wide vs narrow. Because the panes keep their position/identity, the wide↔narrow flip re-lays-out via
+  // CSS instead of tearing down and rebuilding every pane (the remount storm that caused the switch jank).
+  //   wide:  [ diff | d1 | editor | d2 | side ]           (one row)
+  //   narrow: editor on top; d1 splits it from a bottom row of [ side | d2 | diff ]
+  const grid: React.CSSProperties = vertical
+    ? { gridTemplateColumns: '1fr 3px 1fr', gridTemplateRows: `${splitPct}% 7px 1fr`,
+        gridTemplateAreas: '"editor editor editor" "d1 d1 d1" "side d2 diff"' }
+    : { gridTemplateColumns: `${splitPct}% 7px 1fr 7px ${sidePanelPx}px`, gridTemplateRows: '1fr',
+        gridTemplateAreas: '"diff d1 editor d2 side"' }
   return (
-    <div ref={containerRef} style={{
-      display: 'flex', flexDirection: vertical ? 'column' : 'row', height: '100%', overflow: 'hidden',
-    }}>
-      {vertical ? (
-        // ── NARROW / PHONE: editor on TOP; below it a row of [summary + minimap | diffs]. ──
-        <>
-          {editorPaneEl({ height: `${splitPct}%` })}
-          {dragDivider(startDrag, dragging, 'Drag to resize')}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-            {sidePaneEl({ flex: 1, minWidth: 0 })}
-            {thinSep('col')}
-            {diffPaneEl({ flex: 1, minWidth: 0 })}
-          </div>
-        </>
-      ) : (
-        // ── DESKTOP: diff | editor | summary + minimap. ──
-        <>
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-            {diffPaneEl({ width: `${splitPct}%` })}
-            {dragDivider(startDrag, dragging, 'Drag to resize')}
-            {editorPaneEl({ flex: 1 })}
-          </div>
-          {dragDivider(() => startSideDrag(), sideDragging, 'Drag to resize the side panel')}
-          {sidePaneEl({ width: sidePanelPx })}
-        </>
-      )}
+    <>
+      <div ref={containerRef} style={{ display: 'grid', height: '100%', overflow: 'hidden', ...grid }}>
+        {diffPaneEl({ gridArea: 'diff', minWidth: 0, minHeight: 0 })}
+        {gridDivider('d1', vertical ? 'row' : 'col', startDrag, dragging, true, 'Drag to resize')}
+        {editorPaneEl({ gridArea: 'editor', minWidth: 0, minHeight: 0 })}
+        {gridDivider('d2', 'col', () => startSideDrag(), sideDragging, !vertical, 'Drag to resize the side panel')}
+        {sidePaneEl({ gridArea: 'side', minWidth: 0, minHeight: 0 })}
+      </div>
       <Toast />
-    </div>
+    </>
   )
 }
 
