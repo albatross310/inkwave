@@ -481,6 +481,24 @@ function stackHeight(pages: number): number {
   return Math.ceil(Math.sqrt(pages))
 }
 
+// Pick the rows×cols to tile `n` page thumbnails into a W×H panel so each page CELL is portrait — its
+// height:width sits in [MIN,MAX] (≈ a page). We try every row count, score how far the resulting cell ratio
+// falls outside the band (heavily) plus its distance from the ideal (lightly), and take the best. Cells are
+// 1fr so they then scale to fill the panel. Recomputed whenever the panel resizes.
+function bestGrid(n: number, W: number, H: number): { rows: number; cols: number } {
+  if (n <= 1 || W <= 0 || H <= 0) return { rows: Math.max(1, n), cols: 1 }
+  const MIN = 3, MAX = 6, IDEAL = 4.2 // page thumbnail height:width
+  let best = { rows: 1, cols: n }, bestScore = Infinity
+  for (let rows = 1; rows <= n; rows++) {
+    const cols = Math.ceil(n / rows)
+    const ratio = (H / rows) / (W / cols) // cell height : width
+    const outside = ratio < MIN ? MIN - ratio : ratio > MAX ? ratio - MAX : 0
+    const score = outside * 100 + Math.abs(ratio - IDEAL)
+    if (score < bestScore) { bestScore = score; best = { rows, cols } }
+  }
+  return best
+}
+
 // A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
 // (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
 // Click or drag scrolls the panes so that point sits on the midline.
@@ -492,6 +510,7 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
   const [pages, setPages] = useState(1)
   const [maxPages, setMaxPages] = useState(1) // largest page count seen → keep the grid structure stable
   const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean }>>([])
+  const [panelDims, setPanelDims] = useState({ w: 0, h: 0 }) // the minimap's own box, for the aspect-ratio grid
   const pageHRef = useRef(1000)
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -526,11 +545,26 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     return () => ro.disconnect()
   }, [measure, leftRef])
 
+  // Watch the minimap's OWN box so the grid re-solves as the panel resizes (recomputed per resize frame).
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const set = () => setPanelDims({ w: grid.clientWidth, h: grid.clientHeight })
+    const ro = new ResizeObserver(set); ro.observe(grid)
+    set()
+    return () => ro.disconnect()
+  }, [])
+
   // Grid keeps the LONGEST snapshot's structure; a shorter snapshot leaves the extra slots EMPTY rather
-  // than showing pages that aren't there.
+  // than showing pages that aren't there. Rows×cols come from the aspect-ratio solver against the live panel
+  // size (falls back to the fixed f(n) before the box is measured).
   const total = Math.max(pages, maxPages)
-  const height = stackHeight(total)
-  const cols = Math.ceil(total / height)
+  const { rows: height, cols } = useMemo(
+    () => (panelDims.w > 0 && panelDims.h > 0)
+      ? bestGrid(total, panelDims.w, panelDims.h)
+      : { rows: stackHeight(total), cols: Math.ceil(total / stackHeight(total)) },
+    [total, panelDims.w, panelDims.h],
+  )
   const GAP = 4
 
   // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
