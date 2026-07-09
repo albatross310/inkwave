@@ -81,7 +81,17 @@
   }
   /* Waves-through scrollbar: transparent track/corner, translucent thumb. Styling
      ::-webkit-scrollbar still forces the classic (always-visible) bar so layout stays stable. */
-  .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar { width: 13px; height: 13px; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar { width: 13px; height: 0; }
+  /* No horizontal BAR ever (Peter: distracting, does little) — sideways scrolling stays possible
+     (trackpad/shift-wheel) until the fit-to-width zoom floor makes it moot. */
+  .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar:horizontal { display: none; }
+  /* Idle fade: no scroll/pointer activity near the bar for a while → the thumb becomes invisible
+     (track is already transparent), so only waves remain. Scroll.tsx toggles .iw-sb-idle. */
+  .inkwave-editor-surface.iw-fill:not(.is-phone).iw-sb-idle { scrollbar-color: transparent transparent; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone).iw-sb-idle::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-color: transparent;
+  }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-track { background: transparent; }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-corner { background: transparent; }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-thumb {
@@ -90,7 +100,8 @@
     background-clip: padding-box;
     border: 3px solid transparent; /* keeps the slim pill inset without painting the channel */
   }
-  .inkwave-editor-surface.iw-fill:not(.is-phone)::-webkit-scrollbar-thumb:hover { background: rgba(40, 40, 46, 0.65); background-clip: padding-box; border: 3px solid transparent; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-sb-idle)::-webkit-scrollbar-thumb:hover { background: rgba(40, 40, 46, 0.65); background-clip: padding-box; border: 3px solid transparent; }
+  .inkwave-editor-surface.iw-fill:not(.is-phone) { transition: scrollbar-color 0.3s ease; }
 
   /* Scrollbar bleed fix WITHOUT a transparent surface: the fill surface keeps its OPAQUE aqua base +
      fixed ::before waves, so it scrolls on the compositor (a transparent surface over a separate fixed

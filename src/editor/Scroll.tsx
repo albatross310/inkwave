@@ -381,6 +381,27 @@ export function Scroll({
     if (waveMode === 'off') surfaceRef.current?.style.removeProperty('--wave-t')
   }, [waveMode])
 
+  // Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or when the pointer is
+  // near the right edge, and fades out (via .iw-sb-idle - CSS makes it transparent) after 1.4s of
+  // inactivity, so at rest only the waves remain in the channel.
+  useEffect(() => {
+    const el = surfaceRef.current
+    if (!el || !fill || phone) return
+    let t = 0
+    el.classList.add('iw-sb-idle')
+    const show = () => {
+      el.classList.remove('iw-sb-idle')
+      clearTimeout(t)
+      t = window.setTimeout(() => el.classList.add('iw-sb-idle'), 1400)
+    }
+    const onMove = (e: PointerEvent) => {
+      if (el.getBoundingClientRect().right - e.clientX < 28) show()
+    }
+    el.addEventListener('scroll', show, { passive: true })
+    el.addEventListener('pointermove', onMove, { passive: true })
+    return () => { clearTimeout(t); el.removeEventListener('scroll', show); el.removeEventListener('pointermove', onMove) }
+  }, [fill, phone])
+
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
