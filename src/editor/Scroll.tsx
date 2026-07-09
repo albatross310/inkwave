@@ -521,21 +521,38 @@ export function Scroll({
     // latency (~50–300ms ≈ up to ~20px of drift), and re-setting the delay vars on the already-
     // running hydrated shell would phase-shift (jump) it — so the first surface just PUBLISHES its
     // animation's true start time and leaves its own vars untouched; later surfaces sync to it.
-    const w = window as unknown as { __iwWaveEpoch?: number }
+    const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
+    const drifts = () => {
+      try {
+        return el.getAnimations({ subtree: true }) // includes ::before/::after + twinkle children
+          .filter((x) => ((x as CSSAnimation).animationName ?? '').startsWith('iw-wave-drift'))
+      } catch { return [] }
+    }
     if (w.__iwWaveEpoch === undefined) {
       let start = performance.now() // fallback ≈ this mount (fresh mounts start their animation now)
-      try {
-        const a = el.getAnimations({ subtree: true }) // subtree:true includes the ::before/::after animations
-          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-        if (typeof a?.startTime === 'number') start = a.startTime
-        else if (typeof a?.currentTime === 'number') start = performance.now() - a.currentTime
-      } catch { /* keep the approximation */ }
+      const a = drifts().find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+      if (typeof a?.startTime === 'number') start = a.startTime as number
+      else if (typeof a?.currentTime === 'number') start = performance.now() - (a.currentTime as number)
       w.__iwWaveEpoch = start
+      w.__iwWaveEpochAnim = a ?? undefined
       return // this surface's own running animation IS the clock
     }
-    const elapsed = Math.max(0, performance.now() - w.__iwWaveEpoch) / 1000
-    // Fixed-velocity drift from frame one (no start ramp) — sync straight into the loop.
-    el.style.setProperty('--wave-phase', `-${(elapsed % 1.944).toFixed(3)}s`)
+    // EXACT clock share (2026-07-09, the ~10px reveal hiccup): wall-clock --wave-phase math left
+    // later surfaces ~10px behind the first (animation origins land frames after the delay was
+    // computed), and the shell's fade at reveal swapped the visible water BACKWARD by that gap.
+    // Adopting the epoch animation's literal startTime makes every surface pixel-identical by
+    // construction — no delay/origin arithmetic at all. Twinkle children ride the same call.
+    const epochStart = (typeof w.__iwWaveEpochAnim?.startTime === 'number')
+      ? w.__iwWaveEpochAnim.startTime as number
+      : w.__iwWaveEpoch // fallback: the recorded number (close, not exact)
+    const own = drifts()
+    if (own.length) {
+      for (const a of own) { try { a.startTime = epochStart } catch { /* not ready */ } }
+    } else {
+      // No animations yet (display gated) — fall back to the delay var; close enough as a fallback.
+      const elapsed = Math.max(0, performance.now() - (w.__iwWaveEpoch ?? performance.now())) / 1000
+      el.style.setProperty('--wave-phase', `-${(elapsed % 1.944).toFixed(3)}s`)
+    }
   }, [])
   // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
   // an effect with the handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
@@ -550,14 +567,19 @@ export function Scroll({
   const freezeToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
-    // Freeze the compositor animation's current offset BEFORE the class swap paints.
+    // Freeze from the animation CLOCK, not getComputedStyle: currentTime is exact and
+    // compositor-authoritative (the computed transform lags a variable 1-2+ frames — the old fixed
+    // "lead compensation" guess). Drift keyframes are linear 0 → -140px over 1.944s.
     let tx = 0
     try {
-      const m = getComputedStyle(el, '::before').transform
-      if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
-      // The compositor runs the drift ~1–2 frames ahead of the main thread's computed style; freezing
-      // the stale value made the waves flick BACKWARD at reveal. Lead the read by ~2 frames of drift.
-      tx -= 72 * 0.033
+      const a = el.getAnimations({ subtree: true })
+        .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+      if (typeof a?.currentTime === 'number') {
+        tx = -140 * (((a.currentTime as number) / 1000) % 1.944) / 1.944
+      } else {
+        const m = getComputedStyle(el, '::before').transform
+        if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
+      }
     } catch { /* transform unreadable → coast from 0 */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
