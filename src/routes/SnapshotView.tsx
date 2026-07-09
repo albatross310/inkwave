@@ -44,9 +44,11 @@ function NavSide({
   const btnSize    = isPhone ? 41 : 53   // ~20% bigger
   const showVer    = hasVersions && !isPhone
 
+  const dim = isPhone ? 'clamp(30px, 8vw, 41px)' : 'clamp(34px, 3.6vw, 53px)'
+  void btnSize
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: btnSize, height: btnSize, borderRadius: 9,
+    width: dim, height: dim, borderRadius: 9,
     background: disabled ? NAV_BG_DIS : NAV_BG,
     color: disabled ? NAV_FG_DIS : NAV_FG,
     border: `1px solid ${disabled ? 'rgba(140,90,200,0.10)' : 'rgba(140,90,200,0.28)'}`,
@@ -1494,15 +1496,17 @@ function SplitDiffView({
   // ── The three panes as size-parameterised elements, so desktop (diff | editor | side) and narrow
   //    (editor on top; side + diff below) can arrange the SAME panes differently. ──
   const toggleBtn = (on: boolean): React.CSSProperties => ({
-    display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, width: 78, padding: '0 10px',
-    background: on ? INK : '#fff', color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 9,
-    fontSize: '0.8rem', fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: 'clamp(20px, 3.4vh, 30px)', width: 'clamp(52px, 9vw, 78px)', padding: '0 clamp(5px, 0.8vw, 10px)',
+    background: on ? INK : '#fff', color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 8,
+    fontSize: 'clamp(0.62rem, 1.3vw, 0.8rem)', fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
+    boxShadow: '0 1px 5px rgba(80,50,10,0.12)', flexShrink: 0,
   })
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      <div style={{ position: 'absolute', top: 12, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
+      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 'clamp(8px, 1vw, 14px)', zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'center' }}>
+        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
@@ -1510,8 +1514,8 @@ function SplitDiffView({
         <Scroll phone={isPhone}><div style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
       </div>
       {nav?.show && (<>
-        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
-        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={midFrac * 100} overridePos={{ position: 'absolute', right: 8 }} />
+        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
+        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', right: 8 }} />
       </>)}
     </div>
   )
@@ -1894,10 +1898,10 @@ export function SnapshotView() {
       )}
       {/* Fixed header */}
       <div
-        className="z-50 flex items-center gap-x-2.5 px-3 py-1.5 bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: '1.02rem', height: 48 }}
+        className="z-50 flex items-center bg-white/95 backdrop-blur"
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)' }}
       >
-        <span style={{ color: INK, fontWeight: 600 }}>
+        <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0 }}>
           ◈ {snapshot
             ? `${versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
             : 'Snapshot'} · read-only
@@ -1916,10 +1920,10 @@ export function SnapshotView() {
         )}
 
         {/* Centred, jazzed action buttons — the words-diff sits just left of the first (biggest-change) toggle */}
-        <div className="flex-1 flex items-center justify-center gap-2.5 flex-wrap">
+        <div className="flex-1 flex items-center justify-center" style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
         {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
         {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
-          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: '1.2rem' }} title="words added / removed vs the previous snapshot">
+          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0 }} title="words added / removed vs the previous snapshot">
             <span style={{ color: '#15803d', fontWeight: 800 }}>+{headerDiff.added}</span>
             <span style={{ color: '#b91c1c', fontWeight: 800 }}>−{headerDiff.removed}</span>
           </span>
@@ -1932,7 +1936,7 @@ export function SnapshotView() {
           onClick={toggleLineMode}
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.92rem', fontWeight: 500,
+            fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
             background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -1959,7 +1963,7 @@ export function SnapshotView() {
             }}
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
             style={{
-              fontSize: '0.92rem', fontWeight: 500,
+              fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
               background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
               border: '1px solid rgba(92, 45, 138, 0.35)',
               color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
@@ -1988,7 +1992,7 @@ export function SnapshotView() {
             }}
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm"
             style={{
-              fontSize: '0.92rem', fontWeight: 500,
+              fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
               background: 'rgba(185,28,28,0.07)',
               border: '1px solid rgba(185,28,28,0.25)',
               color: '#b91c1c',
@@ -2004,7 +2008,7 @@ export function SnapshotView() {
           onClick={() => navigate('/')}
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: '0.92rem', fontWeight: 500,
+            fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
             background: 'rgba(92, 45, 138, 0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -2018,7 +2022,7 @@ export function SnapshotView() {
       </div>
 
       {/* Spacer for fixed header */}
-      <div style={{ height: 48, flexShrink: 0 }} />
+      <div style={{ height: 'clamp(38px, 7vh, 48px)', flexShrink: 0 }} />
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
