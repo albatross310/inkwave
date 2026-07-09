@@ -1383,143 +1383,92 @@ function SplitDiffView({
     </div>
   )
 
+  // ── The three panes as size-parameterised elements, so desktop (diff | editor | side) and narrow
+  //    (editor on top; side + diff below) can arrange the SAME panes differently. ──
+  const toggleBtn = (on: boolean): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', height: 30, padding: '0 12px', background: on ? INK : '#fff',
+    color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 9, fontSize: '0.8rem',
+    fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
+  })
+  const editorPaneEl = (sz: React.CSSProperties) => (
+    <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
+      {midline}
+      <div style={{ position: 'absolute', top: 12, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
+        <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
+        <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
+      </div>
+      <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
+        <Scroll phone={isPhone}><div style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
+      </div>
+      {nav?.show && (<>
+        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} overridePos={{ position: 'absolute', left: 8 }} />
+        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} overridePos={{ position: 'absolute', right: 8 }} />
+      </>)}
+    </div>
+  )
+  const diffPaneEl = (sz: React.CSSProperties) => (
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
+      {midline}
+      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
+    </div>
+  )
+  const sidePaneEl = (sz: React.CSSProperties) => (
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
+      <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px' }}>
+        {summariesOn && <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>}
+        {!summariesOn ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
+            <div style={{ fontSize: '0.92rem', color: INK, fontWeight: 600, textAlign: 'center', maxWidth: '14ch' }}>Plain-language recaps</div>
+            <button type="button" aria-label="About snapshot recaps — turn them on" onClick={onOptInSummaries} className="transition-transform hover:scale-105" style={{ width: 46, height: 46, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: INK, border: `3px solid ${INK}`, cursor: 'pointer', fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontWeight: 700, fontSize: '1.7rem', lineHeight: 1, boxShadow: '0 1px 6px rgba(80,50,10,0.14)', paddingBottom: 2 }}>i</button>
+          </div>
+        ) : summary && summary.trim()
+          ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
+          : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
+      </div>
+      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
+    </div>
+  )
+  // Divider: desktop dividers are draggable; the narrow separators are thin fixed lines.
+  const dragDivider = (onDown: (x: number, y: number) => void, isDrag: React.MutableRefObject<boolean>, title: string) => (
+    <div style={{ [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10, background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none' }}
+      onMouseDown={(e) => { e.preventDefault(); onDown(e.clientX, e.clientY) }}
+      onTouchStart={(e) => { e.preventDefault(); onDown(e.touches[0].clientX, e.touches[0].clientY) }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
+      onMouseLeave={(e) => { if (!isDrag.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
+      title={title}>{gripDots}</div>
+  )
+  const thinSep = (axis: 'row' | 'col') => (
+    <div style={{ [axis === 'row' ? 'height' : 'width']: 3, flexShrink: 0, background: 'rgba(92,45,138,0.14)' }} />
+  )
+
   return (
     <div ref={containerRef} style={{
       display: 'flex', flexDirection: vertical ? 'column' : 'row', height: '100%', overflow: 'hidden',
     }}>
-      {/* Main split area: DIFF (left/top) + EDITOR document (middle/bottom). Editor is 5/3 × the diff. */}
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: vertical ? 'column' : 'row', overflow: 'hidden' }}>
-
-        {/* ── Diff pane (left) ── */}
-        <div style={{
-          [vertical ? 'height' : 'width']: `${splitPct}%`, flexShrink: 0, position: 'relative', zIndex: 1,
-          overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom,
-        } as React.CSSProperties}>
-          {midline}
-          <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
-        </div>
-
-        {/* ── Diff↔editor divider ── */}
-        <div
-          style={{
-            [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
-            background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
-          }}
-          onMouseDown={(e) => { e.preventDefault(); startDrag(e.clientX, e.clientY) }}
-          onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY) }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
-          onMouseLeave={(e) => { if (!dragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
-          title="Drag to resize"
-        >{gripDots}</div>
-
-        {/* ── Editor document pane (middle) ── */}
-        <div style={{
-          flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden',
-          borderLeft: vertical ? 'none' : '1px solid rgba(92,45,138,0.09)',
-          borderTop: vertical ? '1px solid rgba(92,45,138,0.09)' : 'none',
-        }}>
-          {midline}
-          {/* Counter + scroll-behaviour toggles: ONE centred vertical stack with even gaps. */}
-          {(() => {
-            const btn = (on: boolean): React.CSSProperties => ({
-              display: 'flex', alignItems: 'center', height: 30, padding: '0 12px',
-              background: on ? INK : '#fff', color: on ? '#fff' : INK,
-              border: `1.5px solid ${INK}`, borderRadius: 9, fontSize: '0.8rem',
-              fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
-            })
-            return (
-              <div style={{ position: 'absolute', top: 12, left: 14, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-                {counter && (
-                  <div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>
-                )}
-                <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={btn(snapMode !== 'off')}>
-                  {snapMode === 'off' ? 'Off' : 'On'}
-                </button>
-                <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff (left) drives editor (right) only · Off" style={btn(bijMode !== 'off')}>
-                  {bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}
-                </button>
-              </div>
-            )
-          })()}
-          <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
-            <Scroll phone={isPhone}>
-              <div style={{ zoom: diffZoom } as React.CSSProperties}>
-                <FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} />
-              </div>
-            </Scroll>
+      {vertical ? (
+        // ── NARROW / PHONE: editor on TOP; below it a row of [summary + minimap | diffs]. ──
+        <>
+          {editorPaneEl({ height: `${splitPct}%` })}
+          {dragDivider(startDrag, dragging, 'Drag to resize')}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+            {sidePaneEl({ width: Math.min(sidePanelPx, 200) })}
+            {thinSep('col')}
+            {diffPaneEl({ flex: 1, minWidth: 0 })}
           </div>
-          {/* Snapshot nav — flanking the CENTRAL editor pane: ◂ prev on its left edge, ▸ next on its right. */}
-          {nav?.show && (
-            <>
-              <NavSide
-                side="left" snapDir="back"
-                onSnap={nav.onBack} snapDisabled={!nav.canBack}
-                onVer={nav.onVerBack} verDisabled={!nav.canVerBack}
-                hasVersions={nav.hasVersions} isPhone={isPhone}
-                overridePos={{ position: 'absolute', left: 8 }}
-              />
-              <NavSide
-                side="right" snapDir="fwd"
-                onSnap={nav.onFwd} snapDisabled={!nav.canFwd}
-                onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd}
-                hasVersions={nav.hasVersions} isPhone={isPhone}
-                overridePos={{ position: 'absolute', right: 8 }}
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── Side-panel resize divider (both modes) ── */}
-      <div
-        style={{
-          [vertical ? 'height' : 'width']: 7, flexShrink: 0, zIndex: 10,
-          background: 'rgba(92,45,138,0.10)', cursor: vertical ? 'row-resize' : 'col-resize',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
-        }}
-        onMouseDown={(e) => { e.preventDefault(); startSideDrag() }}
-        onTouchStart={(e) => { e.preventDefault(); startSideDrag() }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)')}
-        onMouseLeave={(e) => { if (!sideDragging.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' }}
-        title="Drag to resize the side panel"
-      >{gripDots}</div>
-
-      {/* ── Side panel (both modes): AI summary (scrollable) + document minimap ── */}
-      <div style={{
-        [vertical ? 'height' : 'width']: sidePanelPx, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column',
-        background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden',
-      } as React.CSSProperties}>
-        <div className="iw-snap-scroll" style={{
-          flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a',
-          border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px',
-        }}>
-          {summariesOn && <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>}
-          {!summariesOn ? (
-            // Opt-in is now a single bold circular "i" (opens the consent dialog — what "Opt in" used to do).
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
-              <div style={{ fontSize: '0.92rem', color: INK, fontWeight: 600, textAlign: 'center', maxWidth: '14ch' }}>Plain-language recaps</div>
-              <button
-                type="button"
-                aria-label="About snapshot recaps — turn them on"
-                onClick={onOptInSummaries}
-                className="transition-transform hover:scale-105"
-                style={{
-                  width: 46, height: 46, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: '#fff', color: INK, border: `3px solid ${INK}`, cursor: 'pointer',
-                  fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontWeight: 700, fontSize: '1.7rem', lineHeight: 1,
-                  boxShadow: '0 1px 6px rgba(80,50,10,0.14)', paddingBottom: 2,
-                }}
-              >
-                i
-              </button>
-            </div>
-          ) : summary && summary.trim()
-            ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
-            : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
-        </div>
-        <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
-      </div>
+        </>
+      ) : (
+        // ── DESKTOP: diff | editor | summary + minimap. ──
+        <>
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
+            {diffPaneEl({ width: `${splitPct}%` })}
+            {dragDivider(startDrag, dragging, 'Drag to resize')}
+            {editorPaneEl({ flex: 1 })}
+          </div>
+          {dragDivider(() => startSideDrag(), sideDragging, 'Drag to resize the side panel')}
+          {sidePaneEl({ width: sidePanelPx })}
+        </>
+      )}
       <Toast />
     </div>
   )
