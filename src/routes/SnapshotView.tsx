@@ -1332,7 +1332,7 @@ function SplitDiffView({
         fenceRaf = requestAnimationFrame(easeFence)
       }
       const onWheel = (e: WheelEvent) => {
-        if (e.ctrlKey || e.metaKey) return
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return // ⌘/ctrl = zoom; shift = snapshot scrub (window handler)
         e.preventDefault()
         x = el.scrollTop
         const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
@@ -1737,23 +1737,49 @@ export function SnapshotView() {
       setNavDir(n > 0 ? 'fwd' : 'back')
       goTo(all[target])
     }
-    window.addEventListener('wheel', onWheel, { passive: false })
-    return () => window.removeEventListener('wheel', onWheel)
+    // Capture phase + preventDefault so the scrub owns the wheel BEFORE the pane scrolls it (no tiny
+    // pre-scroll before the snap kicks in).
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    return () => window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
   }, [goTo])
 
-  // ── Touch swipe ──────────────────────────────────────────────────────────────
-  const touchStartX = useRef(0)
-  const touchStartY = useRef(0)
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-  }
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    const dy = e.changedTouches[0].clientY - touchStartY.current
-    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-    if (dx < 0) goFwd(); else goBack()
-  }
+  // ── Touch swipe → snapshot scrub (phone) ──────────────────────────────────────
+  // A roughly-HORIZONTAL drag scrubs snapshots; vertical stays native scroll. Distance-quantised like the
+  // wheel: at most one step per move event, accumulator reset on each step → a quick flick ≈ 1 snapshot, a
+  // slow deliberate slide steps through many. Works starting on either pane (listener is on the container).
+  const swipeRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = swipeRef.current
+    if (!el) return
+    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0
+    const onStart = (e: TouchEvent) => { dir = '?'; accum = 0; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY }
+    const onMove = (e: TouchEvent) => {
+      const x = e.touches[0].clientX, y = e.touches[0].clientY
+      if (dir === '?') {
+        const dx = x - startX, dy = y - startY
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return          // wait for a decisive move
+        dir = Math.abs(dx) > Math.abs(dy) * 1.7 ? 'h' : 'v'         // must be pretty horizontal
+      }
+      if (dir !== 'h') return                                        // vertical → let the pane scroll natively
+      e.preventDefault()                                             // own the horizontal gesture
+      accum += x - lastX; lastX = x
+      const STEP = 95 // px of horizontal slide per snapshot step
+      if (Math.abs(accum) < STEP) return
+      const n = accum > 0 ? -1 : 1                                   // slide right → previous, slide left → next
+      accum = 0
+      const cur = idxRef.current, all = allRef.current
+      if (cur < 0 || !all.length) return
+      const target = Math.max(0, Math.min(all.length - 1, cur + n))
+      if (target === cur) return
+      setNavDir(n > 0 ? 'fwd' : 'back')
+      goTo(all[target])
+    }
+    const onEnd = () => { dir = '?' }
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd, { passive: true })
+    return () => { el.removeEventListener('touchstart', onStart); el.removeEventListener('touchmove', onMove); el.removeEventListener('touchend', onEnd) }
+  }, [goTo])
 
   const isPhone = isTouchDevice()
   const [isWide, setIsWide] = useState(() =>
@@ -1790,10 +1816,9 @@ export function SnapshotView() {
   return (
     // height:100dvh so the split pane fills the screen without page scroll
     <div
+      ref={swipeRef}
       className="font-serif"
       style={{ height: '100dvh', overflow: 'hidden', color: '#3a3a3a', display: 'flex', flexDirection: 'column' }}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
     >
       {/* First-open gesture hint — centred, one-time, with an explicit close. */}
       {showScrubHint && (
