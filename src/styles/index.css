@@ -528,6 +528,14 @@
   /* Focused word (popover open) — transparent in practice (the reel renders the word). */
   .scas-focused {
     color: #6f3b9e;
+    /* Phone reel exclusivity (2026-07-09): a touch that STARTS on the open word (or the reel card,
+       which sets this inline) belongs to the SCAS cycle — never a page pan or a rubber-band.
+       touch-action is read at gesture start, so it must sit on the element itself; the class
+       out-specifies the phone-media universal `* { touch-action: pan-x pan-y }` (native-zoom
+       suppression). Effective: the focused word is inline-block (inline decoration style).
+       Inert for mouse, so desktop is unchanged. */
+    touch-action: none;
+    overscroll-behavior: none;
   }
 
   /* A substituted (secondary) word — committed from a synonym, not the original. Rendered the
