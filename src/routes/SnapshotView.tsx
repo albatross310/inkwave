@@ -145,6 +145,7 @@ function buildDiffNodes(
   ops: DiffOp[],
   onChangeClick?: (opIdx: number) => void,
   onHoverOp?: (opIdx: number | null) => void,
+  diffPages?: Record<number, number>, // opIdx → 1-based DOCUMENT page (from the editor), for page-break rules
 ): React.ReactNode[] {
   const n = ops.length
   if (!n) return []
@@ -209,6 +210,20 @@ function buildDiffNodes(
     nodes.push(<span key={`t${k++}`} style={style}>{text}</span>)
   }
 
+  // Dashed page-break rule (with logo + number) inline before the first diff on a new DOCUMENT page — the
+  // numbers come from the editor's real pagination, so they line up with the minimap.
+  let lastPage = 0
+  const emitPageBreak = (pg: number) => {
+    flushGap()
+    nodes.push(
+      <div key={`pb${k++}`} aria-hidden="true" style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.34)', margin: '12px 0 5px' }}>
+        <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 700, color: 'rgba(92,45,138,0.72)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+          <img src="/inkwave-logo-v7.png" alt="" style={{ width: 16, height: 16, opacity: 0.72 }} />{pg}
+        </span>
+      </div>,
+    )
+  }
+
   const emitChange = (text: string, style: React.CSSProperties, opIdx: number, cls: string) => {
     if (!text) return; flushGap()
     const { lead, core, trail } = splitEdges(text)
@@ -234,6 +249,8 @@ function buildDiffNodes(
     const op = ops[i]
 
     if (op.type !== 'same') {
+      const pg = diffPages?.[i]
+      if (pg && pg > lastPage) { emitPageBreak(pg); lastPage = pg }
       emitLabel(opPara[i], opWords[i])
       wordsSinceLast = 0
       if (op.type === 'del') {
@@ -324,7 +341,7 @@ function FullDiffView({
 // ── InlineDiffView ────────────────────────────────────────────────────────────
 // Right pane: compact hunk view of the diff.
 function InlineDiffView({
-  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef, midFrac = 0.5,
+  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef, midFrac = 0.5, diffPages,
 }: {
   ops: DiffOp[] | null
   prevSnap: Snapshot | null
@@ -332,30 +349,14 @@ function InlineDiffView({
   onHoverOp: (opIdx: number | null) => void
   scrollBodyRef?: React.RefObject<HTMLDivElement>
   midFrac?: number
+  diffPages?: Record<number, number> // opIdx → document page (from the editor), for in-sync page-break rules
 }) {
   const hasChange = ops ? ops.some(o => o.type !== 'same') : false
   const nodes = useMemo(
-    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp) : [],
+    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp, diffPages) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ops, hasChange, onChangeClick, onHoverOp],
+    [ops, hasChange, onChangeClick, onHoverOp, diffPages],
   )
-
-  // Dotted page guides over the diff content — its OWN A4-height pages (width × √2), a dashed rule + logo +
-  // "p.N" at each break, so the diff pane reads like paged text alongside the editor and the minimap.
-  const contentRef = useRef<HTMLDivElement>(null)
-  const [dims, setDims] = useState({ w: 0, h: 0 })
-  useEffect(() => {
-    const c = contentRef.current
-    if (!c) return
-    const ro = new ResizeObserver(() => setDims(prev => {
-      const w = c.offsetWidth, h = c.offsetHeight
-      return prev.w === w && prev.h === h ? prev : { w, h }
-    }))
-    ro.observe(c)
-    return () => ro.disconnect()
-  }, [])
-  const pageH = dims.w > 0 ? dims.w * Math.SQRT2 : 0
-  const pageCount = pageH > 0 ? Math.min(400, Math.floor(dims.h / pageH)) : 0
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
@@ -374,17 +375,7 @@ function InlineDiffView({
             panel) and the BOTTOM diff to reach it from below — panel-relative, so it shrinks on smaller
             windows instead of a fixed 24em that dwarfs a half-screen pane. */}
         {hasChange && <div aria-hidden="true" style={{ height: `${midFrac * 100}%`, flexShrink: 0 }} />}
-        <div ref={contentRef} style={{ position: 'relative' }}>
-          {nodes}
-          {Array.from({ length: pageCount }, (_, i) => (
-            <div key={i} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: (i + 1) * pageH, borderTop: '1px dashed rgba(92,45,138,0.32)', pointerEvents: 'none', zIndex: 2 }}>
-              <span style={{ position: 'absolute', right: 0, top: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.92rem', fontWeight: 700, color: 'rgba(92,45,138,0.75)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
-                <img src="/inkwave-logo-v7.png" alt="" style={{ width: 17, height: 17, opacity: 0.7 }} />
-                {i + 2}
-              </span>
-            </div>
-          ))}
-        </div>
+        {nodes}
         {hasChange && <div aria-hidden="true" style={{ height: `${(1 - midFrac) * 100}%`, flexShrink: 0 }} />}
       </div>
     </div>
@@ -952,6 +943,36 @@ function SplitDiffView({
   }, [diffZoom])
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
+
+  // Each diff's real DOCUMENT page, measured from the EDITOR's pagination (same pageH the minimap uses), so
+  // the diff panel's page-break rules carry the SAME numbers as the minimap.
+  const [diffPages, setDiffPages] = useState<Record<number, number>>({})
+  useEffect(() => {
+    const L = leftScrollRef.current
+    if (!L) return
+    const compute = () => {
+      const paper = L.querySelector('.scroll-paper') as HTMLElement | null
+      const pw = paper?.clientWidth || L.clientWidth || 1
+      const pageH = Math.max(200, pw * Math.SQRT2)
+      const lr = L.getBoundingClientRect()
+      const map: Record<number, number> = {}
+      L.querySelectorAll('[data-opidx]').forEach((node) => {
+        const el = node as HTMLElement
+        if (!el.classList.contains('diff-add') && !el.classList.contains('diff-del')) return
+        const idx = Number(el.getAttribute('data-opidx'))
+        const y = el.getBoundingClientRect().top - lr.top + L.scrollTop
+        map[idx] = Math.floor(y / pageH) + 1
+      })
+      setDiffPages((prev) => {
+        const mk = Object.keys(map)
+        return (mk.length === Object.keys(prev).length && mk.every(k => prev[+k] === map[+k])) ? prev : map
+      })
+    }
+    const id = requestAnimationFrame(compute)
+    const t = setTimeout(compute, 400) // after fonts/pagination settle
+    const ro = new ResizeObserver(() => compute()); ro.observe(L)
+    return () => { cancelAnimationFrame(id); clearTimeout(t); ro.disconnect() }
+  }, [snapshot.id, diffZoom])
 
   // Publish split position as a CSS variable so the parent can position the right nav.
   useEffect(() => {
@@ -1642,7 +1663,7 @@ function SplitDiffView({
   const diffPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
       {midline}
-      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} />
+      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} diffPages={diffPages} />
       {nav?.show && (<>
         {thinNav('left', nav.onBack, !nav.canBack, '‹', 'Previous snapshot (←)')}
         {thinNav('right', nav.onFwd, !nav.canFwd, '›', 'Next snapshot (→)')}
