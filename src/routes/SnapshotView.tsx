@@ -1209,13 +1209,8 @@ function SplitDiffView({
         })
         ks.sort((a, b) => a.ly - b.ly)
         knotsRef.current = ks
-        // Start the diff panel INSIDE the first/last diff lock, so the first scroll/drag doesn't yank-clamp
-        // from an out-of-bounds position (the "clamps to begin then works").
-        if (ks.length) {
-          const minS = Math.max(0, ks[0].ry - R.clientHeight / 2)
-          const maxS = ks[ks.length - 1].ry - R.clientHeight / 2
-          if (maxS > minS) R.scrollTop = Math.max(minS, Math.min(maxS, R.scrollTop))
-        }
+        // (No resting clamp here — it repositioned the diff pane independently of the editor on every layout
+        //  recompute, breaking the top/bottom lock. The wheel/pan clamp in onRightScroll handles end-at-lock.)
       }
     }
     const id = requestAnimationFrame(recompute)
@@ -1481,9 +1476,9 @@ function SplitDiffView({
   // ── The three panes as size-parameterised elements, so desktop (diff | editor | side) and narrow
   //    (editor on top; side + diff below) can arrange the SAME panes differently. ──
   const toggleBtn = (on: boolean): React.CSSProperties => ({
-    display: 'flex', alignItems: 'center', height: 30, padding: '0 12px', background: on ? INK : '#fff',
-    color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 9, fontSize: '0.8rem',
-    fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, width: 78, padding: '0 10px',
+    background: on ? INK : '#fff', color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 9,
+    fontSize: '0.8rem', fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer', boxShadow: '0 1px 5px rgba(80,50,10,0.12)',
   })
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
