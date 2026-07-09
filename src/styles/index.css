@@ -296,6 +296,12 @@
      paper. Device media query (same signal as isTouchDevice) because html/body have no .is-phone
      ancestor; the unlayered night-mode rules below still win there. */
   @media (pointer: coarse) and (hover: none) {
+    /* Suppress the browser's native zoom EVERYWHERE on phone (Peter, 2026-07-09): the app has its
+       own pinch-zoom (editor font-reflow, PDF magnify) and Safari's page zoom fighting it was
+       confusing. pan-x pan-y keeps native one-finger scrolling; pinch/double-tap zoom are blocked.
+       (JS gesture-event suppression in entry.client.tsx is the reliable half on iOS Safari.) */
+    html, body { touch-action: pan-x pan-y; }
+
     html, body { background-color: #f1eadb; }
   }
 

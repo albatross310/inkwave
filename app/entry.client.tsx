@@ -45,6 +45,16 @@ async function bootstrap() {
 }
 void bootstrap()
 
+// Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are
+// the only reliable hook (Safari ignores user-scalable=no in-browser). Our own pinch handlers use
+// touch events on their surfaces, so they keep working — this only stops the BROWSER's page zoom
+// (over the toolbar, panels, everywhere) from fighting the app's zoom.
+if (window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches) {
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false })
+  }
+}
+
 // PWA file handling (Chrome/Edge/Brave, installed): double-clicking a .inkwave file launches the app
 // here with the file handle. Open it (and resume syncing back to it). No-op in browsers without it.
 const lq = (window as unknown as { launchQueue?: { setConsumer: (cb: (p: { files?: FileSystemFileHandle[] }) => void) => void } }).launchQueue
