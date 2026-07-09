@@ -405,6 +405,14 @@ export function Scroll({
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
       style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
+      {/* Yellow loading sparkles — a dedicated child layer, NOT the wave ::before/::after (fading
+          those would dim the wave lines too). It tiles ONLY the sparkle art and runs the same
+          drift/coast keyframes + inherited --wave-phase/--wave-t as wave layer A, so the flecks
+          ride the crests in lockstep and S-fade to nothing as the waves coast to rest (see
+          .iw-wave-sparkles in styles/index.css). Mounted only while the load animation runs —
+          pure visual layer, no reveal/settled logic (it's in the prerendered shell too, since the
+          shell mounts with waveMode 'anim', so hydration matches). */}
+      {waveMode !== 'off' && <div className="iw-wave-sparkles" aria-hidden="true" />}
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}
       <div
