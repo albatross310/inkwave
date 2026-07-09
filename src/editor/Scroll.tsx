@@ -293,7 +293,7 @@ export function Scroll({
       let start = performance.now() // fallback ≈ this mount (fresh mounts start their animation now)
       try {
         const a = el.getAnimations({ subtree: true }) // subtree:true includes the ::before/::after animations
-          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-ramp-l')
+          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
         if (typeof a?.startTime === 'number') start = a.startTime
         else if (typeof a?.currentTime === 'number') start = performance.now() - a.currentTime
       } catch { /* keep the approximation */ }
@@ -301,14 +301,8 @@ export function Scroll({
       return // this surface's own running animation IS the clock
     }
     const elapsed = Math.max(0, performance.now() - w.__iwWaveEpoch) / 1000
-    // The drift loop starts after the 0.5s S-ramp; sync both to where the clock is now.
-    if (elapsed < 0.5) {
-      el.style.setProperty('--wave-ramp-delay', `-${elapsed.toFixed(3)}s`)
-      el.style.setProperty('--wave-phase', `${(0.5 - elapsed).toFixed(3)}s`)
-    } else {
-      el.style.setProperty('--wave-ramp-delay', '-1s') // ramp long done — fill holds it at -9px
-      el.style.setProperty('--wave-phase', `-${(((elapsed - 0.5) % 1.944)).toFixed(3)}s`)
-    }
+    // Fixed-velocity drift from frame one (no start ramp) — sync straight into the loop.
+    el.style.setProperty('--wave-phase', `-${(elapsed % 1.944).toFixed(3)}s`)
   }, [])
   // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
   // an effect with the handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
@@ -327,12 +321,15 @@ export function Scroll({
     try {
       const m = getComputedStyle(el, '::before').transform
       if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
+      // The compositor runs the drift ~1–2 frames ahead of the main thread's computed style; freezing
+      // the stale value made the waves flick BACKWARD at reveal. Lead the read by ~2 frames of drift.
+      tx -= 72 * 0.033
     } catch { /* transform unreadable → coast from 0 */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
   }, [revealed, waveMode, phone])
   // Coast END → sway handoff. The 2s ease-out itself is pure CSS (iw-wave-coast-l/r); JS wakes only
-  // at animationend to hand over: the final offset (--wave-t − 48px, the keyframes' end value) is
+  // at animationend to hand over: the final offset (--wave-t − 72px, the keyframes' end value) is
   // written into --wave-x in the same commit the coast class drops. Because the coast geometry's
   // ±280px overdraw is exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping
   // the class while setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and
@@ -345,14 +342,14 @@ export function Scroll({
     const finish = () => {
       if (done) return
       done = true
-      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - 48
+      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - 72
       waveBaseRef.current = txFinal - el.scrollTop * 0.06
       el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
     }
     const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
     el.addEventListener('animationend', onEnd)
-    const cap = setTimeout(finish, 2300) // safety net if the animation never ran (e.g. reduced paint states)
+    const cap = setTimeout(finish, 3300) // safety net if the animation never ran (e.g. reduced paint states)
     return () => { el.removeEventListener('animationend', onEnd); clearTimeout(cap) }
   }, [waveMode])
   // --wave-t is inert once the coast class is gone; tidy it away after the 'off' commit (removing it

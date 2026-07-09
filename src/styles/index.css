@@ -155,12 +155,10 @@
      freezes the live offset into --wave-t and the coast keyframes below CONTINUE the drift, easing
      to rest — no boundary snapping; the final offset becomes the scroll sway's base (--wave-x). */
   /* S-curve start: a 0.5s one-shot ramp (zero start velocity, ending at exactly the cruise speed —
-     the bezier's end slope is 2, and 18px = the distance an S-ramp to 72px/s covers in 0.5s), then the
-     infinite linear loop takes over from -9px. translate3d keeps the layer on the GPU. */
-  @keyframes iw-wave-ramp-l { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-18px, 0, 0); } }
-  @keyframes iw-wave-ramp-r { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(18px, 0, 0); } }
-  @keyframes iw-wave-drift-l { from { transform: translate3d(-18px, 0, 0); } to { transform: translate3d(-158px, 0, 0); } }
-  @keyframes iw-wave-drift-r { from { transform: translate3d(18px, 0, 0); } to { transform: translate3d(158px, 0, 0); } }
+  /* Fixed-velocity drift from frame one (Peter cut the start ramp, 2026-07-09): one 140px tile per
+     1.944s loop = 72px/s. translate3d keeps the layer on the GPU. */
+  @keyframes iw-wave-drift-l { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-140px, 0, 0); } }
+  @keyframes iw-wave-drift-r { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(140px, 0, 0); } }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before,
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
     left: -280px; right: -280px;
@@ -177,39 +175,35 @@
     background-position: 0 0;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before {
-    animation:
-      iw-wave-ramp-l 0.5s cubic-bezier(0.4, 0, 0.75, 0.5) var(--wave-ramp-delay, 0s) 1 forwards,
-      iw-wave-drift-l 1.944s linear var(--wave-phase, 0.5s) infinite;
+    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after {
-    animation:
-      iw-wave-ramp-r 0.5s cubic-bezier(0.4, 0, 0.75, 0.5) var(--wave-ramp-delay, 0s) 1 forwards,
-      iw-wave-drift-r 1.944s linear var(--wave-phase, 0.5s) infinite;
+    animation: iw-wave-drift-r 1.944s linear var(--wave-phase, 0s) infinite;
     will-change: transform;
   }
-  /* Reveal coast: CONTINUE the drift and ease to rest over 2s — x(t) = tx0 − 48px·(1 − (1 − t/T)³).
+  /* Reveal coast: CONTINUE the drift and ease to rest over 3s — x(t) = tx0 − 72px·(1 − (1 − t/T)³).
      cubic-bezier(1/3, 1, 2/3, 1) IS that cubic exactly (Bx(u) = u, By(u) = 1 − (1 − u)³): initial
-     slope 3 → initial velocity 3·48px / 2s = 72px/s = the drift speed, a seamless takeover; zero end
+     slope 3 → initial velocity 3·72px / 3s = 72px/s = the drift speed, a seamless takeover; zero end
      velocity; monotonic — never backward, never a stop. Compositor-driven (keyframes, not JS), so a
      busy main thread during the reveal can't stutter it. Scroll.tsx freezes the live offset into
      --wave-t at reveal (same commit as the class swap → the first coast frame is already easing);
-     at animationend it writes the final offset (--wave-t − 48px) into --wave-x in the same commit
+     at animationend it writes the final offset (--wave-t − 72px) into --wave-x in the same commit
      the class drops — with the ±280px (2-tile) overdraw above, that handoff is pixel-identical. */
   @keyframes iw-wave-coast-l {
     from { transform: translate3d(var(--wave-t, 0px), 0, 0); }
-    to   { transform: translate3d(calc(var(--wave-t, 0px) - 48px), 0, 0); }
+    to   { transform: translate3d(calc(var(--wave-t, 0px) - 72px), 0, 0); }
   }
   @keyframes iw-wave-coast-r {
     from { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
-    to   { transform: translate3d(calc(48px - var(--wave-t, 0px)), 0, 0); }
+    to   { transform: translate3d(calc(72px - var(--wave-t, 0px)), 0, 0); }
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
-    animation: iw-wave-coast-l 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-l 3s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
-    animation: iw-wave-coast-r 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-r 3s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
 
