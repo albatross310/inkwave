@@ -412,6 +412,11 @@ export function Scroll({
 // Purely visual overlay (no content reflow).
 function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivElement>; phone?: boolean }) {
   const [breaks, setBreaks] = useState<number[]>([]) // sheet-local y of each page boundary
+  // The guides depend on client-only state (paper size / gapped, both from localStorage), so the
+  // prerendered shell and the client's first render disagree → hydration mismatch. Gate on a post-mount
+  // flag so the FIRST client render matches the shell (nothing), then the guides fill in a tick later.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => { setHydrated(true) }, [])
   const gapped = gappedPagesEnabled()
   const [paperSize, setPaperSizeState] = useState(getPaperSize)
   const [orientation, setOrientationState] = useState(getOrientation)
@@ -486,7 +491,7 @@ function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivEl
 
   const logoSize = gapped ? 76 : 32           // bigger mark in the discrete-sheet (gapped) view
   const pageNumSize = gapped ? '2.6rem' : '1.1rem'
-  const active = !gapped && paperSize !== 'scroll' // gapped paints its own sheets; scroll has no pages
+  const active = hydrated && !gapped && paperSize !== 'scroll' // gapped paints its own sheets; scroll has no pages
 
   return (
     <div className="iw-page-guides absolute inset-0 pointer-events-none select-none" style={{ zIndex: 0 }} aria-hidden="true">
