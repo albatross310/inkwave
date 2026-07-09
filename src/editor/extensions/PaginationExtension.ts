@@ -178,12 +178,12 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
       const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
-      const botMargin = Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
+      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
       // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
         // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
@@ -351,7 +351,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // Keep paddingTop in sync with the user's top-margin setting so page 1 content
               // starts at the same Y as in non-gapped mode — this makes the gap land at
               // pageH - MARGIN_BOTTOM, matching the dashed rule position in PageGuides.
-              sheet.style.paddingTop = `${topM}px`
+              sheet.style.paddingTop = `${phoneLike() ? PHONE_PAGE_MARGIN : topM}px`
               // Enforce minimum one-page scroll height so the footer (logo+number, position:
               // absolute; bottom:22px) always lands at the page bottom, never mid-content
               // on short documents. scrollHeight reflects this minHeight, so segs get the
