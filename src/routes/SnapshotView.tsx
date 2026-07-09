@@ -1450,16 +1450,20 @@ function SplitDiffView({
         const centres = getCentres()
         let nk: Centre | null = null, nd = Infinity
         for (const c of centres) { const d = Math.abs(x - c.c); if (d < nd) { nd = d; nk = c } }
-        let F = 0
+        let F = 0, inWell = false
         if (nk) {
-          const w = nk.half + WARP_WELL_PAD, dx = x - nk.c
-          if (Math.abs(dx) < w * 3) F = -(dx / w) * Math.exp(-(dx * dx) / (2 * w * w)) * WARP_WELL
+          const w = nk.half + WARP_WELL_PAD, u = (x - nk.c) / w
+          // FINITE well: zero at the centre AND at ±w, nothing beyond — no long gaussian tail creeping the
+          // scroll toward a distant diff (the "phantom well / stuck in the middle of nowhere").
+          if (Math.abs(u) < 1) { F = -u * (1 - u * u) * WARP_WELL; inWell = true }
         }
         const resistance = WARP_RESIST_MIN + (WARP_RESIST_MAX - WARP_RESIST_MIN) * Math.exp(-Math.abs(v) / WARP_V0)
         v = v + F - resistance * v
         x = Math.max(0, Math.min(maxScroll(), x + v))
         el.scrollTop = x
-        if (Math.abs(v) < 0.05 && Math.abs(F) < 0.05) { v = 0; raf = 0; return } // settled
+        // Settle ONLY when basically on a diff (snapped) or in free space — never mid-pull, which was the creep.
+        const snapped = !!nk && nd <= nk.half + 2
+        if (Math.abs(v) < 0.05 && (!inWell || snapped)) { v = 0; raf = 0; return }
         raf = requestAnimationFrame(tick)
       }
       let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
