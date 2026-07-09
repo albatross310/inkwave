@@ -743,8 +743,8 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
               )
             })}
             {/* page number + tiny logo, bottom-middle; font scales with the panel */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.3, color: 'rgba(92,45,138,0.62)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
-              <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 1.3, height: numFont * 1.3, opacity: 0.62 }} />
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 2, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+              <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 0.85, height: numFont * 0.85, opacity: 0.66 }} />
               {p + 1}
             </div>
           </div>
@@ -791,7 +791,7 @@ const WARP_RESIST_MAX = 0.34  // resistance as it stops (clean settle)
 const WARP_V0 = 8             // velocity scale for the resistance ramp (px/frame)
 const WARP_WELL = 0.3         // well pull strength (how hard the nearest diff grabs)
 const WARP_WELL_PAD = 20      // well half-width beyond each diff's own half-height
-const WARP_IMPULSE = 0.7      // wheel delta → velocity impulse
+const WARP_IMPULSE = 0.14     // wheel delta → velocity impulse (≈ resistance scale, so scroll is ~1:1 with input, not 5-6×)
 
 function SplitDiffView({
   snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
