@@ -26,6 +26,7 @@ export function Scroll({
   phone = false,
   fill = false,
   revealed = true,
+  fadingOut = false,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -33,7 +34,9 @@ export function Scroll({
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
-  revealed?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
+  revealed?: boolean
+  /** 0.5s opacity fade-out of the WHOLE surface (the loading shell's atomic cross-fade reveal). */
+  fadingOut?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
                      // pagination settle — visibility, not display, so layout + measurement still run.
                      // The editor flips it once; the loading shell passes false so page + text appear
                      // together, atomically, instead of paper-then-text.
