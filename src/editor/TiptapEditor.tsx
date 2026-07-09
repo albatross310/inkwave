@@ -689,7 +689,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     if (!editor) return
     let done = false
-    const finish = () => { if (!done) { done = true; setSettled(true) } }
+    const finish = () => {
+      if (done) return
+      done = true
+      setSettled(true)
+      // Same-task dispatch → React batches Edit's loading-shell unmount with this reveal into ONE
+      // commit: the shell disappears in the exact frame the parchment fades in + the wave coast
+      // starts on this surface (which the shell was covering, already phase-synced + rastered).
+      window.dispatchEvent(new Event('inkwave:editor-revealed'))
+    }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
     // The pagination extension measures in BOTH page modes now (gap widgets / break markers), so
