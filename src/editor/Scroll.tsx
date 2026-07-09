@@ -54,6 +54,24 @@ export function Scroll({
   const magnifyBoxRef = useRef<HTMLDivElement>(null)
   const localPaperRef = useRef<HTMLDivElement>(null)
   const paperElRef = paperRef ?? localPaperRef
+
+  // ── Wave stillness through zoom (Peter: "stop it moving the waves") ─────────────────────────
+  // The sway is --wave-x = base + scrollTop·WAVE_SWAY (see the scroll-sway effect below). Zoom
+  // writes scrollTop in many ways — anchor corrections, the settle re-anchor, and ASYNC browser
+  // scroll-clamps when the wrapper/content shrinks (those materialise at a later layout flush, so
+  // no synchronous bracket can catch them all). Mechanism: zoom activity opens a HOLD WINDOW
+  // (holdWavesFor, extended by every zoom frame + settle); while it's open, the sway handler
+  // treats every scroll delta as zoom-driven and rebases the base EQUAL-AND-OPPOSITE — --wave-x
+  // is held exactly constant through gesture, settle, re-measure and any clamp. When the window
+  // closes, sway resumes from exactly where the waves were (same rebase pattern as the coast
+  // handoff) — no jump. Trade-off: a user scroll INSIDE the window doesn't sway (decorative, and
+  // scrolling mid-zoom is rare); the moment the window lapses, normal sway is untouched.
+  const WAVE_SWAY = 0.06 // 2/3 of the old 0.09 sway speed — shared by the sway + the rebases
+  const waveBaseRef = useRef(0)
+  const zoomHoldUntilRef = useRef(0)
+  const holdWavesFor = (ms: number) => {
+    zoomHoldUntilRef.current = Math.max(zoomHoldUntilRef.current, performance.now() + ms)
+  }
   // Gapped mode draws a separate-sheet drop shadow at EACH page break (the rounded caps in
   // PaginationExtension); the single tall outer shadow would otherwise bleed continuously down the
   // left/right edges and through the gaps, so we drop it here and let the per-gap caps do the work.
@@ -67,7 +85,7 @@ export function Scroll({
   }, [])
 
   // HYBRID ZOOM scope: only the desktop LIVE editor (fill) with a fixed-size paper gets the
-  // transform-magnify + fit-to-width floor. Phone has its own model (canonically-narrower render +
+  // transform-magnify + fit-to-width cap. Phone has its own model (canonically-narrower render +
   // pinch font zoom); SnapshotView's in-flow Scroll and 'scroll' paper (no mm width) stay plain.
   // getPaperSize() is re-read on the page-settings rerender above, so switching paper flips this.
   const hybrid = fill && !phone && getPaperSize() !== 'scroll'
@@ -113,11 +131,15 @@ export function Scroll({
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => {
         persistMagnify()
+        holdWavesFor(800) // the settle re-measure (+ any clamp it causes) must not sway the waves
         window.dispatchEvent(new Event('inkwave:zoom-settled'))
       }, 200)
     }
-    const unsub = subscribeMagnify(() => { apply(); armSettle() })
-    // FIT FLOOR: recompute from the surface's width on every resize (and page-settings change).
+    // holdWavesFor: applying a new scale resizes the wrapper, and the browser may CLAMP scrollTop
+    // against the new extent (asynchronously, at the next layout) — scroll changes the sway must
+    // absorb, whether this fires inside a wheel frame or standalone on a resize-driven fit change.
+    const unsub = subscribeMagnify(() => { holdWavesFor(350); apply(); armSettle() })
+    // FIT CAP: recompute from the surface's width on every resize (and page-settings change).
     // clientWidth excludes the scrollbar (scrollbar-gutter: stable), so the fit page never sits
     // under it; WATER_MARGIN_PX keeps a strip of water visible either side.
     const computeFit = () => setFitContext(Math.max(60, el.clientWidth - 2 * WATER_MARGIN_PX), pageW())
@@ -127,10 +149,12 @@ export function Scroll({
     // typing, pagination. offsetHeight is layout px (transform-invariant), × s = visual height.
     const roPaper = paper ? new ResizeObserver(() => {
       const s = getMagnify()
-      if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
+      // The height write can clamp scrollTop (content shrank while scrolled near the end) — a
+      // layout side-effect, not a user scroll: keep the waves still through it.
+      if (s !== 1 && box && paper) { holdWavesFor(250); box.style.height = `${paper.offsetHeight * s}px` }
     }) : null
     if (paper && roPaper) roPaper.observe(paper)
-    // Settings change: recompute the floor for the new page width, and re-apply AFTER React's own
+    // Settings change: recompute the fit cap for the new page width, and re-apply AFTER React's own
     // settings rerender commits (rAF lands post-commit, pre-paint) — otherwise React's fresh mm
     // width on the wrapper would clobber the imperative pageWidth·s px while magnified.
     const onSettings = () => { computeFit(); requestAnimationFrame(apply) }
@@ -145,9 +169,9 @@ export function Scroll({
       if (settle) clearTimeout(settle)
       el.classList.remove('iw-magnified')
       el.style.removeProperty('--iw-magnify')
-      // NB: the module's fit floor is deliberately NOT reset here — the loading shell and the live
+      // NB: the module's fit cap is deliberately NOT reset here — the loading shell and the live
       // editor are BOTH hybrid surfaces during the load handoff, and the shell unmounting must not
-      // yank the floor from under the editor. A remount recomputes it immediately (computeFit()).
+      // yank the cap from under the editor. A remount recomputes it immediately (computeFit()).
     }
   }, [hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -175,7 +199,6 @@ export function Scroll({
     // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
     let steps = 0 // wheel: ±1 per event; phone pinch: FRACTIONAL (log of the distance ratio) — same 1.08^steps curve
     let mSteps = 0 // magnify steps (hybrid, cursor over the WATER) — same coalescing, separate zone
-    let mX = 0, mY = 0 // cursor at the last magnify wheel event (the anchor point)
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
@@ -203,12 +226,13 @@ export function Scroll({
     // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
     // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
     let anchorEl: HTMLElement | null = null
-    // MAGNIFY frame (hybrid, wheel over the water): scale the whole page about the cursor. The
-    // wrapper box's rect IS the page's visual bounds (layout ≡ visual — see the magnify plumbing
-    // effect), so the point under the cursor is the fraction (m − box.top)/box into the page;
-    // after the scale change that point sits at box'.top + offset·(after/before) — correct the
-    // scroll by its displacement so it stays pinned under the cursor, in VISUAL space (the shared
-    // conversion: paper-local = visual offset ÷ scale; new visual = paper-local × new scale).
+    // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the whole page about the VIEWPORT
+    // CENTRE (Peter: "centre it around the centrepoint of screen" — the cursor position picks the
+    // ZONE only, never the anchor). The wrapper box's rect IS the page's visual bounds (layout ≡
+    // visual — see the magnify plumbing effect), so the content point at the screen centre is the
+    // offset (centre − box.top) into the page; after the scale change it sits at box'.top +
+    // offset·(after/before) — correct the scroll by its displacement so it stays pinned at the
+    // centre (the shared conversion: paper-local = visual ÷ scale; new visual = local × new scale).
     const applyMagnifyFrame = () => {
       const net = mSteps
       mSteps = 0
@@ -216,19 +240,22 @@ export function Scroll({
       const box = magnifyBoxRef.current
       const before = getMagnify()
       const r0 = box?.getBoundingClientRect()
+      const vr = el.getBoundingClientRect()
+      const cX = vr.left + vr.width / 2, cY = vr.top + vr.height / 2
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net)
-      // Multiply the EFFECTIVE scale (not the raw intent): while the fit floor binds, intent is
-      // pinned at 1 so it can't silently run away and snap the page huge when the window widens.
+      // Multiply the EFFECTIVE scale (not the raw intent): while the fit cap binds, intent hovers
+      // just above it instead of silently running to 2.5 and snapping huge when the window widens.
       const after = setUserMagnify(before * factor) // subscriber applied var + wrapper sizes synchronously
       if (box && r0 && after !== before) {
         const r1 = box.getBoundingClientRect() // one forced layout, same frame — pre-paint
-        el.scrollTop += r1.top + (mY - r0.top) * (after / before) - mY
-        el.scrollLeft += r1.left + (mX - r0.left) * (after / before) - mX
+        el.scrollTop += r1.top + (cY - r0.top) * (after / before) - cY
+        el.scrollLeft += r1.left + (cX - r0.left) * (after / before) - cX
       }
       // Persist + zoom-settled ride the magnify subscriber's own settle timer (magnify plumbing).
     }
     const applyFrame = () => {
       raf = 0
+      holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
       const net = steps
       steps = 0
@@ -240,24 +267,37 @@ export function Scroll({
       // with the font, so anchoring against one warps the correction — the "funky near page gaps"
       // bug). When the centre line falls inside a gap, probe outward until real text is found, so
       // the anchor is effectively the nearest text above/below the gap.
+      // Pin pagination's painters for the whole gesture (see the RO gate in PaginationExtension:
+      // per-frame panel repositioning lagged the reflowing text 1–2 frames — the page-boundary
+      // up/down flicker). Cleared in the settle below, right before zoom-settled re-measures.
+      ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       const vr = el.getBoundingClientRect()
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
       const anchorY = phone ? pinchY : vr.top + vr.height / 2
-      const pickAt = (y: number): HTMLElement | null => {
+      const pickAt = (y: number, strict: boolean): HTMLElement | null => {
         const t = document.elementFromPoint(anchorX, y) as HTMLElement | null
         if (!t || !el.contains(t)) return null
         if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
         if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
         if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
+        // STRICT pass: refuse blocks SPLIT by a page gap (a mid-paragraph break nests the fixed-px
+        // gap widget inside the block). Such a block's rect straddles the boundary, so as the text
+        // redistributes across it the top↔gap relationship warps and successive frame corrections
+        // alternate direction — the boundary-zoom flicker. Prefer a block fully inside one page.
+        if (strict && t.querySelector('.inkwave-page-gap')) return null
         return t
       }
       if (!anchorEl || !anchorEl.isConnected) {
         // Probe the centre first, then alternate above/below in growing steps — finds the nearest
-        // text block when the midline sits in a page gap.
-        anchorEl = pickAt(anchorY)
-        for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
+        // text block when the midline sits in a page gap. Two passes: strict (whole block inside
+        // one page), then lenient (a split block still beats the no-anchor ratio fallback).
+        for (const strict of [true, false]) {
+          anchorEl = pickAt(anchorY, strict)
+          for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
+            if (anchorEl) break
+            anchorEl = pickAt(anchorY + dy, strict)
+          }
           if (anchorEl) break
-          anchorEl = pickAt(anchorY + dy)
         }
       }
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
@@ -284,6 +324,8 @@ export function Scroll({
       editorZoomRef.current = next
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => {
+        ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // gesture idle → painters may run
+        holdWavesFor(800) // …but the re-measure + re-anchor below must not sway the waves either
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
         try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
         // ZOOM-SETTLE RE-MEASURE: page breaks stay pinned DURING the gesture (re-measuring live made
@@ -295,7 +337,7 @@ export function Scroll({
         const topBeforeMeasure = held ? held.getBoundingClientRect().top : 0
         const onMeasured = () => {
           window.removeEventListener('inkwave:pagination-measured', onMeasured)
-          requestAnimationFrame(() => {
+          requestAnimationFrame(() => { // re-anchor is a zoom correction too — inside the hold window
             if (held && held.isConnected) {
               const topAfterMeasure = held.getBoundingClientRect().top
               setScrollTop(getScrollTop() + (topAfterMeasure - topBeforeMeasure))
@@ -308,31 +350,53 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, 200)
     }
-    // Zone latch: a wheel gesture keeps the zone it STARTED in. The magnify moves the page under
-    // the stationary cursor (zoom-in grows the paper across it, zoom-out shrinks it away), so
-    // re-testing per event flipped a single gesture between magnify and font-reflow mid-flight.
-    // A >350ms pause ends the gesture and the next wheel re-tests the zone under the cursor.
+    // Zone latch — POSITION-based: the zone is re-tested only when the CURSOR actually moves.
+    // Zooming moves the page under a stationary cursor (magnify grows/shrinks the paper across
+    // it; a gap band slides away as the page rescales), so any time- or per-event re-test flips
+    // a deliberate slow-notching gesture between magnify and font-reflow mid-flight (Peter hit
+    // this zooming out from a page gap). The user's INTENT is where they pointed: while the
+    // pointer stays put (< 8px), the zone they started in holds — however slowly they notch.
     let zoneIsWater = false
-    let zoneUntil = 0
+    let zoneX = Number.NaN, zoneY = Number.NaN // cursor position the current zone was tested at
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
+      if (!(e.ctrlKey || e.metaKey)) {
+        // CONTENT-PROPORTIONAL PLAIN SCROLL (Peter: "the scroll needs to change depending on how
+        // zoomed in we are"): the wrapper sizes scroll space to VISUAL dims, so a native ~100px
+        // wheel notch covers 1/scale× the document distance — at 0.1 the tiny page zips past, at
+        // 2× it crawls. Scale the delta by the effective magnify so one notch always covers the
+        // same fraction of a PAGE: visually slower zoomed out, constant relative to content.
+        // Scale 1 returns without preventDefault — the native path is untouched.
+        if (!hybrid) return
+        const s = getMagnify()
+        if (s === 1) return
+        e.preventDefault()
+        const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // lines/pages → px
+        const dy = e.deltaY * unit * s
+        const dx = e.deltaX * unit * s
+        if (e.shiftKey && !dx) el.scrollLeft += dy // reproduce the native shift-wheel → horizontal mapping
+        else { el.scrollTop += dy; el.scrollLeft += dx }
+        return
+      }
       e.preventDefault()
       if (e.deltaY === 0) return
-      // CURSOR-ZONE DUAL ZOOM (hybrid): over the WATER (outside the parchment) the wheel drives
-      // the transform-magnify of the whole page; over the PAGE it stays the font-reflow zoom.
+      // CURSOR-ZONE DUAL ZOOM (hybrid): over the WATER — beside the parchment OR in a between-
+      // pages gap (the aqua shows through there) — the wheel drives the transform-magnify of the
+      // whole page; over the PAGE it stays the font-reflow zoom.
       // GEOMETRIC test against the paper's VISUAL rect — not DOM containment: the caret-gutter
       // strips live inside the paper but stretch across the water, and the zone must follow what
-      // the eye sees. (gBCR is transform-aware, so this is exact at any magnify.)
-      if (e.timeStamp > zoneUntil) {
+      // the eye sees. (gBCR is transform-aware, so this is exact at any magnify.) The gap check IS
+      // target-based: the gap widget (+ its band) is the topmost element between pages, so a wheel
+      // there targets it — anywhere else on the page it targets text/sheet chrome.
+      if (!(Math.abs(e.clientX - zoneX) < 8 && Math.abs(e.clientY - zoneY) < 8)) {
         const pr = paperElRef.current?.getBoundingClientRect()
         const overPaper = !!(pr && e.clientX >= pr.left && e.clientX <= pr.right
           && e.clientY >= pr.top && e.clientY <= pr.bottom)
-        zoneIsWater = hybrid && !overPaper
+        const overGap = !!(e.target as HTMLElement | null)?.closest?.('.inkwave-page-gap')
+        zoneIsWater = hybrid && (!overPaper || overGap)
+        zoneX = e.clientX; zoneY = e.clientY
       }
-      zoneUntil = e.timeStamp + 350
       if (zoneIsWater) {
         mSteps += e.deltaY < 0 ? 1 : -1
-        mX = e.clientX; mY = e.clientY
       } else {
         steps += e.deltaY < 0 ? 1 : -1
       }
@@ -385,6 +449,7 @@ export function Scroll({
       el.removeEventListener('gesturechange', onGesture)
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
+      ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // never leave painters pinned
     }
   }, [phone, hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
   const sideMarginPx  = getSideMarginPx()
@@ -392,13 +457,15 @@ export function Scroll({
   const btmMarginPx   = getBtmMarginPx()
   const paraSpacingEm = getParaSpacingEm()
   const columns       = getColumns()
-  // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT jump when you ZOOM
-  // (zoom re-anchors scrollTop, which would lurch the waves). So skip the frame where the editor-zoom
-  // level changed and only sway on genuine scrolling.
+  // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT move when you
+  // ZOOM. Inside the zoom hold window (holdWavesFor above) every scroll delta — anchor
+  // corrections, settle re-anchors, async clamp scrolls, whatever — is rebased into the base
+  // equal-and-opposite, so base + scrollTop·WAVE_SWAY (the value written here) is CONSTANT
+  // through the whole gesture. (The old approach — skip one sway frame when the zoom var changed
+  // — leaked: coalesced and clamp-induced scroll events after the skipped one still swayed.)
   // The sway rides on a persistent BASE offset: where the loading coast came to rest (see the coast
   // handoff below, which rebases it against the scroll position at that moment). Starts at 0, so
-  // surfaces that never drift (SnapshotView) keep the plain scrollTop·0.06 sway.
-  const waveBaseRef = useRef(0)
+  // surfaces that never drift (SnapshotView) keep the plain scrollTop·WAVE_SWAY sway.
   useEffect(() => {
     const el = surfaceRef.current
     // Phone: waves exist only DURING load (.iw-wave-anim/.iw-wave-coast in index.css) — at rest the
@@ -407,10 +474,7 @@ export function Scroll({
     if (!el || phone) return
     const target: HTMLElement | Window = el
     let raf = 0
-    // Both zoom axes re-anchor scrollTop (font reflow AND magnify) — skip the sway on either.
-    // Change-detection only (not scale maths) — the scale itself is read via magnify.ts everywhere.
-    const zoomSig = () => `${el.style.getPropertyValue('--iw-editor-zoom')}/${el.style.getPropertyValue('--iw-magnify')}`
-    let lastZoom = zoomSig()
+    let lastTop = el.scrollTop
     const apply = () => {
       raf = 0
       // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the
@@ -418,15 +482,18 @@ export function Scroll({
       // + its animated pseudos every restore-scroll frame — a mid-coast recalc hitch (Firefox
       // re-rasters the overdraw layers on it). The coast's finish() writes the handoff value.
       if (waveModeRef.current !== 'off') return
-      const z = zoomSig()
-      if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
-      el.style.setProperty('--wave-x', `${(waveBaseRef.current + el.scrollTop * 0.06).toFixed(1)}px`) // 0.06 = 2/3 of the old 0.09 sway speed
+      const top = el.scrollTop
+      // Zoom-driven scroll (gesture / settle / clamp): hold --wave-x exactly still by absorbing
+      // the delta into the base. Rebased (not skipped), so sway resumes with no jump.
+      if (performance.now() < zoomHoldUntilRef.current) waveBaseRef.current -= (top - lastTop) * WAVE_SWAY
+      lastTop = top
+      el.style.setProperty('--wave-x', `${(waveBaseRef.current + top * WAVE_SWAY).toFixed(1)}px`)
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
     target.addEventListener('scroll', onScroll, { passive: true })
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
-  }, [phone])
+  }, [phone]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Loading wave drift — CSS/compositor does ALL the moving (`.iw-wave-anim`, in the prerendered
   // HTML, so it starts at FIRST PAINT and never stutters however busy the main thread is; the reveal
@@ -536,7 +603,7 @@ export function Scroll({
       // surface, ::before display:none), so the sway base/--wave-x write is inert there — kept
       // unconditional for one code path.
       const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 72)
-      waveBaseRef.current = txFinal - el.scrollTop * 0.06
+      waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
     }

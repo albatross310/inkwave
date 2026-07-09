@@ -11,11 +11,17 @@ beforeEach(() => {
 })
 
 describe('user magnify clamping', () => {
-  it('clamps intent into [MIN, MAX]', () => {
-    expect(setUserMagnify(0.3)).toBe(MIN_MAGNIFY)
+  it('clamps intent into [MIN, MAX] — zoom-out is (practically) unlimited', () => {
+    expect(MIN_MAGNIFY).toBe(0.02) // degenerate-maths guard only, not a UX floor
+    expect(setUserMagnify(0.005)).toBe(MIN_MAGNIFY)
     expect(getUserMagnify()).toBe(MIN_MAGNIFY)
     expect(setUserMagnify(9)).toBe(MAX_MAGNIFY)
     expect(getUserMagnify()).toBe(MAX_MAGNIFY)
+  })
+
+  it('a tiny page floating in water is valid: intent well below 1 sticks', () => {
+    expect(setUserMagnify(0.1)).toBe(0.1)
+    expect(getMagnify()).toBe(0.1)
   })
 
   it('rejects junk values back to 1', () => {
@@ -23,39 +29,41 @@ describe('user magnify clamping', () => {
     expect(setUserMagnify(-2)).toBe(1)
   })
 
-  it('effective follows intent when no floor binds', () => {
+  it('effective follows intent when no cap binds', () => {
     setUserMagnify(1.8)
     expect(getMagnify()).toBe(1.8)
   })
 })
 
-describe('fit-to-width floor', () => {
-  it('releases (scale 1) when the page fits at natural size', () => {
-    setFitContext(900, 794) // wide window
-    expect(getMagnify()).toBe(1)
+describe('fit-to-width cap (never a partial page)', () => {
+  it('caps zoom-IN at the fit scale on a narrow window', () => {
+    setUserMagnify(1.8)
+    setFitContext(600, 800)
+    expect(getMagnify()).toBeCloseTo(0.75, 4) // full page always fits
   })
 
-  it('scales the page down continuously when the window is narrower than the page', () => {
+  it('never caps zoom-OUT: intent below the fit scale wins', () => {
+    setUserMagnify(0.3)
+    setFitContext(600, 800) // fit would be 0.75; the user wants smaller — allowed
+    expect(getMagnify()).toBe(0.3)
+    setUserMagnify(0.05)
+    expect(getMagnify()).toBe(0.05)
+  })
+
+  it('shrinking the window squeezes a fitted page down continuously', () => {
     setFitContext(600, 800)
     expect(getMagnify()).toBeCloseTo(0.75, 4)
-    setFitContext(400, 800) // narrower still → smaller, continuously
+    setFitContext(400, 800)
     expect(getMagnify()).toBeCloseTo(0.5, 4)
   })
 
-  it('the fit wins outright while it binds — a full page is always shown', () => {
-    setUserMagnify(1.8)
-    setFitContext(600, 800)
-    expect(getMagnify()).toBeCloseTo(0.75, 4) // no horizontal cut-off ever from resizing
+  it('caps zoom-IN on a WIDE window too (past fit would cut the page)', () => {
+    setUserMagnify(2.5)
+    setFitContext(1200, 800) // ratio 1.5 — page fills the window at 1.5
+    expect(getMagnify()).toBeCloseTo(1.5, 4)
   })
 
-  it('wheel intent below the floor is clamped up (page never smaller than fit/natural)', () => {
-    setFitContext(600, 800)
-    setUserMagnify(getMagnify() * 0.926) // wheel-down over the water while pinned
-    expect(getUserMagnify()).toBe(MIN_MAGNIFY) // intent floors at 1, never runs away downward
-    expect(getMagnify()).toBeCloseTo(0.75, 4)
-  })
-
-  it('resizing wider releases the floor back to the persisted intent', () => {
+  it('resizing wider releases the cap back to the persisted intent', () => {
     setUserMagnify(1.8)
     setFitContext(600, 800)
     expect(getMagnify()).toBeCloseTo(0.75, 4)
@@ -63,17 +71,18 @@ describe('fit-to-width floor', () => {
     expect(getMagnify()).toBe(1.8)
   })
 
-  it('never degenerates below the 0.2 safety clamp', () => {
+  it('degenerate windows clamp the cap at MIN_MAGNIFY', () => {
     setFitContext(1, 800)
-    expect(getMagnify()).toBe(0.2)
+    expect(getMagnify()).toBe(MIN_MAGNIFY)
   })
 
-  it('null / bad page width releases the floor', () => {
+  it('null / bad page width releases the cap', () => {
+    setUserMagnify(2)
     setFitContext(600, 800)
     setFitContext(null)
-    expect(getMagnify()).toBe(1)
+    expect(getMagnify()).toBe(2)
     setFitContext(600, 0)
-    expect(getMagnify()).toBe(1)
+    expect(getMagnify()).toBe(2)
   })
 
   it('exports a sane water margin', () => {
@@ -89,7 +98,7 @@ describe('subscribe', () => {
     expect(n).toBe(1)
     setUserMagnify(1.5) // same effective → no notification
     expect(n).toBe(1)
-    setFitContext(600, 800) // floor binds → effective changes
+    setFitContext(600, 800) // cap binds → effective changes
     expect(n).toBe(2)
     off()
     setUserMagnify(2)
@@ -101,6 +110,7 @@ describe('visual → layout conversion', () => {
   it('unscale divides by the scale', () => {
     expect(unscale(70, 0.7)).toBeCloseTo(100, 6)
     expect(unscale(180, 1.8)).toBeCloseTo(100, 6)
+    expect(unscale(10, 0.1)).toBeCloseTo(100, 6) // stays exact at deep zoom-out
   })
 
   it('unscale is the identity at 1 and guards degenerate scales', () => {

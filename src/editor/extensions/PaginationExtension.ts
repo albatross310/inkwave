@@ -234,6 +234,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // (pushes it back); genuine resizes (rotate, keyboard, panel dock — no edit pending) still
           // measure straight away. Desktop keeps the original immediate path, byte-identical.
           const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
+            // ZOOM-GESTURE HOLD (the page-boundary flicker fix): every font-zoom frame resizes the
+            // sheet, so this observer re-ran per frame — recompute early-returns on the unchanged
+            // inputSig but still schedulePaint()s, repositioning the gapped panels/bands 1–2 frames
+            // BEHIND the reflowing text: the sheet edge visibly oscillated up/down at the zoom
+            // target. Scroll.tsx raises __iwZoomHold for the whole gesture (cleared just before it
+            // dispatches zoom-settled), so the panels stay pinned during the gesture and the settle
+            // re-measure repaints them once, cleanly, against the settled layout.
+            if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) return
             if (phoneLike() && editDebounce) scheduleAfterEdit()
             else schedule()
           }) : null

@@ -4,16 +4,17 @@
 // `transform: scale(...)` on the paper inside its size-compensated `.iw-magnify-box` wrapper, see
 // Scroll.tsx + index.css). Two things drive the scale:
 //
-//   • FIT-TO-WIDTH FLOOR — when the window is too narrow to show the canonical page (page width +
+//   • FIT-TO-WIDTH CAP — when the window is too narrow to show the canonical page (page width +
 //     a small water margin > viewport), the page scales down so the FULL page always fits,
-//     continuously as the window shrinks. The user never sees a horizontally cut-off page.
-//     While the floor binds, the fit scale wins outright (wheel intent can't push past it).
-//   • USER MAGNIFY — Ctrl/⌘+wheel with the cursor over the WATER (outside the parchment)
-//     magnifies the whole page (layout untouched — canonical breaks can't move). Intent is
-//     persisted separately from the floor, so widening the window releases the floor and the
-//     user's magnify comes back.
+//     continuously as the window shrinks. The user never sees a horizontally cut-off page:
+//     zooming IN is capped at the fit scale. Zooming OUT below fit is unlimited (a tiny page
+//     floating in water is valid — Peter, 2026-07-09).
+//   • USER MAGNIFY — Ctrl/⌘+wheel with the cursor over the WATER (outside the parchment, or in
+//     a between-pages gap) magnifies the whole page (layout untouched — canonical breaks can't
+//     move). Intent is persisted separately from the cap, so widening the window releases the
+//     cap and the user's magnify comes back.
 //
-// effectiveMagnify = fitScale < 1 ? fitScale : clamp(userMagnify, 1..2.5)
+// effectiveMagnify = min(clamp(userMagnify, 0.02..2.5), fitCap)
 //
 // EVERYTHING reads the scale through this module — no scattered getComputedStyle /
 // getPropertyValue('--iw-magnify') anywhere else. Consumers that read getBoundingClientRect on
@@ -26,9 +27,10 @@
 
 const KEY = 'inkwave:magnify'
 
-export const MIN_MAGNIFY = 1     // user intent can't shrink the page below fit/natural size
+export const MIN_MAGNIFY = 0.02  // practical floor only (degenerate-maths guard) — zoom-out is
+                                 // otherwise unlimited: a tiny page floating in water is valid
 export const MAX_MAGNIFY = 2.5
-export const WATER_MARGIN_PX = 24 // minimum water visible either side of a fit-floored page
+export const WATER_MARGIN_PX = 24 // minimum water visible either side of a fit-capped page
 
 function clampUser(v: number): number {
   return Number.isFinite(v) && v > 0 ? Math.min(MAX_MAGNIFY, Math.max(MIN_MAGNIFY, v)) : 1
@@ -39,13 +41,16 @@ function readPersisted(): number {
   try { return clampUser(parseFloat(localStorage.getItem(KEY) || '') || 1) } catch { return 1 }
 }
 
-let userMagnify = readPersisted() // the persisted INTENT — never the floor-clamped value
-let fitScale = 1                  // min(1, available/pageWidth); < 1 only when the page can't fit
+let userMagnify = readPersisted()         // the persisted INTENT — never the cap-clamped value
+let fitCap = Number.POSITIVE_INFINITY     // available/pageWidth — the NEVER-A-PARTIAL-PAGE ceiling
 let effective = compute()
 const subs = new Set<() => void>()
 
+// The fit scale is an UPPER CAP, not a floor (Peter, 2026-07-09): zooming OUT below fit is always
+// allowed (the page just floats smaller in the water); zooming IN past fit would cut the page
+// horizontally — never allowed. effective = min(clamp(intent, 0.02…2.5), fitCap).
 function compute(): number {
-  return +(fitScale < 1 ? fitScale : clampUser(userMagnify)).toFixed(4)
+  return +Math.min(clampUser(userMagnify), fitCap).toFixed(4)
 }
 
 function refresh(): void {
@@ -58,10 +63,10 @@ function refresh(): void {
 /** The scale the live editor's paper is (to be) rendered at. */
 export function getMagnify(): number { return effective }
 
-/** The persisted user intent (≥ 1) — what the wheel adjusts; the floor never overwrites it. */
+/** The persisted user intent — what the wheel adjusts; the fit cap never overwrites it. */
 export function getUserMagnify(): number { return userMagnify }
 
-/** Set the user intent (clamped 1…2.5). Returns the new EFFECTIVE magnify. */
+/** Set the user intent (clamped 0.02…2.5). Returns the new EFFECTIVE magnify. */
 export function setUserMagnify(v: number): number {
   userMagnify = clampUser(v)
   refresh()
@@ -74,13 +79,15 @@ export function persistMagnify(): void {
 }
 
 /**
- * Feed the fit floor its inputs: the width available for the page inside the scroll surface
+ * Feed the fit cap its inputs: the width available for the page inside the scroll surface
  * (surface clientWidth − 2×WATER_MARGIN_PX) and the canonical page width (pageModel px).
- * `null` releases the floor entirely (no hybrid surface mounted / 'scroll' paper).
+ * The cap is the RAW ratio (may exceed 1 on wide windows — that just means intent up to 2.5 is
+ * allowed); when the window is narrower than the page it drops below 1 and squeezes the page down
+ * so the full page always fits. `null` releases the cap (no hybrid surface / 'scroll' paper).
  */
 export function setFitContext(availablePx: number | null, pageWidthPx?: number): void {
-  if (availablePx == null || !pageWidthPx || pageWidthPx <= 0) fitScale = 1
-  else fitScale = Math.min(1, Math.max(0.2, availablePx / pageWidthPx))
+  if (availablePx == null || !pageWidthPx || pageWidthPx <= 0) fitCap = Number.POSITIVE_INFINITY
+  else fitCap = Math.max(MIN_MAGNIFY, availablePx / pageWidthPx)
   refresh()
 }
 
