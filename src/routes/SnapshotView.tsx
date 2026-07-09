@@ -887,11 +887,18 @@ function SplitDiffView({
     if (opIdx != null && performance.now() - lastMoveRef.current < 150) setAttr(opIdx, 'data-hover', true) // moving, not static
   }, [setAttr])
 
-  // Mark the cursor as in-motion across the split view (used by handleHoverOp above).
+  // Mark the cursor as in-motion (for handleHoverOp) AND set the cross-pane DRIVER by which pane the cursor
+  // is actually over — a live hit-test each mousemove, robust where mouseenter gets dropped (the reverse
+  // sync's "doesn't register that the cursor moved to the diff panel").
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const onMove = () => { lastMoveRef.current = performance.now() }
+    const onMove = (e: MouseEvent) => {
+      lastMoveRef.current = performance.now()
+      const t = e.target as Node, R = rightScrollRef.current, L = leftScrollRef.current
+      if (R && R.contains(t)) driverRef.current = 'right'
+      else if (L && L.contains(t)) driverRef.current = 'left'
+    }
     el.addEventListener('mousemove', onMove, { passive: true })
     return () => el.removeEventListener('mousemove', onMove)
   }, [])
@@ -1117,8 +1124,7 @@ function SplitDiffView({
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     if (!L || !R) return
-    const onLeftEnter = () => { driverRef.current = 'left' }
-    const onRightEnter = () => { driverRef.current = 'right' }
+    // (driver is set by the mousemove hit-test above — robust vs mouseenter being dropped.)
     const inverse = (ry: number): number => { // diff-pane position → editor position
       const ks = knotsRef.current
       if (!ks.length) return ry
@@ -1154,13 +1160,8 @@ function SplitDiffView({
         L.scrollTop = Math.max(0, inverse(R.scrollTop + R.clientHeight / 2) - L.clientHeight / 2)
       })
     }
-    L.addEventListener('mouseenter', onLeftEnter)
-    R.addEventListener('mouseenter', onRightEnter)
     R.addEventListener('scroll', onRightScroll, { passive: true })
-    return () => {
-      L.removeEventListener('mouseenter', onLeftEnter); R.removeEventListener('mouseenter', onRightEnter)
-      R.removeEventListener('scroll', onRightScroll)
-    }
+    return () => { R.removeEventListener('scroll', onRightScroll) }
   }, [snapshot.id])
 
   // Right-click-DRAG the diff pane to scroll it (for mouse users with no wheel/trackpad) — the editor flies
