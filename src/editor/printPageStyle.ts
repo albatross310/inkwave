@@ -5,7 +5,7 @@
 // every <style> tag's text, so the export tab inherits the override automatically — and a plain
 // Ctrl+P / the footer "print" action on the live page picks it up too.
 
-import { getPaperSize, getOrientation, getSideMarginPx } from './pageSettings'
+import { getPaperSize, getOrientation, getSideMarginPx, getTopMarginPx, MARGIN_BOTTOM } from './pageSettings'
 import { paperCssSize } from './pageModel'
 
 const STYLE_ID = 'iw-print-page'
@@ -24,6 +24,9 @@ export function syncPrintPageStyle(): void {
     `@media print{` +
     `html,body,.inkwave-editor-surface{width:${width} !important;}` +
     `@page{size:${width} ${height};margin:0;}` +
+    // Refs pages (named page — see index.css): REAL top/bottom margins from the live settings, so
+    // browser-natural breaks inside the reference list respect the same margins as everywhere.
+    `@page iw-refs{margin-top:${getTopMarginPx()}px;margin-bottom:${MARGIN_BOTTOM}px;}` +
     `.inkwave-editor-surface.is-phone .scroll-paper{padding-left:${side}px !important;padding-right:${side}px !important;}` +
     `}`
   if (!el) {

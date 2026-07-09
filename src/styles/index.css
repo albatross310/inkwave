@@ -818,6 +818,8 @@
   /* (tab / ⇧+tab hint badges removed — the visual hints feature is gone.) */
 }
 
+@page iw-refs { margin-top: 96px; margin-bottom: 72px; }
+
 /* ── Print / "Export PDF" ── a faithful A4 render of the EDITOR's pages, so the PDF matches the
    screen: same font + line spacing + wrapping (it's the browser laying out the same content), and
    the page breaks land where the editor's page gaps are. Both Print and Export PDF call
@@ -879,6 +881,56 @@
     min-height: var(--iw-print-topm, 72px) !important;
     margin: 0 !important;
     padding: 0 !important;
+  }
+
+  /* ── References across print pages (Peter, 2026-07-10) ──
+     The reference list is ONE atom: the browser breaks it naturally across pages, where our
+     widget-simulated margins don't exist — text ran to the paper edge. A NAMED PAGE gives every
+     refs page REAL physical top/bottom margins (values synced dynamically by printPageStyle.ts;
+     these are the A4 defaults). The named-page switch itself forces the break onto a fresh page,
+     so the widget-simulated margin before the list is zeroed to avoid doubling. Side margins stay
+     in-flow (the paper's padding), same as everywhere. */
+  .node-referenceList { page: iw-refs; }
+  .inkwave-page-gap:has(+ .node-referenceList) { height: 0 !important; min-height: 0 !important; }
+
+  /* ── Print-native page numbers + logo (Peter, 2026-07-10: 'the exact way they appear in the
+     editor'). The on-screen .iw-page-guides layer can't print (its y-positions include screen-only
+     gap heights), so each break widget carries the NEXT page's chrome: logo top-right (right 47,
+     +12px below the page top — the widget's bottom minus the simulated top margin IS the page top)
+     and the page number (right 24, +14px), counter-driven. Page 1's chrome rides the magnify-box.
+     Known gap: pages the browser creates INSIDE the reference list get margins but no number. */
+  .scroll-paper { counter-reset: iwpage 1; }
+  .inkwave-page-gap { counter-increment: iwpage; position: relative !important; overflow: visible !important; }
+  .inkwave-page-gap::before {
+    content: '';
+    position: absolute; right: 47px;
+    top: calc(100% - var(--iw-print-topm, 72px) + 12px);
+    width: 76px; height: 76px;
+    background: url('/inkwave-logo-v7.png') center / contain no-repeat;
+    opacity: 0.82;
+  }
+  .inkwave-page-gap::after {
+    content: counter(iwpage);
+    position: absolute; right: 24px;
+    top: calc(100% - var(--iw-print-topm, 72px) + 14px);
+    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 17px; color: #000;
+  }
+  .iw-magnify-box { position: relative !important; }
+  .iw-magnify-box::before {
+    content: '';
+    position: absolute; top: 12px; right: 47px; width: 76px; height: 76px;
+    background: url('/inkwave-logo-v7.png') center / contain no-repeat;
+    opacity: 0.82;
+  }
+  .iw-magnify-box::after {
+    content: '1';
+    position: absolute; top: 14px; right: 24px;
+    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 17px; color: #000;
+  }
+
+  /* No watermarks in print: strip the tea-stain egg regardless of the on-screen setting. */
+  .scas-red[data-scas-old]::after {
+    background: none !important; padding: 0 !important; left: 0 !important; border-radius: 0 !important;
   }
   .inkwave-page-gap-band { display: none !important; }
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
