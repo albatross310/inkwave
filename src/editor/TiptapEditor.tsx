@@ -843,13 +843,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [])
 
 
-  // Show the style bar briefly when the editor first loads, then auto-retreat.
-  useEffect(() => {
-    if (!editor) return
-    setStyleBarOpen(true)
-    armStyleTimer()
-  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Warm the synonym cache as soon as the editor is ready (existing red words).
   useEffect(() => {
     if (!editor || editor.isDestroyed) return

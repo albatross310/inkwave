@@ -20,7 +20,7 @@
 //     1-2 most recently modified .studio files per provider so even the FIRST open is warm.
 
 import { oneDriveConfigured, getSilentToken, getChosenFolder, listFolders, listOneDriveFiles, downloadOneDriveFile, type OneDriveFileEntry, type DriveFolder } from './onedrive'
-import { googleDriveConfigured, preloadGis, getDriveToken, listGoogleDriveFolders, listGoogleDriveFiles, downloadGoogleDriveFileBlob, type GDriveFileEntry } from './gdrive'
+import { googleDriveConfigured, preloadGis, listGoogleDriveFolders, listGoogleDriveFiles, downloadGoogleDriveFileBlob, type GDriveFileEntry, peekDriveToken } from './gdrive'
 import { readAppJson, writeAppJson } from './opfs'
 import { writeOpfsFile } from './opfsWrite'
 
@@ -203,7 +203,7 @@ async function warmOneDrive(): Promise<void> {
 async function warmGDrive(): Promise<void> {
   if (!googleDriveConfigured()) return
   preloadGis() // GIS script + token client off any click path
-  const token = await getDriveToken(false).catch(() => null) // silent grant only — NEVER prompts
+  const token = peekDriveToken() // peek only — getDriveToken(false) opens a GIS popup window on load (Firefox blocks + warns)
   if (!token) return
   const rootKey = listingKey('gd', 'root')
   if (!(await getListing(rootKey))?.fresh) {

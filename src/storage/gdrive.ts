@@ -67,6 +67,13 @@ export function preloadGis(): void {
  * Get a Drive access token. interactive=true shows the Google consent popup (MUST be called from a
  * user gesture); interactive=false attempts a silent grant (only works once consented). null = no token.
  */
+/** The already-granted in-memory token if fresh, else null — NEVER hits the network or GIS.
+ *  For background warm paths: GIS's requestAccessToken opens a POPUP WINDOW even for
+ *  prompt:'none' (Chrome tolerates quiet ones; Firefox blocks + warns "prevented a popup"). */
+export function peekDriveToken(): string | null {
+  return cached && cached.expiry > Date.now() + 60_000 ? cached.token : null
+}
+
 export async function getDriveToken(interactive: boolean): Promise<string | null> {
   if (!CLIENT_ID) return null
   if (cached && cached.expiry > Date.now() + 60_000) return cached.token

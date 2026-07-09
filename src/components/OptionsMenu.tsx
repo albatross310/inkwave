@@ -201,11 +201,15 @@ export function OptionsMenu({
   const EDGE_BUFFER = 10
   const panelAnchor = (): CSSProperties => {
     const br = btnRef.current?.getBoundingClientRect()
+    const bottom = br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60
+    // Phone: hug the right edge (the ⋮ button is the rightmost control; the old centre-clamp used
+    // HALF of the WIDEST panel, which shoved the little menu toward mid-screen — Peter, 2026-07-09).
+    if (isTouchDevice()) return { position: 'fixed', bottom, right: EDGE_BUFFER }
     const HALF = 150 // ~half the widest panel, for edge clamping
     const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
     return {
       position: 'fixed',
-      bottom: br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60,
+      bottom,
       left: Math.round(Math.max(EDGE_BUFFER + HALF, Math.min(window.innerWidth - EDGE_BUFFER - HALF, center))),
       transform: 'translateX(-50%)',
     }
@@ -236,7 +240,7 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable z-[60] w-44 py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable iw-no-print z-[60] w-44 py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {items.map(it => (
               <button key={it.label} role="menuitem" type="button"

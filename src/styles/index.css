@@ -774,6 +774,10 @@
    window.print(); choose a printer or "Save as PDF". */
 .print-seal { display: none; }
 @media print {
+  /* Floating chrome never prints: menus/panels (portaled to body) + the footer toolbar. The
+     hamburger drop-up was printing mid-page (Peter's screenshot, 2026-07-09). */
+  .iw-no-print, .iw-nightable[role="menu"], [data-iw-chrome] { display: none !important; }
+
   /* Zero the page box. The default 8px <body> margin pushes the 210mm parchment 8px past the page
      edge → the rendered content is wider than the sheet, which is exactly what makes Chrome's
      "Fit to page width" shrink everything down (and centre it → oversized margins all round).
