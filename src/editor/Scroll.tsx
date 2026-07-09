@@ -3,7 +3,7 @@ import { gappedPagesEnabled } from './pageView'
 import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation, MARGIN_BOTTOM } from './pageSettings'
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
-import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, WATER_MARGIN_PX } from './magnify'
+import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep } from './zoomStep'
 import { syncTwinkles } from './waveTwinkle'
 
@@ -12,6 +12,32 @@ import { syncTwinkles } from './waveTwinkle'
 export function isTouchDevice(): boolean {
   return typeof window !== 'undefined'
     && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
+}
+
+// ── Zoom input sensitivity (Peter, 2026-07-10: both were too slow — retune HERE) ──────────────
+// Trackpad ctrl-pinch fine-deltas: multiplier on the fractional step per 100px of deltaY. A
+// discrete mouse-wheel notch (|ΔY| ≥ 100) is ALWAYS exactly one 1.08 step — this only speeds up
+// the sub-notch accumulation, capped at one step per event.
+const TRACKPAD_ZOOM_SENSITIVITY = 2
+// Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(1.08)).
+// 1 = the pinched distance ratio maps 1:1 onto the zoom ratio; higher = fewer centimetres of
+// pinch per step. Steps still commit whole on the shared zoomStep lattice.
+const PINCH_ZOOM_SENSITIVITY = 1.75
+
+// ── Deep-zoom-out scroll acceleration (Peter, 2026-07-10) ─────────────────────────────────────
+// The plain-wheel scroll is content-proportional (delta × scale) so a notch always covers the
+// same fraction of a page — but taken literally that gets GLACIAL at tiny scales (at 0.05 a notch
+// is 5px). Below the knee the multiplier accelerates above pure proportionality, ramping harder
+// as the scale approaches MIN_MAGNIFY: f(s) = s^(1 − a·t), t = (KNEE − s)/(KNEE − MIN) ∈ [0,1].
+// At the knee t=0 → f(s) = s exactly (continuous, and the s ≥ KNEE regime is byte-identical);
+// with a = 0.5 the boost over proportional is ≈2.4× at s=0.1, ≈3.9× at s=0.05, ≈7× at 0.02.
+// Retune the KNEE (where acceleration starts) and STRENGTH (how hard it ramps) — not the formula.
+const SCROLL_ACCEL_KNEE = 1 / 3
+const SCROLL_ACCEL_STRENGTH = 0.5
+function scrollScale(s: number): number {
+  if (s >= SCROLL_ACCEL_KNEE) return s
+  const t = (SCROLL_ACCEL_KNEE - s) / (SCROLL_ACCEL_KNEE - MIN_MAGNIFY)
+  return Math.pow(s, 1 - SCROLL_ACCEL_STRENGTH * Math.min(1, t))
 }
 
 // The scroll "paper" chrome — the white page surface and the parchment column with its drop
@@ -381,44 +407,58 @@ export function Scroll({
         // CONTENT-PROPORTIONAL PLAIN SCROLL (Peter: "the scroll needs to change depending on how
         // zoomed in we are"): the wrapper sizes scroll space to VISUAL dims, so a native ~100px
         // wheel notch covers 1/scale× the document distance — at 0.1 the tiny page zips past, at
-        // 2× it crawls. Scale the delta by the effective magnify so one notch always covers the
-        // same fraction of a PAGE: visually slower zoomed out, constant relative to content.
+        // 2× it crawls. Scale the delta by scrollScale(s) — pure proportionality down to the
+        // knee (one notch = the same fraction of a page), then accelerating toward MIN_MAGNIFY
+        // so deep zoom-out scrolling stays brisk (see the curve's constants above).
         // Scale 1 returns without preventDefault — the native path is untouched.
         if (!hybrid) return
         const s = getMagnify()
         if (s === 1) return
         e.preventDefault()
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // lines/pages → px
-        const dy = e.deltaY * unit * s
-        const dx = e.deltaX * unit * s
+        const f = scrollScale(s)
+        const dy = e.deltaY * unit * f
+        const dx = e.deltaX * unit * f
         if (e.shiftKey && !dx) el.scrollLeft += dy // reproduce the native shift-wheel → horizontal mapping
         else { el.scrollTop += dy; el.scrollLeft += dx }
         return
       }
       e.preventDefault()
       if (e.deltaY === 0) return
-      // CURSOR-ZONE DUAL ZOOM (hybrid): over the WATER — beside the parchment OR in a between-
-      // pages gap (the aqua shows through there) — the wheel drives the transform-magnify of the
-      // whole page; over the PAGE it stays the font-reflow zoom.
-      // GEOMETRIC test against the paper's VISUAL rect — not DOM containment: the caret-gutter
-      // strips live inside the paper but stretch across the water, and the zone must follow what
-      // the eye sees. (gBCR is transform-aware, so this is exact at any magnify.) The gap check IS
-      // target-based: the gap widget (+ its band) is the topmost element between pages, so a wheel
-      // there targets it — anywhere else on the page it targets text/sheet chrome.
+      // CURSOR-ZONE DUAL ZOOM (hybrid): the PAGE zone is the PAINTED PAGE BACKGROUND (Peter,
+      // 2026-07-10 — not the text margin): cursor anywhere on parchment, INCLUDING the page's
+      // blank margins around the text, = font-reflow zoom; outside the painted parchment — side
+      // water AND the between-page gaps — = whole-page magnify.
+      // GEOMETRIC test against the parchment's VISUAL rects — not DOM containment (the
+      // caret-gutter strips live inside the paper but stretch across the water; the gap widgets
+      // span the page margins, which ARE parchment). Gapped mode: the painted parchment is
+      // exactly the .inkwave-sheet panel bands (the same rects the step cache positions), so test
+      // those; ungapped: the paper element's rect is the one continuous painted parchment.
+      // gBCR is transform-aware, so this is exact at any magnify — no scaleFor conversion needed
+      // for a visual point-in-rect test.
       if (!(Math.abs(e.clientX - zoneX) < 8 && Math.abs(e.clientY - zoneY) < 8)) {
-        const pr = paperElRef.current?.getBoundingClientRect()
-        const overPaper = !!(pr && e.clientX >= pr.left && e.clientX <= pr.right
-          && e.clientY >= pr.top && e.clientY <= pr.bottom)
-        const overGap = !!(e.target as HTMLElement | null)?.closest?.('.inkwave-page-gap')
-        zoneIsWater = hybrid && (!overPaper || overGap)
+        const x = e.clientX, y = e.clientY
+        const inRect = (r: DOMRect) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+        const panels = el.querySelectorAll<HTMLElement>('.inkwave-sheets .inkwave-sheet')
+        let overPage: boolean
+        if (panels.length) {
+          overPage = Array.from(panels).some((p) => inRect(p.getBoundingClientRect()))
+        } else {
+          const pr = paperElRef.current?.getBoundingClientRect()
+          overPage = !!(pr && inRect(pr))
+        }
+        zoneIsWater = hybrid && !overPage
         zoneX = e.clientX; zoneY = e.clientY
       }
       // LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly
       // ±1 step (identical to the old feel); trackpad ctrl-pinch fine-deltas (small |ΔY|)
       // contribute proportional FRACTIONS that accumulate until a whole step commits — so every
       // input lands on the shared zoomStep lattice instead of an arbitrary float in between.
+      // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fine-delta fraction (Peter: raise it "quite a
+      // bit") — a discrete notch stays exactly one step; retune the constant, not the formula.
       const mag = Math.abs(e.deltaY)
-      const stepDelta = (e.deltaY < 0 ? 1 : -1) * (mag >= 100 ? 1 : mag / 100)
+      const stepDelta = (e.deltaY < 0 ? 1 : -1)
+        * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
       if (zoneIsWater) {
         mSteps += stepDelta
       } else {
@@ -446,7 +486,9 @@ export function Scroll({
       e.preventDefault() // our zoom replaces the browser's — stop the double-zoom
       const d = touchDist(e.touches)
       if (d < 8) return // fingers (nearly) touching — the ratio is degenerate noise
-      steps += Math.log(d / pinchDist) / Math.log(1.08) // fractional steps on the wheel's 1.08 curve
+      // Fractional steps on the wheel's 1.08 curve, boosted by PINCH_ZOOM_SENSITIVITY (Peter,
+      // 2026-07-10: pinch felt too slow) — steps still commit whole on the shared lattice.
+      steps += (Math.log(d / pinchDist) / Math.log(1.08)) * PINCH_ZOOM_SENSITIVITY
       pinchDist = d
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
