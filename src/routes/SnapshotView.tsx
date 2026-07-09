@@ -38,15 +38,14 @@ function NavSide({
   hasVersions: boolean; isPhone: boolean
   overridePos?: React.CSSProperties
 }) {
-  const bracket    = snapDir === 'back' ? '‹'  : '›'
-  const bracketVer = snapDir === 'back' ? '«' : '»'
-  const btnW       = isPhone ? 15 : 17   // thin vertical bars flanking the editor
-  const btnH       = isPhone ? 44 : 54
+  const bracket    = snapDir === 'back' ? '<'  : '>'
+  const bracketVer = snapDir === 'back' ? '<<' : '>>'
+  const btnSize    = isPhone ? 41 : 53   // ~20% bigger
   const showVer    = hasVersions && !isPhone
 
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: btnW, height: btnH, borderRadius: 5,
+    width: btnSize, height: btnSize, borderRadius: 9,
     background: disabled ? NAV_BG_DIS : NAV_BG,
     color: disabled ? NAV_FG_DIS : NAV_FG,
     border: `1px solid ${disabled ? 'rgba(140,90,200,0.10)' : 'rgba(140,90,200,0.28)'}`,
@@ -1486,10 +1485,28 @@ function SplitDiffView({
       </>)}
     </div>
   )
+  // Thin snapshot-nav bar (‹ / ›) — a slim pair flanking the DIFF panel, mirroring the big editor nav.
+  const thinNav = (side: 'left' | 'right', onClick: () => void, disabled: boolean, label: string, title: string) => (
+    <button type="button" title={title} disabled={disabled} onClick={disabled ? undefined : onClick}
+      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+      onMouseLeave={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
+      style={{
+        position: 'absolute', [side]: 6, top: '50%', transform: 'translateY(-50%)', zIndex: 8,
+        width: 15, height: 50, borderRadius: 5, border: `1px solid rgba(140,90,200,${disabled ? 0.1 : 0.28})`,
+        background: disabled ? NAV_BG_DIS : NAV_BG, color: disabled ? NAV_FG_DIS : NAV_FG,
+        cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '1rem', fontFamily: 'inherit', letterSpacing: '-0.04em', boxShadow: '0 1px 4px rgba(80,50,10,0.14)',
+      }}
+    >{label}</button>
+  )
   const diffPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
       {midline}
       <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
+      {nav?.show && (<>
+        {thinNav('left', nav.onBack, !nav.canBack, '‹', 'Previous snapshot (←)')}
+        {thinNav('right', nav.onFwd, !nav.canFwd, '›', 'Next snapshot (→)')}
+      </>)}
     </div>
   )
   const sidePaneEl = (sz: React.CSSProperties) => (
@@ -1860,7 +1877,7 @@ export function SnapshotView() {
 
         {allSnapshots.length > 1 && (
           <span className="text-stone-600 tabular-nums">
-            {`v${groupIdx + 1}.${snapInGroup}/v${groups.length}.${lastGroup?.items.length ?? 1}`}
+            {`v${groupIdx + 1}/${groups.length}`}
           </span>
         )}
 
@@ -1985,7 +2002,7 @@ export function SnapshotView() {
             isNarrow={!isWide}
             lineMode={lineMode}
             summary={currentDiff}
-            counter={allSnapshots.length > 1 ? `s${idx + 1}/${allSnapshots.length}` : undefined}
+            counter={allSnapshots.length > 1 ? `v${groupIdx + 1}.${snapInGroup}/${groups.length}.${lastGroup?.items.length ?? 1}` : undefined}
             summariesOn={aiOn}
             onOptInSummaries={() => setConsentOpen(true)}
             nav={{
