@@ -33,9 +33,11 @@ export interface PageBoxInput {
   orientation: Orientation
   topMarginPx: number     // user setting (pageSettings.getTopMarginPx)
   bottomMarginPx: number  // MARGIN_BOTTOM (pageSettings)
-  // Contexts with no fixed mm parchment width (phone edge-to-edge paper, 'scroll' paper in gapped
-  // mode): keep the paper's aspect RATIO but base it on the rendered width. Print parity is
-  // impossible there anyway (the text wraps at a different width than the printed page).
+  // Contexts with no mm paper identity — 'scroll' paper in gapped mode ONLY: keep the paper's
+  // aspect RATIO but base it on the rendered width. Print parity is impossible there anyway (the
+  // text wraps at a different width than the printed page). Phone paper no longer takes this path:
+  // phones measure inside the forced canonical mm context (canonicalMeasure.ts), so phone breaks
+  // = desktop breaks = print breaks.
   fluidWidthPx?: number
 }
 

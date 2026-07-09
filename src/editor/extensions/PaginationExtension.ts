@@ -12,6 +12,13 @@
 // sheet.clientWidth — clientWidth's integer rounding flips with browser zoom / DPR, which made
 // the pagination browser-zoom-dependent (see pageModel.ts).
 //
+// TRUE CANONICAL PAGINATION (2026-07): the geometry above fixed the page HEIGHT, but lines were
+// still measured against the LIVE layout — editor font-zoom reflowed different words onto each
+// page, and phones measured at their own narrow width. Now every measure runs inside a forced
+// CANONICAL CONTEXT (canonicalMeasure.ts): mm paper width, desktop side margins, zoom 1, base
+// font — so breaks are document positions identical at every zoom, on phone and desktop, and in
+// print. The live layout only affects rendering.
+//
 // Measurement is loop-free: block positions are read as INTRINSIC (the gap-widget heights are
 // subtracted back out), so adding gaps never changes the measured layout. A signature guard stops
 // the recompute→dispatch→recompute cycle once nothing changes.
@@ -19,8 +26,9 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation, getTopMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
+import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
+import { forceCanonicalContext } from '../canonicalMeasure'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
@@ -182,14 +190,6 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
   return { set: DecorationSet.create(doc, decos), sig: sig.join('|') }
 }
 
-// True on touch phones/tablets — same media query as Scroll.isTouchDevice (duplicated here so the
-// pagination chunk doesn't import the React shell). Phone paper is edge-to-edge (no fixed mm
-// width), so page height falls back to the paper RATIO on the rendered width.
-function isTouchLike(): boolean {
-  return typeof window !== 'undefined'
-    && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
-}
-
 export const PaginationExtension = Extension.create<PaginationOptions>({
   name: 'pagination',
   addOptions() { return { enabled: false, gapped: false } },
@@ -325,12 +325,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               announceMeasured()
               return
             }
-            // CANONICAL page height (pageModel): physical mm through the 96dpi reference px —
+            // CANONICAL page geometry (pageModel): physical mm through the 96dpi reference px —
             // NOT sheet.clientWidth, whose integer rounding flips with browser zoom / DPR (and
-            // even at 100% baked a per-page error in vs the printed 297mm page). Phone paper and
-            // 'scroll' paper have no fixed mm width → keep the paper ratio on the rendered width.
-            const fluid = paper === 'scroll' || isTouchLike()
-            const { pageHeightPx: pageH } = pageBoxPx({
+            // even at 100% baked a per-page error in vs the printed 297mm page). Only 'scroll'
+            // paper (gapped mode — the ungapped case bailed above) has no mm identity → keep the
+            // paper ratio on the rendered width; print parity is impossible there anyway. Phones
+            // no longer take this path: they measure inside the forced canonical context below,
+            // so phone breaks = desktop breaks = print breaks.
+            const fluid = paper === 'scroll'
+            const { pageWidthPx, pageHeightPx: pageH } = pageBoxPx({
               paperSize: paper === 'letter' ? 'letter' : 'a4',
               orientation: getOrientation(),
               topMarginPx: topM,
@@ -349,30 +352,68 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // full page height and the panel div fills it naturally — no per-panel hack needed.
               if (pageH > 0) sheet.style.minHeight = `${pageH}px`
             }
-            // Only re-measure when something that affects layout changed (text edit → doc size; zoom/
-            // resize → pageH; margin settings). Our own setMeta dispatches below don't change these,
-            // so they can't loop.
-            // NB: editor font-zoom is deliberately NOT in this signature. Re-measuring DURING the zoom
-            // gesture moves the page breaks while the cursor anchor (set in Scroll.tsx) was computed
-            // against the old layout, so the text lurches. Instead Scroll.tsx fires a single
-            // 'inkwave:page-settings-changed' when the zoom SETTLES → one clean re-measure (settingsCb).
+            // Only re-measure when something that affects the CANONICAL layout changed (text edit →
+            // doc size; paper/orientation → pageH; top margin). Our own setMeta dispatches below
+            // don't change these, so they can't loop. Window/sheet resizes no longer re-measure at
+            // all (canonical breaks don't depend on the rendered width) — the RO-scheduled pass
+            // lands here and early-returns, just repositioning the gapped panels.
+            // NB: editor font-zoom is deliberately NOT in this signature (canonical breaks don't
+            // depend on it either). Re-measuring DURING the zoom gesture lurched the text; instead
+            // Scroll.tsx fires 'inkwave:zoom-settled' → one clean re-measure (zoomCb below), which
+            // now confirms the same breaks and re-paints the panels against the reflowed text.
             const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
             if (inputSig === lastInputSig) { if (gapped) schedulePaint(); return }
             lastInputSig = inputSig
 
-            // The gap widgets are display:block, so they FORCE line breaks — which means a word can't
-            // wrap back across a page boundary, and measuring the line layout with them present shows
-            // the forced break, not the natural wrap (so deletions never reflowed back). Fix: clear
-            // the gaps first so the DOM reflows to its NATURAL wrapping, measure THAT, then re-add the
-            // gaps. All synchronous within this one rAF tick, so the cleared state never paints (no
-            // flicker) — getClientRects forces layout, not paint.
-            const cur = KEY.getState(view.state)
-            if (cur && cur !== DecorationSet.empty) {
-              view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
+            // CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at
+            // every editor zoom and on every device (phone = desktop = print). So the measure runs
+            // in ONE forced canonical layout: true mm paper width (overrides the phone's fluid
+            // width), desktop print side margins (phone renders a slim 1.25rem), --iw-editor-zoom 1
+            // (defeats Ctrl+wheel AND phone pinch) and the 1.125rem base font inline (defeats the
+            // phone ×1.25 boost — see .ProseMirror in index.css). Live zoom / device width then
+            // affect RENDERING only: the widgets ride their document positions through any reflow,
+            // so pinch-zoom grows/shrinks pages without moving words across them. Set → measure →
+            // restore is all synchronous inside this one rAF, extending the existing no-paint
+            // window (getClientRects forces layout, not paint); cost: 2 extra full-document
+            // reflows per measure, which is fine because measures are debounced (150ms after
+            // edits / zoom-settle / settings) — never per-keystroke. Fluid 'scroll' paper keeps
+            // measuring the live layout (its pages are a ratio of the rendered width by design).
+            const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+            const restore = fluid ? null : forceCanonicalContext(
+              { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl, editor: view.dom as HTMLElement },
+              { pageWidthPx, sideMarginPx: getSideMarginPx() },
+            )
+            // The canonical layout is usually SHORTER than a zoomed/phone one, so the forced
+            // layout can CLAMP the scroll offset — capture it and put it back after the restore.
+            // Desktop live editor scrolls the surface (.iw-fill:not(.is-phone) in index.css);
+            // the phone body-scrolls (it has iw-fill too, but the CSS excludes it).
+            const scroller = surfaceEl && surfaceEl.classList.contains('iw-fill') && !surfaceEl.classList.contains('is-phone')
+              ? surfaceEl : null
+            const savedTop = scroller ? scroller.scrollTop : window.scrollY
+            const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
+            let measured = { set: DecorationSet.empty, sig: 'empty' }
+            try {
+              // The gap widgets are display:block, so they FORCE line breaks — which means a word
+              // can't wrap back across a page boundary, and measuring the line layout with them
+              // present shows the forced break, not the natural wrap (so deletions never reflowed
+              // back). Fix: clear the gaps first so the DOM reflows to its NATURAL wrapping,
+              // measure THAT, then re-add the gaps — the cleared state never paints (same window).
+              const cur = KEY.getState(view.state)
+              if (cur && cur !== DecorationSet.empty) {
+                view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
+              }
+              // Canonical context forces --iw-magnify to 1 (rects come back unscaled); only the
+              // fluid path can still be magnified (hybrid-zoom branches).
+              const magnifyScale = restore ? 1 : parseFloat(surfaceEl?.style.getPropertyValue('--iw-magnify') || '') || 1
+              measured = compute(view, pageH, topM, magnifyScale, gapped)
+            } finally {
+              if (restore) {
+                restore()
+                if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
+                else window.scrollTo(savedLeft, savedTop)
+              }
             }
-            const scaleEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
-            const magnifyScale = parseFloat(scaleEl?.style.getPropertyValue('--iw-magnify') || '') || 1
-            const { set, sig } = compute(view, pageH, topM, magnifyScale, gapped)
+            const { set, sig } = measured
             // Only update the set when gap positions actually changed (sig differs). When sig is the
             // same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating any
             // sub-pixel rounding differences in botMargin — the main cause of page-height flicker on
@@ -414,11 +455,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // Re-measure when page settings (top margin, paper size, orientation) change.
           const settingsCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
-          // Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Page breaks stay
-          // pinned DURING the gesture (deliberate — see the inputSig note above), but the gaps and
-          // sheet panels were measured at the old font size: without this, they sit misaligned with
-          // the reflowed text until the next edit — the "strange behaviour near gaps" after zooming.
-          // Scroll.tsx re-anchors the viewport around this re-measure (inkwave:pagination-measured).
+          // Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Breaks are now
+          // measured in the canonical context, so this recomputes IDENTICAL document positions
+          // (the stable-set guard makes the dispatch a no-op) — but it still drives the paint()
+          // pass that repositions the sheet panels/bands against the REFLOWED live text, which IS
+          // zoom-dependent. Scroll.tsx re-anchors the viewport around it (pagination-measured).
           const zoomCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {

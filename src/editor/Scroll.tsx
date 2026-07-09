@@ -385,7 +385,7 @@ export function Scroll({
             '--para-spacing': `${paraSpacingEm}em`,
           } as React.CSSProperties}
         >
-          <PageGuides sheetRef={sheetRef} phone={phone} />
+          <PageGuides sheetRef={sheetRef} />
           <div
             className="mx-auto w-full relative"
             style={{
@@ -410,7 +410,7 @@ export function Scroll({
 // pages, and the on-screen breaks are the print/PDF breaks. Falls back to the uniform canonical
 // model (topMargin + n×textArea) where no markers exist (loading shell, SnapshotView, multi-column).
 // Purely visual overlay (no content reflow).
-function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivElement>; phone?: boolean }) {
+function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
   const [breaks, setBreaks] = useState<number[]>([]) // sheet-local y of each page boundary
   // The guides depend on client-only state (paper size / gapped, both from localStorage), so the
   // prerendered shell and the client's first render disagree → hydration mismatch. Gate on a post-mount
@@ -464,11 +464,12 @@ function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivEl
       } else {
         // No markers yet (loading shell / SnapshotView / multi-column): uniform canonical model —
         // each page holds one text area, exactly where the measured breaks would land if every
-        // page filled perfectly. Fluid width on phone (no fixed mm parchment there).
+        // page filled perfectly. Canonical on phones too: the real markers are measured in the
+        // forced canonical A4/Letter context (PaginationExtension), so the fallback must agree
+        // (the old phone fluid-width path predates canonical measurement).
         const { textAreaPx } = pageBoxPx({
           paperSize, orientation,
           topMarginPx: getTopMarginPx(), bottomMarginPx: MARGIN_BOTTOM,
-          fluidWidthPx: phone ? el.clientWidth : undefined,
         })
         next = []
         for (let y = getTopMarginPx() + textAreaPx; y < total - 4 && next.length < 500; y += textAreaPx) next.push(y)
@@ -487,7 +488,7 @@ function PageGuides({ sheetRef, phone = false }: { sheetRef: RefObject<HTMLDivEl
     window.addEventListener('inkwave:pagination-measured', recompute)
     recompute()
     return () => { ro.disconnect(); window.removeEventListener('inkwave:pagination-measured', recompute) }
-  }, [sheetRef, paperSize, orientation, gapped, phone])
+  }, [sheetRef, paperSize, orientation, gapped])
 
   const logoSize = gapped ? 76 : 32           // bigger mark in the discrete-sheet (gapped) view
   const pageNumSize = gapped ? '2.6rem' : '1.1rem'
