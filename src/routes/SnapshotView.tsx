@@ -94,10 +94,6 @@ function NavSide({
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
-const CONTEXT_WORDS = 4  // words of unchanged context shown either side of each change
-
-function wc(text: string): number { return (text.match(/\S+/g) ?? []).length }
-
 // Split a change's text into [lead whitespace, visible core, trail whitespace] so the highlight (fill +
 // outline) wraps ONLY the core — leading/trailing spaces and especially RETURNS never paint an empty
 // highlighted line. `core` is '' when the change is pure whitespace (then it's rendered plain, unhighlighted).
@@ -108,32 +104,6 @@ function splitEdges(text: string): { lead: string; core: string; trail: string }
   return { lead, core: text.slice(lead.length, text.length - trail.length), trail }
 }
 
-/** First n words + their trailing horizontal whitespace. */
-function takeFirst(text: string, n: number): string {
-  if (n <= 0) return ''
-  const re = /\S+/g
-  let end = 0, count = 0, m: RegExpExecArray | null
-  while (count < n && (m = re.exec(text)) !== null) { end = m.index + m[0].length; count++ }
-  const trail = text.slice(end).match(/^[ \t]*/)?.[0] ?? ''
-  return text.slice(0, end + trail.length)
-}
-
-/** Last n words, including any newline immediately before the first word (≤ 3 chars back). */
-function takeLast(text: string, n: number): string {
-  if (n <= 0) return ''
-  const positions: number[] = []
-  const re = /\S+/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) positions.push(m.index)
-  if (!positions.length) return ''
-  const startIdx = positions[Math.max(0, positions.length - n)]
-  // Only look back ≤ 3 chars so we grab an immediately-preceding \n\n but
-  // never drag in an entire prior paragraph (the old lastIndexOf('\n') bug).
-  const lookback = text.slice(Math.max(0, startIdx - 3), startIdx)
-  const nl = lookback.lastIndexOf('\n')
-  const from = nl >= 0 ? startIdx - (lookback.length - nl) : startIdx
-  return text.slice(from)
-}
 
 /**
  * Build React nodes for the hunk-style diff panel.
@@ -146,141 +116,66 @@ function buildDiffNodes(
   onChangeClick?: (opIdx: number) => void,
   onHoverOp?: (opIdx: number | null) => void,
   diffPages?: Record<number, number>, // opIdx → 1-based DOCUMENT page (from the editor), for page-break rules
+  totalPages?: number,                 // total document pages, so pages with no diffs still show
 ): React.ReactNode[] {
   const n = ops.length
   if (!n) return []
 
-  // Per-op: words of 'same' until the NEXT change op
-  const untilNextW = new Array<number>(n).fill(Infinity)
-  let accW = 0
-  for (let i = n - 1; i >= 0; i--) {
-    if (ops[i].type !== 'same') { accW = 0 }
-    else { untilNextW[i] = accW; accW += wc(ops[i].text) }
-  }
-
-  // Per-op: does any change exist after this op?
-  const changeAfter = new Array<boolean>(n).fill(false)
-  let sawC = false
-  for (let i = n - 1; i >= 0; i--) { if (ops[i].type !== 'same') sawC = true; changeAfter[i] = sawC }
-
-  // Per-op: paragraph index in the "after" text at the START of each op
-  // pmToText joins paragraphs with \n\n, so count \n\n sequences
-  const opPara = new Array<number>(n).fill(0)
-  let para = 0
+  // Page-by-page BULLETED view: every document page gets a dashed rule + logo + number (in sync with the
+  // minimap); the diffs on it become bullet points with a little context; empty pages say "no change".
+  const CTX = 7
+  const toWords = (t: string) => t.trim().split(/\s+/).filter(Boolean)
+  const changes: Array<{ i: number; del: boolean; page: number; before: string; after: string }> = []
+  let maxPage = 1
   for (let i = 0; i < n; i++) {
-    opPara[i] = para
-    if (ops[i].type !== 'del') para += (ops[i].text.match(/\n\n/g) ?? []).length
+    if (ops[i].type === 'same') continue
+    const page = diffPages?.[i] ?? 1
+    if (page > maxPage) maxPage = page
+    const before = ops[i - 1]?.type === 'same' ? toWords(ops[i - 1].text).slice(-CTX).join(' ') : ''
+    const after = ops[i + 1]?.type === 'same' ? toWords(ops[i + 1].text).slice(0, CTX).join(' ') : ''
+    changes.push({ i, del: ops[i].type === 'del', page, before, after })
   }
-
-  // Per-op: cumulative word count at START of each op (for page estimation)
-  const opWords = new Array<number>(n).fill(0)
-  let cw = 0
-  for (let i = 0; i < n; i++) { opWords[i] = cw; if (ops[i].type !== 'del') cw += wc(ops[i].text) }
-
-  const nodes: React.ReactNode[] = []
+  const pages = Math.min(600, Math.max(totalPages ?? 1, maxPage))
+  const out: React.ReactNode[] = []
   let k = 0
-  let wordsSinceLast = Infinity
-  let gapPending = false
-  let lastHunkPara = -1
-
-  const flushGap = () => {
-    if (!gapPending) return
-    gapPending = false
-    nodes.push(<span key={`g${k++}`} style={{
-      display: 'block', textAlign: 'center', color: '#c4b5d8',
-      padding: '1px 0', fontStyle: 'italic', fontSize: '0.78em', userSelect: 'none',
-    }}>···</span>)
-  }
-
-  const emitLabel = (p: number, words: number) => {
-    if (p === lastHunkPara) return
-    lastHunkPara = p
-    const page = Math.floor(words / 250) + 1
-    const pageStr = page > 1 ? ` · p.${page}` : ''
-    nodes.push(<span key={`lbl${k++}`} style={{
-      display: 'block', fontSize: '1.05rem', fontWeight: 600,
-      color: INK, userSelect: 'none',
-      fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
-      padding: '8px 0 2px', fontStyle: 'normal', letterSpacing: '0.02em',
-    }}>{p + 1}{pageStr}</span>)
-  }
-
-  const emit = (text: string, style?: React.CSSProperties) => {
-    if (!text) return; flushGap()
-    nodes.push(<span key={`t${k++}`} style={style}>{text}</span>)
-  }
-
-  // Dashed page-break rule (with logo + number) inline before the first diff on a new DOCUMENT page — the
-  // numbers come from the editor's real pagination, so they line up with the minimap.
-  let lastPage = 0
-  const emitPageBreak = (pg: number) => {
-    flushGap()
-    nodes.push(
-      <div key={`pb${k++}`} aria-hidden="true" style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.34)', margin: '12px 0 5px' }}>
+  for (let pg = 1; pg <= pages; pg++) {
+    out.push(
+      <div key={`pr${k++}`} aria-hidden="true" style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.32)', margin: pg === 1 ? '2px 0 7px' : '15px 0 7px' }}>
         <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 700, color: 'rgba(92,45,138,0.72)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
-          <img src="/inkwave-logo-v7.png" alt="" style={{ width: 16, height: 16, opacity: 0.72 }} />{pg}
+          <img src="/inkwave-logo-v7.png" alt="" style={{ width: 15, height: 15, opacity: 0.72 }} />{pg}
         </span>
       </div>,
     )
-  }
-
-  const emitChange = (text: string, style: React.CSSProperties, opIdx: number, cls: string) => {
-    if (!text) return; flushGap()
-    const { lead, core, trail } = splitEdges(text)
-    if (!core) { nodes.push(<span key={`cw${k++}`}>{text}</span>); return } // pure whitespace/returns → no highlight
-    const clickable = !!onChangeClick
-    if (lead) nodes.push(<span key={`cl${k++}`}>{lead}</span>)
-    nodes.push(
-      <span
-        key={`c${k++}`}
-        className={cls}
-        data-opidx={String(opIdx)}
-        style={style}
-        onClick={clickable ? () => onChangeClick!(opIdx) : undefined}
-        onMouseEnter={onHoverOp ? () => onHoverOp!(opIdx) : undefined}
-        onMouseLeave={onHoverOp ? () => onHoverOp!(null) : undefined}
-        title={clickable ? 'Jump to this change in document' : undefined}
-      >{core}</span>
-    )
-    if (trail) nodes.push(<span key={`ct${k++}`}>{trail}</span>)
-  }
-
-  for (let i = 0; i < n; i++) {
-    const op = ops[i]
-
-    if (op.type !== 'same') {
-      const pg = diffPages?.[i]
-      if (pg && pg > lastPage) { emitPageBreak(pg); lastPage = pg }
-      emitLabel(opPara[i], opWords[i])
-      wordsSinceLast = 0
-      if (op.type === 'del') {
-        emitChange(op.text, {
-          color: '#b91c1c', textDecoration: 'line-through',
-          background: 'rgba(185,28,28,0.07)', borderRadius: 2,
-        }, i, 'diff-del')
-      } else {
-        emitChange(op.text, {
-          background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2,
-        }, i, 'diff-add')
-      }
+    const onPage = changes.filter(c => c.page === pg)
+    if (!onPage.length) {
+      out.push(<div key={`nc${k++}`} style={{ color: '#b3adbb', fontStyle: 'italic', fontSize: '0.78rem', padding: '3px 0 5px 2px' }}>no change this page</div>)
       continue
     }
-
-    const t = op.text
-    const words = wc(t)
-    const headW = wordsSinceLast === Infinity ? 0 : Math.max(0, CONTEXT_WORDS - wordsSinceLast)
-    const tailW = untilNextW[i] === Infinity ? 0 : Math.max(0, CONTEXT_WORDS - untilNextW[i])
-    wordsSinceLast = wordsSinceLast === Infinity ? words : wordsSinceLast + words
-
-    if (headW + tailW >= words) { emit(t); continue }
-
-    // Context snippets carry an ellipsis on the side that abuts elided text.
-    if (headW > 0)  emit(takeFirst(t, headW).trimEnd() + ' …')
-    if (tailW > 0)  emit('… ' + takeLast(t, tailW).trimStart())
-    else if (headW === 0 && changeAfter[i]) emit('…')
+    out.push(
+      <ul key={`ul${k++}`} style={{ margin: '5px 0 7px', paddingLeft: '1.15em', listStyleType: 'disc' }}>
+        {onPage.map((c) => {
+          const cls = c.del ? 'diff-del' : 'diff-add'
+          const style: React.CSSProperties = c.del
+            ? { color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.07)', borderRadius: 2 }
+            : { background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2 }
+          const core = splitEdges(ops[c.i].text).core || ops[c.i].text.trim()
+          return (
+            <li key={c.i} style={{ marginBottom: 5, color: '#3a3a3a' }}>
+              {c.before && <span style={{ color: '#9a94a4' }}>…{c.before} </span>}
+              <span className={cls} data-opidx={String(c.i)} style={style}
+                onClick={onChangeClick ? () => onChangeClick(c.i) : undefined}
+                onMouseEnter={onHoverOp ? () => onHoverOp(c.i) : undefined}
+                onMouseLeave={onHoverOp ? () => onHoverOp(null) : undefined}
+                title={onChangeClick ? 'Jump to this change in the document' : undefined}
+              >{core}</span>
+              {c.after && <span style={{ color: '#9a94a4' }}> {c.after}…</span>}
+            </li>
+          )
+        })}
+      </ul>,
+    )
   }
-
-  return nodes
+  return out
 }
 
 // ── FullDiffView ──────────────────────────────────────────────────────────────
@@ -341,7 +236,7 @@ function FullDiffView({
 // ── InlineDiffView ────────────────────────────────────────────────────────────
 // Right pane: compact hunk view of the diff.
 function InlineDiffView({
-  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef, midFrac = 0.5, diffPages,
+  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef, midFrac = 0.5, diffPages, totalPages,
 }: {
   ops: DiffOp[] | null
   prevSnap: Snapshot | null
@@ -350,12 +245,13 @@ function InlineDiffView({
   scrollBodyRef?: React.RefObject<HTMLDivElement>
   midFrac?: number
   diffPages?: Record<number, number> // opIdx → document page (from the editor), for in-sync page-break rules
+  totalPages?: number
 }) {
   const hasChange = ops ? ops.some(o => o.type !== 'same') : false
   const nodes = useMemo(
-    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp, diffPages) : [],
+    () => ops && hasChange ? buildDiffNodes(ops, onChangeClick, onHoverOp, diffPages, totalPages) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ops, hasChange, onChangeClick, onHoverOp, diffPages],
+    [ops, hasChange, onChangeClick, onHoverOp, diffPages, totalPages],
   )
 
   return (
@@ -947,6 +843,7 @@ function SplitDiffView({
   // Each diff's real DOCUMENT page, measured from the EDITOR's pagination (same pageH the minimap uses), so
   // the diff panel's page-break rules carry the SAME numbers as the minimap.
   const [diffPages, setDiffPages] = useState<Record<number, number>>({})
+  const [totalPages, setTotalPages] = useState(1)
   useEffect(() => {
     const L = leftScrollRef.current
     if (!L) return
@@ -963,6 +860,7 @@ function SplitDiffView({
         const y = el.getBoundingClientRect().top - lr.top + L.scrollTop
         map[idx] = Math.floor(y / pageH) + 1
       })
+      setTotalPages(Math.max(1, Math.ceil(L.scrollHeight / pageH)))
       setDiffPages((prev) => {
         const mk = Object.keys(map)
         return (mk.length === Object.keys(prev).length && mk.every(k => prev[+k] === map[+k])) ? prev : map
@@ -1667,7 +1565,7 @@ function SplitDiffView({
   const diffPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
       {midline}
-      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} diffPages={diffPages} />
+      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} diffPages={diffPages} totalPages={totalPages} />
       {nav?.show && (<>
         {thinNav('left', nav.onBack, !nav.canBack, '‹', 'Previous snapshot (←)')}
         {thinNav('right', nav.onFwd, !nav.canFwd, '›', 'Next snapshot (→)')}
