@@ -4,8 +4,8 @@
 
 @layer base {
   html {
-    /* Pale aquamarine blue behind everything (matches the editor page; shows on overscroll). */
-    background-color: #9fd9c8;
+    /* Aquamarine behind everything (matches the water gradient's right end; shows on overscroll). */
+    background-color: #00bfa8;
     color: #1a1a1a;
     /* Stop iOS Safari auto-inflating text, which desyncs the canvas-based width
        measurements the popover's in-place spacing relies on. */
@@ -25,8 +25,8 @@
     min-height: 100vh;
     /* The water: vivid cyan → aquamarine, left to right with a 15% downward declension
        (atan(0.15) ≈ 8.5° past horizontal). background-color stays as the fallback/average. */
-    background-color: #9fd9c8;
-    background-image: linear-gradient(98.5deg, #00b4d8 0%, #9fd9c8 100%);
+    background-color: #00bfa8;
+    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
     background-attachment: fixed;
     /* ~half a line of breathing space above the parchment; sides 1rem; bottom leaves room for
        the floating footer toolbar. The top value is the single knob for page position. */
@@ -39,7 +39,10 @@
      root/body stay parchment — that root colour is what iOS paints in unrasterised checkerboard
      tiles during fast flicks, and it must read as paper, not blue (Peter, 2026-07-09). */
   .inkwave-editor-surface.is-phone .inkwave-page-gap-band {
-    background: #9fd9c8;
+    /* Same water as desktop — hardcoded to the identical gradient (bands are full-bleed 100vw,
+       so the left→right sweep matches the desktop surface). */
+    background-color: #00bfa8;
+    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
     /* Full-bleed: the band lives inside the sheet's side padding — without this it stops short of
        the screen edges (parchment strips either side). */
     left: 50%;
