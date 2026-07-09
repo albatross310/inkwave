@@ -707,7 +707,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // Desktop is unchanged: coast starts at revealed, reveal is immediate.
       if (isTouchDevice()) {
         window.dispatchEvent(new Event('inkwave:reveal-imminent'))
-        revealTimer = setTimeout(reveal, 2000)
+        // 1.5s: the reveal starts the shell's 0.5s cross-fade, which lands exactly in the coast's
+        // tail — fade completes at 2s, the moment the waves reach rest.
+        revealTimer = setTimeout(reveal, 1500)
         return
       }
       reveal()

@@ -46,11 +46,17 @@ export function Edit() {
   // so React batches shell-unmount + reveal + the wave coast start into one paint). The editor's
   // surface underneath is phase-synced to the same wall clock (--wave-phase, set pre-paint), so the
   // swap is pixel-identical.
-  const [shellUp, setShellUp] = useState(true)
+  // 'up' → covering; 'fading' → 0.5s opacity cross-fade (doc/text/pills fade in atomically
+  // underneath, over the still-coasting waves); 'down' → unmounted.
+  const [shellUp, setShellUp] = useState<'up' | 'fading' | 'down'>('up')
   useEffect(() => {
-    const onRevealed = () => setShellUp(false)
+    let t = 0
+    const onRevealed = () => {
+      setShellUp('fading')
+      t = window.setTimeout(() => setShellUp('down'), 520)
+    }
     window.addEventListener('inkwave:editor-revealed', onRevealed)
-    return () => window.removeEventListener('inkwave:editor-revealed', onRevealed)
+    return () => { clearTimeout(t); window.removeEventListener('inkwave:editor-revealed', onRevealed) }
   }, [])
 
   useEffect(() => {
@@ -106,7 +112,7 @@ export function Edit() {
   const stashedDocRef = useRef<InkwaveDocument | null>(null)
   useEffect(() => {
     const onBegin = () => {
-      setShellUp(true) // waves-only for the whole load; drops again at the new doc's reveal
+      setShellUp('up') // waves-only for the whole load; fades again at the new doc's reveal
       setDoc((d) => { if (d) stashedDocRef.current = d; return null })
     }
     const onFailed = () => setDoc((d) => d ?? stashedDocRef.current)
@@ -148,8 +154,8 @@ export function Edit() {
           <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
         </Suspense>
       )}
-      {shellUp && (
-        <Scroll phone={isTouchDevice()} fill revealed={false}>
+      {shellUp !== 'down' && (
+        <Scroll phone={isTouchDevice()} fill revealed={false} fadingOut={shellUp === 'fading'}>
           <EmptyEditorSurface />
         </Scroll>
       )}

@@ -404,7 +404,12 @@ export function Scroll({
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
-      style={{ '--iw-editor-zoom': editorZoom } as React.CSSProperties}>
+      style={{
+        '--iw-editor-zoom': editorZoom,
+        // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the
+        // wave S-decay — doc, text and pills fade in together underneath, over coasting waves.
+        ...(fadingOut ? { opacity: 0, transition: 'opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)', pointerEvents: 'none' as const } : null),
+      } as React.CSSProperties}>
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. */}
       <div
