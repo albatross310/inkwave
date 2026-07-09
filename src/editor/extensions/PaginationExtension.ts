@@ -353,13 +353,16 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // finished to change") ─────────────────────────────────────────────────────────────────
           // Zoom levels live on the shared zoomStep lattice, and the CANONICAL breaks don't move
           // with zoom — so per step only the band GEOMETRY differs, and ONE hypothetical-reflow
-          // measure per step is the whole cost. While idle, the steps around the current one are
-          // precomputed (one per frame, aborting on any activity); when a gesture commits a step
-          // (the 'inkwave:zoom-step' event Scroll dispatches synchronously with the zoom var), the
-          // cached geometry is applied IMMEDIATELY as pure style writes that batch into the same
-          // reflow as the font change — the pages track the zoom live. A cache miss (zooming past
-          // the precomputed window) falls back to the old behaviour: panels hold (the __iwZoomHold
-          // RO gate) until the settle's verify paint snaps everything atomically.
+          // measure per step is the whole cost. While idle, the whole lattice is precomputed
+          // nearest-first (one step per frame, aborting on any activity); when a gesture commits a
+          // step (the 'inkwave:zoom-step' event Scroll dispatches synchronously with the zoom
+          // var), the cached geometry is applied IMMEDIATELY as pure style writes that batch into
+          // the same reflow as the font change — the pages track the zoom live. A cache MISS reads
+          // the bands LIVE in the same task instead (one extra synchronous reflow that frame):
+          // leaving the panels pinned at stale geometry while the text reflowed made the gap
+          // visually collapse and let text paint out over the water (Peter, 2026-07-10) — bands
+          // and text must land in the SAME frame, cached or not. The settle's verify paint still
+          // snaps everything atomically at the end (a no-op when the cache was accurate).
           const stepCache = new Map<number, BandGeo>()
           const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
@@ -372,16 +375,26 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
             const hit = stepCache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
-            else cacheStats.misses++
+            else {
+              // MISS → measure the bands LIVE, synchronously, in this same task. The zoom var is
+              // already at the new step, so readBands() forces the new layout once and the panel
+              // writes batch into it — visually identical to a hit, one reflow dearer. (The old
+              // pin-until-settle fallback left stale bands under reflowed text: the between-page
+              // gap "joined up" and text flashed out over the water.) Cache it so a re-pass hits.
+              cacheStats.misses++
+              const geo = readBands()
+              if (geo) { applyBands(geo); stepCache.set(d.step, geo) }
+            }
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
-          // Idle precompute: one step per frame, nearest-first within ±PRECOMPUTE_SPAN of the
-          // current step. Each measure is the canonicalMeasure trick on the LIVE zoom var: force
-          // --iw-editor-zoom to the step's lattice value, read the band rects + content height,
-          // restore — all inside one task, so the hypothetical layout never paints. Strictly
-          // desktop + genuinely idle: never during a gesture (__iwZoomHold), never in a typing
-          // pause (the edit debounce is the typing signal), never on phone, never while hidden.
-          const PRECOMPUTE_SPAN = 5
+          // Idle precompute: one step per frame, nearest-first from the current step until the
+          // WHOLE lattice is warm (it's only ~18 steps — a fast gesture can cross any window, and
+          // a miss now costs a synchronous mid-gesture reflow, so warm everything). Each measure
+          // is the canonicalMeasure trick on the LIVE zoom var: force --iw-editor-zoom to the
+          // step's lattice value, read the band rects + content height, restore — all inside one
+          // task, so the hypothetical layout never paints. Strictly desktop + genuinely idle:
+          // never during a gesture (__iwZoomHold), never in a typing pause (the edit debounce is
+          // the typing signal), never on phone, never while hidden.
           let preTimer: ReturnType<typeof setTimeout> | undefined
           let preRaf = 0
           const preBusy = () =>
@@ -391,7 +404,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             || document.visibilityState === 'hidden'
           const nextUncached = (): number | null => {
             const k0 = currentStep()
-            for (let d = 0; d <= PRECOMPUTE_SPAN; d++) {
+            for (let d = 0; d <= ZOOM_STEP_MAX - ZOOM_STEP_MIN; d++) {
               for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
                 if (k < ZOOM_STEP_MIN || k > ZOOM_STEP_MAX) continue
                 if (!stepCache.has(k)) return k
@@ -425,7 +438,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (destroyed || !gapped || phoneLike()) return
             if (preBusy()) { schedulePrecompute(500); return } // back off, retry when quiet
             const k = nextUncached()
-            if (k == null) return // the ±SPAN window is fully warm
+            if (k == null) return // the whole lattice is warm
             measureStep(k)
             preRaf = requestAnimationFrame(precomputeTick) // spread: one hypothetical reflow per frame
           }
@@ -448,7 +461,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.dispatchEvent(new Event('inkwave:pagination-ready'))
             }
             window.dispatchEvent(new Event('inkwave:pagination-measured'))
-            schedulePrecompute() // idle re-warm of the ±SPAN step window (no-op when already warm)
+            schedulePrecompute() // idle re-warm of the step lattice (no-op when already warm)
           }
           const recompute = () => {
             raf = 0
