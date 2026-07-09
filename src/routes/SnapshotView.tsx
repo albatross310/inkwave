@@ -321,13 +321,14 @@ function FullDiffView({
 // ── InlineDiffView ────────────────────────────────────────────────────────────
 // Right pane: compact hunk view of the diff.
 function InlineDiffView({
-  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef,
+  ops, prevSnap, onChangeClick, onHoverOp, scrollBodyRef, midFrac = 0.5,
 }: {
   ops: DiffOp[] | null
   prevSnap: Snapshot | null
   onChangeClick: (opIdx: number) => void
   onHoverOp: (opIdx: number | null) => void
   scrollBodyRef?: React.RefObject<HTMLDivElement>
+  midFrac?: number
 }) {
   const hasChange = ops ? ops.some(o => o.type !== 'same') : false
   const nodes = useMemo(
@@ -349,12 +350,12 @@ function InlineDiffView({
       >
         {!prevSnap && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
         {prevSnap && !hasChange && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
-        {/* ~13 lines of empty lead/trail whitespace: at the document's top (before the first diff's
-            position) the diff pane shows only blank — no diff in view — and the bijection spring has room
-            to "fridge-magnet" snap past the first and last diff instead of dead-ending at the pane edge. */}
-        {hasChange && <div aria-hidden="true" style={{ height: '24em' }} />}
+        {/* Lead/trail whitespace = just enough for the TOP diff to reach the reading line (midFrac of the
+            panel) and the BOTTOM diff to reach it from below — panel-relative, so it shrinks on smaller
+            windows instead of a fixed 24em that dwarfs a half-screen pane. */}
+        {hasChange && <div aria-hidden="true" style={{ height: `${midFrac * 100}%`, flexShrink: 0 }} />}
         {nodes}
-        {hasChange && <div aria-hidden="true" style={{ height: '24em' }} />}
+        {hasChange && <div aria-hidden="true" style={{ height: `${(1 - midFrac) * 100}%`, flexShrink: 0 }} />}
       </div>
     </div>
   )
@@ -1531,7 +1532,7 @@ function SplitDiffView({
   const diffPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
       {midline}
-      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} />
+      <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} />
       {nav?.show && (<>
         {thinNav('left', nav.onBack, !nav.canBack, '‹', 'Previous snapshot (←)')}
         {thinNav('right', nav.onFwd, !nav.canFwd, '›', 'Next snapshot (→)')}
