@@ -1418,6 +1418,7 @@ function SplitDiffView({
       }
       const onWheel = (e: WheelEvent) => {
         if (e.ctrlKey || e.metaKey || e.shiftKey) return // ⌘/ctrl = zoom; shift = snapshot scrub (window handler)
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return // horizontal two-finger swipe = snapshot scrub (below)
         e.preventDefault()
         x = el.scrollTop
         const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
@@ -1447,6 +1448,28 @@ function SplitDiffView({
     install(rightScrollRef.current, () => rCentresRef.current, 'right') // diff pane
     return () => cleanups.forEach((fn) => fn())
   }, [snapMode, snapshot.id])
+
+  // Trackpad TWO-FINGER HORIZONTAL swipe over the editor or diff pane → snapshot scrub (mirrors the phone
+  // swipe + shift+wheel). Distance-quantised: a quick flick ≈ one snapshot, a long deliberate slide steps
+  // through many. Vertical wheels are untouched (the warp/native scroll owns those).
+  useEffect(() => {
+    const L = leftScrollRef.current, R = rightScrollRef.current
+    let accum = 0
+    const STEP = 130 // deltaX px per snapshot step
+    const onWheel = (e: WheelEvent) => {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) return
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.3) return // not a horizontal swipe
+      e.preventDefault()
+      accum += e.deltaX
+      if (Math.abs(accum) < STEP) return
+      const dir = accum > 0 ? 1 : -1 // swipe left (deltaX>0) → next; right → previous
+      accum = 0
+      if (dir > 0) nav?.onFwd(); else nav?.onBack()
+    }
+    L?.addEventListener('wheel', onWheel, { passive: false })
+    R?.addEventListener('wheel', onWheel, { passive: false })
+    return () => { L?.removeEventListener('wheel', onWheel); R?.removeEventListener('wheel', onWheel) }
+  }, [nav, snapshot.id])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).
