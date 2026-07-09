@@ -201,7 +201,7 @@ function buildDiffNodes(
       color: INK, userSelect: 'none',
       fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
       padding: '8px 0 2px', fontStyle: 'normal', letterSpacing: '0.02em',
-    }}>¶{p + 1}{pageStr}</span>)
+    }}>{p + 1}{pageStr}</span>)
   }
 
   const emit = (text: string, style?: React.CSSProperties) => {
@@ -377,10 +377,10 @@ function InlineDiffView({
         <div ref={contentRef} style={{ position: 'relative' }}>
           {nodes}
           {Array.from({ length: pageCount }, (_, i) => (
-            <div key={i} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: (i + 1) * pageH, borderTop: '1px dashed rgba(92,45,138,0.3)', pointerEvents: 'none' }}>
-              <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 3, fontSize: '0.72rem', fontWeight: 700, color: 'rgba(92,45,138,0.5)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
-                <img src="/inkwave-logo-v7.png" alt="" style={{ width: 15, height: 15, opacity: 0.55 }} />
-                p.{i + 2}
+            <div key={i} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: (i + 1) * pageH, borderTop: '1px dashed rgba(92,45,138,0.32)', pointerEvents: 'none', zIndex: 2 }}>
+              <span style={{ position: 'absolute', right: 0, top: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.92rem', fontWeight: 700, color: 'rgba(92,45,138,0.75)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                <img src="/inkwave-logo-v7.png" alt="" style={{ width: 17, height: 17, opacity: 0.7 }} />
+                {i + 2}
               </span>
             </div>
           ))}
@@ -531,7 +531,7 @@ function stackHeight(pages: number): number {
 // 1fr so they then scale to fill the panel. Recomputed whenever the panel resizes.
 function bestGrid(n: number, W: number, H: number): { rows: number; cols: number } {
   if (n <= 1 || W <= 0 || H <= 0) return { rows: Math.max(1, n), cols: 1 }
-  const MIN = 3, MAX = 6, IDEAL = 4.2 // page thumbnail height:width
+  const MIN = 3, MAX = 5, IDEAL = 4 // page thumbnail height:width
   let best = { rows: 1, cols: n }, bestScore = Infinity
   for (let rows = 1; rows <= n; rows++) {
     const cols = Math.ceil(n / rows)
@@ -814,7 +814,7 @@ function SplitDiffView({
   // A ref so the sync effects (which don't re-subscribe on the flip) always read the current value.
   const midFrac = vertical ? 0.5 : 0.382
   const midFracRef = useRef(midFrac); midFracRef.current = midFrac
-  const [splitPct, setSplitPct] = useState(37.5) // diff pane %; editor (rest) ends up 5/3 × the diff
+  const [splitPct, setSplitPct] = useState(28) // diff pane % (narrower by default); editor takes the rest
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const [snapMode, setSnapMode] = useState<SnapMode>(() => {
     try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
@@ -1468,7 +1468,7 @@ function SplitDiffView({
           return
         }
         if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
-        v = Math.max(-90, Math.min(90, v + e.deltaY * WARP_IMPULSE))
+        v = Math.max(-40, Math.min(40, v + e.deltaY * WARP_IMPULSE)) // cap max scroll speed (continuous trackpad was flying at ±90)
         if (!raf) raf = requestAnimationFrame(tick)
       }
       el.addEventListener('wheel', onWheel, { passive: false })
@@ -1604,7 +1604,7 @@ function SplitDiffView({
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 'clamp(8px, 1vw, 14px)', zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 'clamp(2px, 0.4vw, 6px)', zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'center' }}>
         {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
