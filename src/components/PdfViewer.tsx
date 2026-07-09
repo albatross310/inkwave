@@ -1123,8 +1123,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         <>
           <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }} />
           {onClose && (
+            // The TOOLBAR's ✕, in its exact final position/style (top-LEFT, matching the toolbar's
+            // padding) — visual continuity: when the toolbar reveals, the ✕ doesn't move or restyle
+            // (Peter, 2026-07-10: the loading ✕ on the right looked like a different control).
             <button type="button" onClick={onClose} title="Close (Esc)"
-              style={{ position: 'absolute', top: 8, right: 12, zIndex: 11, border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.7rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+              style={{ position: 'absolute', top: 7, left: 12, zIndex: 11, width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
           )}
         </>
       )}
