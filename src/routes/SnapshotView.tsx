@@ -1156,7 +1156,7 @@ function SplitDiffView({
       // lead/trail whitespace (keeps the extremes consistent with the editor). Only while the diff drives,
       // so it never fights the forward-drive spring.
       const ks = knotsRef.current
-      if (ks.length && driverRef.current === 'right') {
+      if (ks.length && driverRef.current === 'right' && !panningRef.current) { // never clamp mid right-drag (it stuck on the first move)
         const minS = Math.max(0, ks[0].ry - R.clientHeight / 2)
         const maxS = ks[ks.length - 1].ry - R.clientHeight / 2
         if (R.scrollTop < minS) { R.scrollTop = minS; return }
@@ -1415,8 +1415,7 @@ function SplitDiffView({
   )
   const sidePaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
-      <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px' }}>
-        {summariesOn && <div style={{ fontWeight: 700, color: INK, marginBottom: 6, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Summary</div>}
+      <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: vertical ? '0.72rem' : '1rem', lineHeight: vertical ? 1.4 : 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: vertical ? '6px 8px' : '9px 11px' }}>
         {!summariesOn ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
             <div style={{ fontSize: '0.92rem', color: INK, fontWeight: 600, textAlign: 'center', maxWidth: '14ch' }}>Plain-language recaps</div>
@@ -1452,7 +1451,7 @@ function SplitDiffView({
           {editorPaneEl({ height: `${splitPct}%` })}
           {dragDivider(startDrag, dragging, 'Drag to resize')}
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-            {sidePaneEl({ width: Math.min(sidePanelPx, 200) })}
+            {sidePaneEl({ flex: 1, minWidth: 0 })}
             {thinSep('col')}
             {diffPaneEl({ flex: 1, minWidth: 0 })}
           </div>
