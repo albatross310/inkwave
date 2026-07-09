@@ -703,6 +703,8 @@ function SplitDiffView({
   // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
   const driverRef = useRef<'left' | 'right'>('left') // whichever pane the cursor is over (default editor)
   const panningRef = useRef(false) // true while a right-click pan is in progress (suppresses the hover glow)
+  const scrollingRef = useRef(false) // true for ~140ms after any pane scroll (suppresses the hover glow)
+  const scrollStopTimer = useRef<number | undefined>(undefined)
   const dragging   = useRef(false)
   // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
   // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
@@ -879,25 +881,21 @@ function SplitDiffView({
     })
   }, [])
 
-  // Highlight triggers when the cursor is IN MOTION as it reaches a diff (any speed) — a truly STATIC
-  // cursor never lights it. Once lit it stays until the cursor leaves. lastMoveRef = last mousemove time.
-  const lastMoveRef = useRef(0)
-
+  // Hover glow lights whenever the cursor is over a diff — EXCEPT while panning or scrolling (scrolling the
+  // content under a still cursor was the case that spuriously lit it; see the scroll-suppress effect).
   const handleHoverOp = useCallback((opIdx: number | null) => {
     setAttr(lastHoveredRef.current, 'data-hover', false) // clear the previous
     lastHoveredRef.current = opIdx
-    if (panningRef.current) return // no hover glow while right-click panning
-    if (opIdx != null && performance.now() - lastMoveRef.current < 150) setAttr(opIdx, 'data-hover', true) // moving, not static
+    if (panningRef.current || scrollingRef.current) return // no glow while panning or scrolling
+    if (opIdx != null) setAttr(opIdx, 'data-hover', true)
   }, [setAttr])
 
-  // Mark the cursor as in-motion (for handleHoverOp) AND set the cross-pane DRIVER by which pane the cursor
-  // is actually over — a live hit-test each mousemove, robust where mouseenter gets dropped (the reverse
-  // sync's "doesn't register that the cursor moved to the diff panel").
+  // Set the cross-pane DRIVER by which pane the cursor is actually over — a live hit-test each mousemove,
+  // robust where mouseenter gets dropped (the reverse sync's "doesn't register the cursor moved to the diff").
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const onMove = (e: MouseEvent) => {
-      lastMoveRef.current = performance.now()
       const t = e.target as Node, R = rightScrollRef.current, L = leftScrollRef.current
       if (R && R.contains(t)) driverRef.current = 'right'
       else if (L && L.contains(t)) driverRef.current = 'left'
@@ -905,6 +903,27 @@ function SplitDiffView({
     el.addEventListener('mousemove', onMove, { passive: true })
     return () => el.removeEventListener('mousemove', onMove)
   }, [])
+
+  // Suppress the hover glow WHILE either pane is scrolling; re-light the hovered diff once it settles. This
+  // replaces the old "must have moved onto it" velocity gate — scrolling is the case that spuriously lit it.
+  useEffect(() => {
+    const L = leftScrollRef.current, R = rightScrollRef.current
+    const onAnyScroll = () => {
+      scrollingRef.current = true
+      setAttr(lastHoveredRef.current, 'data-hover', false)
+      window.clearTimeout(scrollStopTimer.current)
+      scrollStopTimer.current = window.setTimeout(() => {
+        scrollingRef.current = false
+        if (!panningRef.current && lastHoveredRef.current != null) setAttr(lastHoveredRef.current, 'data-hover', true)
+      }, 140)
+    }
+    L?.addEventListener('scroll', onAnyScroll, { passive: true })
+    R?.addEventListener('scroll', onAnyScroll, { passive: true })
+    return () => {
+      L?.removeEventListener('scroll', onAnyScroll); R?.removeEventListener('scroll', onAnyScroll)
+      window.clearTimeout(scrollStopTimer.current)
+    }
+  }, [snapshot.id, setAttr])
 
   // Click from right pane: toggle active op, scroll LEFT pane so midline hits the change.
   const handleClickOp = useCallback((opIdx: number) => {
