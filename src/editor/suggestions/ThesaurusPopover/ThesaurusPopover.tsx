@@ -1,8 +1,13 @@
 // ThesaurusPopover — Word-cycle synonym interface.
 // Keyboard: j/k cycle, Space accept+advance, Tab prev word, Shift+Tab next, Esc dismiss
 // Slots: 0 = original word, 1–7 = synonyms (no delete slot — double-tap a word to delete it)
-// Click/touch: opens cycle; drag spins the reel and it rests; short click commits,
+// Mouse: press opens; drag spins the reel and it rests; short click commits,
 // press-and-hold (anywhere) keeps it open to keep changing; double-tap selects for deletion.
+// Touch (phone model, 2026-07-09): a still TAP opens the cycle (on pointerup) and it STAYS open;
+// browsing is then a NEW vertical drag starting on the open word/reel (touch-action:none there —
+// the reel owns that gesture exclusively, the page never moves); a pan starting anywhere else —
+// including an UNOPENED red word — is native page scroll exclusively and never touches the reel.
+// Tap the reel to confirm, tap outside to dismiss, double-tap to select for deletion.
 //
 // Stage D animation model: the reel is a CONTINUOUS scroll position (cycle.reelPos,
 // in slot units) rather than discrete steps. A drag moves it 1:1 with the pointer; on
@@ -36,6 +41,9 @@ const GHOST_MS = 500
 const MAX_VEL    = 0.060   // slots/ms — capped so a frame never jumps the whole window
 const FLING_TAU  = 260     // ms; coast distance ≈ v0 · TAU, so larger = more glide / browse
 const VEL_STOP   = 0.0006  // slots/ms; below this the fling hands off to the settle ease
+
+// Pointer travel under this = a still tap/click (opens the cycle on touch, commits on release).
+const TAP_PX = 6
 
 interface ThesaurusPopoverProps {
   editor: Editor
@@ -287,35 +295,40 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   useEffect(() => {
     if (!editor) return
     const edEl = editor.view.dom
+    // PHONE TAP-TO-OPEN (2026-07-09). A touch on a red word must NOT open (or scroll) the cycle on
+    // pointerDOWN — at gesture start the finger is ambiguous (tap vs page pan), and the old
+    // open-on-down model made the SAME gesture both open the cycle and steer the reel while the
+    // browser — whose gesture-start touch-action on the word is `pan-x pan-y` (the universal phone
+    // rule in index.css) — was equally entitled to take it as a page pan. Whoever won the first
+    // touchmove won: sometimes both ran (page panned WHILE the reel advanced), and a browser-claimed
+    // pan fired pointercancel and killed the drag mid-way ("they restrict each other"). New model:
+    // a still tap (< TAP_PX at release) opens the cycle on pointerUP; a moved finger is a native
+    // page scroll and nothing opens. Browsing is then a NEW gesture that must start on the open
+    // word/reel (see dragArmed), whose touch-action:none lets the reel own it outright.
+    let pendingTouchOpen: { id: number; x: number; y: number } | null = null
+    function openFor(t: HTMLElement) {
+      tabCursorRef.current = null
+      openedByPointerRef.current = true   // this press/tap opened the cycle — its release must not commit
+      openCycleForElement(t)
+    }
     function onPointerDown(e: PointerEvent) {
       const t = (e.target as HTMLElement).closest('.scas-red') as HTMLElement | null
       if (!t || !edEl.contains(t)) return
-      // Shrink the effective click target by 3px each side so a click right at the word's
-      // edge falls through to ProseMirror's normal cursor placement instead of opening the cycle.
-      if (e.pointerType !== 'touch') {
-        const r = t.getBoundingClientRect()
-        if (e.clientX < r.left + 3 || e.clientX > r.right - 3) return
-      }
-      e.preventDefault(); tabCursorRef.current = null
-      openedByPointerRef.current = true   // this press opens a cycle — its release must not commit
-      // Fix 4: opening rebuilds this .scas-red span (PM dispatch), and WebKit keeps sending the
-      // gesture's touch events to the now-DETACHED node — which has no ancestors, so the
-      // document-level touchmove handler never sees them and iOS starts scrolling. CSS
-      // touch-action can't help (inert on display:inline, read only at gesture start). So
-      // attach a non-passive touchmove listener to the touched node ITSELF, before the rebuild;
-      // a detached node still receives its own gesture's events, so preventDefault keeps working.
       if (e.pointerType === 'touch') {
-        const suppress = (ev: TouchEvent) => ev.preventDefault()
-        const cleanup = () => {
-          t.removeEventListener('touchmove', suppress)
-          t.removeEventListener('touchend', cleanup)
-          t.removeEventListener('touchcancel', cleanup)
-        }
-        t.addEventListener('touchmove', suppress, { passive: false })
-        t.addEventListener('touchend', cleanup)
-        t.addEventListener('touchcancel', cleanup)
+        // Arm the tap-open. preventDefault here suppresses only the compatibility mouse events
+        // (no PM caret placement / iOS keyboard) — NOT the native pan, which stays free: a finger
+        // that moves scrolls the page and the tap-open is abandoned by the distance gate at up.
+        pendingTouchOpen = { id: e.pointerId, x: e.clientX, y: e.clientY }
+        e.preventDefault()
+        return
       }
-      openCycleForElement(t)
+      // Mouse/pen: unchanged press-opens model. Shrink the effective click target by 3px each
+      // side so a click right at the word's edge falls through to ProseMirror's normal cursor
+      // placement instead of opening the cycle.
+      const r = t.getBoundingClientRect()
+      if (e.clientX < r.left + 3 || e.clientX > r.right - 3) return
+      e.preventDefault()
+      openFor(t)
       // The open REBUILDS this .scas-red span (PM dispatch destroys it). The browser gives the
       // pointer an IMPLICIT capture to that span — but per spec it's set AFTER the pointerdown event
       // finishes dispatching, so a setPointerCapture() we call *synchronously* here gets clobbered by
@@ -329,8 +342,27 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       grab()
       queueMicrotask(grab)
     }
+    function onPointerUp(e: PointerEvent) {
+      const p = pendingTouchOpen; pendingTouchOpen = null
+      if (!p || e.pointerId !== p.id) return
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) >= TAP_PX) return   // it panned — the page owned it
+      // Touch implicit capture keeps e.target = the down element; if a SCAS tick rebuilt the span
+      // mid-tap that node is detached, so fall back to a live hit-test at the release point.
+      let t = (e.target as HTMLElement | null)?.closest?.('.scas-red') as HTMLElement | null
+      if (!t || !edEl.contains(t))
+        t = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest?.('.scas-red') as HTMLElement | null
+      if (!t || !edEl.contains(t)) return
+      openFor(t)
+    }
+    function onPointerCancel() { pendingTouchOpen = null }
     document.addEventListener('pointerdown', onPointerDown, { capture: true })
-    return () => document.removeEventListener('pointerdown', onPointerDown, { capture: true })
+    document.addEventListener('pointerup', onPointerUp, { capture: true })
+    document.addEventListener('pointercancel', onPointerCancel, { capture: true })
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, { capture: true })
+      document.removeEventListener('pointerup', onPointerUp, { capture: true })
+      document.removeEventListener('pointercancel', onPointerCancel, { capture: true })
+    }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset the reel whenever a different word is focused (or the cycle opens/closes).
@@ -488,7 +520,6 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // Commit model: a STILL click (no scroll, any duration) commits the rested word. A press-and-
     // DRAG spins the reel; releasing a drag commits the landed word (or flings). Duration no longer
     // matters — only whether the pointer moved — so a slow deliberate tap still confirms.
-    const TAP_PX = 6                                 // pointer travel under this = a still click (commit)
     let lastY: number | null = null
     let lastT = 0
     let downX = 0, downY = 0
@@ -509,13 +540,22 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       // Arm the drag-to-scroll only if the press lands on the word or the reel — a drag that
       // begins on empty parchment / body text must NOT spin the reel.
       const el = e.target as HTMLElement | null
-      // Arm the drag-to-scroll if the press lands on the word/reel — OR if it just OPENED a cycle.
-      // The opening press is, by definition, on a red word; but the capture-phase open handler (which
-      // runs before this) rebuilds the DOM and applies compression, so a real hit-test can resolve
-      // e.target to a sibling `.scas-comp-before/after` span (no matching class) → dragArmed went
-      // false → the opening press couldn't scroll the reel. openedByPointerRef (set by that handler)
-      // tells us this press opened a cycle, so arm it unconditionally.
-      dragArmed = openedByPointerRef.current || !!el?.closest?.('.scas-red, .scas-cycle-card')
+      if (e.pointerType === 'touch') {
+        // PHONE: drag-to-scroll engages ONLY when a cycle is ALREADY open and the touch starts on
+        // the open word/reel — both carry touch-action:none (index.css + inline card style), read
+        // at gesture start, so the browser never contests the pan and the reel owns the gesture
+        // outright (onTouchMove's preventDefault is the imperative half). A pan starting anywhere
+        // else — including an UNOPENED red word — is native page scroll exclusively.
+        dragArmed = !!cycleRef.current && !!el?.closest?.('.scas-cycle-card, .scas-focused')
+      } else {
+        // Mouse: arm if the press lands on the word/reel — OR if it just OPENED a cycle.
+        // The opening press is, by definition, on a red word; but the capture-phase open handler
+        // (which runs before this) rebuilds the DOM and applies compression, so a real hit-test can
+        // resolve e.target to a sibling `.scas-comp-before/after` span (no matching class) →
+        // dragArmed went false → the opening press couldn't scroll the reel. openedByPointerRef
+        // (set by that handler) tells us this press opened a cycle, so arm it unconditionally.
+        dragArmed = openedByPointerRef.current || !!el?.closest?.('.scas-red, .scas-cycle-card')
+      }
     }
     function onPointerMove(e: PointerEvent) {
       // Mouse: trust e.buttons (catches button-released-without-pointerup). Touch/pen: that bit is
@@ -568,9 +608,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         if (!c) return
         const el = e.target as HTMLElement | null
         const onCard = !!el?.closest?.('.scas-cycle-card')
-        // The press that OPENED this cycle, released with no drag, commits the centred (original)
-        // word — a single click "snaps it back". (To pick a synonym you press-hold-drag-release.)
-        if (opened) { cancelAnim(); commitRested(); return }
+        if (opened) {
+          // Touch (phone model): the tap that OPENED the cycle leaves it open — browsing is a new
+          // drag on the word/reel; confirming is a tap on it; dismissing is a tap outside.
+          if (e.pointerType === 'touch') return
+          // Mouse: the press that OPENED this cycle, released with no drag, commits the centred
+          // (original) word — a single click "snaps it back". (To pick a synonym you
+          // press-hold-drag-release.)
+          cancelAnim(); commitRested(); return
+        }
         if (!onCard && el?.closest?.('.scas-red')) return   // tapped another red word — the open handler dealt with it
         cancelAnim()
         if (onCard) commitRested()                          // tap on the reel/word → confirm (even un-scrolled)
@@ -617,20 +663,30 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // While a cycle is open, suppress native touch-scroll on the editor so a finger
-  // drag spins the reel instead of scrolling the document. Restored on close.
+  // While a cycle is open, suppress text-selection on the editor. NOTE (phone model, 2026-07-09):
+  // the old blanket `touch-action: none` on the whole editor is GONE — it froze page scrolling
+  // everywhere while a popup was open (and, being applied after the opening gesture had started,
+  // never governed that gesture anyway). Reel exclusivity now lives on the elements themselves:
+  // .scas-focused (index.css) and the reel card (inline style) carry touch-action:none, which the
+  // browser reads at gesture start — so a drag beginning there can never become a page pan, while
+  // a pan beginning anywhere else scrolls natively. overscroll-behavior:none on the root scroller
+  // while open stops any leaked pan from rubber-banding / bouncing mid-cycle.
   useEffect(() => {
     if (!cycle || !editor) return
     const el = editor.view.dom as HTMLElement
-    const prevTouch  = el.style.touchAction
     const prevSelect = el.style.userSelect
-    el.style.touchAction = 'none'
     el.style.userSelect = 'none'
     el.style.setProperty('-webkit-user-select', 'none')
+    const root = document.documentElement, body = document.body
+    const prevRootOB = root.style.overscrollBehavior
+    const prevBodyOB = body.style.overscrollBehavior
+    root.style.overscrollBehavior = 'none'
+    body.style.overscrollBehavior = 'none'
     return () => {
-      el.style.touchAction = prevTouch
       el.style.userSelect = prevSelect
       el.style.removeProperty('-webkit-user-select')
+      root.style.overscrollBehavior = prevRootOB
+      body.style.overscrollBehavior = prevBodyOB
     }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -814,6 +870,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       <div className="absolute z-50 select-none scas-cycle-card"
         style={{ top: cardTop, left, width: cardWidth, height: cardH, boxSizing: 'border-box',
                  fontFamily, fontSize: fsz, overflow: 'hidden',
+                 // Reel exclusivity (phone): a touch STARTING on the card belongs to the reel —
+                 // touch-action is read at gesture start, so the browser never begins a page pan
+                 // (and never rubber-bands) from here. Beats the phone universal pan-x pan-y rule.
+                 touchAction: 'none', overscrollBehavior: 'none',
                  background: cardBg, WebkitTapHighlightColor: 'transparent' }}>
         {rows}
       </div>
