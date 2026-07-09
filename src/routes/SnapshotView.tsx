@@ -340,6 +340,23 @@ function InlineDiffView({
     [ops, hasChange, onChangeClick, onHoverOp],
   )
 
+  // Dotted page guides over the diff content — its OWN A4-height pages (width × √2), a dashed rule + logo +
+  // "p.N" at each break, so the diff pane reads like paged text alongside the editor and the minimap.
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [dims, setDims] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const c = contentRef.current
+    if (!c) return
+    const ro = new ResizeObserver(() => setDims(prev => {
+      const w = c.offsetWidth, h = c.offsetHeight
+      return prev.w === w && prev.h === h ? prev : { w, h }
+    }))
+    ro.observe(c)
+    return () => ro.disconnect()
+  }, [])
+  const pageH = dims.w > 0 ? dims.w * Math.SQRT2 : 0
+  const pageCount = pageH > 0 ? Math.min(400, Math.floor(dims.h / pageH)) : 0
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
       <div
@@ -357,7 +374,17 @@ function InlineDiffView({
             panel) and the BOTTOM diff to reach it from below — panel-relative, so it shrinks on smaller
             windows instead of a fixed 24em that dwarfs a half-screen pane. */}
         {hasChange && <div aria-hidden="true" style={{ height: `${midFrac * 100}%`, flexShrink: 0 }} />}
-        {nodes}
+        <div ref={contentRef} style={{ position: 'relative' }}>
+          {nodes}
+          {Array.from({ length: pageCount }, (_, i) => (
+            <div key={i} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: (i + 1) * pageH, borderTop: '1px dashed rgba(92,45,138,0.3)', pointerEvents: 'none' }}>
+              <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 3, fontSize: '0.72rem', fontWeight: 700, color: 'rgba(92,45,138,0.5)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                <img src="/inkwave-logo-v7.png" alt="" style={{ width: 15, height: 15, opacity: 0.55 }} />
+                p.{i + 2}
+              </span>
+            </div>
+          ))}
+        </div>
         {hasChange && <div aria-hidden="true" style={{ height: `${(1 - midFrac) * 100}%`, flexShrink: 0 }} />}
       </div>
     </div>
