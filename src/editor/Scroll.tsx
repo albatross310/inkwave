@@ -202,6 +202,15 @@ export function Scroll({
     }
   }, [hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Non-hybrid fill surfaces (phone; 'scroll' paper) render the magnify wrapper too — hydration
+  // STRUCTURE must match the desktop-built prerender (see the render below) — but must not keep
+  // its width: React 18 silently adopts mismatched server attributes at hydration and never
+  // rewrites one whose vdom value doesn't change between renders, so the build-time `width:210mm`
+  // would stick to a phone's wrapper forever (horizontal overflow). Clear it pre-paint.
+  useLayoutEffect(() => {
+    if (fill && !hybrid) magnifyBoxRef.current?.style.removeProperty('width')
+  }, [fill, hybrid])
+
   // In-app editor zoom: Ctrl/⌘+wheel (desktop) or two-finger pinch (phone) over the editor scales
   // the font (so text REFLOWS, like a webpage) — isolated from the PDF panel because we
   // preventDefault the browser zoom. Persisted; both inputs share the same key + pipeline.
@@ -848,16 +857,23 @@ export function Scroll({
         </div>
       </div>
       )
-      if (!hybrid) return paperNode
+      if (!fill) return paperNode // in-flow surfaces (SnapshotView) mount client-only — no wrapper
       // The magnify wrapper: mx-auto + an explicit width centre the page; the width starts as the
       // same mm value the paper uses (layout identical to master at scale 1) and is imperatively
       // switched to pageWidth·s px while magnified (see the magnify plumbing effect). Height is
       // ONLY ever set imperatively (paperHeight·s), so React never fights the RO's writes.
+      // RENDERED FOR EVERY fill SURFACE, hybrid or not (2026-07-10 iOS regression): the prerendered
+      // shell is built desktop-side (hybrid), so gating this div on `hybrid` made the phone's first
+      // client render STRUCTURALLY different from the server HTML — hydration failed (#418), React
+      // client-re-rendered <html> from scratch and stripped .iw-water-ready + data-theme, and the
+      // whole load choreography died (gradient with no waves). Structure must be a constant of
+      // `fill`; hybrid only drives styling/behaviour. Non-hybrid: width comes from the cleanup
+      // effect below (the adopted server attribute must be cleared imperatively).
       return (
         <div
           ref={magnifyBoxRef}
           className="iw-magnify-box mx-auto"
-          style={{ width: paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).width }}
+          style={{ width: hybrid ? paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).width : undefined }}
         >
           {paperNode}
         </div>

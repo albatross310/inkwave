@@ -54,12 +54,28 @@ void bootstrap()
 // tiles have decoded on this client before — the neutral-parchment hold is a COLD-load device
 // only, so a refresh never flashes parchment→aqua again (the 2026-07-09 "refresh flash").
 {
+  const root = document.documentElement
+  let stamped = false
   const ready = () => {
-    document.documentElement.classList.add('iw-water-ready')
+    stamped = true
+    root.classList.add('iw-water-ready')
     try { localStorage.setItem('inkwave:waterReady', '1') } catch { /* private mode */ }
   }
-  if (document.documentElement.classList.contains('iw-water-ready')) {
-    // Pre-stamped by the head script (warm client) — nothing to gate.
+  // GUARD (2026-07-10, the iOS "gradient without waves"): if hydration ever fails, React 18's
+  // recovery client-renders <html> from scratch and STRIPS attributes it doesn't render —
+  // .iw-water-ready and data-theme both vanished, the wave pseudos went display:none for the whole
+  // session (this block had already taken the pre-stamped branch, so nothing re-stamped), and a
+  // night client fell back to day. The structural mismatch that triggered it is fixed in
+  // Scroll.tsx, but the stamps must survive ANY future recovery: re-assert them the moment they
+  // vanish. MutationObserver callbacks are microtasks — they run before the wiped frame can paint,
+  // so recovery can never flash parchment or kill the water. A legitimate theme toggle always
+  // SETS data-theme (never removes it), so re-applying only when it's absent can't fight Settings.
+  new MutationObserver(() => {
+    if (stamped && !root.classList.contains('iw-water-ready')) root.classList.add('iw-water-ready')
+    if (!root.dataset.theme) applyTheme()
+  }).observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] })
+  if (root.classList.contains('iw-water-ready')) {
+    stamped = true // pre-stamped by the head script (warm client) — nothing to decode, guard armed
   } else {
     const surface = document.querySelector('.inkwave-editor-surface')
     const urls: string[] = []
