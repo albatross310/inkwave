@@ -119,7 +119,15 @@ export async function listDocumentIds(): Promise<string[]> {
 // ─── Debounced autosave ───────────────────────────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
-const AUTOSAVE_DELAY_MS = 200
+// PHONE INPUT PRIORITY (2026-07-09): the save beat is where the editor's LAZY doc build actually
+// runs — full getJSON + embedBibliography + JSON.stringify, all main-thread and O(doc). At 200ms it
+// fired in ordinary inter-word typing pauses on a phone CPU; 800ms waits for a genuine pause
+// (trailing — every edit re-arms it), and the crash-loss window stays under a second. Desktop keeps
+// 200ms. (Same coarse-pointer test as isTouchDevice — inlined so storage doesn't import editor code.)
+const AUTOSAVE_DELAY_MS =
+  typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
+    ? 800
+    : 200
 
 export function scheduleSave(
   doc: InkwaveDocument | (() => InkwaveDocument),
