@@ -42,6 +42,9 @@ interface PageRef {
   w: number; h: number
   page: any; viewport: any // eslint-disable-line @typescript-eslint/no-explicit-any
   rendered: boolean; rendering: boolean
+  // Two-tier canvases: `base` is the cheap low-res always-there render (never evicted — fast scroll
+  // falls back to it instead of white); `sharp` is the supersampled on-demand one that covers it.
+  baseCanvas: HTMLCanvasElement | null; sharpCanvas: HTMLCanvasElement | null
 }
 interface Pending { text: string; page: number; rects: HighlightRect[]; groups: Array<{ page: number; rects: HighlightRect[] }>; x: number; y: number }
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
@@ -248,12 +251,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
   }
 
+  // Count of in-flight SHARP (visible-page) renders. The base-tier background sweep polls this and
+  // stalls while it's non-zero, so painting what the user is actually looking at always preempts
+  // background base progress.
+  const sharpActiveRef = useRef(0)
+
   // Paint one page's canvas + text layer on demand (called by the IntersectionObserver). Placeholder
   // sizes are already correct, so this never reflows — which is also what stops the open-scroll snap.
   async function renderOnePage(idx: number, token: number) {
     const pg = pagesRef.current[idx]
     if (!pg || pg.rendered || pg.rendering) return
     pg.rendering = true
+    sharpActiveRef.current++
+    try {
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) { pg.rendering = false; return }
     // Supersample: render the canvas at ≥2× the CSS size and let the browser downscale, so PDF text
@@ -272,8 +282,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     const canvas = document.createElement('canvas')
     canvas.width = Math.floor(pg.viewport.width * outputScale)
     canvas.height = Math.floor(pg.viewport.height * outputScale)
-    canvas.style.cssText = `width:${Math.floor(pg.viewport.width)}px;height:${Math.floor(pg.viewport.height)}px;display:block;`
+    // position:relative — a positioned in-flow element paints ABOVE the absolutely-positioned base
+    // canvas that was PREPENDED before it (same stacking level, later in tree order = on top).
+    canvas.style.cssText = `width:${Math.floor(pg.viewport.width)}px;height:${Math.floor(pg.viewport.height)}px;display:block;position:relative;`
     pg.canvasWrap.appendChild(canvas)
+    pg.sharpCanvas = canvas
     const ctx = canvas.getContext('2d')!
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high' // high-quality scaling of embedded images
     await pg.page.render({
@@ -286,14 +299,89 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     await new pdfjs.TextLayer({ textContentSource: tc, container: pg.textLayer, viewport: pg.viewport }).render().catch(() => {})
     pg.rendered = true
     pg.rendering = false // allow a re-render after eviction (evicted pages flip rendered back to false)
+    } finally {
+      sharpActiveRef.current--
+    }
+  }
+
+  // ── BASE TIER (never blank) ──────────────────────────────────────────────────
+  // Fast scroll used to outrun the on-demand sharp renderer and land on white placeholders. So after
+  // the initially visible pages have painted, a background sweep renders EVERY page once at a cheap
+  // low resolution into a CSS-stretched canvas UNDER the sharp one. A fast flick then always lands on
+  // a soft-but-readable page (the sharp render covers it moments later), and the touch-only eviction
+  // can drop far sharp canvases and fall back to base instead of blank. Sequential, yielding between
+  // pages, and stalled whenever a sharp render is in flight — it never competes with the visible view.
+  const BASE_SCALE_MAX = 0.45                 // soft but readable; ~0.4 MB RGBA per US-Letter page
+  const BASE_SCALE_MIN = 0.2                  // resolution floor for very long docs
+  const BASE_BUDGET_BYTES = 48 * 1024 * 1024  // total base-tier cap (iOS canvas memory is the scarce resource)
+
+  // Render one page's base canvas (detached, then prepended so the sharp canvas paints over it).
+  // Returns the RGBA bytes it consumed, so the sweep can enforce the total budget.
+  async function renderBaseOnePage(idx: number, baseScale: number, token: number): Promise<number> {
+    const pg = pagesRef.current[idx]
+    if (!pg || pg.baseCanvas) return 0
+    // Desktop never evicts, so a base canvas under a finished sharp one is dead weight there; on touch
+    // the sharp canvas may be evicted later, so base must exist even for currently-sharp pages.
+    if (pg.rendered && !isTouch) return 0
+    const vp = pg.page.getViewport({ scale: baseScale, rotation: rotationRef.current })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.floor(vp.width))
+    canvas.height = Math.max(1, Math.floor(vp.height))
+    // CSS-stretched over the whole placeholder. PREPENDED (and position:absolute) so the sharp canvas
+    // — position:relative, later in tree order — always paints ON TOP, whichever finished first.
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return 0
+    await pg.page.render({ canvas, canvasContext: ctx, viewport: vp }).promise.catch(() => {})
+    if (token !== renderTokenRef.current) { canvas.width = 0; canvas.height = 0; return 0 } // doc/zoom superseded — discard
+    pg.canvasWrap.prepend(canvas)
+    pg.baseCanvas = canvas
+    return canvas.width * canvas.height * 4
+  }
+
+  // Kick off the background base sweep for the current render generation (token-aborted like
+  // everything else). Called at the end of renderPages, so a zoom/rotation re-render restarts it.
+  function startBaseSweep(token: number) {
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+    void (async () => {
+      await sleep(400) // let the initially visible pages paint sharp (and the open-scroll settle land) first
+      if (token !== renderTokenRef.current) return
+      const pages = pagesRef.current
+      if (!pages.length) return
+      // Pick a base scale that fits the WHOLE doc in the byte budget (long docs get softer pages),
+      // clamped to a readable floor. Page 1's dims stand in for all — mixed sizes only wobble the
+      // estimate, and the in-loop budget check below is the hard cap anyway.
+      const vp1 = pages[0].page.getViewport({ scale: 1 })
+      const baseScale = Math.min(BASE_SCALE_MAX, Math.max(BASE_SCALE_MIN,
+        Math.sqrt(BASE_BUDGET_BYTES / (vp1.width * vp1.height * 4 * pages.length))))
+      // Nearest-first: pages closest to the current viewport are the likely flick targets.
+      const sc = scrollRef.current
+      let anchor = 0
+      if (sc) {
+        const top = sc.getBoundingClientRect().top
+        let best = Infinity
+        pages.forEach((pg, i) => { const d = Math.abs(pg.wrapper.getBoundingClientRect().top - top); if (d < best) { best = d; anchor = i } })
+      }
+      const order = pages.map((_, i) => i).sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor))
+      let budget = BASE_BUDGET_BYTES
+      for (const idx of order) {
+        if (token !== renderTokenRef.current) return
+        // Visible-page sharp renders always preempt the sweep.
+        while (sharpActiveRef.current > 0) { await sleep(60); if (token !== renderTokenRef.current) return }
+        budget -= await renderBaseOnePage(idx, baseScale, token)
+        if (budget <= 0) return // hard cap (mixed page sizes, or the clamped floor on very long docs)
+        await sleep(0) // yield between pages — scrolling and typing stay responsive
+      }
+    })()
   }
 
   // Evict far-away rendered pages (TOUCH ONLY). iOS caps the tab's TOTAL canvas memory; a long PDF of
   // permanent supersampled canvases blows the budget and Safari blanks pages / jetsams the tab. Keep
-  // ~6 pages either side of the viewport; beyond that, free the canvas bitmap NOW (width=0 releases
-  // iOS's canvas accounting immediately — GC alone is too late), clear the text layer, and mark the
-  // page unrendered so the IntersectionObserver repaints it when it scrolls back near. Placeholder
-  // sizes are untouched, so eviction never reflows. hlLayer (annotations) is left alone.
+  // ~6 pages either side of the viewport; beyond that, free the SHARP canvas bitmap NOW (width=0
+  // releases iOS's canvas accounting immediately — GC alone is too late), clear the text layer, and
+  // mark the page unrendered so the IntersectionObserver repaints it when it scrolls back near.
+  // The BASE canvas is deliberately left alive — evicted pages fall back to the soft base render, not
+  // white. Placeholder sizes are untouched, so eviction never reflows. hlLayer (annotations) is left alone.
   const KEEP_PAGES = 6
   function evictFarPages(visible: Set<number>) {
     let lo = Infinity, hi = -Infinity
@@ -301,8 +389,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     pagesRef.current.forEach((pg, i) => {
       if (i >= lo - KEEP_PAGES && i <= hi + KEEP_PAGES) return
       if (!pg.rendered || pg.rendering) return
-      const canvas = pg.canvasWrap.querySelector('canvas')
+      const canvas = pg.sharpCanvas
       if (canvas) { canvas.width = 0; canvas.height = 0; canvas.remove() }
+      pg.sharpCanvas = null
       pg.textLayer.textContent = ''
       pg.rendered = false
     })
@@ -355,7 +444,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       pageEl.appendChild(label)
 
       viewer.appendChild(pageEl)
-      pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false })
+      pagesRef.current.push({ wrapper: pageEl, canvasWrap, textLayer, hlLayer, w: viewport.width, h: viewport.height, page, viewport, rendered: false, rendering: false, baseCanvas: null, sharpCanvas: null })
     }
     if (token !== renderTokenRef.current) return
     redrawOverlays()
@@ -373,6 +462,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }, { root: scrollRef.current, rootMargin: '800px 0px' })
     for (const pg of pagesRef.current) io.observe(pg.wrapper)
     observerRef.current = io
+    // BASE TIER: once the visible pages have had first crack at painting sharp, sweep every page
+    // into a cheap low-res base canvas so fast scroll can never land on a white placeholder.
+    startBaseSweep(token)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -408,7 +500,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     const overlay = document.createElement('div')
     overlay.style.cssText = `position:fixed;left:${sRect.left}px;top:${sRect.top}px;width:${sRect.width}px;height:${sRect.height}px;z-index:5;pointer-events:none;overflow:hidden;`
     for (const pg of pagesRef.current) {
-      const c = pg.canvasWrap.querySelector('canvas')
+      // Clone whichever canvas is topmost: the sharp one when present, else the base fallback —
+      // so the freeze matches what's actually on screen even for evicted/not-yet-sharp pages.
+      const c = pg.sharpCanvas ?? pg.baseCanvas
       if (!c) continue
       const r = c.getBoundingClientRect()
       if (r.bottom < sRect.top || r.top > sRect.bottom) continue // offscreen — skip
