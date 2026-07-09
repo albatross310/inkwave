@@ -137,9 +137,17 @@
      shimmer/moiré the old fast-scroll fade was working around. */
   .inkwave-editor-surface {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
-       (opposite drift directions) without duplicating image data per theme — night just re-points these. */
-    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='14' x2='0' y2='86' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3C/svg%3E");
-    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='84' x2='0' y2='156' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3C/svg%3E");
+       (opposite drift directions) without duplicating image data per theme — night just re-points these.
+       Tile anatomy (Peter, 2026-07-09): THICK seashell line on TOP, thin white line BELOW it, plus a
+       short accent dash roughly halfway between them under ONE swell per tile — a's under the x=35
+       crest, b's under the x=105 swell, so the tiled field reads organic rather than gridded. The
+       Q/T construction keeps endpoints + slopes identical at x=0/140 — the 140px seamless loop. */
+    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='-14' x2='0' y2='58' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M18 29.4 Q26.5 27.7 35 27' fill='none' stroke='%23FFF5EE' stroke-opacity='0.4' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='56' x2='0' y2='128' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3Cpath d='M88 112.8 Q96.5 114.4 105 115' fill='none' stroke='%23FFF5EE' stroke-opacity='0.38' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    /* Sparkle tile for the LOADING drift only (see .iw-wave-sparkles below): bright yellow flecks
+       sitting just under tile-a's thick crest, offset ~11px past the peak (x=35 → 46) so they read
+       as light caught on the shoulder, not a bullseye. Same 140px loop; rides layer A's keyframes. */
+    --iw-wave-sparks: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cg stroke='%23ffe14d' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M46 15.8 V24.2'/%3E%3Cpath d='M41.8 20 H50.2'/%3E%3C/g%3E%3Ccircle cx='46' cy='20' r='1.4' fill='%23fffbe0'/%3E%3Ccircle cx='52.5' cy='25.5' r='1.1' fill='%23ffe14d' fill-opacity='0.9'/%3E%3Ccircle cx='47' cy='46' r='1' fill='%23ffe14d' fill-opacity='0.55'/%3E%3C/svg%3E");
   }
   .inkwave-editor-surface::before {
     content: '';
@@ -147,9 +155,10 @@
     inset: 0;
     z-index: -1; /* behind content (over the aqua base) — must NOT raise content above the toolbar */
     pointer-events: none;
-    /* TWO layers, each a 140×140 tile holding a thick+thin PAIR that moves as one. Layer A carries
-       every other pair; layer B the pairs between them — given opposite --wave-x so consecutive
-       pairs (every second thick line) sway opposite ways. Horizontal only, no vertical movement. */
+    /* TWO layers, each a 140×140 tile holding a PAIR (thick seashell line on TOP, thin white line
+       below) that moves as one. Layer A carries every other pair; layer B the pairs between them —
+       given opposite --wave-x so consecutive pairs (every second thick line) sway opposite ways.
+       Horizontal only, no vertical movement. */
     background-image: var(--iw-wave-a), var(--iw-wave-b);
     background-size: 140px 140px, 140px 140px;
     background-position:
@@ -211,7 +220,8 @@
      the class drops — with the ±280px (2-tile) overdraw above, that handoff is pixel-identical. */
   /* ONE shared keyframe set for both platforms: the coast DISTANCE is a var so the seamless-takeover
      maths (initial slope 3 → v0 = 3·dist/T = 72px/s) holds at any duration. Desktop: T=3s, dist=72px.
-     Phone: T=2s, dist = 72·2/3 = 48px (set below). */
+     Phone: T=2s, dist = 72·2/3 = 48px (set below). The DURATION is a var too (--wave-coast-T) so the
+     sparkle layer's fade runs exactly the platform's coast length without duplicating the numbers. */
   @keyframes iw-wave-coast-l {
     from { transform: translate3d(var(--wave-t, 0px), 0, 0); }
     to   { transform: translate3d(calc(var(--wave-t, 0px) - var(--wave-coast-dist, 72px)), 0, 0); }
@@ -221,11 +231,11 @@
     to   { transform: translate3d(calc(var(--wave-coast-dist, 72px) - var(--wave-t, 0px)), 0, 0); }
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
-    animation: iw-wave-coast-l 3s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
-    animation: iw-wave-coast-r 3s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-r var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
 
@@ -244,6 +254,7 @@
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast {
     --wave-coast-dist: 48px; /* v·T/3 = 72·2/3 — keeps the 72px/s seamless takeover at 2s */
+    --wave-coast-T: 2s;
   }
   .inkwave-editor-surface.is-phone.iw-wave-anim::before,
   .inkwave-editor-surface.is-phone.iw-wave-coast::before {
@@ -270,12 +281,44 @@
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast::before {
-    animation: iw-wave-coast-l 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast::after {
-    animation: iw-wave-coast-r 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-r var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
+  }
+
+  /* YELLOW LOADING SPARKLES (Peter's spec, 2026-07-09). Bright flecks riding just under layer A's
+     crests, alive ONLY while the load drift runs. They cannot live on the wave ::before/::after —
+     animating opacity there would dim the wave LINES too — so Scroll.tsx mounts a dedicated child
+     div (only while waveMode !== 'off') that tiles ONLY the sparkle art (--iw-wave-sparks) and runs
+     the SAME drift keyframes + inherited --wave-phase as layer A, so the flecks move in lockstep
+     with their crests. On coast it gets BOTH the layer-A coast transform (inherited --wave-t /
+     --wave-coast-dist) AND an S-curve opacity 1→0 over the same --wave-coast-T — the sparkles dim
+     exactly as the waves slow, gone at rest, and React unmounts the div when the classes drop.
+     Pure visual layer: no reveal/settled logic. z-order: a real child between the two pseudos in
+     tree order, so it paints over layer A's lines ("on the water") — the tiles never overlap
+     vertically anyway (sparks at y≈15–47, layer B's lines at y≈83–129). */
+  @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
+  .iw-wave-sparkles {
+    position: fixed; inset: 0; left: -280px; right: -280px; /* same 2-tile overdraw as the wave layers */
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--iw-wave-sparks);
+    background-size: 140px 140px;
+    background-position: 0 0;
+    contain: strict;
+  }
+  .inkwave-editor-surface.iw-wave-anim .iw-wave-sparkles {
+    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite;
+    will-change: transform;
+  }
+  .inkwave-editor-surface.iw-wave-coast .iw-wave-sparkles {
+    animation:
+      iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards,
+      iw-spark-fade   var(--wave-coast-T, 3s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    will-change: transform, opacity;
   }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
@@ -793,10 +836,11 @@
 :root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e;   background-image: none; /* night: solid dark surface, no day gradient */
 }
 
-/* Grey waves on black (same two-layer tiles, grey strokes instead of white). */
+/* Grey waves on black (same two-layer tiles — thick line on TOP, thin below, accent dash between —
+   grey strokes instead of white/seashell). Same geometry as the day tiles above. */
 :root[data-theme="night"] .inkwave-editor-surface {
-  --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E");
-  --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3C/svg%3E");
+  --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M18 29.4 Q26.5 27.7 35 27' fill='none' stroke='%239aa3af' stroke-opacity='0.36' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3Cpath d='M88 112.8 Q96.5 114.4 105 115' fill='none' stroke='%239aa3af' stroke-opacity='0.34' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 
 /* Charcoal paper. Sheets are a touch lighter than the black surround so pages read as distinct. */
