@@ -30,6 +30,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColum
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
 import { scaleFor } from '../magnify'
+import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 import { bibProvider } from '../../citations/bibProvider'
 import { notePerf } from '../perflog'
 
@@ -263,16 +264,25 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (sheet && ro && !observed) { ro.observe(sheet); observed = true }
             return sheet
           }
-          // Position panels at every region NOT covered by a gap band: [0..band0], [band0..band1], …
-          const paint = () => {
-            paintRaf = 0
-            if (!sheet || !layer) return
-            // Unlike the break MEASURE (which runs inside the canonical context, magnify forced
-            // to 1), this paint pass reads the LIVE, possibly transform-magnified DOM: band rects
-            // come back in VISUAL px while scrollHeight and the panel styles we write are LAYOUT
-            // px — divide the rect-derived distances by the scale (magnify.ts) to stay consistent.
+          // ── Page-band geometry: read (live DOM) / apply (panel styles) — split so the step
+          // cache can APPLY precomputed geometry without reading anything (see below). ──────────
+          interface BandGeo { tops: number[]; heights: number[]; total: number }
+          // Read the CURRENT band geometry from the live DOM, in sheet-local LAYOUT px. Unlike the
+          // break MEASURE (canonical context, magnify forced to 1), this reads the live, possibly
+          // transform-magnified DOM: band rects come back in VISUAL px while scrollHeight and the
+          // panel styles are LAYOUT px — divide rect-derived distances by the scale (magnify.ts).
+          const readBands = (): BandGeo | null => {
+            if (!sheet || !layer) return null
             const s = scaleFor(sheet)
             const sheetTop = sheet.getBoundingClientRect().top
+            const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
+            const tops: number[] = []
+            const heights: number[] = []
+            for (const band of bands) {
+              const r = band.getBoundingClientRect()
+              tops.push((r.top - sheetTop) / s)
+              heights.push(r.height / s)
+            }
             // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
             // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
             // (taller) panels held the old height and every repaint re-measured its own stale
@@ -282,18 +292,23 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             layer.style.display = 'none'
             const total = sheet.scrollHeight
             layer.style.display = ''
-            const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
+            return { tops, heights, total }
+          }
+          // Position panels at every region NOT covered by a gap band: [0..band0], [band0..band1], …
+          // Pure style writes — no layout reads — so a step-cache hit can run it mid-gesture and
+          // the writes batch into the SAME reflow as the font-zoom change (panels move WITH text).
+          const applyBands = (geo: BandGeo) => {
+            if (!layer) return
             const segs: Array<{ top: number; height: number }> = []
             let cursor = 0
-            for (const band of bands) {
-              const r = band.getBoundingClientRect()
-              const top = Math.round((r.top - sheetTop) / s)
-              const bottom = Math.round((r.top - sheetTop + r.height) / s)
+            for (let i = 0; i < geo.tops.length; i++) {
+              const top = Math.round(geo.tops[i])
+              const bottom = Math.round(geo.tops[i] + geo.heights[i])
               if (top <= cursor) { cursor = Math.max(cursor, bottom); continue }
               segs.push({ top: cursor, height: top - cursor })
               cursor = bottom
             }
-            segs.push({ top: cursor, height: Math.max(0, total - cursor) })
+            segs.push({ top: cursor, height: Math.max(0, geo.total - cursor) })
             // Reconcile the panel divs to match the segment list (reuse to avoid churn). Each panel
             // carries its page number as a footer pinned to its bottom margin (not in the gap).
             while (layer.children.length > segs.length) layer.lastElementChild!.remove()
@@ -323,7 +338,105 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (numSpan) numSpan.textContent = String(i + 1)
             })
           }
+          const paint = () => {
+            paintRaf = 0
+            if (!sheet || !layer) return
+            const geo = readBands()
+            if (!geo) return
+            applyBands(geo)
+            // A settle/idle paint IS a fresh measurement of the current step — cache it for free.
+            stepCache.set(currentStep(), geo)
+          }
           const schedulePaint = () => { if (!paintRaf) paintRaf = requestAnimationFrame(paint) }
+
+          // ── PREDICTIVE STEP CACHE (Peter, 2026-07-09: "the pages wait until the scrolling is
+          // finished to change") ─────────────────────────────────────────────────────────────────
+          // Zoom levels live on the shared zoomStep lattice, and the CANONICAL breaks don't move
+          // with zoom — so per step only the band GEOMETRY differs, and ONE hypothetical-reflow
+          // measure per step is the whole cost. While idle, the steps around the current one are
+          // precomputed (one per frame, aborting on any activity); when a gesture commits a step
+          // (the 'inkwave:zoom-step' event Scroll dispatches synchronously with the zoom var), the
+          // cached geometry is applied IMMEDIATELY as pure style writes that batch into the same
+          // reflow as the font change — the pages track the zoom live. A cache miss (zooming past
+          // the precomputed window) falls back to the old behaviour: panels hold (the __iwZoomHold
+          // RO gate) until the settle's verify paint snaps everything atomically.
+          const stepCache = new Map<number, BandGeo>()
+          const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
+          ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
+          const clearStepCache = () => stepCache.clear()
+          const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+          const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
+          const onZoomStep = (e: Event) => {
+            const d = (e as CustomEvent).detail as { step?: number; surface?: Element } | undefined
+            if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
+            if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
+            const hit = stepCache.get(d.step)
+            if (hit) { cacheStats.hits++; applyBands(hit) }
+            else cacheStats.misses++
+          }
+          window.addEventListener('inkwave:zoom-step', onZoomStep)
+          // Idle precompute: one step per frame, nearest-first within ±PRECOMPUTE_SPAN of the
+          // current step. Each measure is the canonicalMeasure trick on the LIVE zoom var: force
+          // --iw-editor-zoom to the step's lattice value, read the band rects + content height,
+          // restore — all inside one task, so the hypothetical layout never paints. Strictly
+          // desktop + genuinely idle: never during a gesture (__iwZoomHold), never in a typing
+          // pause (the edit debounce is the typing signal), never on phone, never while hidden.
+          const PRECOMPUTE_SPAN = 5
+          let preTimer: ReturnType<typeof setTimeout> | undefined
+          let preRaf = 0
+          const preBusy = () =>
+            (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
+            || editDebounce !== undefined
+            || bibDebounce !== undefined
+            || document.visibilityState === 'hidden'
+          const nextUncached = (): number | null => {
+            const k0 = currentStep()
+            for (let d = 0; d <= PRECOMPUTE_SPAN; d++) {
+              for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
+                if (k < ZOOM_STEP_MIN || k > ZOOM_STEP_MAX) continue
+                if (!stepCache.has(k)) return k
+              }
+            }
+            return null
+          }
+          const measureStep = (k: number) => {
+            const surface = surfaceOf()
+            if (!surface || !sheet || !layer) return
+            // The hypothetical layout can be shorter than the live one → the browser would clamp
+            // the scroll; save/restore exactly (same pattern as the canonical measure window).
+            const scroller = surface.classList.contains('iw-fill') && !surface.classList.contains('is-phone') ? surface : null
+            const savedTop = scroller ? scroller.scrollTop : window.scrollY
+            const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
+            const prev = surface.style.getPropertyValue('--iw-editor-zoom')
+            surface.style.setProperty('--iw-editor-zoom', String(stepToZoom(k)))
+            let geo: BandGeo | null = null
+            try {
+              geo = readBands() // forces the hypothetical layout; set → read → restore never paints
+            } finally {
+              if (prev) surface.style.setProperty('--iw-editor-zoom', prev)
+              else surface.style.removeProperty('--iw-editor-zoom')
+              if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
+              else window.scrollTo(savedLeft, savedTop)
+            }
+            if (geo) { stepCache.set(k, geo); cacheStats.precomputed++ }
+          }
+          const precomputeTick = () => {
+            preRaf = 0
+            if (destroyed || !gapped || phoneLike()) return
+            if (preBusy()) { schedulePrecompute(500); return } // back off, retry when quiet
+            const k = nextUncached()
+            if (k == null) return // the ±SPAN window is fully warm
+            measureStep(k)
+            preRaf = requestAnimationFrame(precomputeTick) // spread: one hypothetical reflow per frame
+          }
+          const schedulePrecompute = (delay = 350) => {
+            if (!gapped) return // panels are the cache's only consumer; markers repaint live
+            if (preTimer) clearTimeout(preTimer)
+            preTimer = setTimeout(() => {
+              preTimer = undefined
+              if (!preRaf) preRaf = requestAnimationFrame(precomputeTick)
+            }, delay)
+          }
 
           // Latch + announce the FIRST successful measure — the editor's one-paint reveal gate
           // (TiptapEditor `settled`) waits for it so text and page marks appear together. Plus the
@@ -335,6 +448,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.dispatchEvent(new Event('inkwave:pagination-ready'))
             }
             window.dispatchEvent(new Event('inkwave:pagination-measured'))
+            schedulePrecompute() // idle re-warm of the ±SPAN step window (no-op when already warm)
           }
           const recompute = () => {
             raf = 0
@@ -494,6 +608,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             return (window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp ? 1200 : 850
           }
           const scheduleAfterEdit = () => {
+            clearStepCache() // doc changed → every step's band geometry is stale
             if (editDebounce) clearTimeout(editDebounce)
             editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, editDelayMs())
           }
@@ -503,13 +618,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // would skip re-measuring (the break sits wrong until an edit nudges it). Force a fresh
           // measure once fonts are ready (and on any later font load).
           let destroyed = false
-          const fontCb = () => { if (!destroyed) forceRecompute() }
+          const fontCb = () => { if (!destroyed) { clearStepCache(); forceRecompute() } }
           if (typeof document !== 'undefined' && document.fonts) {
             document.fonts.ready.then(fontCb).catch(() => {})
             document.fonts.addEventListener?.('loadingdone', fontCb)
           }
           // Re-measure when page settings (top margin, paper size, orientation) change.
-          const settingsCb = () => { if (!destroyed) forceRecompute() }
+          const settingsCb = () => { if (!destroyed) { clearStepCache(); forceRecompute() } }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
           // Re-measure when the bibliography hydrates or changes. Citation labels render "?key"
           // until the library loads, then rebuild asynchronously to their real widths ("Author &
@@ -520,6 +635,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // queueMicrotask/setState rebuild; the sig guards make it a no-op when breaks didn't move.
           let bibDebounce: ReturnType<typeof setTimeout> | undefined
           const bibCb = () => {
+            clearStepCache() // citation labels re-measure → per-step geometry stale
             if (destroyed) return
             if (bibDebounce) clearTimeout(bibDebounce)
             bibDebounce = setTimeout(() => { bibDebounce = undefined; forceRecompute() }, 180)
@@ -530,7 +646,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // (the stable-set guard makes the dispatch a no-op) — but it still drives the paint()
           // pass that repositions the sheet panels/bands against the REFLOWED live text, which IS
           // zoom-dependent. Scroll.tsx re-anchors the viewport around it (pagination-measured).
-          const zoomCb = () => { if (!destroyed) forceRecompute() }
+          const zoomCb = () => { if (!destroyed) { forceRecompute(); schedulePrecompute() } }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {
             // Phone: only a DOC change pushes the queued measure back. This update hook also fires
@@ -556,6 +672,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               window.removeEventListener('inkwave:zoom-settled', zoomCb)
+              window.removeEventListener('inkwave:zoom-step', onZoomStep)
+              if (preTimer) clearTimeout(preTimer)
+              if (preRaf) cancelAnimationFrame(preRaf)
               layer?.remove()
               if (gapped) {
                 sheet?.classList.remove('inkwave-gapped')

@@ -4,6 +4,7 @@ import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getC
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, WATER_MARGIN_PX } from './magnify'
+import { stepToZoom, zoomToStep } from './zoomStep'
 import { syncTwinkles } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
@@ -178,8 +179,10 @@ export function Scroll({
   // In-app editor zoom: Ctrl/⌘+wheel (desktop) or two-finger pinch (phone) over the editor scales
   // the font (so text REFLOWS, like a webpage) — isolated from the PDF panel because we
   // preventDefault the browser zoom. Persisted; both inputs share the same key + pipeline.
+  // LATTICE (predictive step cache): the level is always a zoomStep.ts lattice point — legacy
+  // persisted floats snap to the nearest step on load, so every rendered zoom is a cacheable one.
   const [editorZoom, setEditorZoom] = useState(() => {
-    try { return Number(localStorage.getItem('inkwave:editorZoom')) || 1 } catch { return 1 }
+    try { return stepToZoom(zoomToStep(Number(localStorage.getItem('inkwave:editorZoom')) || 1)) } catch { return 1 }
   })
   const editorZoomRef = useRef(editorZoom); editorZoomRef.current = editorZoom
   // Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
@@ -197,8 +200,12 @@ export function Scroll({
     // and rAF runs before paint so the synchronous anchor logic below stays single-frame/flicker-free.
     // React state + localStorage persist are deferred to a settle timer: neither changes pixels
     // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
-    let steps = 0 // wheel: ±1 per event; phone pinch: FRACTIONAL (log of the distance ratio) — same 1.08^steps curve
-    let mSteps = 0 // magnify steps (hybrid, cursor over the WATER) — same coalescing, separate zone
+    // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps per frame (Math.trunc, the
+    // remainder carries) — wheel notches contribute ±1, trackpad fine-deltas and phone pinch
+    // contribute proportional fractions, so every input quantizes onto the shared zoomStep.ts
+    // lattice. That's what makes zoom levels precomputable (the pagination step cache).
+    let steps = 0 // font-reflow zone
+    let mSteps = 0 // magnify zone (hybrid, cursor over the WATER) — same coalescing, separate zone
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
@@ -234,8 +241,8 @@ export function Scroll({
     // offset·(after/before) — correct the scroll by its displacement so it stays pinned at the
     // centre (the shared conversion: paper-local = visual ÷ scale; new visual = local × new scale).
     const applyMagnifyFrame = () => {
-      const net = mSteps
-      mSteps = 0
+      const net = Math.trunc(mSteps) // whole steps only; the fractional remainder carries
+      mSteps -= net
       if (!net) return
       const box = magnifyBoxRef.current
       const before = getMagnify()
@@ -257,8 +264,8 @@ export function Scroll({
       raf = 0
       holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
-      const net = steps
-      steps = 0
+      const net = Math.trunc(steps) // commit whole lattice steps; the fractional remainder carries
+      steps -= net
       if (!net) return
       // Pick (or re-pick, if the node was destroyed) a TEXT block near the VIEWPORT CENTRE. Reject:
       // the big containers (.ProseMirror / .scroll-paper — they span the whole doc, so their top
@@ -267,10 +274,6 @@ export function Scroll({
       // with the font, so anchoring against one warps the correction — the "funky near page gaps"
       // bug). When the centre line falls inside a gap, probe outward until real text is found, so
       // the anchor is effectively the nearest text above/below the gap.
-      // Pin pagination's painters for the whole gesture (see the RO gate in PaginationExtension:
-      // per-frame panel repositioning lagged the reflowing text 1–2 frames — the page-boundary
-      // up/down flicker). Cleared in the settle below, right before zoom-settled re-measures.
-      ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       const vr = el.getBoundingClientRect()
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
       const anchorY = phone ? pinchY : vr.top + vr.height / 2
@@ -303,9 +306,24 @@ export function Scroll({
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
       const ratio = getScrollTop() / scrollRange()
       const topBefore = anchorEl ? anchorEl.getBoundingClientRect().top : 0 // at the CURRENT size
-      const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
-      const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
+      // LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but
+      // every reachable level is a shared lattice point the pagination step cache can precompute).
+      const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
+      const next = stepToZoom(stepNext)
+      if (next === editorZoomRef.current) return // pinned at a lattice bound — nothing to apply
+      // Pin pagination's RO-driven painters for the whole gesture (per-frame LIVE repositioning
+      // lagged the reflowing text 1–2 frames — the page-boundary up/down flicker). The step cache
+      // below replaces live repositioning with instant precomputed geometry; the RO path stays
+      // gated as the cache-MISS fallback. Cleared in the settle, right before zoom-settled.
+      ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
+      // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed, SYNCHRONOUSLY
+      // and before any layout read below — a cache hit applies the precomputed page-band geometry
+      // as pure style writes that batch into the SAME reflow as the font change, so the panels
+      // move WITH the text instead of waiting for the settle. The surface is included so the
+      // SnapshotView's zoom (its own Scroll dispatches too) can never drive the live editor's
+      // panels. A miss is fine — the panels hold (the old pinning) and the settle verifies.
+      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el } }))
       // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
       // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
       // could bite against the stale height near the document end. One offsetHeight read in a
@@ -395,10 +413,16 @@ export function Scroll({
         zoneIsWater = hybrid && (!overPaper || overGap)
         zoneX = e.clientX; zoneY = e.clientY
       }
+      // LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly
+      // ±1 step (identical to the old feel); trackpad ctrl-pinch fine-deltas (small |ΔY|)
+      // contribute proportional FRACTIONS that accumulate until a whole step commits — so every
+      // input lands on the shared zoomStep lattice instead of an arbitrary float in between.
+      const mag = Math.abs(e.deltaY)
+      const stepDelta = (e.deltaY < 0 ? 1 : -1) * (mag >= 100 ? 1 : mag / 100)
       if (zoneIsWater) {
-        mSteps += e.deltaY < 0 ? 1 : -1
+        mSteps += stepDelta
       } else {
-        steps += e.deltaY < 0 ? 1 : -1
+        steps += stepDelta
       }
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
