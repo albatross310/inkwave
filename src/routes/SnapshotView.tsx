@@ -10,6 +10,7 @@ import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
+import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
@@ -1749,6 +1750,12 @@ export function SnapshotView() {
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
+      {/* Wave loading choreography (Peter, 2026-07-09): the same drifting-waves veil as the
+          editor's load covers the snapshot view until its content is genuinely ready (snapshots
+          read + citation library loaded → the panes render + lay out beneath), then coasts and
+          fades so diff + doc appear together over the decaying waves. One-shot: scrubbing /
+          in-view navigation never re-triggers it (status never returns to 'loading'). */}
+      <LoadingVeil ready={status !== 'loading' && libReady} />
       {/* First-open gesture hint — centred, one-time, with an explicit close. */}
       {showScrubHint && (
         <div

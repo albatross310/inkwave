@@ -50,9 +50,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         {/* Pre-paint theme: the prerendered HTML is day-themed and JS applies data-theme only after
             the bundle executes — night users got a bright flash for the whole JS fetch on cold
-            loads. This runs before first paint; the CSP middleware nonces every inline script. */}
+            loads. This runs before first paint; the CSP middleware nonces every inline script.
+            It also pre-opens the atomic-water gate on WARM clients (the wave tiles have decoded
+            here before — see entry.client): without it every refresh flashed the neutral
+            parchment for the JS boot, then popped to aqua (the 2026-07-09 "refresh flash"). The
+            neutral hold remains for genuinely cold first visits, where it does its real job. */}
         <script dangerouslySetInnerHTML={{ __html:
-          `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day'}catch(e){}`,
+          `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day';if(localStorage.getItem('inkwave:waterReady'))document.documentElement.classList.add('iw-water-ready')}catch(e){}`,
         }} />
         <meta charSet="utf-8" />
         {/* viewport-fit=cover: extend under the iOS notch/home-indicator so env(safe-area-inset-*)

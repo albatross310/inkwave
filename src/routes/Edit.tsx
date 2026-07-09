@@ -52,6 +52,12 @@ export function Edit() {
   useEffect(() => {
     let t = 0
     const onRevealed = () => {
+      // PHONE (Peter, 2026-07-09): drop the shell INSTANTLY — beneath it is the editor surface's
+      // own identical, phase-locked coasting water, so the swap is invisible; the full-screen
+      // parchment then fades IN over the still-visible decaying waves (Scroll's 0.5s phone
+      // transition + the .iw-chrome-in toolbar/pill fade). The old shell fade-OUT cross-faded
+      // the waves into paper — they seemed to die during the blend.
+      if (isTouchDevice()) { setShellUp('down'); return }
       setShellUp('fading')
       t = window.setTimeout(() => setShellUp('down'), 520)
     }

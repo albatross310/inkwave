@@ -46,26 +46,39 @@ async function bootstrap() {
 void bootstrap()
 
 // ─── Atomic water reveal ───
-// The water (aqua gradient + wave tiles) is gated behind .iw-water-ready: decode the tile SVGs
+// The water (aqua gradient + wave tiles) is gated behind .iw-water-ready: decode EVERY wave tile
 // FIRST, then stamp the class — colour and waves paint in the same style recalc instead of
-// "blue first, waves a few frames later". Fallback timer covers decode() quirks.
+// "blue first, waves a few frames later". Fallback timer covers decode() quirks. The generated
+// twinkle layers (waveTwinkle.ts) pre-decode their own tiles before each mounts. REFRESH: root.tsx
+// carries a pre-paint inline script that stamps the class immediately when the flag below says the
+// tiles have decoded on this client before — the neutral-parchment hold is a COLD-load device
+// only, so a refresh never flashes parchment→aqua again (the 2026-07-09 "refresh flash").
 {
-  const ready = () => document.documentElement.classList.add('iw-water-ready')
-  const surface = document.querySelector('.inkwave-editor-surface')
-  const urls: string[] = []
-  if (surface) {
-    const cs = getComputedStyle(surface)
-    for (const v of ['--iw-wave-a', '--iw-wave-b']) {
-      const m = cs.getPropertyValue(v).match(/url\("(.+)"\)/)
-      if (m) urls.push(m[1])
-    }
+  const ready = () => {
+    document.documentElement.classList.add('iw-water-ready')
+    try { localStorage.setItem('inkwave:waterReady', '1') } catch { /* private mode */ }
   }
-  if (urls.length === 0) ready()
-  else {
-    const t = setTimeout(ready, 500) // decode() should take ~a frame; never hold the water hostage
-    void Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() }))
-      .catch(() => {})
-      .then(() => { clearTimeout(t); ready() })
+  if (document.documentElement.classList.contains('iw-water-ready')) {
+    // Pre-stamped by the head script (warm client) — nothing to gate.
+  } else {
+    const surface = document.querySelector('.inkwave-editor-surface')
+    const urls: string[] = []
+    if (surface) {
+      const cs = getComputedStyle(surface)
+      // Decode every wave-tile var the water uses (the sparkle tile taught us: any wave layer the
+      // gate does NOT decode pops in a few frames late, a visible hitch at a consistent time).
+      for (const v of ['--iw-wave-a', '--iw-wave-b']) {
+        const m = cs.getPropertyValue(v).match(/url\("(.+)"\)/)
+        if (m) urls.push(m[1])
+      }
+    }
+    if (urls.length === 0) ready()
+    else {
+      const t = setTimeout(ready, 500) // decode() should take ~a frame; never hold the water hostage
+      void Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() }))
+        .catch(() => {})
+        .then(() => { clearTimeout(t); ready() })
+    }
   }
 }
 
