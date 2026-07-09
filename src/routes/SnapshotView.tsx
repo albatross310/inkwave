@@ -16,6 +16,7 @@ import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
 
 const INK = '#5c2d8a'
+const NAV_H = 'clamp(38px, 6vh, 50px)' // shared height for BOTH nav pairs (editor + diff panel)
 const NAV_BG = 'rgba(140, 90, 200, 0.35)'
 const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
 const NAV_FG = 'rgba(92, 45, 138, 0.85)'
@@ -48,7 +49,7 @@ function NavSide({
   void btnSize
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: dim, height: dim, borderRadius: 9,
+    width: dim, height: NAV_H, borderRadius: 9,
     background: disabled ? NAV_BG_DIS : NAV_BG,
     color: disabled ? NAV_FG_DIS : NAV_FG,
     border: `1px solid ${disabled ? 'rgba(140,90,200,0.10)' : 'rgba(140,90,200,0.28)'}`,
@@ -1526,7 +1527,7 @@ function SplitDiffView({
       onMouseLeave={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
       style={{
         position: 'absolute', [side]: 6, top: `${midFrac * 100}%`, transform: 'translateY(-50%)', zIndex: 8,
-        width: 15, height: 50, borderRadius: 5, border: `1px solid rgba(140,90,200,${disabled ? 0.1 : 0.28})`,
+        width: 15, height: NAV_H, borderRadius: 5, border: `1px solid rgba(140,90,200,${disabled ? 0.1 : 0.28})`,
         background: disabled ? NAV_BG_DIS : NAV_BG, color: disabled ? NAV_FG_DIS : NAV_FG,
         cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: '1rem', fontFamily: 'inherit', letterSpacing: '-0.04em', boxShadow: '0 1px 4px rgba(80,50,10,0.14)',
@@ -1923,7 +1924,7 @@ export function SnapshotView() {
         <div className="flex-1 flex items-center justify-center" style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
         {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
         {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
-          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0 }} title="words added / removed vs the previous snapshot">
+          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: 'clamp(6px, 1.4vw, 16px)' }} title="words added / removed vs the previous snapshot">
             <span style={{ color: '#15803d', fontWeight: 800 }}>+{headerDiff.added}</span>
             <span style={{ color: '#b91c1c', fontWeight: 800 }}>−{headerDiff.removed}</span>
           </span>
