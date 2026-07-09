@@ -477,18 +477,32 @@ export function Scroll({
     }
     // PHONE PINCH-TO-ZOOM — the same pipeline as the wheel path (same rAF coalescing, clamps,
     // persistence and settle re-measure), driven by the two-finger distance ratio instead of wheel
-    // steps. preventDefault is what stops Safari's own page pinch (the viewport meta deliberately
-    // leaves browser zoom enabled, so without it every pinch would double-zoom the whole chrome);
-    // .is-phone also sets touch-action: pan-x pan-y as the declarative half of the same contract.
+    // steps. INPUT-PIPELINE COST (round-2 iPhone lag, 2026-07-10): a NON-PASSIVE touchstart /
+    // touchmove on the whole surface makes iOS synchronously dispatch EVERY touch to the main
+    // thread and wait before acting on it — every tap and every scroll frame inherits whatever
+    // deferred task is running (the pagination measure, the SCAS tick). So: touchstart is PASSIVE
+    // (its handler only records pinch state), and the non-passive touchmove is attached ONLY while
+    // two fingers are actually down — single-finger scrolling never has a blocking listener at all.
+    // Pinch suppression still holds three ways: the first two-finger touchmove preventDefaults
+    // (the listener is attached synchronously inside the second finger's touchstart, before any
+    // move can dispatch), the gesturestart/gesturechange preventDefault below, and the universal
+    // phone `touch-action: pan-x pan-y` as the declarative half of the same contract.
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    let pinchMoveArmed = false
+    const armPinchMove = () => {
+      if (!pinchMoveArmed) { pinchMoveArmed = true; el.addEventListener('touchmove', onTouchMove, { passive: false }) }
+    }
+    const disarmPinchMove = () => {
+      if (pinchMoveArmed) { pinchMoveArmed = false; el.removeEventListener('touchmove', onTouchMove) }
+    }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
-      e.preventDefault()
       pinchDist = touchDist(e.touches)
       pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
       anchorEl = null // fresh gesture → applyFrame picks the text block under THIS midpoint
       steps = 0
+      armPinchMove()
     }
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 2 || !pinchDist) return
@@ -501,12 +515,13 @@ export function Scroll({
       pinchDist = d
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
-    const onTouchEnd = (e: TouchEvent) => { if (e.touches.length < 2) pinchDist = 0 } // settle timer already armed
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) { pinchDist = 0; disarmPinchMove() } // settle timer already armed
+    }
     // iOS Safari's non-standard gesture events drive the native pinch — suppress them over the editor.
     const onGesture = (e: Event) => e.preventDefault()
     if (phone) {
-      el.addEventListener('touchstart', onTouchStart, { passive: false })
-      el.addEventListener('touchmove', onTouchMove, { passive: false })
+      el.addEventListener('touchstart', onTouchStart, { passive: true })
       el.addEventListener('touchend', onTouchEnd)
       el.addEventListener('touchcancel', onTouchEnd)
       el.addEventListener('gesturestart', onGesture)
@@ -517,7 +532,7 @@ export function Scroll({
     return () => {
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
+      disarmPinchMove()
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
       el.removeEventListener('gesturestart', onGesture)

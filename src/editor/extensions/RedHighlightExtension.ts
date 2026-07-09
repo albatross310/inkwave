@@ -48,7 +48,14 @@ export const RED_HIGHLIGHT_KEY = new PluginKey<RedHighlightState>('redHighlight'
 
 // Dispatch a transaction with this meta key to force a hint rebuild without
 // changing the document (e.g. when the popover opens or closes).
+// Payload: `true` = full-document rebuild (every non-tick dispatcher). The phone typing tick may
+// instead pass `{ window }` — the tick's edit+caret range — and only the paragraphs intersecting
+// it are rebuilt and SPLICED into the existing set (decorations elsewhere are untouched; they were
+// position-mapped through the edits and no state outside the window changed — the editor only
+// sends a window when the SCAS state did NOT change, so no other instance of any lemma can need a
+// repaint). Full-doc rebuilds were O(doc) on every 250ms pause — the phone inter-word stutter.
 export const SCAS_HINT_META = 'scasHintUpdate'
+export type ScasHintMeta = true | { window: { from: number; to: number } }
 
 // A CHANGED commit replaces the word's text, so ProseMirror builds a FRESH decoration element —
 // the cross-out/stamp opacity transition then has no prior value to animate from and would POP in.
@@ -156,7 +163,8 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
             // deferred SCAS tick dispatches SCAS_HINT_META ~120ms after the last input, and THAT
             // (or a reveal) is what rebuilds. Verdicts are frozen at commit anyway, so a ≤120ms
             // repaint delay changes nothing semantically.
-            const rebuild = !!tr.getMeta(SCAS_HINT_META) || !!revealMeta
+            const hintMeta = tr.getMeta(SCAS_HINT_META) as ScasHintMeta | undefined
+            const rebuild = !!hintMeta || !!revealMeta
             if (!rebuild && !tr.docChanged) return old
 
             // Remap the reveal anchors across the edit, then fold in this tr's reveal meta.
@@ -190,6 +198,29 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
             if (!rebuild) {
               // Edit without a tick: ride the mapping. Decorations/anchors stay glued to their text.
               return { decorations: old.decorations.map(tr.mapping, tr.doc), reveals, flagged }
+            }
+
+            // WINDOWED REBUILD (phone typing tick): rebuild only the window's paragraphs and splice
+            // them into the existing set. Guarded to the plain-typing case — a reveal or an open
+            // popover (focusedPos) can decorate outside the window, so those take the full path.
+            const win = hintMeta && hintMeta !== true && !revealMeta && getHintState().focusedPos === null
+              ? hintMeta.window : null
+            if (win) {
+              // The tick's meta transaction never changes the doc, but stay safe if a window meta
+              // ever rides a doc-changing one: splice against the MAPPED set (flagged was already
+              // remapped above).
+              const base = tr.docChanged ? old.decorations.map(tr.mapping, tr.doc) : old.decorations
+              const wb = buildWindowDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged, win)
+              if (!wb.bounds) return { decorations: base, reveals, flagged } // no paragraphs in range
+              const decorations = base
+                .remove(base.find(wb.bounds.from, wb.bounds.to))
+                .add(next.doc, wb.list)
+              // Anchors outside the window persist untouched (their text didn't change and no state
+              // changed); the window's paragraphs adopt the freshly-derived entries.
+              const merged = new Map<number, string>()
+              flagged.forEach((orig, pos) => { if (pos < wb.bounds!.from || pos >= wb.bounds!.to) merged.set(pos, orig) })
+              wb.flagged.forEach((orig, pos) => merged.set(pos, orig))
+              return { decorations, reveals, flagged: merged }
             }
 
             const built = buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged)
@@ -249,7 +280,7 @@ function hhmm(raw: string | null): string | null {
   return 'nt'                   // 19:30–24:00
 }
 
-function buildDecorations(
+export function buildDecorations(
   pmDoc: PMNode,
   inkDoc: InkwaveDocument,
   cursorPos: number,
@@ -267,19 +298,87 @@ function buildDecorations(
   // A word is purple iff its lemma is Locked or an outstanding live kick — the frozen verdict
   // from the SCAS controller, NOT a recompute against the current S_v (so rotation never reflows
   // already-committed text). `lemmaOf` collapses inflections to the state key.
-  const redWords: RedWord[] = []
+  const ctx: ScanCtx = {
+    cursorPos, lookup, flagged, newFlagged, initialAnchors,
+    debugAll: debugHighlightAll(), // temporary: colour every pool word for animation testing
+    redWords: [],
+  }
   let paragraphIndex = 0
-  const debugAll = debugHighlightAll() // temporary: colour every pool word for animation testing
-  // Compression/slide animation is ripped out for master (shared flag in popoverConstants — also gates
-  // the LOGIC in usePopoverLayout). The static compression applies INSTANTLY; transitions below are
-  // no-ops while it's false.
-
   pmDoc.descendants((node: PMNode, pos: number) => {
     if (node.type.name !== 'paragraph') return true
-    const pIdx = paragraphIndex++
-    let seqInPara = 0
+    scanParagraphWords(node, pos, paragraphIndex++, ctx)
+    return false
+  })
 
-    node.forEach((child: PMNode, offset: number) => {
+  const decorations = decorationsFor(ctx.redWords, hintState, reveals)
+  return { decorations: DecorationSet.create(pmDoc, decorations), flagged: newFlagged }
+}
+
+// Windowed variant — the phone typing tick's splice source (see apply()). Scans ONLY the
+// paragraphs intersecting `window` through the SAME per-paragraph scan as the full build (the two
+// paths cannot drift), and returns the raw decoration list plus the actual paragraph bounds so the
+// caller can remove/replace exactly that span. `bounds: null` = no paragraphs in range (or SCAS
+// display off) — the caller keeps the existing set untouched, which is what a full rebuild would
+// have produced for text that didn't change.
+export function buildWindowDecorations(
+  pmDoc: PMNode,
+  inkDoc: InkwaveDocument,
+  cursorPos: number,
+  hintState: HintState,
+  lookup: ScasLookup,
+  reveals: ReadonlySet<number>,
+  flagged: Map<number, string>,
+  window: { from: number; to: number },
+): { list: Decoration[]; flagged: Map<number, string>; bounds: { from: number; to: number } | null } {
+  const newFlagged = new Map<number, string>()
+  if (inkDoc.scasMode !== 'n' || !inkDoc.scasState || scasSuggestionsOff()) return { list: [], flagged: newFlagged, bounds: null }
+  const ctx: ScanCtx = { cursorPos, lookup, flagged, newFlagged, debugAll: debugHighlightAll(), redWords: [] }
+  // ±1 keeps a collapsed (from === to) window from matching nothing; clamp into the doc.
+  const from = Math.max(0, Math.min(window.from - 1, pmDoc.content.size))
+  const to = Math.max(from, Math.min(window.to + 1, pmDoc.content.size))
+  const paras: Array<{ node: PMNode; pos: number }> = []
+  pmDoc.nodesBetween(from, to, (node: PMNode, pos: number) => {
+    if (node.type.name !== 'paragraph') return true
+    paras.push({ node, pos })
+    return false
+  })
+  if (!paras.length) return { list: [], flagged: newFlagged, bounds: null }
+  // data-para must match the full walk's numbering — count the paragraphs strictly before the
+  // window's first (cheap: descends containers, never into textblocks).
+  let pIdx = 0
+  pmDoc.nodesBetween(0, paras[0].pos, (node: PMNode) => {
+    if (node.type.name === 'paragraph') { pIdx++; return false }
+    return true
+  })
+  for (const p of paras) scanParagraphWords(p.node, p.pos, pIdx++, ctx)
+  const last = paras[paras.length - 1]
+  return {
+    list: decorationsFor(ctx.redWords, hintState, reveals),
+    flagged: newFlagged,
+    bounds: { from: paras[0].pos, to: last.pos + last.node.nodeSize },
+  }
+}
+
+// Shared scan context — everything the per-paragraph word scan reads/writes.
+interface ScanCtx {
+  cursorPos: number
+  lookup: ScasLookup
+  flagged: Map<number, string>
+  newFlagged: Map<number, string>
+  initialAnchors?: ReadonlySet<string>
+  debugAll: boolean
+  redWords: RedWord[]
+}
+
+// ONE paragraph's word scan — shared verbatim by the full-document and windowed builds.
+// Compression/slide animation is ripped out for master (shared flag in popoverConstants — also gates
+// the LOGIC in usePopoverLayout). The static compression applies INSTANTLY; transitions in
+// decorationsFor are no-ops while it's false.
+function scanParagraphWords(node: PMNode, pos: number, pIdx: number, ctx: ScanCtx): void {
+  const { cursorPos, lookup, flagged, newFlagged, initialAnchors, debugAll, redWords } = ctx
+  let seqInPara = 0
+
+  node.forEach((child: PMNode, offset: number) => {
       if (!child.isText || !child.text) return
       const text = child.text
       // The slot mark anchors a cycled word's synonym list to its original. A committed memory slot
@@ -348,14 +447,13 @@ function buildDecorations(
           })
         }
       }
-    })
-
-    return false
   })
+}
 
-  // ── 3. Build decorations ──────────────────────────────────────────────────
-  // (Tab/⇧+tab hint badges were removed — the visual hints feature is gone. Tab navigation still
-  // works from the keyboard; it just no longer paints a per-word badge.)
+// ── 3. Build decorations from the collected words ───────────────────────────
+// (Tab/⇧+tab hint badges were removed — the visual hints feature is gone. Tab navigation still
+// works from the keyboard; it just no longer paints a per-word badge.)
+function decorationsFor(redWords: RedWord[], hintState: HintState, reveals: ReadonlySet<number>): Decoration[] {
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
@@ -421,5 +519,5 @@ function buildDecorations(
     }
   }
 
-  return { decorations: DecorationSet.create(pmDoc, decorations), flagged: newFlagged }
+  return decorations
 }

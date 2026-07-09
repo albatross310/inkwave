@@ -245,6 +245,16 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
+- Phone SCAS tick is WINDOWED (2026-07-10): the 250ms tick scans/repaints only the tick's
+  edit+caret paragraphs (~200× cheaper than O(doc)). INVARIANT: any tick with a DELETION does the
+  FULL scan — the engine's vanished-lemma pass needs whole-doc word presence (a window that hides a
+  removal ⇒ false lock + phantom snapshot); and the windowed decoration splice is only legal when
+  the tick did NOT change SCAS state (a verdict change repaints that lemma doc-wide). Desktop keeps
+  the full scan (byte-identical). Word count now runs ONLY while the ◈ panel is open on phone.
+- Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
+  wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
+  fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
+  the first move). Pinch suppression = that preventDefault + gesture events + touch-action.
 - iPadOS masquerades as macOS (detect via maxTouchPoints); GIS popups need pre-loaded clients so
   requestAccessToken runs inside the tap's transient activation.
 

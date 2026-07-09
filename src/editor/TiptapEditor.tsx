@@ -253,6 +253,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
   const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
+  // Phone windowed SCAS tick: the debounce window's accumulated edit range (current-doc coords,
+  // remapped through each transaction) + the caret position at the LAST tick (a word commits when
+  // the caret leaves it, so the previous caret's paragraph must be rescanned too).
+  const scasWinRef = useRef<{ from: number; to: number } | null>(null)
+  const scasLastCaretRef = useRef(1)
   const lastNotifiedTitleRef = useRef('')     // shell re-renders only when the title actually changes
   // QUIET SCHEDULER: heavy background work (archive pre-merge, receipt verification) runs only after
   // the writer has been genuinely idle for a stretch. requestIdleCallback alone still fires
@@ -501,6 +506,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           const size = e.state.doc.content.size
           if (prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current) scasHadDeletionRef.current = true
           prevDocSizeRef.current = size
+          // SCAN WINDOW bookkeeping (phone): accumulate WHERE this debounce window's edits landed,
+          // in current-doc coordinates — map the running range and the last-tick caret through this
+          // edit, then union this transaction's own changed range (each step's new range, mapped
+          // through the steps after it). The tick below hands the union to processDoc so the scan
+          // is O(window), not O(doc). Cost here is O(steps) per keystroke — no doc walks.
+          scasLastCaretRef.current = transaction.mapping.map(scasLastCaretRef.current)
+          let wf = scasWinRef.current ? transaction.mapping.map(scasWinRef.current.from, -1) : Infinity
+          let wt = scasWinRef.current ? transaction.mapping.map(scasWinRef.current.to, 1) : -Infinity
+          const maps = transaction.mapping.maps
+          for (let i = 0; i < maps.length; i++) {
+            const remain = transaction.mapping.slice(i + 1)
+            maps[i].forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+              wf = Math.min(wf, remain.map(newStart, -1))
+              wt = Math.max(wt, remain.map(newEnd, 1))
+            })
+          }
+          if (wt >= wf) scasWinRef.current = { from: wf, to: wt }
         }
         if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
         // PHONE: the tick's engine scan + decoration rebuild is O(doc) — ~7ms/10k words in Node,
@@ -512,20 +534,43 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           const tickT0 = performance.now()
           const hadDeletion = scasHadDeletionRef.current
           scasHadDeletionRef.current = false
-          scasRef.current!.processDoc(e.state.doc, e.state.selection.from, hadDeletion)
+          // PHONE WINDOWED TICK (2026-07-10, round-2 lag): scan only where this tick's edits/caret
+          // moves happened — the window = accumulated edit range ∪ last-tick caret ∪ current caret
+          // (a word commits when the caret LEAVES it, so both caret paragraphs must be scanned).
+          // Full scan stays for: desktop (byte-identical), any tick with a DELETION (the engine's
+          // vanished-lemma pass needs whole-doc word presence — the phantom-snapshot guard), and
+          // the decoration repaint whenever the tick DID change state (a verdict change repaints
+          // every instance of that lemma doc-wide).
+          const caretNow = e.state.selection.from
+          const acc = scasWinRef.current
+          scasWinRef.current = null
+          const lastCaret = scasLastCaretRef.current
+          scasLastCaretRef.current = caretNow
+          const win = isTouchDevice() && !hadDeletion
+            ? {
+                from: Math.min(acc ? acc.from : caretNow, caretNow, lastCaret),
+                to: Math.max(acc ? acc.to : caretNow, caretNow, lastCaret),
+              }
+            : null
+          const stateChanged = scasRef.current!.processDoc(e.state.doc, caretNow, hadDeletion, win)
           // Always repaint: the deferred decorations need it after edits, and it refreshes the
-          // cursor-word suppression after pure caret moves.
-          e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
+          // cursor-word suppression after pure caret moves. Windowed splice only when nothing
+          // outside the window can differ (no state change, no open popover) — else full rebuild.
+          const meta = win && !stateChanged && hintStateRef.current.focusedPos === null
+            ? { window: win } : true
+          e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, meta))
           notePerf('scas-tick', performance.now() - tickT0)
         }, isTouchDevice() ? 250 : 120)
       }
 
       // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
-      // a paragraph), so it stays above the docChanged gate. O(caret) walk; React bails on same value.
+      // a paragraph), so it stays above the docChanged gate. O(blocks-before-caret) walk (return
+      // false at each textblock so it never descends into inline content); React bails on same value.
       const { $from } = e.state.selection
       let pIdx = 0
       e.state.doc.nodesBetween(0, $from.pos, (node) => {
-        if (node.type.name === 'paragraph') pIdx++
+        if (node.type.name === 'paragraph') { pIdx++; return false }
+        return !node.isTextblock // headings etc.: nothing inside a textblock can be a paragraph
       })
       setCurrentParagraphIndex(Math.max(0, pIdx - 1))
 
@@ -801,18 +846,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
   // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
-  // Phone: 1s — the O(doc) string build + unicode regex otherwise lands in inter-word pauses, and
-  // the readout lives behind the ◈ panel there anyway (input priority #1).
+  // Phone: the readout lives behind the ◈ panel (controlled `receiptOpen` on touch), so while it's
+  // CLOSED we don't count AT ALL — the O(doc) string build + unicode regex + the editor-shell
+  // re-render otherwise landed in every 1s inter-word pause (input priority #1). Opening the panel
+  // counts immediately (the effect re-runs on receiptOpen) and keeps counting at 1s while open.
+  // Desktop is untouched: receiptOpen never flips there (ReceiptPanel manages its own open state).
   useEffect(() => {
     if (!editor) return
+    const touch = isTouchDevice()
+    if (touch && !receiptOpen) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const count = () => { const m = editor.getText().match(/[\p{L}\p{N}]+/gu); setWordCount(m ? m.length : 0) }
-    const delay = isTouchDevice() ? 1000 : 300
+    const delay = touch ? 1000 : 300
     const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(count, delay) }
     count()
     editor.on('update', schedule)
     return () => { editor.off('update', schedule); if (timer) clearTimeout(timer) }
-  }, [editor])
+  }, [editor, receiptOpen])
   // "Sync editor" from the PDF viewer: scroll to the citation OCCURRENCE a highlight belongs to.
   useEffect(() => {
     if (!editor) return
@@ -909,6 +959,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       docRef.current.scasSetSize ?? DEFAULT_SET_SIZE,
     )
     prevDocSizeRef.current = -1
+    scasWinRef.current = null   // positions from the previous document are meaningless
+    scasLastCaretRef.current = 1
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 

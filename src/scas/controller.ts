@@ -34,15 +34,26 @@ interface ScannedWord {
   committed: boolean      // false = the word under the cursor, still being typed (no boundary yet)
 }
 
+/** A document range (PM positions) that bounds where this tick's edits/caret activity happened. */
+export interface ScanWindow { from: number; to: number }
+
 /**
  * Collect the document's *committed* words. A word is committed unless it is the one under the
  * cursor still being typed (no trailing boundary yet) — matching the renderer's definition, so a
  * word nudge fires exactly when the word turns red.
+ *
+ * `window` (phone input priority, 2026-07-10): scan only the paragraphs intersecting the given
+ * range instead of the whole document. The full scan is O(doc) (~3ms/12k words in Node, tens of ms
+ * on a phone CPU) and ran on EVERY 250ms typing pause; a caret/edit window is ~500× cheaper.
+ * SAFE BY CONSTRUCTION for passes 1–2: words can only newly commit (caret leaves them) or newly
+ * substitute (doc changes there) INSIDE the tick's edit+caret window, and verdicts for text outside
+ * it are frozen state (never re-derived from S_v — the no-retroactive-reflag invariant). The
+ * DELETION pass needs whole-document presence, so processDoc ignores the window when a deletion
+ * happened (see below) — a window is never allowed to hide a removal.
  */
-function scanCommitted(pmDoc: PMNode, cursorPos: number): ScannedWord[] {
+function scanCommitted(pmDoc: PMNode, cursorPos: number, window?: ScanWindow): ScannedWord[] {
   const out: ScannedWord[] = []
-  pmDoc.descendants((node: PMNode, pos: number) => {
-    if (node.type.name !== 'paragraph') return true
+  const scanParagraph = (node: PMNode, pos: number) => {
     node.forEach((child: PMNode, offset: number) => {
       if (!child.isText || !child.text) return
       const text = child.text
@@ -74,8 +85,25 @@ function scanCommitted(pmDoc: PMNode, cursorPos: number): ScannedWord[] {
         })
       }
     })
-    return false
-  })
+  }
+  if (window) {
+    // Windowed: whole paragraphs only (nodesBetween yields every paragraph INTERSECTING the range,
+    // and scanParagraph reads the entire paragraph), so a window never splits a word or misses the
+    // committed-word boundary test. ±1 keeps a collapsed (from === to) window from vanishing.
+    const from = Math.max(0, Math.min(window.from - 1, pmDoc.content.size))
+    const to = Math.max(from, Math.min(window.to + 1, pmDoc.content.size))
+    pmDoc.nodesBetween(from, to, (node: PMNode, pos: number) => {
+      if (node.type.name !== 'paragraph') return true
+      scanParagraph(node, pos)
+      return false
+    })
+  } else {
+    pmDoc.descendants((node: PMNode, pos: number) => {
+      if (node.type.name !== 'paragraph') return true
+      scanParagraph(node, pos)
+      return false
+    })
+  }
   return out
 }
 
@@ -148,10 +176,16 @@ export class ScasController {
   /**
    * Process a document change: fire word nudges, resolve substitutions, and (only when content was
    * removed) lock deleted nudged lemmas. Returns true if the state changed.
+   *
+   * `window` (optional): bound the scan to the tick's edit+caret range — the phone's O(doc)-off-
+   * the-typing-path optimisation. HARD GUARD: whenever `hadDeletion` is set the window is ignored
+   * and the whole document is scanned, because the deletion pass decides "a nudged lemma VANISHED"
+   * from word presence — a windowed scan can't see removals outside itself, and a false "vanished"
+   * would lock the lemma AND take a phantom snapshot (the phantom-snapshot guard).
    */
-  processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean): boolean {
+  processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean, window?: ScanWindow | null): boolean {
     if (this.setSize === 0) return false // Infinite mode: no constraint encounters
-    const words = scanCommitted(pmDoc, cursorPos)
+    const words = scanCommitted(pmDoc, cursorPos, !hadDeletion && window ? window : undefined)
     const before = this.state
     let st = this.state
 
