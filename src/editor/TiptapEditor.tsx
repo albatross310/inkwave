@@ -61,6 +61,7 @@ import { VerifyModal } from '../components/VerifyModal'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
+import { notePerf, perflogEnabled } from './perflog'
 import { CitationNode } from './extensions/CitationNode'
 import { CiteSuggestion } from './extensions/CiteSuggestion'
 import { ReferenceListNode } from './extensions/ReferenceListNode'
@@ -468,15 +469,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           prevDocSizeRef.current = size
         }
         if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
+        // PHONE: the tick's engine scan + decoration rebuild is O(doc) — ~7ms/10k words in Node,
+        // several × slower on a phone CPU (tens of ms on a thesis-length doc), and at 120ms it
+        // landed between keystrokes during normal typing. 250ms keeps it in genuine gaps; verdicts
+        // freeze at commit anyway, so a later repaint changes nothing semantically. Desktop stays 120.
         scasTickTimerRef.current = setTimeout(() => {
           if (e.isDestroyed) return
+          const tickT0 = performance.now()
           const hadDeletion = scasHadDeletionRef.current
           scasHadDeletionRef.current = false
           scasRef.current!.processDoc(e.state.doc, e.state.selection.from, hadDeletion)
           // Always repaint: the deferred decorations need it after edits, and it refreshes the
           // cursor-word suppression after pure caret moves.
           e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, true))
-        }, 120)
+          notePerf('scas-tick', performance.now() - tickT0)
+        }, isTouchDevice() ? 250 : 120)
       }
 
       // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
@@ -656,6 +663,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('orientationchange', onOrient)
     return () => { vv.removeEventListener('resize', onVV); window.removeEventListener('orientationchange', onOrient) }
   }, [])
+  // Mirror keyboardUp to a window flag so non-React code can read it — PaginationExtension's phone
+  // edit debounce stretches while the keyboard is up (reflow mid-composition is worthless).
+  useEffect(() => {
+    ;(window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp = keyboardUp
+  }, [keyboardUp])
+
+  // On-device input-latency capture (gated: localStorage 'inkwave:perflog' = '1', see perflog.ts).
+  // Per keystroke: how long the beforeinput event WAITED for the main thread (a deferred tick /
+  // measure still running) + the synchronous work until the next frame could start. The worst value
+  // per 2s window prints as one console.info — capture numbers on the phone without devtools.
+  useEffect(() => {
+    if (!editor || !perflogEnabled()) return
+    const dom = editor.view.dom
+    const onBeforeInput = (ev: Event) => {
+      const queuedMs = Math.max(0, performance.now() - ev.timeStamp)
+      const t0 = performance.now()
+      requestAnimationFrame(() => notePerf('input-task', queuedMs + (performance.now() - t0)))
+    }
+    dom.addEventListener('beforeinput', onBeforeInput, true)
+    return () => dom.removeEventListener('beforeinput', onBeforeInput, true)
+  }, [editor])
 
   // Keep the caret above the keyboard / bottom toolbar. While the keyboard is up, if typing or
   // a caret move would put the caret below the keyboard top (or the visible bar above it),
@@ -733,11 +761,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
   // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
+  // Phone: 1s — the O(doc) string build + unicode regex otherwise lands in inter-word pauses, and
+  // the readout lives behind the ◈ panel there anyway (input priority #1).
   useEffect(() => {
     if (!editor) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const count = () => { const m = editor.getText().match(/[\p{L}\p{N}]+/gu); setWordCount(m ? m.length : 0) }
-    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(count, 300) }
+    const delay = isTouchDevice() ? 1000 : 300
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(count, delay) }
     count()
     editor.on('update', schedule)
     return () => { editor.off('update', schedule); if (timer) clearTimeout(timer) }

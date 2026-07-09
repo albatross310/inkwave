@@ -30,6 +30,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColum
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
 import { bibProvider } from '../../citations/bibProvider'
+import { notePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 const GAP = 56 // px of aqua (waves) between sheets
@@ -225,7 +226,16 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           let sheet: HTMLElement | null = null
           let layer: HTMLElement | null = null
           let observed = false
-          const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => schedule()) : null
+          // PHONE INPUT PRIORITY: a keystroke that adds/removes a LINE resizes the sheet, so this
+          // observer fired one frame after the edit and — doc size changed ⇒ fresh inputSig — ran
+          // the full triple-reflow measure IMMEDIATELY, bypassing the edit debounce entirely. On
+          // phone, a resize arriving while an edit's re-measure is pending folds into that debounce
+          // (pushes it back); genuine resizes (rotate, keyboard, panel dock — no edit pending) still
+          // measure straight away. Desktop keeps the original immediate path, byte-identical.
+          const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
+            if (phoneLike() && editDebounce) scheduleAfterEdit()
+            else schedule()
+          }) : null
 
           // A background layer of REAL parchment sheet panels, one per page, positioned at the
           // measured page regions (between the gap bands). Each is its own <div>, so it gets a real
@@ -371,6 +381,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             const inputSig = `${view.state.doc.content.size}:${Math.round(pageH)}:${topM}`
             if (inputSig === lastInputSig) { if (gapped) schedulePaint(); return }
             lastInputSig = inputSig
+            const measureT0 = performance.now() // perflog: the full canonical-measure cost (phone lag hunt)
 
             // CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at
             // every editor zoom and on every device (phone = desktop = print). So the measure runs
@@ -440,6 +451,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             if (gapped) schedulePaint()
             announceMeasured()
+            notePerf('page-measure', performance.now() - measureT0)
           }
           const schedule = () => { if (!raf) raf = requestAnimationFrame(recompute) }
           const forceRecompute = () => { lastInputSig = ''; schedule() }
@@ -449,10 +461,24 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // backspace, where line heights shrink). The existing gap decorations are position-mapped
           // through each edit in apply(), so the gaps ride along correctly while we wait; the breaks
           // re-settle 150ms after typing pauses. Resize/fonts/settings still re-measure immediately.
+          //
+          // PHONE (2026-07-09, "character input is priority #1 — reflow can wait"): each measure is
+          // THREE forced full-document reflows (gap-clear → canonical-context force → measure →
+          // restore) — cheap on desktop, ~100-300ms of layout on a phone CPU with a long doc. At
+          // 150ms it landed in ordinary inter-word typing pauses, freezing the next keystroke. So
+          // edit-driven re-measures on phone wait for a GENUINE pause: 850ms after the last
+          // transaction, stretched to 1200ms while the on-screen keyboard is up (TiptapEditor mirrors
+          // it to window.__iwKeyboardUp — reflowing mid-composition is worthless). Trailing debounce:
+          // every further keystroke pushes a queued measure back. Desktop stays 150ms, and the FIRST
+          // measure (the pagination-ready reveal latch) is schedule()d directly below — untouched.
           let editDebounce: ReturnType<typeof setTimeout> | undefined
+          const editDelayMs = () => {
+            if (!phoneLike()) return 150
+            return (window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp ? 1200 : 850
+          }
           const scheduleAfterEdit = () => {
             if (editDebounce) clearTimeout(editDebounce)
-            editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, 150)
+            editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, editDelayMs())
           }
           schedule()
           // Web fonts (EB Garamond) load AFTER first paint and reflow the text, moving every line —
@@ -490,7 +516,18 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const zoomCb = () => { if (!destroyed) forceRecompute() }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {
-            update: scheduleAfterEdit,
+            // Phone: only a DOC change pushes the queued measure back. This update hook also fires
+            // for decoration repaints (the SCAS tick) and every React re-render of the editor
+            // component (word count, panels — Tiptap's updateState), and each of those reset the
+            // debounce: measured on-device, the word-count re-render alone stacked the phone measure
+            // to ~1.9s after the last keystroke. Doc object identity is the cheap test (ProseMirror
+            // docs are persistent structures — unchanged doc ⇒ same reference); a skipped reschedule
+            // loses nothing, since a no-edit recompute early-returns on inputSig anyway. Desktop
+            // keeps the original unconditional reset.
+            update: (view, prevState) => {
+              if (phoneLike() && prevState && view.state.doc === prevState.doc) return
+              scheduleAfterEdit()
+            },
             destroy() {
               destroyed = true
               ro?.disconnect()
