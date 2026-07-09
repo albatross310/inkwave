@@ -367,6 +367,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [styleBarOpen, setStyleBarOpen] = useState(false)
   const styleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Clicking the WATER (surface outside the paper), a page GAP, or anywhere non-interactive on the
+  // page dismisses the floating style bar (Peter, 2026-07-09: it only auto-hid via its timer).
+  // Native clicks in text already collapse the selection; this covers the targets that don't.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null
+      if (!t || !t.closest('.inkwave-editor-surface')) return          // footer/panels/portals: not ours
+      if (t.closest('.ProseMirror, .scas-cycle-card, button, [role="menu"], [role="dialog"], input, select')) return
+      setStyleBarOpen(false)
+      clearStyleTimer()
+      const ed = editorRef.current
+      if (ed && !ed.state.selection.empty) {
+        ed.chain().setTextSelection(ed.state.selection.head).run()     // collapse → selection bar retracts
+      }
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [])
+
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
     styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
