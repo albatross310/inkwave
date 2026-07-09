@@ -519,14 +519,15 @@ function bestGrid(n: number, W: number, H: number): { rows: number; cols: number
 // A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
 // (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
 // Click or drag scrolls the panes so that point sits on the midline.
-function MinimapPanel({ leftRef, ops, snapKey }: {
+function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
   leftRef: React.RefObject<HTMLDivElement | null>
   ops: DiffOp[] | null
   snapKey: string
+  midFrac?: number
 }) {
   const [pages, setPages] = useState(1)
   const [maxPages, setMaxPages] = useState(1) // largest page count seen → keep the grid structure stable
-  const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean }>>([])
+  const [marks, setMarks] = useState<Array<{ page: number; frac: number; add: boolean; opIdx: number }>>([])
   const [panelDims, setPanelDims] = useState({ w: 0, h: 0 }) // the minimap's own box, for the aspect-ratio grid
   const pageHRef = useRef(1000)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -543,14 +544,15 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     setPages(n)
     setMaxPages(m => Math.max(m, n))
     const er = el.getBoundingClientRect()
-    const m: Array<{ page: number; frac: number; add: boolean }> = []
+    const m: Array<{ page: number; frac: number; add: boolean; opIdx: number }> = []
     el.querySelectorAll('[data-opidx]').forEach(o => {
-      const op = ops?.[Number((o as HTMLElement).getAttribute('data-opidx'))]
+      const idx = Number((o as HTMLElement).getAttribute('data-opidx'))
+      const op = ops?.[idx]
       if (!op || op.type === 'same') return
       const r = (o as HTMLElement).getBoundingClientRect()
       const y = r.top - er.top + el.scrollTop
       const page = Math.max(0, Math.min(n - 1, Math.floor(y / pageH)))
-      m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add' })
+      m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add', opIdx: idx })
     })
     // Skip the setState when the marks are identical — the observers fire on every resize tick and a fresh
     // array would re-render the whole grid for nothing (same pattern PageGuides uses).
@@ -596,6 +598,9 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     [total, panelDims.w, panelDims.h],
   )
   const GAP = 4
+  // Page-number + logo size scales with the cell height (panel resolution).
+  const cellApproxH = panelDims.h > 0 ? (panelDims.h - 12 - (height - 1) * GAP) / height : 40
+  const numFont = Math.max(5, Math.min(13, cellApproxH * 0.16))
 
   // Map a pointer position over the grid → (page, frac) → scroll the document pane there (its onScroll
   // then follows the diff pane). Column-major: down a column, then the next column.
@@ -613,8 +618,16 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     const fracInCell = Math.max(0, Math.min(1, (rRaw - r * cellH) / (cellH - GAP)))
     const y = (page + fracInCell) * pageHRef.current
     window.dispatchEvent(new Event('inkwave:minimap-seek')) // → diff pane follows gently, not springily
-    el.scrollTo({ top: Math.max(0, y - el.clientHeight / 2), behavior: 'auto' })
-  }, [cols, height, pages, leftRef])
+    el.scrollTo({ top: Math.max(0, y - el.clientHeight * midFrac), behavior: 'auto' })
+  }, [cols, height, pages, leftRef, midFrac])
+
+  // Click a diff tick → both panes fly to THAT change (editor scrolls; the diff pane follows via the sync).
+  const seekToY = useCallback((y: number) => {
+    const el = leftRef.current
+    if (!el) return
+    window.dispatchEvent(new Event('inkwave:minimap-seek'))
+    el.scrollTo({ top: Math.max(0, y - el.clientHeight * midFrac), behavior: 'smooth' })
+  }, [leftRef, midFrac])
 
   const dragging = useRef(false)
   const onDown = (e: React.PointerEvent) => { dragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); seekTo(e.clientX, e.clientY) }
@@ -631,12 +644,12 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     const colStride = (w - (cols - 1) * GAP) / cols
     const cellH = (h - (height - 1) * GAP) / height
     const pageH = pageHRef.current
-    const yc = el.scrollTop + el.clientHeight / 2
+    const yc = el.scrollTop + el.clientHeight * midFrac
     const p = Math.max(0, Math.min(pages - 1, Math.floor(yc / pageH)))
     const frac = Math.max(0, Math.min(1, (yc - p * pageH) / pageH))
     const c = Math.floor(p / height), r = p % height
     setHere({ top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride })
-  }, [cols, height, pages, leftRef])
+  }, [cols, height, pages, leftRef, midFrac])
   useEffect(() => {
     const el = leftRef.current
     if (!el) return
@@ -644,6 +657,25 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
     el.addEventListener('scroll', updateHere, { passive: true })
     return () => el.removeEventListener('scroll', updateHere)
   }, [updateHere, snapKey])
+
+  // Wheel over the minimap scrolls the document — one cell-height of wheel ≈ one page, so you sweep DOWN the
+  // current column (and on into the next) straight from the minimap.
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const onWheel = (e: WheelEvent) => {
+      const el = leftRef.current
+      if (!el) return
+      e.preventDefault()
+      const h = grid.clientHeight - 12
+      const cellH = (h - (height - 1) * GAP) / height
+      const factor = pageHRef.current / Math.max(1, cellH) // minimap px → document px (1 cell = 1 page)
+      window.dispatchEvent(new Event('inkwave:minimap-seek'))
+      el.scrollTop += e.deltaY * factor
+    }
+    grid.addEventListener('wheel', onWheel, { passive: false })
+    return () => grid.removeEventListener('wheel', onWheel)
+  }, [leftRef, height])
 
   return (
     <div
@@ -665,13 +697,26 @@ function MinimapPanel({ leftRef, ops, snapKey }: {
       )}
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
-          <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)' }}>
-            {marks.filter(m => m.page === p).map((m, i) => (
-              <div key={i} aria-hidden="true" style={{
-                position: 'absolute', left: 1, right: 1, top: `${m.frac * 100}%`, height: 2,
-                background: m.add ? '#16a34a' : '#dc2626', borderRadius: 1,
-              }} />
-            ))}
+          <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)', overflow: 'hidden' }}>
+            {marks.filter(m => m.page === p).map((m, i) => {
+              const base = m.add ? '#16a34a' : '#dc2626', dark = m.add ? '#0d6b30' : '#8f1414'
+              // Wrapper is a taller transparent hit target; the inner bar widens + darkens on hover.
+              return (
+                <div key={i} title="Jump both panes to this change"
+                  onClick={(e) => { e.stopPropagation(); seekToY((m.page + m.frac) * pageHRef.current) }}
+                  onMouseEnter={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '5px'; b.style.background = dark }}
+                  onMouseLeave={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '2px'; b.style.background = base }}
+                  style={{ position: 'absolute', left: 0, right: 0, top: `${m.frac * 100}%`, transform: 'translateY(-50%)', height: 10, display: 'flex', alignItems: 'center', cursor: 'pointer', zIndex: 4 }}
+                >
+                  <div style={{ width: '100%', height: 2, background: base, borderRadius: 1, transition: 'height 0.1s, background 0.1s' }} />
+                </div>
+              )
+            })}
+            {/* page number + tiny logo, bottom-middle; font scales with the panel */}
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.5)', fontSize: numFont, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+              <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 1.15, height: numFont * 1.15, opacity: 0.5 }} />
+              {p + 1}
+            </div>
           </div>
         ) : (
           // A page this shorter snapshot doesn't have — an empty slot, keeping the grid stable.
@@ -1556,7 +1601,7 @@ function SplitDiffView({
           ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
           : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
       </div>
-      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} />
+      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} midFrac={midFrac} />
     </div>
   )
   // Grid divider filling its template track. Same DOM element whether draggable (resize) or a fixed thin
