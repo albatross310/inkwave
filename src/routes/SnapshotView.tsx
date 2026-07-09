@@ -1851,8 +1851,14 @@ export function SnapshotView() {
     if (!el) return
     let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
     const FIRST = 38, REST = 9 // detent for the first snap, then heaps
-    const onStart = (e: TouchEvent) => { dir = '?'; accum = 0; started = false; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY }
+    const onStart = (e: TouchEvent) => {
+      // Multi-touch = a PINCH (master's Scroll zoom handlers own it) — never a scrub. Without this
+      // guard, finger-0's drift during a pinch scrubbed snapshots mid-gesture (merge fix, 2026-07-10).
+      if (e.touches.length > 1) { dir = 'v'; return }
+      dir = '?'; accum = 0; started = false; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY
+    }
     const onMove = (e: TouchEvent) => {
+      if (e.touches.length > 1) { dir = 'v'; return } // a second finger landed mid-gesture → hand off to the pinch
       const x = e.touches[0].clientX, y = e.touches[0].clientY
       if (dir === '?') {
         const dx = x - startX, dy = y - startY
