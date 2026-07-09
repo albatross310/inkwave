@@ -242,6 +242,10 @@ export function Scroll({
   // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT jump when you ZOOM
   // (zoom re-anchors scrollTop, which would lurch the waves). So skip the frame where the editor-zoom
   // level changed and only sway on genuine scrolling.
+  // The sway rides on a persistent BASE offset: where the loading coast came to rest (see the coast
+  // handoff below, which rebases it against the scroll position at that moment). Starts at 0, so
+  // surfaces that never drift (SnapshotView) keep the plain scrollTop·0.06 sway.
+  const waveBaseRef = useRef(0)
   useEffect(() => {
     const el = surfaceRef.current
     // Phone: the wave ::before is display:none (see .is-phone in index.css), so the sway var would be
@@ -254,7 +258,7 @@ export function Scroll({
       raf = 0
       const z = el.style.getPropertyValue('--iw-editor-zoom')
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
-      el.style.setProperty('--wave-x', `${(el.scrollTop * 0.06).toFixed(1)}px`) // 2/3 of the old 0.09 sway speed
+      el.style.setProperty('--wave-x', `${(waveBaseRef.current + el.scrollTop * 0.06).toFixed(1)}px`) // 0.06 = 2/3 of the old 0.09 sway speed
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
     apply()
@@ -262,19 +266,42 @@ export function Scroll({
     return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [phone])
 
-  // Loading wave drift — CSS/compositor does the moving (`.iw-wave-anim`, in the prerendered HTML,
-  // so it starts at FIRST PAINT and never stutters however busy the main thread is). JS only manages
-  // the phases: sync the live surface to the shell's animation phase at mount, and at reveal freeze
-  // the current offset then ease it to the nearest 140px tile boundary (pattern-identity) over ~1s —
-  // an exponential coast to rest with a zero-jump handoff back to the scroll sway.
+  // Loading wave drift — CSS/compositor does ALL the moving (`.iw-wave-anim`, in the prerendered
+  // HTML, so it starts at FIRST PAINT and never stutters however busy the main thread is; the reveal
+  // coast is a CSS keyframe animation too — see iw-wave-coast-l/r in index.css). JS only manages the
+  // phase boundaries, each a one-shot write: sync the surface to the shared animation clock at mount,
+  // freeze the offset into --wave-t at reveal (the coast keyframes take it from there, continuing
+  // FORWARD with a 2s cubic ease-out whose initial slope is the 72px/s drift speed), and at coast end
+  // hand the final offset to the scroll sway as its persistent base — no boundary snapping, so the
+  // waves can never stop or move backward.
   const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
   const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
-  useEffect(() => {
-    // Pick up mid-loop where the (unmounted) shell's animation was: negative delay = elapsed % loop.
+  // useLayoutEffect: the FIRST paint of a freshly-mounted surface must already sit at the shared
+  // clock. As a plain effect this ran AFTER paint, so every surface remount painted one frame at
+  // ramp-start (offset ~0) then jumped to the synced phase — a visible wave flash per remount.
+  useLayoutEffect(() => {
+    // Pick up mid-loop where the first surface's animation is: negative delay = elapsed % loop.
     const el = surfaceRef.current
     if (!el || !startedHiddenRef.current) return
-    // The drift loop starts after the 0.5s S-ramp; sync both to where the shell's animation is now.
-    const elapsed = performance.now() / 1000
+    // ONE shared clock — the moment the FIRST surface's animation actually started (the prerendered
+    // shell's, at first paint). performance.now() alone overestimates elapsed by the first-paint
+    // latency (~50–300ms ≈ up to ~20px of drift), and re-setting the delay vars on the already-
+    // running hydrated shell would phase-shift (jump) it — so the first surface just PUBLISHES its
+    // animation's true start time and leaves its own vars untouched; later surfaces sync to it.
+    const w = window as unknown as { __iwWaveEpoch?: number }
+    if (w.__iwWaveEpoch === undefined) {
+      let start = performance.now() // fallback ≈ this mount (fresh mounts start their animation now)
+      try {
+        const a = el.getAnimations({ subtree: true }) // subtree:true includes the ::before/::after animations
+          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-ramp-l')
+        if (typeof a?.startTime === 'number') start = a.startTime
+        else if (typeof a?.currentTime === 'number') start = performance.now() - a.currentTime
+      } catch { /* keep the approximation */ }
+      w.__iwWaveEpoch = start
+      return // this surface's own running animation IS the clock
+    }
+    const elapsed = Math.max(0, performance.now() - w.__iwWaveEpoch) / 1000
+    // The drift loop starts after the 0.5s S-ramp; sync both to where the clock is now.
     if (elapsed < 0.5) {
       el.style.setProperty('--wave-ramp-delay', `-${elapsed.toFixed(3)}s`)
       el.style.setProperty('--wave-phase', `${(0.5 - elapsed).toFixed(3)}s`)
@@ -284,13 +311,17 @@ export function Scroll({
     }
   }, [])
   // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
-  // an effect with the decay loop — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
-  // effect and its CLEANUP cancelled the just-started rAF, leaving .iw-wave-coast stuck forever
+  // an effect with the handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
+  // effect and its CLEANUP tore down the just-armed listeners, leaving .iw-wave-coast stuck forever
   // (frozen waves + background-position pinned at 0 → the scroll sway looked "broken").
+  // useLayoutEffect: --wave-t + the coast class land in the SAME commit that drops the anim class,
+  // before the browser paints — the first coast frame is already easing from the frozen offset, so
+  // there is no dead frame (and no intermediate render ever lacks both classes: waveMode swaps
+  // 'anim' → 'coast' atomically in one state).
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
     const el = surfaceRef.current
-    if (!el) { setWaveMode('off'); return }
+    if (!el || phone) { setWaveMode('off'); return } // phone: waves are display:none — nothing to coast
     // Freeze the compositor animation's current offset BEFORE the class swap paints.
     let tx = 0
     try {
@@ -299,37 +330,35 @@ export function Scroll({
     } catch { /* transform unreadable → coast from 0 */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
-  }, [revealed, waveMode])
+  }, [revealed, waveMode, phone])
+  // Coast END → sway handoff. The 2s ease-out itself is pure CSS (iw-wave-coast-l/r); JS wakes only
+  // at animationend to hand over: the final offset (--wave-t − 48px, the keyframes' end value) is
+  // written into --wave-x in the same commit the coast class drops. Because the coast geometry's
+  // ±280px overdraw is exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping
+  // the class while setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and
+  // the sway then continues from that offset (base = txFinal − scrollTop·0.06, rebased here).
   useEffect(() => {
     if (waveMode !== 'coast') return
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
-    let raf = 0
-    let last = performance.now()
-    let tx = parseFloat(el.style.getPropertyValue('--wave-t')) || 0
-    let v = -72 // px/s leftward — the speed the CSS drift was running at
-    const TAU = 0.28 // s — exponential decay; visually still in ~1s
-    const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.1)
-      last = now
-      v *= Math.exp(-dt / TAU)
-      tx += v * dt
-      if (Math.abs(v) < 3) {
-        // Nearly at rest: glide to the nearest tile boundary, where transform ≡ none.
-        const target = Math.round(tx / 140) * 140
-        tx += (target - tx) * Math.min(1, dt * 8)
-        if (Math.abs(target - tx) < 0.4) {
-          el.style.removeProperty('--wave-t')
-          setWaveMode('off')
-          raf = 0
-          return
-        }
-      }
-      el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
-      raf = requestAnimationFrame(tick)
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - 48
+      waveBaseRef.current = txFinal - el.scrollTop * 0.06
+      el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
+      setWaveMode('off') // class drops on React's commit — --wave-x is already in place
     }
-    raf = requestAnimationFrame(tick)
-    return () => { if (raf) cancelAnimationFrame(raf) }
+    const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
+    el.addEventListener('animationend', onEnd)
+    const cap = setTimeout(finish, 2300) // safety net if the animation never ran (e.g. reduced paint states)
+    return () => { el.removeEventListener('animationend', onEnd); clearTimeout(cap) }
+  }, [waveMode])
+  // --wave-t is inert once the coast class is gone; tidy it away after the 'off' commit (removing it
+  // BEFORE the class dropped was the old backward-jump bug — the still-coasting transform fell to 0).
+  useEffect(() => {
+    if (waveMode === 'off') surfaceRef.current?.style.removeProperty('--wave-t')
   }, [waveMode])
 
   return (

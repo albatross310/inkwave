@@ -148,10 +148,12 @@
      is in the prerendered HTML) and stay perfectly smooth however busy the main thread is while the
      editor boots. The wave PAIR splits across the two pseudo-elements so the pairs drift in OPPOSITE
      directions (matching the scroll sway); each slides exactly one 140px tile per loop — pattern-
-     identical, an infinite seamless drift — with a tile of slack on BOTH sides so no edge is ever
-     uncovered. --wave-phase syncs the live surface to the shell's animation mid-loop. At reveal,
-     Scroll.tsx freezes the offset into --wave-t and eases it to the nearest tile boundary (identity
-     for both directions), so dropping the classes hands back to the two-layer ::before with zero jump. */
+     identical, an infinite seamless drift — with exactly TWO tiles (280px) of slack on BOTH sides so
+     no edge is ever uncovered AND the element origin stays ≡ 0 (mod 140): a transform of +tx paints
+     the same pixels as background-position +tx, which is what makes the coast→sway handoff identity.
+     --wave-phase syncs the live surface to the shell's animation mid-loop. At reveal, Scroll.tsx
+     freezes the live offset into --wave-t and the coast keyframes below CONTINUE the drift, easing
+     to rest — no boundary snapping; the final offset becomes the scroll sway's base (--wave-x). */
   /* S-curve start: a 0.5s one-shot ramp (zero start velocity, ending at exactly the cruise speed —
      the bezier's end slope is 2, and 18px = the distance an S-ramp to 72px/s covers in 0.5s), then the
      infinite linear loop takes over from -9px. translate3d keeps the layer on the GPU. */
@@ -161,14 +163,14 @@
   @keyframes iw-wave-drift-r { from { transform: translate3d(18px, 0, 0); } to { transform: translate3d(158px, 0, 0); } }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before,
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
-    left: -320px; right: -320px;
+    left: -280px; right: -280px;
     background-image: var(--iw-wave-a); /* layer A only — layer B lives on ::after during the drift */
     background-position: 0 0;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after,
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
     content: '';
-    position: fixed; inset: 0; left: -320px; right: -320px;
+    position: fixed; inset: 0; left: -280px; right: -280px;
     z-index: -1; pointer-events: none;
     background-image: var(--iw-wave-b);
     background-size: 140px 140px;
@@ -186,8 +188,30 @@
       iw-wave-drift-r 1.944s linear var(--wave-phase, 0.5s) infinite;
     will-change: transform;
   }
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before { transform: translate3d(var(--wave-t, 0px), 0, 0); }
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after  { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
+  /* Reveal coast: CONTINUE the drift and ease to rest over 2s — x(t) = tx0 − 48px·(1 − (1 − t/T)³).
+     cubic-bezier(1/3, 1, 2/3, 1) IS that cubic exactly (Bx(u) = u, By(u) = 1 − (1 − u)³): initial
+     slope 3 → initial velocity 3·48px / 2s = 72px/s = the drift speed, a seamless takeover; zero end
+     velocity; monotonic — never backward, never a stop. Compositor-driven (keyframes, not JS), so a
+     busy main thread during the reveal can't stutter it. Scroll.tsx freezes the live offset into
+     --wave-t at reveal (same commit as the class swap → the first coast frame is already easing);
+     at animationend it writes the final offset (--wave-t − 48px) into --wave-x in the same commit
+     the class drops — with the ±280px (2-tile) overdraw above, that handoff is pixel-identical. */
+  @keyframes iw-wave-coast-l {
+    from { transform: translate3d(var(--wave-t, 0px), 0, 0); }
+    to   { transform: translate3d(calc(var(--wave-t, 0px) - 48px), 0, 0); }
+  }
+  @keyframes iw-wave-coast-r {
+    from { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
+    to   { transform: translate3d(calc(48px - var(--wave-t, 0px)), 0, 0); }
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
+    animation: iw-wave-coast-l 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    will-change: transform;
+  }
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
+    animation: iw-wave-coast-r 2s cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    will-change: transform;
+  }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
      goes fully transparent, so the real (fixed) aqua+waves background shows through everywhere; the

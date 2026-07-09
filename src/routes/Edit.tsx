@@ -35,6 +35,23 @@ function migrateDocument(doc: InkwaveDocument): InkwaveDocument {
 
 export function Edit() {
   const [doc, setDoc] = useState<InkwaveDocument | null>(null)
+  // ONE persistent loading shell (the waves). The old shape rendered the waves surface in THREE
+  // tree positions across a load — the !doc return, the Suspense fallback, then the editor's own
+  // surface — and each swap REMOUNTED .inkwave-editor-surface, recreating the wave pseudo-layers:
+  // the two predictable flashes during load. Now a single shell instance spans !doc + the lazy
+  // editor chunk + the editor's pre-reveal settle. It renders AFTER (so on top of) the mounting
+  // editor — both are opaque fixed surfaces, DOM order stacks them; the editor's floating chrome
+  // keeps its explicit z-indexes above, exactly as before — and unmounts in the SAME React commit
+  // the editor reveals ('inkwave:editor-revealed' is dispatched in the same task as setSettled(true),
+  // so React batches shell-unmount + reveal + the wave coast start into one paint). The editor's
+  // surface underneath is phase-synced to the same wall clock (--wave-phase, set pre-paint), so the
+  // swap is pixel-identical.
+  const [shellUp, setShellUp] = useState(true)
+  useEffect(() => {
+    const onRevealed = () => setShellUp(false)
+    window.addEventListener('inkwave:editor-revealed', onRevealed)
+    return () => window.removeEventListener('inkwave:editor-revealed', onRevealed)
+  }, [])
 
   useEffect(() => {
     async function init() {
@@ -88,7 +105,10 @@ export function Edit() {
   // stranded blank shell.
   const stashedDocRef = useRef<InkwaveDocument | null>(null)
   useEffect(() => {
-    const onBegin = () => setDoc((d) => { if (d) stashedDocRef.current = d; return null })
+    const onBegin = () => {
+      setShellUp(true) // waves-only for the whole load; drops again at the new doc's reveal
+      setDoc((d) => { if (d) stashedDocRef.current = d; return null })
+    }
     const onFailed = () => setDoc((d) => d ?? stashedDocRef.current)
     window.addEventListener('inkwave:open-begin', onBegin)
     window.addEventListener('inkwave:open-failed', onFailed)
@@ -113,24 +133,26 @@ export function Edit() {
     return () => window.removeEventListener('inkwave:open-doc', onOpen as EventListener)
   }, [])
 
-  // Before the document loads (and during prerender, where effects never run) render the SHARED
-  // empty-editor shell — the same Scroll chrome + an empty .ProseMirror facsimile the live
-  // editor uses. So the prerendered landing page is a direct CSS function of the editor, and the
-  // real editor mounts in its place with no visual jump.
-  if (!doc) {
-    return (
-      <Scroll phone={isTouchDevice()} fill revealed={false}>
-        <EmptyEditorSurface />
-      </Scroll>
-    )
-  }
-
+  // The persistent shell (see shellUp above) is the SHARED empty-editor facsimile — the same Scroll
+  // chrome + an empty .ProseMirror the live editor uses — so the prerendered landing page (doc=null,
+  // shellUp=true → shell only) is a direct CSS function of the editor, and the editor reveals under
+  // it with no visual jump.
   // key={doc.id} → switching documents in place cleanly remounts the editor (sessions, snapshots,
-  // sync reconnect all re-run for the new doc). Suspense fallback = the same waves-only shell, so
-  // the editor chunk streaming in changes nothing visually until the one-paint reveal.
+  // sync reconnect all re-run for the new doc). fallback={null}: the shell on top already provides
+  // the loading visuals — a fallback surface here would be a second instance that remounts on every
+  // suspend (one of the old load flashes).
   return (
-    <Suspense fallback={<Scroll phone={isTouchDevice()} fill revealed={false}><EmptyEditorSurface /></Scroll>}>
-      <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
-    </Suspense>
+    <>
+      {doc && (
+        <Suspense fallback={null}>
+          <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
+        </Suspense>
+      )}
+      {shellUp && (
+        <Scroll phone={isTouchDevice()} fill revealed={false}>
+          <EmptyEditorSurface />
+        </Scroll>
+      )}
+    </>
   )
 }
