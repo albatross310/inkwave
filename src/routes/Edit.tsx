@@ -128,8 +128,13 @@ export function Edit() {
   // handle, so the just-granted file permission survives (a reload would drop it → no auto-save).
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      const detail = (e as CustomEvent<{ id: string; doc?: InkwaveDocument }>).detail
+      const id = detail?.id
       if (!id) return
+      // openInkwaveFile passes the just-parsed document in the event — use it directly instead of
+      // re-reading + JSON.parsing the same (possibly multi-MB) file it just wrote to OPFS. The
+      // OPFS read stays as the fallback for any dispatcher that only sends an id.
+      if (detail.doc && detail.doc.id === id) { setDoc(migrateDocument(detail.doc)); return }
       void loadDocument(id).then((loaded) => {
         if (loaded) setDoc(migrateDocument(loaded))
         else console.warn('[inkwave] open-doc: document not found in OPFS after import:', id)

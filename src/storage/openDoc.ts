@@ -4,7 +4,9 @@
 // active-doc pointer so it also works when the editor isn't mounted yet (cold launch).
 
 import { v4 as uuidv4 } from 'uuid'
-import { parseTraceFile, readStudioFile } from '../provenance/bundle'
+import type { ExportBundle } from '../provenance/bundle'
+import { parseStudioOffThread } from '../workers/parseClient'
+import { openPerfStart, openPerfStep, openPerfAbort, openPerfDispatched } from './openPerf'
 import { saveDocument } from './opfs'
 import { upsertMeta } from './indexeddb'
 import { withScasDefaults } from '../scas/state'
@@ -32,9 +34,11 @@ export async function openInkwaveFile(
   // so a bad file never strands a blank shell. Cloud handlers fire open-begin even earlier
   // (before the download); this one covers the local-file path and is idempotent.
   window.dispatchEvent(new Event('inkwave:open-begin'))
+  openPerfStart('local') // no-op when a cloud handler already started this open's marks
   try {
     await openInkwaveFileInner(file, opts)
   } catch (err) {
+    openPerfAbort()
     window.dispatchEvent(new Event('inkwave:open-failed'))
     throw err
   }
@@ -45,12 +49,15 @@ async function openInkwaveFileInner(
   opts: { handle?: FileSystemFileHandle; googleFileId?: string; oneDriveFile?: { folder: OneDriveFolder; name: string } } = {},
 ): Promise<void> {
   const { handle, googleFileId, oneDriveFile } = opts
-  let data: ReturnType<typeof parseTraceFile>
+  let data: ExportBundle
   try {
-    data = parseTraceFile(await readStudioFile(file)) // transparently gunzips .studio.gz
+    // Bytes → worker: gunzip-sniff (.studio.gz) + decode + JSON.parse all OFF the main thread —
+    // parsing a 20 MB .studio inline here was the biggest single open-path stall (~0.5-1s frozen).
+    data = await parseStudioOffThread(await file.arrayBuffer())
   } catch {
     throw new Error(`"${file.name}" doesn't look like an Inkwave file — it may be a plain-text document that was renamed to .studio`)
   }
+  openPerfStep('parse')
   // Accept an export bundle (content under .document) OR a raw saved document (top-level contentJson).
   const contentJson = (data as { contentJson?: typeof data.document.contentJson }).contentJson ?? data.document?.contentJson
   if (!contentJson) throw new Error('not an Inkwave file')
@@ -70,8 +77,12 @@ async function openInkwaveFileInner(
   if (handle) await setSaveFileHandle(id, handle)                    // resume local file sync (writable handle)
 
   // Restore provenance history from the bundle when OPFS has fewer snapshots (device transfer).
-  // Local OPFS wins if it already has all snapshots.
-  if (data.snapshots?.length) await restoreSnapshotsFromBundle(id, data.snapshots)
+  // Local OPFS wins if it already has all snapshots. deferDiskWrite: the union lands in the
+  // write-through snapshot cache SYNCHRONOUSLY (so the editor's eager snapshot list right after
+  // open-doc sees the full history — grow-only holds), while the heavy stringify+gzip+OPFS write
+  // runs behind the reveal on the per-doc write chain. See restoreSnapshotsFromBundle.
+  if (data.snapshots?.length) await restoreSnapshotsFromBundle(id, data.snapshots, { deferDiskWrite: true })
+  openPerfStep('snapshots')
 
   // Restore the view settings that travelled with the doc (theme, gapped pages, paper/margins, zoom).
   applyViewSettings((data as { viewSettings?: Record<string, string> }).viewSettings)
@@ -86,12 +97,16 @@ async function openInkwaveFileInner(
   await saveDocument(doc)
   await upsertMeta({ id, title: doc.title, updatedAt: doc.updatedAt })
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
+  openPerfStep('save')
 
   // Switch IN PLACE for every open (Edit.tsx listens for inkwave:open-doc and remounts the editor
   // via key={doc.id}). The old non-handle path did window.location.reload() — the file was parsed,
   // written to OPFS, then the WHOLE APP re-booted and re-parsed it from OPFS: double the work and
   // most of the 2-3s first-open. The in-place path also keeps a just-granted file permission alive.
-  window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id } }))
+  // The event carries the parsed doc so Edit.tsx doesn't re-read + JSON.parse the (possibly
+  // multi-MB) file we JUST wrote to OPFS — that second parse was pure duplicated main-thread work.
+  window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id, doc } }))
+  openPerfDispatched()
   if (handle) window.dispatchEvent(new Event('inkwave:save-file-linked'))
 
   // Restore the embedded citation library (+ any embedded PDFs) AFTER the document is showing —

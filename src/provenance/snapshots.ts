@@ -81,10 +81,29 @@ async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
   return (await p).slice()
 }
 
+// ── Cache-first, serialised disk writes ────────────────────────────────────────
+// The write-through cache updates SYNCHRONOUSLY (before the disk write lands) and is the in-session
+// authority; the gzip+stringify+write is chained per-document so writes can never land out of order.
+// Grow-only safety: the cache is always a SUPERSET of disk (only intentional deletes shrink it), and
+// every write-back (cloud sync, folder mirror) reads through the cache — so if a deferred disk write
+// fails, disk merely didn't grow (never truncated) and every sync target still gets the full union.
+// The per-doc chain also means a deferred open-time restore write and a subsequent snapshot append
+// serialise: disk always converges to the latest cache state.
+const _writeChain = new Map<string, Promise<void>>()
+function queueSnapshotsWrite(documentId: string, snaps: Snapshot[]): Promise<void> {
+  const copy = snaps.slice()
+  _snapCache.set(documentId, Promise.resolve(copy)) // write-through FIRST — readers see it immediately
+  const prev = _writeChain.get(documentId) ?? Promise.resolve()
+  const next = prev.catch(() => { /* keep the chain alive after a failed predecessor */ }).then(async () => {
+    // writeOpfsFile works on iOS too (no createWritable there — worker sync-access fallback).
+    await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipEncode(JSON.stringify(copy)))
+  })
+  _writeChain.set(documentId, next)
+  return next
+}
+
 async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promise<void> {
-  // writeOpfsFile works on iOS too (no createWritable there — worker sync-access fallback).
-  await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipEncode(JSON.stringify(snaps)))
-  _snapCache.set(documentId, Promise.resolve(snaps.slice())) // write-through, after a successful write
+  await queueSnapshotsWrite(documentId, snaps)
 }
 
 /** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back
@@ -151,13 +170,29 @@ export async function deleteSnapshot(documentId: string, snapId: string): Promis
  * Restore snapshots from an export bundle into OPFS — only when OPFS has FEWER snapshots than the
  * bundle. Local OPFS always wins: if the machine already has the full history, leave it untouched.
  * Call this when opening a .studio file so provenance survives device transfers.
+ *
+ * `deferDiskWrite` (the OPEN path): the union lands in the write-through cache synchronously —
+ * the editor's eager snapshot list right after open sees the FULL union — while the heavy
+ * stringify+gzip+write runs behind the reveal (the wave-decay dead time) on the per-doc write
+ * chain. GROW-ONLY holds either way: a failed deferred write leaves disk un-grown (never
+ * truncated), the cache stays the superset every write-back unions from, and the bundle's copy
+ * still exists at its source.
  */
-export async function restoreSnapshotsFromBundle(documentId: string, bundleSnaps: Snapshot[]): Promise<void> {
+export async function restoreSnapshotsFromBundle(
+  documentId: string,
+  bundleSnaps: Snapshot[],
+  opts: { deferDiskWrite?: boolean } = {},
+): Promise<void> {
   if (!bundleSnaps.length) return
   const existing = await readSnapshotsFile(documentId)
   const merged = mergeSnapshots(existing, bundleSnaps)
   if (merged.length <= existing.length) return // OPFS already holds everything the bundle has
-  await writeSnapshotsFile(documentId, merged)   // union — never drops local-only snapshots either
+  const write = queueSnapshotsWrite(documentId, merged) // union — never drops local-only snapshots either
+  if (opts.deferDiskWrite) {
+    void write.catch((err) => console.warn('[inkwave] deferred snapshot restore write failed:', err))
+    return
+  }
+  await write
 }
 
 export async function latestSnapshot(documentId: string): Promise<Snapshot | null> {

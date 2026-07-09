@@ -53,8 +53,8 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, getGDriveFileTag, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
@@ -80,6 +80,8 @@ import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
 import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
+import { getCachedOpen, putCachedOpen, warmCloudOpen, type OpenCacheProvider } from '../storage/openCache'
+import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
@@ -1150,14 +1152,44 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!ed) return
     exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
   }
-  async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string }) {
+  // Fetch a cloud file's bytes THROUGH the OPFS open cache: change-tag match → cached bytes, no
+  // download (instant); mismatch/unknown → download + refill; download failed but bytes cached →
+  // serve the stale copy (airplane-mode opens keep working). Returns null only with nothing at all.
+  // A cache HIT only ever compares against a TRUSTED tag: the tag from a fresh listing, or a live
+  // metadata GET when the picker was still showing its cached listing — a stale listing tag could
+  // false-hit and silently open OUTDATED content, which the next sync would then write back over
+  // the newer remote copy. A wrong STORED tag, by contrast, can only cause a miss (safe).
+  async function fetchCloudBytes(
+    provider: OpenCacheProvider,
+    itemId: string,
+    listingTag: string | undefined,
+    listingFresh: boolean,
+    fetchTag: (id: string) => Promise<string | null>,
+    download: (id: string) => Promise<Blob | null>,
+  ): Promise<{ blob: Blob; how: string } | null> {
+    const cached = await getCachedOpen(provider, itemId)
+    let tag = listingTag
+    if (cached && !listingFresh) tag = (await fetchTag(itemId)) ?? undefined // verify before trusting a hit
+    if (cached && tag && cached.tag === tag) return { blob: cached.blob, how: listingFresh ? 'cache hit' : 'cache hit, tag verified' }
+    const blob = await download(itemId)
+    if (blob) {
+      if (tag) void putCachedOpen(provider, itemId, tag, blob) // refill behind the open
+      return { blob, how: cached ? 'cache stale, re-downloaded' : 'cache miss' }
+    }
+    if (cached) return { blob: cached.blob, how: 'offline — stale cached copy' }
+    return null
+  }
+
+  async function onGdriveFileOpen(f: { id: string; name: string; folderId: string; folderName: string; tag?: string; fresh?: boolean }) {
     window.dispatchEvent(new Event('inkwave:open-begin')) // see OneDrive note
+    openPerfStart('gdrive')
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
-    const blob = await downloadGoogleDriveFileBlob(f.id)
-    if (!blob) { window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
+    const got = await fetchCloudBytes('gdrive', f.id, f.tag, !!f.fresh, getGDriveFileTag, downloadGoogleDriveFileBlob)
+    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
+    openPerfStep('download', got.how)
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
-      await openInkwaveFile(new File([blob], f.name), { googleFileId: f.id })
+      await openInkwaveFile(new File([got.blob], f.name), { googleFileId: f.id })
       setGdriveOpenerOpen(false) // see OneDrive note — same-id opens don't remount the editor
     } catch (err) {
       setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
@@ -1169,16 +1201,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!acct) { await startOneDriveSignIn(); return }
     setOdOpenerOpen(true)
   }
-  async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder }) {
+  async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder; cTag?: string; fresh?: boolean }) {
     // Choreography: page hides + waves drift for the WHOLE load, download included.
     window.dispatchEvent(new Event('inkwave:open-begin'))
+    openPerfStart('onedrive')
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
-    const blob = await downloadOneDriveFile(f.itemId)
+    const got = await fetchCloudBytes('onedrive', f.itemId, f.cTag, !!f.fresh, getOneDriveItemTag, downloadOneDriveFile)
     // NEVER fail silently ("tapped the file, nothing happened" on phone): every exit is visible.
-    if (!blob) { window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
+    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
+    openPerfStep('download', got.how)
     void addRecentFolder(f.folder)
     try {
-      await openInkwaveFile(new File([blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })
+      await openInkwaveFile(new File([got.blob], f.name), { oneDriveFile: { folder: f.folder, name: f.name } })
       // Close the opener explicitly: opening a doc with the SAME id as the active one doesn't
       // remount the editor (key unchanged), so nothing else would dismiss the panel.
       setOdOpenerOpen(false)
@@ -1342,6 +1376,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }
     })
     return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Warm the cloud OPEN paths at idle: silent tokens (MSAL chunk / GIS script), the pickers' folder
+  // listings (so "Open from OneDrive/Drive" paints instantly), and the bytes of the most recent
+  // .studio files (so even a first open after sign-in skips the download). Entirely silent — no
+  // auth UI can ever appear from here, and every failure is swallowed (see warmCloudOpen).
+  useEffect(() => {
+    runWhenQuiet(() => warmCloudOpen(), 3000)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if

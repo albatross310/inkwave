@@ -2,7 +2,7 @@
 // inline fallback (node/vitest, prerender, or any environment without Worker). Callers keep plain
 // async signatures; whether the parse ran off-thread is an implementation detail.
 
-import { parseTraceFile } from '../provenance/traceParse'
+import { parseTraceFile, parseStudioBuffer } from '../provenance/traceParse'
 import type { ExportBundle } from '../provenance/bundle'
 
 let worker: Worker | null = null
@@ -35,7 +35,7 @@ function getWorker(): Worker | null {
   }
 }
 
-function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrace'; text: string } | { kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }, transfer: Transferable[]): Promise<unknown> | null {
+function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrace'; text: string } | { kind: 'parseStudio'; buf: ArrayBuffer } | { kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }, transfer: Transferable[]): Promise<unknown> | null {
   const w = getWorker()
   if (!w) return null
   const id = ++seq
@@ -58,6 +58,14 @@ export async function gunzipJsonOffThread(buf: ArrayBuffer): Promise<unknown> {
   if (p) { try { return await p } catch { /* worker died mid-flight; buf is gone — rethrow below */ } }
   if (!p) return inlineGunzipJson(buf)
   throw new Error('parse worker failed')
+}
+
+/** Raw .studio BYTES → bundle, off-thread when possible: gunzip-sniff + decode + JSON.parse all in
+ *  the worker, so opening a 20 MB doc never stalls the main thread. The buffer is TRANSFERRED. */
+export async function parseStudioOffThread(buf: ArrayBuffer): Promise<ExportBundle> {
+  const p = call({ kind: 'parseStudio', buf }, [buf])
+  if (p) { try { return (await p) as ExportBundle } catch (err) { throw err instanceof Error ? err : new Error(String(err)) } }
+  return parseStudioBuffer(buf) // no Worker (node/vitest, prerender) → same logic inline
 }
 
 /** .studio/.trace text → bundle, off-thread when possible. */

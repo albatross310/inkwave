@@ -294,15 +294,43 @@ export async function createOneDriveFolder(parentId: string | null, name: string
 // (pre-.studio era), or .txt (iOS "rename on share" mangling). The opener validates by CONTENT
 // (parseTraceFile anchors on the record marker), so listing broadly is safe — a wrong pick errors.
 const OPENABLE_FILE_RE = /\.(studio|studio\.gz|inkwave|trace\.json|insig\.json|json|txt)$/i
+
+/** An openable OneDrive file, with the metadata the open cache keys on: cTag is Graph's CONTENT
+ *  tag (changes only when the file's bytes change — a rename doesn't invalidate the cache); eTag
+ *  is the fallback for the rare items without one (over-invalidates, which is always safe). */
+export interface OneDriveFileEntry { id: string; name: string; cTag?: string; size?: number; modifiedAt?: number }
+
 /** List the openable FILES in a folder (null/'' = root) for the file opener. */
-export async function listOneDriveFiles(parentId: string | null): Promise<DriveFolder[]> {
+export async function listOneDriveFiles(parentId: string | null): Promise<OneDriveFileEntry[]> {
   const token = await getSilentToken()
   if (!token) throw new Error('not signed in')
   const base = parentId ? `${GRAPH}/me/drive/items/${parentId}/children` : `${GRAPH}/me/drive/root/children`
-  const res = await fetch(`${base}?$select=id,name,file&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await fetch(`${base}?$select=id,name,file,cTag,eTag,size,lastModifiedDateTime&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
-  const data = (await res.json()) as { value: Array<{ id: string; name: string; file?: unknown }> }
-  return data.value.filter((it) => it.file && OPENABLE_FILE_RE.test(it.name)).map((it) => ({ id: it.id, name: it.name }))
+  const data = (await res.json()) as { value: Array<{ id: string; name: string; file?: unknown; cTag?: string; eTag?: string; size?: number; lastModifiedDateTime?: string }> }
+  return data.value
+    .filter((it) => it.file && OPENABLE_FILE_RE.test(it.name))
+    .map((it) => ({
+      id: it.id,
+      name: it.name,
+      cTag: it.cTag ?? it.eTag,
+      size: it.size,
+      modifiedAt: it.lastModifiedDateTime ? Date.parse(it.lastModifiedDateTime) : undefined,
+    }))
+}
+
+/** The LIVE change-tag for one item (metadata GET, no body) — the open cache verifies a cached
+ *  copy against this when the picker's listing itself came from cache (a stale listing tag must
+ *  never produce a false cache hit). null on any failure (offline / no token). */
+export async function getOneDriveItemTag(itemId: string): Promise<string | null> {
+  try {
+    const token = await getSilentToken()
+    if (!token) return null
+    const res = await fetch(`${GRAPH}/me/drive/items/${itemId}?$select=cTag,eTag`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return null
+    const d = (await res.json()) as { cTag?: string; eTag?: string }
+    return d.cTag ?? d.eTag ?? null
+  } catch { return null }
 }
 
 /** Download a OneDrive file's raw bytes by item id. Bytes, NOT text: a .studio.gz is gzip binary,

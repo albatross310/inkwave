@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder, type OneDriveFileEntry } from '../storage/onedrive'
+import { getListing, putListing, listingKey, type CachedListing } from '../storage/openCache'
 
 // Open a .studio/.inkwave file FROM OneDrive (for phones, where OneDrive isn't a mounted Explorer
 // folder). Browse folders, pick a file → the caller downloads it, opens it, and adopts it as the
@@ -19,12 +20,15 @@ function OneDriveCloud() {
 type Crumb = { id: string; name: string }
 
 export function OneDriveFileOpener({ onOpen, onClose }: {
-  onOpen: (f: { itemId: string; name: string; folder: OneDriveFolder }) => void | Promise<void>
+  onOpen: (f: { itemId: string; name: string; folder: OneDriveFolder; cTag?: string; fresh?: boolean }) => void | Promise<void>
   onClose: () => void
 }) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([])
   const [folders, setFolders] = useState<DriveFolder[] | null>(null)
-  const [files, setFiles] = useState<DriveFolder[] | null>(null)
+  const [files, setFiles] = useState<OneDriveFileEntry[] | null>(null)
+  // Whether the SHOWING listing came from the live API (vs the instant cached seed) — the open
+  // cache only trusts a fresh listing's cTag directly; a cached one is re-verified before a hit.
+  const [listingFresh, setListingFresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
@@ -40,10 +44,34 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
 
   useEffect(() => {
     let cancelled = false
-    setFolders(null); setFiles(null); setError(null)
+    let gotFresh = false
+    setFolders(null); setFiles(null); setError(null); setListingFresh(false)
+    const key = listingKey('od', currentId)
+    type L = CachedListing<DriveFolder, OneDriveFileEntry>
+    // Cached listing → the picker paints instantly (the idle warm pass pre-populates it); the fresh
+    // fetch below replaces it in the background. Skipped on explicit reloads (new-folder create).
+    if (!reload) {
+      void getListing<L>(key).then((c) => {
+        if (!cancelled && !gotFresh && c) { setFolders(c.value.folders); setFiles(c.value.files) }
+      })
+    }
     Promise.all([listFolders(currentId), listOneDriveFiles(currentId)])
-      .then(([fo, fi]) => { if (!cancelled) { setFolders(fo); setFiles(fi) } })
-      .catch((e) => { if (!cancelled) setError((e as Error).message) })
+      .then(([fo, fi]) => {
+        if (cancelled) return
+        gotFresh = true
+        setFolders(fo); setFiles(fi); setListingFresh(true)
+        putListing(key, { folders: fo, files: fi } satisfies L)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        // Offline / expired token: keep (or restore) the cached listing so the picker still works —
+        // opening then falls back to the OPFS byte cache. Error only when there's nothing to show.
+        void getListing<L>(key).then((c) => {
+          if (cancelled || gotFresh) return
+          if (c) { setFolders(c.value.folders); setFiles(c.value.files) }
+          else setError((e as Error).message)
+        })
+      })
     return () => { cancelled = true }
   }, [currentId, reload])
 
@@ -61,9 +89,10 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  async function open(file: DriveFolder) {
+  async function open(file: OneDriveFileEntry) {
     setOpening(true)
-    try { await onOpen({ itemId: file.id, name: file.name, folder: { id: currentId ?? '', path: currentPath } }) }
+    // cTag rides along so the open path can serve cached bytes when the content hasn't changed.
+    try { await onOpen({ itemId: file.id, name: file.name, folder: { id: currentId ?? '', path: currentPath }, cTag: file.cTag, fresh: listingFresh }) }
     finally { onClose() }
   }
 
