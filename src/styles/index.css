@@ -830,3 +830,24 @@
   0%, 100% { box-shadow: 0 0 6px 1px rgba(212,175,55,0.34); }
   50%      { box-shadow: 0 0 12px 2px rgba(214,175,55,0.62); }
 }
+
+/* ─── Atomic water reveal (Peter, 2026-07-09) ─────────────────────────────────
+   On first paint the aqua/gradient painted a few frames BEFORE the wave tiles finished
+   decoding — "blue first, then waves". Until entry.client decodes the tile SVGs and stamps
+   .iw-water-ready on <html>, the water stays NEUTRAL (parchment; near-black in night) and the
+   wave layers stay hidden — then colour + waves arrive in ONE style recalc. These sit LAST in
+   the file so equal-specificity wave rules above lose to them while the gate is closed. */
+:root:not(.iw-water-ready) { background-color: #f7f2e8; }
+:root:not(.iw-water-ready) .inkwave-editor-surface:not(.is-phone) {
+  background-color: #f7f2e8;
+  background-image: none;
+}
+:root:not(.iw-water-ready) .inkwave-editor-surface::before,
+:root:not(.iw-water-ready) .inkwave-editor-surface::after {
+  display: none;
+}
+:root[data-theme="night"]:not(.iw-water-ready),
+:root[data-theme="night"]:not(.iw-water-ready) .inkwave-editor-surface:not(.is-phone) {
+  background-color: #0a0b0e;
+  background-image: none;
+}

@@ -45,6 +45,30 @@ async function bootstrap() {
 }
 void bootstrap()
 
+// ─── Atomic water reveal ───
+// The water (aqua gradient + wave tiles) is gated behind .iw-water-ready: decode the tile SVGs
+// FIRST, then stamp the class — colour and waves paint in the same style recalc instead of
+// "blue first, waves a few frames later". Fallback timer covers decode() quirks.
+{
+  const ready = () => document.documentElement.classList.add('iw-water-ready')
+  const surface = document.querySelector('.inkwave-editor-surface')
+  const urls: string[] = []
+  if (surface) {
+    const cs = getComputedStyle(surface)
+    for (const v of ['--iw-wave-a', '--iw-wave-b']) {
+      const m = cs.getPropertyValue(v).match(/url\("(.+)"\)/)
+      if (m) urls.push(m[1])
+    }
+  }
+  if (urls.length === 0) ready()
+  else {
+    const t = setTimeout(ready, 500) // decode() should take ~a frame; never hold the water hostage
+    void Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() }))
+      .catch(() => {})
+      .then(() => { clearTimeout(t); ready() })
+  }
+}
+
 // Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are
 // the only reliable hook (Safari ignores user-scalable=no in-browser). Our own pinch handlers use
 // touch events on their surfaces, so they keep working — this only stops the BROWSER's page zoom
