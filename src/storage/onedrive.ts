@@ -412,6 +412,32 @@ export async function fetchPdfSidecars(folder: OneDriveFolder | null, studioName
   }
 }
 
+/** Fetch ONE missing sidecar on demand (e.g. the reader tapped a PDF whose bytes aren't local).
+ *  Historical iOS trap: savePdf threw on WebKit until the OPFS write shim (2026-07-08), so a doc's
+ *  sidecar pass could "complete" with nothing stored. This + the quiet-pass refetch heal that. */
+export async function fetchSidecarFor(docId: string, item: CSLItem): Promise<boolean> {
+  if (!oneDriveConfigured() || !pdfNameOf(item)) return false
+  const token = await getSilentToken()
+  if (!token) return false
+  const studioName = oneDriveFilename(docId)
+  if (!studioName) return false
+  try {
+    const res = await fetch(contentUrlIn(getChosenFolder(), sidecarName(studioName, item.id)), { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return false
+    await savePdf(item.id, await res.blob())
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Re-fetch any missing sidecars for a doc's cited items (idempotent — skips bytes already local). */
+export async function fetchMissingSidecars(docId: string, items: CSLItem[]): Promise<void> {
+  const studioName = oneDriveFilename(docId)
+  if (!studioName) return
+  await fetchPdfSidecars(getChosenFolder(), studioName, items)
+}
+
 const ensureExt = (name: string) => (name.toLowerCase().endsWith(`.${TRACE_EXTENSION}`) ? name : `${name}.${TRACE_EXTENSION}`)
 
 /** Rename the synced OneDrive file in place (PATCH by its current path) and remember the new name for

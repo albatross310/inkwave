@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getPdfData, hasPdf } from '../citations/pdfSource'
+import { fetchSidecarFor } from '../storage/onedrive'
 import { bibProvider } from '../citations/bibProvider'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
@@ -59,9 +60,19 @@ export function PdfSidePanel() {
       if (!hasPdf(bibProvider.get(detail.citekey))) { setLoading(false); setNoAttachment(detail.label || detail.citekey); return }
       setLoading(true)
       void (async () => {
-        const data = await getPdfData(detail.citekey)
+        let data = await getPdfData(detail.citekey)
+        if (!data) {
+          // On-demand sidecar recovery: metadata says a PDF exists but the bytes aren't local —
+          // the historical iOS savePdf failure left docs in exactly this state. One targeted
+          // OneDrive fetch heals it right here.
+          try {
+            const docId = localStorage.getItem('inkwave:activeDocumentId')
+            const item = bibProvider.get(detail.citekey)
+            if (docId && item && await fetchSidecarFor(docId, item)) data = await getPdfData(detail.citekey)
+          } catch { /* fall through to the error */ }
+        }
         setLoading(false)
-        if (!data) { setError('Couldn’t load this source’s PDF (no embedded file, or the URL didn’t load).'); return }
+        if (!data) { setError('Couldn’t load this source’s PDF — no embedded file on this device (and it couldn’t be fetched from OneDrive).'); return }
         const page = detail.page && detail.page > 0 ? detail.page : 1
         setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, restoreScroll: detail.restoreScroll ?? false, onLink: detail.onLink })
       })()

@@ -32,6 +32,11 @@
 
   /* Phone keeps BODY scroll (so the address bar hides and the on-screen keyboard behaves); make room
      for the PDF panel with padding. */
+  /* Phone: the BAND between pages reads aquamarine (the brand backdrop, waves omitted) while the
+     root/body stay parchment — that root colour is what iOS paints in unrasterised checkerboard
+     tiles during fast flicks, and it must read as paper, not blue (Peter, 2026-07-09). */
+  .inkwave-editor-surface.is-phone .inkwave-page-gap-band { background: #9fd9c8; }
+
   .inkwave-editor-surface.is-phone {
     padding-right: calc(1rem + var(--iw-pdf-room, 0px));
     padding-bottom: calc(8rem + var(--iw-pdf-room-bottom, 0px));

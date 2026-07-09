@@ -53,7 +53,7 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, type OneDriveFolder } from '../storage/onedrive'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
@@ -69,6 +69,7 @@ import { CitationPanel } from '../components/CitationPanel'
 import { PdfSidePanel } from '../components/PdfSidePanel'
 import { Toast } from '../components/Toast'
 import { loadLibrary } from '../citations/library'
+import { bibProvider } from '../citations/bibProvider'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
 import { embedBibliography } from '../citations/resolve'
@@ -1309,6 +1310,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       void preMergeSaveFile(docRef.current.id)
       if (oneDriveActiveRef.current) void preMergeRemote(docRef.current)
       if (gdriveActiveRef.current) void preMergeGDrive(docRef.current.id)
+      // Heal missing PDF sidecars (idempotent — skips bytes already local). iOS trap: savePdf threw
+      // on WebKit until the OPFS write shim, so earlier sidecar passes could complete with nothing
+      // stored; this quiet-pass refetch restores them for the cited items.
+      if (oneDriveActiveRef.current) {
+        void loadLibrary().then(() => fetchMissingSidecars(docRef.current.id, bibProvider.getAll())).catch(() => {})
+      }
     })
     return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
