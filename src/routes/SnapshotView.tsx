@@ -713,7 +713,9 @@ function SplitDiffView({
     if (springRafRef.current) return
     const step = () => {
       const R = rightScrollRef.current, target = rightTargetRef.current
-      if (!R || target == null) { springRafRef.current = 0; return }
+      // Bail if the DIFF pane has become the driver (reverse sync) — otherwise this lingering forward-drive
+      // spring keeps yanking the diff pane toward a stale target, fighting the user (the "stuck / rolls back").
+      if (!R || target == null || driverRef.current === 'right') { springRafRef.current = 0; return }
       const dx = target - R.scrollTop
       const k = gentleFollowRef.current ? 0.4 : 0.85 // fraction of the gap closed each frame
       if (Math.abs(dx) < 0.4) { R.scrollTop = target; springRafRef.current = 0; return }
@@ -1409,7 +1411,7 @@ function SplitDiffView({
                   <div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 10, padding: '4px 12px', fontSize: '1.1rem', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>
                 )}
                 <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={btn(snapMode !== 'off')}>
-                  Snap: {snapMode === 'off' ? 'Off' : 'On'}
+                  {snapMode === 'off' ? 'Off' : 'On'}
                 </button>
                 <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff (left) drives editor (right) only · Off" style={btn(bijMode !== 'off')}>
                   {bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}
