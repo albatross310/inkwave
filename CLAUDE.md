@@ -41,7 +41,7 @@ pnpm dev        # react-router dev (http://localhost:5173)
 pnpm build      # react-router build — outputs static client + prerendered HTML to build/client/
 pnpm typecheck  # react-router typegen && tsc -b
 pnpm preview    # vite preview --outDir build/client
-pnpm test       # vitest (NOTE: no tests written yet)
+pnpm test       # vitest — ~37 files / 426 tests; ALL must pass before any push
 pnpm test:e2e   # playwright (none written yet)
 ```
 
@@ -152,13 +152,20 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make
   it fixed there or it covers the diff panel). Solid styled scrollbar + inset `::before` so the fixed
   waves don't bleed over it. `StyleBar.tsx` = the formatting bar (font/size/B/H/align/list/∀).
-- **In-app zoom (WIP, unmerged).** Editor zoom is font-reflow on master (`inkwave:editorZoom`,
-  Ctrl+wheel, pointer-anchored). Peter's target model is on branch **`feat/zoom-magnify`**: CSS
-  transform-magnify below the fit point (page scales up to fill width; scales guides/numbers/margins
-  uniformly since transform doesn't touch clientWidth) → font-reflow above it. NOT native browser
-  zoom (can't be scoped to one panel). PDF + editor + (todo) diff each zoom independently. See
-  memory `inkwave-hybrid-zoom`. Do NOT use CSS `zoom` on the parchment — it inflates clientWidth and
-  breaks the paginator.
+- **Hybrid zoom (SHIPPED 2026-07-09).** TWO zooms, one owner module `src/editor/magnify.ts`:
+  Ctrl/⌘+wheel over the PAGE = font-reflow zoom (`--iw-editor-zoom`, `inkwave:editorZoom`); over the
+  WATER (or a page gap) = GPU transform-magnify of the whole page (`--iw-magnify` on a dedicated
+  `.iw-magnify-box` wrapper, top-left origin, NO transform at scale 1). Fit-to-width: when the window
+  is narrower than the page, the fit scale binds — never a partial page horizontally; it CAPS zoom-in
+  and user magnify can go far below (infinite zoom-out). The wrapper is sized to the page's VISUAL
+  dims (height set imperatively from a paper RO) so scroll range == visual content exactly.
+  **Coordinate convention:** getBoundingClientRect under the transform returns VISUAL px — convert
+  via `scaleFor(el)`/`unscale()` from magnify.ts, NEVER ad-hoc reads. Pagination measures in the
+  canonical window where magnify is forced to 1, so breaks are magnify-independent by construction.
+  Do NOT use CSS `zoom` on the parchment — it inflates clientWidth and breaks the paginator. Phone
+  zoom = pinch → the font-reflow pipeline (Scroll.tsx touch handlers); browser-native zoom is
+  suppressed app-wide on phone (universal `touch-action: pan-x pan-y` — NB touch-action does NOT
+  inherit, hence the `*` rule — + gesture*/two-finger-touchmove preventDefault + 16px input floor).
 - **Review layer (IN PROGRESS, branch `feat/review`).** Peter's spec: live suggestion mode (track
   changes on every keystroke, behind a toggle so normal typing is unaffected), comments as sticky
   notes over the wave (not a panel), triggered from the **R** button in the footer toolbar, review
@@ -166,6 +173,86 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 - **Snapshot review** (`routes/SnapshotView.tsx`, `/snapshot`) — split diff (annotated doc + hunk
   panel), keep-same-words-on-the-midline OR snap-to-biggest-change dotted-line modes, shift-wheel
   fast scrub, per-version summaries (Haiku). Grow-only + deterministic pmToText apply here too.
+
+## Canonical pagination (2026-07-09 — the load-bearing invariant)
+
+Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
+desktop side margins, `--iw-editor-zoom:1`, `--iw-magnify:1`, font 1.125rem — defeats the phone
+×1.25 rule) inside `PaginationExtension.recompute()`'s single-rAF no-paint window
+(`editor/canonicalMeasure.ts` does capture→force→restore-exactly), then applied as DOCUMENT-POSITION
+break widgets. Same text on page N at every zoom, on phone (which "calculates relative to A4") and
+in print. Consequences: live zoom/width changes ONLY repaint panels (`zoom-settled` → stable-set
+no-op re-measure + `paint()`); window resize doesn't re-measure breaks at all; phone gap GEOMETRY is
+compact fixed 32px (`PHONE_PAGE_MARGIN` — canonical fill-margins don't match phone-reflowed text
+heights). Hard-won bugs, do not reintroduce: (a) a child's useLayoutEffect runs BEFORE the parent's
+ref attaches on fresh mounts (PageGuides went dark; StrictMode masks it in dev — resolve elements
+from your OWN refs); (b) the ResizeObserver must FOLD into the edit debounce, not measure next frame
+(it fired the triple-reflow measure one frame after every line-wrapping keystroke); (c) Tiptap's
+`update` fires on EVERY updateState incl. unrelated React re-renders — gate reschedules on doc
+identity; (d) 'scroll' paper must still measure font-canonically. Citation-label hydration reflows
+invisibly to inputSig → bibProvider.subscribe drives a debounced re-measure.
+
+## Wave / water system (2026-07-09)
+
+Water = cyan→aquamarine gradient (`#00b4d8 → #00bfa8`, 98.5°, viewport-fixed). Waves = two 140px
+SVG data-URI tiles as vars `--iw-wave-a/b` on the surface (night block re-points them; thick line
+on TOP), drawn by `::before`/`::after` (±280px overdraw = exactly two tiles — keep it ≡0 mod 140 or
+transform↔background-position handoff tears). States: **anim** (fixed-velocity 72px/s drift,
+1.944s/tile loop, phase-synced across surfaces via `__iwWaveEpoch` from the real animation
+startTime), **coast** (pure-CSS exact-cubic ease-out `cubic-bezier(1/3,1,2/3,1)` ≡ x(t)=tx₀−d(1−(1−t/T)³),
+d=vT/3 so initial velocity = drift velocity: T/d from `--wave-coast-T`/`--wave-coast-dist`, 3s/72px
+desktop, 2s/48px phone), **off** (scroll sway via background-position ±`--wave-x` with a persistent
+base). Sparkles ride a dedicated child div (opacity independent of the lines). ATOMIC WATER: the
+whole water is gated behind `.iw-water-ready` on <html> (entry.client decodes the tile URIs first) —
+colour + waves land in one paint; add any NEW tile var to that decode list. LOAD CHOREOGRAPHY: one
+persistent shell (Edit.tsx `shellUp`) spans !doc + lazy chunk + pre-reveal; the settle gate fires
+`inkwave:reveal-imminent` (coast start) then reveals; open-begin/open-failed re-raise/restore it.
+Phone reveal waits for the coast tail. The coast freeze reads the compositor transform (which runs
+~2 frames AHEAD of getComputedStyle — compensate) and must NOT start in the same commit as the
+reveal (main-thread delay = backward flick).
+
+## Open pipeline + cloud caching (2026-07-09)
+
+`storage/openCache.ts`: cloud `.studio` bytes cached in OPFS keyed by change-tag (Graph cTag/eTag,
+Drive md5/version), 100MB LRU; cache HITS may only compare TRUSTED tags (fresh listing / live
+metadata GET) — a stale listing tag could false-hit and the next sync would clobber the newer
+remote. `warmCloudOpen()` (runWhenQuiet) pre-warms tokens/listings/recent bytes; background warm
+paths must NEVER call GIS `getDriveToken` — its requestAccessToken opens a real popup window even
+for prompt:'none' (Firefox blocks + warns); use `peekDriveToken()`. Parse runs OFF-THREAD
+(`parseStudio` op in workers/parseClient.ts — the .studio parse on the main thread was the historic
+0.5-1s open freeze); `inkwave:open-doc` carries the parsed doc. Snapshot restore defers its disk
+write behind the reveal (write-through `_snapCache` is authoritative in-session; grow-only holds
+because every write-back reads through the cache). Library/PDF restore is fire-and-forget AFTER the
+reveal. `openPerf.ts` logs one line per open. OneDrive PDF sidecars self-heal: quiet-pass
+`fetchMissingSidecars` + on-demand `fetchSidecarFor` in PdfSidePanel (savePdf threw on iOS until the
+write shim, so metadata can say a PDF exists with no local bytes).
+
+## iOS / WebKit invariants (2026-07-08/09 — each was a live bug)
+
+- ALL OPFS writes go through `storage/opfsWrite.ts` (WebKit has NO createWritable; worker
+  createSyncAccessHandle, serialized — ONE open handle per file or it throws; truncate/flush/close
+  awaited for ≤16.x).
+- File inputs: NO `accept` extension lists on touch (unregistered UTIs grey out every file).
+- `navigator.storage.persist()` on first write (Safari's 7-day eviction); iOS <16.4 (no
+  CompressionStream) degrades gracefully + banner.
+- touch-action does NOT inherit — per-element, hence the universal phone rule; mid-gesture elements
+  that own a drag (SCAS reel) need their own `touch-action:none`.
+- iOS auto-zooms (and STAYS zoomed) focusing controls <16px — global 16px floor on phone.
+- Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
+  autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
+  on-device numbers.
+- iPadOS masquerades as macOS (detect via maxTouchPoints); GIS popups need pre-loaded clients so
+  requestAccessToken runs inside the tap's transient activation.
+
+## Working model (how these sessions run)
+
+Peter tests live on iPhone + desktop and reports in batches; work is delegated to parallel
+isolated-worktree agents with precise briefs (root-cause first, no half-fixes), merged serially into
+master from `/root/dev/Inkwave-perf` (Peter's own sessions use `/root/dev/Inkwave` — NEVER share a
+checkout) with the full gate: typecheck (ignore pre-existing TS7016/TS2550 in test files), ALL tests,
+build (gate on real exit codes — `| tail` swallows failures), then push (= production deploy).
+Snapshot React state is METADATA-ONLY (`SnapshotMeta`; fetch full snapshots via `listSnapshots` at
+action time — never hold contentJson in state). Autosave failures dispatch `inkwave:save-failed`.
 
 ## Theming / colour schemes (MANDATORY for every new panel — 2026-07-07)
 
