@@ -53,6 +53,12 @@ if (window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches) {
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(ev, (e) => e.preventDefault(), { passive: false })
   }
+  // gesture* events alone proved insufficient (2026-07-09): also cancel any two-finger touchmove
+  // that nothing upstream handled. The editor's own pinch handler preventDefaults on the surface
+  // first; this is the backstop for the toolbar, panels, and everything else.
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) e.preventDefault()
+  }, { passive: false })
 }
 
 // PWA file handling (Chrome/Edge/Brave, installed): double-clicking a .inkwave file launches the app

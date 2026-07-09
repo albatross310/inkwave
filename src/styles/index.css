@@ -306,8 +306,16 @@
     /* Suppress the browser's native zoom EVERYWHERE on phone (Peter, 2026-07-09): the app has its
        own pinch-zoom (editor font-reflow, PDF magnify) and Safari's page zoom fighting it was
        confusing. pan-x pan-y keeps native one-finger scrolling; pinch/double-tap zoom are blocked.
-       (JS gesture-event suppression in entry.client.tsx is the reliable half on iOS Safari.) */
-    html, body { touch-action: pan-x pan-y; }
+       touch-action does NOT inherit — html/body alone left every child at `auto`, so pinches over
+       the page/toolbar still zoomed (the first version of this fix). The universal selector is
+       deliberate. JS gesture-event suppression in entry.client.tsx is the other half on iOS.
+       Our own pinch handlers keep working: with pinch removed from native handling, two-finger
+       touchmoves are delivered to JS as cancelable events. */
+    * { touch-action: pan-x pan-y; }
+
+    /* iOS zooms the page to any focused control under 16px computed font — and STAYS zoomed after
+       blur (part of the page out of frame). Floor every form control at 16px on phone. */
+    input, select, textarea { font-size: max(16px, 1em) !important; }
 
     html, body { background-color: #f1eadb; }
   }
