@@ -97,6 +97,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const printedKnownRef = useRef(false) // true when Haiku verified the offset
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  // ATOMIC CONTENTS REVEAL (Peter, 2026-07-09): the panel window pops instantly (PdfSidePanel), but
+  // the toolbar / page canvases / text layer / highlight overlays used to pop in piecemeal. Keep the
+  // WHOLE viewer at opacity 0 (still laid out + rendering underneath — same trick as the editor's
+  // settle gate) behind a blank-paper shimmer, and flip ONE toggle when the initial viewport is
+  // actually ready: placeholders built + overlays drawn (renderPages) + the visible pages' canvas &
+  // text layer painted (renderVisibleNow) + the initial scroll applied. Capped at 1.5s like the
+  // editor's reveal gate, so a slow/huge PDF can never hold the panel hostage.
+  const [revealed, setRevealed] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
@@ -539,6 +547,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     offsetRef.current = pageOffsetOf(item0)
     printedKnownRef.current = (item0 as { _iw?: IwCitationMeta } | undefined)?._iw?.pageOffsetFlag === 'verified'
     setZoom(1)
+    // Fresh document → re-arm the atomic reveal (the citekey key usually remounts the component,
+    // but a data change on the same key must re-gate too). Cap ~1.5s: reveal whatever is painted.
+    setRevealed(false)
+    const revealCap = setTimeout(() => { if (!cancelled) setRevealed(true) }, 1500)
 
     void (async () => {
       setStatus('loading')
@@ -568,14 +580,21 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           last = scrollRef.current?.scrollTop ?? 0
           if (n > 0) setTimeout(() => requestAnimationFrame(() => settle(n - 1)), 120)
         }
-        requestAnimationFrame(() => settle(3))
+        requestAnimationFrame(() => {
+          settle(3) // the FIRST scrollToTarget just ran synchronously — the viewport is now the real one
+          // ATOMIC REVEAL: paint the initial viewport's canvas + text layer (overlays were drawn in
+          // renderPages), then flip the one visibility toggle. The IntersectionObserver keeps driving
+          // later scroll-in renders exactly as before — this only fronts the pages the reveal shows.
+          void renderVisibleNow(renderTokenRef.current).then(() => { if (!cancelled) setRevealed(true) })
+        })
       } catch {
-        if (!cancelled) setStatus('error')
+        if (!cancelled) { setStatus('error'); setRevealed(true) } // error text shows immediately — no gate
       }
     })()
 
     return () => {
       cancelled = true
+      clearTimeout(revealCap)
       renderTokenRef.current++       // supersede any in-flight render
       observerRef.current?.disconnect()
       docRef.current = null
@@ -1069,6 +1088,22 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
+      {/* Blank-paper shimmer while the contents gate is closed — the panel window is already up;
+          toolbar + pages + text + highlights arrive together when `revealed` flips (see the load
+          effect). Sits ABOVE the opacity-0 contents so the in-progress layout never peeks through. */}
+      {!revealed && (
+        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e9e7e3' }}>
+          <div className="iw-subtle-flash" style={{ width: 'min(72%, 440px)', height: '76%', background: '#fdfdfc', borderRadius: 4, boxShadow: '0 1px 6px rgba(0,0,0,0.18)' }} />
+        </div>
+      )}
+
+      {/* ONE fade for everything inside the window: toolbar, context strip, pages (canvas + text
+          layer + hlLayer overlays), zoom controls. opacity (not visibility/display) so layout and
+          the initial canvas/text-layer renders run at full size underneath the shimmer. */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+        opacity: revealed ? 1 : 0, transition: 'opacity 200ms ease',
+        pointerEvents: revealed ? undefined : 'none' }}>
+
       {/* Single consolidated toolbar. Secondary controls are compact (icon + checkbox); their labels
           live in the status line on hover (setHint) so the bar stays squished. */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, rowGap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
@@ -1236,6 +1271,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         </div>
       )}
       </div>
+
+      </div>{/* /atomic-reveal fade wrapper */}
     </div>
   )
 }
