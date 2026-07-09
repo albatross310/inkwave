@@ -61,18 +61,30 @@ export function PdfSidePanel() {
       setLoading(true)
       void (async () => {
         let data = await getPdfData(detail.citekey)
+        let fetchReason: string | null = null
         if (!data) {
           // On-demand sidecar recovery: metadata says a PDF exists but the bytes aren't local —
           // the historical iOS savePdf failure left docs in exactly this state. One targeted
-          // OneDrive fetch heals it right here.
+          // OneDrive fetch heals it right here; on failure the reason drives an ACTIONABLE error.
           try {
             const docId = localStorage.getItem('inkwave:activeDocumentId')
             const item = bibProvider.get(detail.citekey)
-            if (docId && item && await fetchSidecarFor(docId, item)) data = await getPdfData(detail.citekey)
+            if (docId && item) {
+              const r = await fetchSidecarFor(docId, item)
+              if (r.ok) data = await getPdfData(detail.citekey)
+              else fetchReason = r.reason
+            }
           } catch { /* fall through to the error */ }
         }
         setLoading(false)
-        if (!data) { setError('Couldn’t load this source’s PDF — no embedded file on this device (and it couldn’t be fetched from OneDrive).'); return }
+        if (!data) {
+          setError(fetchReason === 'no-auth'
+            ? 'This source’s PDF isn’t on this device yet. Sign in to OneDrive (⋮ → Save → Sync to OneDrive) and it will be fetched automatically.'
+            : fetchReason === 'not-found'
+              ? 'This source’s PDF isn’t on this device, and no sidecar copy was found in the doc’s OneDrive folder. Re-attach the PDF on the device that has it and sync once.'
+              : 'Couldn’t load this source’s PDF — no embedded file on this device.')
+          return
+        }
         const page = detail.page && detail.page > 0 ? detail.page : 1
         setViewing({ data, page, quote: detail.quote ?? null, label: detail.label || detail.citekey, citekey: detail.citekey, instanceId: detail.instanceId ?? null, context: detail.context ?? null, noRef: detail.noRef ?? false, restoreScroll: detail.restoreScroll ?? false, onLink: detail.onLink })
       })()

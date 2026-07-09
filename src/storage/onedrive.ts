@@ -415,19 +415,20 @@ export async function fetchPdfSidecars(folder: OneDriveFolder | null, studioName
 /** Fetch ONE missing sidecar on demand (e.g. the reader tapped a PDF whose bytes aren't local).
  *  Historical iOS trap: savePdf threw on WebKit until the OPFS write shim (2026-07-08), so a doc's
  *  sidecar pass could "complete" with nothing stored. This + the quiet-pass refetch heal that. */
-export async function fetchSidecarFor(docId: string, item: CSLItem): Promise<boolean> {
-  if (!oneDriveConfigured() || !pdfNameOf(item)) return false
+export type SidecarFetchResult = { ok: true } | { ok: false; reason: 'unavailable' | 'no-auth' | 'not-found' }
+export async function fetchSidecarFor(docId: string, item: CSLItem): Promise<SidecarFetchResult> {
+  if (!oneDriveConfigured() || !pdfNameOf(item)) return { ok: false, reason: 'unavailable' }
   const token = await getSilentToken()
-  if (!token) return false
+  if (!token) return { ok: false, reason: 'no-auth' } // not signed in on THIS device/session
   const studioName = oneDriveFilename(docId)
-  if (!studioName) return false
+  if (!studioName) return { ok: false, reason: 'unavailable' }
   try {
     const res = await fetch(contentUrlIn(getChosenFolder(), sidecarName(studioName, item.id)), { headers: { Authorization: `Bearer ${token}` } })
-    if (!res.ok) return false
+    if (!res.ok) return { ok: false, reason: 'not-found' }
     await savePdf(item.id, await res.blob())
-    return true
+    return { ok: true }
   } catch {
-    return false
+    return { ok: false, reason: 'not-found' }
   }
 }
 
