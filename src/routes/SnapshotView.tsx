@@ -651,11 +651,16 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     setHere({ top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride })
   }, [cols, height, pages, leftRef, midFrac])
   useEffect(() => {
-    const el = leftRef.current
+    const el = leftRef.current, grid = gridRef.current
     if (!el) return
     updateHere()
     el.addEventListener('scroll', updateHere, { passive: true })
-    return () => el.removeEventListener('scroll', updateHere)
+    // Recompute on minimap resize too — otherwise `here` keeps stale absolute px and the marker races ahead
+    // of its page as the map grows/shrinks.
+    let raf = 0
+    const ro = grid ? new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(updateHere) }) : null
+    if (grid && ro) ro.observe(grid)
+    return () => { el.removeEventListener('scroll', updateHere); ro?.disconnect(); cancelAnimationFrame(raf) }
   }, [updateHere, snapKey])
 
   // Wheel over the minimap scrolls the document — one cell-height of wheel ≈ one page, so you sweep DOWN the
