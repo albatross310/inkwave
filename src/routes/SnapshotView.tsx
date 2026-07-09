@@ -1201,6 +1201,7 @@ function SplitDiffView({
     let v = 0, x = el.scrollTop, raf = 0
     const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
     const tick = () => {
+      if (driverRef.current === 'right') { raf = 0; return } // diff pane drives the editor now (reverse sync) — don't fight it
       const centres = centresRef.current
       // NEAREST well only — pull toward the closest diff. Summing every nearby well made concentrated diffs
       // accumulate a huge potential (the "wading"); one well can't.
@@ -1228,6 +1229,7 @@ function SplitDiffView({
     // then longest (ties → the first found), so exactly one diff per notch.
     let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
     const easeFence = () => {
+      if (driverRef.current === 'right') { fenceRaf = 0; return } // diff pane drives the editor now
       const dx = dispTarget - el.scrollTop
       if (Math.abs(dx) < 0.5) { el.scrollTop = dispTarget; x = dispTarget; fenceRaf = 0; return }
       el.scrollTop = el.scrollTop + dx * 0.3
