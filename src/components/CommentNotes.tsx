@@ -7,6 +7,7 @@ import { useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { activeSet, onReviewChanged } from '../editor/review/reviewState'
+import { subscribe as subscribeMagnify } from '../editor/magnify'
 
 const INK = '#5c2d8a'
 
@@ -58,15 +59,18 @@ export function CommentNotes({ editor, paperRef }: { editor: Editor; paperRef: R
     return () => window.removeEventListener('inkwave:edit-comment', onEdit)
   }, [])
 
-  // Reposition (re-read anchor rects) on any scroll or resize.
+  // Reposition (re-read anchor rects) on any scroll or resize — and on magnify changes (the notes
+  // live in a fixed viewport-space overlay, so they must follow the paper's scaled rects).
   useEffect(() => {
     let raf = 0
     const on = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; tick(n => n + 1) }) }
     window.addEventListener('scroll', on, { capture: true, passive: true })
     window.addEventListener('resize', on)
+    const unsubMagnify = subscribeMagnify(on)
     return () => {
       window.removeEventListener('scroll', on, { capture: true } as EventListenerOptions)
       window.removeEventListener('resize', on)
+      unsubMagnify()
       if (raf) cancelAnimationFrame(raf)
     }
   }, [])

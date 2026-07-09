@@ -23,6 +23,7 @@ import { posOf } from './popoverGeometry'
 import { displayFor } from './popoverFallbacks'
 import { measureTextWidth, getFont } from '../textMetrics'
 import { usePopoverLayout } from './usePopoverLayout'
+import { scaleFor, unscale, subscribe as subscribeMagnify } from '../../magnify'
 
 // The selected slot for a given continuous position = nearest ring, wrapped into [0,SIZE).
 const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE
@@ -569,7 +570,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         draggingRef.current = true; setMoving(true)   // held + steering: keep the marker lit
         return
       }
-      const rowH = rowHRef.current || 1
+      // rowH is layout px; pointer travel is visual px — scale the row so a drag stays 1:1 with
+      // the RENDERED row height under the transform-magnify (one visual row = one slot).
+      const rowH = (rowHRef.current || 1) * scaleFor(edEl)
       const dPos = -(e.clientY - lastY) / rowH       // finger up → reel advances (k)
       lastY = e.clientY
       reelRef.current += dPos
@@ -690,13 +693,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-measure geometry on scroll/resize.
+  // Re-measure geometry on scroll/resize — and on magnify changes (the paper's transform scale
+  // moves every rect the memo reads; the re-render lands after Scroll's subscriber applied it).
   useEffect(() => {
     if (!cycle) return
     const bump = () => setGeomNonce(n => n + 1)
     window.addEventListener('resize', bump)
     window.addEventListener('scroll', bump, true)
-    return () => { window.removeEventListener('resize', bump); window.removeEventListener('scroll', bump, true) }
+    const unsubMagnify = subscribeMagnify(bump)
+    return () => { window.removeEventListener('resize', bump); window.removeEventListener('scroll', bump, true); unsubMagnify() }
   }, [!!cycle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Geometry (memoised — depends on the focused word, NOT the reel position) ──
@@ -710,6 +715,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     const rect = focusedEl.getBoundingClientRect()
     const cs   = window.getComputedStyle(focusedEl)
     const fsz  = parseFloat(cs.fontSize) || 18
+    // The card renders INSIDE the (possibly transform-magnified) paper: its inline left/top/width
+    // are LAYOUT px, while the rects read here are VISUAL px. Unscale every rect DIFFERENCE
+    // (magnify.ts) so card coords, canvas text widths (layout px) and fsz all share one space.
+    const s = scaleFor(focusedEl)
 
     // EXIT-STATIONARY reel. Each synonym renders with its LEFT edge at the word's natural x —
     // exactly where it lands when committed (the text before it is unchanged), so the chosen
@@ -717,15 +726,15 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // shifted left ONLY as far as needed to stay inside it (such a word reflows to the next
     // line on commit anyway, so that residual offset is unavoidable — and kept minimal).
     const font         = getFont(focusedEl)
-    const naturalLeftC = cycle.naturalLeft - cRect.left
+    const naturalLeftC = unscale(cycle.naturalLeft - cRect.left, s)
     // The reserved box IS the focused word's expanded rect; the after-text begins at its right
     // edge, so reel words must stay within [boxLeft, boxRight] or they paint over the text. We use
     // the LIVE rendered rect directly (single coordinate source). The open layout is applied
     // instantly, so there's no half-grown box to outrun — the old MODEL-box / `settled` swap only
     // existed for a CSS-transition grow that the default path never ran, and switching model→live
     // ~150ms after every open was itself a guaranteed horizontal pop (audit F1/F4). Gone now.
-    const boxLeftC  = rect.left  - cRect.left
-    const boxRightC = rect.right - cRect.left
+    const boxLeftC  = unscale(rect.left  - cRect.left, s)
+    const boxRightC = unscale(rect.right - cRect.left, s)
     const widths    = cycle.synonyms.map(s => measureTextWidth(s, font))
     const DOT_PAD   = 8   // room left of the word for the origin ink-blot
     const left      = boxLeftC - DOT_PAD
@@ -744,9 +753,9 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     if (textNode?.nodeType === Node.TEXT_NODE) {
       const rng = document.createRange(); rng.selectNodeContents(textNode)
       const tr  = rng.getBoundingClientRect()
-      textMid   = tr.top - cRect.top + tr.height / 2
+      textMid   = unscale(tr.top - cRect.top + tr.height / 2, s)
     } else {
-      textMid = rect.top - cRect.top + rect.height / 2
+      textMid = unscale(rect.top - cRect.top + rect.height / 2, s)
     }
 
     const rowH  = Math.round(fsz * 1.15)

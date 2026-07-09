@@ -3,6 +3,7 @@ import { gappedPagesEnabled } from './pageView'
 import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation, MARGIN_BOTTOM } from './pageSettings'
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
+import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, WATER_MARGIN_PX } from './magnify'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -46,6 +47,12 @@ export function Scroll({
   // with no vertical movement. rAF-throttled.
   const surfaceRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // Hybrid zoom (desktop live editor only): the paper sits inside a size-compensated wrapper that
+  // the magnify transform scales. paperRef is optional (the loading shell passes none) — keep a
+  // local ref so the wrapper machinery works on every hybrid surface.
+  const magnifyBoxRef = useRef<HTMLDivElement>(null)
+  const localPaperRef = useRef<HTMLDivElement>(null)
+  const paperElRef = paperRef ?? localPaperRef
   // Gapped mode draws a separate-sheet drop shadow at EACH page break (the rounded caps in
   // PaginationExtension); the single tall outer shadow would otherwise bleed continuously down the
   // left/right edges and through the gaps, so we drop it here and let the per-gap caps do the work.
@@ -57,6 +64,91 @@ export function Scroll({
     window.addEventListener('inkwave:page-settings-changed', onChanged)
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
+
+  // HYBRID ZOOM scope: only the desktop LIVE editor (fill) with a fixed-size paper gets the
+  // transform-magnify + fit-to-width floor. Phone has its own model (canonically-narrower render +
+  // pinch font zoom); SnapshotView's in-flow Scroll and 'scroll' paper (no mm width) stay plain.
+  // getPaperSize() is re-read on the page-settings rerender above, so switching paper flips this.
+  const hybrid = fill && !phone && getPaperSize() !== 'scroll'
+
+  // ── Magnify plumbing (hybrid only) ──────────────────────────────────────────────────────────
+  // ONE subscriber applies the module's effective magnify to the DOM: the --iw-magnify var (the
+  // CSS transform reads it), the .iw-magnified class (scaleFor() keys off it; also gates the
+  // transform rule so scale=1 renders EXACTLY like master — no containing-block change), and the
+  // wrapper box's width/height. The wrapper is the scroll-height fix: transform doesn't change
+  // layout size, so a scaled-down page would leave ghost scroll space (and a scaled-up one would
+  // clip) — sizing the wrapper to the page's VISUAL dims (pageW·s × paperH·s) makes layout ≡
+  // visual, so the scroll range always matches what's on screen and mx-auto centring stays exact.
+  // useLayoutEffect: the first fit/magnify application lands BEFORE the browser paints the mounted
+  // surface, so a narrow window (or a persisted magnify) never flashes one frame at scale 1.
+  useLayoutEffect(() => {
+    const el = surfaceRef.current
+    if (!el || !hybrid) return
+    const box = magnifyBoxRef.current
+    const paper = paperElRef.current
+    const pageW = () => pageBoxPx({
+      paperSize: getPaperSize() === 'letter' ? 'letter' : 'a4',
+      orientation: getOrientation(),
+      topMarginPx: getTopMarginPx(),
+      bottomMarginPx: MARGIN_BOTTOM,
+    }).pageWidthPx
+    const apply = () => {
+      const s = getMagnify()
+      el.style.setProperty('--iw-magnify', String(s))
+      el.classList.toggle('iw-magnified', s !== 1)
+      if (box) {
+        // s=1 → restore the mm width React rendered (layout identical to master) + natural height.
+        box.style.width = s === 1
+          ? paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).width
+          : `${pageW() * s}px`
+        box.style.height = s === 1 || !paper ? '' : `${paper.offsetHeight * s}px`
+      }
+    }
+    // Settle: persist the INTENT + fire the settle event (PageGuides/panels repaint; the breaks
+    // are canonical so the pagination re-measure is a stable-set no-op — no lurch). Debounced so
+    // a wheel gesture / continuous window resize settles once.
+    let settle: ReturnType<typeof setTimeout> | undefined
+    const armSettle = () => {
+      if (settle) clearTimeout(settle)
+      settle = setTimeout(() => {
+        persistMagnify()
+        window.dispatchEvent(new Event('inkwave:zoom-settled'))
+      }, 200)
+    }
+    const unsub = subscribeMagnify(() => { apply(); armSettle() })
+    // FIT FLOOR: recompute from the surface's width on every resize (and page-settings change).
+    // clientWidth excludes the scrollbar (scrollbar-gutter: stable), so the fit page never sits
+    // under it; WATER_MARGIN_PX keeps a strip of water visible either side.
+    const computeFit = () => setFitContext(Math.max(60, el.clientWidth - 2 * WATER_MARGIN_PX), pageW())
+    const ro = new ResizeObserver(computeFit)
+    ro.observe(el)
+    // Wrapper height must track the paper's (unscaled) height through reflows — font zoom,
+    // typing, pagination. offsetHeight is layout px (transform-invariant), × s = visual height.
+    const roPaper = paper ? new ResizeObserver(() => {
+      const s = getMagnify()
+      if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
+    }) : null
+    if (paper && roPaper) roPaper.observe(paper)
+    // Settings change: recompute the floor for the new page width, and re-apply AFTER React's own
+    // settings rerender commits (rAF lands post-commit, pre-paint) — otherwise React's fresh mm
+    // width on the wrapper would clobber the imperative pageWidth·s px while magnified.
+    const onSettings = () => { computeFit(); requestAnimationFrame(apply) }
+    window.addEventListener('inkwave:page-settings-changed', onSettings)
+    computeFit()
+    apply()
+    return () => {
+      unsub()
+      ro.disconnect()
+      roPaper?.disconnect()
+      window.removeEventListener('inkwave:page-settings-changed', onSettings)
+      if (settle) clearTimeout(settle)
+      el.classList.remove('iw-magnified')
+      el.style.removeProperty('--iw-magnify')
+      // NB: the module's fit floor is deliberately NOT reset here — the loading shell and the live
+      // editor are BOTH hybrid surfaces during the load handoff, and the shell unmounting must not
+      // yank the floor from under the editor. A remount recomputes it immediately (computeFit()).
+    }
+  }, [hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // In-app editor zoom: Ctrl/⌘+wheel (desktop) or two-finger pinch (phone) over the editor scales
   // the font (so text REFLOWS, like a webpage) — isolated from the PDF panel because we
@@ -81,6 +173,8 @@ export function Scroll({
     // React state + localStorage persist are deferred to a settle timer: neither changes pixels
     // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
     let steps = 0 // wheel: ±1 per event; phone pinch: FRACTIONAL (log of the distance ratio) — same 1.08^steps curve
+    let mSteps = 0 // magnify steps (hybrid, cursor over the WATER) — same coalescing, separate zone
+    let mX = 0, mY = 0 // cursor at the last magnify wheel event (the anchor point)
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
@@ -108,8 +202,33 @@ export function Scroll({
     // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
     // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
     let anchorEl: HTMLElement | null = null
+    // MAGNIFY frame (hybrid, wheel over the water): scale the whole page about the cursor. The
+    // wrapper box's rect IS the page's visual bounds (layout ≡ visual — see the magnify plumbing
+    // effect), so the point under the cursor is the fraction (m − box.top)/box into the page;
+    // after the scale change that point sits at box'.top + offset·(after/before) — correct the
+    // scroll by its displacement so it stays pinned under the cursor, in VISUAL space (the shared
+    // conversion: paper-local = visual offset ÷ scale; new visual = paper-local × new scale).
+    const applyMagnifyFrame = () => {
+      const net = mSteps
+      mSteps = 0
+      if (!net) return
+      const box = magnifyBoxRef.current
+      const before = getMagnify()
+      const r0 = box?.getBoundingClientRect()
+      const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net)
+      // Multiply the EFFECTIVE scale (not the raw intent): while the fit floor binds, intent is
+      // pinned at 1 so it can't silently run away and snap the page huge when the window widens.
+      const after = setUserMagnify(before * factor) // subscriber applied var + wrapper sizes synchronously
+      if (box && r0 && after !== before) {
+        const r1 = box.getBoundingClientRect() // one forced layout, same frame — pre-paint
+        el.scrollTop += r1.top + (mY - r0.top) * (after / before) - mY
+        el.scrollLeft += r1.left + (mX - r0.left) * (after / before) - mX
+      }
+      // Persist + zoom-settled ride the magnify subscriber's own settle timer (magnify plumbing).
+    }
     const applyFrame = () => {
       raf = 0
+      applyMagnifyFrame()
       const net = steps
       steps = 0
       if (!net) return
@@ -146,6 +265,13 @@ export function Scroll({
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net) // same per-step feel as before
       const next = Math.max(0.6, Math.min(2.5, +(editorZoomRef.current * factor).toFixed(3)))
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
+      // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
+      // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
+      // could bite against the stale height near the document end. One offsetHeight read in a
+      // frame that's about to force layout anyway.
+      const mag = getMagnify()
+      if (mag !== 1 && magnifyBoxRef.current && paperElRef.current)
+        magnifyBoxRef.current.style.height = `${paperElRef.current.offsetHeight * mag}px`
       if (anchorEl && anchorEl.isConnected) {
         const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
         setScrollTop(getScrollTop() + (topAfter - topBefore)) // hold the anchored text still
@@ -181,11 +307,34 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, 200)
     }
+    // Zone latch: a wheel gesture keeps the zone it STARTED in. The magnify moves the page under
+    // the stationary cursor (zoom-in grows the paper across it, zoom-out shrinks it away), so
+    // re-testing per event flipped a single gesture between magnify and font-reflow mid-flight.
+    // A >350ms pause ends the gesture and the next wheel re-tests the zone under the cursor.
+    let zoneIsWater = false
+    let zoneUntil = 0
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       if (e.deltaY === 0) return
-      steps += e.deltaY < 0 ? 1 : -1
+      // CURSOR-ZONE DUAL ZOOM (hybrid): over the WATER (outside the parchment) the wheel drives
+      // the transform-magnify of the whole page; over the PAGE it stays the font-reflow zoom.
+      // GEOMETRIC test against the paper's VISUAL rect — not DOM containment: the caret-gutter
+      // strips live inside the paper but stretch across the water, and the zone must follow what
+      // the eye sees. (gBCR is transform-aware, so this is exact at any magnify.)
+      if (e.timeStamp > zoneUntil) {
+        const pr = paperElRef.current?.getBoundingClientRect()
+        const overPaper = !!(pr && e.clientX >= pr.left && e.clientX <= pr.right
+          && e.clientY >= pr.top && e.clientY <= pr.bottom)
+        zoneIsWater = hybrid && !overPaper
+      }
+      zoneUntil = e.timeStamp + 350
+      if (zoneIsWater) {
+        mSteps += e.deltaY < 0 ? 1 : -1
+        mX = e.clientX; mY = e.clientY
+      } else {
+        steps += e.deltaY < 0 ? 1 : -1
+      }
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
     // PHONE PINCH-TO-ZOOM — the same pipeline as the wheel path (same rAF coalescing, clamps,
@@ -236,7 +385,7 @@ export function Scroll({
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
     }
-  }, [phone])
+  }, [phone, hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
@@ -257,10 +406,13 @@ export function Scroll({
     if (!el || phone) return
     const target: HTMLElement | Window = el
     let raf = 0
-    let lastZoom = el.style.getPropertyValue('--iw-editor-zoom')
+    // Both zoom axes re-anchor scrollTop (font reflow AND magnify) — skip the sway on either.
+    // Change-detection only (not scale maths) — the scale itself is read via magnify.ts everywhere.
+    const zoomSig = () => `${el.style.getPropertyValue('--iw-editor-zoom')}/${el.style.getPropertyValue('--iw-magnify')}`
+    let lastZoom = zoomSig()
     const apply = () => {
       raf = 0
-      const z = el.style.getPropertyValue('--iw-editor-zoom')
+      const z = zoomSig()
       if (z !== lastZoom) { lastZoom = z; return } // a zoom caused this scroll change → don't move waves
       el.style.setProperty('--wave-x', `${(waveBaseRef.current + el.scrollTop * 0.06).toFixed(1)}px`) // 0.06 = 2/3 of the old 0.09 sway speed
     }
@@ -422,9 +574,14 @@ export function Scroll({
           shell mounts with waveMode 'anim', so hydration matches). */}
       {waveMode !== 'off' && <div className="iw-wave-sparkles" aria-hidden="true" />}
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
-          fills the screen edge-to-edge, no shadow. */}
+          fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in
+          the .iw-magnify-box wrapper below — the wrapper carries the centring (mx-auto + explicit
+          width) and is imperatively sized to the page's VISUAL dims when magnified, while the paper
+          itself is transform-scaled from its top-left (see the magnify plumbing effect + index.css).
+          Layout width stays the true mm width in every mode, so the canonical breaks never move. */}
+      {(() => { const paperNode = (
       <div
-        ref={paperRef}
+        ref={paperElRef}
         // FIXED page width (not max-width + w-full) so the text always reflows at true A4/Letter width.
         // That keeps words-per-line — and therefore words-per-page — constant regardless of screen
         // width, so the page-break guides + gapped pages fall at the SAME content on any screen (they
@@ -432,7 +589,7 @@ export function Scroll({
         // horizontally instead of reflowing. Phone + 'scroll' paper keep the fluid full-width layout.
         className={(() => {
           if (phone || getPaperSize() === 'scroll') return 'mx-auto w-full'
-          return 'mx-auto'
+          return hybrid ? '' : 'mx-auto' // hybrid: the wrapper centres; the paper stays at its top-left
         })()}
         style={{
           width: (() => {
@@ -485,6 +642,22 @@ export function Scroll({
           </div>
         </div>
       </div>
+      )
+      if (!hybrid) return paperNode
+      // The magnify wrapper: mx-auto + an explicit width centre the page; the width starts as the
+      // same mm value the paper uses (layout identical to master at scale 1) and is imperatively
+      // switched to pageWidth·s px while magnified (see the magnify plumbing effect). Height is
+      // ONLY ever set imperatively (paperHeight·s), so React never fights the RO's writes.
+      return (
+        <div
+          ref={magnifyBoxRef}
+          className="iw-magnify-box mx-auto"
+          style={{ width: paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).width }}
+        >
+          {paperNode}
+        </div>
+      )
+      })()}
     </div>
   )
 }
@@ -550,9 +723,9 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       if (!total) { lastSigRef.current = ''; return setBreaks([]) }
       // Prefer the REAL break markers the pagination extension measured — same breaks as gapped
       // mode. gBCR returns VISUAL (transform-scaled) coords; the overlay lives INSIDE the scaled
-      // paper, so divide by the magnify scale to get paper-local px (scale=1 on master).
-      const surface = el.closest('.inkwave-editor-surface') as HTMLElement | null
-      const scale = parseFloat(surface?.style.getPropertyValue('--iw-magnify') || '') || 1
+      // paper, so divide by the magnify scale to get paper-local px (magnify.ts owns the scale;
+      // scaleFor resolves 1 for untransformed surfaces like SnapshotView's).
+      const scale = scaleFor(el)
       const markers = Array.from(el.querySelectorAll('.inkwave-page-gap')) as HTMLElement[]
       let next: number[]
       if (markers.length) {

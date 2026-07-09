@@ -63,10 +63,16 @@ export function lineEndPosAfter(wordRect: DOMRect, wordTo: number, paraEl: Eleme
 //
 // .scas-red is display:inline-block (~45px box); midpoint±tolerance is used for
 // same-line detection so adjacent-line chars inside the tall box are excluded.
+//
+// COORDINATE SPACES (`scale` = the transform-magnify on the paper, magnify.ts): the rect inputs
+// (naturalTop/Bottom/LineRight) and every rect read in here are VISUAL px — fine for the
+// same-line comparisons, which are visual-vs-visual. naturalWidth/minWidth arrive in LAYOUT px
+// (the caller unscales), matching fontSize/letter-spacing — so the one visual quantity that mixes
+// into that maths, the line's right-hand slack, is divided by `scale` below. scale=1 is a no-op.
 export function computeLineCompressionRange(
   naturalTop: number, naturalBottom: number, naturalLineRight: number,
   naturalWidth: number, minWidth: number, wordFrom: number, wordTo: number,
-  paraEl: Element, editor: Editor,
+  paraEl: Element, editor: Editor, scale = 1,
 ): LineRange | null {
   const midY = (naturalTop + naturalBottom) / 2
   const tol  = (naturalBottom - naturalTop) * 0.45
@@ -99,7 +105,7 @@ export function computeLineCompressionRange(
   if (nBefore + nAfter === 0) return null
 
   const paraRight = paraEl.getBoundingClientRect().right
-  const slack = Math.max(0, paraRight - naturalLineRight)
+  const slack = Math.max(0, (paraRight - naturalLineRight) / (scale > 0.01 ? scale : 1)) // visual → layout px
   const exp   = Math.max(0, Math.ceil(minWidth) - naturalWidth)
   if (exp === 0) return null
 
