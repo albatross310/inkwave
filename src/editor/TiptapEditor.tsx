@@ -1960,8 +1960,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     <ComplianceContext.Provider value={compliance}>
       {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
       <div className={isTouch ? (!settled ? 'iw-chrome-hold' : !chromeDone ? 'iw-chrome-in' : undefined) : undefined}>
-        {/* Faded seal on every printed/PDF page (hidden on screen; fixed → repeats per print page). */}
-        <div className="print-seal" aria-hidden="true"><img src="/fav-128.png" alt="" /></div>
         {otherDevice && !conflictDismissed && (
           <div
             className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif"
