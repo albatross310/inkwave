@@ -6,6 +6,8 @@
 
 const K_SET = 'inkwave:reviewActiveSet'
 const K_SUGGEST = 'inkwave:reviewSuggest'
+const K_SHOW = 'inkwave:reviewShowChanges'
+const K_HIDDEN = 'inkwave:reviewHiddenSets'
 const EVT = 'inkwave:review-changed'
 
 const ls = (k: string): string | null => { try { return localStorage.getItem(k) } catch { return null } }
@@ -24,3 +26,57 @@ export function setActiveSet(name: string): void { setLs(K_SET, name || DEFAULT_
 
 export function suggestOn(): boolean { return ls(K_SUGGEST) === '1' }
 export function setSuggestOn(v: boolean): void { setLs(K_SUGGEST, v ? '1' : '0'); fire() }
+
+// ── Show/hide changes (MS-Word markup visibility) ────────────────────────────────────────────────
+// Global: show the doc WITH tracked suggestions (default) or CLEAN (as-if-accepted — insertions
+// render as normal text, deletion-marked text disappears; nothing is resolved, only display).
+// Per-layer: each named set can be hidden independently (its suggestions + comment underlines).
+// Both are pure CSS (a managed <style> tag) — the marks stay in the document untouched.
+
+export function showChangesGlobal(): boolean { return ls(K_SHOW) !== '0' }
+export function setShowChangesGlobal(v: boolean): void { setLs(K_SHOW, v ? '1' : '0'); syncReviewVisibilityStyles(); fire() }
+
+export function hiddenSets(): string[] {
+  try { const a = JSON.parse(ls(K_HIDDEN) || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : [] } catch { return [] }
+}
+export function isSetHidden(name: string): boolean { return hiddenSets().includes(name) }
+export function setSetHidden(name: string, hidden: boolean): void {
+  const cur = new Set(hiddenSets())
+  if (hidden) cur.add(name); else cur.delete(name)
+  setLs(K_HIDDEN, JSON.stringify([...cur]))
+  syncReviewVisibilityStyles()
+  fire()
+}
+// A set is effectively visible only when the global toggle is on AND it isn't individually hidden.
+export function isSetVisible(name: string): boolean { return showChangesGlobal() && !isSetHidden(name) }
+
+// Escape a string for use inside a double-quoted CSS attribute selector value.
+const cssAttr = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+// The clean-view rules for one layer (or for everything when `set` is null — the global hide).
+// Insertions must fall back to the surrounding text colour (the inline gradient uses
+// -webkit-text-fill-color:transparent, so both it and the background must be overridden).
+function cleanRules(set: string | null): string {
+  const sug = set == null ? '' : `[data-set="${cssAttr(set)}"]`       // suggestion marks carry data-set
+  const com = set == null ? '' : `[data-comment-set="${cssAttr(set)}"]` // comment marks carry data-comment-set
+  return (
+    `.ProseMirror ins.iw-ins${sug}{background:none !important;-webkit-text-fill-color:currentColor !important;color:inherit !important;}` +
+    `.ProseMirror del.iw-del${sug}{display:none !important;}` +
+    `.ProseMirror span.iw-comment${com}{background:transparent !important;border-bottom:none !important;}`
+  )
+}
+
+// Maintain the <style> tag that realises the current visibility state. Idempotent; call on boot
+// (TiptapEditor mount) and from the setters above. No-op outside the browser (prerender).
+export function syncReviewVisibilityStyles(): void {
+  if (typeof document === 'undefined') return
+  let el = document.getElementById('iw-review-visibility') as HTMLStyleElement | null
+  if (!el) { el = document.createElement('style'); el.id = 'iw-review-visibility'; document.head.appendChild(el) }
+  let css = ''
+  if (!showChangesGlobal()) {
+    css = cleanRules(null)
+  } else {
+    for (const name of hiddenSets()) css += cleanRules(name)
+  }
+  el.textContent = css
+}

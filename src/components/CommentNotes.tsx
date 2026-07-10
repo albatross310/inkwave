@@ -6,7 +6,7 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
-import { activeSet, onReviewChanged } from '../editor/review/reviewState'
+import { activeSet, onReviewChanged, isSetVisible } from '../editor/review/reviewState'
 import { subscribe as subscribeMagnify } from '../editor/magnify'
 
 const INK = '#5c2d8a'
@@ -14,8 +14,10 @@ const INK = '#5c2d8a'
 interface CommentInfo { id: string; body: string; from: number; to: number }
 
 // Walk the doc, gathering every comment mark in the active set as { id, body, from..to }.
+// A hidden layer (per-set eye / global show-changes off) shows no notes either.
 function collectComments(editor: Editor): CommentInfo[] {
   const set = activeSet()
+  if (!isSetVisible(set)) return []
   const byId: Record<string, CommentInfo> = {}
   editor.state.doc.descendants((node, pos) => {
     if (!node.isText) return

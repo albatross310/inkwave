@@ -2,7 +2,8 @@
 //
 // All buttons use the container's onMouseDown preventDefault to keep the editor's
 // selection alive. Long-press (≥175ms) opens the option popup; short tap applies
-// the last-used option. Menu items trigger on pointer-up for immediacy.
+// the last-used option (font + size are HOLD-ONLY — a plain click does nothing).
+// Menu items trigger on pointer-up for immediacy.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -41,9 +42,21 @@ const HIGHLIGHT_COLORS = [
   { label: 'Clear',  color: null },
 ]
 
+// Text colours — a small tasteful set fitting the calm identity (deep, ink-like tones).
+const TEXT_COLORS: Array<{ label: string; color: string | null }> = [
+  { label: 'Default', color: null },
+  { label: 'Ink',     color: '#5c2d8a' },
+  { label: 'Black',   color: '#1a1a1a' },
+  { label: 'Blue',    color: '#1e3a8a' },
+  { label: 'Red',     color: '#991b1b' },
+  { label: 'Green',   color: '#166534' },
+  { label: 'Brown',   color: '#78350f' },
+]
+
 type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
 type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha' | 'upper-roman' | 'taskList'
 type Align = 'left' | 'center' | 'right' | 'justify'
+type IndentAction = 'line+' | 'line-' | 'para+' | 'para-' | 'clear'
 
 const CHAR_FMT_LABELS: Record<CharFmt, string> = { bold: 'B', italic: 'i', underline: 'U', strike: 'S' }
 const CHAR_FMT_STYLES: Record<CharFmt, React.CSSProperties> = {
@@ -61,6 +74,13 @@ const ALIGN_LABELS: Record<Align, string> = {
 const LIST_TYPE_LABELS: Record<ListType, string> = {
   bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.', 'upper-roman': 'I.', taskList: '☐',
 }
+const INDENT_ITEMS: Array<{ action: IndentAction; label: string; preview: string }> = [
+  { action: 'line+', label: 'Indent line',        preview: '⇥' },
+  { action: 'line-', label: 'Unindent line',      preview: '⇤' },
+  { action: 'para+', label: 'First-line indent',  preview: '¶⇥' },
+  { action: 'para-', label: 'Remove first-line',  preview: '¶⇤' },
+  { action: 'clear', label: 'Clear line format',  preview: '⌫' },
+]
 
 function useLongPress(onShortPress: () => void, onLongPress: () => void) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -97,26 +117,30 @@ export function StyleBar({ editor, onActivity, phone }: {
   phone?: boolean
 }) {
   const [, force] = useState(0)
-  const [fontOpen,  setFontOpen]  = useState(false)
-  const [sizeOpen,  setSizeOpen]  = useState(false)
-  const [fmtOpen,   setFmtOpen]   = useState(false)
-  const [hlOpen,    setHlOpen]    = useState(false)
-  const [alignOpen, setAlignOpen] = useState(false)
-  const [listOpen,  setListOpen]  = useState(false)
+  const [fontOpen,   setFontOpen]   = useState(false)
+  const [sizeOpen,   setSizeOpen]   = useState(false)
+  const [fmtOpen,    setFmtOpen]    = useState(false)
+  const [hlOpen,     setHlOpen]     = useState(false)
+  const [colorOpen,  setColorOpen]  = useState(false)
+  const [alignOpen,  setAlignOpen]  = useState(false)
+  const [listOpen,   setListOpen]   = useState(false)
+  const [indentOpen, setIndentOpen] = useState(false)
 
   const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
   const [lastHlColor,  setLastHlColor]  = useState<string | null>(null)
+  const [lastTxtColor, setLastTxtColor] = useState<string | null>(null)
   const [lastListType, setLastListType] = useState<ListType>('bulletList')
   const [lastAlign,    setLastAlign]    = useState<Align>('left')
-  const [lastFont,     setLastFont]     = useState<string>('')
-  const [lastSize,     setLastSize]     = useState<number>(0)
+  const [lastIndent,   setLastIndent]   = useState<IndentAction>('line+')
 
-  const fontBtnRef  = useRef<HTMLButtonElement>(null)
-  const sizeBtnRef  = useRef<HTMLButtonElement>(null)
-  const fmtBtnRef   = useRef<HTMLButtonElement>(null)
-  const hlBtnRef    = useRef<HTMLButtonElement>(null)
-  const alignBtnRef = useRef<HTMLButtonElement>(null)
-  const listBtnRef  = useRef<HTMLButtonElement>(null)
+  const fontBtnRef   = useRef<HTMLButtonElement>(null)
+  const sizeBtnRef   = useRef<HTMLButtonElement>(null)
+  const fmtBtnRef    = useRef<HTMLButtonElement>(null)
+  const hlBtnRef     = useRef<HTMLButtonElement>(null)
+  const colorBtnRef  = useRef<HTMLButtonElement>(null)
+  const alignBtnRef  = useRef<HTMLButtonElement>(null)
+  const listBtnRef   = useRef<HTMLButtonElement>(null)
+  const indentBtnRef = useRef<HTMLButtonElement>(null)
 
   const ping = () => onActivity?.()
 
@@ -142,16 +166,17 @@ export function StyleBar({ editor, onActivity, phone }: {
     return () => { editor.off('selectionUpdate', clearHighlight) }
   }, [editor])
 
-  const closeAll = () => { setFontOpen(false); setSizeOpen(false); setFmtOpen(false); setHlOpen(false); setAlignOpen(false); setListOpen(false) }
+  const closeAll = () => { setFontOpen(false); setSizeOpen(false); setFmtOpen(false); setHlOpen(false); setColorOpen(false); setAlignOpen(false); setListOpen(false); setIndentOpen(false) }
+  const anyOpen = fontOpen || sizeOpen || fmtOpen || hlOpen || colorOpen || alignOpen || listOpen || indentOpen
 
   useEffect(() => {
-    if (!(fontOpen || sizeOpen || fmtOpen || hlOpen || alignOpen || listOpen)) return
+    if (!anyOpen) return
     const onDown = () => closeAll()
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeAll() }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [fontOpen, sizeOpen, fmtOpen, hlOpen, alignOpen, listOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [anyOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const ts = editor.getAttributes('textStyle')
@@ -161,13 +186,13 @@ export function StyleBar({ editor, onActivity, phone }: {
   const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
   const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   const curHlColor = (editor.getAttributes('highlight') as { color?: string }).color ?? null
+  const curTxtColor = (ts as { color?: string }).color ?? null
   const listActive = editor.isActive('bulletList') || editor.isActive('orderedList') || editor.isActive('taskList')
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
+  const setFont = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize = (pt: number) => {
     ping()
-    setLastSize(pt)
     editor.chain().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
     setSizeOpen(false)
   }
@@ -185,6 +210,13 @@ export function StyleBar({ editor, onActivity, phone }: {
     ping()
     if (color) {
       setLastHlColor(color)
+      // Toggle semantics: highlighting text ALREADY in this exact colour unhighlights it
+      // (a different colour still re-colours, below).
+      if (editor.isActive('highlight', { color })) {
+        editor.chain().unsetHighlight().run()
+        setHlOpen(false)
+        return
+      }
       editor.chain().setHighlight({ color }).run()
       // After applying highlight to a selection, storedMarks is null (range selection has no
       // stored marks). But when the cursor later collapses to the right edge of highlighted text,
@@ -200,6 +232,12 @@ export function StyleBar({ editor, onActivity, phone }: {
     }
     setHlOpen(false)
   }
+  function applyTextColor(color: string | null) {
+    ping()
+    if (color) setLastTxtColor(color)
+    editor.chain().setMark('textStyle', { color }).run()
+    setColorOpen(false)
+  }
   function applyAlign(a: Align) { ping(); setLastAlign(a); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
   function applyListType(type: ListType) {
     ping(); setLastListType(type); setListOpen(false)
@@ -211,22 +249,50 @@ export function StyleBar({ editor, onActivity, phone }: {
     else if (inOrdered) editor.chain().focus().updateAttributes('orderedList', { listType: type }).run()
     else { editor.chain().focus().toggleOrderedList().run(); if (type !== 'decimal') editor.chain().focus().updateAttributes('orderedList', { listType: type }).run() }
   }
+  // Indent: whole-line/block indent = paddingLeft (stepped, stackable); paragraph first-line
+  // indent = textIndent (on/off). Values live on ParagraphStyle attrs. A non-em paddingLeft
+  // (pasted px values) unindents straight to none. 'clear' keeps the old ⌫¶ escape hatch for
+  // stuck pasted margins/line-height that the remove actions don't touch.
+  const INDENT_STEP = 2 // em
+  const emVal = (v: string | null | undefined): number | null => {
+    const m = /^([\d.]+)em$/.exec(v ?? ''); return m ? parseFloat(m[1]) : null
+  }
+  function applyIndent(action: IndentAction) {
+    ping()
+    if (action !== 'clear') setLastIndent(action)
+    const attrs = editor.getAttributes('paragraph') as { paddingLeft?: string | null; textIndent?: string | null }
+    if (action === 'line+') {
+      const cur = emVal(attrs.paddingLeft) ?? 0
+      editor.chain().focus().setParaStyle({ paddingLeft: `${cur + INDENT_STEP}em` }).run()
+    } else if (action === 'line-') {
+      const cur = emVal(attrs.paddingLeft)
+      const next = cur != null ? cur - INDENT_STEP : 0
+      editor.chain().focus().setParaStyle({ paddingLeft: next > 0 ? `${next}em` : null }).run()
+    } else if (action === 'para+') {
+      editor.chain().focus().setParaStyle({ textIndent: `${INDENT_STEP}em` }).run()
+    } else if (action === 'para-') {
+      editor.chain().focus().setParaStyle({ textIndent: null }).run()
+    } else {
+      editor.chain().focus().setParaStyle({ lineHeight: null, marginBottom: null, marginTop: null, paddingLeft: null, paddingRight: null, textIndent: null }).run()
+    }
+    setIndentOpen(false)
+  }
 
-  const fontPress  = useLongPress(
-    () => { if (lastFont) setFont(lastFont); else { closeAll(); setFontOpen(true) } },
-    () => { closeAll(); setFontOpen(true) },
-  )
-  const sizePress  = useLongPress(
-    () => { if (lastSize) setSize(lastSize); else { closeAll(); setSizeOpen(true) } },
-    () => { closeAll(); setSizeOpen(true) },
-  )
-  const fmtPress   = useLongPress(() => applyFmt(lastFmt),          () => setFmtOpen(true))
-  const hlPress    = useLongPress(
+  // Font + size open ONLY on click-and-hold — a plain click does nothing (no apply, no cycle).
+  const fontPress   = useLongPress(() => {}, () => { closeAll(); setFontOpen(true) })
+  const sizePress   = useLongPress(() => {}, () => { closeAll(); setSizeOpen(true) })
+  const fmtPress    = useLongPress(() => applyFmt(lastFmt),          () => { closeAll(); setFmtOpen(true) })
+  const hlPress     = useLongPress(
     () => { if (lastHlColor !== null) applyHighlight(lastHlColor); else { closeAll(); setHlOpen(true) } },
-    () => setHlOpen(true),
+    () => { closeAll(); setHlOpen(true) },
   )
-  const listPress  = useLongPress(() => applyListType(lastListType), () => setListOpen(true))
-  const alignPress = useLongPress(() => applyAlign(lastAlign),       () => setAlignOpen(true))
+  const colorPress  = useLongPress(
+    () => { if (lastTxtColor !== null) applyTextColor(lastTxtColor); else { closeAll(); setColorOpen(true) } },
+    () => { closeAll(); setColorOpen(true) },
+  )
+  const listPress   = useLongPress(() => applyListType(lastListType), () => { closeAll(); setListOpen(true) })
+  const alignPress  = useLongPress(() => applyAlign(lastAlign),       () => { closeAll(); setAlignOpen(true) })
+  const indentPress = useLongPress(() => applyIndent(lastIndent),     () => { closeAll(); setIndentOpen(true) })
 
   function above(ref: React.RefObject<HTMLElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
@@ -236,32 +302,26 @@ export function StyleBar({ editor, onActivity, phone }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
-  // Desktop: circular badge buttons. Phone: rectangular flush buttons filling bar height.
-  const pill = (open: boolean, hl = false): string => {
-    if (phone) {
-      return `flex-1 flex items-center justify-center self-stretch transition-colors text-sm ${open || hl ? `text-[${INK}] bg-stone-50` : 'text-stone-500'}`
-    }
-    // Desktop: circular badge — same visual as main toolbar buttons
-    return `flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
-  }
+  // Circular badge buttons everywhere. Phone: same circles as desktop, ~19% bigger (38px — the max
+  // nine controls fit a 360px row with the tightened spacing) for comfortable tapping. flex-shrink-0
+  // keeps them true circles — without it a tight row squeezes them oval.
+  const circleSize = phone ? 'w-[38px] h-[38px] flex-shrink-0' : 'w-8 h-8'
+  const pill = (open: boolean, hl = false): string =>
+    `flex items-center justify-center ${circleSize} rounded-full border transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
 
-  const phoneFontSizeClass = `flex-1 flex items-center justify-center self-stretch text-xs text-stone-500 transition-colors`
-  const deskFontClass = `flex items-center justify-center h-8 px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs min-w-[2.5rem]`
-  const deskSizeClass = `flex items-center justify-center h-8 px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums min-w-[2.5rem]`
+  const fontClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs min-w-[2.5rem]`
+  const sizeClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums min-w-[2.5rem]`
 
   return (
     <div
-      className={phone
-        ? 'flex items-stretch text-sm text-stone-500 font-serif w-full divide-x divide-stone-100'
-        : 'flex items-center gap-1.5 text-sm text-stone-500 font-serif w-full'
-      }
+      className={`flex items-center ${phone ? 'justify-between' : 'gap-1'} text-sm text-stone-500 font-serif w-full`}
       onMouseDown={e => { if (!(e.target as Element).closest('input')) e.preventDefault() }}
       onMouseEnter={() => onActivity?.()}
     >
-      {/* Font — short-press applies last font, long-press opens picker */}
+      {/* Font — opens on click-and-hold only */}
       <button ref={fontBtnRef} type="button" {...fontPress}
         onClick={e => { e.stopPropagation(); fontPress.onClick() }}
-        className={phone ? phoneFontSizeClass : deskFontClass}
+        className={fontClass}
         title="Font (hold to change)">
         {curFont.slice(0, 3)}
       </button>
@@ -283,10 +343,10 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
-      {/* Size — short-press applies last size, long-press opens picker */}
+      {/* Size — opens on click-and-hold only */}
       <button ref={sizeBtnRef} type="button" {...sizePress}
         onClick={e => { e.stopPropagation(); sizePress.onClick() }}
-        className={phone ? phoneFontSizeClass : deskSizeClass}
+        className={sizeClass}
         title="Font size (hold to change)">
         <span className="text-xs select-none">{curSize}</span>
       </button>
@@ -310,7 +370,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={fmtBtnRef} type="button" {...fmtPress}
         onClick={e => { e.stopPropagation(); fmtPress.onClick() }}
         className={pill(fmtOpen)}
-        style={{ ...CHAR_FMT_STYLES[lastFmt], minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ ...CHAR_FMT_STYLES[lastFmt], textAlign: 'center', fontSize: '0.82rem' }}
         title="Character formatting (hold for options)">
         {CHAR_FMT_LABELS[lastFmt]}
       </button>
@@ -331,13 +391,13 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
-      {/* H — tap=last colour, hold=picker */}
+      {/* H — tap=last colour (toggles off on same-colour text), hold=picker */}
       <button ref={hlBtnRef} type="button" {...hlPress}
         onClick={e => { e.stopPropagation(); hlPress.onClick() }}
         className={pill(hlOpen, !!lastHlColor)}
-        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem',
+        style={{ textAlign: 'center', fontSize: '0.82rem',
           background: lastHlColor ?? undefined, color: (hlOpen || lastHlColor) ? (hlOpen ? INK : '#374151') : '#6b7280' }}
-        title="Highlight (hold for colours)">
+        title="Highlight (hold for colours; same colour again removes it)">
         H
       </button>
       {hlOpen && createPortal(
@@ -358,11 +418,39 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
+      {/* T (text colour) — tap=last colour, hold=palette */}
+      <button ref={colorBtnRef} type="button" {...colorPress}
+        onClick={e => { e.stopPropagation(); colorPress.onClick() }}
+        className={pill(colorOpen)}
+        style={{ textAlign: 'center', fontSize: '0.82rem', fontWeight: 600,
+          color: lastTxtColor ?? 'var(--iw-ink, #5c2d8a)' }}
+        title="Text colour (hold for palette)">
+        T
+      </button>
+      {colorOpen && createPortal(
+        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
+        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
+          onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
+          {TEXT_COLORS.map(c => (
+            <button key={c.label} type="button"
+              onPointerDown={e => e.preventDefault()} onPointerUp={() => applyTextColor(c.color)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-stone-50"
+              style={{ color: curTxtColor === c.color ? INK : '#374151', fontWeight: curTxtColor === c.color ? 500 : 400,
+                borderLeft: curTxtColor === c.color ? `2px solid ${INK}` : '2px solid transparent' }}>
+              <span className="w-3.5 h-3.5 rounded-full border flex-shrink-0"
+                style={{ background: c.color ?? 'transparent', borderColor: c.color ? 'transparent' : '#d1d5db' }} />
+              <span>{c.label}</span>
+            </button>
+          ))}
+        </div></>,
+        document.body,
+      )}
+
       {/* A — tap=last align, hold=picker */}
       <button ref={alignBtnRef} type="button" {...alignPress}
         onClick={e => { e.stopPropagation(); alignPress.onClick() }}
         className={pill(alignOpen) + ' font-serif'}
-        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ textAlign: 'center', fontSize: '0.82rem' }}
         title="Alignment (hold for options)">
         A
       </button>
@@ -387,7 +475,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       <button ref={listBtnRef} type="button" {...listPress}
         onClick={e => { e.stopPropagation(); listPress.onClick() }}
         className={pill(listOpen, listActive)}
-        style={{ minWidth: phone ? undefined : 30, textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ textAlign: 'center', fontSize: '0.82rem' }}
         title="Lists (hold for types)">
         {LIST_TYPE_LABELS[lastListType]}
       </button>
@@ -424,27 +512,37 @@ export function StyleBar({ editor, onActivity, phone }: {
         document.body,
       )}
 
-      {/* ⌫¶ — clear paragraph formatting: strips stuck line styles (indent/padding/margins/line
-          height) that ride in silently on PASTED content and that undo can't reach (the attrs
-          arrived at paste time — Peter's indented title, 2026-07-10). */}
-      <button type="button"
-        onClick={() => { ping(); editor.chain().focus().setParaStyle({ lineHeight: null, marginBottom: null, marginTop: null, paddingLeft: null, paddingRight: null, textIndent: null }).run() }}
-        title="Clear line formatting (indent, spacing)"
-        className={phone
-          ? `flex-1 flex items-center justify-center self-stretch text-stone-500 text-base`
-          : `flex items-center justify-center w-8 h-8 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-xs`
-        }>
-        ⌫¶
+      {/* ⇥ (indent) — tap=last indent action, hold=picker. Replaces the old ⌫¶ button; its
+          clear-line-formatting escape hatch lives on as the drop-up's last row. */}
+      <button ref={indentBtnRef} type="button" {...indentPress}
+        onClick={e => { e.stopPropagation(); indentPress.onClick() }}
+        className={pill(indentOpen)}
+        style={{ textAlign: 'center', fontSize: '0.82rem' }}
+        title="Indent (hold for options)">
+        ⇥
       </button>
+      {indentOpen && createPortal(
+        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
+        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
+          onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
+          {INDENT_ITEMS.map(item => (
+            <button key={item.action} type="button"
+              onPointerDown={e => e.preventDefault()} onPointerUp={() => applyIndent(item.action)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-stone-50"
+              style={{ color: '#374151', borderLeft: '2px solid transparent' }}>
+              <span className="w-6 text-center" style={{ color: INK, opacity: 0.8 }}>{item.preview}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div></>,
+        document.body,
+      )}
 
-      {/* ∀ — select all (always visible on both phone and desktop) */}
+      {/* ∀ — select all */}
       <button type="button"
         onClick={() => { ping(); editor.chain().focus().selectAll().run() }}
         title="Select all"
-        className={phone
-          ? `flex-1 flex items-center justify-center self-stretch text-stone-500 text-base`
-          : `flex items-center justify-center w-8 h-8 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-sm`
-        }>
+        className={pill(false) + ' text-sm'}>
         ∀
       </button>
     </div>
