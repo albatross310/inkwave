@@ -175,8 +175,13 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   minimap (wheel + diff ticks + page numbers/logos), position-based swipe scrub + momentum fling
   (multi-touch bails to the pinch — keep that guard), shift-wheel fast scrub, golden-ratio reading
   line, narrow/phone CSS-grid layout, per-version summaries (Haiku, opt-in), LoadingVeil wave
-  choreography on open. Grow-only + deterministic pmToText apply here too. Known drift: minimap/
-  diff-panel page numbers use paper-width×√2, not canonical breaks (phone-visible).
+  choreography on open. Grow-only + deterministic pmToText apply here too. The doc pane has GAPPED
+  PAGES (2026-07-10): `editor/staticPagination.ts` re-runs the editor's canonical break pipeline
+  against the pane's static HTML (forced canonical measure → breaks cached as text-node char
+  offsets → the shared `pageGap.ts` widgets + sheet panels inserted post-render; content keyed by
+  snapshot.id so the DOM surgery never fights React). Minimap + diff-panel page numbers now come
+  from those REAL canonical page regions (the old paper-width×√2 drift is fixed). Scrub diffs are
+  cached + read-ahead ±20 in idle time (`provenance/diffCache.ts`) so hard scrubs hit only cache.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

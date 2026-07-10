@@ -31,56 +31,19 @@ import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
+// gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
+// static paginator (staticPagination.ts) so both build byte-identical gap DOM.
+import { PHONE_PAGE_MARGIN, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
 import { notePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
-const GAP = 56 // px of aqua (waves) between sheets
-// Phone pages are content-tall with COMPACT fixed margins: break POSITIONS are canonical (same
-// text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
-// don't match the phone's taller reflowed text — they rendered as huge dead bands (2026-07-09).
-const PHONE_PAGE_MARGIN = 32
-const phoneLike = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
 export interface PaginationOptions {
   enabled: boolean // measure page breaks at all (the live editor; off for headless/snapshot use)
   gapped: boolean  // true: tall gap widgets + sheet panels; false: zero-size break markers
-}
-
-// The gap widget reserves the vertical space between the last line of one page and the first line of
-// the next: [ bottom margin of page above | GAP (transparent) | top margin of page below ]. It hosts
-// an (empty) band marker at the gap offset so the paint() pass can measure exactly where the
-// transparent gap is and lay the parchment sheet panels around it. No visible parts of its own —
-// the panels paint the parchment, the page number is a footer inside each panel.
-function gapEl(botMargin: number, topMargin: number, gapped: boolean): HTMLElement {
-  // SPAN, not div: a page break can land mid-paragraph, and a block-level <div> is invalid as a
-  // child of <p> — the browser then reparents/splits the paragraph in the rendered DOM, scrambling
-  // caret placement (the caret jumps across the gap, edits land on the wrong page). A <span> is valid
-  // phrasing content inside <p>; CSS gives it `display:block` so it still reserves the vertical gap.
-  const el = document.createElement('span')
-  el.className = 'inkwave-page-gap'
-  // @media print turns every widget into the NEXT page's top margin (break-before: page +
-  // height: var(--iw-print-topm)) — carry the live setting so the printed margin matches the
-  // screen (it was hard-coded 72px, wrong whenever the top-margin setting differs).
-  el.style.setProperty('--iw-print-topm', `${Math.round(topMargin)}px`)
-  el.contentEditable = 'false'
-  if (!gapped) {
-    // Ungapped: an invisible zero-HEIGHT break marker (see .iw-break-marker in index.css). Still a
-    // block, so the break it forces coincides with the line start it sits at (a visual no-op at
-    // steady state) and its rect top IS the page boundary — PageGuides draws the dashed rule
-    // there, and the print stylesheet breaks the page there. No vertical space is reserved.
-    el.classList.add('iw-break-marker')
-    return el
-  }
-  el.style.height = `${Math.round(botMargin + GAP + topMargin)}px`
-  const band = document.createElement('span')
-  band.className = 'inkwave-page-gap-band'
-  band.style.top = `${Math.round(botMargin)}px`
-  band.style.height = `${GAP}px`
-  el.appendChild(band)
-  return el
 }
 
 // Collect every LINE as { intrinsic top, doc position of its start } — so a page break can land
