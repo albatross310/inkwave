@@ -900,10 +900,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }
       // Desktop: two clean frames (~33ms, imperceptible) between coast start and the heavy reveal
       // commit — the coast is compositor-driven and already easing smoothly when the commit lands.
-      // DESKTOP (Peter, 2026-07-10): +0.5s before the doc comes up so the slowdown is noticeable
-      // (coast 2.5s; 1s fade starts at 0.5s) — the wait is post-ready, so pagination/paint/idle
-      // warms (zoom step cache, twinkles, cloud prefetch) already run inside it; nothing is wasted.
-      revealTimer = setTimeout(reveal, 500)
+      // DESKTOP (Peter, 2026-07-10 rev2): fade starts AT coast start (0.5s earlier than before) —
+      // two rAFs keep the coast's first presented frame ahead of the reveal commit; the 1s opacity
+      // fade then plays over the decelerating waves.
+      revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
     }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
