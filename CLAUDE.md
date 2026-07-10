@@ -276,8 +276,11 @@ action time — never hold contentJson in state). Autosave failures dispatch `in
   allows. Agent briefs that ask for headed runs must say this.
 - **Notifier (task #27, pending):** final reports start with the sentinel "📋 REPORT" so Peter's
   PowerShell hook can either FILTER to reports only, or keep all toasts but play a DIFFERENT SOUND
-  for report messages (his preferred option) — audibly distinct without looking. Until the hook is
-  updated, keep interim turns content-free anyway.
+  for report messages (his preferred option) — audibly distinct without looking. RATIONALE (Peter):
+  best of both worlds — when he's focused on development he keeps feeding agents on the ordinary
+  toasts; when he's focused elsewhere (writing) he responds only to the significant sound. The
+  two-tier cadence is the general model for working with him. Until the hook is updated, keep
+  interim turns content-free anyway.
 - **Batch the reporting — protect Peter's focus.** He writes (thesis/essays) while agents run;
   every notification breaks his concentration. Do NOT ping per-merge: merge each through the full
   gate as it lands with a bare non-message turn-ending, and send ONE consolidated report when ALL
