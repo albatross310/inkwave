@@ -2006,7 +2006,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 distribute the remaining slack.
                 Width arithmetic @360px: 8 (px-1) + ◈36 + ▲36 + 4×37 slots + S37 + ⚙37 + ⋮36 = 338. */}
             {showMainRow && (
-            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-1' : 'gap-0.5 px-2'}`}>
+            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-1' : 'gap-0.5 px-2'}`}
+              onClickCapture={(e) => {
+                // Any toolbar button closes the style + review bars — except each bar's own toggle
+                // (its onClick still runs after this capture, so its toggle semantics survive).
+                const b = (e.target as HTMLElement).closest('button')
+                if (!b) return
+                if (b.dataset.iwBar !== 'style') { setStyleBarOpen(false); clearStyleTimer() }
+                if (b.dataset.iwBar !== 'review') setReviewOpen(false)
+              }}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
                 <button
@@ -2092,7 +2100,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           )}
                           {id === 'receipt' && (
                             <button type="button"
-                              onClick={() => { setReviewOpen(o => !o) }}
+                              data-iw-bar="review" onClick={() => { setReviewOpen(o => !o) }}
                               className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                               title="Review — comments & track changes"
                             >
@@ -2137,7 +2145,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   )}
                   {slotId === 'receipt' && (
                     <button type="button"
-                      onClick={() => setReviewOpen(o => !o)}
+                      data-iw-bar="review" onClick={() => setReviewOpen(o => !o)}
                       className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                       title="Review — comments & track changes"
                     >
@@ -2151,6 +2159,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               <button
                 type="button"
                 aria-pressed={styleBarOpen}
+                data-iw-bar="style"
                 onClick={() => { const next = !styleBarOpen; setStyleBarOpen(next); if (next) armStyleTimer(); else clearStyleTimer() }}
                 className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"

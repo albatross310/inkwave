@@ -590,6 +590,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const pdfTargetRef = useRef<string | null>(null)
 
   function attachPdf(item: CSLItem) {
+    // Already attached → say so instead of silently opening the picker (Peter, 2026-07-10).
+    if ((item as { _iw?: IwCitationMeta })._iw?.pdfName) {
+      setNotice({ text: 'A PDF is already attached for this item.', kind: 'err' })
+      return
+    }
     pdfTargetRef.current = item.id
     pdfInputRef.current?.click()
   }
