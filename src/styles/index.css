@@ -528,6 +528,11 @@
        Our own pinch handlers keep working: with pinch removed from native handling, two-finger
        touchmoves are delivered to JS as cancelable events. */
     * { touch-action: pan-x pan-y; }
+    /* The gap bands over-bleed 200vw (white-strip fix) — CLIP horizontal overflow or the body
+       gains sideways scroll range: the page loaded with empty space at right, dragging revealed
+       it, selection drifted into it (Peter, 2026-07-10). clip, not hidden (hidden would make
+       body a scroll container). */
+    html, body { overflow-x: clip; }
 
     /* iOS zooms the page to any focused control under 16px computed font — and STAYS zoomed after
        blur (part of the page out of frame). Floor every form control at 16px on phone. */
