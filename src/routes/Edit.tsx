@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 // CRITICAL-PATH SPLIT: the editor graph (Tiptap/PM, KaTeX, the 30k-word list, citations, Clerk)
 // is the bulk of the app's JS. Lazy-loading it means the tiny shell chunk hydrates immediately —
@@ -49,20 +49,43 @@ export function Edit() {
   // 'up' → covering; 'fading' → 0.5s opacity cross-fade (doc/text/pills fade in atomically
   // underneath, over the still-coasting waves); 'down' → unmounted.
   const [shellUp, setShellUp] = useState<'up' | 'fading' | 'down'>('up')
+  // The shell is PRERENDERED (build-time: no window → phone=false), and React production
+  // hydration does NOT correct attribute mismatches — so on a phone the shell used to run the
+  // whole load DESKTOP-classed and only gained .is-phone when shellUp changed at reveal: the
+  // wave rule-set (coast duration/distance vars) switched under a RUNNING animation mid-coast →
+  // position jump, early animationend, early shell drop (Peter's "jumps to the last section",
+  // 2026-07-10). Correct the class in the first post-hydration commit instead — the water is
+  // still display-gated (.iw-water-ready decode) then, so the swap can never be seen.
+  const [shellPhone, setShellPhone] = useState(false)
+  // LAYOUT effect: the correction must land before the first post-hydration paint — if it raced
+  // the atomic-water gate (slow cold hydration), the desktop→phone rule swap would land mid-drift
+  // and restart the running wave animations.
+  useLayoutEffect(() => { setShellPhone(isTouchDevice()) }, [])
   useEffect(() => {
     let t = 0
     const onRevealed = () => {
-      // PHONE (Peter, 2026-07-09): drop the shell INSTANTLY — beneath it is the editor surface's
-      // own identical, phase-locked coasting water, so the swap is invisible; the full-screen
-      // parchment then fades IN over the still-visible decaying waves (Scroll's 0.5s phone
-      // transition + the .iw-chrome-in toolbar/pill fade). The old shell fade-OUT cross-faded
-      // the waves into paper — they seemed to die during the blend.
-      if (isTouchDevice()) { setShellUp('down'); return }
+      // PHONE (2026-07-10, the "broken slowdown" regression): ONE visible water until rest. The
+      // instant drop at reveal swapped to the editor surface's own copy MID-COAST — on iOS the
+      // covered copy's layers composite/rasterize only at the visibility flip, so the swap
+      // freeze-framed and shifted the gradient (Peter: "freeze frames right before the doc").
+      // Now the SHELL persists through the whole coast, carrying the only water; it FADES from
+      // reveal (1.2s) so the parchment+chrome rise over its still-decelerating waves (the editor
+      // surface is background-transparent while covered — see .iw-wave-covered.is-phone), and it
+      // UNMOUNTS at 'inkwave:wave-rest' (Scroll's coast-end finish, ≈2s = fade end) in the same
+      // commit the editor uncovers — at which point the phone editor is plain parchment (no waves
+      // at rest on phone), so nothing ever double-paints or swaps mid-motion.
       setShellUp('fading')
-      t = window.setTimeout(() => setShellUp('down'), isTouchDevice() ? 830 : 1030) // 0.8s phone / 1s desktop fade
+      if (isTouchDevice()) return // unmounts at wave-rest (below), exactly as the fade completes
+      t = window.setTimeout(() => setShellUp('down'), 1030) // 1s desktop fade
     }
+    const onRest = () => { if (isTouchDevice()) setShellUp('down') }
     window.addEventListener('inkwave:editor-revealed', onRevealed)
-    return () => { clearTimeout(t); window.removeEventListener('inkwave:editor-revealed', onRevealed) }
+    window.addEventListener('inkwave:wave-rest', onRest)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('inkwave:editor-revealed', onRevealed)
+      window.removeEventListener('inkwave:wave-rest', onRest)
+    }
   }, [])
 
   useEffect(() => {
@@ -166,7 +189,7 @@ export function Edit() {
         </Suspense>
       )}
       {shellUp !== 'down' && (
-        <Scroll phone={isTouchDevice()} fill revealed={false} fadingOut={shellUp === 'fading'}>
+        <Scroll phone={shellPhone} fill revealed={false} fadingOut={shellUp === 'fading'}>
           <EmptyEditorSurface />
         </Scroll>
       )}
