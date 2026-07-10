@@ -92,6 +92,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
   )
 }
 
+// SPA-FALLBACK FIRST PAINT (2026-07-11): routes with no prerendered HTML (/snapshot in a new
+// tab, /login, unknown paths) are served build/client/__spa-fallback.html, whose body is THIS
+// component rendered at build time. Without it the fallback painted bare parchment for the whole
+// JS fetch + hydration — the first stretch of the "white background early" on the snapshot
+// window. A static water placeholder (see .iw-boot-water in index.css) keeps the tab water-
+// coloured until the route mounts its real wave choreography (LoadingVeil).
+export function HydrateFallback() {
+  return <div className="iw-boot-water" aria-hidden="true" />
+}
+
 export default function App() {
   useEffect(() => {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]

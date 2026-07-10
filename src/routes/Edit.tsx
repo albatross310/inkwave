@@ -110,12 +110,27 @@ export function Edit() {
     const onRevealedLate = () => {
       if (isTouchDevice() && restSeen) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850) }
     }
+    // PER-LOAD RESET (2026-07-11, the OPEN-DOC white-out): these closure vars live for the
+    // component's whole life, but they describe ONE load. On the second load (open a document)
+    // the stale restSeen=true from the first load made onRevealedLate drop the shell 850ms after
+    // the reveal — mid-coast, while the covered editor is transparent — so the body parchment
+    // showed through until wave-rest (Peter's "white background coming up early ... opening a
+    // document"). Stale timers were live too: the first load's 4s force-down cap could fire INTO
+    // the next load's covering shell. Every open starts a fresh choreography — reset it all.
+    const onBegin = () => {
+      revealedAt = 0
+      restSeen = false
+      clearTimeout(t)
+      clearTimeout(t2)
+    }
+    window.addEventListener('inkwave:open-begin', onBegin)
     window.addEventListener('inkwave:editor-revealed', onRevealed)
     window.addEventListener('inkwave:editor-revealed', onRevealedLate)
     window.addEventListener('inkwave:wave-rest', onRest)
     return () => {
       clearTimeout(t)
       clearTimeout(t2)
+      window.removeEventListener('inkwave:open-begin', onBegin)
       window.removeEventListener('inkwave:editor-revealed', onRevealed)
       window.removeEventListener('inkwave:editor-revealed', onRevealedLate)
       window.removeEventListener('inkwave:wave-rest', onRest)

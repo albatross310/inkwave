@@ -245,7 +245,23 @@ re-freezes from the drift's extrapolated pose when >150ms late (rebaseCoast) —
 full-speed-overlay-then-backward-snap; phone shell drop waits for wave-rest AND paper fade end.
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts). Known residual:
 the editor mounts TWICE per load (duplicate reveal events; Tiptap useEditor recreation) — needs
-its own pass.
+its own pass. 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
+PER-LOAD — Edit.tsx's closure vars (revealedAt/restSeen) and its pending force-down/cap timers
+must reset on `inkwave:open-begin`; the FIRST load's 4s phone cap fired ~1.7s into the SECOND
+load's covering shell = the open-document white-out (stale restSeen was a second path to the same
+drop). LoadingVeil (snapshot open) on phone now stays OPAQUE until wave-rest then fades over
+STILL water — a veil-scoped CSS block (`.iw-loading-veil` in index.css) keeps the phone veil
+surface viewport-pinned + water-painted through waveMode 'off' (a bare phone surface reverts to
+parchment + un-pins there); veil unmount waits the FULL Scroll fade (0.8s phone / 1s desktop —
+the old 520ms unmount popped mid-fade). Non-prerendered routes (/snapshot in a new tab) serve
+`__spa-fallback.html`, which now paints a STATIC water pre-hydration (root.tsx HydrateFallback →
+`.iw-boot-water`, deliberately NOT behind the iw-water-ready gate). Twinkle dash-respawn boot
+gate RE-ARMS on open-begin (bootDone stayed true forever after the first reveal, so every open
+ran the respawn raster storm the boot is protected from — 2 canvas PNG encodes per respawn wedged
+headless WebKit and ate ~8% of the Chromium open). PROBE GOTCHA: `vite preview` does NOT apply
+the vercel.json SPA rewrite — it serves the prerendered EDITOR page for /snapshot, hydration
+mismatches (#418/#423), React recreates <html> and iw-water-ready/data-theme die (gradient with
+no waves). Probe /snapshot against a fallback-faithful static server, never vite preview.
 
 ## Open pipeline + cloud caching (2026-07-09)
 
@@ -388,6 +404,13 @@ timers; the main thread only blocks ~1.5s now):
 Rule of thumb: nothing that reads/parses/encodes the whole `.studio` or hits the network per-snapshot
 may run synchronously on load. Stamp on creation, sweep on demand, cache encodes, read metadata not
 bodies.
+
+- **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
+  full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
+  after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
+  writer's first scrolls ran (the post-open jank). PaginationExtension now also holds it while any
+  input (pointer/wheel/key/scroll, 1.5s) or reveal-chain event (open-begin/reveal-imminent/
+  editor-revealed, 3s) is recent. A cold cache stays CORRECT — onZoomStep measures a miss live.
 
 ## Code map
 

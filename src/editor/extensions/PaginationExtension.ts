@@ -386,10 +386,29 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // the typing signal), never on phone, never while hidden.
           let preTimer: ReturnType<typeof setTimeout> | undefined
           let preRaf = 0
+          // GENUINELY idle only (2026-07-11, "Chrome still a bit slow opening a document"): each
+          // precompute step is a full-document hypothetical reflow (~100ms+ of layout on a long
+          // doc), and the warm-up used to start 350ms after the mount's first measure — ~18
+          // consecutive long frames landing exactly while the reveal chain, the wave coast and
+          // the writer's first scrolls run (profiled: the post-open longtask churn). Any input
+          // or load-choreography activity now pushes the warm-up back; a zoom during the cold
+          // window stays CORRECT — onZoomStep measures a miss live in the same task.
+          let quietUntil = 0
+          const bumpQuiet = (ms: number) => {
+            quietUntil = Math.max(quietUntil, performance.now() + ms)
+          }
+          const onPreActivity = () => bumpQuiet(1500)
+          const onPreChoreo = () => bumpQuiet(3000)
+          const PRE_ACT_EVS = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
+          const PRE_CHOREO_EVS = ['inkwave:open-begin', 'inkwave:reveal-imminent', 'inkwave:editor-revealed'] as const
+          PRE_ACT_EVS.forEach((ev) => window.addEventListener(ev, onPreActivity, { passive: true, capture: true }))
+          PRE_CHOREO_EVS.forEach((ev) => window.addEventListener(ev, onPreChoreo))
+          bumpQuiet(3000) // the mount itself is a choreography
           const preBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
             || editDebounce !== undefined
             || bibDebounce !== undefined
+            || performance.now() < quietUntil
             || document.visibilityState === 'hidden'
           const nextUncached = (): number | null => {
             const k0 = currentStep()
@@ -688,6 +707,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               window.removeEventListener('inkwave:zoom-settled', zoomCb)
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
+              PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
+              PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)
               if (preRaf) cancelAnimationFrame(preRaf)
               layer?.remove()

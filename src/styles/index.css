@@ -207,7 +207,8 @@
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the
      shimmer/moiré the old fast-scroll fade was working around. */
-  .inkwave-editor-surface {
+  .inkwave-editor-surface,
+  .iw-boot-water {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
        (opposite drift directions) without duplicating image data per theme — night just re-points these.
        Tile anatomy (Peter, 2026-07-09): THICK seashell line on TOP, thin white line BELOW it. The
@@ -305,6 +306,34 @@
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
     animation: iw-wave-coast-r var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
+  }
+
+  /* LOADING VEIL (LoadingVeil.tsx — the wave choreography for secondary routes: snapshot open).
+     The veil is WATER for its WHOLE life, including waveMode 'off' after the coast rests — a bare
+     phone surface reverts to parchment there (::before display:none) and UN-PINS (the fixed rule
+     below is gated on the wave classes), which would flash parchment the instant the coast ended.
+     The phone veil fades only AFTER wave-rest (2026-07-11 invariant: parchment only at rest), so
+     these rules keep the phone veil surface viewport-pinned and painted as still water — the
+     desktop off-state rendering (two tile layers, background-position at the coast's handed-off
+     --wave-x) — for the fade to run over. Placed BEFORE the .is-phone wave blocks: during
+     anim/coast their equal-specificity rules override image/animation, exactly as designed. */
+  .iw-loading-veil .inkwave-editor-surface.is-phone {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background-color: #00bfa8;
+    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    background-attachment: scroll;
+    background-size: 100vw 100lvh;
+    background-repeat: no-repeat;
+  }
+  .iw-loading-veil .inkwave-editor-surface.is-phone::before {
+    display: block; /* beats .is-phone::before { display: none } */
+    background-image: var(--iw-wave-a), var(--iw-wave-b);
+    background-size: 140px 140px, 140px 140px;
+    background-position:
+      var(--wave-x, 0px) 0px,
+      calc(-1 * var(--wave-x, 0px)) 0px;
   }
 
   /* PHONE LOADING WAVES (Peter's spec, 2026-07-09). During load ONLY, the phone shell shows the SAME
@@ -1134,7 +1163,8 @@
 /* Grey waves on black (same two-layer tiles — thick line on TOP, thin below — grey strokes instead
    of white/seashell). Same geometry as the day tiles above. Accent dashes are the dynamic twinkle
    layers (waveTwinkle.ts) — grey family in night via each node's --twk-night variant. */
-:root[data-theme="night"] .inkwave-editor-surface {
+:root[data-theme="night"] .inkwave-editor-surface,
+:root[data-theme="night"] .iw-boot-water {
   --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3C/svg%3E");
   --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='%239aa3af' stroke-opacity='0.42' stroke-width='3.1'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%239aa3af' stroke-opacity='0.30' stroke-width='1.4'/%3E%3C/svg%3E");
 }
@@ -1293,4 +1323,25 @@
 :root[data-theme="night"]:not(.iw-water-ready) .inkwave-editor-surface:not(.is-phone) {
   background-color: #0a0b0e;
   background-image: none;
+}
+
+/* ─── Boot water — the SPA-fallback page (2026-07-11) ─────────────────────────
+   Routes with no prerendered HTML (/snapshot in a new tab, /login) serve __spa-fallback.html,
+   which used to paint BARE PARCHMENT for the whole JS fetch + hydration — the first stretch of
+   Peter's "white background early" on the snapshot window. root.tsx's HydrateFallback renders
+   this div: a STATIC water (same gradient + tile art the live surfaces use) so the tab's first
+   paint is water; hydration replaces it with the route's real animated veil. Deliberately NOT
+   behind the .iw-water-ready gate — it exists precisely before any JS has run. */
+.iw-boot-water {
+  position: fixed;
+  inset: 0;
+  background-color: #00bfa8;
+  background-image: var(--iw-wave-a), var(--iw-wave-b), linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+  background-size: 140px 140px, 140px 140px, 100% 100%;
+  background-repeat: repeat, repeat, no-repeat;
+}
+:root[data-theme="night"] .iw-boot-water {
+  background-color: #0a0b0e;
+  background-image: var(--iw-wave-a), var(--iw-wave-b);
+  background-size: 140px 140px, 140px 140px;
 }

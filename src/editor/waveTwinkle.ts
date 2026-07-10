@@ -1155,6 +1155,14 @@ export function syncTwinkles(
   if (!listening) {
     listening = true
     window.addEventListener('inkwave:editor-revealed', () => { bootDone = true })
+    // PER-LOAD RE-ARM (2026-07-11, the open-doc analogue of the boot livelock): the gate below
+    // exists because dash-respawn art rebuilds (2 canvas rasters + PNG encodes each, up to
+    // 4/frame) livelocked React's time-sliced editor mount at boot — but bootDone stayed true
+    // forever after the FIRST reveal, so every OPEN-DOCUMENT choreography (a full editor remount
+    // behind the same drifting shell) ran the respawn storm the boot is protected from. Profiled
+    // 2026-07-11: toDataURL was ~8% of the Chromium open-mount window, and headless WebKit
+    // wedged for ~19s. Each open re-arms the gate; its reveal re-opens it, exactly like boot.
+    window.addEventListener('inkwave:open-begin', () => { bootDone = false })
     window.addEventListener('inkwave:water-ready', onWaterReady)
     window.addEventListener('inkwave:zoom-settled', regenDashes)
     let rt: ReturnType<typeof setTimeout> | undefined
