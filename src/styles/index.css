@@ -39,6 +39,9 @@
      root/body stay parchment — that root colour is what iOS paints in unrasterised checkerboard
      tiles during fast flicks, and it must read as paper, not blue (Peter, 2026-07-09). */
   .inkwave-editor-surface.is-phone .inkwave-page-gap-band {
+    /* OVER-bleed: the band centres on its PARENT, which can sit off viewport-centre by paddings/
+       safe-areas — a 200vw sweep hides any such offset (the surface clips horizontal excess).
+       Fixes the white strip at the gap's side (Peter's screenshot, 2026-07-10). */
     /* Same water as desktop — hardcoded to the identical gradient (bands are full-bleed 100vw,
        so the left→right sweep matches the desktop surface). */
     background-color: #00bfa8;
@@ -46,7 +49,7 @@
     /* Full-bleed: the band lives inside the sheet's side padding — without this it stops short of
        the screen edges (parchment strips either side). */
     left: 50%;
-    width: 100vw;
+    width: 200vw;
     transform: translateX(-50%);
   }
 
@@ -533,7 +536,7 @@
      contain:paint scopes each sheet's invalidation to its own box. (2026-07-08) */
   .inkwave-editor-surface.is-phone .inkwave-sheet {
     box-shadow: 0 0 0 1px rgba(80, 50, 10, 0.14);
-    border-radius: 10px;
+    border-radius: 35px;
     contain: paint;
   }
 

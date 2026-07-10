@@ -1117,8 +1117,9 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     return () => { ro.disconnect(); window.removeEventListener('inkwave:pagination-measured', recompute) }
   }, [sheetRef, paperSize, orientation, gapped])
 
-  const logoSize = gapped ? 76 : 32           // bigger mark in the discrete-sheet (gapped) view
-  const pageNumSize = gapped ? '2.6rem' : '1.1rem'
+  const phoneG = isTouchDevice()
+  const logoSize = (gapped ? 76 : 32) * (phoneG ? 1.2 : 1) // bigger mark on phone (Peter, 2026-07-10)
+  const pageNumSize = phoneG ? (gapped ? '3rem' : '1.35rem') : (gapped ? '2.6rem' : '1.1rem') // phone: a few pt bigger, solid black
   const active = hydrated && !gapped && paperSize !== 'scroll' // gapped paints its own sheets; scroll has no pages
 
   return (

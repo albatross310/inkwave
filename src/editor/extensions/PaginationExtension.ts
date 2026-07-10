@@ -33,7 +33,7 @@ import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
-import { PHONE_PAGE_MARGIN, phoneLike, gapEl } from '../pageGap'
+import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
 import { notePerf } from '../perflog'
 
@@ -133,7 +133,7 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
     }
     // Force the reference list onto a fresh page (before the normal overflow check).
     if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
-      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN : Math.max(MARGIN_BOTTOM, pageH - topM - used)
+      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - used)
       const gapTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
@@ -145,7 +145,7 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
       const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
-      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
+      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
       // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height

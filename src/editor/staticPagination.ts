@@ -27,7 +27,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColum
 import { pageBoxPx } from './pageModel'
 import { forceCanonicalContext } from './canonicalMeasure'
 import { gappedPagesEnabled } from './pageView'
-import { PHONE_PAGE_MARGIN, phoneLike, gapEl } from './pageGap'
+import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from './pageGap'
 
 // One page's REGION in the scroll container's content coordinates (live layout px) — the real
 // canonical page grid the minimap + diff-panel page rules consume (replacing the paper-width×√2
@@ -190,7 +190,7 @@ function resolvePicks(blocks: Block[], lines: StaticLine[], picks: Pick[], pageH
   const specs: BreakSpec[] = picks.map((p) => ({
     blockIdx: lines[p.lineIdx].blockIdx,
     charOffset: -1,
-    botMargin: phone ? PHONE_PAGE_MARGIN : Math.max(MARGIN_BOTTOM, pageH - topM - p.brokeUsed),
+    botMargin: phone ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - p.brokeUsed),
     topMargin: phone ? PHONE_PAGE_MARGIN : topM,
   }))
   // Group the mid-block picks by block, resolve each block in one forward pass over its text nodes.
