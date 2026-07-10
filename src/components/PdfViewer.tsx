@@ -140,6 +140,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const docRef = useRef<PdfDoc | null>(null)
   const fitScaleRef = useRef(1)
   const textFitX0Ref = useRef<number | null>(null) // text bbox left (scale-1 px) — fit-to-text h-centering
+  // The fit baseline's raw inputs (page width + text extents, scale-1 px), kept so the LIVE panel
+  // resize can recompute fit-to-text per frame without re-reading the PDF.
+  const fitInputsRef = useRef<{ pageW: number; ext: { x0: number; x1: number } | null } | null>(null)
   const renderTokenRef = useRef(0)
   const hoverRef = useRef(false)
   const offsetRef = useRef(0)          // printed page = sheet + offset
@@ -194,6 +197,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const toolRef = useRef<ToolKind | null>(null); toolRef.current = tool
   const colorRef = useRef(color); colorRef.current = color
   const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
+  const zoomStateRef = useRef(zoom); zoomStateRef.current = zoom // live mirror for the resize tracker
 
   // Context-strip dismiss (Peter, 2026-07-10): the ✕ reclaims the vertical reading space for this
   // open only — the next citation click that brings a quote/context shows the strip again.
@@ -687,6 +691,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         // bbox can never zoom out below whole-page fit or crop wildly; no text layer → page fit.
         const ext = await textExtentsOf(doc as PdfDoc, initialPage ?? 1)
         if (cancelled) return
+        fitInputsRef.current = { pageW: baseVp.width, ext: ext ? { x0: ext.x0, x1: ext.x1 } : null }
         if (ext) {
           const s = (containerW - 2 * TEXT_FIT_INSET) / (ext.x1 - ext.x0)
           fitScaleRef.current = Math.max(pageFit, Math.min(3, 2 * pageFit, s))
@@ -861,6 +866,66 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  // ── LIVE FIT ON PANEL RESIZE (Peter, 2026-07-10) ─────────────────────────────────────────────
+  // While the panel is drag-resized (or the window changes width) at the DEFAULT zoom, the
+  // fit-to-text baseline tracks the live width so the text margins stay snapped to the panel edges
+  // through the whole drag. Per resize frame: recompute the fit from the stored inputs and
+  // CSS-scale the current render (cheap — no page repaint); on settle, ONE sharp re-render at the
+  // new fit (the same instant-transform + settle pattern as the wheel zoom). A manual zoom override
+  // (zoom ≠ 1 — the persisted user zoom) always wins: no tracking until they're back at 100%.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const sc = scrollRef.current, viewer = viewerRef.current
+    if (!sc || !viewer) return
+    let baseW = sc.clientWidth
+    let baseSt: number | null = null // scrollTop at gesture start — frames compose from it
+    let settle: ReturnType<typeof setTimeout> | undefined
+    const fitFor = (w: number): number => {
+      const inputs = fitInputsRef.current
+      if (!inputs) return fitScaleRef.current
+      const containerW = w - 24
+      const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
+      return inputs.ext
+        ? Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / (inputs.ext.x1 - inputs.ext.x0)))
+        : pageFit
+    }
+    const ro = new ResizeObserver(() => {
+      const w = sc.clientWidth
+      if (w === baseW) return
+      // Manual zoom wins; rotation swaps the page dims out from under the stored inputs — skip both.
+      if (zoomStateRef.current !== 1 || rotationRef.current % 360 !== 0) { baseW = w; return }
+      const newFit = fitFor(w)
+      const r = newFit / fitScaleRef.current // vs the RENDERED fit baseline
+      if (baseSt == null) baseSt = sc.scrollTop
+      viewer.style.transformOrigin = '0 0'
+      viewer.style.transform = `scale(${r})`
+      sc.scrollTop = baseSt * r // top-left origin ⇒ scaling scroll holds the top content line
+      if (textFitX0Ref.current != null)
+        sc.scrollLeft = Math.max(0, textFitX0Ref.current * fitScaleRef.current * r - TEXT_FIT_INSET)
+      clearTimeout(settle)
+      settle = setTimeout(() => {
+        baseW = sc.clientWidth
+        baseSt = null
+        const fit = fitFor(sc.clientWidth)
+        if (fit === fitScaleRef.current) { viewer.style.transform = ''; viewer.style.transformOrigin = ''; return }
+        const st = sc.scrollTop
+        const unfreeze = freezeViewport() // cover the teardown+repaint — no blank flash
+        fitScaleRef.current = fit
+        void renderPages(fit * zoomStateRef.current).then(async () => {
+          viewer.style.transform = ''
+          viewer.style.transformOrigin = ''
+          sc.scrollTop = st // the per-frame math already put the right content position here
+          if (textFitX0Ref.current != null) sc.scrollLeft = Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
+          await renderVisibleNow(renderTokenRef.current)
+          requestAnimationFrame(() => requestAnimationFrame(unfreeze))
+        }).catch(unfreeze)
+      }, 220)
+    })
+    ro.observe(sc)
+    return () => { ro.disconnect(); clearTimeout(settle) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
 
   function scrollToTarget() {
     const container = scrollRef.current

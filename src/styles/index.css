@@ -55,9 +55,9 @@
 
   .inkwave-editor-surface.is-phone {
     background-image: none; /* phone surface is parchment (checkerboard fix) — no water gradient */
-    padding-right: calc(1rem + var(--iw-pdf-room, 0px));
-    padding-bottom: calc(8rem + var(--iw-pdf-room-bottom, 0px));
-    transition: padding-right 0.18s ease, padding-bottom 0.18s ease;
+    /* NB: no padding here — the phone panel-room padding lives in the LATER .is-phone rule below
+       (its `padding` shorthand would silently kill any longhand set here — it did, 2026-07-10). */
+    transition: padding-top 0.18s ease;
   }
 
   /* Desktop: the surface IS the scroll container, sized to the EDITOR region (viewport minus the PDF
@@ -69,16 +69,16 @@
      in-flow (position: static) so it doesn't cover the diff panel. */
   .inkwave-editor-surface.iw-fill:not(.is-phone) {
     position: fixed;
-    top: 0;
-    /* The PDF panel's side dock insets whichever edge it hugs (right by default; left when the
-       swap-sides toggle moves it — Peter, 2026-07-10). */
+    /* The PDF panel insets whichever edge it docks to (right by default; left via the swap-sides
+       toggle; top on phone-style top docks — Peter, 2026-07-10). */
+    top: var(--iw-pdf-room-top, 0px);
     left: var(--iw-pdf-room-left, 0px);
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
     min-height: 0;
     overflow-y: scroll; /* always reserve + show the vertical bar (auto let it hide) */
     overflow-x: auto;
-    transition: left 0.18s ease, right 0.18s ease, bottom 0.18s ease;
+    transition: top 0.18s ease, left 0.18s ease, right 0.18s ease, bottom 0.18s ease;
     /* TRANSPARENT track (Peter reversed the earlier opaque-grey call, 2026-07-09): the fixed wave
        ::before spans the whole viewport INCLUDING the scrollbar channel, so a transparent track
        lets the waves run all the way through the bar. Only the thumb paints — a translucent pill. */
@@ -124,7 +124,8 @@
   .inkwave-editor-surface.iw-fill:not(.is-phone) { scrollbar-gutter: stable; }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::before {
     /* No 16px scrollbar exclusion any more — the track is transparent, so the waves run all the
-       way through the bar (Peter, 2026-07-09). PDF-panel room still applies (either side). */
+       way through the bar (Peter, 2026-07-09). PDF-panel room still applies (any edge). */
+    top: var(--iw-pdf-room-top, 0px);
     left: var(--iw-pdf-room-left, 0px);
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
@@ -496,7 +497,12 @@
      doesn't change it). */
   .inkwave-editor-surface.is-phone {
     background-color: #f1eadb; /* a shade under the sheet #f7f2e8, so gapped-mode gaps still read as bands */
-    padding: 0 0 8rem;
+    /* PHONE PDF DOCK (Peter, 2026-07-10): the viewer takes the TOP half; padding-top pushes the
+       writing into the bottom half. Body scroll means the content under the panel shifts down by
+       exactly the inset, so the line you were reading lands just below the panel — the scroll
+       anchor comes for free on open AND close. (This rule's shorthand is the ONE owner of the
+       phone surface padding — an earlier longhand would lose to it.) */
+    padding: var(--iw-pdf-room-top, 0px) 0 8rem;
     /* Declarative half of the pinch contract: one-finger pans stay native (smooth body scroll) but
        the browser's own pinch-zoom / double-tap-zoom are off over the editor — Scroll.tsx's
        two-finger handler drives the in-app font zoom instead (and preventDefaults as the
