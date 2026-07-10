@@ -27,7 +27,7 @@ import { scaleFor } from './magnify'
 export type ZoomMode = 'water' | 'text'
 
 /** Cooldown after the last zoom event before the gesture's mode (and cursor) release. */
-export const ZOOM_LATCH_COOLDOWN_MS = 500
+export const ZOOM_LATCH_COOLDOWN_MS = 300
 
 /**
  * The x-line rule: is `clientX` outside the text column of the (first) paper under `root`?
