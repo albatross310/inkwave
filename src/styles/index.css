@@ -135,6 +135,17 @@
     transform-origin: top left;
   }
 
+  /* ZOOM CURSOR (Peter, 2026-07-10): while a ctrl/⌘-wheel zoom gesture is latched (first zoom
+     event → 0.5s after the last — see zoomZone.ts), the whole surface shows a zoom cursor,
+     reflecting the last direction. Class toggles only on latch boundaries / direction flips —
+     no per-frame style writes. The `*` leg beats descendants' own cursors (text carets etc.);
+     !important beats inline cursor styles. Applies to any latch host (live editor surface,
+     SnapshotView's split container). */
+  .iw-zooming-water, .iw-zooming-water *,
+  .iw-zooming-text, .iw-zooming-text * { cursor: zoom-in !important; }
+  .iw-zoom-out.iw-zooming-water, .iw-zoom-out.iw-zooming-water *,
+  .iw-zoom-out.iw-zooming-text, .iw-zoom-out.iw-zooming-text * { cursor: zoom-out !important; }
+
   /* Review comments: commented text gets a soft amber underline (the sticky note is drawn in the
      gutter by CommentNotes). Subtle so it never competes with SCAS/citation colours. */
   .iw-comment {
