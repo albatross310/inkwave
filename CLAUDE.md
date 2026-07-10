@@ -274,9 +274,10 @@ action time — never hold contentJson in state). Autosave failures dispatch `in
   `xvfb-run` (virtual display — headed semantics, zero visible window) as the default, or launch
   args `--window-position=-32000,-32000` as fallback. Headless remains the default where fidelity
   allows. Agent briefs that ask for headed runs must say this.
-- **Notifier (task #27, pending):** Peter's PowerShell toast should fire only on final reports —
-  final reports start with the sentinel "📋 REPORT" so his notification hook can filter on it.
-  Until his hook is updated, keep interim turns content-free anyway.
+- **Notifier (task #27, pending):** final reports start with the sentinel "📋 REPORT" so Peter's
+  PowerShell hook can either FILTER to reports only, or keep all toasts but play a DIFFERENT SOUND
+  for report messages (his preferred option) — audibly distinct without looking. Until the hook is
+  updated, keep interim turns content-free anyway.
 - **Batch the reporting — protect Peter's focus.** He writes (thesis/essays) while agents run;
   every notification breaks his concentration. Do NOT ping per-merge: merge each through the full
   gate as it lands with a bare non-message turn-ending, and send ONE consolidated report when ALL
