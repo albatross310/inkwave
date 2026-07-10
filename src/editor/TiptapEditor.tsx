@@ -417,6 +417,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (barsAnimTimer.current) clearTimeout(barsAnimTimer.current)
     barsAnimTimer.current = setTimeout(() => setBarsAnimating(false), 520) // covers close+defer+open
   }
+  // Comment notes mount only after the review row has landed — their full-doc scan + per-note
+  // getBoundingClientRect were riding the R-tap's frame ("bars lag on opening", 2026-07-11).
+  const [notesReady, setNotesReady] = useState(false)
+  useEffect(() => {
+    if (!reviewOpen) { setNotesReady(false); return }
+    const t = setTimeout(() => setNotesReady(true), 260)
+    return () => clearTimeout(t)
+  }, [reviewOpen])
   function toggleBar(which: 'style' | 'review') {
     const seq = ++barSeqRef.current
     markBarsAnimating()
@@ -2027,7 +2035,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         {/* Review layer — mounted ONLY while the R button is on, so it does ZERO work during normal
             writing (it rescans the doc for comment marks, which was per-keystroke lag otherwise). */}
-        {editor && reviewOpen && <CommentNotes editor={editor} paperRef={paperRef} />}
+        {editor && reviewOpen && notesReady && <CommentNotes editor={editor} paperRef={paperRef} />}
         {/* ReviewBar now renders as the toolbar's second row (see below) — not a floating pill. */}
 
         {/* One sync indicator. Regular browser (File System Access) → local folder only; Firefox/

@@ -595,17 +595,17 @@
     line-height: var(--inkwave-lh, 1.55);
   }
 
-  /* Phone footer toolbar: nine circle buttons must fit a 360px screen. GROW the circles to 39px
-     (the max nine fit inside the pill's 2px of borders — the requested +25% over 36px would need
-     405px) and cap each button's 44px min-WIDTH at the same 39px, so justify-between spreads any
-     remaining slack as gaps on wider screens. Scoped override — desktop keeps the 36px circles +
-     full 44px targets. */
+  /* Phone footer toolbar: the nine circle buttons fill the row edge-to-edge, NEARLY TOUCHING
+     (Peter, 2026-07-11): each circle = the pill width split nine ways, so gaps stay ~1px on any
+     device (375px phone → 41px circles, 430px → 47px) with a tablet cap. Both the visible circle
+     AND the button's 44px min-width take the same size, so justify-between has almost no slack to
+     spread. Scoped override — desktop keeps the 36px circles + full 44px targets. */
   .iw-phone-toolbar .min-w-\[44px\] {
-    min-width: 39px;
+    min-width: clamp(36px, calc((100vw - 6px) / 9), 48px);
   }
   .iw-phone-toolbar .w-9 {
-    width: 39px;
-    height: 39px;
+    width: clamp(36px, calc((100vw - 6px) / 9), 48px);
+    height: clamp(36px, calc((100vw - 6px) / 9), 48px);
   }
 
   /* iOS long-press guard: the whole footer toolbar and every drop-up/picker must never start a

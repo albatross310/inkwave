@@ -61,7 +61,7 @@ function docSets(editor: Editor): string[] {
 }
 
 export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }) {
-  const [, tick] = useState(0)
+  const [rev, tick] = useState(0)
   useEffect(() => {
     const bump = () => tick((n) => n + 1)
     editor.on('update', bump)
@@ -70,7 +70,9 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
   }, [editor])
   const [setMenu, setSetMenu] = useState(false)
 
-  const sets = useMemo(() => docSets(editor), [editor, setMenu]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Only scan the doc for set names when the drop-up is actually open — `sets` renders nowhere
+  // else, and this full-doc walk was riding the R-tap's frame (bar-open lag, 2026-07-11).
+  const sets = useMemo(() => (setMenu ? docSets(editor) : []), [editor, setMenu])
   const cur = activeSet()
   const showAll = showChangesGlobal()
 
@@ -87,7 +89,9 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
 
   // ── Review nav (step through tracked changes; accept/discard) ──
   const navIdxRef = useRef(0)
-  const nChanges = changeRanges(editor).length
+  // Memoed on `rev` (bumped by editor updates + review-state changes): parent re-renders — every
+  // footer toggle re-renders the whole editor tree — must not re-walk the doc.
+  const nChanges = useMemo(() => changeRanges(editor).length, [editor, rev])
   function goToChange(i: number) {
     const chs = changeRanges(editor)
     if (!chs.length) return
