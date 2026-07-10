@@ -305,7 +305,16 @@ export async function listOneDriveFiles(parentId: string | null): Promise<OneDri
   const token = await getSilentToken()
   if (!token) throw new Error('not signed in')
   const base = parentId ? `${GRAPH}/me/drive/items/${parentId}/children` : `${GRAPH}/me/drive/root/children`
-  const res = await fetch(`${base}?$select=id,name,file,cTag,eTag,size,lastModifiedDateTime&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
+  // The enriched $select feeds the open cache (change-tags) + recency prefetch. Graph's consumer
+  // (personal) drives are pickier about $select/$orderby combinations than the docs admit, and a
+  // rejected field would 400 the WHOLE listing — the picker regression ("not seeing the files",
+  // 2026-07-10). So: any failure of the enriched request retries the proven pre-cache minimal
+  // listing before erroring. Files then still list + open; the byte cache just misses (safe).
+  let res = await fetch(`${base}?$select=id,name,file,cTag,eTag,size,lastModifiedDateTime&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) {
+    console.warn(`[inkwave] enriched OneDrive listing failed (${res.status}) — retrying the minimal listing`)
+    res = await fetch(`${base}?$select=id,name,file&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
+  }
   if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
   const data = (await res.json()) as { value: Array<{ id: string; name: string; file?: unknown; cTag?: string; eTag?: string; size?: number; lastModifiedDateTime?: string }> }
   return data.value

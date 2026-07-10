@@ -84,6 +84,7 @@ import { setDocSource, getDocSource } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { getCachedOpen, putCachedOpen, warmCloudOpen, type OpenCacheProvider } from '../storage/openCache'
 import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
+import { reportOpenError, takeOpenError } from '../storage/openError'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
 import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
@@ -291,6 +292,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // PWA install prompt — captured here so both OptionsMenu and InstallPromptBanner can use it.
   const [installPrompt, setInstallPrompt] = useState<any>(null)
   const [fileOpenError, setFileOpenError] = useState<string | null>(null)
+  // Open failures happen while the initiating editor is UNMOUNTED (open-begin hides the doc), so
+  // the message parks in storage/openError and the instance that mounts after the restore shows it.
+  useEffect(() => {
+    const show = () => { const m = takeOpenError(); if (m) setFileOpenError(m) }
+    show()
+    window.addEventListener('inkwave:open-error', show)
+    return () => window.removeEventListener('inkwave:open-error', show)
+  }, [])
   useEffect(() => {
     const onPrompt = (e: Event) => { e.preventDefault(); setInstallPrompt(e) }
     const onInstalled = () => setInstallPrompt(null)
@@ -1317,14 +1326,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     openPerfStart('gdrive')
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const got = await fetchCloudBytes('gdrive', f.id, f.tag, !!f.fresh, getGDriveFileTag, downloadGoogleDriveFileBlob)
-    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
+    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); reportOpenError(`Couldn't download "${f.name}" from Google Drive — check the connection and try again.`); return }
     openPerfStep('download', got.how)
     void addRecentGDriveFolder({ id: f.folderId === 'root' ? '' : f.folderId, name: f.folderName })
     try {
       await openInkwaveFile(new File([got.blob], f.name), { googleFileId: f.id })
       setGdriveOpenerOpen(false) // see OneDrive note — same-id opens don't remount the editor
     } catch (err) {
-      setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
+      reportOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
   }
   // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.
@@ -1340,7 +1349,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     // Bytes, not text — the opener can pick a .studio.gz; readStudioFile gunzips by magic bytes.
     const got = await fetchCloudBytes('onedrive', f.itemId, f.cTag, !!f.fresh, getOneDriveItemTag, downloadOneDriveFile)
     // NEVER fail silently ("tapped the file, nothing happened" on phone): every exit is visible.
-    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); setFileOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
+    if (!got) { openPerfAbort(); window.dispatchEvent(new Event('inkwave:open-failed')); reportOpenError(`Couldn't download "${f.name}" from OneDrive — check the connection and try again.`); return }
     openPerfStep('download', got.how)
     void addRecentFolder(f.folder)
     try {
@@ -1349,7 +1358,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // remount the editor (key unchanged), so nothing else would dismiss the panel.
       setOdOpenerOpen(false)
     } catch (err) {
-      setFileOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
+      reportOpenError(err instanceof Error ? err.message : `Could not open "${f.name}"`)
     }
   }
 
@@ -2215,7 +2224,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
-                onFileOpenError={setFileOpenError}
+                onFileOpenError={reportOpenError}
               />
               <InstallPromptBanner installPrompt={installPrompt} />
             </div>
