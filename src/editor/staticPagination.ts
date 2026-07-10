@@ -323,8 +323,9 @@ export function paginateStaticDoc(opts: {
   let specs = cacheGet(key)
   if (!specs) {
     // CANONICAL MEASUREMENT — the same forced context as the editor (see canonicalMeasure.ts),
-    // plus the snapshot pane's own Ctrl+wheel zoom, which is a CSS `zoom` on a wrapper INSIDE the
-    // sheet: force it to 1 too, or the measured line grid would scale with the diff zoom.
+    // plus the snapshot pane's own fit-capped zoom, which is a CSS `zoom` on the PAPER (or any
+    // wrapper between the content and the surface): force every inline zoom on that path to 1,
+    // or the measured line grid would scale with the pane zoom.
     // Set → measure → restore is fully synchronous — the forced layout never paints.
     const restore = forceCanonicalContext(
       fluid
@@ -333,7 +334,7 @@ export function paginateStaticDoc(opts: {
       { pageWidthPx, sideMarginPx: getSideMarginPx() },
     )
     const zoomHosts: Array<{ el: HTMLElement; prev: string }> = []
-    for (let p = root.parentElement; p && p !== sheet.parentElement; p = p.parentElement) {
+    for (let p = root.parentElement; p && p !== surface; p = p.parentElement) {
       const z = p.style.getPropertyValue('zoom')
       if (z && z !== '1') { zoomHosts.push({ el: p, prev: z }); p.style.setProperty('zoom', '1') }
     }
@@ -374,23 +375,31 @@ export function paginateStaticDoc(opts: {
     }
   }
 
-  // Band geometry read + panel apply — the extension's readBands/applyBands contract, minus the
-  // transform-magnify scale (the snapshot pane never magnifies; its CSS `zoom` scales layout AND
-  // rects consistently, so visual px ARE sheet-local px here).
+  // Band geometry read + panel apply — the extension's readBands/applyBands contract. With the
+  // fit-capped pane zoom on the PAPER, the sheet (and its band rects) render VISUALLY scaled while
+  // the panel styles are sheet-LOCAL px — convert rect-derived distances by the effective zoom
+  // (rect width / clientWidth, exactly 1 when unzoomed), the CSS-`zoom` analog of scaleFor().
   const readBands = (): { tops: number[]; heights: number[]; total: number } | null => {
     if (!layer) return null
-    const sheetTop = sheet.getBoundingClientRect().top
+    const sr = sheet.getBoundingClientRect()
+    const zr = sheet.clientWidth > 0 ? sr.width / sheet.clientWidth : 1
+    const z = Math.abs(zr - 1) < 0.01 ? 1 : zr // sub-pixel rect noise at zoom 1 → exactly 1
     const tops: number[] = []
     const heights: number[] = []
     sheet.querySelectorAll('.inkwave-page-gap-band').forEach((band) => {
       const r = (band as HTMLElement).getBoundingClientRect()
-      tops.push(r.top - sheetTop)
-      heights.push(r.height)
+      tops.push((r.top - sr.top) / z)
+      heights.push(r.height / z)
     })
     // Content height with the panel layer hidden — the absolutely-positioned panels extend
-    // scrollHeight themselves (the "never retracts" fixpoint the extension hit).
+    // scrollHeight themselves (the "never retracts" fixpoint the extension hit). The full-final-
+    // page minHeight (applyBands) must be neutralized for the same reason: it would hold the
+    // previous extension and ratchet the content height forever.
     layer.style.display = 'none'
+    const prevMin = sheet.style.minHeight
+    sheet.style.minHeight = ''
     const total = sheet.scrollHeight
+    sheet.style.minHeight = prevMin
     layer.style.display = ''
     return { tops, heights, total }
   }
@@ -405,7 +414,20 @@ export function paginateStaticDoc(opts: {
       segs.push({ top: cursor, height: top - cursor })
       cursor = bottom
     }
-    segs.push({ top: cursor, height: Math.max(0, geo.total - cursor) })
+    // FULL FINAL PAGE (MS-Word style, Peter 2026-07-10): a barely-filled last page still paints as
+    // a whole sheet. Full height = the average of the previous ≤5 page regions in this SAME
+    // geometry (exact under any zoom / phone reflow, where raw canonical pageH would mismatch the
+    // live layout); a single-page doc falls back to canonical pageH (its live height at zoom 1).
+    const prior = segs.map((s) => s.height)
+    const fullH = prior.length
+      ? prior.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, prior.length)
+      : pageH
+    segs.push({ top: cursor, height: Math.max(Math.max(0, geo.total - cursor), Math.round(fullH)) })
+    // Give the extended panel somewhere to paint + keep the scroll range consistent with the
+    // visual: the sheet's min-height covers the last panel's bottom (readBands neutralizes this
+    // during its total read, so it can retract when content shrinks).
+    const last = segs[segs.length - 1]
+    sheet.style.minHeight = `${Math.max(Math.round(pageH), Math.ceil(last.top + last.height))}px`
     while (layer.children.length > segs.length) layer.lastElementChild!.remove()
     while (layer.children.length < segs.length) {
       const d = document.createElement('div')

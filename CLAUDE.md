@@ -182,6 +182,14 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   snapshot.id so the DOM surgery never fights React). Minimap + diff-panel page numbers now come
   from those REAL canonical page regions (the old paper-width×√2 drift is fixed). Scrub diffs are
   cached + read-ahead ±20 in idle time (`provenance/diffCache.ts`) so hard scrubs hit only cache.
+  2026-07-10 batch: MIDLINE PAGE SYNC (driver pane's midline crossing a page boundary flies the
+  follower to that page — editor→diff unless bijMode 'both'; diff→editor only in 'off'; crossings
+  retarget in-flight jumps, nav-settle window suppresses scrub/reposition); doc-pane zoom is a
+  fit-capped CSS `zoom` on the PAPER (min(diffZoom, paneFit) — full page always fits the pane;
+  phone pinned to 1 = edge-to-edge; staticPagination forces it to 1 in the canonical window +
+  converts visual→local px in the band paint); FULL FINAL PAGE (last sheet extends to avg of prior
+  ≤5 page regions, sheet min-height grows to cover — recompute's baseline must respect lastMinH or
+  the RO ping-pongs; same treatment in PaginationExtension); minimap wheel = exactly 2× the pane.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

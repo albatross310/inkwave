@@ -8,6 +8,9 @@ import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
 import { opsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
 import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
+import { pageBoxPx } from '../editor/pageModel'
+import { getPaperSize, getOrientation } from '../editor/pageSettings'
+import { WATER_MARGIN_PX } from '../editor/magnify'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
@@ -144,7 +147,7 @@ function buildDiffNodes(
   let k = 0
   for (let pg = 1; pg <= pages; pg++) {
     out.push(
-      <div key={`pr${k++}`} aria-hidden="true" style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.32)', margin: pg === 1 ? '2px 0 7px' : '15px 0 7px' }}>
+      <div key={`pr${k++}`} aria-hidden="true" data-page={pg} style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.32)', margin: pg === 1 ? '2px 0 7px' : '15px 0 7px' }}>
         <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 700, color: 'rgba(92,45,138,0.72)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
           <img src="/inkwave-logo-v7.png" alt="" style={{ width: 15, height: 15, opacity: 0.72 }} />{pg}
         </span>
@@ -620,7 +623,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
       if (!el) return
       e.preventDefault()
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // line/page → px
-      el.scrollTop += e.deltaY * unit * 3 // moderate; the editor's own scroll handlers take it from here
+      el.scrollTop += e.deltaY * unit * 2 // exactly DOUBLE the doc pane's native rate (Peter, 2026-07-10)
     }
     grid.addEventListener('wheel', onWheel, { passive: false })
     return () => grid.removeEventListener('wheel', onWheel)
@@ -922,7 +925,7 @@ function SplitDiffView({
     const t = setTimeout(compute, 400) // after fonts/pagination settle
     const ro = new ResizeObserver(() => compute()); ro.observe(L)
     return () => { cancelAnimationFrame(id); clearTimeout(t); ro.disconnect() }
-  }, [snapshot.id, diffZoom, pageGeo])
+  }, [snapshot.id, pageGeo])
 
   // Publish split position as a CSS variable so the parent can position the right nav.
   useEffect(() => {
@@ -971,9 +974,60 @@ function SplitDiffView({
     return () => { disposed = true; pagRef.current?.destroy(); pagRef.current = null }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.id, ops])
-  // Diff zoom reflows the pane (CSS zoom) — breaks are DOM positions and don't move, but the
-  // rendered band geometry does: reposition the panels + refresh pageGeo in the same commit.
-  useLayoutEffect(() => { pagRef.current?.repaint() }, [diffZoom])
+  // ── Fit cap + effective pane zoom (Peter, 2026-07-10 — the main editor's fit-to-width floor) ──
+  // The doc pane's zoom lives as CSS `zoom` on the PAPER (applied imperatively below), so scaling
+  // shrinks the whole page — sheet, panels, gaps, text — and a narrow pane always shows the FULL
+  // page, never a horizontally-cut one. fit = (paneWidth − water margins) / canonical page width,
+  // recomputed on every pane resize (split drag, window resize, side panel). Manual zoom below the
+  // cap works; zooming past fit is capped, exactly like magnify.ts's fitScale. PHONE: the pane
+  // defaults to the phone view — fluid full-width paper + PHONE_PAGE_MARGIN (staticPagination), so
+  // effective zoom is pinned to 1 and the page spans edge-to-edge with no side water.
+  const [paneFit, setPaneFit] = useState(1)
+  useLayoutEffect(() => {
+    const L = leftScrollRef.current
+    if (!L || isPhone || getPaperSize() === 'scroll') return // phone/fluid: paper is already pane-width
+    const { pageWidthPx } = pageBoxPx({
+      paperSize: getPaperSize() === 'letter' ? 'letter' : 'a4',
+      orientation: getOrientation(), topMarginPx: 0, bottomMarginPx: 0,
+    })
+    let raf = 0
+    const compute = () => setPaneFit((prev) => {
+      const next = Math.max(0.2, (L.clientWidth - 2 * WATER_MARGIN_PX) / pageWidthPx)
+      return Math.abs(next - prev) < 0.002 ? prev : next
+    })
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(compute) })
+    ro.observe(L)
+    compute()
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
+  }, [isPhone])
+  const effZoom = isPhone || getPaperSize() === 'scroll' ? 1 : Math.min(diffZoom, paneFit)
+  // Apply the effective zoom to the paper + reposition the band panels in the SAME commit — the
+  // breaks are DOM positions and never move, only the rendered geometry does. staticPagination
+  // forces this zoom to 1 inside its canonical measure window and converts visual→local px in its
+  // band paint, so the CSS-`zoom`-breaks-the-paginator rule (CLAUDE.md) doesn't apply here.
+  useLayoutEffect(() => {
+    const paper = leftScrollRef.current?.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+    if (paper) {
+      if (effZoom === 1) paper.style.removeProperty('zoom')
+      else paper.style.setProperty('zoom', String(+effZoom.toFixed(4)))
+    }
+    pagRef.current?.repaint()
+  }, [effZoom, snapshot.id])
+
+  // ── Midline PAGE SYNC (Peter, 2026-07-10) ────────────────────────────────────────────────────
+  // When the DRIVER pane's midline crosses a page boundary, the FOLLOWER flies to that page — the
+  // editor's boundaries are the real canonical page regions (pageGeo); the diff panel's are its
+  // page rules ([data-page], wired to the same breaks). Fires ONLY where the continuous bijection
+  // isn't already driving that direction (it would fight the spring / the per-frame inverse map):
+  // editor→diff jumps unless bijMode 'both'; diff→editor jumps only in 'off'. Hysteresis: pages
+  // are latched per pane — one jump per boundary CROSSING (a further crossing mid-flight simply
+  // RETARGETS the follower); snapshot navigation re-latches without jumping (nav-settle window).
+  const pageGeoRef = useRef<StaticPageGeo[] | null>(null)
+  pageGeoRef.current = pageGeo
+  const rulesRef = useRef<Array<{ page: number; top: number }>>([]) // diff-pane page rules, content coords
+  const lastLeftPageRef = useRef(0)   // 0 = unlatched (fresh snapshot)
+  const lastRightPageRef = useRef(0)
+  const pageFlightUntilRef = useRef(0) // nav-settle window: crossings latch silently until it lapses
 
   // ── Cross-pane highlight (injected CSS + data-attrs — zero React re-renders) ──
   // Inject once; CSS targets .diff-del / .diff-add spans that carry data-hover / data-active.
@@ -1313,6 +1367,17 @@ function SplitDiffView({
         knotsRef.current = ks
         // (No resting clamp here — it repositioned the diff pane independently of the editor on every layout
         //  recompute, breaking the top/bottom lock. The wheel/pan clamp in onRightScroll handles end-at-lock.)
+        // Diff-pane page-rule positions (content coords) — the midline page sync reads these to
+        // track which page section the diff midline is on without per-frame layout reads.
+        const rules: Array<{ page: number; top: number }> = []
+        R.querySelectorAll('[data-page]').forEach((el) => {
+          rules.push({
+            page: Number((el as HTMLElement).getAttribute('data-page')),
+            top: (el as HTMLElement).getBoundingClientRect().top - rRect.top + R.scrollTop,
+          })
+        })
+        rules.sort((a, b) => a.top - b.top)
+        rulesRef.current = rules
       }
     }
     // rAF-coalesce: a window resize fires many events per drag; run the heavy layout-read sweep at most once
@@ -1322,7 +1387,9 @@ function SplitDiffView({
     window.addEventListener('resize', onResize)
     return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', onResize) }
   // pageGeo: the static paginator's gaps shift every diff's content-y — re-cache centres/knots after they land.
-  }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx, pageGeo])
+  // totalPages/diffPages: the diff panel re-renders its page rules off these → re-read rule positions.
+  // effZoom: the fit-capped paper zoom reflows the editor pane the same way diffZoom reflows the diff pane.
+  }, [snapshot.id, diffZoom, effZoom, vertical, splitPct, sidePanelPx, pageGeo, totalPages, diffPages])
 
   // REVERSE SYNC (bijection): scrolling the DIFF panel maps the EDITOR to the inverse-bijection position
   // INSTANTLY — a true 1:1 bijection, no trailing. The DRIVER is simply whichever pane the CURSOR is over
@@ -1369,6 +1436,91 @@ function SplitDiffView({
     }
     R.addEventListener('scroll', onRightScroll, { passive: true })
     return () => { R.removeEventListener('scroll', onRightScroll) }
+  }, [snapshot.id])
+
+  // ── Midline page-crossing detector (see the refs/comment at pageGeoRef above) ────────────────
+  useEffect(() => {
+    const L = leftScrollRef.current, R = rightScrollRef.current
+    if (!L || !R) return
+    // Fresh snapshot: suppress jumps through the nav-settle window (the midline-anchor / 'longest'
+    // reposition is not a user crossing), and EAGER-latch both panes' pages once layout lands so
+    // the very first genuine crossing after open isn't eaten by an unlatched ref.
+    lastLeftPageRef.current = 0
+    lastRightPageRef.current = 0
+    pageFlightUntilRef.current = performance.now() + 450
+    let latchRaf = requestAnimationFrame(() => {
+      latchRaf = requestAnimationFrame(() => {
+        if (lastLeftPageRef.current === 0) lastLeftPageRef.current = pageOfLeft()
+        if (lastRightPageRef.current === 0) lastRightPageRef.current = pageOfRight()
+      })
+    })
+    const pageOfLeft = (): number => {
+      const geo = pageGeoRef.current
+      if (!geo || !geo.length) return 0
+      const yc = L.scrollTop + L.clientHeight * midFracRef.current
+      let k = 0
+      while (k < geo.length - 1 && geo[k + 1].top <= yc) k++
+      return k + 1
+    }
+    const pageOfRight = (): number => {
+      const rules = rulesRef.current
+      if (!rules.length) return 0
+      const yc = R.scrollTop + R.clientHeight * midFracRef.current
+      let pg = rules[0].page
+      for (const r of rules) { if (r.top <= yc) pg = r.page; else break }
+      return pg
+    }
+    // The jump = the same smooth fly the diff-click bijection uses. Targets land the page's start
+    // AT the midline (its rule / its sheet top), mirroring how a page begins under the reading line.
+    const flyRightToPage = (pg: number) => {
+      const rule = R.querySelector(`[data-page="${pg}"]`) as HTMLElement | null
+      if (!rule) return
+      const top = rule.getBoundingClientRect().top - R.getBoundingClientRect().top + R.scrollTop
+      diffFlightRef.current = true // diffs light off the diff midline while it flies (same as a click flight)
+      window.setTimeout(() => { diffFlightRef.current = false }, 900)
+      R.scrollTo({ top: Math.max(0, top - R.clientHeight * midFracRef.current + 6), behavior: 'smooth' })
+    }
+    const flyLeftToPage = (pg: number) => {
+      const geo = pageGeoRef.current
+      const region = geo?.[pg - 1]
+      if (!region) return
+      const target = Math.max(0, region.top - L.clientHeight * midFracRef.current + 6)
+      L.scrollTo({ top: target, behavior: 'smooth' })
+      anchorRatioRef.current = (target + L.clientHeight * midFracRef.current) / Math.max(1, L.scrollHeight)
+    }
+    // Crossings on the DRIVER pane RETARGET any in-flight jump (a new smooth scrollTo on the same
+    // follower simply supersedes — a fast multi-page scroll lands on the final page instead of a
+    // stale one). Loops can't happen: the follower's own flight-induced crossings fail the driver
+    // gate. Suppression covers only the nav-settle window and minimap drags (gentleFollow).
+    let tick = false
+    const step = () => {
+      tick = false
+      const suppressed = performance.now() < pageFlightUntilRef.current || gentleFollowRef.current
+      const lp = pageOfLeft()
+      if (lp && lp !== lastLeftPageRef.current) {
+        const crossed = lastLeftPageRef.current !== 0
+        lastLeftPageRef.current = lp
+        // editor→diff: only while the editor drives, and only where the forward spring ISN'T
+        // already syncing continuously (bijMode 'both' owns that direction).
+        if (crossed && !suppressed && driverRef.current === 'left' && bijectionRef.current !== 'both') flyRightToPage(lp)
+      }
+      const rp = pageOfRight()
+      if (rp && rp !== lastRightPageRef.current) {
+        const crossed = lastRightPageRef.current !== 0
+        lastRightPageRef.current = rp
+        // diff→editor: only while the diff drives, and only in 'off' — 'both'/'reverse' already
+        // drive the editor per-frame via the inverse bijection (a jump would fight it).
+        if (crossed && !suppressed && driverRef.current === 'right' && bijectionRef.current === 'off') flyLeftToPage(rp)
+      }
+    }
+    const onScroll = () => { if (!tick) { tick = true; requestAnimationFrame(step) } }
+    L.addEventListener('scroll', onScroll, { passive: true })
+    R.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      cancelAnimationFrame(latchRaf)
+      L.removeEventListener('scroll', onScroll)
+      R.removeEventListener('scroll', onScroll)
+    }
   }, [snapshot.id])
 
   // Right-click-DRAG the diff pane to scroll it (for mouse users with no wheel/trackpad) — the editor flies
@@ -1619,7 +1771,10 @@ function SplitDiffView({
       {/* LEFT-aligned to the pane edge (flex-start + left 0): the narrower toggles' left edges sit
           flush against the diff panel's edge instead of floating centred under the wider counter. */}
       <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }}>
-        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
+        {/* The counter pill is wider than the toggles: CENTRE it over their column (x-centre =
+            toggle width / 2) so its extra width extends LEFT over the pane boundary/diff panel,
+            never rightward over the document text (Peter, 2026-07-10). */}
+        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none', transform: 'translateX(calc(clamp(52px, 9vw, 78px) / 2 - 50%))' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
@@ -1627,7 +1782,9 @@ function SplitDiffView({
         {/* key={snapshot.id}: each snapshot gets a FRESH subtree, so the static paginator's DOM
             surgery (gap insertion splits text nodes) can never desync React's reconciliation —
             React never patches inside a subtree it replaced wholesale. */}
-        <Scroll phone={isPhone}><div key={snapshot.id} style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
+        {/* Pane zoom now lives on the PAPER (fit-capped effZoom, imperative — see the fit-cap
+            effect) so a narrow pane scales the whole page down instead of cutting it. */}
+        <Scroll phone={isPhone}><div key={snapshot.id}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
       </div>
       {nav?.show && (<>
         <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
