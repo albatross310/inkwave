@@ -5,6 +5,7 @@
 
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { listSnapshotMeta } from '../provenance/snapshots'
 import { useNavigate } from 'react-router'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMeta, InkwaveDocument } from '../types/document'
@@ -173,13 +174,32 @@ export function OptionsMenu({
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [menuOpen])
 
-  const items: Array<{ label: string; run: () => void }> = [
+  // Two columns (Peter, 2026-07-10): RIGHT = file ops ending with Export; LEFT = the rest, ending
+  // with Sign in/Logout (AccountMenuItems renders after the left column).
+  const fileItems: Array<{ label: string; run: () => void }> = [
     { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
     { label: 'Open…', run: () => setModal('upload') },
     { label: 'Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },
     { label: 'Save as…', run: () => setModal('savecopy') },
     { label: 'Export…', run: () => setModal('export') },
+  ]
+  const items: Array<{ label: string; run: () => void }> = [
+    {
+      label: 'Provenance',
+      run: () => {
+        // Open the snapshot view at the MOST RECENT snapshot of the active doc.
+        void (async () => {
+          try {
+            const docId = localStorage.getItem('inkwave:activeDocumentId')
+            if (!docId) return
+            const snaps = await listSnapshotMeta(docId)
+            const last = snaps[snaps.length - 1]
+            if (last) window.open(`/snapshot?doc=${encodeURIComponent(docId)}&snap=${encodeURIComponent(last.id)}`, '_blank', 'noopener')
+          } catch { /* no snapshots yet */ }
+        })()
+      },
+    },
     { label: 'Print', run: () => onPrint?.() },
     { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
@@ -240,17 +260,31 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-no-print z-[60] w-44 py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif" style={menuStyle}
+          <div role="menu" className="iw-nightable iw-no-print z-[60] w-[21rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
-            {items.map(it => (
-              <button key={it.label} role="menuitem" type="button"
-                onClick={() => { setMenuOpen(false); it.run() }}
-                className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
-              >
-                {it.label}
-              </button>
-            ))}
-            <AccountMenuItems onClose={() => setMenuOpen(false)} />
+            {/* LEFT column: Provenance/Print/Verify/About/Privacy … ending with Sign in/Logout. */}
+            <div className="flex-1 border-r border-stone-100">
+              {items.map(it => (
+                <button key={it.label} role="menuitem" type="button"
+                  onClick={() => { setMenuOpen(false); it.run() }}
+                  className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                >
+                  {it.label}
+                </button>
+              ))}
+              <AccountMenuItems onClose={() => setMenuOpen(false)} />
+            </div>
+            {/* RIGHT column: file ops, ending with Export. */}
+            <div className="flex-1">
+              {fileItems.map(it => (
+                <button key={it.label} role="menuitem" type="button"
+                  onClick={() => { setMenuOpen(false); it.run() }}
+                  className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                >
+                  {it.label}
+                </button>
+              ))}
+            </div>
           </div>
         </>,
         document.body,
