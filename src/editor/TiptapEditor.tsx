@@ -382,8 +382,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // One bar fully retreats before the other rises (Peter, 2026-07-10: pressing S then R had the
   // style bar riding the review bar). 240ms = the collapse transition + a beat.
   const barSeqRef = useRef(0)
+  const [barsAnimating, setBarsAnimating] = useState(false)
+  const barsAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function markBarsAnimating() {
+    setBarsAnimating(true)
+    if (barsAnimTimer.current) clearTimeout(barsAnimTimer.current)
+    barsAnimTimer.current = setTimeout(() => setBarsAnimating(false), 520) // covers close+defer+open
+  }
   function toggleBar(which: 'style' | 'review') {
     const seq = ++barSeqRef.current
+    markBarsAnimating()
     if (which === 'review') {
       if (reviewOpen) { setReviewOpen(false); return }
       if (styleBarOpen) {
@@ -1968,7 +1976,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         >
           <div
             ref={footerRef}
-            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm overflow-hidden ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             onPointerDown={isTouch ? (e) => {
               // Prevent the toolbar from stealing focus from the editor on iOS.
               // Without this, tapping a toolbar button dismisses the text selection
