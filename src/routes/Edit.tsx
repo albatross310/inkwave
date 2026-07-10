@@ -59,7 +59,7 @@ export function Edit() {
       // the waves into paper — they seemed to die during the blend.
       if (isTouchDevice()) { setShellUp('down'); return }
       setShellUp('fading')
-      t = window.setTimeout(() => setShellUp('down'), 830) // 0.8s fade (Peter, 2026-07-10)
+      t = window.setTimeout(() => setShellUp('down'), isTouchDevice() ? 830 : 1030) // 0.8s phone / 1s desktop fade
     }
     window.addEventListener('inkwave:editor-revealed', onRevealed)
     return () => { clearTimeout(t); window.removeEventListener('inkwave:editor-revealed', onRevealed) }

@@ -264,18 +264,18 @@
      sparkle layer's fade runs exactly the platform's coast length without duplicating the numbers. */
   @keyframes iw-wave-coast-l {
     from { transform: translate3d(var(--wave-t, 0px), 0, 0); }
-    to   { transform: translate3d(calc(var(--wave-t, 0px) - var(--wave-coast-dist, 72px)), 0, 0); }
+    to   { transform: translate3d(calc(var(--wave-t, 0px) - var(--wave-coast-dist, 60px)), 0, 0); }
   }
   @keyframes iw-wave-coast-r {
     from { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
-    to   { transform: translate3d(calc(var(--wave-coast-dist, 72px) - var(--wave-t, 0px)), 0, 0); }
+    to   { transform: translate3d(calc(var(--wave-coast-dist, 60px) - var(--wave-t, 0px)), 0, 0); }
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
-    animation: iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-l var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
-    animation: iw-wave-coast-r var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-r var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
 
@@ -321,11 +321,11 @@
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast::before {
-    animation: iw-wave-coast-l var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-l var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast::after {
-    animation: iw-wave-coast-r var(--wave-coast-T, 3s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
+    animation: iw-wave-coast-r var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
     will-change: transform;
   }
 
@@ -383,7 +383,7 @@
     bottom: var(--iw-pdf-room-bottom, 0px);
   }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-sparks {
-    animation: iw-spark-fade var(--wave-coast-T, 3s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    animation: iw-spark-fade var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
     will-change: opacity;
   }
   .iw-twk-field {

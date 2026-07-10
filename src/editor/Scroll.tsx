@@ -792,7 +792,7 @@ export function Scroll({
       // phone (2s). On phone the waves cease to exist the moment the classes drop (parchment
       // surface, ::before display:none), so the sway base/--wave-x write is inert there — kept
       // unconditional for one code path.
-      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 72)
+      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 60) // v·T/3: 2s/48 phone, 2.5s/60 desktop
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
@@ -864,7 +864,7 @@ export function Scroll({
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the
         // wave S-decay — doc, text and pills fade in together underneath, over coasting waves.
-        ...(fadingOut ? { opacity: 0, transition: 'opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1)', pointerEvents: 'none' as const } : null),
+        ...(fadingOut ? { opacity: 0, transition: `opacity ${phone ? 0.8 : 1}s cubic-bezier(0.4, 0, 0.2, 1)`, pointerEvents: 'none' as const } : null),
       } as React.CSSProperties}>
       {/* Twinkle host — sparkles + accent dashes live in here as generated layers, NOT on the wave
           ::before/::after (fading/blinking those would dim the wave lines too). Rendered EMPTY
@@ -916,7 +916,7 @@ export function Scroll({
           // the fade lands at 2.0s, the moment the waves reach rest.
           visibility: revealed ? 'visible' : 'hidden',
           opacity: revealed ? 1 : 0,
-          transition: 'opacity 800ms cubic-bezier(0.4, 0, 0.2, 1)', // both platforms: 0.8s atomic fade (Peter, 2026-07-10)
+          transition: `opacity ${phone ? 800 : 1000}ms cubic-bezier(0.4, 0, 0.2, 1)`, // 0.8s phone / 1s desktop atomic fade
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven
