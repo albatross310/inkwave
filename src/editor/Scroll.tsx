@@ -681,6 +681,10 @@ export function Scroll({
   // 'anim' → 'coast' atomically in one state).
   // Freeze the compositor animation's current offset into --wave-t and swap to the coast class —
   // shared by the desktop trigger (revealed, below) and the phone trigger ('inkwave:reveal-imminent').
+  // coastT0 = the timeline moment --wave-t was sampled at (drift startTime + currentTime): the ONE
+  // coast clock. The coast-start layout effect backdates the coast CSS animations to it, and the
+  // twinkle fields coast from the same number, so tiles + twinkles share one start by construction.
+  const coastT0Ref = useRef(0)
   const freezeToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
@@ -688,16 +692,21 @@ export function Scroll({
     // compositor-authoritative (the computed transform lags a variable 1-2+ frames — the old fixed
     // "lead compensation" guess). Drift keyframes are linear 0 → -140px over 1.944s.
     let tx = 0
+    let t0 = (document.timeline?.currentTime as number | null) ?? performance.now()
     try {
       const a = el.getAnimations({ subtree: true })
         .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
       if (typeof a?.currentTime === 'number') {
         tx = -140 * (((a.currentTime as number) / 1000) % 1.944) / 1.944
+        // The exact timeline moment tx corresponds to — NOT performance.now(), which runs ahead
+        // of the frozen frame clock by however long this task has been running.
+        if (typeof a.startTime === 'number') t0 = (a.startTime as number) + (a.currentTime as number)
       } else {
         const m = getComputedStyle(el, '::before').transform
         if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
       }
     } catch { /* transform unreadable → coast from 0 */ }
+    coastT0Ref.current = t0
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
   }
@@ -729,10 +738,30 @@ export function Scroll({
   // ±280px overdraw is exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping
   // the class while setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and
   // the sway then continues from that offset (base = txFinal − scrollTop·0.06, rebased here).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (waveMode !== 'coast') return
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
+    // BACKDATE the coast animations to the freeze clock (2026-07-10, the coast-start tick). A CSS
+    // animation created by the class swap is PLAY-PENDING until the compositor acks a commit — and
+    // the reveal work starves that commit for up to ~300ms (measured). Through that window the
+    // compositor keeps running the LAST committed state (the infinite drift), so when the coast
+    // finally activated it snapped every wave line BACKWARD to --wave-t (≈30px measured) in one
+    // frame, while the WAAPI twinkle fields (already backdated) stayed continuous — the "tick" +
+    // the dashes visibly sliding off their crests. Setting startTime = coastT0 resolves the pending
+    // start NOW: whenever the commit lands, the animation is already mid-flight where the drift
+    // would have been (the coast's initial slope IS the drift velocity, so the residual is the
+    // deceleration over the starved window — sub-pixel in the normal ~1-frame case). The spark
+    // S-fade (iw-spark-fade) rides the same clock so it dies exactly with the coast. This is a
+    // LAYOUT effect so the backdate lands in the same commit as the class swap.
+    try {
+      for (const a of el.getAnimations({ subtree: true })) {
+        const n = (a as CSSAnimation).animationName ?? ''
+        if (n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade') {
+          try { a.startTime = coastT0Ref.current } catch { /* not ready — pending start is the fallback */ }
+        }
+      }
+    } catch { /* getAnimations unavailable → original pending-start behaviour */ }
     let done = false
     const finish = () => {
       if (done) return
@@ -796,7 +825,15 @@ export function Scroll({
   useLayoutEffect(() => {
     const host = twinkleRef.current
     if (!host || !fill) return
-    syncTwinkles(host, { sparks: waveMode !== 'off', dashes: !phone || waveMode !== 'off', mode: waveMode, phone })
+    syncTwinkles(host, {
+      sparks: waveMode !== 'off',
+      dashes: !phone || waveMode !== 'off',
+      mode: waveMode,
+      phone,
+      // The tiles' exact coast clock (see freezeToCoast) — fields must coast from the SAME number
+      // or they shear off the crests by the task-time skew between the freeze and this effect.
+      coastStart: waveMode === 'coast' ? coastT0Ref.current : undefined,
+    })
   }, [fill, phone, waveMode])
 
   return (
