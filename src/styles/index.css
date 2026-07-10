@@ -149,16 +149,16 @@
      SVG data URIs, 28px, hotspot at the lens centre (11,11); keyword fallbacks for engines that
      reject SVG cursors. */
   .iw-zooming-water, .iw-zooming-water * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Cpath d='M6 12 Q8.5 9.5 11 12 T16 12' fill='none' stroke='%2300b4d8' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Ctext x='11' y='15' font-family='Georgia,serif' font-style='italic' font-size='12' font-weight='bold' fill='%2300b4d8' text-anchor='middle'%3Ei%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
   }
   .iw-zooming-text, .iw-zooming-text * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%235c2d8a' stroke-width='2'/%3E%3Ctext x='11' y='14.8' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%235c2d8a' text-anchor='middle'%3EA%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%235c2d8a' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%235c2d8a'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%23837a6e' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%23837a6e' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%23837a6e' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%23837a6e'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
   }
   .iw-zoom-out.iw-zooming-water, .iw-zoom-out.iw-zooming-water * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Cpath d='M6 12 Q8.5 9.5 11 12 T16 12' fill='none' stroke='%2300b4d8' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Ctext x='11' y='15' font-family='Georgia,serif' font-style='italic' font-size='12' font-weight='bold' fill='%2300b4d8' text-anchor='middle'%3Ei%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
   }
   .iw-zoom-out.iw-zooming-text, .iw-zoom-out.iw-zooming-text * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%235c2d8a' stroke-width='2'/%3E%3Ctext x='11' y='14.8' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%235c2d8a' text-anchor='middle'%3EA%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%235c2d8a' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%235c2d8a'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%23837a6e' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%23837a6e' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%23837a6e' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%23837a6e'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
   }
 
   /* Review comments: commented text gets a soft amber underline (the sticky note is drawn in the
@@ -432,7 +432,7 @@
     background-color: #f7f2e8;
     background-image:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
-    border-radius: 8px;
+    border-radius: 20px; /* +150% corner rounding (Peter, 2026-07-10) */
     box-shadow: 0 8px 32px rgba(80, 50, 10, 0.22), 0 2px 6px rgba(80, 50, 10, 0.18);
   }
   /* The gap widget reserves the space between sheets; the band is an invisible marker (positioned by
@@ -521,7 +521,7 @@
      contain:paint scopes each sheet's invalidation to its own box. (2026-07-08) */
   .inkwave-editor-surface.is-phone .inkwave-sheet {
     box-shadow: 0 0 0 1px rgba(80, 50, 10, 0.14);
-    border-radius: 4px;
+    border-radius: 10px;
     contain: paint;
   }
 

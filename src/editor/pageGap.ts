@@ -5,7 +5,7 @@
 // gap DOM without dragging the editor graph in — same reasoning as MARGIN_BOTTOM living in
 // pageSettings (shell-chunk weight).
 
-export const GAP = 56 // px of aqua (waves) between sheets
+export const GAP = 78 // px of aqua (waves) between sheets (+40%, Peter 2026-07-10)
 
 // Phone pages are content-tall with COMPACT fixed margins: break POSITIONS are canonical (same
 // text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
