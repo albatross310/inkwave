@@ -391,6 +391,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => document.removeEventListener('pointerdown', onDown)
   }, [])
 
+  // One bar fully retreats before the other rises (Peter, 2026-07-10: pressing S then R had the
+  // style bar riding the review bar). 240ms = the collapse transition + a beat.
+  const barSeqRef = useRef(0)
+  function toggleBar(which: 'style' | 'review') {
+    const seq = ++barSeqRef.current
+    if (which === 'review') {
+      if (reviewOpen) { setReviewOpen(false); return }
+      if (styleBarOpen) {
+        setStyleBarOpen(false); clearStyleTimer()
+        setTimeout(() => { if (barSeqRef.current === seq) setReviewOpen(true) }, 240)
+      } else setReviewOpen(true)
+    } else {
+      if (styleBarOpen) { setStyleBarOpen(false); clearStyleTimer(); return }
+      if (reviewOpen) {
+        setReviewOpen(false)
+        setTimeout(() => { if (barSeqRef.current === seq) { setStyleBarOpen(true); armStyleTimer() } }, 240)
+      } else { setStyleBarOpen(true); armStyleTimer() }
+    }
+  }
+
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
     styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
@@ -1999,7 +2019,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
             {/* Review row — stacks ABOVE the main toolbar (like the style bar): the pill is
                 bottom-anchored, so this grows upward and the main row never moves. */}
-            {editor && reviewOpen && <ReviewBar editor={editor} />}
+            {editor && (
+              <div style={{
+                overflow: 'hidden',
+                maxHeight: reviewOpen ? '60px' : '0',
+                opacity: reviewOpen ? 1 : 0,
+                pointerEvents: reviewOpen ? 'auto' : 'none',
+                transition: 'max-height 220ms ease, opacity 160ms ease',
+              }}>
+                {reviewOpen && <ReviewBar editor={editor} />}
+              </div>
+            )}
 
             {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) caps every button's 44px
                 min-WIDTH at 37px so the nine circles fit a 360px screen; px-1 + justify-between
@@ -2100,7 +2130,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           )}
                           {id === 'receipt' && (
                             <button type="button"
-                              data-iw-bar="review" onClick={() => { setReviewOpen(o => !o) }}
+                              data-iw-bar="review" onClick={() => toggleBar('review')}
                               className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                               title="Review — comments & track changes"
                             >
@@ -2145,7 +2175,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   )}
                   {slotId === 'receipt' && (
                     <button type="button"
-                      data-iw-bar="review" onClick={() => setReviewOpen(o => !o)}
+                      data-iw-bar="review" onClick={() => toggleBar('review')}
                       className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                       title="Review — comments & track changes"
                     >
@@ -2160,7 +2190,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 type="button"
                 aria-pressed={styleBarOpen}
                 data-iw-bar="style"
-                onClick={() => { const next = !styleBarOpen; setStyleBarOpen(next); if (next) armStyleTimer(); else clearStyleTimer() }}
+                onClick={() => toggleBar('style')}
                 className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                 title="Style"
               >
