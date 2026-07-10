@@ -64,18 +64,20 @@ export function Edit() {
   useEffect(() => {
     let t = 0
     const onRevealed = () => {
-      // PHONE (2026-07-10, the "broken slowdown" regression): ONE visible water until rest. The
-      // instant drop at reveal swapped to the editor surface's own copy MID-COAST — on iOS the
-      // covered copy's layers composite/rasterize only at the visibility flip, so the swap
-      // freeze-framed and shifted the gradient (Peter: "freeze frames right before the doc").
-      // Now the SHELL persists through the whole coast, carrying the only water; it FADES from
-      // reveal (1.2s) so the parchment+chrome rise over its still-decelerating waves (the editor
-      // surface is background-transparent while covered — see .iw-wave-covered.is-phone), and it
-      // UNMOUNTS at 'inkwave:wave-rest' (Scroll's coast-end finish, ≈2s = fade end) in the same
-      // commit the editor uncovers — at which point the phone editor is plain parchment (no waves
-      // at rest on phone), so nothing ever double-paints or swaps mid-motion.
+      // PHONE (2026-07-11, the iOS "goes white" fix): ONE visible water until rest, and the
+      // shell must NOT fade — fading the only water exposed the body parchment through the
+      // transparent covered editor MID-COAST. Instead the shell stays fully OPAQUE ('up') and
+      // the covered editor sits ABOVE it (z-raised, transparent — .iw-wave-covered.is-phone), so
+      // the parchment + chrome fade in OVER the still-decelerating water. At 'inkwave:wave-rest'
+      // the shell drops and the editor uncovers in one commit — parchment-to-parchment, no
+      // mid-motion swap. A CAP forces the drop 4s after reveal even if wave-rest never fires
+      // (bulletproof: the shell may never persist forever).
+      if (isTouchDevice()) {
+        clearTimeout(t)
+        t = window.setTimeout(() => setShellUp('down'), 4000) // safety net only — wave-rest is the real trigger
+        return
+      }
       setShellUp('fading')
-      if (isTouchDevice()) return // unmounts at wave-rest (below), exactly as the fade completes
       t = window.setTimeout(() => setShellUp('down'), 1030) // 1s desktop fade
     }
     const onRest = () => { if (isTouchDevice()) setShellUp('down') }

@@ -414,6 +414,11 @@
   .inkwave-editor-surface.is-phone.iw-wave-covered {
     background-color: transparent;
     background-image: none;
+    /* ABOVE the sibling shell (z-raise; the shell keeps z:auto): the covered surface is fully
+       transparent, so the shell's opaque water shows through it while the paper + chrome fade
+       in on top — the water can never be replaced by a bare background mid-coast (the iOS
+       "goes white" bug, 2026-07-11). Reverts with the class at wave-rest. */
+    z-index: 1;
   }
 
   @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
@@ -1099,6 +1104,13 @@
 :root[data-theme="night"] { color-scheme: dark; background-color: #0a0b0e; }
 :root[data-theme="night"] body { background-color: #0a0b0e; }
 :root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e;   background-image: none; /* night: solid dark surface, no day gradient */
+}
+/* The phone covered editor must stay TRANSPARENT in night too (it sits z-raised above the
+   loading shell's water — an opaque night surface would blot the water out; see the covered
+   block in the wave section). Placed after the night surface rule so it wins the tie. */
+:root[data-theme="night"] .inkwave-editor-surface.is-phone.iw-wave-covered {
+  background-color: transparent;
+  background-image: none;
 }
 
 /* Grey waves on black (same two-layer tiles — thick line on TOP, thin below — grey strokes instead
