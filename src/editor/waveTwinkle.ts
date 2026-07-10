@@ -488,7 +488,17 @@ function ensureDriver(): void {
 
 function step(ts: number): void {
   driver = 0
-  const dt = Math.min(64, Math.max(0, ts - lastStep))
+  const raw = ts - lastStep
+  // STORM BREAKER (2026-07-11, Peter's Chrome "waves forever"): with no vsync (headless, some
+  // GPU-less/occluded states) rAF can fire back-to-back at CPU speed; the driver's own style
+  // writes then re-invalidate every "frame" and the loop eats the main thread — the boot never
+  // runs, the reveal never comes, the compositor waves forever. A sub-3ms callback cadence is
+  // never a real display — bow out to a timer and let the task queue breathe.
+  if (raw >= 0 && raw < 3) {
+    setTimeout(ensureDriver, 8)
+    return
+  }
+  const dt = Math.min(64, Math.max(0, raw))
   lastStep = ts
   if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
   respawnSparks(ts) // per-glint relocation — before the anim early-return (sparks glint all load)
@@ -701,8 +711,8 @@ function respawnSparks(now: number): void {
     d.y = 140 * d.row + body.cy - d.h / 2
     d.day = body.day
     d.night = body.night
-    // Decode hints — the spark is dark; worst case the fresh art rasters a frame into the glint.
-    for (const u of [d.day, d.night]) { const img = new Image(); img.src = u; img.decode().catch(() => {}) }
+    // (No decode hints here — per-respawn Image().decode() of data-URI SVGs is main-thread work
+    // that WEDGED the boot at high densities, 2026-07-11; the dark window rasters them in time.)
     for (const h of hs) {
       const el = h.sparks?.els[i]
       if (!el) continue
@@ -721,13 +731,31 @@ function respawnSparks(now: number): void {
 // scroll-twinkling ('driven', the vt clock the playbackRate driver integrates). LATCHED and
 // static dashes have no live animation → no more envelopes → they rest where they are (the
 // lit-at-stop texture must not shuffle). One respawn per envelope = constant population.
+let respawnCursor = 0 // round-robin start index — the budget must not starve the tail
+// NO dash respawns while the app BOOTS (2026-07-11, Peter's Chrome "waves forever"): the
+// respawn's per-frame style writes kept every frame busy, so React's time-sliced editor mount
+// yielded, rescheduled, yielded… and the boot NEVER completed — a livelock, not a loop (the
+// compositor waves ran forever over a page that never revealed). Dash never-twice matters at
+// rest/scroll twinkling; the load drift keeps its seeded field. Sparks (few, load-only, cheap)
+// keep respawning as before. If the reveal never fires, respawns simply stay off — graceful.
+let bootDone = false
 function respawnDashes(now: number): void {
-  if (!defs || !hosts.size || blinkMode === 'static') return
+  if (!bootDone || !defs || !hosts.size || blinkMode === 'static') return
   const hs = Array.from(hosts.values())
   const fx: Partial<Record<Group, number>> = {}
   const vw = window.innerWidth
   const clockBase = (blinkMode === 'playing' ? now - epochMs : vt) / 1000
-  defs.dashes.forEach((d, i) => {
+  // BUDGET (2026-07-11): at ~250 dashes a bad frame could respawn dozens at once (art build +
+  // URI encode + style writes ×hosts) — bound the per-frame work; demand is ~3/frame at 60Hz,
+  // so a budget of 4 keeps up while capping worst-case frames. Deferred ones keep their dark
+  // window (the phase guard) or take the next envelope — never a visible move.
+  let budget = 4
+  const list = defs.dashes
+  const n = list.length
+  for (let k = 0; k < n && budget > 0; k++) {
+    const i = (respawnCursor + k) % n
+    const d = list[i]
+    void ((d, i) => {
     // Only while a live blink animation exists (latch/static cancel them per element).
     let live = false
     for (const h of hs) { const el = h.dashes?.els[i]; if (el && dashAnims.has(el)) { live = true; break } }
@@ -759,7 +787,7 @@ function respawnDashes(now: number): void {
     d.y = art.y
     d.day = art.day
     d.night = art.night
-    for (const u of [d.day, d.night]) { const img = new Image(); img.src = u; img.decode().catch(() => {}) }
+    // (No decode hints — see respawnSparks: per-respawn SVG decodes wedged the boot.)
     for (const h of hs) {
       const el = h.dashes?.els[i]
       if (!el) continue
@@ -768,7 +796,10 @@ function respawnDashes(now: number): void {
       el.style.setProperty('--twk-day', `url("${d.day}")`)
       el.style.setProperty('--twk-night', `url("${d.night}")`)
     }
-  })
+    budget--
+    })(d, i)
+  }
+  respawnCursor = (respawnCursor + 1) % Math.max(1, n)
 }
 
 // ─── Viewport liveliness cap (2026-07-10, Peter's scroll-lag regression + density bump) ──────
@@ -1060,6 +1091,7 @@ export function syncTwinkles(
   }
   if (!listening) {
     listening = true
+    window.addEventListener('inkwave:editor-revealed', () => { bootDone = true })
     window.addEventListener('inkwave:water-ready', onWaterReady)
     window.addEventListener('inkwave:zoom-settled', regenDashes)
     let rt: ReturnType<typeof setTimeout> | undefined

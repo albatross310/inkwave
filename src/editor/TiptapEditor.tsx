@@ -242,6 +242,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('inkwave:wave-rest', onRest)
     return () => window.removeEventListener('inkwave:wave-rest', onRest)
   }, [])
+  // BULLETPROOF cap (2026-07-11): if wave-rest never fires (any engine path that loses the
+  // coast), covered must still lift — 4s after the reveal, unconditionally.
+  useEffect(() => {
+    if (!settled || waveRest) return
+    const t = setTimeout(() => setWaveRest(true), 4000)
+    return () => clearTimeout(t)
+  }, [settled, waveRest])
   // PHONE REVEAL CHROME (Peter, 2026-07-09): the floating chrome (toolbar/pills — z-indexed ABOVE
   // the z:auto loading shell) is held invisible while the shell covers, then fades IN over 0.5s at
   // reveal, over the editor's own still-coasting waves (see .iw-chrome-hold/.iw-chrome-in in
@@ -978,7 +985,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     let done = false
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let revealRaf = 0
+    let revealed = false
     const reveal = () => {
+      if (revealed) return // idempotent — the rAF path and the safety cap both call it
+      revealed = true
       setSettled(true)
       // Same-task dispatch → React batches Edit's loading-shell unmount with this reveal into ONE
       // commit: the shell disappears in the exact frame the parchment fades in on this surface
@@ -1009,6 +1019,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // class swap and the heavy reveal commit, as before — the coast is compositor-driven and
       // already easing smoothly when the commit lands (the 2026-07-09 backward-flick fix).
       revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
+      // rAF can starve on a wedged/backgrounded main thread — the reveal must still happen
+      // (bulletproof cap; reveal is idempotent).
+      revealTimer = setTimeout(reveal, 1500)
     }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
