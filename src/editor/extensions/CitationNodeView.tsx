@@ -15,7 +15,7 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
-  citeAnchorId, navigateToBibEntry, occurrencesAt, ensureNavStyles, mergePages,
+  citeAnchorId, navigateToBibEntry, occurrencesAt, ensureNavStyles, mergePages, locatorPages, formatPages,
 } from '../../citations/citationNav'
 import { openPdf, pageFromLocator, getLastPdfPage } from '../../citations/pdfViewer'
 import { highlightPages, highlightsOf, saveHighlights } from '../../citations/pdfHighlights'
@@ -65,6 +65,11 @@ interface Seg {
   key: string
   text: string       // author-year WITHOUT the page (the page is a separate link now)
   pages: string      // "p. 5" / "pp. 3–7" — clickable, opens the source at that page
+  // SPLIT RENDERING (Peter, 2026-07-10): when BOTH highlight-derived pages AND an explicit in-text
+  // locator exist, the highlight pages DELINK (plain text, `plainPages`) and the locator renders as
+  // ', esp. X' (`espLoc`) — still the clickable ref. Either kind alone → `pages` as before.
+  plainPages: string // highlight-derived pages, deduped of locator pages — plain text, no nav
+  espLoc: string     // the instance-linked locator — non-empty ⇒ split mode
   pageNum: number | null
   hasPdf: boolean
   occ: number
@@ -104,12 +109,22 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       // occurrence (per-instance) — highlights from other inlines / the bib don't add pages here.
       const off = pageOffsetOf(item)
       const iid = (a as { instanceId?: string | null }).instanceId ?? null
-      const pages = item ? mergePages(a.locator, highlightPages(item, iid).map(p => p + off)) : ''
+      const hlPages = item ? highlightPages(item, iid).map(p => p + off) : []
+      // SPLIT RENDERING (Peter, 2026-07-10): both kinds present → highlight pages delink (plain)
+      // and the actually-linked locator gets ', esp. X' (the clickable ref). Locator pages are
+      // deduped OUT of the plain list; if that empties it, only one kind remains → render as today.
+      let plainPages = '', espLoc = ''
+      if (item && a.locator && hlPages.length) {
+        const locSet = new Set(locatorPages(a.locator))
+        const rest = [...new Set(hlPages.filter(p => !locSet.has(p)))].sort((x, y) => x - y)
+        if (rest.length && (locSet.size || a.locator.trim())) { plainPages = formatPages(rest); espLoc = a.locator.trim() }
+      }
+      const pages = item && !espLoc ? mergePages(a.locator, hlPages) : ''
       const pageLabel = pages ? (/[–-]/.test(pages) || /,/.test(pages) ? `pp. ${pages}` : `p. ${pages}`) : ''
       return item
         // text is author-year only (pages passed empty) so the page can be its OWN clickable link.
-        ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages: '' }), pages: pageLabel, pageNum: pageFromLocator(pages) ?? null, hasPdf: hasPdf(item), occ: occMap.get(key) ?? 1, found: true }
-        : { key, text: `?${key}`, pages: '', pageNum: null, hasPdf: false, occ: occMap.get(key) ?? 1, found: false }
+        ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages: '' }), pages: pageLabel, plainPages, espLoc, pageNum: (espLoc ? pageFromLocator(espLoc) : pageFromLocator(pages)) ?? null, hasPdf: hasPdf(item), occ: occMap.get(key) ?? 1, found: true }
+        : { key, text: `?${key}`, pages: '', plainPages: '', espLoc: '', pageNum: null, hasPdf: false, occ: occMap.get(key) ?? 1, found: false }
     })
     setSegs(next)
   }, [editor, getPos]) // reads attrs from attrsRef
@@ -260,8 +275,36 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       >
                         {s.text}
                       </span>
-                      {/* Page(s) — clickable link that opens the SOURCE (PDF) at that page/passage. */}
-                      {s.pages && (
+                      {/* SPLIT page refs (Peter, 2026-07-10): highlight-derived pages render PLAIN
+                          (delinked); the in-text-linked locator renders ', esp. X' and stays the
+                          clickable ref (same click-to-open + hold-to-edit as the merged link). */}
+                      {s.espLoc ? (
+                        <>
+                          {`, pp. ${s.plainPages}, `}
+                          {s.hasPdf ? (
+                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                              title="Click: open the source at the linked page · Click & hold: edit / delete the page reference"
+                              onPointerDown={e => {
+                                e.stopPropagation()
+                                heldRef.current = false
+                                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                                holdTimer.current = setTimeout(() => { heldRef.current = true; setPageEdit({ key: s.key, x: r.left + r.width / 2, y: r.top, fromPage: true }) }, 450)
+                              }}
+                              onPointerUp={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                              onPointerLeave={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                              onPointerCancel={() => { if (holdTimer.current) clearTimeout(holdTimer.current) }}
+                              onClick={e => {
+                                e.stopPropagation()
+                                if (heldRef.current) { heldRef.current = false; return }
+                                const iid = (attrs as { instanceId?: string | null }).instanceId ?? null
+                                openPdf({ citekey: s.key, page: s.pageNum ?? pageFromLocator(attrs.locator), quote: attrs.quote, label: s.text, instanceId: iid, context: precedingSentence(), onLink: (quote) => updateAttributes({ quote }) })
+                              }}
+                            >{`esp. ${s.espLoc}`}</span>
+                          ) : <>{`esp. ${s.espLoc}`}</>}
+                        </>
+                      ) :
+                      /* Page(s) — clickable link that opens the SOURCE (PDF) at that page/passage. */
+                      s.pages && (
                         s.hasPdf ? (
                           <>
                             {', '}

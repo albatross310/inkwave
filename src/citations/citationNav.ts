@@ -221,6 +221,14 @@ function parseRanges(loc: string): Array<[number, number]> {
   return out
 }
 
+/** The distinct page numbers a locator string names ("2, 4–6" → [2,4,5,6]), sorted. Used by the
+ *  in-text split rendering to dedupe locator pages out of the highlight-derived plain list. */
+export function locatorPages(loc: string): number[] {
+  const set = new Set<number>()
+  for (const [a, b] of parseRanges(loc)) for (let p = a; p <= Math.min(b, a + 999); p++) set.add(p)
+  return [...set].sort((x, y) => x - y)
+}
+
 /** All distinct page numbers cited for a source across the document (from citation locators), sorted. */
 export function citedPages(doc: PMNode, key: string): number[] {
   const set = new Set<number>()
