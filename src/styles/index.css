@@ -551,11 +551,17 @@
     line-height: var(--inkwave-lh, 1.55);
   }
 
-  /* Phone footer toolbar: nine circle buttons must fit a 360px screen. Keep the 44px tap HEIGHT
-     but cap each button's tap WIDTH at the 36px (w-9) circle +1px, so justify-between can spread
-     the remaining slack as gaps. Scoped override — desktop keeps the full 44px targets. */
+  /* Phone footer toolbar: nine circle buttons must fit a 360px screen. GROW the circles to 39px
+     (the max nine fit inside the pill's 2px of borders — the requested +25% over 36px would need
+     405px) and cap each button's 44px min-WIDTH at the same 39px, so justify-between spreads any
+     remaining slack as gaps on wider screens. Scoped override — desktop keeps the 36px circles +
+     full 44px targets. */
   .iw-phone-toolbar .min-w-\[44px\] {
-    min-width: 37px;
+    min-width: 39px;
+  }
+  .iw-phone-toolbar .w-9 {
+    width: 39px;
+    height: 39px;
   }
 
   /* Parchment paper texture for the scroll body (the page the text sits on). UNIFORM colour: the

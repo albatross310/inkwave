@@ -9,6 +9,7 @@ import TextAlign from '@tiptap/extension-text-align'
 import Highlight from '@tiptap/extension-highlight'
 import Underline from '@tiptap/extension-underline'
 import { FontSize } from './extensions/FontSize'
+import { TextColor } from './extensions/TextColor'
 import { ParagraphStyle } from './extensions/ParagraphStyle'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
@@ -25,6 +26,7 @@ import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/p
 import { ScasSlotMark } from './extensions/ScasSlotMark'
 import { CommentMark } from './extensions/CommentMark'
 import { InsertionMark, DeletionMark, TrackChanges } from './extensions/TrackChanges'
+import { syncReviewVisibilityStyles } from './review/reviewState'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { MathInline } from './extensions/MathInline'
@@ -128,6 +130,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
   useEffect(() => { applyCrossoutMode() }, [])
+
+  // Realise the persisted review-visibility state (global show/hide + hidden layers) on boot —
+  // a hidden layer must stay hidden across reloads even before the review bar is ever opened.
+  useEffect(() => { syncReviewVisibilityStyles() }, [])
 
   // The SCAS engine controller (live state mirrored to doc.scasState for persistence). Created
   // lazily so it survives re-renders; reseated when the active document changes (see effect below).
@@ -475,6 +481,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       TextStyle,
       FontFamily,
       FontSize,
+      TextColor,
       TextAlign.configure({ types: ['paragraph'] }),
       ParagraphStyle,
       // Standard Enter = new paragraph; Shift+Enter = hard break (via StarterKit's HardBreak).
@@ -763,6 +770,49 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     ;(window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp = keyboardUp
   }, [keyboardUp])
+
+  // PHONE: the footer toolbar HUGS the keyboard instead of retracting — pinned flush to the visual
+  // viewport's bottom edge (keyboard top / URL bar) through the whole slide. The offset feeds the
+  // fixed wrapper via --iw-kb-offset on <html> (outside React, so re-renders never clobber it);
+  // an rAF loop runs while the viewport geometry is CHANGING (per-frame tracking of the keyboard
+  // animation — vv only fires sparse resize/scroll events mid-slide) and parks once stable.
+  useEffect(() => {
+    if (!isTouchDevice()) return
+    const vv = window.visualViewport
+    if (!vv) return
+    const root = document.documentElement
+    let raf = 0
+    let lastOff = -1
+    let stable = 0
+    // Distance from the LAYOUT viewport bottom up to the visual viewport bottom = the keyboard
+    // (or collapsed-URL-bar) overlap that fixed-bottom elements sit behind on iOS. Pinch-zoom
+    // shrinks vv.height without moving fixed elements, so a zoomed viewport pins the bar at 0.
+    const measure = () =>
+      vv.scale > 1.01 ? 0 : Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height))
+    const tick = () => {
+      const off = measure()
+      if (off !== lastOff) { lastOff = off; stable = 0; root.style.setProperty('--iw-kb-offset', `${off}px`) }
+      else stable++
+      if (stable < 30) raf = requestAnimationFrame(tick) // park after ~0.5s of no movement
+      else raf = 0
+    }
+    const kick = () => { stable = 0; if (!raf) raf = requestAnimationFrame(tick) }
+    vv.addEventListener('resize', kick)
+    vv.addEventListener('scroll', kick)
+    window.addEventListener('resize', kick)
+    // Watchdog: vv events can be missed around load/orientation races — three property reads every
+    // 500ms re-kicks the loop if the parked value has drifted, so the bar can never stick wrong.
+    const watchdog = setInterval(() => { if (measure() !== lastOff) kick() }, 500)
+    kick()
+    return () => {
+      vv.removeEventListener('resize', kick)
+      vv.removeEventListener('scroll', kick)
+      window.removeEventListener('resize', kick)
+      clearInterval(watchdog)
+      cancelAnimationFrame(raf)
+      root.style.removeProperty('--iw-kb-offset')
+    }
+  }, [])
 
   // On-device input-latency capture (gated: localStorage 'inkwave:perflog' = '1', see perflog.ts).
   // Per keystroke: how long the beforeinput event WAITED for the main thread (a deferred tick /
@@ -1775,7 +1825,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // styleBarOpen keeps the main row alive while the user is actively formatting.
   const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty && !selIsAtomNode
   const selectionOnDesktop = !isTouch && !!(editor?.state.selection && !editor.state.selection.empty) && !selIsAtomNode
-  const showMainRow = !isTouch || !keyboardUp || styleBarOpen
+  // The main row no longer retracts while typing on phone — the footer hugs the keyboard instead
+  // (the --iw-kb-offset tracker above), so it stays visible and usable the whole time.
+  const showMainRow = true
   // Style bar auto-expands on phone text selection or desktop text selection.
   const styleBarExpanded = (selectionOnPhone || selectionOnDesktop || styleBarOpen) && !!editor
   const barVisible = showMainRow || selectionOnPhone
@@ -1960,7 +2012,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         <div
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
           style={{
-            paddingBottom: isTouch ? 'env(safe-area-inset-bottom)' : `${28 * zoom}px`,
+            // Phone: the safe-area padding melts away as the keyboard overlap grows (max() keeps the
+            // slide continuous) so the bar sits truly flush on the keyboard's top edge.
+            paddingBottom: isTouch ? 'max(0px, calc(env(safe-area-inset-bottom) - var(--iw-kb-offset, 0px)))' : `${28 * zoom}px`,
             // Landscape phones (viewport-fit=cover): keep the docked bar clear of the notch/home-bar
             // side insets, matching the bottom inset above. Zero in portrait / on desktop.
             paddingLeft: isTouch ? 'env(safe-area-inset-left)' : undefined,
@@ -1968,10 +2022,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // When the PDF panel is open: a side dock stops the centring box at the docked edge
             // (--iw-pdf-room right / --iw-pdf-room-left left) so the toolbar recentres over the
             // writing; a bottom dock lifts the whole toolbar above it (--iw-pdf-room-bottom).
+            // Phone adds --iw-kb-offset (the keyboard-hug tracker) on top.
             left: 'var(--iw-pdf-room-left, 0px)',
             right: 'var(--iw-pdf-room, 0px)',
-            bottom: 'var(--iw-pdf-room-bottom, 0px)',
-            transition: 'left 0.18s ease, right 0.18s ease, bottom 0.18s ease',
+            bottom: isTouch ? 'calc(var(--iw-kb-offset, 0px) + var(--iw-pdf-room-bottom, 0px))' : 'var(--iw-pdf-room-bottom, 0px)',
+            // No bottom transition on phone: the keyboard tracker writes bottom per-frame — a CSS
+            // transition would trail the keyboard instead of hugging it.
+            transition: isTouch ? 'left 0.18s ease, right 0.18s ease' : 'left 0.18s ease, right 0.18s ease, bottom 0.18s ease',
           }}
         >
           <div
@@ -2011,7 +2068,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 pointerEvents: styleBarExpanded ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
-                <div className="flex items-center px-4 py-2 border-b border-stone-200">
+                {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
+                <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
                   {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} />}
                 </div>
               </div>
@@ -2027,16 +2085,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 pointerEvents: reviewOpen ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
-                {reviewOpen && <ReviewBar editor={editor} />}
+                {reviewOpen && <ReviewBar editor={editor} phone={isTouch} />}
               </div>
             )}
 
-            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) caps every button's 44px
-                min-WIDTH at 37px so the nine circles fit a 360px screen; px-1 + justify-between
-                distribute the remaining slack.
-                Width arithmetic @360px: 8 (px-1) + ◈36 + ▲36 + 4×37 slots + S37 + ⚙37 + ⋮36 = 338. */}
+            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) grows every circle to 40px
+                (the max nine fit) and caps each button's 44px min-WIDTH at the same 40px;
+                justify-between distributes whatever slack the screen leaves.
+                Width arithmetic @360px: 0 (px-0) + 9 × 40 (◈ ▲ 4 slots S ⚙ ⋮) = 360 — exact fit;
+                wider screens gain gaps via justify-between. */}
             {showMainRow && (
-            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-1' : 'gap-0.5 px-2'}`}
+            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-0' : 'gap-0.5 px-2'}`}
               onClickCapture={(e) => {
                 // Any toolbar button closes the style + review bars — except each bar's own toggle
                 // (its onClick still runs after this capture, so its toggle semantics survive).
