@@ -142,7 +142,14 @@ export function scheduleSave(
   onSaved?: () => void,
 ): void {
   if (saveTimer !== null) clearTimeout(saveTimer)
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(async function beat() {
+    // ZOOM-GESTURE DEFERRAL: a pre-zoom edit's autosave beat (doc serialize + OPFS write) must
+    // not land mid-gesture — while a zoom gesture holds the painters (__iwZoomHold, cleared at
+    // settle), push the beat back; it flushes ≤250ms after the gesture settles.
+    if (typeof window !== 'undefined' && (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) {
+      saveTimer = setTimeout(beat, 250)
+      return
+    }
     try {
       // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
       // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).

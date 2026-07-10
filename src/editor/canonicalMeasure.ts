@@ -50,11 +50,21 @@ export function forceCanonicalContext(targets: CanonicalTargets, geom: Canonical
     el.style.setProperty(prop, value)
   }
   set(targets.paper, 'width', `${geom.pageWidthPx}px`)
+  // Defensive: any transient transform on the paper (gesture effects, future previews) must never
+  // leak VISUAL-scaled rects into a measure — force it untransformed, restored exactly.
+  set(targets.paper, 'transform', 'none')
   set(targets.sheet, 'padding-left', `${geom.sideMarginPx}px`)
   set(targets.sheet, 'padding-right', `${geom.sideMarginPx}px`)
   set(targets.surface, '--iw-editor-zoom', '1')
   set(targets.surface, '--iw-magnify', '1') // canonical implies scale=1 (hybrid-zoom branches)
   set(targets.editor, 'font-size', CANONICAL_FONT_SIZE)
+  // LIVE-REFLOW WINDOW invariant (Peter's lazy off-screen pinch, 2026-07-10): if a zoom gesture's
+  // content-visibility window were ever active during a measure, skipped blocks would report
+  // collapsed rects. --iw-cv inherits into `.iw-zoom-live > *` (index.css reads it via var()),
+  // so forcing it on the editor makes every block fully laid out for the window — break
+  // measurement (and the step cache's hypothetical reflows, which run through this same context
+  // owner's var conventions) always sees true geometry.
+  set(targets.editor, '--iw-cv', 'visible')
   let restored = false
   return () => {
     if (restored) return

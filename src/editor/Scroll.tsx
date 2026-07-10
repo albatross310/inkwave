@@ -4,7 +4,7 @@ import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getC
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
-import { stepToZoom, zoomToStep } from './zoomStep'
+import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { syncTwinkles, reportSway } from './waveTwinkle'
 
@@ -20,10 +20,11 @@ export function isTouchDevice(): boolean {
 // discrete mouse-wheel notch (|ΔY| ≥ 100) is ALWAYS exactly one 1.08 step — this only speeds up
 // the sub-notch accumulation, capped at one step per event.
 const TRACKPAD_ZOOM_SENSITIVITY = 2
-// Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(1.08)).
+// Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(RATIO)).
 // 1 = the pinched distance ratio maps 1:1 onto the zoom ratio; higher = fewer centimetres of
-// pinch per step. Steps still commit whole on the shared zoomStep lattice.
-const PINCH_ZOOM_SENSITIVITY = 1.75
+// pinch per step. Steps still commit whole on the shared zoomStep lattice. Raised 1.75 → 2.5
+// (Peter, 2026-07-10) now the transform preview decouples gesture feel from reflow cost.
+const PINCH_ZOOM_SENSITIVITY = 2.5
 
 // ── Deep-zoom-out scroll acceleration (Peter, 2026-07-10) ─────────────────────────────────────
 // The plain-wheel scroll is content-proportional (delta × scale) so a notch always covers the
@@ -309,6 +310,7 @@ export function Scroll({
     // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
     // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
     let anchorEl: HTMLElement | null = null
+    let anchorTop0 = 0 // the anchor's viewport top when picked — the gesture's PIN position
     // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the whole page about the VIEWPORT
     // CENTRE (Peter: "centre it around the centrepoint of screen" — the cursor position picks the
     // ZONE only, never the anchor). The wrapper box's rect IS the page's visual bounds (layout ≡
@@ -378,6 +380,7 @@ export function Scroll({
           }
           if (anchorEl) break
         }
+        if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
       }
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
       const ratio = getScrollTop() / scrollRange()
@@ -392,6 +395,10 @@ export function Scroll({
       // below replaces live repositioning with instant precomputed geometry; the RO path stays
       // gated as the cache-MISS fallback. Cleared in the settle, right before zoom-settled.
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
+      // DESKTOP lazy off-screen too (Peter, 2026-07-10: "sometimes lag in the reflow zoom on
+      // desktop"): the live-reflow window makes each step lay out ~one screenful. Phone enters at
+      // touchstart; desktop enters on the first committed step; both exit in the settle below.
+      enterZoomLive(anchorX, anchorY)
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed, SYNCHRONOUSLY
       // and before any layout read below — a cache hit applies the precomputed page-band geometry
@@ -409,7 +416,13 @@ export function Scroll({
         magnifyBoxRef.current.style.height = `${paperElRef.current.offsetHeight * mag}px`
       if (anchorEl && anchorEl.isConnected) {
         const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
-        setScrollTop(getScrollTop() + (topAfter - topBefore)) // hold the anchored text still
+        // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
+        // content-visibility placeholder set re-evaluates between frames (scroll corrections move
+        // the viewport), and per-frame displacement correction PRESERVES that inter-frame drift
+        // instead of undoing it (the pinch midpoint slid ~200px over a big gesture). While the
+        // window is active the user cannot scroll (fingers down / ctrl+wheel burst), so the pin
+        // is safe; outside it (CV unsupported) the classic displacement correction stands.
+        setScrollTop(getScrollTop() + (topAfter - (zoomLiveEd ? anchorTop0 : topBefore)))
         if (!phone) el.scrollLeft = keepLeft
       } else {
         setScrollTop(ratio * scrollRange()) // no anchor → keep relative position
@@ -417,7 +430,11 @@ export function Scroll({
       }
       editorZoomRef.current = next
       if (settle) clearTimeout(settle)
-      settle = setTimeout(() => {
+      settle = setTimeout(function settleFn() {
+        // Fingers still down = the gesture is NOT over (a paused pinch) — settling now would tear
+        // down the live window + anchor pin mid-gesture and re-measure under held fingers. Wait.
+        if (pinchDist) { settle = setTimeout(settleFn, 200); return }
+        exitZoomLive() // full layout returns (anchored) BEFORE the re-measure + React catch-up
         ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // gesture idle → painters may run
         holdWavesFor(800) // …but the re-measure + re-anchor below must not sway the waves either
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
@@ -500,51 +517,129 @@ export function Scroll({
       }
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
-    // PHONE PINCH-TO-ZOOM — the same pipeline as the wheel path (same rAF coalescing, clamps,
-    // persistence and settle re-measure), driven by the two-finger distance ratio instead of wheel
-    // steps. INPUT-PIPELINE COST (round-2 iPhone lag, 2026-07-10): a NON-PASSIVE touchstart /
-    // touchmove on the whole surface makes iOS synchronously dispatch EVERY touch to the main
-    // thread and wait before acting on it — every tap and every scroll frame inherits whatever
-    // deferred task is running (the pagination measure, the SCAS tick). So: touchstart is PASSIVE
-    // (its handler only records pinch state), and the non-passive touchmove is attached ONLY while
-    // two fingers are actually down — single-finger scrolling never has a blocking listener at all.
-    // Pinch suppression still holds three ways: the first two-finger touchmove preventDefaults
-    // (the listener is attached synchronously inside the second finger's touchstart, before any
-    // move can dispatch), the gesturestart/gesturechange preventDefault below, and the universal
-    // phone `touch-action: pan-x pan-y` as the declarative half of the same contract.
+    // PHONE PINCH-TO-ZOOM — LIVE font reflow per lattice step, exactly like the desktop wheel
+    // (Peter, 2026-07-10: "I want live reflow with better performance — do everything off the
+    // screen lazily; anchor to the point between the two fingers"). The performance budget comes
+    // from the LIVE-REFLOW WINDOW below: during the gesture, off-screen blocks skip layout
+    // entirely (content-visibility: auto — a phone screen holds ~one screenful of text, so each
+    // zoom step lays out only that in real time). ANCHOR: the pinch MIDPOINT's vertical position
+    // (applyFrame's phone branch picks the text block at pinchX/pinchY and holds its displacement
+    // to zero) — horizontal is inherently fixed by the full-width reflow. Feature-detected: where
+    // content-visibility is unsupported (iOS < 18) the same live pipeline runs against the full
+    // document (correct, just heavier).
+    //
+    // INPUT-PIPELINE COST (round-2 iPhone lag, 2026-07-10): a NON-PASSIVE touchstart / touchmove
+    // on the whole surface makes iOS synchronously dispatch EVERY touch to the main thread and
+    // wait — so touchstart stays PASSIVE (records pinch state only), and the non-passive
+    // touchmove is attached ONLY while two fingers are down (armed synchronously inside the
+    // second finger's touchstart, before any move can dispatch). Pinch suppression = that
+    // preventDefault + the CAPTURE-phase document backstop + gesture* preventDefault
+    // (entry.client.tsx) + the universal phone `touch-action: pan-x pan-y`.
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     let pinchMoveArmed = false
+    let gestureStartZoom = 1 // zoom level at pinch start — detects a no-commit gesture
     const armPinchMove = () => {
       if (!pinchMoveArmed) { pinchMoveArmed = true; el.addEventListener('touchmove', onTouchMove, { passive: false }) }
     }
     const disarmPinchMove = () => {
       if (pinchMoveArmed) { pinchMoveArmed = false; el.removeEventListener('touchmove', onTouchMove) }
     }
+    // ── LIVE-REFLOW WINDOW (the "lazy off-screen" strategy — phone pinch AND desktop wheel) ──
+    // While a zoom gesture is active, `.iw-zoom-live` puts content-visibility:auto on the
+    // editor's block children (see index.css): the browser natively SKIPS layout of off-screen
+    // blocks, so a zoom step reflows ~one screenful instead of the whole document. Skipped-
+    // placeholder height = the document's average REAL block height, published as ONE root-level
+    // var (--iw-cis) — NEVER per-block inline styles: writing a style attribute on a ProseMirror-
+    // OWNED node trips PM's DOM observer, which REBUILDS the touched blocks — that detached the
+    // gesture's touch target (iOS keeps dispatching a pinch's touchmoves to the ORIGINAL node, so
+    // the gesture died after the first commit) and stripped the placeholder sizes (scroll
+    // collapse). The aggregate scroll geometry stays ≈ exact (n·avg ≈ total content); per-block
+    // error is absorbed by the anchor PIN (anchorTop0) and trued by the exit bracket + settle.
+    // Measurement stays exact: forceCanonicalContext forces --iw-cv: visible inside every
+    // canonical window, and no measure runs mid-gesture anyway (__iwZoomHold + no edits, with the
+    // SCAS tick / PageGuides also deferring on the hold). Scoped to the GESTURE only.
+    const CV_LIVE = typeof CSS !== 'undefined' && !!CSS.supports?.('content-visibility', 'auto')
+    let zoomLiveEd: HTMLElement | null = null
+    const enterZoomLive = (ax: number, ay: number) => {
+      if (!CV_LIVE || zoomLiveEd) return
+      const ed = el.querySelector('.ProseMirror') as HTMLElement | null
+      if (!ed || !ed.children.length) return
+      // Mean of the blocks' REAL heights (reads only — PM-safe), not scrollHeight/n: container
+      // padding / page-fill min-heights skewed that high, and oversize placeholders churned the
+      // geometry on every placeholder↔real swap as the viewport moved.
+      let sum = 0
+      for (const c of Array.from(ed.children) as HTMLElement[]) sum += c.offsetHeight
+      // ENTRY BRACKET: switching blocks above the viewport to placeholder heights SHIFTS the
+      // content the user is looking at — visible as a jump the instant a gesture starts (and it
+      // poisoned the anchor pin, which would hold the SHIFTED position for the whole gesture).
+      // Hold the block at the gesture's anchor point still across the switch, same task.
+      const ref = document.elementFromPoint(ax, ay)?.closest('.ProseMirror > *') as HTMLElement | null
+      const before = ref ? ref.getBoundingClientRect().top : 0
+      ed.style.setProperty('--iw-cis', `${Math.max(24, Math.round(sum / ed.children.length))}px`)
+      ed.classList.add('iw-zoom-live')
+      zoomLiveEd = ed
+      if (ref) {
+        const after = ref.getBoundingClientRect().top // forces the skipped layout now, pre-paint
+        setScrollTop(getScrollTop() + (after - before))
+      }
+    }
+    const exitZoomLive = () => {
+      const ed = zoomLiveEd
+      if (!ed) return
+      zoomLiveEd = null
+      // Re-anchoring bracket: skipped blocks held placeholder heights; un-skipping lays them out
+      // at the committed zoom, displacing everything below — pin the held anchor back to its
+      // gesture-start viewport top in the same task so the anchored text never jumps.
+      const held = anchorEl && anchorEl.isConnected ? anchorEl : null
+      ed.classList.remove('iw-zoom-live')
+      ed.style.removeProperty('--iw-cis')
+      if (held) {
+        const after = held.getBoundingClientRect().top // forces the full relayout now, pre-paint
+        setScrollTop(getScrollTop() + (after - anchorTop0))
+      }
+    }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
       pinchDist = touchDist(e.touches)
       pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
-      anchorEl = null // fresh gesture → applyFrame picks the text block under THIS midpoint
+      anchorEl = null // fresh gesture → applyFrame anchors the text block under THIS midpoint
       steps = 0
+      // Hold from the FIRST touch (not the first commit): a queued SCAS tick landing mid-pinch
+      // rebuilds the touched paragraph and the gesture dies on the detached node (iOS dispatches
+      // a pinch's touchmoves to the ORIGINAL target). Cleared by the settle, or at touchend on a
+      // gesture that never commits.
+      ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
+      gestureStartZoom = editorZoomRef.current
+      enterZoomLive(pinchX, pinchY)
       armPinchMove()
     }
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 2 || !pinchDist) return
-      e.preventDefault() // our zoom replaces the browser's — stop the double-zoom
+      e.preventDefault() // our zoom replaces the browser's — stop the native pinch
       const d = touchDist(e.touches)
       if (d < 8) return // fingers (nearly) touching — the ratio is degenerate noise
-      // Fractional steps on the wheel's 1.08 curve, boosted by PINCH_ZOOM_SENSITIVITY (Peter,
-      // 2026-07-10: pinch felt too slow) — steps still commit whole on the shared lattice.
-      steps += (Math.log(d / pinchDist) / Math.log(1.08)) * PINCH_ZOOM_SENSITIVITY
+      steps += (Math.log(d / pinchDist) / Math.log(ZOOM_STEP_RATIO)) * PINCH_ZOOM_SENSITIVITY
       pinchDist = d
-      if (!raf) raf = requestAnimationFrame(applyFrame)
+      if (!raf) raf = requestAnimationFrame(applyFrame) // live commit — one visible-window reflow per frame
     }
     const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) { pinchDist = 0; disarmPinchMove() } // settle timer already armed
+      if (e.touches.length >= 2 || !pinchDist) return
+      pinchDist = 0
+      disarmPinchMove()
+      // Final commit LANDS NEAREST the fingers (round the fractional remainder), then the
+      // live-reflow window closes — both in this same task, one paint, anchored throughout.
+      if (raf) { cancelAnimationFrame(raf); raf = 0 }
+      steps = Math.round(steps)
+      applyFrame()
+      exitZoomLive()
+      // A pinch that never committed a step arms no settle — release the deferred work now.
+      if (editorZoomRef.current === gestureStartZoom)
+        (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false
     }
     // iOS Safari's non-standard gesture events drive the native pinch — suppress them over the editor.
     const onGesture = (e: Event) => e.preventDefault()
+    let cleanupWheelArming: (() => void) | undefined
     if (phone) {
       el.addEventListener('touchstart', onTouchStart, { passive: true })
       el.addEventListener('touchend', onTouchEnd)
@@ -552,10 +647,45 @@ export function Scroll({
       el.addEventListener('gesturestart', onGesture)
       el.addEventListener('gesturechange', onGesture)
     } else {
-      el.addEventListener('wheel', onWheel, { passive: false })
+      // ── SCROLL LATENCY: the non-passive wheel listener exists ONLY when it can actually
+      // preventDefault (Peter, 2026-07-10: ~100ms wheel→scroll lag). A non-passive wheel listener
+      // — however cheap its body — forces the compositor to WAIT for main-thread dispatch on
+      // EVERY wheel event, so plain scrolling inherited whatever task was running (SCAS tick,
+      // measures). The listener is now ARMED only while it could intercept: ctrl/⌘ held (zoom) or
+      // magnify ≠ 1 (content-proportional scroll). At rest there is NO non-passive wheel listener
+      // at all — plain scrolling is fully compositor-threaded, native latency.
+      // Residual edge: entering the window with ctrl ALREADY held gives the browser the first
+      // notch (page zoom) until a keydown/pointer event reveals the modifier — the passive
+      // pointermove check below closes that for the mouse-first flow.
+      let wheelArmed = false
+      const armWheel = () => { if (!wheelArmed) { wheelArmed = true; el.addEventListener('wheel', onWheel, { passive: false }) } }
+      const disarmWheel = () => { if (wheelArmed) { wheelArmed = false; el.removeEventListener('wheel', onWheel) } }
+      let ctrlHeld = false
+      const syncWheelArming = () => { if (ctrlHeld || getMagnify() !== 1) armWheel(); else disarmWheel() }
+      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = true; syncWheelArming() } }
+      const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = false; syncWheelArming() } }
+      const onBlurWin = () => { ctrlHeld = false; syncWheelArming() }
+      const onPointerCheck = (e: PointerEvent) => { // came-in-held: reveal the modifier before the first wheel
+        const held = e.ctrlKey || e.metaKey
+        if (held !== ctrlHeld) { ctrlHeld = held; syncWheelArming() }
+      }
+      window.addEventListener('keydown', onKeyDown, { capture: true })
+      window.addEventListener('keyup', onKeyUp, { capture: true })
+      window.addEventListener('blur', onBlurWin)
+      el.addEventListener('pointermove', onPointerCheck, { passive: true })
+      const unsubArm = subscribeMagnify(syncWheelArming)
+      syncWheelArming()
+      cleanupWheelArming = () => {
+        window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
+        window.removeEventListener('keyup', onKeyUp, { capture: true } as EventListenerOptions)
+        window.removeEventListener('blur', onBlurWin)
+        el.removeEventListener('pointermove', onPointerCheck)
+        unsubArm()
+        disarmWheel()
+      }
     }
     return () => {
-      el.removeEventListener('wheel', onWheel)
+      cleanupWheelArming?.()
       el.removeEventListener('touchstart', onTouchStart)
       disarmPinchMove()
       el.removeEventListener('touchend', onTouchEnd)
@@ -564,6 +694,7 @@ export function Scroll({
       el.removeEventListener('gesturechange', onGesture)
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
+      exitZoomLive() // never leave the live-reflow window (content-visibility) on the editor
       latch.dispose() // drop the mode latch + zoom-cursor classes with the listeners
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // never leave painters pinned
     }
@@ -1091,6 +1222,11 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
     const el = (overlayRef.current?.parentElement as HTMLDivElement | null) ?? sheetRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const recompute = () => {
+      // ZOOM-GESTURE DEFERRAL: the sheet resizes on every zoom step, so the RO fired this on
+      // every gesture frame — marker rect reads + a possible React re-render, on the reflow's
+      // critical path. While a gesture holds the painters, skip; the settle's zoom-settled
+      // re-measure fires 'inkwave:pagination-measured' (listened below), which recomputes once.
+      if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) return
       const total = el.scrollHeight
       if (!total) { lastSigRef.current = ''; return setBreaks([]) }
       // Prefer the REAL break markers the pagination extension measured — same breaks as gapped

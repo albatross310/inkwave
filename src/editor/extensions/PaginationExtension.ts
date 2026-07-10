@@ -615,7 +615,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             return (window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp ? 1200 : 850
           }
           const scheduleAfterEdit = () => {
-            clearStepCache() // doc changed → every step's band geometry is stale
             if (editDebounce) clearTimeout(editDebounce)
             editDebounce = setTimeout(() => { editDebounce = undefined; schedule() }, editDelayMs())
           }
@@ -665,7 +664,16 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // loses nothing, since a no-edit recompute early-returns on inputSig anyway. Desktop
             // keeps the original unconditional reset.
             update: (view, prevState) => {
-              if (phoneLike() && prevState && view.state.doc === prevState.doc) return
+              // STEP-CACHE INVALIDATION rides DOC IDENTITY, not transactions (Peter, 2026-07-10:
+              // "we might as well cache the steps we've gone through so going back is instant").
+              // This hook fires for EVERY transaction — including our own settle-time setMeta
+              // dispatches, SCAS decoration repaints, and each React re-render's updateState —
+              // and clearing per transaction wiped the whole warmed lattice at every settle, so a
+              // zoom-in → zoom-out retrace missed on every step it had just visited. Only a real
+              // doc change makes per-step band geometry stale.
+              const docChanged = !prevState || view.state.doc !== prevState.doc
+              if (docChanged) clearStepCache()
+              if (phoneLike() && !docChanged) return
               scheduleAfterEdit()
             },
             destroy() {

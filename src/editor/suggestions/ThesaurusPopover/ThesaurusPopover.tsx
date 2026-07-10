@@ -646,7 +646,11 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     // Keep a touch drag from scrolling the document while it's steering the reel.
     function onTouchMove(e: TouchEvent) { if (lastY !== null) e.preventDefault() }
 
-    document.addEventListener('wheel', onWheel, { passive: false })
+    // NB: onWheel is a NO-OP (reel wheel-scroll was turned off) — it must NOT be registered
+    // non-passively: a non-passive document wheel listener makes the compositor wait on the main
+    // thread for EVERY wheel event app-wide (Peter's ~100ms scroll lag, 2026-07-10). Passive keeps
+    // the (dead) hook shape without any scroll-latency tax; delete both when the reel wheel stays gone.
+    document.addEventListener('wheel', onWheel, { passive: true })
     document.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('pointermove', onPointerMove)
