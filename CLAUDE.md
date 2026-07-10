@@ -226,7 +226,13 @@ persistent shell (Edit.tsx `shellUp`) spans !doc + lazy chunk + pre-reveal; the 
 `inkwave:reveal-imminent` (coast start) then reveals; open-begin/open-failed re-raise/restore it.
 Phone reveal waits for the coast tail. The coast freeze reads the compositor transform (which runs
 ~2 frames AHEAD of getComputedStyle — compensate) and must NOT start in the same commit as the
-reveal (main-thread delay = backward flick).
+reveal (main-thread delay = backward flick). RELIABILITY (2026-07-11, the tri-engine load bug):
+per-frame twinkle respawn style writes LIVELOCKED React's time-sliced editor mount (boot never
+finished → waves forever) — dash respawns are boot-gated until `inkwave:editor-revealed`, budgeted
+4/frame; on phone the shell stays OPAQUE until `wave-rest` with the covered editor z-raised above
+it (fading the only water mid-coast exposed bare parchment = the iOS white-out). Every reveal-chain
+event has a fallback cap (reveal 1.5s, shell force-down 4s, covered lift 4s) — keep them when
+touching the chain.
 
 ## Open pipeline + cloud caching (2026-07-09)
 
