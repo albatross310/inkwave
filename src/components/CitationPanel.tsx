@@ -843,7 +843,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           </div>
         )}
 
-        <div className="px-4 pt-3 pb-2 border-b border-stone-100">
+        <div className={isTouchDevice() ? 'order-3 px-4 pt-2 pb-3 border-t border-stone-100' : 'px-4 pt-3 pb-2 border-b border-stone-100'}>
           <div className="flex gap-2">
             <input
               ref={searchInputRef}
@@ -873,8 +873,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           )}
         </div>
 
-        <div className="px-4 py-2 border-b border-stone-100">
-          {/* All controls share h-7 so they line up; wrap (never clip) if the panel is narrow. */}
+        <div className={isTouchDevice() ? 'order-2 px-4 py-2 border-t border-stone-100' : 'px-4 py-2 border-b border-stone-100'}>
+          {/* All controls share h-7 so they line up; wrap (never clip) if the panel is narrow.
+              Phone: this row + the paste bar sit BELOW the list (order-2/-3), search at the very
+              bottom — thumb-reachable (Peter, 2026-07-10). The list is order-1. */}
           <div className="flex items-center gap-1.5 flex-wrap">
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
@@ -928,7 +930,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           </div>
         </div>
 
-        <div className={`iw-snap-scroll flex-1 overflow-y-auto px-4 py-2 ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
+        <div className={`iw-snap-scroll flex-1 overflow-y-auto px-4 py-2 ${isTouchDevice() ? 'order-1' : ''} ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
           {!helpDismissed && (
             <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-400">
