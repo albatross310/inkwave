@@ -9,12 +9,22 @@
 // of waiting for the settle.
 //
 // The lattice replaces the old multiplicative drift (zoom' = clamp(zoom·1.08^n) from an arbitrary
-// float) — same 8%-per-notch feel, but every reachable level is one of the 18 lattice points.
+// float) — same 8%-per-notch feel, but every reachable level is one of the lattice points.
+//
+// PHONE LATTICE (Peter, 2026-07-10): double density — 1.04 steps over the same range (≈0.63 …
+// ≈2.37, 35 points vs the desktop 18) so pinch commits land closer to wherever the fingers
+// stopped. Device-constant (the pointer type can't change mid-session), and node/tests see the
+// desktop lattice (no matchMedia). Cross-device persistence is safe: zoomToStep snaps any
+// persisted float to the nearest step of the CURRENT device's lattice on load.
 
-export const ZOOM_STEP_RATIO = 1.08
-// Lattice bounds inside the historical clamp [0.6, 2.5]: 1.08⁻⁶ ≈ 0.630 … 1.08¹¹ ≈ 2.332.
-export const ZOOM_STEP_MIN = -6
-export const ZOOM_STEP_MAX = 11
+const PHONE_LATTICE = typeof window !== 'undefined'
+  && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
+
+export const ZOOM_STEP_RATIO = PHONE_LATTICE ? 1.04 : 1.08
+// Desktop bounds inside the historical clamp [0.6, 2.5]: 1.08⁻⁶ ≈ 0.630 … 1.08¹¹ ≈ 2.332.
+// Phone: 1.04⁻¹² ≈ 0.625 … 1.04²² ≈ 2.370 — the same range at double the density.
+export const ZOOM_STEP_MIN = PHONE_LATTICE ? -12 : -6
+export const ZOOM_STEP_MAX = PHONE_LATTICE ? 22 : 11
 
 export function clampStep(k: number): number {
   return Math.max(ZOOM_STEP_MIN, Math.min(ZOOM_STEP_MAX, Math.round(k)))

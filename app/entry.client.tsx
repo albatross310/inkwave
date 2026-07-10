@@ -122,15 +122,21 @@ void bootstrap()
 // touch events on their surfaces, so they keep working — this only stops the BROWSER's page zoom
 // (over the toolbar, panels, everywhere) from fighting the app's zoom.
 if (window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches) {
+  // CAPTURE phase, both hooks (2026-07-10 audit — "native pinch still fighting ours"): at bubble
+  // phase any descendant handler calling stopPropagation would shadow the suppression, and
+  // Safari commits its native pinch for the WHOLE gesture if the first two-finger touchmove
+  // isn't cancelled. Capture runs first, unshadowable, and this early non-passive registration
+  // is also what makes WebKit dispatch two-finger moves as CANCELABLE at all (a listener armed
+  // only mid-gesture may see cancelable=false). preventDefault doesn't stop propagation, so the
+  // app's own pinch handlers (editor zoom, PDF viewer) still receive every event.
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
-    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false })
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false, capture: true })
   }
   // gesture* events alone proved insufficient (2026-07-09): also cancel any two-finger touchmove
-  // that nothing upstream handled. The editor's own pinch handler preventDefaults on the surface
-  // first; this is the backstop for the toolbar, panels, and everything else.
+  // that nothing upstream handled — the backstop for the toolbar, panels, and everything else.
   document.addEventListener('touchmove', (e) => {
     if (e.touches.length > 1) e.preventDefault()
-  }, { passive: false })
+  }, { passive: false, capture: true })
 }
 
 // PWA file handling (Chrome/Edge/Brave, installed): double-clicking a .inkwave file launches the app

@@ -137,9 +137,33 @@
      size-compensated .iw-magnify-box wrapper (Scroll.tsx). Gated on .iw-magnified so scale=1
      renders EXACTLY as before (no transform → no containing-block / stacking-context change).
      NEVER use CSS `zoom` here — it inflates clientWidth and breaks the paginator. */
-  .inkwave-editor-surface.iw-magnified .iw-magnify-box > div {
+  .inkwave-editor-surface.iw-magnified:not(.is-phone) .iw-magnify-box > div {
     transform: scale(var(--iw-magnify, 1));
     transform-origin: top left;
+  }
+  /* PHONE HARDENING (2026-07-10 "selection shrinks the page from the right"): the magnify
+     machinery is desktop-only by construction (hybrid = fill && !phone), but the wrapper element
+     renders on every fill surface for hydration parity — so make it CSS-level IMPOSSIBLE for any
+     leaked class/var/inline size (adopted server width, stale imperative px, a stray transform)
+     to change the phone paper's geometry. Selection / keyboard raise must never resize the page. */
+  .inkwave-editor-surface.is-phone .iw-magnify-box {
+    width: auto !important;
+    height: auto !important;
+  }
+  .inkwave-editor-surface.is-phone .iw-magnify-box > div { transform: none !important; }
+
+  /* ZOOM LIVE-REFLOW WINDOW (gesture-scoped — Scroll.tsx enterZoomLive; phone pinch AND desktop
+     ctrl+wheel): off-screen blocks skip layout entirely (content-visibility: auto), so each live
+     zoom step lays out only the ~one screenful in view — Peter's "lazy reflow of everything out
+     of the screen". --iw-cv lets measurement windows force everything visible
+     (forceCanonicalContext sets it on the editor; it inherits over this rule's var()). */
+  .ProseMirror.iw-zoom-live > * {
+    content-visibility: var(--iw-cv, auto);
+    /* Placeholder for skipped blocks: the doc's average block height (--iw-cis, set once on the
+       PM root at gesture start — never per-block inline: that mutates PM-owned nodes and its DOM
+       observer rebuilds them, killing the live gesture). `auto` upgrades to the real remembered
+       size once a block has rendered under the window. */
+    contain-intrinsic-size: auto var(--iw-cis, 300px);
   }
 
   /* ZOOM CURSOR (Peter, 2026-07-10): while a ctrl/⌘-wheel zoom gesture is latched (first zoom

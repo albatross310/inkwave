@@ -561,8 +561,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         // several × slower on a phone CPU (tens of ms on a thesis-length doc), and at 120ms it
         // landed between keystrokes during normal typing. 250ms keeps it in genuine gaps; verdicts
         // freeze at commit anyway, so a later repaint changes nothing semantically. Desktop stays 120.
-        scasTickTimerRef.current = setTimeout(() => {
+        scasTickTimerRef.current = setTimeout(function tick() {
           if (e.isDestroyed) return
+          // ZOOM-GESTURE DEFERRAL (Peter, 2026-07-10 "lag in the reflow zoom"): the tick's engine
+          // scan + decoration rebuild is the heaviest non-visual work that can land mid-gesture —
+          // and a decoration repaint REBUILDS paragraph DOM, which detaches an active pinch's
+          // touch target (iOS keeps dispatching to the original node → the gesture dies). While a
+          // zoom gesture holds the painters (__iwZoomHold, cleared at settle), park the tick and
+          // retry — it flushes ≤150ms after the settle. Verdicts freeze at commit anyway, so a
+          // deferred repaint changes nothing semantically.
+          if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) {
+            scasTickTimerRef.current = setTimeout(tick, 150)
+            return
+          }
           const tickT0 = performance.now()
           const hadDeletion = scasHadDeletionRef.current
           scasHadDeletionRef.current = false
