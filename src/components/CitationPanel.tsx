@@ -897,9 +897,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
               title="Sort the library"
               className="h-8 text-[13px] text-stone-600 border border-stone-200 rounded px-1.5 bg-white">
-              <option value="added">{isTouchDevice() ? 'Recent' : 'Recently added'}</option>
-              <option value="alpha">{isTouchDevice() ? 'A–Z' : 'Alphabetical'}</option>
-              <option value="author">Author</option>
+              {/* Three letters + '..' — the select sizes to its longest option (Peter, 2026-07-10). */}
+              <option value="added">Rec..</option>
+              <option value="alpha">Alp..</option>
+              <option value="author">Aut..</option>
             </select>
             <button type="button" onClick={toggleSortDir}
               title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
