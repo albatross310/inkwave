@@ -309,9 +309,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               const logo = document.createElement('img')
               logo.src = '/inkwave-logo-v7.png'
               logo.alt = ''
-              // Phone: noticeably bigger footer chrome + solid black number (Peter, 2026-07-10).
+              // Phone: NO logo (no room) — just a centred, solid-black, larger number (Peter).
               const ph = phoneLike()
-              logo.style.cssText = `width:${ph ? 34 : 22}px;height:${ph ? 34 : 22}px;opacity:0.8;flex-shrink:0;display:block`
+              logo.style.cssText = `width:22px;height:22px;opacity:0.75;flex-shrink:0;display:${ph ? 'none' : 'block'}`
               f.appendChild(logo)
               const num = document.createElement('span')
               num.style.cssText = `font-family:"EB Garamond",Georgia,serif;color:${ph ? 'var(--iw-page-num, #000)' : '#9b5ccc'};font-size:${ph ? '1.25rem' : '0.9rem'};font-weight:${ph ? '700' : '400'};line-height:1;display:block`
