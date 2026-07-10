@@ -455,8 +455,20 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // watchdog flags a save gap: edits pending + no successful save for 60s = something is stuck
   // (e.g. a latched __iwZoomHold) — surface it loudly instead of losing work.
   useEffect(() => {
+    let privateNoticeShown = false
     const onFail = (e: Event) => {
-      const msg = (e as CustomEvent).detail?.error ?? 'unknown error'
+      const msg = String((e as CustomEvent).detail?.error ?? 'unknown error')
+      // OPFS refused at the door (SecurityError from getDirectory) = this WINDOW can't store
+      // files at all — Firefox private browsing, not a stuck save. A reload won't help and the
+      // red re-arming banner is just noise (Peter, 2026-07-11): calmer copy, once per session,
+      // dismiss is final.
+      if (/security ?error|getDirectory/i.test(msg)) {
+        if (!privateNoticeShown) {
+          privateNoticeShown = true
+          setFileOpenError('This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.')
+        }
+        return
+      }
       setFileOpenError(`SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`)
     }
     window.addEventListener('inkwave:save-failed', onFail)
