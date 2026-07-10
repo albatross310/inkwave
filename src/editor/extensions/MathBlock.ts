@@ -1,6 +1,8 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { MathBlockView } from './MathBlockView'
+import { requestMathEdit } from './mathActivation'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -44,8 +46,12 @@ export const MathBlock = Node.create({
     return {
       insertMathBlock:
         (latex = '', align = 'aligned') =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs: { latex, align } }),
+        ({ chain }) => {
+          // Raise the edit-mode flag FIRST — the node view mounts during the dispatch
+          // and opens MathLive with the caret inside, ready to type.
+          requestMathEdit()
+          return chain().focus().insertContent({ type: this.name, attrs: { latex, align } }).run()
+        },
     }
   },
 
@@ -53,5 +59,25 @@ export const MathBlock = Node.create({
     return {
       'Alt-Shift-=': () => this.editor.commands.insertMathBlock(),
     }
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      // Trailing-paragraph guarantee: the document must never END with a math block.
+      // Without it, "click right of / below the block at doc end" has no text position
+      // to land on and relies on the (easy-to-miss) gap cursor. Runs as appendTransaction
+      // so paste / deletion of the trailing paragraph re-establishes the invariant too.
+      new Plugin({
+        key: new PluginKey('mathBlockTrailingParagraph'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null
+          const last = newState.doc.lastChild
+          if (!last || last.type.name !== 'mathBlock') return null
+          const paragraph = newState.schema.nodes.paragraph
+          if (!paragraph) return null
+          return newState.tr.insert(newState.doc.content.size, paragraph.create())
+        },
+      }),
+    ]
   },
 })

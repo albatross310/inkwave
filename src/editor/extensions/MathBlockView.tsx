@@ -6,6 +6,7 @@ import type { NodeViewProps } from '@tiptap/react'
 import { handleMathKey, applyShorthands, applyShorthandsLive } from './mathUtils'
 import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './mathSymbols'
 import { loadMathLive } from './mathLiveLoader'
+import { pendingMathEdit } from './mathActivation'
 
 const INK = '#5c2d8a'
 
@@ -88,7 +89,9 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
   const latex: string = node.attrs.latex
   const align: Align  = node.attrs.align ?? 'aligned'
 
-  const [active,     setActive]     = useState(latex === '')
+  // Open in edit mode only when the writer JUST inserted this node (menu / Alt+⇧+=) —
+  // not merely because latex is empty (doc load / undo / sync used to steal focus).
+  const [active,     setActive]     = useState(() => pendingMathEdit())
   const [localLatex, setLocalLatex] = useState(latex)
   const [mlReady,    setMlReady]    = useState(false)
   const [greekOn,    setGreekOn]    = useState(false)

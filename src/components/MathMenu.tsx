@@ -127,6 +127,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
     reload()
   }
 
+  // Shortcut hints live in the hover tooltip (title), not the row — keeps the menu narrow (Peter, 2026-07-10).
   const btn = (label: string, hint: string, onClick: () => void) => (
     <button
       key={label}
@@ -138,8 +139,6 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
       <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
-      {/* Subtle right-aligned shortcut — reliably visible (native tooltips weren't surfacing). */}
-      {hint && <span style={{ marginLeft: 'auto', paddingLeft: 14, fontFamily: 'ui-monospace, monospace', fontSize: '0.72rem', color: '#b8afc4', whiteSpace: 'nowrap' }}>{hint}</span>}
     </button>
   )
 
@@ -164,7 +163,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
         <div
           className="iw-nightable"
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
-          style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgba(92,45,138,0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '160px' }}
+          style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgba(92,45,138,0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '118px' }}
         >
           {view === 'menu' && (
             <>

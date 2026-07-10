@@ -6,6 +6,7 @@ import type { NodeViewProps } from '@tiptap/react'
 import { handleMathKey, applyShorthands, applyShorthandsLive } from './mathUtils'
 import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './mathSymbols'
 import { loadMathLive } from './mathLiveLoader'
+import { pendingMathEdit } from './mathActivation'
 
 const INK = '#5c2d8a'
 
@@ -31,7 +32,10 @@ function renderFull(src: string): string {
 export function MathInlineView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const latex: string = node.attrs.latex
 
-  const [active,     setActive]     = useState(latex === '')
+  // Open in edit mode only when the writer JUST inserted this node (menu / Alt+=) —
+  // not merely because latex is empty: an empty node arriving by doc load / undo /
+  // sync used to mount active and steal focus from the page.
+  const [active,     setActive]     = useState(() => pendingMathEdit())
   const [localLatex, setLocalLatex] = useState(latex)
   const [mlReady,    setMlReady]    = useState(false)
   const [greekOn,    setGreekOn]    = useState(false)
@@ -298,7 +302,25 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
           // doesn't steal it when the formula is inactive.
           e.preventDefault()
           if (!active) {
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+            const box = e.currentTarget as HTMLElement
+            // Edge bands: the pill's padding extends the hit box a few px past the
+            // rendered formula, so a click aimed "just beside the math" lands ON the
+            // node and used to reopen the equation instead of placing the text caret.
+            // Route padding-band clicks to a caret beside the node (same intent as the
+            // CitationNodeView margin fix — the pill keeps its padding for looks, so
+            // the split is done by coordinates against the KaTeX content box).
+            const content = (box.firstElementChild as HTMLElement | null)?.getBoundingClientRect()
+            if (content && typeof getPos === 'function') {
+              const side = e.clientX > content.right ? 'after' : e.clientX < content.left ? 'before' : null
+              if (side) {
+                const pos = getPos()
+                if (pos != null) {
+                  editor.chain().focus().setTextSelection(side === 'after' ? pos + node.nodeSize : pos).run()
+                  return
+                }
+              }
+            }
+            const rect = box.getBoundingClientRect()
             const xRatio = (e.clientX - rect.left) / rect.width
             pendingCursorRef.current = xRatio > 0.5 ? 'end' : 'start'
             pendingClickRef.current = { clientX: e.clientX, clientY: e.clientY }
