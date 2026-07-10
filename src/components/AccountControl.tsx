@@ -204,6 +204,7 @@ function HeadlessAuth({ onClose }: { onClose: () => void }) {
   const [clerk, setClerk] = useState<HeadlessClerk | null>(() => getHeadless())
   const [signedIn, setSignedIn] = useState(() => !!getHeadless()?.user)
   const [busy, setBusy] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   // Re-render on auth changes (sign-in completing in the modal, sign-out). addListener fires
   // immediately with the current state, then on every mutation; it returns its unsubscriber.
@@ -230,10 +231,11 @@ function HeadlessAuth({ onClose }: { onClose: () => void }) {
     // path takes over seamlessly (same session cookie). This session continues headlessly.
     try { localStorage.setItem('inkwave:auth', '1') } catch { /* private mode */ }
     setBusy(true)
+    setLoadFailed(false)
     const c = await armHeadless()
     setBusy(false)
     setClerk(c)
-    if (!c) return // load failed (offline / blocked) — keep the row so a later click retries
+    if (!c) { setLoadFailed(true); return } // surfaced below; the row stays so a later click retries
     onClose()
     c.openSignIn()
   }
@@ -242,10 +244,16 @@ function HeadlessAuth({ onClose }: { onClose: () => void }) {
     <>
       <div className="my-1 border-t border-stone-100" />
       {busy
-        ? <Row disabled><span className="iw-subtle-flash">…</span></Row>
+        ? <Row disabled><span className="iw-signin-flash">…</span></Row>
         : signedIn && clerk
           ? <AccountItems clerk={clerk} onClose={onClose} />
           : <Row onClick={() => void signIn()}>Sign in</Row>}
+      {loadFailed && !busy && (
+        // A failed clerk-js load (offline, blocked script) must never silently no-op the click.
+        <div role="alert" className="px-4 pb-1 text-xs text-amber-600">
+          Sign-in couldn’t load — check your connection, then click again to retry.
+        </div>
+      )}
     </>
   )
 }
@@ -266,7 +274,7 @@ export function AccountMenuItems({ onClose }: { onClose: () => void }) {
       <div className="my-1 border-t border-stone-100" />
       <ProfileSync />
       {/* While Clerk is still initialising, a subtly flashing "…" stands in for the sign-in row. */}
-      <ClerkLoading><Row disabled><span className="iw-subtle-flash">…</span></Row></ClerkLoading>
+      <ClerkLoading><Row disabled><span className="iw-signin-flash">…</span></Row></ClerkLoading>
       <ClerkLoaded>
         <SignedOut><SignInItem onClose={onClose} /></SignedOut>
         <SignedIn><ProviderAccountItems onClose={onClose} /></SignedIn>

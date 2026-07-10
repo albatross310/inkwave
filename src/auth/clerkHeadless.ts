@@ -10,11 +10,38 @@
 
 import type { Clerk as ClerkInstance } from '@clerk/clerk-js'
 import { CLERK_PUBLISHABLE_KEY } from './config'
+import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
 export type HeadlessClerk = ClerkInstance
 
 let instance: HeadlessClerk | null = null
 let loading: Promise<HeadlessClerk | null> | null = null
+
+// ─── CSP tripwire ────────────────────────────────────────────────────────────────
+// Clerk's UI swallows network-LEVEL failures: a fetch the browser refuses (CSP, extension block)
+// rejects before Clerk gets a response, and the modal quietly resets to "Continue" — no error, no
+// console hint beyond the violation report. That was the 2026-07-10 incident: the production
+// frontend API (clerk.iwzero.me) was missing from middleware.ts connect-src, and sign-in silently
+// no-oped in every browser. The domain is fixed there; this guard makes the failure MODE loud if a
+// domain ever goes missing again — a developer console error plus one writer-visible toast.
+let cspGuardInstalled = false
+export function installClerkCspGuard(): void {
+  if (cspGuardInstalled || typeof document === 'undefined') return
+  cspGuardInstalled = true
+  let toasted = false
+  document.addEventListener('securitypolicyviolation', (e) => {
+    if (!/clerk/i.test(e.blockedURI)) return
+    console.error(
+      `[inkwave] Clerk request blocked by CSP: ${e.blockedURI} (${e.violatedDirective}). ` +
+      'Sign-in cannot work — add this origin to the policy in middleware.ts.',
+    )
+    if (toasted) return // one toast per session; the console keeps the full stream
+    toasted = true
+    window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, {
+      detail: { text: 'Sign-in is blocked by a security policy on this site — a configuration bug on our side, not your browser. Please try again after the next update.' },
+    }))
+  })
+}
 
 /** The live headless instance, if armHeadless() has completed (null otherwise). */
 export function getHeadless(): HeadlessClerk | null {
@@ -32,6 +59,7 @@ export async function armHeadless(): Promise<HeadlessClerk | null> {
   if (!loading) {
     loading = (async () => {
       try {
+        installClerkCspGuard() // armed before the first Clerk network call, so nothing fails silently
         const { Clerk } = await import('@clerk/clerk-js')
         const clerk = new Clerk(CLERK_PUBLISHABLE_KEY)
         await clerk.load()

@@ -23,6 +23,9 @@ async function bootstrap() {
     // Record the mount BEFORE hydration: AccountControl branches on this (provider hooks vs the
     // headless clerk-js path) and must never see a half-set state.
     markClerkProviderMounted()
+    // Same tripwire as the headless path: a CSP-blocked Clerk request must never fail silently.
+    const { installClerkCspGuard } = await import('../src/auth/clerkHeadless')
+    installClerkCspGuard()
     const { ClerkProvider, useClerk } = await import('@clerk/clerk-react')
     // After the lazy "Sign in" armed auth + reloaded, open the sign-in modal automatically (one-click).
     const AutoSignIn = () => {
