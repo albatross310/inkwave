@@ -6,6 +6,8 @@
 // pageSettings (shell-chunk weight).
 
 export const GAP = 78 // px of aqua (waves) between sheets (+40%, Peter 2026-07-10)
+export const PHONE_GAP = 55 // 30% smaller on phone (Peter, 2026-07-10)
+export const PHONE_SHEET_RADIUS = 35 // must match .is-phone .inkwave-sheet border-radius
 
 // Phone pages are content-tall with COMPACT fixed margins: break POSITIONS are canonical (same
 // text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
@@ -40,11 +42,15 @@ export function gapEl(botMargin: number, topMargin: number, gapped: boolean): HT
     el.classList.add('iw-break-marker')
     return el
   }
-  el.style.height = `${Math.round(botMargin + GAP + topMargin)}px`
+  const gap = phoneLike() ? PHONE_GAP : GAP
+  el.style.height = `${Math.round(botMargin + gap + topMargin)}px`
   const band = document.createElement('span')
   band.className = 'inkwave-page-gap-band'
-  band.style.top = `${Math.round(botMargin)}px`
-  band.style.height = `${GAP}px`
+  // Phone: the band OVERLAPS the sheets by the corner radius (it paints BEHIND the panels), so the
+  // rounded corners' cutouts are filled by water instead of the parchment surface (Peter, 2026-07-10).
+  const bleed = phoneLike() ? PHONE_SHEET_RADIUS : 0
+  band.style.top = `${Math.round(botMargin) - bleed}px`
+  band.style.height = `${gap + 2 * bleed}px`
   el.appendChild(band)
   return el
 }

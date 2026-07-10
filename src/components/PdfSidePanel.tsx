@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getPdfData, hasPdf } from '../citations/pdfSource'
-import { fetchSidecarFor } from '../storage/onedrive'
+import { fetchSidecarFor, startOneDriveSignIn } from '../storage/onedrive'
 import { bibProvider } from '../citations/bibProvider'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
@@ -112,7 +112,7 @@ export function PdfSidePanel() {
         setLoading(false)
         if (!data) {
           setError(fetchReason === 'no-auth'
-            ? 'This source’s PDF isn’t on this device yet. Sign in to OneDrive (⋮ → Save → Sync to OneDrive) and it will be fetched automatically.'
+            ? 'NOAUTH' // sentinel — rendered as an inline sign-in button below
             : fetchReason === 'not-found'
               ? 'This source’s PDF isn’t on this device, and no sidecar copy was found in the doc’s OneDrive folder. Re-attach the PDF on the device that has it and sync once.'
               : 'Couldn’t load this source’s PDF — no embedded file on this device.')
@@ -261,7 +261,18 @@ export function PdfSidePanel() {
         ) : noAttachment ? (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '1rem', fontStyle: 'italic' }}>No attachment</div>
         ) : error ? (
-          <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>{error}</div>
+          <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>
+            {error === 'NOAUTH' ? (
+              <>
+                This source’s PDF isn’t on this device yet.
+                <button type="button"
+                  onClick={() => void startOneDriveSignIn()}
+                  style={{ display: 'block', marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 'none', background: '#5c2d8a', color: '#fff', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  Sign in to OneDrive to fetch it
+                </button>
+              </>
+            ) : error}
+          </div>
         ) : viewing ? (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: dragging ? 'none' : 'auto' }}>
             <PdfViewer

@@ -105,7 +105,10 @@ async function getApp(): Promise<{
         // sessionStorage, NOT localStorage: keeps the OneDrive access token out of a persistent,
         // cross-tab, XSS-readable store. It still survives the same-tab Microsoft redirect (which is
         // all the redirect flow needs); the cost is a re-auth in a fresh tab, an acceptable trade.
-        cache: { cacheLocation: 'sessionStorage' },
+        // localStorage on TOUCH devices (2026-07-10): iOS Safari treats every launch as a new
+        // session, so sessionStorage meant re-auth on every visit — the recurring 'PDF isn't on
+        // this device / picker empty' reports. Desktop keeps sessionStorage (tighter XSS surface).
+        cache: { cacheLocation: (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches) ? 'localStorage' : 'sessionStorage' },
       })
       await app.initialize()
       // Same-window flow: process the auth response when we return from the Microsoft redirect.

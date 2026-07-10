@@ -458,7 +458,7 @@
   /* cursor:default — the gap (and its margins) is not text, so show the arrow like the area above
      the page, not the editor's text I-beam. */
   .inkwave-page-gap { display: block; position: relative; user-select: none; cursor: default; }
-  .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; }
+  .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; z-index: 0; }
   /* Ungapped mode's break MARKER (same widget, zero height): a 0-height block that pins the
      measured break position — PageGuides draws the dashed rule at its rect, @media print breaks
      the page at it. Block (not inline): the break sits at a line start, so the forced break is a
