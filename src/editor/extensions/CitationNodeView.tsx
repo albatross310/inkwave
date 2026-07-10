@@ -209,7 +209,11 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           color: hasMissing ? '#b91c1c' : 'var(--iw-cite-color, #5c2d8a)',
           background: selected ? `${INK}18` : undefined,
           borderRadius: 3,
-          padding: '0 2px',
+          // margin, not padding: margins are OUTSIDE the hit box, so a click immediately beside the
+          // citation lands the caret next to it (e.g. to type a full stop) instead of selecting the
+          // atom (Peter, 2026-07-10). Visual spacing unchanged.
+          margin: '0 2px',
+          padding: 0,
           cursor: 'default',
           userSelect: 'none',
           fontFamily: 'inherit',
