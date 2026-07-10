@@ -153,6 +153,12 @@ export function PdfSidePanel() {
   // it. Clicks INSIDE the viewer (selecting text, using the toolbar) never count.
   useEffect(() => {
     if (!open || fullscreen) return // fullscreen covers the editor — a stray focusin must not close it
+    // PHONE TOP DOCK: NEVER active, whatever the persisted ◧ flag says (Peter, 2026-07-10 "can't
+    // open keyboard mode") — tapping the bottom-half editor to TYPE is the whole point of the top
+    // dock. With this listener armed, the tap's pointerdown/focusin closed the panel, the
+    // padding-top transition shifted the tapped text ~half a screen mid-gesture, and iOS
+    // cancelled the tap — so the contenteditable never focused and the keyboard never rose.
+    if (orientation === 'top') return
     if (orientation !== 'bottom' && !hideOnEditorClick) return
     // ANYWHERE in the editor region counts — water, margins, right of the text (Peter, 2026-07-10:
     // it only worked on the text body). Listen on the SURFACE; clicks inside the viewer/panel or on
