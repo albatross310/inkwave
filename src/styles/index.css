@@ -367,6 +367,18 @@
      rate TRACKS WATER MOTION: full during drift, decelerating through the coast, zero at rest
      (a ~50% static subset stays lit via --twk-static), scroll-velocity-proportional while
      swaying — all WAAPI playbackRate, owned by waveTwinkle.ts. */
+  /* The live editor's water while the OPAQUE loading shell still covers it (Scroll's `covered`):
+     the two wave copies are never pixel-identical mid-boot — the editor's fixed pseudos anchor to
+     its still-shifting flow box, so the double-paint smears/dims every line (measured: peak 223
+     doubled vs 242 single = Peter's phone "style change" at the coast). visibility, NOT display:
+     the drift/coast animations keep running + clocked (freeze maths intact); the copy appears at
+     the reveal handoff, geometry settled + clock-identical — a seamless cross-fade. */
+  .inkwave-editor-surface.iw-wave-covered::before,
+  .inkwave-editor-surface.iw-wave-covered::after,
+  .inkwave-editor-surface.iw-wave-covered .iw-wave-twinkles {
+    visibility: hidden;
+  }
+
   @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
   .iw-wave-twinkles,
   .iw-twk-set {

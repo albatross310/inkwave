@@ -57,6 +57,7 @@ export function Scroll({
   fill = false,
   revealed = true,
   fadingOut = false,
+  covered = false,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -65,6 +66,13 @@ export function Scroll({
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
   revealed?: boolean
+  /** The live editor while the OPAQUE loading shell still covers it: its water must not paint —
+      the two wave copies are never pixel-identical mid-boot (the editor's fixed pseudos anchor to
+      its still-shifting flow box), and the double-paint visibly smears/dims the lines (measured:
+      line peak 223 doubled vs 242 single). visibility, NOT display: the drift/coast animations
+      keep running + clocked, so the freeze/coast state machine is unaffected, and the copy
+      appears exactly at the reveal handoff — geometry settled, clock-identical, seamless. */
+  covered?: boolean
   /** 0.5s opacity fade-out of the WHOLE surface (the loading shell's atomic cross-fade reveal). */
   fadingOut?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
                      // pagination settle — visibility, not display, so layout + measurement still run.
@@ -707,6 +715,8 @@ export function Scroll({
   // coast clock. The coast-start layout effect backdates the coast CSS animations to it, and the
   // twinkle fields coast from the same number, so tiles + twinkles share one start by construction.
   const coastT0Ref = useRef(0)
+  const coastEndRef = useRef<number | null>(null) // device-pixel-snapped coast end offset (see below)
+  const coastDistRef = useRef<number | null>(null) // the snapped coast travel (tx − end)
   const freezeToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
@@ -729,6 +739,32 @@ export function Scroll({
       }
     } catch { /* transform unreadable → coast from 0 */ }
     coastT0Ref.current = t0
+    // LITERAL coast keyframes (2026-07-10, Peter's phone "style change at the slowdown"): the
+    // stylesheet's iw-wave-coast-l/r keyframes read var(--wave-t)/var(--wave-coast-dist), and
+    // var()-dependent keyframes CANNOT run on the compositor — the coast ran as a MAIN-THREAD
+    // animation whose fractional transform is re-rastered CRISP each frame, while the drift
+    // (literal keyframes, composited) is GPU-sampled at fractional texel offsets = slightly
+    // SOFTENED lines. The swap therefore visibly sharpened/brightened every wave line in one
+    // frame (measured: line peak RGB ~[177,225,228] drifting → ~[227,238,234] coasting). Fix:
+    // inject the SAME keyframe names with literal px values into a late <style> (last definition
+    // wins) so the coast composites exactly like the drift — identical rendering, only motion
+    // differs. The END offset is snapped to an integer DEVICE pixel: at rest the composited
+    // texture then sits texel-exact (bilinear ≡ nearest), so dropping to background-position at
+    // the coast→off handoff paints identical pixels too — no sharpen-pop at either boundary.
+    // The var-based CSS keyframes remain as the no-JS fallback (today's behaviour).
+    const dist = phone ? 48 : 60
+    const dpr = window.devicePixelRatio || 1
+    const end = Math.round((tx - dist) * dpr) / dpr
+    coastEndRef.current = end
+    coastDistRef.current = tx - end // the snapped travel — the twinkle fields must coast EXACTLY this
+    try {
+      const css =
+        `@keyframes iw-wave-coast-l{from{transform:translate3d(${tx.toFixed(3)}px,0,0)}to{transform:translate3d(${end.toFixed(3)}px,0,0)}}` +
+        `@keyframes iw-wave-coast-r{from{transform:translate3d(${(-tx).toFixed(3)}px,0,0)}to{transform:translate3d(${(-end).toFixed(3)}px,0,0)}}`
+      let st = document.getElementById('iw-coast-kf') as HTMLStyleElement | null
+      if (!st) { st = document.createElement('style'); st.id = 'iw-coast-kf'; document.head.appendChild(st) }
+      if (st.textContent !== css) st.textContent = css // both surfaces freeze the same clock — one write
+    } catch { /* injection failed → var-based keyframes still coast (pre-fix rendering) */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
     setWaveMode('coast')
   }
@@ -792,9 +828,12 @@ export function Scroll({
       // phone (2s). On phone the waves cease to exist the moment the classes drop (parchment
       // surface, ::before display:none), so the sway base/--wave-x write is inert there — kept
       // unconditional for one code path.
-      const txFinal = (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 60) // v·T/3: 2s/48 phone, 2.5s/60 desktop
+      // The injected literal keyframes end on a device-pixel-SNAPPED offset (coastEndRef) — the
+      // --wave-x handoff must write that same number or the bg-position repaint shifts sub-pixel.
+      const txFinal = coastEndRef.current
+        ?? (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 60) // v·T/3: 2s/48 phone, 2.5s/60 desktop
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
-      el.style.setProperty('--wave-x', `${txFinal.toFixed(1)}px`)
+      el.style.setProperty('--wave-x', `${txFinal.toFixed(3)}px`) // 3 decimals — must carry the device-px snap exactly
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
     }
     const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
@@ -855,11 +894,14 @@ export function Scroll({
       // The tiles' exact coast clock (see freezeToCoast) — fields must coast from the SAME number
       // or they shear off the crests by the task-time skew between the freeze and this effect.
       coastStart: waveMode === 'coast' ? coastT0Ref.current : undefined,
+      // …and the same SNAPPED travel (the tiles' end offset is rounded to a device pixel), or the
+      // dashes end ≤1 device px off their crests at rest.
+      coastDist: waveMode === 'coast' ? coastDistRef.current ?? undefined : undefined,
     })
   }, [fill, phone, waveMode])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the

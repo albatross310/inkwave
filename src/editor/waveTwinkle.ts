@@ -80,7 +80,7 @@ export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night w
 
 // ─── Field tuning ─────────────────────────────────────────────────────────────────────────────
 const PAD = 420 // offscreen coverage either side of the viewport (recycle headroom ≈ 5.8s of drift)
-const DASH_ROW_PX = 650 // one dash per this many px of strip width, per row, per field (denser — Peter, 2026-07-10)
+const DASH_ROW_PX = 220 // one dash per this many px of strip width, per row, per field (~3x denser — Peter, 2026-07-10)
 const SPARK_ROW_PX = 800 // denser field — they were barely visible (Peter, 2026-07-10)
 const DASH_ON: [number, number] = [0.55, 0.65] // s lit per twinkle (~0.6s, Peter 2026-07-10)
 const DASH_REPEAT_CHANCE = 0.25 // subset with back-to-back blinks (high duty)
@@ -164,8 +164,8 @@ function memRing(kind: 'spark' | 'dash'): number {
   const cells = Math.max(1, Math.floor(stripW / 140))
   return Math.min(24, Math.max(8, Math.round(cells * 1.5)))
 }
-const MEM_LS_KEY = 'inkwave:twkMem:v1'
-let mem: Map<string, number[]> | null = null // band key → ring of normalized strike positions
+const MEM_LS_KEY = 'inkwave:twkMem:v2' // v2: entries are [x, halfWidth] — dashes have real extent
+let mem: Map<string, [number, number][]> | null = null // band key → ring of [x, hw] strikes
 let memW = 0 // the stripW the memory was built against
 let memSaveT: ReturnType<typeof setTimeout> | undefined
 
@@ -174,12 +174,14 @@ function memLoad(): void {
   mem = new Map()
   memW = stripW
   try {
+    localStorage.removeItem('inkwave:twkMem:v1') // retired schema
     const j = JSON.parse(localStorage.getItem(MEM_LS_KEY) ?? 'null') as
-      { w: number; bands: Record<string, number[]> } | null
+      { w: number; bands: Record<string, [number, number][]> } | null
     // Positions are only comparable against the same strip width — a resize reshuffles the
     // whole geography, so a mismatched blob just starts fresh (and is overwritten on next save).
     if (j && j.w === stripW && j.bands)
-      for (const k of Object.keys(j.bands)) mem.set(k, j.bands[k].filter((n) => Number.isFinite(n)))
+      for (const k of Object.keys(j.bands))
+        mem.set(k, j.bands[k].filter((e) => Array.isArray(e) && Number.isFinite(e[0]) && Number.isFinite(e[1])))
   } catch { /* private mode / corrupt — in-session memory still applies */ }
 }
 
@@ -188,7 +190,7 @@ function memSave(): void {
   memSaveT = setTimeout(() => { // load; a trailing debounce would never fire until the water rests
     memSaveT = undefined
     try {
-      const bands: Record<string, number[]> = {}
+      const bands: Record<string, [number, number][]> = {}
       for (const [k, v] of mem!) bands[k] = v
       localStorage.setItem(MEM_LS_KEY, JSON.stringify({ w: memW, bands }))
     } catch { /* best effort */ }
@@ -202,10 +204,11 @@ const ringDist = (a: number, b: number) => { // wave-space is circular mod strip
 }
 
 // Draw a position through the band's strike memory: candidates come from `draw` (the existing
-// distribution — density and banding stay exact), the first one ≥ MEM_EPS from every remembered
-// strike wins; after MEM_TRIES the farthest candidate is taken (a position is ALWAYS placed).
-// The accepted strike is recorded (ring per band) and persisted.
-function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, draw: () => T, xOf: (c: T) => number): T {
+// distribution — density and banding stay exact), the first whose EDGE-TO-EDGE gap from every
+// remembered strike is ≥ MEM_EPS wins (hw = the strike's half-width along x: dashes have real
+// extent — centre distance alone would let long dashes overlap tips); after MEM_TRIES the
+// farthest candidate is taken (a position is ALWAYS placed). Recorded per band + persisted.
+function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: number, draw: () => T, xOf: (c: T) => number): T {
   memLoad()
   const key = `${kind}:${group}:${row}`
   const seen = mem!.get(key) ?? []
@@ -215,12 +218,12 @@ function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, draw: () 
     const c = draw()
     const nx = wrapW(xOf(c))
     let dMin = Infinity
-    for (const p of seen) dMin = Math.min(dMin, ringDist(nx, p))
+    for (const p of seen) dMin = Math.min(dMin, ringDist(nx, p[0]) - hw - p[1])
     if (dMin >= MEM_EPS) { best = c; break }
     if (dMin > bestD) { bestD = dMin; best = c }
   }
   const picked = best!
-  seen.push(Math.round(wrapW(xOf(picked))))
+  seen.push([Math.round(wrapW(xOf(picked))), hw])
   const cap = memRing(kind)
   if (seen.length > cap) seen.splice(0, seen.length - cap)
   mem!.set(key, seen)
@@ -230,23 +233,26 @@ function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, draw: () 
 
 // ─── Instance generation ──────────────────────────────────────────────────────────────────────
 function genDash(rnd: () => number, group: Group, row: number, strip: number): Inst {
-  const w = 24, h = 16
+  // THREE LENGTH TYPES (Peter, 2026-07-10): very short / medium / slightly longer accents,
+  // ~35/40/25. hw = half the arc window; box w/h fit window + stroke + caps at max slope 0.514.
+  const tr = rnd()
+  const [hw, w, h] = tr < 0.35 ? [4, 14, 12] : tr < 0.75 ? [8.5, 24, 16] : [13, 32, 20]
   // Box centre — anywhere along the strip, either swell half; drawn through the strike memory
   // so a (re)seeded dash never lands where one recently sat in this band.
-  const cx = memPick('dash', group, row, () => -PAD + rnd() * strip, (c) => c)
+  const cx = memPick('dash', group, row, hw, () => -PAD + rnd() * strip, (c) => c)
   const wx = wrap140(cx)
   const c = CREST[group]
   const y0 = midY(c, wx)
-  // The dash IS the exact midline arc over [wx−8.5, wx+8.5] (Peter, 2026-07-10: "always parallel
+  // The dash IS the exact midline arc over [wx−hw, wx+hw] (Peter, 2026-07-10: "always parallel
   // with the thick line above"). The midline is piecewise-PARABOLIC with curvature flipping at
   // every swell joint (x ≡ 0 mod 70) — the old single quadratic through 3 samples was exact
-  // inside one branch but a joint-straddling dash (17/70 ≈ 24% of them) got a near-straight
+  // inside one branch but a joint-straddling dash (window/70 of them) got a near-straight
   // segment at the averaged slope where the water S-bends: visibly not parallel. So: split the
   // window at the joints and emit one quadratic Bézier per piece — a quadratic reproduces a
   // parabola EXACTLY (control point = intersection of the end tangents), so every dash carries
   // the thick line's own y(x) and tangents at its x, jitter being one whole-dash vertical offset.
   const yAt = (X: number) => midY(c, X) - y0 + h / 2 // local-space midline (box centre = h/2)
-  const xa = wx - 8.5, xb = wx + 8.5
+  const xa = wx - hw, xb = wx + hw
   const cuts: number[] = [xa]
   for (let k = Math.ceil(xa / 70) * 70; k < xb; k += 70) if (k > xa) cuts.push(k)
   cuts.push(xb)
@@ -258,7 +264,7 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   }
   const op = 0.32 + 0.12 * rnd()
   const path = (col: string, o: number) =>
-    `<path d='${dPath}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2' stroke-linecap='round'/>`
+    `<path d='${dPath}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2.3' stroke-linecap='round'/>`
   const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
   // A repeat subset blinks nearly back-to-back (high duty = short dark gaps between flashes).
   const duty = rnd() < DASH_REPEAT_CHANCE ? 0.75 + 0.1 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
@@ -310,7 +316,7 @@ function sparkBody(rnd: () => number, group: Group, t: number): { cy: number; da
 
 function genSpark(rnd: () => number, group: Group, row: number, strip: number): Inst {
   const w = 30, h = 30
-  const { cx, t } = memPick('spark', group, row, () => drawSparkPos(rnd, strip), (c) => c.cx)
+  const { cx, t } = memPick('spark', group, row, 0, () => drawSparkPos(rnd, strip), (c) => c.cx)
   const { cy, day, night } = sparkBody(rnd, group, t)
   const rapid = rnd() < SPARK_REPEAT_CHANCE // some glints repeat in quick succession
   const [p0, p1] = rapid ? SPARK_REPEAT_PERIOD : SPARK_PERIOD
@@ -614,7 +620,7 @@ function respawnSparks(now: number): void {
     sparkCycle.set(d, dark)
     if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
     const rnd = liveRnd
-    const pos = memPick('spark', d.group, d.row, () => drawSparkPos(rnd, stripW), (c) => c.cx)
+    const pos = memPick('spark', d.group, d.row, 0, () => drawSparkPos(rnd, stripW), (c) => c.cx)
     const body = sparkBody(rnd, d.group, pos.t)
     // Fold the fresh strip position into current viewport coverage (recycle's invariant: shifts
     // are multiples of stripW ≡ 0 mod 140 — wave-space identity and band-y stay true).
@@ -802,6 +808,22 @@ function onWaterReady(): void {
     w.__iwWaveEpoch = start
     if (anim) w.__iwWaveEpochAnim = anim
     epochMs = start
+    // Re-anchor EVERY surface's tile drift too (2026-07-10, Peter's phone "style change at the
+    // slowdown"): a surface that mounted while the water was display-gated synced its drift to
+    // the STALE pre-gate epoch and nothing ever corrected it — its wave copy ran ~first-paint-
+    // latency (3-21px) out of phase with the shell's, and wherever both copies paint the lines
+    // rendered visibly smeared/dimmer (measured: line peak 223 with both vs 242 with one). The
+    // load choreography's shell↔editor seamlessness REQUIRES every copy clock-identical.
+    for (const s of document.querySelectorAll('.inkwave-editor-surface')) {
+      try {
+        for (const a of s.getAnimations({ subtree: true })) {
+          const n = (a as CSSAnimation).animationName ?? ''
+          if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
+            try { a.startTime = start } catch { /* pending/detached — ready-resolve re-anchors */ }
+          }
+        }
+      } catch { /* getAnimations unavailable */ }
+    }
     sparkCycle = new WeakMap() // dark-window indices were computed against the previous epoch
     for (const h of hosts.values()) {
       for (const kind of ['sparks', 'dashes'] as const) {
@@ -874,7 +896,7 @@ function regenAll(): void {
 // handoff land in the same flush as the surface's wave class swap — no flash frame).
 export function syncTwinkles(
   host: HTMLElement,
-  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean; coastStart?: number },
+  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean; coastStart?: number; coastDist?: number },
 ): void {
   if (!defs) {
     epochMs = resolveEpoch()
@@ -919,7 +941,12 @@ export function syncTwinkles(
     // field coast and the (backdated) tile coast start from one number — performance.now() here
     // runs ahead of the frozen frame clock by however long this commit has been running.
     const start = want.coastStart ?? performance.now()
-    coast = { start, T: want.phone ? 2000 : 3000, dist: want.phone ? 48 : 72 }
+    // T/dist must mirror the tiles' coast exactly (CSS: 2s/48px phone, 2.5s/60px desktop — the
+    // old 3s/72px here left desktop fields ending 12px off their crests). want.coastDist carries
+    // the tiles' device-pixel-SNAPPED travel (Scroll.tsx rounds the coast end to a device pixel
+    // so the resting texture is texel-exact); the fields must travel the same snapped distance
+    // or they end ≤1 device px off their crests at rest.
+    coast = { start, T: want.phone ? 2000 : 2500, dist: want.coastDist ?? (want.phone ? 48 : 60) }
     lastCoast = coast
     restRebase = null // the coming handoff freezes a fresh constant
     if (blinkMode === 'playing') {
