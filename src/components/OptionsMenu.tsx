@@ -26,7 +26,7 @@ const INK = '#5c2d8a'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
 const PANEL_GAP = 14
 
-type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export'
+type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov'
 const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
@@ -196,6 +196,7 @@ export function OptionsMenu({
             const snaps = await listSnapshotMeta(docId)
             const last = snaps[snaps.length - 1]
             if (last) window.open(`/snapshot?doc=${encodeURIComponent(docId)}&snap=${encodeURIComponent(last.id)}`, '_blank', 'noopener')
+            else setModal('noprov')
           } catch { /* no snapshots yet */ }
         })()
       },
@@ -260,14 +261,14 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-no-print z-[60] w-[21rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
+          <div role="menu" className="iw-nightable iw-no-print z-[60] w-[16.5rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {/* LEFT column: Provenance/Print/Verify/About/Privacy … ending with Sign in/Logout. */}
             <div className="flex-1 border-r border-stone-100">
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                  className="w-full text-left pl-4 pr-2 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
                 >
                   {it.label}
                 </button>
@@ -279,7 +280,7 @@ export function OptionsMenu({
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-4 pr-5 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                  className="w-full text-left pl-4 pr-2 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
                 >
                   {it.label}
                 </button>
@@ -297,6 +298,13 @@ export function OptionsMenu({
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
+          {modal === 'noprov' && (
+            <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
+              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#5c2d8a44' }}>
+              No snaps or provenance info yet recorded.
+              <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
+            </div>
+          )}
         </Modal>
       )}
     </div>

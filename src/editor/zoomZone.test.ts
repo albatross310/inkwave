@@ -55,7 +55,7 @@ describe('createZoomLatch', () => {
     expect(latch.resolve(() => 'text', false)).toBe('water') // still inside the cooldown
   })
 
-  it('releases 0.5s after the LAST zoom event (cooldown re-arms per event)', () => {
+  it('releases 0.3s after the LAST zoom event (cooldown re-arms per event)', () => {
     const latch = createZoomLatch(() => host)
     latch.resolve(() => 'water', false)
     vi.advanceTimersByTime(400)

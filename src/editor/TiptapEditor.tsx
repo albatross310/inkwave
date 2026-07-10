@@ -1968,7 +1968,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         >
           <div
             ref={footerRef}
-            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm overflow-hidden ${isTouch ? 'w-full' : ''}`}
             onPointerDown={isTouch ? (e) => {
               // Prevent the toolbar from stealing focus from the editor on iOS.
               // Without this, tapping a toolbar button dismisses the text selection
@@ -2034,8 +2034,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 // (its onClick still runs after this capture, so its toggle semantics survive).
                 const b = (e.target as HTMLElement).closest('button')
                 if (!b) return
-                if (b.dataset.iwBar !== 'style') { setStyleBarOpen(false); clearStyleTimer() }
-                if (b.dataset.iwBar !== 'review') setReviewOpen(false)
+                if (b.dataset.iwBar) return // S/R toggles own their sequencing (toggleBar) — don't pre-close
+                setStyleBarOpen(false); clearStyleTimer()
+                setReviewOpen(false)
               }}>
               {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
               {isTouch && (
