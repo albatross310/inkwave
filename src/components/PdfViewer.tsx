@@ -1421,12 +1421,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             <span aria-hidden="true" style={{ position: 'absolute', left: -2, right: -2, top: '50%', height: 1.5, background: 'currentColor', transform: 'translateY(-50%)' }} />
           </span>
         </button>
-        {/* Hide-on-editor-click toggle (full screen) — lights up purple when on; off by default. */}
+        {/* Hide-on-editor-click toggle (full screen) — lights up purple when on; off by default.
+            Hidden on touch: the phone top dock NEVER closes on editor taps (tapping the bottom
+            half to TYPE is its whole point — Peter, 2026-07-10), so the toggle would be inert. */}
+        {!isTouch && (
         <button type="button" title="In full screen, hide the PDF when you click back into the editor"
           onMouseEnter={() => setHint('in full screen, clicking back into the editor drops the PDF viewer (off by default)')}
           onClick={() => setHideOnEditorClick(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
             border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
+        )}
         {fullscreenButton}
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {TOOLS.map(t => {
