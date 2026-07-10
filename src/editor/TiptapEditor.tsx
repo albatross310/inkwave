@@ -463,10 +463,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // red re-arming banner is just noise (Peter, 2026-07-11): calmer copy, once per session,
       // dismiss is final.
       if (/security ?error|getDirectory/i.test(msg)) {
-        if (!privateNoticeShown) {
-          privateNoticeShown = true
+        if (privateNoticeShown) return
+        privateNoticeShown = true
+        // With OneDrive signed in the work IS being stored (cloud, from memory) — no banner at
+        // all then; the notice is only for a private window with nowhere to put the writing.
+        void oneDriveAccount().then((acct) => {
+          if (acct) { console.info('inkwave: local storage unavailable (private window) — cloud sync is carrying saves'); return }
           setFileOpenError('This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.')
-        }
+        }).catch(() => {
+          setFileOpenError('This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.')
+        })
         return
       }
       setFileOpenError(`SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`)
