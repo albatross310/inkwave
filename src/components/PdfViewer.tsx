@@ -15,7 +15,11 @@ import { isTouchDevice } from '../editor/Scroll'
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
-const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#d0bcff']
+// Annotation palette (Peter, 2026-07-10): violet removed; dark red + dark blue added.
+// DARK_BLUE is also the default for underlines and strikethroughs (see armTool).
+const DARK_RED = '#991b1b'
+const DARK_BLUE = '#1e3a8a'
+const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', DARK_RED, DARK_BLUE]
 type ToolKind = HighlightKind | 'erase'
 const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'highlight', label: '▮', title: 'Highlight' },
@@ -54,6 +58,41 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; groups: 
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
+// ── Fit-to-text-width (Peter, 2026-07-10) ────────────────────────────────────────────────────────
+// The DEFAULT zoom puts the TEXT's left/right margins at the panel edges (small safety inset), not
+// the page's. Extents come from getTextContent — the same items the text layer renders from — so no
+// render pass is needed before the fit is known. Pages with no text layer (scans) or an implausibly
+// narrow bbox (a lone page number would explode the zoom) return null → caller falls back to
+// page-width fit.
+const TEXT_FIT_INSET = 10 // px of safety either side so glyphs never kiss the panel edge
+async function textExtentsOf(doc: PdfDoc, pageNum: number): Promise<{ x0: number; x1: number; pageW: number } | null> {
+  try {
+    const page = await doc.getPage(Math.min(Math.max(pageNum, 1), doc.numPages))
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    let x0 = Infinity, x1 = -Infinity
+    for (const it of tc.items as Array<{ str?: string; width?: number; transform?: number[] }>) {
+      if (!it.str?.trim() || !it.transform || !((it.width ?? 0) > 0)) continue
+      // convertToViewportPoint handles the page's viewBox offset + inherent rotation.
+      const [ax] = vp.convertToViewportPoint(it.transform[4], it.transform[5])
+      const [bx] = vp.convertToViewportPoint(it.transform[4] + (it.width ?? 0), it.transform[5])
+      x0 = Math.min(x0, ax, bx); x1 = Math.max(x1, ax, bx)
+    }
+    if (!Number.isFinite(x0) || x1 - x0 < vp.width * 0.3) return null // no/implausible text layer
+    return { x0, x1, pageW: vp.width }
+  } catch { return null }
+}
+
+// Manual-zoom override: once the user zooms by hand, that zoom (relative to the fit baseline)
+// persists and future opens skip the default in favour of it.
+const USER_ZOOM_KEY = 'inkwave:pdfUserZoom'
+function savedUserZoom(): number | null {
+  try {
+    const v = parseFloat(localStorage.getItem(USER_ZOOM_KEY) || '')
+    return Number.isFinite(v) && v >= ZOOM_MIN && v <= ZOOM_MAX ? v : null
+  } catch { return null }
+}
+
 export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onClose, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
@@ -88,6 +127,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }, [hideOnEditorClick])
   // Hovering a compact control shows its explanation down in the status line (keeps the bar squished).
   const setHint = (_?: string | null) => {} // hints now live in each control's tooltip; keep the calls no-op
+  const rootRef = useRef<HTMLDivElement>(null) // whole viewer — keyboard shortcuts gate on hover OR focus-within
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
@@ -95,6 +135,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const highlightsRef = useRef<PdfHighlight[]>([])
   const docRef = useRef<PdfDoc | null>(null)
   const fitScaleRef = useRef(1)
+  const textFitX0Ref = useRef<number | null>(null) // text bbox left (scale-1 px) — fit-to-text h-centering
   const renderTokenRef = useRef(0)
   const hoverRef = useRef(false)
   const offsetRef = useRef(0)          // printed page = sheet + offset
@@ -110,9 +151,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // re-drawn + the initial scroll applied. Capped at 1.5s like the editor's reveal gate, so a
   // slow/huge PDF can never hold the panel hostage.
   const [revealed, setRevealed] = useState(false)
-  const [zoom, setZoom] = useState(1)
+  // zoom 1 = the FIT BASELINE (fit-to-text-width when the page has a text layer, else page-width
+  // fit). A manually-chosen zoom persists (USER_ZOOM_KEY) and overrides the default on open.
+  const [zoom, setZoom] = useState(() => savedUserZoom() ?? 1)
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
+  // Per-tool colour memory: underline/strike DEFAULT to dark blue (Peter, 2026-07-10); clicking a
+  // swatch while a tool is armed re-colours THAT tool and is remembered for the session.
+  const toolColorsRef = useRef<Partial<Record<ToolKind, string>>>({ underline: DARK_BLUE, strike: DARK_BLUE })
+  function armTool(kind: ToolKind | null) {
+    setTool(kind)
+    if (kind && kind !== 'erase') setColor(toolColorsRef.current[kind] ?? COLORS[0])
+  }
   const [noteSize, setNoteSize] = useState<number>(() => { try { return Number(localStorage.getItem('inkwave:pdfNoteSize')) || 12 } catch { return 12 } })
   const toolRef = useRef<ToolKind | null>(null); toolRef.current = tool
   const colorRef = useRef(color); colorRef.current = color
@@ -565,7 +615,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     highlightsRef.current = highlightsOf(item0)
     offsetRef.current = pageOffsetOf(item0)
     printedKnownRef.current = (item0 as { _iw?: IwCitationMeta } | undefined)?._iw?.pageOffsetFlag === 'verified'
-    setZoom(1)
+    const initZoom = savedUserZoom() ?? 1 // manual-zoom override survives across opens; 1 = fit default
+    setZoom(initZoom)
     // Fresh document → re-arm the atomic reveal (the citekey key usually remounts the component,
     // but a data change on the same key must re-gate too). Cap ~1.5s: reveal whatever is painted.
     setRevealed(false)
@@ -583,10 +634,23 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
 
         const containerW = (scrollRef.current?.clientWidth ?? 800) - 24
         const baseVp = (await doc.getPage(1)).getViewport({ scale: 1 })
-        fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / baseVp.width))
+        const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / baseVp.width))
+        // DEFAULT ZOOM = FIT-TO-TEXT-WIDTH: scale so the first visible page's text bbox spans the
+        // panel (TEXT_FIT_INSET safety either side). Clamped to [page-fit … 2×page-fit] so a weird
+        // bbox can never zoom out below whole-page fit or crop wildly; no text layer → page fit.
+        const ext = await textExtentsOf(doc as PdfDoc, initialPage ?? 1)
+        if (cancelled) return
+        if (ext) {
+          const s = (containerW - 2 * TEXT_FIT_INSET) / (ext.x1 - ext.x0)
+          fitScaleRef.current = Math.max(pageFit, Math.min(3, 2 * pageFit, s))
+          textFitX0Ref.current = ext.x0 // scrollToTarget centres the text block horizontally
+        } else {
+          fitScaleRef.current = pageFit
+          textFitX0Ref.current = null
+        }
 
-        await renderPages(fitScaleRef.current)
-        renderedZoomRef.current = 1 // pages are drawn at fit (zoom 1) → baseline for the CSS-zoom ratio
+        await renderPages(fitScaleRef.current * initZoom)
+        renderedZoomRef.current = initZoom // drawn at fit×override → baseline for the CSS-zoom ratio
         if (cancelled) return
         setStatus('ready')
         // Direct scroll (placeholder sizes are final, so no reflow to fight). Re-apply a couple of
@@ -629,15 +693,24 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, citekey])
 
-  // Keyboard over the PDF viewer: Ctrl/Cmd+F opens the in-PDF find bar; Escape leaves the active markup
-  // mode (and closes the find bar) — unless a note is being edited (its own handler eats Escape first).
+  // Keyboard over the PDF viewer (hovered or focus-within): Ctrl/Cmd+F opens the in-PDF find bar;
+  // Ctrl+T / Ctrl+H / Ctrl+E toggle the text / highlight / eraser tools (Peter, 2026-07-10 —
+  // preventDefault overrides the browser's tab/history/search defaults, and NEVER while typing in
+  // a note's contentEditable or an input: this runs capture-phase, BEFORE the note's own
+  // stopPropagation, so the typing gate must be explicit); Escape leaves the active markup mode
+  // (and closes the find bar) — unless a note is being edited (its own handler eats Escape first).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!hoverRef.current) return
+      if (!hoverRef.current && !(rootRef.current && rootRef.current.contains(document.activeElement))) return
+      const ae = document.activeElement as HTMLElement | null
+      const typing = !!ae && (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         setSearchOpen(true)
         requestAnimationFrame(() => { searchBoxRef.current?.focus(); searchBoxRef.current?.select() })
+      } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !typing) {
+        const kind = ({ t: 'text', h: 'highlight', e: 'erase' } as Record<string, ToolKind | undefined>)[e.key.toLowerCase()]
+        if (kind) { e.preventDefault(); e.stopPropagation(); armTool(toolRef.current === kind ? null : kind) }
       } else if (e.key === 'Escape') {
         if (searchOpen) { setSearchOpen(false); clearFindHits() }
         if (toolRef.current) setTool(null)
@@ -690,6 +763,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // restore the pointer anchor. (The one re-render replaces the constant per-tick clear-and-blank.)
     clearTimeout(zoomSettleRef.current)
     zoomSettleRef.current = setTimeout(() => {
+      // This effect only fires on USER zoom (the load path sets zoom before status is 'ready', and
+      // the guard above drops those) → persist the override so future opens skip the fit default.
+      try { localStorage.setItem(USER_ZOOM_KEY, String(zoom)) } catch { /* private mode */ }
       const box = el.getBoundingClientRect()
       const ax = a ? a.x - box.left : el.clientWidth / 2
       const ay = a ? a.y - box.top  : el.clientHeight / 2
@@ -738,6 +814,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   function scrollToTarget() {
     const container = scrollRef.current
     if (!container) return
+    // Fit-to-text default view: the page is deliberately wider than the panel, so start with the
+    // TEXT block centred horizontally (its left margin at the safety inset). Every initial-scroll
+    // path gets this; the user can then h-scroll freely.
+    if (textFitX0Ref.current != null)
+      container.scrollLeft = Math.max(0, textFitX0Ref.current * fitScaleRef.current * renderedZoomRef.current - TEXT_FIT_INSET)
     const cRect = container.getBoundingClientRect()
     const toTop = (pg: PageRef, extra = 0) =>
       container.scrollTop + (pg.wrapper.getBoundingClientRect().top - cRect.top) + extra
@@ -1017,6 +1098,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
     if (toolRef.current !== 'text') return
     if (!pagesRef.current.length) return
+    // A press INSIDE an existing note (or on any annotation's ✕ handle) must select/edit/delete
+    // THAT element, never draw a new box over it — bail before the preview/capture starts, so the
+    // note's own click handlers (select → edit) run untouched. Inside the scroller the only
+    // buttons are those handles, so `button` is a safe part of the selector.
+    if ((e.target as HTMLElement).closest?.('[data-hl-id], button')) return
     // Pick the page under the cursor; if the cursor is in the MARGIN (outside every page), anchor to the
     // vertically-nearest page so notes can live outside the sheet (x fraction may be <0 or >1).
     let idx = pagesRef.current.findIndex(pg => {
@@ -1035,9 +1121,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     const pr = pagesRef.current[idx].wrapper.getBoundingClientRect()
-    // A clearly DOTTED preview rectangle tracks the drag so the gesture is discoverable.
+    // A clearly DOTTED preview rectangle tracks the drag so the gesture is discoverable. min-w/h
+    // make it VISIBLE from the very first frame (pointerdown, before any movement) — a 0×0 border
+    // read as "nothing happened" until the drag crossed a few px (Peter, 2026-07-10).
     const preview = document.createElement('div')
-    preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:0;width:0;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
+    preview.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;height:0;width:0;min-width:14px;min-height:14px;border:2px dotted ${INK};background:${colorRef.current}44;z-index:30;pointer-events:none;border-radius:4px;`
     document.body.appendChild(preview)
     textDragRef.current = { pageIdx: idx, startX: e.clientX, startY: e.clientY, preview, pr }
     document.addEventListener('pointermove', onTextDragMove)
@@ -1111,7 +1199,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   return (
-    <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+    <div ref={rootRef} style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
 
       {/* Pre-reveal cover (Peter, 2026-07-09 refinement): the instant state is JUST a white window
@@ -1152,7 +1240,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           return (
             <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
               onMouseEnter={() => setHint(`${t.title}`)}
-              onClick={() => setTool(active ? null : t.kind)}
+              onClick={() => armTool(active ? null : t.kind)}
               style={{
                 width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1170,7 +1258,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         </select>
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {COLORS.map(c => (
-          <button key={c} type="button" onClick={() => setColor(c)}
+          <button key={c} type="button"
+            onClick={() => { setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c }}
             style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, transform: 'translateY(-3px)', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
         ))}
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />

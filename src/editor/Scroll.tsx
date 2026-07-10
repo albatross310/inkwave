@@ -169,7 +169,39 @@ export function Scroll({
     // FIT CAP: recompute from the surface's width on every resize (and page-settings change).
     // clientWidth excludes the scrollbar (scrollbar-gutter: stable), so the fit page never sits
     // under it; WATER_MARGIN_PX keeps a strip of water visible either side.
-    const computeFit = () => setFitContext(Math.max(60, el.clientWidth - 2 * WATER_MARGIN_PX), pageW())
+    //
+    // SCROLL LOCK THROUGH THE SQUEEZE (Peter, 2026-07-10): when a width change re-binds the fit
+    // cap — the PDF panel opening/closing (its --iw-pdf-room inset narrows this fixed surface over
+    // a 0.18s transition), or a window resize — the effective magnify changes, the wrapper's
+    // height changes with it, and the reading position would scroll away. Anchor the TOP-visible
+    // text line: read its viewport top, apply the new fit (setFitContext → the subscriber's
+    // apply() resizes the wrapper SYNCHRONOUSLY), read it again, and displacement-correct
+    // scrollTop — per RO tick, so the transition's stream of small changes each cancels to zero
+    // and the text you were reading stays put through the whole open/close relayout. Same
+    // held-anchor rule (and the same block-rejection rules) as the zoom paths below.
+    const pickTopAnchor = (): HTMLElement | null => {
+      const vr = el.getBoundingClientRect()
+      const pr = paperElRef.current?.getBoundingClientRect()
+      const x = pr ? pr.left + pr.width / 2 : vr.left + vr.width / 2
+      for (const dy of [40, 90, 150, 220, 300]) {
+        const t = document.elementFromPoint(x, vr.top + dy) as HTMLElement | null
+        if (!t || !el.contains(t)) continue
+        if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) continue
+        if (!t.closest('.ProseMirror')) continue // sheet chrome / layer divs — their tops don't track text
+        if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) continue
+        return t
+      }
+      return null
+    }
+    const computeFit = () => {
+      const anchor = pickTopAnchor()
+      const topBefore = anchor ? anchor.getBoundingClientRect().top : 0
+      setFitContext(Math.max(60, el.clientWidth - 2 * WATER_MARGIN_PX), pageW())
+      if (anchor && anchor.isConnected) {
+        const topAfter = anchor.getBoundingClientRect().top // forces layout at the new wrapper size
+        if (topAfter !== topBefore) el.scrollTop += topAfter - topBefore
+      }
+    }
     const ro = new ResizeObserver(computeFit)
     ro.observe(el)
     // Wrapper height must track the paper's (unscaled) height through reflows — font zoom,
