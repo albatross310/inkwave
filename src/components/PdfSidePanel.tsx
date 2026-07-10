@@ -118,14 +118,27 @@ export function PdfSidePanel() {
   useEffect(() => {
     if (!open) return
     if (orientation !== 'bottom' && !hideOnEditorClick) return
+    // ANYWHERE in the editor region counts — water, margins, right of the text (Peter, 2026-07-10:
+    // it only worked on the text body). Listen on the SURFACE; clicks inside the viewer/panel or on
+    // floating chrome (footer, pills, menus — outside the surface or [data-iw-chrome]) never count.
+    const surface = document.querySelector('.inkwave-editor-surface.iw-fill')
     const pm = document.querySelector('.ProseMirror')
-    if (!pm) return
+    if (!surface && !pm) return
     let armed = false
     const arm = setTimeout(() => { armed = true }, 600)
-    const onEditorInteract = () => { if (armed) close() }
-    pm.addEventListener('pointerdown', onEditorInteract)
-    pm.addEventListener('focusin', onEditorInteract)
-    return () => { clearTimeout(arm); pm.removeEventListener('pointerdown', onEditorInteract); pm.removeEventListener('focusin', onEditorInteract) }
+    const onEditorInteract = (e: Event) => {
+      if (!armed) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.closest('[data-iw-chrome]') || t.closest('.iw-nightable'))) return // chrome/panels
+      close()
+    }
+    surface?.addEventListener('pointerdown', onEditorInteract)
+    pm?.addEventListener('focusin', onEditorInteract)
+    return () => {
+      clearTimeout(arm)
+      surface?.removeEventListener('pointerdown', onEditorInteract)
+      pm?.removeEventListener('focusin', onEditorInteract)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, orientation, hideOnEditorClick])
 
