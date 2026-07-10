@@ -178,6 +178,12 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               }}
             />
 
+            {/* Build marker — which deploy is this device actually running? (Peter checks on
+                phone, where devtools aren't available; the console line logs the same pair.) */}
+            <div className="px-4 pt-1 pb-1 text-[10px] text-stone-400 select-all">
+              build {__BUILD_ID__} · {__BUILD_COMMIT__}
+            </div>
+
             <div className="h-2" />
           </div>
         </>,

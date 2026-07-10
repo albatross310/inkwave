@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { reactRouter } from '@react-router/dev/vite'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig, loadEnv, type PluginOption } from 'vite'
@@ -115,7 +116,14 @@ return {
   // A unique id per build. The service worker is registered as /sw.js?v=<id> and names its cache
   // after it, so EVERY deploy looks like an SW update → old caches purged + tabs reloaded once →
   // changes always show up, with no manual "unregister".
-  define: { __BUILD_ID__: JSON.stringify(Date.now().toString(36)) },
+  define: {
+    __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
+    // Short commit hash — shown in Settings ("build <id> · <hash>") so a phone tester can tell
+    // WHICH code a device is actually running without devtools. Falls back gracefully off-git.
+    __BUILD_COMMIT__: JSON.stringify((() => {
+      try { return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim() } catch { return 'nogit' }
+    })()),
+  },
   server: {
     host: true, // bind 0.0.0.0 so the WSL2 dev server is reachable from the Windows browser
   },

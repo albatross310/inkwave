@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
-import { syncTwinkles, reportSway } from './waveTwinkle'
+import { syncTwinkles, reportSway, rebaseCoast } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -889,6 +889,13 @@ export function Scroll({
     // texture then sits texel-exact (bilinear ≡ nearest), so dropping to background-position at
     // the coast→off handoff paints identical pixels too — no sharpen-pop at either boundary.
     // The var-based CSS keyframes remain as the no-JS fallback (today's behaviour).
+    writeCoastFrames(el, tx)
+    setWaveMode('coast')
+  }
+  // Freeze offset → literal coast keyframes + refs + --wave-t. Shared by freezeToCoast and the
+  // late-first-frame refreeze below (both surfaces freeze the same clock, so the css write is
+  // idempotent across them).
+  const writeCoastFrames = (el: HTMLElement, tx: number) => {
     const dist = phone ? 48 : 60
     const dpr = window.devicePixelRatio || 1
     const end = Math.round((tx - dist) * dpr) / dpr
@@ -903,7 +910,6 @@ export function Scroll({
       if (st.textContent !== css) st.textContent = css // both surfaces freeze the same clock — one write
     } catch { /* injection failed → var-based keyframes still coast (pre-fix rendering) */ }
     el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
-    setWaveMode('coast')
   }
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
@@ -957,6 +963,42 @@ export function Scroll({
         }
       }
     } catch { /* getAnimations unavailable → original pending-start behaviour */ }
+    // LATE-FIRST-FRAME REFREEZE (2026-07-11, Peter's phone "kept going over the slowdown then
+    // jumped to too slowed down"): the backdate above is exact only when the coast's first
+    // painted frame lands ~a frame after the freeze. On a starved boot the compositor keeps
+    // DRIFTING at full speed until the commit finally lands — and the backdated coast then
+    // materialises deep into its decelerated curve: full-speed motion, then a visible backward
+    // snap to a much slower pose. This rAF runs at the head of the first frame that will paint
+    // the coast: if that frame is late (>150ms after the freeze clock), re-freeze from the
+    // DRIFT'S EXTRAPOLATED POSE at this timestamp — where the waves visibly are — and restart
+    // the coast (and the twinkle fields, same clock) from here. Normal loads never cross the
+    // threshold, so this is byte-inert on a healthy boot.
+    const refreezeRaf = requestAnimationFrame((ts) => {
+      if (waveModeRef.current !== 'coast') return
+      const late = ts - coastT0Ref.current
+      if (late <= 150) return
+      const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
+      const epoch = (typeof w.__iwWaveEpochAnim?.startTime === 'number')
+        ? w.__iwWaveEpochAnim.startTime as number
+        : w.__iwWaveEpoch
+      if (typeof epoch !== 'number') return
+      const tx = -140 * (((ts - epoch) / 1000) % 1.944) / 1.944 // the drift pose the compositor shows NOW
+      coastT0Ref.current = ts
+      writeCoastFrames(el, tx)
+      try {
+        for (const a of el.getAnimations({ subtree: true })) {
+          const n = (a as CSSAnimation).animationName ?? ''
+          if (n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade') {
+            try { a.startTime = ts } catch { /* pending start still runs the rebased keyframes */ }
+          }
+        }
+      } catch { /* getAnimations unavailable */ }
+      rebaseCoast(ts, coastDistRef.current ?? (phone ? 48 : 60)) // twinkle fields ride the same rebased clock
+      // The coast now ENDS `late` ms later than the original clock — push the finish() cap out by
+      // the same amount, so a refrozen coast still finishes via animationend, not the cap.
+      clearTimeout(cap)
+      cap = setTimeout(finish, 3300 + late)
+    })
     let done = false
     const finish = () => {
       if (done) return
@@ -979,8 +1021,8 @@ export function Scroll({
     }
     const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
     el.addEventListener('animationend', onEnd)
-    const cap = setTimeout(finish, 3300) // safety net if the animation never ran (e.g. reduced paint states)
-    return () => { el.removeEventListener('animationend', onEnd); clearTimeout(cap) }
+    let cap = setTimeout(finish, 3300) // safety net if the animation never ran (e.g. reduced paint states); the refreeze above re-arms it
+    return () => { el.removeEventListener('animationend', onEnd); clearTimeout(cap); cancelAnimationFrame(refreezeRaf) }
   }, [waveMode, phone])
   // --wave-t is inert once the coast class is gone; tidy it away after the 'off' commit (removing it
   // BEFORE the class dropped was the old backward-jump bug — the still-coasting transform fell to 0).

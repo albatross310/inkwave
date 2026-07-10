@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
-console.log(`%c[inkwave] build: ${__BUILD_ID__}`, 'color:#5c2d8a;font-weight:bold')
+console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#5c2d8a;font-weight:bold')
 
 // Apply the saved theme (night/day) before hydration so a night-mode reader doesn't flash light.
 import { applyTheme } from '../src/editor/theme'

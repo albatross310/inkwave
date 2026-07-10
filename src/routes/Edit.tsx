@@ -4,7 +4,14 @@ import { v4 as uuidv4 } from 'uuid'
 // is the bulk of the app's JS. Lazy-loading it means the tiny shell chunk hydrates immediately —
 // waves + drift on screen — while the editor chunk downloads IN PARALLEL with the OPFS document
 // read, instead of everything executing serially before anything can mount.
-const TiptapEditor = lazy(() => import('../editor/TiptapEditor').then(m => ({ default: m.TiptapEditor })))
+// The import is kicked EAGERLY at module scope (2026-07-11): `lazy(() => import(...))` alone only
+// starts the fetch on the component's FIRST RENDER — i.e. after setDoc — so the chunk fetch+eval
+// was actually SERIALIZED behind the whole storage read (measured on Chromium: chunk request at
+// 4.0s, the moment the doc resolved). Kicking it here restores the designed parallelism: the
+// fetch+eval overlap the OPFS/IndexedDB load, and any storage stall no longer adds to boot.
+// (browser only: the prerender/SSR pass must not eval the editor graph at module scope)
+const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
+const TiptapEditor = lazy(() => (tiptapEditorImport ?? import('../editor/TiptapEditor')).then(m => ({ default: m.TiptapEditor })))
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
 import { loadDocument, emptyTiptapDoc } from '../storage/opfs'
@@ -63,7 +70,11 @@ export function Edit() {
   useLayoutEffect(() => { setShellPhone(isTouchDevice()) }, [])
   useEffect(() => {
     let t = 0
+    let t2 = 0
+    let revealedAt = 0 // when the editor's 0.8s paper fade STARTED (phone ordering guard below)
+    let restSeen = false
     const onRevealed = () => {
+      revealedAt = performance.now()
       // PHONE (2026-07-11, the iOS "goes white" fix): ONE visible water until rest, and the
       // shell must NOT fade — fading the only water exposed the body parchment through the
       // transparent covered editor MID-COAST. Instead the shell stays fully OPAQUE ('up') and
@@ -80,12 +91,33 @@ export function Edit() {
       setShellUp('fading')
       t = window.setTimeout(() => setShellUp('down'), 1030) // 1s desktop fade
     }
-    const onRest = () => { if (isTouchDevice()) setShellUp('down') }
+    // ORDERING GUARD (2026-07-11): wave-rest is compositor-clocked (animationend ~2s after the
+    // freeze) while the reveal is a main-thread timer + React commit — on a slow phone the coast
+    // can END before the paper above has finished its 0.8s fade-in. Dropping the shell then would
+    // flash parchment through the half-faded paper (a paler echo of the white-out). So the drop
+    // waits for BOTH: the waves at rest AND the fade complete (revealedAt + 850ms). The still
+    // water lingering a few hundred ms is invisible next to a pale flash. The 4s post-reveal cap
+    // (onRevealed above) is unchanged — the shell can still never persist forever.
+    const onRest = () => {
+      if (!isTouchDevice()) return
+      restSeen = true
+      const wait = revealedAt ? Math.max(0, revealedAt + 850 - performance.now()) : 0
+      if (!revealedAt) return // reveal hasn't landed — onRevealed's cap (or the drop below) covers it
+      if (wait === 0) setShellUp('down')
+      else { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), wait) }
+    }
+    // If rest arrived BEFORE the reveal (heavily starved boot), drop once the fade completes.
+    const onRevealedLate = () => {
+      if (isTouchDevice() && restSeen) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850) }
+    }
     window.addEventListener('inkwave:editor-revealed', onRevealed)
+    window.addEventListener('inkwave:editor-revealed', onRevealedLate)
     window.addEventListener('inkwave:wave-rest', onRest)
     return () => {
       clearTimeout(t)
+      clearTimeout(t2)
       window.removeEventListener('inkwave:editor-revealed', onRevealed)
+      window.removeEventListener('inkwave:editor-revealed', onRevealedLate)
       window.removeEventListener('inkwave:wave-rest', onRest)
     }
   }, [])

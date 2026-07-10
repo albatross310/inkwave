@@ -139,10 +139,28 @@ function mulberry32(seed: number): () => number {
   }
 }
 
-const f1 = (n: number) => String(Math.round(n * 10) / 10)
 const wrap140 = (x: number) => ((x % 140) + 140) % 140
-const svgUri = (w: number, h: number, body: string) =>
-  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'>${body}</svg>`)}`
+
+// ─── Art rasteriser — canvas PNG data-URIs, NOT SVG data-URIs (2026-07-11) ───────────────────
+// Chromium builds an ISOLATED SVG DOCUMENT (inner frame + style engine + resource fetch) for
+// every unique SVG-image URI. The field is ~300 instances × day+night ≈ 600 unique URIs at boot
+// — traced at ~4.3s of IsolatedSVGDocumentHost/SVGImage::DataChanged on the warm-load main
+// thread (the "Chrome takes forever" boot; Firefox's SVG image path is cheap, hence the engine
+// asymmetry) — and every respawn minted MORE of them, forever. A 2D-canvas raster of the same
+// strokes encodes to a tiny PNG whose decode is a threaded, document-less image decode: visually
+// identical (drawn at devicePixelRatio), no SVG machinery at all. One shared canvas, reused.
+let _rasterCv: HTMLCanvasElement | null = null
+function rasterURI(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): string {
+  const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1))
+  const cv = (_rasterCv ??= document.createElement('canvas'))
+  cv.width = Math.ceil(w * dpr) // resize clears
+  cv.height = Math.ceil(h * dpr)
+  const g = cv.getContext('2d')
+  if (!g) return ''
+  g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  draw(g)
+  return cv.toDataURL('image/png')
+}
 
 // ─── Banding maths ────────────────────────────────────────────────────────────────────────────
 const arcY = (c: number, t: number) => c - 36 * t * (1 - t) // crest arc of a thick line
@@ -263,20 +281,29 @@ function dashArt(rnd: () => number, group: Group, row: number, hw: number, w: nu
   const cuts: number[] = [xa]
   for (let k = Math.ceil(xa / 70) * 70; k < xb; k += 70) if (k > xa) cuts.push(k)
   cuts.push(xb)
-  let dPath = `M${f1(w / 2 + (xa - wx))} ${f1(yAt(xa))}`
-  for (let s = 0; s < cuts.length - 1; s++) {
-    const A = cuts[s], B = cuts[s + 1]
-    dPath += ` Q${f1(w / 2 + ((A + B) / 2 - wx))} ${f1(yAt(A) + (midYd(A) * (B - A)) / 2)}` +
-      ` ${f1(w / 2 + (B - wx))} ${f1(yAt(B))}`
-  }
   const op = 0.32 + 0.12 * rnd()
-  const path = (col: string, o: number) =>
-    `<path d='${dPath}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2.3' stroke-linecap='round'/>`
+  // Same piecewise quadratics as the old SVG path, stroked straight onto the raster canvas.
+  const paint = (col: string, o: number) => rasterURI(w, h, (g) => {
+    g.strokeStyle = col
+    g.globalAlpha = o
+    g.lineWidth = 2.3
+    g.lineCap = 'round'
+    g.beginPath()
+    g.moveTo(w / 2 + (xa - wx), yAt(xa))
+    for (let s = 0; s < cuts.length - 1; s++) {
+      const A = cuts[s], B = cuts[s + 1]
+      g.quadraticCurveTo(
+        w / 2 + ((A + B) / 2 - wx), yAt(A) + (midYd(A) * (B - A)) / 2,
+        w / 2 + (B - wx), yAt(B),
+      )
+    }
+    g.stroke()
+  })
   return {
     x: cx - w / 2,
     y: 140 * row + y0 + (rnd() - 0.5) * 5 - h / 2,
-    day: svgUri(w, h, path(DASH_COLOR, op)),
-    night: svgUri(w, h, path(DASH_COLOR_NIGHT, op * 0.92)),
+    day: paint(DASH_COLOR, op),
+    night: paint(DASH_COLOR_NIGHT, op * 0.92),
   }
 }
 
@@ -314,24 +341,34 @@ function sparkBody(rnd: () => number, group: Group, t: number): { cy: number; da
   const arc = arcY(c, t)
   const cy = arc + (0.12 + 0.73 * rnd()) * (c - arc) // inside the arc↔chord lens
   const s = 0.75 + 0.4 * rnd()
-  const glyph = (col: string, core: string) => {
-    let p =
-      `<g stroke='${col}' stroke-width='${f1(1.6 * s)}' stroke-linecap='round'>` +
-      `<path d='M15 ${f1(15 - 4.2 * s)} V${f1(15 + 4.2 * s)}'/>` +
-      `<path d='M${f1(15 - 4.2 * s)} 15 H${f1(15 + 4.2 * s)}'/></g>` +
-      `<circle cx='15' cy='15' r='${f1(1.4 * s)}' fill='${core}'/>`
-    const sats = rnd() < 0.35 ? 2 : 1
-    for (let k = 0; k < sats; k++) {
-      const offX = (rnd() < 0.5 ? -1 : 1) * (3 + 5 * rnd())
-      const ts = Math.min(0.98, Math.max(0.02, t + offX / 70))
-      const ys = arcY(c, ts) + (0.2 + 0.7 * rnd()) * (c - arcY(c, ts))
-      p += `<circle cx='${f1(15 + offX)}' cy='${f1(15 + ys - cy)}' r='${f1(0.9 + 0.4 * rnd())}' fill='${col}' fill-opacity='${f1(0.55 + 0.35 * rnd())}'/>`
-    }
-    return p
+  // Satellites drawn from the SAME random stream for both variants (the old SVG built one string
+  // and recoloured it) — precompute them, then rasterise each palette.
+  const sats: { offX: number; ys: number; r: number; o: number }[] = []
+  const nSats = rnd() < 0.35 ? 2 : 1
+  for (let k = 0; k < nSats; k++) {
+    const offX = (rnd() < 0.5 ? -1 : 1) * (3 + 5 * rnd())
+    const ts = Math.min(0.98, Math.max(0.02, t + offX / 70))
+    const ys = arcY(c, ts) + (0.2 + 0.7 * rnd()) * (c - arcY(c, ts))
+    sats.push({ offX, ys, r: 0.9 + 0.4 * rnd(), o: 0.55 + 0.35 * rnd() })
   }
-  const day = glyph(SPARK_COLOR, SPARK_CORE)
-  const night = day.split(SPARK_COLOR).join(SPARK_COLOR_NIGHT).split(SPARK_CORE).join(SPARK_CORE_NIGHT)
-  return { cy, day: svgUri(w, h, day), night: svgUri(w, h, night) }
+  const paint = (col: string, core: string) => rasterURI(w, h, (g) => {
+    g.strokeStyle = col
+    g.lineWidth = 1.6 * s
+    g.lineCap = 'round'
+    g.beginPath()
+    g.moveTo(15, 15 - 4.2 * s); g.lineTo(15, 15 + 4.2 * s)
+    g.moveTo(15 - 4.2 * s, 15); g.lineTo(15 + 4.2 * s, 15)
+    g.stroke()
+    g.fillStyle = core
+    g.beginPath(); g.arc(15, 15, 1.4 * s, 0, 2 * Math.PI); g.fill()
+    g.fillStyle = col
+    for (const sat of sats) {
+      g.globalAlpha = sat.o
+      g.beginPath(); g.arc(15 + sat.offX, 15 + sat.ys - cy, sat.r, 0, 2 * Math.PI); g.fill()
+    }
+    g.globalAlpha = 1
+  })
+  return { cy, day: paint(SPARK_COLOR, SPARK_CORE), night: paint(SPARK_COLOR_NIGHT, SPARK_CORE_NIGHT) }
 }
 
 function genSpark(rnd: () => number, group: Group, row: number, strip: number): Inst {
@@ -1034,12 +1071,38 @@ function onWaterReady(): void {
     // Play-pending: the drift's startTime resolves only once the compositor acks a commit (~a
     // frame in Firefox; ~100ms measured on a busy Chromium boot) and its pseudos RENDER AT 0
     // until then. So anchor to "now" — not the stale mount-time epoch (measured −12.4px) — and
-    // keep re-anchoring every frame while it stays pending (bounds the twinkle↔tile skew to ~one
-    // frame's drift, ~1px); adopt the literal startTime the moment ready resolves. Exact after.
+    // keep the FIELDS pinned to "now" while it stays pending, adopting the literal startTime
+    // the moment ready resolves. Exact after.
+    //
+    // The pending tick is LIGHT (2026-07-11 — Chromium's slow-boot livelock, CPU-profiled): the
+    // old tick ran the FULL anchor every frame — getAnimations(subtree) forced style on every
+    // surface and startTime writes hit all ~250 dash blink animations — and each mutation batch
+    // re-dirtied the compositor sync that the pending start was itself waiting on: the ack could
+    // starve for SECONDS ("(program)" 12.7s in the profile) while storage promises and the
+    // editor mount sat behind the flood. Firefox resolves starts without the ack, hence the
+    // engine asymmetry. Per pending frame we now touch ONLY the epoch vars + the four field
+    // transforms (direct references — no style forcing, no blink loop); blink phase runs off the
+    // provisional epoch until the one exact full anchor at ready-resolve (random phases — the
+    // interim error is imperceptible, and dash/spark respawn cycles reset there as before).
     anchor(performance.now())
+    const anchorLight = (start: number) => {
+      const w = window as unknown as { __iwWaveEpoch?: number }
+      w.__iwWaveEpoch = start
+      epochMs = start
+      for (const h of hosts.values()) {
+        for (const kind of ['sparks', 'dashes'] as const) {
+          const nodes = h[kind]
+          if (!nodes) continue
+          for (const g of ['a', 'b'] as Group[]) {
+            const a = fieldAnim.get(nodes.fields[g])
+            if (a && fieldMode.get(nodes.fields[g]) === 'anim') a.startTime = start
+          }
+        }
+      }
+    }
     const tick = () => {
       if (typeof drift!.startTime === 'number' || waterMode !== 'anim') return
-      anchor(performance.now())
+      anchorLight(performance.now())
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
@@ -1154,6 +1217,30 @@ export function syncTwinkles(
   else if (!want.sparks && h.sparks) { h.sparks.set.remove(); h.sparks = undefined; h.tok.sparks++ }
   if (want.dashes && !h.dashes) mountSet(host, h, 'dashes')
   else if (!want.dashes && h.dashes) { disarmDashes(h.dashes); h.dashes.set.remove(); h.dashes = undefined; h.tok.dashes++ }
+}
+
+// LATE-FIRST-FRAME COAST REBASE (2026-07-11 — see Scroll.tsx): when the coast's first painted
+// frame landed late (starved boot), the tiles re-freeze from the drift's extrapolated pose at
+// that frame; the twinkle FIELDS must ride the same rebased clock or they'd snap to the stale
+// deep-coast pose the tiles just abandoned. Recreates each coasting field's WAAPI animation
+// against the new start (applyFieldMode's coast branch derives x0 from coast.start, which is
+// exactly the drift pose at the rebased moment — same analytic clock as the tiles).
+export function rebaseCoast(start: number, dist: number): void {
+  if (waterMode !== 'coast' || !coast) return
+  coast = { start, T: coast.T, dist }
+  lastCoast = coast
+  for (const h of hosts.values()) {
+    for (const kind of ['sparks', 'dashes'] as const) {
+      const nodes = h[kind]
+      if (!nodes) continue
+      for (const g of ['a', 'b'] as Group[]) {
+        const f = nodes.fields[g]
+        if (fieldMode.get(f) !== 'coast') continue
+        fieldMode.delete(f) // force applyFieldMode through its same-mode no-op guard
+        applyFieldMode(f, g, 'coast', f.closest('.inkwave-editor-surface') as HTMLElement | null)
+      }
+    }
+  }
 }
 
 // Genuine scrollTop velocity (px/s) from the sway handler — zoom-hold-compensated deltas are

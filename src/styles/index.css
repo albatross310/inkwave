@@ -319,6 +319,20 @@
     /* Same water as the desktop surface (the phone base is parchment — checkerboard fix above). */
     background-color: #00bfa8;
     background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    /* PIN THE SHELL BOX TO THE VIEWPORT (2026-07-11 — THE real iOS "goes white"). Phone surfaces
+       are IN-FLOW (`.iw-fill:not(.is-phone)` is the only fixed rule — phone is body-scroll), so
+       the moment the covered editor mounted before the shell in the DOM, the shell's BOX was
+       pushed a full editor-height below the viewport: its viewport-FIXED wave pseudos kept
+       painting (ghost seashell lines) but the aqua gradient — painted on the element box —
+       scrolled away with it: parchment + ghost lines = the phone white-out, on every load from
+       editor-mount to wave-rest. Waves on a phone exist ONLY on the loading shell (the covered
+       editor renders no wave classes), so pinning this box changes nothing else; the shell
+       unmounts at wave-rest and normal phone flow is untouched. z-index: 0 keeps it under the
+       z:1 covered editor, so paper + chrome still fade in ABOVE the water. */
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast {
     --wave-coast-dist: 48px; /* v·T/3 = 72·2/3 — keeps the 72px/s seamless takeover at 2s */
@@ -365,7 +379,11 @@
      reshapes it. Tiles were already fixed 140px — this stabilises the BOXES + the gradient. */
   .inkwave-editor-surface.is-phone.iw-wave-anim,
   .inkwave-editor-surface.is-phone.iw-wave-coast {
-    background-attachment: fixed;
+    /* scroll, NOT fixed attachment (2026-07-11): the shell box is viewport-pinned now (rule
+       above), so element-anchored paints the same pixels — and WebKit's fixed-attachment path
+       is historically unreliable once the element composites (overlapping z:1 editor). The
+       100lvh size still shape-stabilises the gradient through browser-UI transitions. */
+    background-attachment: scroll;
     background-size: 100vw 100lvh;
     background-repeat: no-repeat;
   }
