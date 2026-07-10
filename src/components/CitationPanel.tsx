@@ -805,7 +805,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={fullscreen
-          ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: 'min(1080px, 96vw)', overflow: 'hidden', borderRadius: 0, borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }
+          ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(1080px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
           : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
