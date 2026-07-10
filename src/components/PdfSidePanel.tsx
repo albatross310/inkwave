@@ -1,10 +1,14 @@
 // App-level PDF panel. Mounted once in the editor; listens for 'inkwave:open-pdf' (citations/
 // pdfViewer.ts), loads the PDF bytes from OPFS, and renders them with the bundled pdf.js viewer.
 //
-// Docks top/bottom by default (and always on narrow/phone screens); on a wide screen a toggle switches
-// it to a right-hand side-by-side dock. It publishes --iw-pdf-room (side) / --iw-pdf-room-bottom
-// (bottom) so the editor surface + floating toolbars make room (see styles/index.css). Resizing drags
-// a full-viewport overlay portaled above the viewer so pointer events aren't swallowed mid-drag.
+// Desktop: docks bottom by default; on a wide screen a toggle switches it to a side-by-side dock
+// (left or right edge). PHONE (isTouchDevice): the viewer always takes the TOP half and the editor
+// keeps the bottom half (Peter, 2026-07-10) — the old forced bottom dock never worked there (the
+// bottom-dock tap-editor-closes listener dropped the PDF on the first touch, and the px-height
+// bottom panel sat behind iOS's dynamic URL bar). It publishes --iw-pdf-room (right) /
+// --iw-pdf-room-left / --iw-pdf-room-bottom / --iw-pdf-room-top so the editor surface + floating
+// toolbars make room (see styles/index.css). Resizing drags a full-viewport overlay portaled above
+// the viewer so pointer events aren't swallowed mid-drag.
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -13,6 +17,7 @@ import { fetchSidecarFor } from '../storage/onedrive'
 import { bibProvider } from '../citations/bibProvider'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
+import { isTouchDevice } from '../editor/Scroll'
 
 const INK = '#5c2d8a'
 const MIN_W = 320, MIN_H = 200
@@ -22,6 +27,8 @@ const DOCK_SIDE_KEY = 'inkwave:pdfDockSide' // side dock on the 'left' or 'right
 // surface's waves stay visible in the side strips (and sway with the PDF scroll; see PdfViewer's
 // inkwave:pdf-sway feed into Scroll.tsx).
 const FS_SIDE = 64, FS_VERT = 12
+// Phone top dock height: dvh tracks iOS's dynamic URL bar (vh fallback for old WebKit).
+const PHONE_TOP_H = typeof CSS !== 'undefined' && CSS.supports?.('height', '50dvh') ? '50dvh' : '50vh'
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
@@ -52,7 +59,10 @@ export function PdfSidePanel() {
     mq.addEventListener('change', h)
     return () => mq.removeEventListener('change', h)
   }, [])
-  const orientation: 'bottom' | 'side' = isWide ? storedOrient : 'bottom'
+  // PHONE = TOP dock, always (the panel above, the editor in the bottom half). Non-touch narrow
+  // windows keep the bottom dock; wide screens keep the stored bottom/side preference.
+  const isPhone = isTouchDevice()
+  const orientation: 'bottom' | 'side' | 'top' = isPhone ? 'top' : isWide ? storedOrient : 'bottom'
 
   // Which screen edge the SIDE dock lives on (Peter, 2026-07-10) — persisted; bottom dock ignores it.
   const [dockSide, setDockSide] = useState<'left' | 'right'>(() => {
@@ -175,12 +185,14 @@ export function PdfSidePanel() {
   // computeFit anchor keeps the same content line in place through both transitions.
   useEffect(() => {
     const root = document.documentElement
-    const set = (right: string, left: string, bottom: string) => {
+    const set = (right: string, left: string, bottom: string, top = '0px') => {
       root.style.setProperty('--iw-pdf-room', right)
       root.style.setProperty('--iw-pdf-room-left', left)
       root.style.setProperty('--iw-pdf-room-bottom', bottom)
+      root.style.setProperty('--iw-pdf-room-top', top)
     }
     if (!open || fullscreen) set('0px', '0px', '0px')
+    else if (orientation === 'top') set('0px', '0px', '0px', PHONE_TOP_H) // phone: editor keeps the bottom half
     else if (orientation === 'side') {
       if (dockSide === 'left') set('0px', `${width}px`, '0px')
       else set(`${width}px`, '0px', '0px')
@@ -202,9 +214,12 @@ export function PdfSidePanel() {
   const side = orientation === 'side'
   const panelPos: React.CSSProperties = fullscreen
     // Fullscreen float: the pane is centred over the water with the wave strips visible either
-    // side (a big page floating on the water — not chrome-less edge-to-edge).
-    ? { top: FS_VERT, bottom: FS_VERT, left: FS_SIDE, right: FS_SIDE, borderRadius: 12, border: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
-    : side
+    // side (a big page floating on the water — not chrome-less edge-to-edge). Phone gets slim margins.
+    ? { top: FS_VERT, bottom: FS_VERT, left: isPhone ? 10 : FS_SIDE, right: isPhone ? 10 : FS_SIDE, borderRadius: 12, border: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
+    : orientation === 'top'
+      // PHONE: the viewer pops up ABOVE, full width, top half — the editor keeps the bottom half.
+      ? { top: 0, left: 0, right: 0, height: PHONE_TOP_H, paddingTop: 'env(safe-area-inset-top)' /* notch, standalone PWA */, borderBottom: `1px solid ${INK}33`, boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }
+      : side
       ? (dockSide === 'left'
         ? { top: 0, left: 0, bottom: 0, width, maxWidth: '100vw', borderRight: `1px solid ${INK}33`, boxShadow: '4px 0 24px rgba(0,0,0,0.18)' }
         : { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: `1px solid ${INK}33`, boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' })
@@ -217,8 +232,9 @@ export function PdfSidePanel() {
   return (
     <>
       <div style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
-        {/* Resize handle on the edge facing the editor (hidden in fullscreen — nothing to resize) */}
-        {!fullscreen && (
+        {/* Resize handle on the edge facing the editor (hidden in fullscreen, and on the phone's
+            fixed 50dvh top dock — a touch drag there fights scrolling). */}
+        {!fullscreen && orientation !== 'top' && (
         <div
           onPointerDown={e => {
             e.preventDefault()
@@ -275,7 +291,7 @@ export function PdfSidePanel() {
                   {dockSide === 'right' ? '⇤' : '⇥'}
                 </button>
               ) : null}
-              dockButton={isWide && !fullscreen ? (
+              dockButton={isWide && !fullscreen && !isPhone ? (
                 <button type="button" onClick={toggleOrient} title={side ? 'Dock to the bottom (panel under the editor)' : 'Dock to the side (side-by-side with the editor)'}
                   style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
                   {side ? '▭' : '▯'}
