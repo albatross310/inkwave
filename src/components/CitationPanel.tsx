@@ -881,7 +881,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             {(['cited', 'all', 'manual'] as RefMode[]).map(m => (
               <button
                 key={m} type="button" onClick={() => setMode(m)}
-                className="h-8 text-[13px] px-2 rounded border flex items-center"
+                className="h-8 text-[13px] w-14 justify-center rounded border flex items-center"
                 style={refMode === m
                   ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #5c2d8a)', color: 'var(--iw-cite-color, #5c2d8a)' }
                   : { borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}

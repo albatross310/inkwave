@@ -22,6 +22,9 @@ const KEYS = [
   'inkwave:editorZoom',
   'inkwave:pdfNoteSize',
   'inkwave:snapLineMode',
+  // Dismissed info bars travel with the doc too (Peter, 2026-07-10).
+  'inkwave:citeExtDismissed',
+  'inkwave:citeHelpDismissed',
 ]
 
 export type ViewSettings = Record<string, string>
