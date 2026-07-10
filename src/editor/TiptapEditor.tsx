@@ -800,8 +800,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       vv.scale > 1.01 ? 0 : Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height))
     const tick = () => {
       const off = measure()
-      if (off !== lastOff) { lastOff = off; stable = 0; root.style.setProperty('--iw-kb-offset', `${off}px`) }
-      else stable++
+      if (off !== lastOff) {
+        lastOff = off
+        stable = 0
+        root.style.setProperty('--iw-kb-offset', `${off}px`)
+        // The footer just moved — keep the caret clear of its NEW position (reads the live rect).
+        keepCaretRef.current()
+      } else stable++
       if (stable < 30) raf = requestAnimationFrame(tick) // park after ~0.5s of no movement
       else raf = 0
     }
@@ -820,6 +825,51 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       clearInterval(watchdog)
       cancelAnimationFrame(raf)
       root.style.removeProperty('--iw-kb-offset')
+    }
+  }, [])
+
+  // The toolbar band is RESERVED space: --iw-toolbar-h mirrors the footer pill's LIVE height
+  // (grows when the style/review rows open — the RO tracks the animation) so index.css can
+  // (a) pad the phone surface's bottom and (b) scroll-padding every scroller, keeping the caret,
+  // selection handles and scrollIntoView targets ABOVE the toolbar + keyboard, never behind them.
+  useEffect(() => {
+    const el = footerRef.current
+    if (!el) return
+    const root = document.documentElement
+    const write = () => {
+      // Rect height (not offsetHeight): includes the desktop ×1.12 scale transform.
+      root.style.setProperty('--iw-toolbar-h', `${Math.ceil(el.getBoundingClientRect().height)}px`)
+      keepCaretRef.current() // rows opening/closing move the pill's top edge — keep the caret clear
+    }
+    const ro = new ResizeObserver(write)
+    ro.observe(el)
+    write()
+    return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
+  }, [])
+
+  // iOS touch-and-hold guard, half two (half one = .iw-touch-guard user-select CSS): a touch that
+  // STARTS on the toolbar or any of its drop-ups must never start a text selection mid-slide when
+  // the finger moves up onto the editor — touch events keep firing on their START target, so one
+  // document-level non-passive touchmove preventDefault covers every guard surface, including
+  // portaled menus. Touches that start in the editor itself are untouched (long-press selection
+  // there still works). Capture-phase + first-touch-only so a second finger can't drop the guard.
+  useEffect(() => {
+    if (!isTouchDevice()) return
+    let guarded = false
+    const start = (e: TouchEvent) => {
+      if (e.touches.length === 1) guarded = !!(e.target as Element | null)?.closest?.('.iw-touch-guard')
+    }
+    const move = (e: TouchEvent) => { if (guarded && e.cancelable) e.preventDefault() }
+    const end = (e: TouchEvent) => { if (e.touches.length === 0) guarded = false }
+    document.addEventListener('touchstart', start, { capture: true, passive: true })
+    document.addEventListener('touchmove', move, { capture: true, passive: false })
+    document.addEventListener('touchend', end, { capture: true, passive: true })
+    document.addEventListener('touchcancel', end, { capture: true, passive: true })
+    return () => {
+      document.removeEventListener('touchstart', start, { capture: true } as EventListenerOptions)
+      document.removeEventListener('touchmove', move, { capture: true } as EventListenerOptions)
+      document.removeEventListener('touchend', end, { capture: true } as EventListenerOptions)
+      document.removeEventListener('touchcancel', end, { capture: true } as EventListenerOptions)
     }
   }, [])
 
@@ -2042,7 +2092,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         >
           <div
             ref={footerRef}
-            className={`iw-nightable pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable iw-touch-guard pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             onPointerDown={isTouch ? (e) => {
               // Prevent the toolbar from stealing focus from the editor on iOS.
               // Without this, tapping a toolbar button dismisses the text selection

@@ -114,7 +114,7 @@ export function GuideMenu() {
             ref={dialogRef}
             role="dialog"
             aria-label="Guide"
-            className="iw-nightable fixed z-[100]"
+            className="iw-nightable iw-touch-guard fixed z-[100]"
             onMouseDown={e => e.stopPropagation()}
             style={{
               ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),

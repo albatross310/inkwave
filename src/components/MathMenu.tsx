@@ -161,7 +161,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
             (the trigger's onClick never fires while open — exactly how SettingsMenu toggles). */}
         <div className="fixed inset-0 z-[199]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
         <div
-          className="iw-nightable"
+          className="iw-nightable iw-touch-guard"
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgba(92,45,138,0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '118px' }}
         >
