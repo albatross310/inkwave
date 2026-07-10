@@ -191,6 +191,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           let sheet: HTMLElement | null = null
           let layer: HTMLElement | null = null
           let observed = false
+          let lastPageH = 0 // canonical page height from the last recompute — the full-final-page fallback
+          let lastMinH = 0  // applyBands' full-final-page sheet extension — recompute's baseline must
+                            // respect it or the RO oscillates (reset→shrink→paint→grow→RO→reset…)
           // PHONE INPUT PRIORITY: a keystroke that adds/removes a LINE resizes the sheet, so this
           // observer fired one frame after the edit and — doc size changed ⇒ fresh inputSig — ran
           // the full triple-reflow measure IMMEDIATELY, bypassing the edit debounce entirely. On
@@ -251,9 +254,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // (taller) panels held the old height and every repaint re-measured its own stale
             // extent — a self-sustaining fixpoint ("space below the page never retracts", gapped
             // only, cleared by refresh/toggle because those rebuild the layer). Hiding the layer
-            // for one read costs one reflow per (debounced) paint pass.
+            // for one read costs one reflow per (debounced) paint pass. The full-final-page
+            // min-height (applyBands) is neutralized for the same reason — it would ratchet.
             layer.style.display = 'none'
+            const prevMin = sheet.style.minHeight
+            sheet.style.minHeight = ''
             const total = sheet.scrollHeight
+            sheet.style.minHeight = prevMin
             layer.style.display = ''
             return { tops, heights, total }
           }
@@ -271,7 +278,24 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               segs.push({ top: cursor, height: top - cursor })
               cursor = bottom
             }
-            segs.push({ top: cursor, height: Math.max(0, geo.total - cursor) })
+            // FULL FINAL PAGE (MS-Word style, Peter 2026-07-10): a barely-filled last page still
+            // paints as a whole sheet. Full height = the average of the previous ≤5 page regions
+            // in this SAME geometry — derived from geo alone, so step-cache hits reproduce it
+            // exactly, and it's correct under font zoom / phone reflow where the canonical pageH
+            // wouldn't match the live layout. Single-page docs fall back to pageH (see recompute).
+            const prior = segs.map((s) => s.height)
+            const fullH = prior.length
+              ? prior.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, prior.length)
+              : lastPageH
+            segs.push({ top: cursor, height: Math.max(Math.max(0, geo.total - cursor), Math.round(fullH)) })
+            // Give the extended panel somewhere to paint + keep scroll range == visual: min-height
+            // covers the last panel's bottom (readBands neutralizes it during the total read, so
+            // it can retract when content shrinks).
+            if (sheet) {
+              const last = segs[segs.length - 1]
+              lastMinH = Math.max(Math.round(lastPageH), Math.ceil(last.top + last.height))
+              sheet.style.minHeight = `${lastMinH}px`
+            }
             // Reconcile the panel divs to match the segment list (reuse to avoid churn). Each panel
             // carries its page number as a footer pinned to its bottom margin (not in the gap).
             while (layer.children.length > segs.length) layer.lastElementChild!.remove()
@@ -461,6 +485,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               bottomMarginPx: MARGIN_BOTTOM,
               fluidWidthPx: fluid && sheet ? sheet.clientWidth : undefined,
             })
+            lastPageH = pageH // applyBands' full-final-page fallback (single-page docs)
             if (sheet && gapped) {
               sheet.classList.add('inkwave-gapped')
               // Keep paddingTop in sync with the user's top-margin setting so page 1 content
@@ -471,7 +496,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // absolute; bottom:22px) always lands at the page bottom, never mid-content
               // on short documents. scrollHeight reflects this minHeight, so segs get the
               // full page height and the panel div fills it naturally — no per-panel hack needed.
-              if (pageH > 0) sheet.style.minHeight = `${pageH}px`
+              // Baseline respects applyBands' full-final-page extension (lastMinH): writing bare
+              // pageH here shrank the sheet the paint pass had just grown, and the RO ping-ponged
+              // between the two writes forever. Stale-larger for one pass after an edit is fine —
+              // the paint recomputes the true extension from the fresh geometry.
+              if (pageH > 0) sheet.style.minHeight = `${Math.max(pageH, lastMinH)}px`
             }
             // Only re-measure when something that affects the CANONICAL layout changed (text edit →
             // doc size; paper/orientation → pageH; top margin). Our own setMeta dispatches below
