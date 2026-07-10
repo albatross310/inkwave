@@ -746,7 +746,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
     // Default: 18px below top, centred over the writing area (shift left by half the PDF panel width
     // when it's open so the panel doesn't sit under it).
-    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2)', transform: 'translateX(-50%)' }
+    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)', transform: 'translateX(-50%)' }
   }
 
   function onHeaderMouseDown(e: React.MouseEvent) {

@@ -67,13 +67,15 @@
   .inkwave-editor-surface.iw-fill:not(.is-phone) {
     position: fixed;
     top: 0;
-    left: 0;
+    /* The PDF panel's side dock insets whichever edge it hugs (right by default; left when the
+       swap-sides toggle moves it — Peter, 2026-07-10). */
+    left: var(--iw-pdf-room-left, 0px);
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
     min-height: 0;
     overflow-y: scroll; /* always reserve + show the vertical bar (auto let it hide) */
     overflow-x: auto;
-    transition: right 0.18s ease, bottom 0.18s ease;
+    transition: left 0.18s ease, right 0.18s ease, bottom 0.18s ease;
     /* TRANSPARENT track (Peter reversed the earlier opaque-grey call, 2026-07-09): the fixed wave
        ::before spans the whole viewport INCLUDING the scrollbar channel, so a transparent track
        lets the waves run all the way through the bar. Only the thumb paints — a translucent pill. */
@@ -119,7 +121,8 @@
   .inkwave-editor-surface.iw-fill:not(.is-phone) { scrollbar-gutter: stable; }
   .inkwave-editor-surface.iw-fill:not(.is-phone)::before {
     /* No 16px scrollbar exclusion any more — the track is transparent, so the waves run all the
-       way through the bar (Peter, 2026-07-09). PDF-panel room still applies. */
+       way through the bar (Peter, 2026-07-09). PDF-panel room still applies (either side). */
+    left: var(--iw-pdf-room-left, 0px);
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
   }

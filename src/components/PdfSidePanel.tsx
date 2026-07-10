@@ -17,6 +17,11 @@ import { PdfViewer } from './PdfViewer'
 const INK = '#5c2d8a'
 const MIN_W = 320, MIN_H = 200
 const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
+const DOCK_SIDE_KEY = 'inkwave:pdfDockSide' // side dock on the 'left' or 'right' screen edge
+// Fullscreen float margins: the pane sits centred over the water like a big page — the editor
+// surface's waves stay visible in the side strips (and sway with the PDF scroll; see PdfViewer's
+// inkwave:pdf-sway feed into Scroll.tsx).
+const FS_SIDE = 64, FS_VERT = 12
 
 interface Viewing {
   data: ArrayBuffer; page: number; quote: string | null; label: string; citekey: string
@@ -49,6 +54,21 @@ export function PdfSidePanel() {
   }, [])
   const orientation: 'bottom' | 'side' = isWide ? storedOrient : 'bottom'
 
+  // Which screen edge the SIDE dock lives on (Peter, 2026-07-10) — persisted; bottom dock ignores it.
+  const [dockSide, setDockSide] = useState<'left' | 'right'>(() => {
+    try { return localStorage.getItem(DOCK_SIDE_KEY) === 'left' ? 'left' : 'right' } catch { return 'right' }
+  })
+  function toggleDockSide() {
+    setDockSide(s => {
+      const next = s === 'left' ? 'right' : 'left'
+      try { localStorage.setItem(DOCK_SIDE_KEY, next) } catch { /* private mode */ }
+      return next
+    })
+  }
+  // FULLSCREEN (Peter, 2026-07-10): the viewer floats over the whole app window (water visible at
+  // the sides). Per-session only — every open starts docked; Escape (or the ⛶ toggle) exits.
+  const [fullscreen, setFullscreen] = useState(false)
+
   const open = !!(viewing || error || loading || noAttachment)
 
   useEffect(() => {
@@ -58,6 +78,7 @@ export function PdfSidePanel() {
       setError(null)
       setViewing(null)
       setNoAttachment(null)
+      setFullscreen(false) // fullscreen is per-session/per-open — every open starts docked
       // The panel still pops up for a source with no PDF — it just says "No attachment".
       if (!hasPdf(bibProvider.get(detail.citekey))) { setLoading(false); setNoAttachment(detail.label || detail.citekey); return }
       setLoading(true)
@@ -96,11 +117,16 @@ export function PdfSidePanel() {
   }, [])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) close() }
+    // Escape steps DOWN one level: fullscreen → back to the dock; docked → close the panel.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !open) return
+      if (fullscreen) setFullscreen(false)
+      else close()
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, fullscreen])
 
   // The "hide the PDF when you click back into the editor" toggle (◧ in the viewer toolbar), read live.
   const [hideOnEditorClick, setHideOnEditorClick] = useState(() => {
@@ -116,7 +142,7 @@ export function PdfSidePanel() {
   // when the ◧ toggle is on. Armed after a short delay so the very tap that opened the PDF doesn't close
   // it. Clicks INSIDE the viewer (selecting text, using the toolbar) never count.
   useEffect(() => {
-    if (!open) return
+    if (!open || fullscreen) return // fullscreen covers the editor — a stray focusin must not close it
     if (orientation !== 'bottom' && !hideOnEditorClick) return
     // ANYWHERE in the editor region counts — water, margins, right of the text (Peter, 2026-07-10:
     // it only worked on the text body). Listen on the SURFACE; clicks inside the viewer/panel or on
@@ -140,22 +166,29 @@ export function PdfSidePanel() {
       pm?.removeEventListener('focusin', onEditorInteract)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, orientation, hideOnEditorClick])
+  }, [open, orientation, hideOnEditorClick, fullscreen])
 
-  // Make room: side → padding-right; bottom → padding-bottom (+ shift the footer toolbar up).
+  // Make room: side dock → inset the editor from that edge (right OR left — Peter, 2026-07-10);
+  // bottom → padding-bottom (+ shift the footer toolbar up). FULLSCREEN never squeezes: the pane
+  // COVERS the editor, so its layout (and the reading line the scroll anchor holds) is untouched —
+  // entering/exiting fullscreen from a side dock releases/re-binds the fit cap and Scroll.tsx's
+  // computeFit anchor keeps the same content line in place through both transitions.
   useEffect(() => {
     const root = document.documentElement
-    const set = (side: string, bottom: string) => {
-      root.style.setProperty('--iw-pdf-room', side)
+    const set = (right: string, left: string, bottom: string) => {
+      root.style.setProperty('--iw-pdf-room', right)
+      root.style.setProperty('--iw-pdf-room-left', left)
       root.style.setProperty('--iw-pdf-room-bottom', bottom)
     }
-    if (!open) set('0px', '0px')
-    else if (orientation === 'side') set(`${width}px`, '0px')
-    else set('0px', `${height}px`)
-    return () => set('0px', '0px')
-  }, [open, orientation, width, height])
+    if (!open || fullscreen) set('0px', '0px', '0px')
+    else if (orientation === 'side') {
+      if (dockSide === 'left') set('0px', `${width}px`, '0px')
+      else set(`${width}px`, '0px', '0px')
+    } else set('0px', '0px', `${height}px`)
+    return () => set('0px', '0px', '0px')
+  }, [open, orientation, width, height, fullscreen, dockSide])
 
-  function close() { setViewing(null); setError(null); setLoading(false); setNoAttachment(null) }
+  function close() { setViewing(null); setError(null); setLoading(false); setNoAttachment(null); setFullscreen(false) }
   function toggleOrient() {
     setStoredOrient(o => {
       const next = o === 'side' ? 'bottom' : 'side'
@@ -167,17 +200,25 @@ export function PdfSidePanel() {
   if (!open) return null
 
   const side = orientation === 'side'
-  const panelPos: React.CSSProperties = side
-    ? { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: `1px solid ${INK}33`, boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' }
-    : { left: 0, right: 0, bottom: 0, height, maxHeight: '92vh', borderTop: `1px solid ${INK}33`, boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }
+  const panelPos: React.CSSProperties = fullscreen
+    // Fullscreen float: the pane is centred over the water with the wave strips visible either
+    // side (a big page floating on the water — not chrome-less edge-to-edge).
+    ? { top: FS_VERT, bottom: FS_VERT, left: FS_SIDE, right: FS_SIDE, borderRadius: 12, border: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
+    : side
+      ? (dockSide === 'left'
+        ? { top: 0, left: 0, bottom: 0, width, maxWidth: '100vw', borderRight: `1px solid ${INK}33`, boxShadow: '4px 0 24px rgba(0,0,0,0.18)' }
+        : { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: `1px solid ${INK}33`, boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' })
+      : { left: 0, right: 0, bottom: 0, height, maxHeight: '92vh', borderTop: `1px solid ${INK}33`, boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }
+  // Resize handle rides the panel's INNER edge (the one facing the editor) — flips with the dock side.
   const handlePos: React.CSSProperties = side
-    ? { left: 0, top: 0, bottom: 0, width: 10, cursor: 'col-resize' }
+    ? { ...(dockSide === 'left' ? { right: 0 } : { left: 0 }), top: 0, bottom: 0, width: 10, cursor: 'col-resize' }
     : { left: 0, right: 0, top: 0, height: 10, cursor: 'row-resize' }
 
   return (
     <>
       <div style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
-        {/* Resize handle on the edge facing the editor */}
+        {/* Resize handle on the edge facing the editor (hidden in fullscreen — nothing to resize) */}
+        {!fullscreen && (
         <div
           onPointerDown={e => {
             e.preventDefault()
@@ -187,6 +228,7 @@ export function PdfSidePanel() {
           title="Drag to resize"
           style={{ position: 'absolute', zIndex: 2, background: dragging ? `${INK}22` : 'transparent', ...handlePos }}
         />
+        )}
 
         {/* The header bar is gone — the viewer renders its close in the toolbar; the transient states
             below get a floating × so they stay dismissible. */}
@@ -217,8 +259,24 @@ export function PdfSidePanel() {
               noRef={viewing.noRef}
               restoreScroll={viewing.restoreScroll}
               onClose={close}
-              dockButton={isWide ? (
-                <button type="button" onClick={toggleOrient} title={side ? 'Dock to bottom' : 'Dock to the side'}
+              fullscreen={fullscreen}
+              fullscreenButton={
+                <button type="button" onClick={() => setFullscreen(f => !f)}
+                  title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen — float the PDF over the water'}
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem', borderRadius: 6, lineHeight: 1,
+                    border: `1px solid ${fullscreen ? INK : '#d6cfe0'}`, background: fullscreen ? `${INK}1f` : '#fff', color: INK }}>⛶</button>
+              }
+              sideButtons={!fullscreen && side ? (
+                // Swap which screen edge the side dock hugs (persisted) — distinct from the
+                // ▭/▯ dock-ORIENTATION toggle next to it and the ⇄ sync-editor toggle at the left.
+                <button type="button" onClick={toggleDockSide}
+                  title={dockSide === 'right' ? 'Move the panel to the LEFT edge of the screen' : 'Move the panel to the RIGHT edge of the screen'}
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+                  {dockSide === 'right' ? '⇤' : '⇥'}
+                </button>
+              ) : null}
+              dockButton={isWide && !fullscreen ? (
+                <button type="button" onClick={toggleOrient} title={side ? 'Dock to the bottom (panel under the editor)' : 'Dock to the side (side-by-side with the editor)'}
                   style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
                   {side ? '▭' : '▯'}
                 </button>
@@ -235,7 +293,8 @@ export function PdfSidePanel() {
           onPointerMove={e => {
             const d = dragStart.current
             if (!d) return
-            if (d.axis === 'x') setWidth(Math.max(MIN_W, Math.min(window.innerWidth - 80, d.size + (d.start - e.clientX))))
+            // Drag direction depends on which edge the side dock hugs (grow toward the editor).
+            if (d.axis === 'x') setWidth(Math.max(MIN_W, Math.min(window.innerWidth - 80, d.size + (dockSide === 'left' ? e.clientX - d.start : d.start - e.clientX))))
             else setHeight(Math.max(MIN_H, Math.min(window.innerHeight - 80, d.size + (d.start - e.clientY))))
           }}
           onPointerUp={() => { dragStart.current = null; setDragging(false) }}

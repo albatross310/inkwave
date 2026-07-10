@@ -1946,12 +1946,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // side insets, matching the bottom inset above. Zero in portrait / on desktop.
             paddingLeft: isTouch ? 'env(safe-area-inset-left)' : undefined,
             paddingRight: isTouch ? 'env(safe-area-inset-right)' : undefined,
-            // When the PDF panel is open: a side dock stops the centring box at its left edge
-            // (--iw-pdf-room) so the toolbar recentres over the writing; a bottom dock lifts the whole
-            // toolbar above it (--iw-pdf-room-bottom).
+            // When the PDF panel is open: a side dock stops the centring box at the docked edge
+            // (--iw-pdf-room right / --iw-pdf-room-left left) so the toolbar recentres over the
+            // writing; a bottom dock lifts the whole toolbar above it (--iw-pdf-room-bottom).
+            left: 'var(--iw-pdf-room-left, 0px)',
             right: 'var(--iw-pdf-room, 0px)',
             bottom: 'var(--iw-pdf-room-bottom, 0px)',
-            transition: 'right 0.18s ease, bottom 0.18s ease',
+            transition: 'left 0.18s ease, right 0.18s ease, bottom 0.18s ease',
           }}
         >
           <div
