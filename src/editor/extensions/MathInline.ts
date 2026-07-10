@@ -1,6 +1,7 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { MathInlineView } from './MathInlineView'
+import { requestMathEdit } from './mathActivation'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -41,8 +42,12 @@ export const MathInline = Node.create({
     return {
       insertMathInline:
         (latex = '') =>
-        ({ commands }) =>
-          commands.insertContent({ type: this.name, attrs: { latex } }),
+        ({ chain }) => {
+          // Raise the edit-mode flag FIRST — the node view mounts during the dispatch
+          // and opens MathLive with the caret inside, ready to type.
+          requestMathEdit()
+          return chain().focus().insertContent({ type: this.name, attrs: { latex } }).run()
+        },
     }
   },
 
