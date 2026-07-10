@@ -23,12 +23,16 @@ export const links: LinksFunction = () => [
   // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
   // bump is a fresh URL that finally displaces the stale icon Firefox's favicon store (places.sqlite —
   // NOT the web cache, so a normal cache-clear never touched it) was pinning.
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=19' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=19' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=19' },
-  { rel: 'icon', href: '/favicon.ico?v=19', sizes: 'any' },
-  { rel: 'shortcut icon', href: '/favicon.ico?v=19' },
-  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=19' },
+  // SOLVED 2026-07-10 ("logo momentarily then the default"): these links were fine all along — a
+  // TiptapEditor effect swapped the first icon link to an inline document-glyph SVG at editor mount,
+  // which at tab size looks like Firefox's default page icon. The swap is removed (see TiptapEditor);
+  // ?v=20 displaces the doc glyph any returning Firefox profile has stored against the page URL.
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=20' },
+  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=20' },
+  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=20' },
+  { rel: 'icon', href: '/favicon.ico?v=20', sizes: 'any' },
+  { rel: 'shortcut icon', href: '/favicon.ico?v=20' },
+  { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
@@ -53,12 +57,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Pre-paint theme: the prerendered HTML is day-themed and JS applies data-theme only after
             the bundle executes — night users got a bright flash for the whole JS fetch on cold
             loads. This runs before first paint; the CSP middleware nonces every inline script.
-            It also pre-opens the atomic-water gate on WARM clients (the wave tiles have decoded
-            here before — see entry.client): without it every refresh flashed the neutral
-            parchment for the JS boot, then popped to aqua (the 2026-07-09 "refresh flash"). The
-            neutral hold remains for genuinely cold first visits, where it does its real job. */}
+            (The warm-client iw-water-ready pre-stamp that used to live here is GONE, 2026-07-10:
+            the atomic-water gate now also waits for the twinkle field to mount, so pre-opening it
+            painted waves without twinkles. Every load holds the neutral parchment until the whole
+            water — tiles + twinkles — can land in one paint. See entry.client.tsx.) */}
         <script dangerouslySetInnerHTML={{ __html:
-          `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day';if(localStorage.getItem('inkwave:waterReady'))document.documentElement.classList.add('iw-water-ready')}catch(e){}`,
+          `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day'}catch(e){}`,
         }} />
         <meta charSet="utf-8" />
         {/* viewport-fit=cover: extend under the iOS notch/home-indicator so env(safe-area-inset-*)
