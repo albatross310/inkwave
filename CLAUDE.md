@@ -268,6 +268,14 @@ build (gate on real exit codes — `| tail` swallows failures), then push (= pro
 Snapshot React state is METADATA-ONLY (`SnapshotMeta`; fetch full snapshots via `listSnapshots` at
 action time — never hold contentJson in state). Autosave failures dispatch `inkwave:save-failed`.
 
+**Standing preferences (Peter, 2026-07-10):**
+- **Batch the reporting.** When multiple agents are in flight, do NOT ping Peter per-merge — merge
+  each through the full gate as it lands, and send ONE consolidated report when ALL agents are done.
+- **Keep agents alive with their memories intact — always.** Never discard an agent's context:
+  resume completed/failed agents via SendMessage (their transcripts restore full context) instead of
+  spawning fresh ones for follow-ups in the same domain; salvage worktrees + transcripts when an
+  agent dies (spend limits, filters); preserve agent worktrees until their work is merged.
+
 ## Theming / colour schemes (MANDATORY for every new panel — 2026-07-07)
 
 Night mode (and future colour schemes) is driven by ONE switch: `src/editor/theme.ts` sets
