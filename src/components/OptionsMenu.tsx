@@ -6,6 +6,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { listSnapshotMeta } from '../provenance/snapshots'
+import { flushPendingSave } from '../storage/opfs'
 import { useNavigate } from 'react-router'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMeta, InkwaveDocument } from '../types/document'
@@ -56,7 +57,14 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
 // Open Recent). The writable-handle "Open…" path switches in place instead (see openInkwaveFile).
 function openDocument(id: string) {
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
-  window.location.reload()
+  // Flush any pending save before the reload — abort if it fails (data-loss guard, 2026-07-10).
+  void (async () => {
+    try { await flushPendingSave() } catch (err) {
+      alert(`Your latest changes could not be saved, so the switch was cancelled.\n\n${String(err)}`)
+      return
+    }
+    window.location.reload()
+  })()
 }
 
 async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4()): Promise<void> {

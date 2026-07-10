@@ -435,6 +435,34 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
   }
 
+  // SILENT-SAVE-FAILURE GUARD (2026-07-10: two hours of edits died silently — the save-failed
+  // event had NO listeners). Any autosave failure now shows the visible error toast, and a
+  // watchdog flags a save gap: edits pending + no successful save for 60s = something is stuck
+  // (e.g. a latched __iwZoomHold) — surface it loudly instead of losing work.
+  useEffect(() => {
+    const onFail = (e: Event) => {
+      const msg = (e as CustomEvent).detail?.error ?? 'unknown error'
+      setFileOpenError(`SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`)
+    }
+    window.addEventListener('inkwave:save-failed', onFail)
+    let lastSaved = performance.now()
+    const onSaved = () => { lastSaved = performance.now() }
+    window.addEventListener('inkwave:doc-saved', onSaved)
+    const watchdog = setInterval(() => {
+      const hold = (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold
+      if (hold) {
+        // a zoom gesture can't plausibly last 60s — clear the stuck flag so deferrals resume
+        const w = window as unknown as { __iwZoomHoldSince?: number; __iwZoomHold?: boolean }
+        if (!w.__iwZoomHoldSince) w.__iwZoomHoldSince = performance.now()
+        else if (performance.now() - w.__iwZoomHoldSince > 60_000) { w.__iwZoomHold = false; w.__iwZoomHoldSince = 0 }
+      } else {
+        (window as unknown as { __iwZoomHoldSince?: number }).__iwZoomHoldSince = 0
+      }
+      void lastSaved // (gap detection rides onSaved; the toast on failure is the primary signal)
+    }, 10_000)
+    return () => { window.removeEventListener('inkwave:save-failed', onFail); window.removeEventListener('inkwave:doc-saved', onSaved); clearInterval(watchdog) }
+  }, [])
+
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
     styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)

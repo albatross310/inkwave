@@ -137,24 +137,50 @@ const AUTOSAVE_DELAY_MS =
     ? 800
     : 200
 
+// The pending save, exposed so flushPendingSave() can force it through (settings toggles reload
+// the page — they MUST flush first; a debounced-away save was half an hour of Peter's work, 2026-07-10).
+let pendingDoc: InkwaveDocument | (() => InkwaveDocument) | null = null
+let pendingOnSaved: (() => void) | undefined
+let deferSince = 0
+
+/** Run any pending debounced save NOW. Resolves true if a save ran, false if none pending.
+ *  THROWS on save failure — callers about to reload must abort. */
+export async function flushPendingSave(): Promise<boolean> {
+  if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null }
+  if (!pendingDoc) return false
+  const d = pendingDoc; const cb = pendingOnSaved
+  pendingDoc = null; pendingOnSaved = undefined
+  await saveDocument(typeof d === 'function' ? d() : d)
+  cb?.()
+  return true
+}
+
 export function scheduleSave(
   doc: InkwaveDocument | (() => InkwaveDocument),
   onSaved?: () => void,
 ): void {
+  pendingDoc = doc
+  pendingOnSaved = onSaved
+  deferSince = 0
   if (saveTimer !== null) clearTimeout(saveTimer)
   saveTimer = setTimeout(async function beat() {
-    // ZOOM-GESTURE DEFERRAL: a pre-zoom edit's autosave beat (doc serialize + OPFS write) must
-    // not land mid-gesture — while a zoom gesture holds the painters (__iwZoomHold, cleared at
-    // settle), push the beat back; it flushes ≤250ms after the gesture settles.
-    if (typeof window !== 'undefined' && (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) {
+    // ZOOM-GESTURE DEFERRAL — BOUNDED (2026-07-10): while a zoom gesture holds (__iwZoomHold,
+    // cleared at settle) push the beat back, but never beyond 3s total — a stuck flag must not
+    // become silent data loss.
+    const holding = typeof window !== 'undefined' && (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold
+    if (holding && (!deferSince || performance.now() - deferSince < 3000)) {
+      if (!deferSince) deferSince = performance.now()
       saveTimer = setTimeout(beat, 250)
       return
     }
+    deferSince = 0
+    pendingDoc = null; pendingOnSaved = undefined
     try {
       // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
       // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
       await saveDocument(typeof doc === 'function' ? doc() : doc)
       onSaved?.()
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('inkwave:doc-saved'))
     } catch (err) {
       // NEVER swallow a failed autosave (iOS quota/handle errors) — the writer must not keep
       // typing into a document that stopped persisting. UI listens on this event.

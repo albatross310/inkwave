@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
+import { flushPendingSave } from '../storage/opfs'
+
+// NEVER reload with a pending save (2026-07-10: the gapped toggle's bare reload cost Peter real
+// work — storage had also silently stalled). Flush first; on failure DO NOT reload.
+async function flushThenReload(): Promise<void> {
+  try { await flushPendingSave() } catch (err) {
+    alert(`Your latest changes could not be saved, so the page was NOT reloaded.\n\n${String(err)}`)
+    return
+  }
+  window.location.reload()
+}
 import { crossoutMode, cycleCrossoutMode, watermarkEnabled, setWatermark } from '../editor/crossout'
 import { nightModeEnabled, setNightMode } from '../editor/theme'
 import { aiSummariesEnabled, setAiSummaries, urlLookupEnabled, setUrlLookup, aiConsentGiven, markAiConsent, type AiFeature } from '../editor/aiSettings'
@@ -94,7 +105,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
             <Row
               label="Gapped pages"
               checked={gappedPagesEnabled()}
-              onChange={() => { setGappedPages(!gappedPagesEnabled()); window.location.reload() }}
+              onChange={() => { setGappedPages(!gappedPagesEnabled()); void flushThenReload() }}
             />
 
             {/* Old word display */}
@@ -141,7 +152,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               <Row
                 label="Debug: highlight all"
                 checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
-                onChange={() => { try { const on = localStorage.getItem('inkwave:debugHighlightAll') === '1'; localStorage.setItem('inkwave:debugHighlightAll', on ? '0' : '1') } catch { /* private */ } window.location.reload() }}
+                onChange={() => { try { const on = localStorage.getItem('inkwave:debugHighlightAll') === '1'; localStorage.setItem('inkwave:debugHighlightAll', on ? '0' : '1') } catch { /* private */ } void flushThenReload() }}
               />
             )}
 
@@ -163,7 +174,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
               onChange={() => {
                 try { localStorage.setItem('inkwave:debugHighlightAll', localStorage.getItem('inkwave:debugHighlightAll') === '1' ? '0' : '1') } catch { /* private mode */ }
-                window.location.reload()
+                void flushThenReload()
               }}
             />
 
