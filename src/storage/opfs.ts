@@ -66,15 +66,23 @@ async function readJson<T>(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+// App-level JSON (recent folders, open-cache listings/index) is ALWAYS best-effort convenience
+// state — so these never reject. In a private window `navigator.storage.getDirectory()` itself can
+// throw (it sits OUTSIDE readJson's catch), and that must degrade to "no cache, network-only", not
+// break the caller (the 2026-07-10 Firefox-private picker report). Document persistence
+// (saveDocument below) deliberately KEEPS throwing — autosave failures must stay loud.
+
 /** Read a small app-level JSON file from the OPFS root (e.g. recent-folder choices). */
 export async function readAppJson<T>(name: string): Promise<T | null> {
-  return readJson<T>(await getRoot(), name)
+  try { return await readJson<T>(await getRoot(), name) } catch { return null }
 }
 
-/** Write a small app-level JSON file to the OPFS root. */
+/** Write a small app-level JSON file to the OPFS root. Best-effort — never throws. */
 export async function writeAppJson(name: string, data: unknown): Promise<void> {
-  const write = await writeJson(await getRoot(), name)
-  await write(data)
+  try {
+    const write = await writeJson(await getRoot(), name)
+    await write(data)
+  } catch { /* private mode / quota — convenience state only */ }
 }
 
 /** Save the full document to OPFS. */

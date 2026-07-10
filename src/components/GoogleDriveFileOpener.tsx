@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, createGoogleDriveFolder, type GDriveRecent, type GDriveFileEntry } from '../storage/gdrive'
+import { listGoogleDriveFolders, listGoogleDriveFiles, getRecentGDriveFolders, createGoogleDriveFolder, startGoogleDriveSignIn, peekDriveToken, type GDriveRecent, type GDriveFileEntry } from '../storage/gdrive'
 import { getListing, putListing, listingKey, type CachedListing } from '../storage/openCache'
 
 // Open a .studio/.inkwave file FROM Google Drive — folder-navigable (matches the OneDrive opener).
@@ -47,6 +47,10 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
   // cache only trusts a fresh listing's tag directly; a cached one is re-verified before a hit.
   const [listingFresh, setListingFresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Token lapsed (drive.file lists come back EMPTY, not an error, without one) → an explicit
+  // sign-in INSIDE the picker, never a misleading "Nothing here". The tap is a user gesture and
+  // GIS is pre-loaded, so the consent popup opens within the tap's transient activation.
+  const [needsAuth, setNeedsAuth] = useState(false)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<GDriveRecent[]>([])
   const [reload, setReload] = useState(0)
@@ -62,7 +66,7 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
   useEffect(() => {
     let cancelled = false
     let gotFresh = false
-    setFolders(null); setFiles(null); setError(null); setListingFresh(false)
+    setFolders(null); setFiles(null); setError(null); setNeedsAuth(false); setListingFresh(false)
     const key = listingKey('gd', currentId)
     type L = CachedListing<Item, GDriveFileEntry>
     // Cached listing → instant paint (the idle warm pass pre-populates it); the fresh fetch below
@@ -75,10 +79,12 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
     Promise.all([listGoogleDriveFolders(currentId), listGoogleDriveFiles(currentId)])
       .then(([fo, fi]) => {
         if (cancelled) return
+        // drive.file returns [] both for "empty" and "token lapsed": with nothing listed AND no
+        // live token, this is the signed-out case — show the sign-in state, and don't overwrite a
+        // good cached listing with the auth-blip empties.
+        if (!fo.length && !fi.length && !peekDriveToken()) { gotFresh = true; setNeedsAuth(true); return }
         gotFresh = true
         setFolders(fo); setFiles(fi); setListingFresh(true)
-        // drive.file returns [] both for "empty" and "token lapsed" — never let an auth blip wipe a
-        // good cached listing (genuinely-empty folders are cheap to refetch, so skipping them is fine).
         if (fo.length || fi.length) putListing(key, { folders: fo, files: fi } satisfies L)
       })
       .catch((e) => {
@@ -176,7 +182,17 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
 
         <div className="border rounded-lg max-h-72 overflow-auto" style={{ borderColor: '#e6eef5' }}>
           {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
-          {!error && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
+          {needsAuth && (
+            <div className="p-4 text-center">
+              <p className="text-sm text-stone-500 mb-3 font-sans">Your Google Drive session has ended — sign in again to browse your files.</p>
+              <button type="button"
+                onClick={() => void startGoogleDriveSignIn().then((ok) => { if (ok) { setNeedsAuth(false); setReload((r) => r + 1) } })}
+                className="text-sm font-sans text-white px-4 py-1.5 rounded" style={{ background: G_BLUE }}>
+                Sign in to Google Drive
+              </button>
+            </div>
+          )}
+          {!error && !needsAuth && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
           {folders?.map((f) => (
             <button key={f.id} type="button" onClick={() => setCrumbs([...crumbs, { id: f.id, name: f.name }])}
               className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2"
@@ -195,7 +211,7 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
               <span aria-hidden="true">📄</span>{f.name}
             </button>
           ))}
-          {!error && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
+          {!error && !needsAuth && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
         </div>
         <p className="text-xs text-stone-400 mt-3">Pick a file — it opens and keeps syncing back to Drive (no Save needed). For files shared with you, use “This computer” on desktop.</p>
       </div>

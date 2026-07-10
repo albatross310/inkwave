@@ -60,12 +60,25 @@ export async function gunzipJsonOffThread(buf: ArrayBuffer): Promise<unknown> {
   throw new Error('parse worker failed')
 }
 
-/** Raw .studio BYTES → bundle, off-thread when possible: gunzip-sniff + decode + JSON.parse all in
- *  the worker, so opening a 20 MB doc never stalls the main thread. The buffer is TRANSFERRED. */
-export async function parseStudioOffThread(buf: ArrayBuffer): Promise<ExportBundle> {
+/** Raw .studio bytes → bundle, off-thread when possible: gunzip-sniff + decode + JSON.parse all in
+ *  the worker, so opening a 20 MB doc never stalls the main thread.
+ *
+ *  Takes the BLOB (not a buffer): the worker copy is transferred (detached), so when the worker
+ *  DIES — chunk fetch failure on a flaky mobile network, an iOS memory-pressure kill, CSP — the
+ *  Blob is the still-readable source for the inline retry. The 2026-07-09 version took the buffer
+ *  and RETHREW on worker death; on an iPhone that turned every cloud open into a silent failure
+ *  ("blank page", 2026-07-10), where every other worker op had always degraded inline. */
+export async function parseStudioOffThread(file: Blob): Promise<ExportBundle> {
+  const buf = await file.arrayBuffer()
   const p = call({ kind: 'parseStudio', buf }, [buf])
-  if (p) { try { return (await p) as ExportBundle } catch (err) { throw err instanceof Error ? err : new Error(String(err)) } }
-  return parseStudioBuffer(buf) // no Worker (node/vitest, prerender) → same logic inline
+  if (!p) return parseStudioBuffer(buf) // no Worker (node/vitest, prerender) → same logic inline
+  try {
+    return (await p) as ExportBundle
+  } catch {
+    // Worker rejected — a genuine parse error OR a dead worker; the inline pass distinguishes:
+    // it throws the same error for a genuinely-bad file, and succeeds when only the worker died.
+    return parseStudioBuffer(await file.arrayBuffer())
+  }
 }
 
 /** .studio/.trace text → bundle, off-thread when possible. */

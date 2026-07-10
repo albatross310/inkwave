@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder, type OneDriveFileEntry } from '../storage/onedrive'
+import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, startOneDriveSignIn, type DriveFolder, type OneDriveFolder, type OneDriveFileEntry } from '../storage/onedrive'
 import { getListing, putListing, listingKey, type CachedListing } from '../storage/openCache'
 
 // Open a .studio/.inkwave file FROM OneDrive (for phones, where OneDrive isn't a mounted Explorer
@@ -30,6 +30,9 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
   // cache only trusts a fresh listing's cTag directly; a cached one is re-verified before a hit.
   const [listingFresh, setListingFresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Silent token gone (expired session, private-window storage) → an explicit sign-in INSIDE the
+  // picker, never an empty/broken list. The tap is a user gesture, so the redirect flow is fine.
+  const [needsAuth, setNeedsAuth] = useState(false)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
   const [reload, setReload] = useState(0)
@@ -45,7 +48,7 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
   useEffect(() => {
     let cancelled = false
     let gotFresh = false
-    setFolders(null); setFiles(null); setError(null); setListingFresh(false)
+    setFolders(null); setFiles(null); setError(null); setNeedsAuth(false); setListingFresh(false)
     const key = listingKey('od', currentId)
     type L = CachedListing<DriveFolder, OneDriveFileEntry>
     // Cached listing → the picker paints instantly (the idle warm pass pre-populates it); the fresh
@@ -65,10 +68,13 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
       .catch((e) => {
         if (cancelled) return
         // Offline / expired token: keep (or restore) the cached listing so the picker still works —
-        // opening then falls back to the OPFS byte cache. Error only when there's nothing to show.
+        // opening then falls back to the OPFS byte cache. With nothing cached, a missing silent
+        // token shows the sign-in state (the pre-cache behaviour, made explicit); anything else
+        // shows the error. NEVER an unexplained empty list.
         void getListing<L>(key).then((c) => {
           if (cancelled || gotFresh) return
           if (c) { setFolders(c.value.folders); setFiles(c.value.files) }
+          else if ((e as Error).message === 'not signed in') setNeedsAuth(true)
           else setError((e as Error).message)
         })
       })
@@ -157,7 +163,16 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
 
         <div className="border rounded-lg max-h-72 overflow-auto" style={{ borderColor: '#e6eef5' }}>
           {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
-          {!error && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
+          {needsAuth && (
+            <div className="p-4 text-center">
+              <p className="text-sm text-stone-500 mb-3 font-sans">Your OneDrive session has ended — sign in again to browse your files.</p>
+              <button type="button" onClick={() => void startOneDriveSignIn()}
+                className="text-sm font-sans text-white px-4 py-1.5 rounded" style={{ background: ONE }}>
+                Sign in to OneDrive
+              </button>
+            </div>
+          )}
+          {!error && !needsAuth && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}
           {/* Folders to drill into */}
           {folders?.map((f) => (
             <button key={f.id} type="button" onClick={() => setCrumbs([...crumbs, { id: f.id, name: f.name }])}
@@ -178,7 +193,7 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
               <span aria-hidden="true">📄</span>{f.name}
             </button>
           ))}
-          {!error && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
+          {!error && !needsAuth && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
         </div>
         <p className="text-xs text-stone-400 mt-3">Pick a file — it opens and keeps syncing back to OneDrive (no Save needed).</p>
       </div>

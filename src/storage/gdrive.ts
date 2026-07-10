@@ -299,7 +299,13 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<GDriveFil
   // .json/.txt catch pre-.studio-era saves and iOS renames. The opener validates by content.
   let q = "(name contains '.studio' or name contains '.inkwave' or name contains '.json' or name contains '.txt') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
   if (parentId) q += ` and '${parentId}' in parents`
-  const res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name,md5Checksum,version,size,modifiedTime)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  // Enriched fields feed the open cache; if Drive ever rejects the combination (400), retry the
+  // proven minimal listing before giving up — files must always LIST even if the cache can't tag.
+  let res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name,md5Checksum,version,size,modifiedTime)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) {
+    console.warn(`[inkwave] enriched Drive listing failed (${res.status}) — retrying the minimal listing`)
+    res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+  }
   if (!res.ok) return []
   const d = (await res.json()) as { files?: Array<{ id: string; name: string; md5Checksum?: string; version?: string; size?: string; modifiedTime?: string }> }
   return (d.files ?? []).map((f) => ({

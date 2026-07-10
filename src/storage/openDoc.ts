@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ExportBundle } from '../provenance/bundle'
 import { parseStudioOffThread } from '../workers/parseClient'
 import { openPerfStart, openPerfStep, openPerfAbort, openPerfDispatched } from './openPerf'
+import { reportOpenError } from './openError'
 import { saveDocument } from './opfs'
 import { upsertMeta } from './indexeddb'
 import { withScasDefaults } from '../scas/state'
@@ -53,7 +54,8 @@ async function openInkwaveFileInner(
   try {
     // Bytes → worker: gunzip-sniff (.studio.gz) + decode + JSON.parse all OFF the main thread —
     // parsing a 20 MB .studio inline here was the biggest single open-path stall (~0.5-1s frozen).
-    data = await parseStudioOffThread(await file.arrayBuffer())
+    // Takes the Blob so a dead worker degrades to an inline parse (the transferred copy is gone).
+    data = await parseStudioOffThread(file)
   } catch {
     throw new Error(`"${file.name}" doesn't look like an Inkwave file — it may be a plain-text document that was renamed to .studio`)
   }
@@ -94,8 +96,20 @@ async function openInkwaveFileInner(
     // Restore the signed receipt chain from the bundle so the ReceiptPanel shows history.
     ...(data.receipts?.length ? { scasReceipts: data.receipts } : {}),
   })
-  await saveDocument(doc)
-  await upsertMeta({ id, title: doc.title, updatedAt: doc.updatedAt })
+  // Persist — but a persistence failure must NOT abort the open. The parsed doc is in hand and
+  // travels in the open-doc event, so the writer can still read/work with it; failing here used to
+  // throw → open-failed → the PREVIOUS doc silently restored ("tapped the file, got a blank page").
+  // The two real ways this fires: OPFS unavailable (private windows) and, on iOS, a DEAD parse
+  // worker (all WebKit OPFS writes go through it — the same death that used to kill the parse).
+  // Loud, not fatal: the save-failed event (autosave's channel) + a visible parked banner.
+  try {
+    await saveDocument(doc)
+    await upsertMeta({ id, title: doc.title, updatedAt: doc.updatedAt })
+  } catch (err) {
+    console.error('[inkwave] open: initial save failed (opening anyway):', err)
+    window.dispatchEvent(new CustomEvent('inkwave:save-failed', { detail: { error: String((err as Error)?.message ?? err) } }))
+    reportOpenError(`"${title}" opened, but this device couldn't store it (storage unavailable) — changes may not persist here.`)
+  }
   try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
   openPerfStep('save')
 
