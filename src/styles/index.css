@@ -1108,6 +1108,10 @@
 /* Subtle flashing placeholder (loading states — sign-in while Clerk mounts, OneDrive "connecting"). */
 @keyframes iw-subtle-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
 .iw-subtle-flash { animation: iw-subtle-flash 1.35s ease-in-out infinite; }
+/* Sign-in menu variant (Peter, 2026-07-10): a touch bigger and a touch more noticeable — larger
+   glyph, wider opacity swing, slower period. The base .iw-subtle-flash stays as-is (SyncStatus). */
+@keyframes iw-signin-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.28; } }
+.iw-signin-flash { display: inline-block; font-size: calc(1em + 2px); line-height: 1; animation: iw-signin-flash 1.6s ease-in-out infinite; }
 
 /* ─── Phone reveal choreography (Peter, 2026-07-09): fade the CONTENT IN over visible waves ───
    On phone the parchment fills the screen, so the old shell fade-OUT cross-faded the waves into

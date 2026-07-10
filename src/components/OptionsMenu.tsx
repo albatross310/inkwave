@@ -17,6 +17,8 @@ import { isTouchDevice } from '../editor/Scroll'
 import { oneDriveFilename } from '../storage/onedrive'
 import { googleDriveConfigured, preloadGis } from '../storage/gdrive'
 import { AccountMenuItems } from './AccountControl'
+import { CLERK_PUBLISHABLE_KEY, clerkProviderMounted } from '../auth/config'
+import { armHeadless } from '../auth/clerkHeadless'
 import { getSaveFileName } from '../storage/folder'
 import { getDocSource } from '../storage/docSource'
 import { inkwaveFileName } from '../provenance/bundle'
@@ -136,6 +138,14 @@ export function OptionsMenu({
   useEffect(() => {
     if ((menuOpen || modal === 'save' || modal === 'savecopy' || modal === 'upload') && googleDriveConfigured()) preloadGis()
   }, [menuOpen, modal])
+
+  // Warm clerk-js the same way while the menu is open (headless path only — with the provider
+  // mounted Clerk is already live). armHeadless is an idempotent singleton, so this either starts
+  // the load early or no-ops; the eventual "Sign in" tap then finds Clerk ready and openSignIn runs
+  // inside the tap's transient activation — no network wait between click and modal.
+  useEffect(() => {
+    if (menuOpen && CLERK_PUBLISHABLE_KEY && !clerkProviderMounted()) void armHeadless()
+  }, [menuOpen])
 
   // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open · ⌘/Ctrl+N New ·
   // ⌘/Ctrl+P Print. (Ctrl+N may be reserved by the browser for a new window and can't always be
