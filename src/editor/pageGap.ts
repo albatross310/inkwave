@@ -13,7 +13,7 @@ export const PHONE_SHEET_RADIUS = 35 // must match .is-phone .inkwave-sheet bord
 // text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
 // don't match the phone's taller reflowed text — they rendered as huge dead bands (2026-07-09).
 export const PHONE_PAGE_MARGIN = 32 // px — compact page TOP margin on phone
-export const PHONE_PAGE_MARGIN_BOTTOM = 44 // px — a touch more air below the text (Peter, 2026-07-10)
+export const PHONE_PAGE_MARGIN_BOTTOM = 56 // px — a touch more air below the text (Peter, 2026-07-10)
 
 export const phoneLike = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
 
