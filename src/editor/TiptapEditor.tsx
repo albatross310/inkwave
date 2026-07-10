@@ -231,6 +231,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // parchment + background paint instantly from the prerendered shell either way. Hard 1.2s cap so
   // a slow font can never hold the writing hostage.
   const [settled, setSettled] = useState(false)
+  // PHONE (2026-07-10): the editor's water stays covered until the waves REST — not until the
+  // reveal. Uncovering mid-coast made iOS composite/rasterize the just-shown copy late = the
+  // freeze-frame + gradient shift Peter saw. At rest the phone editor has no waves at all
+  // (parchment), so the uncover is inert; the flag exists to hold `covered` through the coast.
+  const [waveRest, setWaveRest] = useState(false)
+  useEffect(() => {
+    if (!isTouchDevice()) return
+    const onRest = () => setWaveRest(true)
+    window.addEventListener('inkwave:wave-rest', onRest)
+    return () => window.removeEventListener('inkwave:wave-rest', onRest)
+  }, [])
   // PHONE REVEAL CHROME (Peter, 2026-07-09): the floating chrome (toolbar/pills — z-indexed ABOVE
   // the z:auto loading shell) is held invisible while the shell covers, then fades IN over 0.5s at
   // reveal, over the editor's own still-coasting waves (see .iw-chrome-hold/.iw-chrome-in in
@@ -898,12 +909,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         revealTimer = setTimeout(reveal, 1200) // 0.8s fade lands exactly in the coast tail (ends at 2s = wave rest)
         return
       }
-      // Desktop: two clean frames (~33ms, imperceptible) between coast start and the heavy reveal
-      // commit — the coast is compositor-driven and already easing smoothly when the commit lands.
-      // DESKTOP (Peter, 2026-07-10): +0.5s before the doc comes up so the slowdown is noticeable
-      // (coast 2.5s; 1s fade starts at 0.5s) — the wait is post-ready, so pagination/paint/idle
-      // warms (zoom step cache, twinkles, cloud prefetch) already run inside it; nothing is wasted.
-      revealTimer = setTimeout(reveal, 500)
+      // DESKTOP (Peter, 2026-07-10, second tune): the page fade-in starts AT coast start — no
+      // extra wait (the 1s fade runs over the first 1s of the 2.5s coast; the slowdown stays
+      // visible for another 1.5s after the fade completes). Two clean frames between the coast
+      // class swap and the heavy reveal commit, as before — the coast is compositor-driven and
+      // already easing smoothly when the commit lands (the 2026-07-09 backward-flick fix).
+      revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
     }
     const cap = setTimeout(finish, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
@@ -1882,7 +1893,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </button>
           </div>
         )}
-        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled} covered={!settled}>
+        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled} covered={isTouch ? !waveRest : !settled}>
           <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />

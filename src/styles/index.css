@@ -382,6 +382,15 @@
   .inkwave-editor-surface.iw-wave-covered .iw-wave-twinkles {
     visibility: hidden;
   }
+  /* PHONE (2026-07-10): while covered, the editor surface is fully TRANSPARENT — its opaque aqua
+     would sit between the persisting shell's water and the parchment/chrome fading in above, so
+     the fade-through would show the wrong colour. The shell's water is THE water until wave-rest
+     (Edit.tsx drops the shell + the uncover lands in one commit; at rest phone has no waves).
+     Placed after the .is-phone wave blocks — same specificity, later wins. */
+  .inkwave-editor-surface.is-phone.iw-wave-covered {
+    background-color: transparent;
+    background-image: none;
+  }
 
   @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
   .iw-wave-twinkles,

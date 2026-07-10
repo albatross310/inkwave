@@ -720,6 +720,12 @@ export function Scroll({
   const freezeToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
+    // PHONE + covered (2026-07-10): this surface renders NO wave classes (see the className) —
+    // the SHELL owns the only water. WebKit proved hidden-pseudo animations unreliable (its
+    // covered coast never fired animationend → wave classes lingered as a parchment "freeze
+    // frame"), and a class-less surface has no drift to freeze — running the maths here would
+    // clobber the shell's injected keyframes with tx=0. Drop straight to rest.
+    if (phone && covered) { setWaveMode('off'); return }
     // Freeze from the animation CLOCK, not getComputedStyle: currentTime is exact and
     // compositor-authoritative (the computed transform lags a variable 1-2+ frames — the old fixed
     // "lead compensation" guess). Drift keyframes are linear 0 → -140px over 1.944s.
@@ -835,6 +841,10 @@ export function Scroll({
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(3)}px`) // 3 decimals — must carry the device-px snap exactly
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
+      // The waves are at REST — the phone load choreography keys on this (Edit.tsx drops the
+      // shell + TiptapEditor uncovers the editor's water in listeners of this same dispatch, so
+      // React batches all three into ONE commit: no frame ever shows a mid-motion swap).
+      window.dispatchEvent(new Event('inkwave:wave-rest'))
     }
     const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
     el.addEventListener('animationend', onEnd)
@@ -886,6 +896,10 @@ export function Scroll({
   useLayoutEffect(() => {
     const host = twinkleRef.current
     if (!host || !fill) return
+    // PHONE + covered: no twinkles on this host, and — critically — do NOT call syncTwinkles at
+    // all: waterMode is GLOBAL, and this surface's early drop to 'off' (freezeToCoast) would
+    // clobber the shell's live coast for every host. The shell owns the water until wave-rest.
+    if (phone && covered) return
     syncTwinkles(host, {
       sparks: waveMode !== 'off',
       dashes: !phone || waveMode !== 'off',
@@ -898,10 +912,13 @@ export function Scroll({
       // dashes end ≤1 device px off their crests at rest.
       coastDist: waveMode === 'coast' ? coastDistRef.current ?? undefined : undefined,
     })
-  }, [fill, phone, waveMode])
+    // covered IS a dep: the phone editor skips sync while covered (above), so the uncover at
+    // wave-rest must run one sync — it carries the global twinkle mode to 'off' (the shell
+    // unmounts in the same commit, so its own 'off' sync never runs) and parks the driver.
+  }, [fill, phone, waveMode, covered])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the

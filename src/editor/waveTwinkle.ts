@@ -51,7 +51,7 @@
 //
 // NON-REPEATING STRIKES (Peter, 2026-07-10: "the glitters must never strike the same place
 // twice"). Two mechanisms, one sampler:
-//   • Every position draw (spark gen, spark respawn, dash gen/reseed) goes through memPick():
+//   • Every position draw (spark gen/respawn, dash gen/reseed/respawn) goes through memPick():
 //     candidates come from the EXISTING distributions (density + banding maths untouched), but
 //     are rejection-sampled against a per-band memory of past strikes — min wave-space distance
 //     MEM_EPS. 'Same place' = wave-space x (strip x mod stripW — recycling shifts by ±stripW so
@@ -63,12 +63,13 @@
 //     ε-separated strikes — see memRing): ≈ one full load of glints, carried over the reload
 //     boundary. After MEM_TRIES failed draws the farthest candidate wins, so a position is
 //     ALWAYS placed — density is unchanged by construction.
-//   • Sparks additionally RESPAWN after every glint: the driver watches each spark's blink
-//     clock and, in the dark window right after a glint ends (opacity 0 — the move is
+//   • Sparks AND dashes additionally RESPAWN after every glint/blink envelope: the driver
+//     watches each instance's blink clock (epoch clock while playing, the vt clock while
+//     driven) and, in the dark window right after an envelope ends (opacity 0 — the move is
 //     invisible), redraws its position AND art through the sampler. The running opacity
-//     animation is never touched (period/delay/onS keep their epoch phase); only left/top and
-//     the art vars change, on every host's copy. Without this a spark re-glints at ITS OWN spot
-//     every 0.9–2.2s — the most visible "same place twice" of all.
+//     animation is never touched (period/delay/onS keep their phase); only left/top and the
+//     art vars change, on every host's copy. Latched / static dashes have no live animation —
+//     no more envelopes — so the resting texture never shuffles.
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
 export const SPARK_COLOR = '#ffe14d' // sparkle strokes/satellites (day)
@@ -80,11 +81,17 @@ export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night w
 
 // ─── Field tuning ─────────────────────────────────────────────────────────────────────────────
 const PAD = 420 // offscreen coverage either side of the viewport (recycle headroom ≈ 5.8s of drift)
-const DASH_ROW_PX = 220 // one dash per this many px of strip width, per row, per field (~3x denser — Peter, 2026-07-10)
+const DASH_ROW_PX = 160 // one dash per this many px of strip width, per row, per field (denser again — Peter, 2026-07-10)
 const SPARK_ROW_PX = 800 // denser field — they were barely visible (Peter, 2026-07-10)
-const DASH_ON: [number, number] = [0.55, 0.65] // s lit per twinkle (~0.6s, Peter 2026-07-10)
+// Dash lit ENVELOPE (Peter, 2026-07-10): 0.3s ease-in-out S rise + 0.4s fully lit + 0.3s
+// mirrored S fall = a fixed 1.0s envelope (see blinkKeyframes). DASH_ON is that envelope length.
+const DASH_ON: [number, number] = [1.0, 1.0]
+const DASH_S = 0.3 // each S-curve flank (s)
 const DASH_REPEAT_CHANCE = 0.25 // subset with back-to-back blinks (high duty)
-const DASH_DUTY: [number, number] = [0.42, 0.58] // lit fraction while blinking at rate 1
+// Lit fraction while blinking at rate 1. The S envelope's PERCEIVED lit time ≈ 0.4s flat +
+// 2·(0.3/2) flank ≈ 0.7 of the 1.0s envelope, so duty is retuned ÷0.7-ish from the old hard
+// window's [0.42,0.58] — the same proportion of dashes reads as visible at once.
+const DASH_DUTY: [number, number] = [0.60, 0.78]
 const SPARK_ON_S = 0.2 // a glint (0.1 read as barely visible)
 const SPARK_PERIOD: [number, number] = [0.9, 2.2]
 const SPARK_REPEAT_CHANCE = 0.3 // subset with quick re-glints
@@ -107,6 +114,7 @@ interface Inst {
   kind: 'spark' | 'dash'
   group: Group
   row: number // 140px wave row — the strike-memory band, and the base for band-y maths
+  hw: number // dash only: half the arc window (the length type) — respawns keep their length
   x: number // field-local box left (px); field space ≡ wave space (recycle keeps it mod-140 true)
   y: number
   w: number
@@ -232,13 +240,12 @@ function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: numbe
 }
 
 // ─── Instance generation ──────────────────────────────────────────────────────────────────────
-function genDash(rnd: () => number, group: Group, row: number, strip: number): Inst {
-  // THREE LENGTH TYPES (Peter, 2026-07-10): very short / medium / slightly longer accents,
-  // ~35/40/25. hw = half the arc window; box w/h fit window + stroke + caps at max slope 0.514.
-  const tr = rnd()
-  const [hw, w, h] = tr < 0.35 ? [4, 14, 12] : tr < 0.75 ? [8.5, 24, 16] : [13, 32, 20]
+// A dash strike: position via the never-twice memory + the exact-midline art at that position.
+// Shared by genDash and the per-envelope respawn (which keeps the instance's length/schedule).
+function dashArt(rnd: () => number, group: Group, row: number, hw: number, w: number, h: number, strip: number):
+  { x: number; y: number; day: string; night: string } {
   // Box centre — anywhere along the strip, either swell half; drawn through the strike memory
-  // so a (re)seeded dash never lands where one recently sat in this band.
+  // so a strike never lands where one recently sat in this band.
   const cx = memPick('dash', group, row, hw, () => -PAD + rnd() * strip, (c) => c)
   const wx = wrap140(cx)
   const c = CREST[group]
@@ -265,15 +272,28 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   const op = 0.32 + 0.12 * rnd()
   const path = (col: string, o: number) =>
     `<path d='${dPath}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2.3' stroke-linecap='round'/>`
-  const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
-  // A repeat subset blinks nearly back-to-back (high duty = short dark gaps between flashes).
-  const duty = rnd() < DASH_REPEAT_CHANCE ? 0.75 + 0.1 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
-  const period = onS / duty
   return {
-    kind: 'dash', group, row,
-    x: cx - w / 2, y: 140 * row + y0 + (rnd() - 0.5) * 5 - h / 2, w, h,
+    x: cx - w / 2,
+    y: 140 * row + y0 + (rnd() - 0.5) * 5 - h / 2,
     day: svgUri(w, h, path(DASH_COLOR, op)),
     night: svgUri(w, h, path(DASH_COLOR_NIGHT, op * 0.92)),
+  }
+}
+
+function genDash(rnd: () => number, group: Group, row: number, strip: number): Inst {
+  // THREE LENGTH TYPES (Peter, 2026-07-10): very short / medium / slightly longer accents,
+  // ~35/40/25. hw = half the arc window; box w/h fit window + stroke + caps at max slope 0.514.
+  const tr = rnd()
+  const [hw, w, h] = tr < 0.35 ? [4, 14, 12] : tr < 0.75 ? [8.5, 24, 16] : [13, 32, 20]
+  const art = dashArt(rnd, group, row, hw, w, h, strip)
+  const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
+  // A repeat subset blinks nearly back-to-back (high duty = short dark gaps between flashes).
+  const duty = rnd() < DASH_REPEAT_CHANCE ? 0.86 + 0.06 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
+  const period = onS / duty
+  return {
+    kind: 'dash', group, row, hw,
+    x: art.x, y: art.y, w, h,
+    day: art.day, night: art.night,
     period, delay: rnd() * period, onS,
     staticOn: rnd() < STATIC_ON_CHANCE,
   }
@@ -322,7 +342,7 @@ function genSpark(rnd: () => number, group: Group, row: number, strip: number): 
   const [p0, p1] = rapid ? SPARK_REPEAT_PERIOD : SPARK_PERIOD
   const period = p0 + (p1 - p0) * rnd()
   return {
-    kind: 'spark', group, row,
+    kind: 'spark', group, row, hw: 0,
     x: cx - w / 2, y: 140 * row + cy - h / 2, w, h,
     day, night,
     period, delay: rnd() * period, onS: SPARK_ON_S,
@@ -354,6 +374,10 @@ let restRebase: Record<Group, number> | null = null
 
 // Blink machinery: 'playing' = real-time full rate (drift); 'driven' = playbackRate follows the
 // water; 'static' = no animations, opacity is each dash's var(--twk-static).
+// latchMap/latchGen: lit-at-stop dashes — the viewport liveliness pass must never re-arm them;
+// a new load (anim re-entry) bumps the generation instead of clearing.
+const latchMap = new WeakMap<HTMLElement, number>()
+let latchGen = 0
 let blinkMode: 'playing' | 'driven' | 'static' = 'playing'
 const dashAnims = new Map<HTMLElement, Animation>()
 const blinkAnim = new WeakMap<HTMLElement, Animation>() // EVERY instance's live blink (epoch re-anchor)
@@ -366,6 +390,8 @@ let scrollTargetV = 0
 let scrollTs = -1e9
 let stillSince = 0
 let lastRecycle = 0
+let lastRateWrite = -1e9 // last playbackRate flush (ts)
+let lastWrittenEff = -1 // the rate the animations currently carry
 let listening = false
 
 function resolveEpoch(): number {
@@ -376,12 +402,26 @@ function resolveEpoch(): number {
 }
 
 function blinkKeyframes(d: Inst): Keyframe[] {
-  const ramp = d.kind === 'spark' ? 0.03 : 0.1 // glints snap; dashes ease
   const o = (s: number) => Math.min(0.99, s / d.period)
+  if (d.kind === 'spark') {
+    const ramp = 0.03 // glints snap
+    return [
+      { offset: 0, opacity: 0 },
+      { offset: o(ramp), opacity: 1 },
+      { offset: o(d.onS - ramp), opacity: 1 },
+      { offset: o(d.onS), opacity: 0 },
+      { offset: 1, opacity: 0 },
+    ]
+  }
+  // Dash S-curve envelope (Peter, 2026-07-10): 0.3s ease-in-out rise, 0.4s fully lit, 0.3s
+  // mirrored ease-in-out fall — they ease in AND out, never snap. Per-keyframe easing applies
+  // to the segment it starts; the 1→1 hold needs none. The driver's coast/scroll playbackRate
+  // stretches the whole envelope with the water, and the lit-at-stop latch reads mid-envelope
+  // opacity — both semantics unchanged by the shape.
   return [
-    { offset: 0, opacity: 0 },
-    { offset: o(ramp), opacity: 1 },
-    { offset: o(d.onS - ramp), opacity: 1 },
+    { offset: 0, opacity: 0, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+    { offset: o(DASH_S), opacity: 1 },
+    { offset: o(d.onS - DASH_S), opacity: 1, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
     { offset: o(d.onS), opacity: 0 },
     { offset: 1, opacity: 0 },
   ]
@@ -431,12 +471,9 @@ function goStatic(): void {
 function wakeFromStatic(): void {
   if (blinkMode !== 'static') return
   blinkMode = 'driven'
-  for (const h of hosts.values()) {
-    for (const el of h.dashes?.els ?? []) {
-      const d = elDef.get(el)
-      if (d && el.isConnected && !dashAnims.has(el)) dashAnims.set(el, startDrivenBlink(el, d))
-    }
-  }
+  // Arm only what the viewport can see (and never the latched set) — re-arming the full field
+  // on every scroll start was ~200 el.animate() calls of churn.
+  syncDashLiveliness()
 }
 
 // ─── The driver — one rAF loop mapping water speed → dash playbackRate ───────────────────────
@@ -455,6 +492,7 @@ function step(ts: number): void {
   lastStep = ts
   if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
   respawnSparks(ts) // per-glint relocation — before the anim early-return (sparks glint all load)
+  respawnDashes(ts) // per-envelope relocation — dashes never strike the same place twice either
   if (waterMode === 'anim') { // dashes play natively at full rate; the loop only recycles
     driver = requestAnimationFrame(step)
     return
@@ -469,16 +507,24 @@ function step(ts: number): void {
   }
   vt += eff * dt
   lastEff = eff
-  if (blinkMode === 'driven') {
+  // THROTTLED rate flush (2026-07-10, Peter's scroll-lag regression): at ~145 dashes, per-frame
+  // playbackRate writes were ~145 compositor-synced Animation mutations EVERY rAF while
+  // scrolling — the lag. The rate follows slow curves (coast v(t), smoothed scroll velocity),
+  // so a ~120ms cadence (or a material change) is visually identical; vt still integrates
+  // per-frame, so blink PHASE stays exact regardless of write cadence. The coast latch rides
+  // the same cadence (a dash stays lit ~1s — a 120ms latch check cannot miss one).
+  if (blinkMode === 'driven' && (ts - lastRateWrite > 120 || Math.abs(eff - lastWrittenEff) > 0.08)) {
+    lastRateWrite = ts
+    lastWrittenEff = eff
     for (const [el, a] of dashAnims) {
       a.playbackRate = eff
       // COAST LATCH (Peter, 2026-07-10): during the slowdown, any dash that reaches full glow is
       // LATCHED on — the lit set grows monotonically through the coast (no thinning), and the
-      // final static texture is whatever accumulated. getComputedStyle per frame is coast-only
-      // (~38 els for ~2.5s). Scroll-driven twinkling (no coast) never latches.
+      // final static texture is whatever accumulated. Coast-only; scroll twinkling never latches.
       if (coast && el.isConnected && parseFloat(getComputedStyle(el).opacity) > 0.7) {
         a.cancel()
         dashAnims.delete(el)
+        latchMap.set(el, latchGen)
         el.style.setProperty('--twk-static', '1')
         el.style.opacity = '' // → var(--twk-static)=1, eased by the CSS transition
       }
@@ -569,11 +615,26 @@ function currentFieldX(field: HTMLElement, group: Group): number {
 // (x mod 140) — its band-y, art and schedule stay valid; it rejoins the pattern on the other
 // side, always while offscreen. Defs are SHARED across hosts, so the shift applies to every
 // host's copy of the instance in the same pass.
+let lastRecycleFx: Partial<Record<Group, number>> = {}
 function recycle(): void {
   if (!defs || !hosts.size) return
   pruneHosts()
   const vw = window.innerWidth
   const hs = Array.from(hosts.values())
+  // TRAVEL GATE (scroll-lag fix): the sweep only matters once the fields have moved far enough
+  // that offscreen headroom could be consumed (PAD 420 ≈ 5.8s of drift; 40px is conservative).
+  // A parked/slow-sway session skips the whole instance scan.
+  const gateFx: Partial<Record<Group, number>> = {}
+  let moved = false
+  for (const g of ['a', 'b'] as Group[]) {
+    const f = hs.find((h) => h.dashes || h.sparks)
+    const fld = (f?.dashes ?? f?.sparks)?.fields[g]
+    if (!fld) continue
+    gateFx[g] = currentFieldX(fld, g)
+    if (lastRecycleFx[g] === undefined || Math.abs((gateFx[g] as number) - (lastRecycleFx[g] as number)) > 40) moved = true
+  }
+  if (!moved) return
+  lastRecycleFx = gateFx
   for (const kind of ['sparks', 'dashes'] as const) {
     const list = defs[kind]
     const fx: Partial<Record<Group, number>> = {}
@@ -591,6 +652,7 @@ function recycle(): void {
       if (moved) for (const h of hs) { const el = h[kind]?.els[i]; if (el) el.style.left = `${d.x}px` }
     })
   }
+  syncDashLiveliness() // same travel gate: arm/idle blink animations as dashes cross the viewport
 }
 
 // ─── Per-glint spark respawn — a glitter never strikes the same place twice ──────────────────
@@ -598,6 +660,7 @@ function recycle(): void {
 // The blink ANIMATION is never touched — its epoch phase, period and compositor-driven opacity
 // carry on; only the instance's position and art move, inside the dark window (opacity 0).
 let sparkCycle = new WeakMap<Inst, number>() // last dark-window index acted on, per instance
+let dashCycle = new WeakMap<Inst, number>() // same, for the dashes' blink envelopes
 let liveRnd: (() => number) | null = null // respawn PRNG — independent of the gen streams
 
 function respawnSparks(now: number): void {
@@ -647,6 +710,98 @@ function respawnSparks(now: number): void {
       el.style.top = `${d.y}px`
       el.style.setProperty('--twk-day', `url("${d.day}")`)
       el.style.setProperty('--twk-night', `url("${d.night}")`)
+    }
+  })
+}
+
+// Dashes get the same treatment (Peter, 2026-07-10: "the lines still appear predictably at the
+// same places — never striking the same place twice"): after each blink ENVELOPE completes, the
+// dash redraws its position + art through the never-twice memory, in the dark window between
+// envelopes (invisible). Applies wherever dashes BLINK — drift ('playing', epoch clock), coast /
+// scroll-twinkling ('driven', the vt clock the playbackRate driver integrates). LATCHED and
+// static dashes have no live animation → no more envelopes → they rest where they are (the
+// lit-at-stop texture must not shuffle). One respawn per envelope = constant population.
+function respawnDashes(now: number): void {
+  if (!defs || !hosts.size || blinkMode === 'static') return
+  const hs = Array.from(hosts.values())
+  const fx: Partial<Record<Group, number>> = {}
+  const vw = window.innerWidth
+  const clockBase = (blinkMode === 'playing' ? now - epochMs : vt) / 1000
+  defs.dashes.forEach((d, i) => {
+    // Only while a live blink animation exists (latch/static cancel them per element).
+    let live = false
+    for (const h of hs) { const el = h.dashes?.els[i]; if (el && dashAnims.has(el)) { live = true; break } }
+    if (!live) return
+    const clock = clockBase + d.delay
+    const dark = Math.floor((clock - d.onS - 0.06) / d.period)
+    const prev = dashCycle.get(d)
+    if (prev === undefined) { dashCycle.set(d, dark); return }
+    if (dark <= prev) return
+    // Respawn only while (near-)invisible: the inter-envelope dark window, or the first beat of
+    // the next S-ramp (a janky frame can overshoot the short dark gap of the high-duty subset).
+    const phase = ((clock % d.period) + d.period) % d.period
+    if (phase < d.onS + 0.05 && phase > 0.1) return
+    dashCycle.set(d, dark)
+    if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
+    const art = dashArt(liveRnd, d.group, d.row, d.hw, d.w, d.h, stripW)
+    // Fold into current viewport coverage (multiples of stripW ≡ 0 mod 140 — see respawnSparks).
+    let x0 = fx[d.group]
+    if (x0 === undefined) {
+      const f = hs.find((h) => h.dashes)?.dashes?.fields[d.group]
+      x0 = f ? currentFieldX(f, d.group) : 0
+      fx[d.group] = x0
+    }
+    let nx = art.x
+    const sx = nx + d.w / 2 + x0
+    if (sx < -PAD) nx += stripW * Math.ceil((-PAD - sx) / stripW)
+    else if (sx > vw + PAD) nx -= stripW * Math.ceil((sx - vw - PAD) / stripW)
+    d.x = nx
+    d.y = art.y
+    d.day = art.day
+    d.night = art.night
+    for (const u of [d.day, d.night]) { const img = new Image(); img.src = u; img.decode().catch(() => {}) }
+    for (const h of hs) {
+      const el = h.dashes?.els[i]
+      if (!el) continue
+      el.style.left = `${d.x}px`
+      el.style.top = `${d.y}px`
+      el.style.setProperty('--twk-day', `url("${d.day}")`)
+      el.style.setProperty('--twk-night', `url("${d.night}")`)
+    }
+  })
+}
+
+// ─── Viewport liveliness cap (2026-07-10, Peter's scroll-lag regression + density bump) ──────
+// Only dashes whose screen position is inside the viewport (+100px margin) carry a LIVE blink
+// animation; offscreen ones idle with no animation at all (fewer compositor layers, fewer rate
+// writes). Phase never suffers: startBlink/startDrivenBlink re-derive the exact phase from the
+// epoch/vt clocks, so a dash scrolled back in blinks as if it had never stopped. The 100px
+// margin exceeds the recycle travel gate (40px), so a dash is re-armed before it can be seen.
+// Latched (lit-at-stop) dashes are never re-armed within their generation.
+function syncDashLiveliness(): void {
+  if (!defs || !hosts.size || blinkMode === 'static') return
+  const vw = window.innerWidth
+  const hs = Array.from(hosts.values())
+  const fx: Partial<Record<Group, number>> = {}
+  for (const g of ['a', 'b'] as Group[]) {
+    const f = hs.find((h) => h.dashes)?.dashes?.fields[g]
+    if (f) fx[g] = currentFieldX(f, g)
+  }
+  defs.dashes.forEach((d, i) => {
+    const x0 = fx[d.group]
+    if (x0 === undefined) return
+    const sx = d.x + x0
+    const visible = sx > -100 - d.w && sx < vw + 100
+    for (const h of hs) {
+      const el = h.dashes?.els[i]
+      if (!el || !el.isConnected) continue
+      const has = dashAnims.has(el)
+      if (visible && !has && latchMap.get(el) !== latchGen) {
+        dashAnims.set(el, blinkMode === 'playing' ? startBlink(el, d) : startDrivenBlink(el, d))
+      } else if (!visible && has) {
+        dashAnims.get(el)!.cancel()
+        dashAnims.delete(el)
+      }
     }
   })
 }
@@ -825,6 +980,7 @@ function onWaterReady(): void {
       } catch { /* getAnimations unavailable */ }
     }
     sparkCycle = new WeakMap() // dark-window indices were computed against the previous epoch
+    dashCycle = new WeakMap()
     for (const h of hosts.values()) {
       for (const kind of ['sparks', 'dashes'] as const) {
         const nodes = h[kind]
@@ -928,12 +1084,8 @@ export function syncTwinkles(
       blinkMode = 'playing'
       for (const a of dashAnims.values()) a.cancel()
       dashAnims.clear()
-      for (const hs of hosts.values()) {
-        for (const el of hs.dashes?.els ?? []) {
-          const d = elDef.get(el)
-          if (d && el.isConnected) dashAnims.set(el, startBlink(el, d))
-        }
-      }
+      latchGen++ // the lit-at-stop set belongs to the finished load — a fresh drift re-arms all
+      syncDashLiveliness() // viewport-capped full-rate blinks
     }
   }
   if (want.mode === 'coast' && prev !== 'coast' && !coast) {
