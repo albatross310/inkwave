@@ -584,6 +584,13 @@ export function Scroll({
     let raf = 0
     let lastTop = el.scrollTop
     let lastTs = performance.now()
+    // FULLSCREEN PDF SWAY (Peter, 2026-07-10): while the PDF viewer floats over the water it
+    // dispatches its absolute scrollTop ('inkwave:pdf-sway'); folded into the SAME base+top
+    // formula as a second scroll source, so the waves at the pane's sides sway with PDF scrolling
+    // exactly like editor scrolling — one write path, and the zoom-hold/coast rules stay intact.
+    let pdfTop = 0
+    const writeWave = () =>
+      el.style.setProperty('--wave-x', `${(waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1)}px`)
     const apply = () => {
       raf = 0
       // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the
@@ -604,12 +611,27 @@ export function Scroll({
       }
       lastTop = top
       lastTs = now
-      el.style.setProperty('--wave-x', `${(waveBaseRef.current + top * WAVE_SWAY).toFixed(1)}px`)
+      writeWave()
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
+    const onPdfSway = (e: Event) => {
+      const top = (e as CustomEvent<{ top: number }>).detail?.top ?? 0
+      const prev = pdfTop
+      pdfTop = top
+      if (waveModeRef.current !== 'off') return // drift/coast own the wave position
+      const now = performance.now()
+      if (top !== prev) reportSway(Math.abs(top - prev) / Math.max(8, now - lastTs) * 1000) // dashes twinkle too
+      lastTs = now
+      writeWave()
+    }
     apply()
     target.addEventListener('scroll', onScroll, { passive: true })
-    return () => { target.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
+    window.addEventListener('inkwave:pdf-sway', onPdfSway)
+    return () => {
+      target.removeEventListener('scroll', onScroll)
+      window.removeEventListener('inkwave:pdf-sway', onPdfSway)
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [phone]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Loading wave drift — CSS/compositor does ALL the moving (`.iw-wave-anim`, in the prerendered

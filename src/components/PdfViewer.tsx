@@ -4,7 +4,7 @@
 // drives text-layer positioning/selection. Highlights are our own overlay divs (normalised rects),
 // stored on the source's _iw.highlights — not baked into the PDF.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
@@ -93,7 +93,7 @@ function savedUserZoom(): number | null {
   } catch { return null }
 }
 
-export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, onClose, onLinkToCitation }: {
+export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId, context, noRef, restoreScroll, dockButton, sideButtons, fullscreen, fullscreenButton, onClose, onLinkToCitation }: {
   data: ArrayBuffer
   citekey: string
   initialPage?: number
@@ -103,10 +103,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   noRef?: boolean              // opened from the bib → annotations must not become page refs
   restoreScroll?: boolean      // open at the reader's last exact scroll position (author-year click)
   dockButton?: ReactNode       // the panel's dock-orientation toggle, rendered inside this single toolbar
+  sideButtons?: ReactNode      // panel controls at the RIGHT end of the toolbar (swap dock edge), before dockButton
+  fullscreen?: boolean         // panel-owned fullscreen mode — gates the wave-sway scroll feed
+  fullscreenButton?: ReactNode // the panel's ⛶ toggle, rendered in the toggle group right of the ✕
   onClose?: () => void         // close the panel — rendered as a big × at the left of the toolbar
   onLinkToCitation?: (quote: string, page: number) => void
 }) {
   const instanceIdRef = useRef<string | null | undefined>(instanceId); instanceIdRef.current = instanceId
+  const fullscreenRef = useRef(!!fullscreen); fullscreenRef.current = !!fullscreen
   // Touch/iOS: inputs need ≥16px font (or Safari auto-zooms the page on focus) and the drag tools need
   // pointer events + touch-action:none. Device-based, so it can't change mid-session.
   const isTouch = isTouchDevice()
@@ -163,10 +167,38 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     setTool(kind)
     if (kind && kind !== 'erase') setColor(toolColorsRef.current[kind] ?? COLORS[0])
   }
+  // MARKUP SELECTION (Peter, 2026-07-10): a bare click on a highlight/underline/strike SELECTS it
+  // (outlined rects + an inline colour popup anchored at the click). While selected, the toolbar
+  // swatches AND the popup dots recolour THAT annotation; Delete/Backspace removes it; Escape or a
+  // click elsewhere deselects. Coordinates with the bare-click disarm: annotation click = select
+  // (never disarm), bare click on nothing = deselect + disarm.
+  const [selectedMk, setSelectedMk] = useState<{ id: string; x: number; y: number } | null>(null)
+  const selectedMkRef = useRef<string | null>(null)
+  function selectMarkup(hl: PdfHighlight | null, at?: { clientX: number; clientY: number }) {
+    selectedMkRef.current = hl?.id ?? null
+    if (!hl) setSelectedMk(null)
+    else {
+      const box = scrollRef.current?.getBoundingClientRect()
+      setSelectedMk({ id: hl.id, x: at && box ? at.clientX - box.left : 40, y: at && box ? at.clientY - box.top : 40 })
+    }
+    redrawOverlays()
+  }
+  function recolorMarkup(id: string, c: string) {
+    const hl = highlightsRef.current.find(h => h.id === id)
+    if (!hl) return
+    hl.color = c
+    redrawOverlays()
+    void saveHighlights(citekey, highlightsRef.current)
+  }
   const [noteSize, setNoteSize] = useState<number>(() => { try { return Number(localStorage.getItem('inkwave:pdfNoteSize')) || 12 } catch { return 12 } })
   const toolRef = useRef<ToolKind | null>(null); toolRef.current = tool
   const colorRef = useRef(color); colorRef.current = color
   const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
+
+  // Context-strip dismiss (Peter, 2026-07-10): the ✕ reclaims the vertical reading space for this
+  // open only — the next citation click that brings a quote/context shows the strip again.
+  const [contextDismissed, setContextDismissed] = useState(false)
+  useEffect(() => { setContextDismissed(false) }, [context, instanceId])
 
   // Find-in-PDF (Ctrl+F) — searches the real text layer, scrolls to matches, highlights them.
   const [searchOpen, setSearchOpen] = useState(false)
@@ -176,6 +208,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const searchBoxRef = useRef<HTMLInputElement>(null)
 
   const removeHighlight = (id: string) => {
+    if (selectedMkRef.current === id) { selectedMkRef.current = null; setSelectedMk(null) } // no dangling selection/popup
     highlightsRef.current = highlightsRef.current.filter(h => h.id !== id)
     redrawOverlays()
     void saveHighlights(citekey, highlightsRef.current)
@@ -295,6 +328,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             div.style.cssText = `position:absolute;${paint}pointer-events:none;`
             div.title = hl.note || (hl.citekey ? `Linked to ${hl.citekey}` : hl.text.slice(0, 80))
             pg.hlLayer.appendChild(div)
+          }
+        }
+        // SELECTED markup: outline every rect so the selection is unmistakable (same INK outline
+        // as a selected text note). The recolour swatches/popup and Delete both key off this.
+        if (selectedMkRef.current === hl.id) {
+          for (const r of hl.rects) {
+            const sel = document.createElement('div')
+            sel.style.cssText = `position:absolute;left:${r.x * pw - 2}px;top:${r.y * ph - 2}px;width:${r.w * pw + 4}px;height:${r.h * ph + 4}px;outline:2px solid ${INK};border-radius:3px;pointer-events:none;z-index:2;`
+            pg.hlLayer.appendChild(sel)
           }
         }
         // Small delete handle at the annotation's start — the ONLY way to remove it (no accidental
@@ -561,6 +603,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       }
       setLastPdfPage(citekey, best)
       setLastPdfScroll(citekey, sc.scrollTop) // exact spot, so author-year reopens where you left off
+      // FULLSCREEN WAVE SWAY (Peter, 2026-07-10): while the PDF floats over the water, its scroll
+      // drives the editor's --wave-x sway + dash twinkle exactly like editor scrolling does.
+      // Scroll.tsx's sway effect folds this absolute top into its base+top formula.
+      if (fullscreenRef.current) window.dispatchEvent(new CustomEvent('inkwave:pdf-sway', { detail: { top: sc.scrollTop } }))
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(report) }
     sc.addEventListener('scroll', onScroll, { passive: true })
@@ -617,6 +663,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     printedKnownRef.current = (item0 as { _iw?: IwCitationMeta } | undefined)?._iw?.pageOffsetFlag === 'verified'
     const initZoom = savedUserZoom() ?? 1 // manual-zoom override survives across opens; 1 = fit default
     setZoom(initZoom)
+    selectedMkRef.current = null; setSelectedMk(null) // a fresh document can't keep a stale selection
     // Fresh document → re-arm the atomic reveal (the citekey key usually remounts the component,
     // but a data change on the same key must re-gate too). Cap ~1.5s: reveal whatever is painted.
     setRevealed(false)
@@ -711,7 +758,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !typing) {
         const kind = ({ t: 'text', h: 'highlight', e: 'erase' } as Record<string, ToolKind | undefined>)[e.key.toLowerCase()]
         if (kind) { e.preventDefault(); e.stopPropagation(); armTool(toolRef.current === kind ? null : kind) }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedMkRef.current) {
+        e.preventDefault() // a selected markup annotation deletes like a selected note
+        removeHighlight(selectedMkRef.current)
       } else if (e.key === 'Escape') {
+        if (selectedMkRef.current) selectMarkup(null)
         if (searchOpen) { setSearchOpen(false); clearFindHits() }
         if (toolRef.current) setTool(null)
       }
@@ -979,11 +1030,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     return { text, page: groups[0].page, rects: groups[0].rects, groups, x: last.right - box.left, y: last.bottom - box.top }
   }
 
-  function onMouseUp() {
+  function onMouseUp(e: React.MouseEvent) {
+    const d = downRef.current; downRef.current = null
+    // A BARE CLICK = pressed and released on (almost) the same spot, not on an annotation's own DOM
+    // (notes / ✕ handles keep their select/edit/delete behaviour untouched). Anything that moved is
+    // a drag (text selection, note drawing) — never a disarm/select trigger.
+    const onAnnot = !!d?.onAnnot || !!(e.target as HTMLElement).closest?.('[data-hl-id], button')
+    const bareClick = !!d && !onAnnot && e.button === 0 && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5
+    if (onAnnot && selectedMkRef.current) selectMarkup(null) // focus moved to a note — drop the markup selection
     const info = selectionInfo()
     // Text-tool placement + eraser are click-driven (onPdfPointerDown) — nothing to do on mouse-up.
     if (toolRef.current === 'text' || toolRef.current === 'erase') { window.getSelection()?.removeAllRanges(); setPending(null); return }
-    if (!info) { setPending(null); return }
+    if (!info) {
+      if (bareClick) {
+        // MARKUP SELECT / BARE-CLICK DISARM (Peter, 2026-07-10): a click on a highlight/underline/
+        // strike selects it (outline + inline colour popup — never a disarm); a click that would
+        // otherwise do NOTHING deselects whatever was selected and acts like Escape on the armed tool.
+        const hl = markupAt(e.clientX, e.clientY)
+        if (hl) selectMarkup(hl, e)
+        else {
+          if (selectedMkRef.current) selectMarkup(null)
+          if (toolRef.current) setTool(null)
+        }
+      }
+      setPending(null); return
+    }
     // A markup tool is active → apply it immediately (Firefox-style); otherwise offer the toolbar.
     if (toolRef.current) {
       void createHighlight(info, toolRef.current, colorRef.current, false)
@@ -1060,7 +1131,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   // Eraser: click any annotation (highlight / underline / strike / note) to remove it.
-  function eraseAt(clientX: number, clientY: number): void {
+  // Returns whether it actually erased something (the bare-click disarm keys off a whole
+  // gesture that removed nothing).
+  function eraseAt(clientX: number, clientY: number): boolean {
     for (let i = 0; i < pagesRef.current.length; i++) {
       const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
       if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
@@ -1070,26 +1143,56 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         const hl = highlightsRef.current[j]
         if (hl.page !== i + 1) continue
         const hit = hl.rects.some(r => fx >= r.x - 0.005 && fx <= r.x + (r.w || 0.3) + 0.005 && fy >= r.y - 0.01 && fy <= r.y + (r.h || 0.04) + 0.01)
-        if (hit) { removeHighlight(hl.id); return }
+        if (hit) { removeHighlight(hl.id); return true }
       }
-      return
+      return false
     }
+    return false
+  }
+
+  // Hit-test a click against MARKUP annotations (highlight/underline/strike — text notes are real
+  // DOM and select themselves). Same generous rect maths as the eraser, topmost-first.
+  function markupAt(clientX: number, clientY: number): PdfHighlight | null {
+    for (let i = 0; i < pagesRef.current.length; i++) {
+      const pr = pagesRef.current[i].hlLayer.getBoundingClientRect()
+      if (clientX < pr.left || clientX > pr.right || clientY < pr.top || clientY > pr.bottom) continue
+      const fx = (clientX - pr.left) / pr.width, fy = (clientY - pr.top) / pr.height
+      for (let j = highlightsRef.current.length - 1; j >= 0; j--) {
+        const hl = highlightsRef.current[j]
+        if (hl.page !== i + 1 || (hl.kind ?? 'highlight') === 'text') continue
+        if (hl.rects.some(r => fx >= r.x - 0.005 && fx <= r.x + r.w + 0.005 && fy >= r.y - 0.01 && fy <= r.y + r.h + 0.01)) return hl
+      }
+      return null
+    }
+    return null
   }
 
   // ONE pointer path for mouse AND touch (pointerdown + capture): a bare tap with the note tool still
   // creates the default-size box (tiny-drag fallback below), and the eraser works with taps and drags.
   // The container gets touch-action:none only while one of these drag tools is armed, so the gesture
   // never turns into a native pan; preventDefault also suppresses the compatibility mouse events.
+  // Where the gesture STARTED — onMouseUp's bare-click detection (disarm / markup-select) needs
+  // the down position (click vs drag) and whether the press landed on an annotation's own DOM.
+  const downRef = useRef<{ x: number; y: number; onAnnot: boolean } | null>(null)
   function onPdfPointerDown(e: React.PointerEvent) {
+    downRef.current = { x: e.clientX, y: e.clientY, onAnnot: !!(e.target as HTMLElement).closest?.('[data-hl-id], button') }
     if (toolRef.current === 'erase') {
       e.preventDefault()
-      eraseAt(e.clientX, e.clientY)
+      // Track the whole gesture: a stationary tap that erased NOTHING acts like Escape (bare-click
+      // disarm) — a tap that hit something, or any drag-erase swipe, keeps the eraser armed.
+      let erased = eraseAt(e.clientX, e.clientY)
+      let moved = false
+      const sx = e.clientX, sy = e.clientY
       e.currentTarget.setPointerCapture(e.pointerId)
-      const move = (ev: PointerEvent) => eraseAt(ev.clientX, ev.clientY) // drag-erase: keep hitting along the swipe
+      const move = (ev: PointerEvent) => { // drag-erase: keep hitting along the swipe
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 5) moved = true
+        if (eraseAt(ev.clientX, ev.clientY)) erased = true
+      }
       const done = () => {
         document.removeEventListener('pointermove', move)
         document.removeEventListener('pointerup', done)
         document.removeEventListener('pointercancel', done)
+        if (!erased && !moved) setTool(null) // bare click on nothing = disarm (Peter, 2026-07-10)
       }
       document.addEventListener('pointermove', move)
       document.addEventListener('pointerup', done)
@@ -1235,41 +1338,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
             style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
-        {TOOLS.map(t => {
-          const active = tool === t.kind
-          return (
-            <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
-              onMouseEnter={() => setHint(`${t.title}`)}
-              onClick={() => armTool(active ? null : t.kind)}
-              style={{
-                width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
-                color: t.kind === 'highlight' ? '#eab308' : INK,
-                textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
-              }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
-          )
-        })}
-        {/* Text-note font size */}
-        <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
-          onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.82rem' /* <16px makes iOS auto-zoom on focus */, padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
-          {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
-        </select>
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
-        {COLORS.map(c => (
-          <button key={c} type="button"
-            onClick={() => { setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c }}
-            style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, transform: 'translateY(-3px)', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
-        ))}
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
-        {/* Scroll-highlighted navigator */}
-        <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
-        <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+        {/* TOGGLE GROUP right of the ✕ (Peter, 2026-07-10): ⇄ sync-editor, # don't-add-pages,
+            ◧ hide-on-editor-click, ⛶ fullscreen — grouped at the left end, functions unchanged. */}
         {/* Sync-editor toggle — a box that lights up purple when on. */}
-        <button type="button" title="Scroll the editor to where the highlight is cited when you click the arrows"
+        <button type="button" title="Sync editor: scroll the editor to where the highlight is cited when you click the ‹ › arrows"
           onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
           onClick={() => setSyncEditor(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
@@ -1290,19 +1362,88 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onClick={() => setHideOnEditorClick(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
             border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
+        {fullscreenButton}
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        {TOOLS.map(t => {
+          const active = tool === t.kind
+          return (
+            <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
+              onMouseEnter={() => setHint(`${t.title}`)}
+              // Keep a live text selection alive through the press — mousedown on a button would
+              // collapse it before onClick could read it (the pending toolbar works from stored
+              // state for the same reason). Harmless for the tools that don't use selections.
+              onMouseDown={ev => ev.preventDefault()}
+              onClick={() => {
+                // APPLY-TO-SELECTION (Peter, 2026-07-10): text already selected + an edit tool
+                // pressed → apply that markup IMMEDIATELY in the tool's default colour (dark blue
+                // for U/S, yellow for highlight — the armTool defaults), then clear the selection.
+                // The button does NOT arm in that case; with no selection it toggles as before.
+                if (t.kind === 'highlight' || t.kind === 'underline' || t.kind === 'strike') {
+                  const info = selectionInfo()
+                  if (info) {
+                    void createHighlight(info, t.kind, toolColorsRef.current[t.kind] ?? COLORS[0], false)
+                    skipSelChangeRef.current = true // our removeAllRanges refires selectionchange (touch mirror)
+                    window.getSelection()?.removeAllRanges()
+                    setPending(null)
+                    return
+                  }
+                }
+                armTool(active ? null : t.kind)
+              }}
+              style={{
+                width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
+                color: t.kind === 'highlight' ? '#eab308' : INK,
+                textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
+              }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
+          )
+        })}
+        {/* Text-note font size */}
+        <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
+          onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
+          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.82rem' /* <16px makes iOS auto-zoom on focus */, padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
+          {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
+        </select>
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        {COLORS.map((c, i) => (
+          <Fragment key={c}>
+            {/* Small divider between the highlight colours and the dark red/blue pair (Peter, 2026-07-10). */}
+            {i === COLORS.length - 2 && <span style={{ width: 1, height: 14, background: `${INK}22`, margin: '0 2px', flexShrink: 0, transform: 'translateY(-3px)' }} />}
+            <button type="button"
+              onClick={() => {
+                // A SELECTED markup annotation takes the swatch: recolour it (persisted) and leave
+                // the armed tool's colour alone. Otherwise the swatch sets the tool colour as before.
+                if (selectedMkRef.current) { recolorMarkup(selectedMkRef.current, c); return }
+                setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c
+              }}
+              style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, transform: 'translateY(-3px)', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+          </Fragment>
+        ))}
+        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        {/* Scroll-highlighted navigator */}
+        <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
+        <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
         <span style={{ marginLeft: 'auto' }} />
+        {sideButtons}
         {dockButton}
       </div>
 
       {/* Context: the sentence in the editor just before the citation. Clicking it jumps to that citation
           in the document (via its instanceId). */}
-      {context && (
+      {context && !contextDismissed && (
         <div
           onClick={() => { if (instanceIdRef.current) window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: instanceIdRef.current } })) }}
           title={instanceIdRef.current ? 'Go to this citation in the document' : undefined}
-          style={{ flexShrink: 0, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
-          <span style={{ fontStyle: 'italic' }}>“…{context}”</span>
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
+          <span style={{ fontStyle: 'italic', flex: 1, minWidth: 0 }}>“…{context}”</span>
+          {/* Per-open dismiss — reclaims the strip's height; stopPropagation so it never jumps to the citation. */}
+          <button type="button" title="Hide this context strip"
+            onClick={ev => { ev.stopPropagation(); setContextDismissed(true) }}
+            style={{ flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent', color: '#8d7ba3', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, borderRadius: 4 }}>×</button>
         </div>
       )}
 
@@ -1376,6 +1517,25 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         ))}
       </div>
 
+      {/* Inline menu for a SELECTED markup annotation — the same colour-dots card as the pending
+          toolbar, anchored at the click: dots recolour THAT annotation (as do the top-toolbar
+          swatches while it stays selected); Remove mirrors Delete/Backspace. */}
+      {selectedMk && (
+        <div style={{
+          position: 'absolute', left: Math.max(8, Math.min(selectedMk.x, (scrollRef.current?.clientWidth ?? 400) - 220)),
+          top: selectedMk.y + 6, zIndex: 20, background: '#fff', border: `1px solid ${INK}44`, borderRadius: 8,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.18)', padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          {COLORS.map(c => (
+            <button key={c} type="button" title="Recolour this annotation" onClick={() => recolorMarkup(selectedMk.id, c)}
+              style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer' }} />
+          ))}
+          <button type="button" title="Remove annotation (Delete)" onClick={() => removeHighlight(selectedMk.id)}
+            style={{ fontSize: '0.72rem', color: '#7f1d1d', background: '#fff', border: '1px solid #7f1d1d55', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ✕ Remove
+          </button>
+        </div>
+      )}
       {pending && (
         <div style={{
           position: 'absolute', left: Math.max(8, Math.min(pending.x, (scrollRef.current?.clientWidth ?? 400) - 220)),
