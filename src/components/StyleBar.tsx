@@ -111,10 +111,11 @@ function useLongPress(onShortPress: () => void, onLongPress: () => void) {
   }
 }
 
-export function StyleBar({ editor, onActivity, phone }: {
+export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   editor: Editor
   onActivity?: () => void
   phone?: boolean
+  barVisible?: boolean // the bar row's expanded state — pickers close WITH the bar (they portal to body)
 }) {
   const [, force] = useState(0)
   const [fontOpen,   setFontOpen]   = useState(false)
@@ -125,6 +126,13 @@ export function StyleBar({ editor, onActivity, phone }: {
   const [alignOpen,  setAlignOpen]  = useState(false)
   const [listOpen,   setListOpen]   = useState(false)
   const [indentOpen, setIndentOpen] = useState(false)
+  // Pickers portal to document.body, so collapsing the bar row doesn't hide them — close them all
+  // the moment the bar goes down (Peter, 2026-07-10: orphaned colour palette floating alone).
+  useEffect(() => {
+    if (barVisible) return
+    setFontOpen(false); setSizeOpen(false); setFmtOpen(false); setHlOpen(false)
+    setColorOpen(false); setAlignOpen(false); setListOpen(false); setIndentOpen(false)
+  }, [barVisible])
 
   const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
   const [lastHlColor,  setLastHlColor]  = useState<string | null>(null)

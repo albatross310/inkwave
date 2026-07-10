@@ -2129,7 +2129,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
                 <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
-                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} />}
+                  {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} barVisible={styleBarExpanded} />}
                 </div>
               </div>
             )}
