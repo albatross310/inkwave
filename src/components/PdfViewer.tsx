@@ -158,6 +158,28 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // re-drawn + the initial scroll applied. Capped at 1.5s like the editor's reveal gate, so a
   // slow/huge PDF can never hold the panel hostage.
   const [revealed, setRevealed] = useState(false)
+  // Latch mirror + the ONE reveal decision point. The old one-shot barrier raced the newer render
+  // paths (fit-to-text / live-fit re-renders supersede the load token, and a superseded
+  // renderVisibleNow resolves EARLY) — the toolbar then revealed before the text layer (Peter's
+  // regression). maybeReveal() is instead called after EVERY completed page render (and by the
+  // load barrier): it flips only when every page actually intersecting the viewport has its
+  // canvas AND text-layer spans attached (pg.rendered — the text-ready contract). Whatever render
+  // path completes last is the one that opens the gate, so no path can slip past it.
+  const revealedRef = useRef(false)
+  function maybeReveal(): void {
+    if (revealedRef.current) return
+    const sc = scrollRef.current
+    if (!sc || !pagesRef.current.length) return
+    const sRect = sc.getBoundingClientRect()
+    const visible = pagesRef.current.filter(pg => {
+      const r = pg.wrapper.getBoundingClientRect()
+      return r.bottom >= sRect.top + 1 && r.top <= sRect.bottom - 1
+    })
+    if (!visible.length || !visible.every(pg => pg.rendered)) return
+    revealedRef.current = true
+    redrawOverlays() // highlight overlays drawn against the final layout — part of the same barrier
+    requestAnimationFrame(() => requestAnimationFrame(() => setRevealed(true))) // after the commit paints
+  }
   // zoom 1 = the FIT BASELINE (fit-to-text-width when the page has a text layer, else page-width
   // fit). A manually-chosen zoom persists (USER_ZOOM_KEY) and overrides the default on open.
   const [zoom, setZoom] = useState(() => savedUserZoom() ?? 1)
@@ -421,6 +443,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     await new pdfjs.TextLayer({ textContentSource: tc, container: pg.textLayer, viewport: pg.viewport }).render().catch(() => {})
     pg.rendered = true
     pg.rendering = false // allow a re-render after eviction (evicted pages flip rendered back to false)
+    maybeReveal() // every completed render re-checks the atomic-reveal gate (no path can slip past it)
     } finally {
       sharpActiveRef.current--
     }
@@ -670,8 +693,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     selectedMkRef.current = null; setSelectedMk(null) // a fresh document can't keep a stale selection
     // Fresh document → re-arm the atomic reveal (the citekey key usually remounts the component,
     // but a data change on the same key must re-gate too). Cap ~1.5s: reveal whatever is painted.
+    revealedRef.current = false
     setRevealed(false)
-    const revealCap = setTimeout(() => { if (!cancelled) setRevealed(true) }, 1500)
+    const revealCap = setTimeout(() => { if (!cancelled) { revealedRef.current = true; setRevealed(true) } }, 1500)
 
     void (async () => {
       setStatus('loading')
@@ -717,20 +741,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         }
         requestAnimationFrame(() => {
           settle(3) // the FIRST scrollToTarget just ran synchronously — the viewport is now the real one
-          // ATOMIC REVEAL BARRIER: await the visible pages' canvas AND text layer (renderVisibleNow →
-          // renderOnePage resolves only with the text-layer spans attached, INCLUDING renders the
-          // IntersectionObserver started first — see the text-ready contract on renderOnePage), then
-          // re-draw the highlight overlays against the final layout as part of the same barrier, and
-          // only then — after the commit has painted (double rAF) — flip the one visibility toggle.
-          // The IntersectionObserver keeps driving later scroll-in renders exactly as before.
-          void renderVisibleNow(renderTokenRef.current).catch(() => {}).then(() => {
-            if (cancelled) return
-            redrawOverlays()
-            requestAnimationFrame(() => requestAnimationFrame(() => { if (!cancelled) setRevealed(true) }))
-          })
+          // ATOMIC REVEAL: front the initial viewport's renders (canvas + text layer — the
+          // text-ready contract on renderOnePage), then check the gate. maybeReveal() is ALSO
+          // called after every completed render, so even if a fit/live-fit re-render supersedes
+          // this token mid-flight, whichever render completes last opens the gate — the toolbar
+          // can never appear ahead of the text again.
+          void renderVisibleNow(renderTokenRef.current).catch(() => {}).then(() => { if (!cancelled) maybeReveal() })
         })
       } catch {
-        if (!cancelled) { setStatus('error'); setRevealed(true) } // error text shows immediately — no gate
+        if (!cancelled) { setStatus('error'); revealedRef.current = true; setRevealed(true) } // error shows immediately — no gate
       }
     })()
 
@@ -926,6 +945,53 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     return () => { ro.disconnect(); clearTimeout(settle) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
+
+  // ── FULLSCREEN ENTER/EXIT REFIT (Peter, 2026-07-10: "exit leaves the text ridden off to the
+  // right") ── the dock↔fullscreen jump is the one width change the live-fit RO could leave
+  // half-done: with a persisted manual zoom (zoomStateRef ≠ 1) the RO deliberately skips, so the
+  // old fullscreen scrollLeft survived into the much narrower dock — text jammed off-screen. Drive
+  // the transition deterministically: at the fit baseline, recompute fit for the NEW width, sharp
+  // re-render, and snap the text's left margin flush (same maths as the load path); under a manual
+  // zoom override, clamp scrollLeft into the new range (the user's zoom is respected, never reset).
+  const prevFsRef = useRef(!!fullscreen)
+  useEffect(() => {
+    const was = prevFsRef.current
+    prevFsRef.current = !!fullscreen
+    if (was === !!fullscreen || status !== 'ready') return
+    const sc = scrollRef.current, viewer = viewerRef.current
+    if (!sc || !viewer) return
+    // Next frame: the panel's new geometry has laid out, clientWidth is the real new width.
+    const raf = requestAnimationFrame(() => {
+      if (zoomStateRef.current !== 1 || rotationRef.current % 360 !== 0) {
+        sc.scrollLeft = Math.max(0, Math.min(sc.scrollLeft, sc.scrollWidth - sc.clientWidth))
+        return
+      }
+      const inputs = fitInputsRef.current
+      if (!inputs) return
+      const containerW = sc.clientWidth - 24
+      const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
+      const fit = inputs.ext
+        ? Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / (inputs.ext.x1 - inputs.ext.x0)))
+        : pageFit
+      const snapLeft = (f: number) => {
+        sc.scrollLeft = textFitX0Ref.current != null ? Math.max(0, textFitX0Ref.current * f - TEXT_FIT_INSET) : 0
+      }
+      if (Math.abs(fit - fitScaleRef.current) < 0.001) { snapLeft(fit); return }
+      const st = sc.scrollTop * (fit / fitScaleRef.current) // hold the top content line through the rescale
+      const unfreeze = freezeViewport()
+      fitScaleRef.current = fit
+      void renderPages(fit).then(async () => {
+        viewer.style.transform = ''
+        viewer.style.transformOrigin = ''
+        sc.scrollTop = st
+        snapLeft(fit)
+        await renderVisibleNow(renderTokenRef.current)
+        requestAnimationFrame(() => requestAnimationFrame(unfreeze))
+      }).catch(unfreeze)
+    })
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, status])
 
   function scrollToTarget() {
     const container = scrollRef.current
@@ -1379,11 +1445,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         <>
           <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }} />
           {onClose && (
-            // The TOOLBAR's ✕, in its exact final position/style (top-LEFT, matching the toolbar's
-            // padding) — visual continuity: when the toolbar reveals, the ✕ doesn't move or restyle
-            // (Peter, 2026-07-10: the loading ✕ on the right looked like a different control).
+            // The TOOLBAR's ✕, in its exact final position/style (BOTTOM-left — the toolbar lives
+            // at the bottom now) — visual continuity: when the toolbar reveals, the ✕ doesn't move
+            // or restyle (Peter, 2026-07-10: a moving loading ✕ read as a different control).
             <button type="button" onClick={onClose} title="Close (Esc)"
-              style={{ position: 'absolute', top: 7, left: 12, zIndex: 11, width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+              style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 11, width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
           )}
         </>
       )}
@@ -1395,9 +1461,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         opacity: revealed ? 1 : 0, transition: 'opacity 200ms ease',
         pointerEvents: revealed ? undefined : 'none' }}>
 
-      {/* Single consolidated toolbar. Secondary controls are compact (icon + checkbox); their labels
-          live in the status line on hover (setHint) so the bar stays squished. */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, rowGap: 6, padding: '7px 12px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
+      {/* Single consolidated toolbar — at the BOTTOM of the panel (Peter, 2026-07-10), on both
+          platforms; the quote/context strip sits directly above it and the pages above that.
+          Flex `order` does the visual re-stack (pages 1 · context 2 · toolbar 3) without moving
+          the JSX, so every absolute-positioned popover keeps its anchor. Secondary controls are
+          compact; every control explains itself via its tooltip. */}
+      <div style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, rowGap: 6, padding: '7px 12px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
         onMouseLeave={() => setHint(null)}>
         {onClose && (
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
@@ -1495,6 +1564,22 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
         <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+        {/* Rotate lives in the toolbar (Peter, 2026-07-10) — the floating −/%/+ zoom pill is gone;
+            Ctrl/⌘+wheel (and the persisted user zoom) remain the zoom path. */}
+        <button type="button" title="Rotate 90°" aria-label="Rotate 90 degrees"
+          onClick={async () => {
+            const next = (rotationRef.current + 90) % 360
+            rotationRef.current = next
+            const doc = docRef.current
+            if (doc) { // re-fit for the new orientation (width/height swap at 90°/270°)
+              const containerW = (scrollRef.current?.clientWidth ?? 800) - 24
+              const vp = (await doc.getPage(1)).getViewport({ scale: 1, rotation: next })
+              fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / vp.width))
+            }
+            renderedZoomRef.current = zoom
+            void renderPages(fitScaleRef.current * zoom)
+          }}
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
         <span style={{ marginLeft: 'auto' }} />
         {sideButtons}
@@ -1507,7 +1592,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         <div
           onClick={() => { if (instanceIdRef.current) window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: instanceIdRef.current } })) }}
           title={instanceIdRef.current ? 'Go to this citation in the document' : undefined}
-          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderBottom: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
+          style={{ order: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderTop: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
           <span style={{ fontStyle: 'italic', flex: 1, minWidth: 0 }}>“…{context}”</span>
           {/* Per-open dismiss — reclaims the strip's height; stopPropagation so it never jumps to the citation. */}
           <button type="button" title="Hide this context strip"
@@ -1516,11 +1601,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         </div>
       )}
 
-      <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-      {/* Find-in-PDF bar (Ctrl+F) */}
+      <div style={{ order: 1, position: 'relative', flex: 1, minHeight: 0 }}>
+      {/* Find-in-PDF bar (Ctrl+F) — anchored just ABOVE the bottom toolbar, opening upward. */}
       {searchOpen && (
         <div className="iw-nightable" style={{
-          position: 'absolute', top: 10, right: 18, zIndex: 25,
+          position: 'absolute', bottom: 10, right: 18, zIndex: 25,
           display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: `1px solid ${INK}44`,
           borderRadius: 10, boxShadow: '0 3px 14px rgba(0,0,0,0.22)', padding: '8px 12px',
         }}>
@@ -1559,32 +1644,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
 
-      {/* Zoom controls */}
-      <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 15, display: 'flex', gap: 4, background: '#fff', border: `1px solid ${INK}33`, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', padding: 2 }}>
-        <button type="button" title="Rotate 90°" aria-label="Rotate 90 degrees"
-          onClick={async () => {
-            const next = (rotationRef.current + 90) % 360
-            rotationRef.current = next
-            const doc = docRef.current
-            if (doc) { // re-fit for the new orientation (width/height swap at 90°/270°)
-              const containerW = (scrollRef.current?.clientWidth ?? 800) - 24
-              const vp = (await doc.getPage(1)).getViewport({ scale: 1, rotation: next })
-              fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / vp.width))
-            }
-            renderedZoomRef.current = zoom
-            void renderPages(fitScaleRef.current * zoom)
-          }}
-          style={{ minWidth: 34, height: 34, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '1.35rem', borderRadius: 5, lineHeight: 1 }}>
-          ⟳
-        </button>
-        {([['−', () => { zoomAnchorRef.current = null; setZoom(z => Math.max(ZOOM_MIN, z / 1.2)) }], [`${Math.round(zoom * 100)}%`, () => { zoomAnchorRef.current = null; setZoom(1) }], ['+', () => { zoomAnchorRef.current = null; setZoom(z => Math.min(ZOOM_MAX, z * 1.2)) }]] as const).map(([label, fn], i) => (
-          <button key={i} type="button" onClick={fn}
-            style={{ minWidth: label.length > 2 ? 44 : 26, height: 26, border: 'none', background: 'transparent', color: INK, cursor: 'pointer', fontSize: '0.8rem', borderRadius: 5 }}
-            title={label === '+' ? 'Zoom in (Ctrl +)' : label === '−' ? 'Zoom out (Ctrl −)' : 'Reset zoom (Ctrl 0)'}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* (The floating rotate/−/%/+ pill is gone — rotate moved into the bottom toolbar;
+          Ctrl/⌘+wheel remains the zoom. Peter, 2026-07-10.) */}
 
       {/* Inline menu for a SELECTED markup annotation — the same colour-dots card as the pending
           toolbar, anchored at the click: dots recolour THAT annotation (as do the top-toolbar

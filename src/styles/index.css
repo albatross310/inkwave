@@ -962,11 +962,17 @@
 }
 
 @page {
-  margin-bottom: 64px; /* MARGIN_BOTTOM − 8: real margin for the number box; forced breaks still win */
+  margin-bottom: 64px; /* MARGIN_BOTTOM − 8: real margin for the chrome box; forced breaks still win */
+  /* Per-page chrome, styled EXACTLY like the editor's bottom-centre footer (.inkwave-sheet-num:
+     22px logo + 0.9rem purple number). This static rule is the number-only fallback; the dynamic
+     printPageStyle.ts tag OVERRIDES this margin box with `url(logo-svg) counter(page)` once the
+     22px logo data-URI is built (margin boxes can't size images, so the SVG carries an intrinsic
+     22px size). Margin boxes appear on EVERY page including page 1 and on browser-natural breaks
+     inside the reference list, so numbering is continuous. Chromium ≥131; Firefox prints no box. */
   @bottom-center {
     content: counter(page);
-    font-family: 'EB Garamond', Georgia, serif; font-weight: 700; font-size: 15px; color: #000;
-    margin-bottom: 22px;
+    font-family: 'EB Garamond', Georgia, serif; font-size: 0.9rem; color: #9b5ccc;
+    margin-bottom: 16px;
   }
 }
 @page iw-refs { margin-top: 96px; margin-bottom: 64px; }
@@ -975,7 +981,6 @@
    screen: same font + line spacing + wrapping (it's the browser laying out the same content), and
    the page breaks land where the editor's page gaps are. Both Print and Export PDF call
    window.print(); choose a printer or "Save as PDF". */
-.print-seal { display: none; }
 @media print {
   /* Floating chrome never prints: menus/panels (portaled to body) + the footer toolbar. The
      hamburger drop-up was printing mid-page (Peter's screenshot, 2026-07-09). */
@@ -1043,20 +1048,19 @@
      so the widget-simulated margin before the list is zeroed to avoid doubling. Side margins stay
      in-flow (the paper's padding), same as everywhere. */
   .node-referenceList { page: iw-refs; }
-  .inkwave-page-gap:has(+ .node-referenceList) { height: 0 !important; min-height: 0 !important; }
+  /* display:none, NOT height:0 (proven with the namedpage.mjs harness, 2026-07-10): a zero-height
+     widget still carries break-before:page, and the named-page switch then forces a SECOND break —
+     a blank number-only page appeared between the body and References. The named-page switch IS
+     the refs break; the widget must not exist in print at all. */
+  .inkwave-page-gap:has(+ .node-referenceList) { display: none !important; }
+  /* A reference entry never straddles a page boundary (proven split in the same harness):
+     the browser breaks BETWEEN entries instead. */
+  .node-referenceList .iw-bib-entry { break-inside: avoid; }
 
-  /* ── Print page chrome (Peter, 2026-07-10: bottom centre) ──
-     Logo: one FIXED element (Scroll renders .iw-print-logo) — position:fixed repeats on every
-     printed page in Chromium; sits just above the bottom margin, centred. Page numbers: the @page
-     @bottom-center margin box with counter(page) — real margin boxes need a real margin, so @page
-     gets margin-bottom (see the @page rules; 8px inside MARGIN_BOTTOM so our forced breaks always
-     land first and parity can't flip). Bonus: pages the browser breaks naturally inside the
-     reference list are numbered too. Firefox has no margin boxes — numbers are Chromium-only. */
-  .iw-print-logo {
-    display: block !important;
-    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
-    width: 56px; height: 56px; opacity: 0.82;
-  }
+  /* Page chrome (logo + number) lives in the @page @bottom-center margin box — see the top-level
+     @page rule + printPageStyle.ts (the fixed-img .iw-print-logo approach was replaced 2026-07-10:
+     a separate fixed logo + number-only box printed a mis-sized mark and could not sit NEXT TO the
+     number as the editor footer does). */
 
   /* No watermarks in print: the old-word stamp (egg + text) and the time badge don't print,
      regardless of the on-screen crossout/watermark settings. */
@@ -1068,18 +1072,16 @@
   .scas-red { background: none !important; color: #1a1a1a !important; box-shadow: none !important; }
   /* Drop the memory cross-out + first-written stamp too — the printed/PDF document is clean final text. */
   .scas-red[data-scas-old]::after, .scas-red[data-scas-time]::before { content: none !important; }
-  /* The faded seal on every printed page (fixed → repeats per page). Uses a real <img>, NOT a CSS
-     background — browsers drop background images from print unless "Background graphics" is ticked,
-     so a background-image seal silently never prints. Foreground <img> content always prints. */
-  .print-seal {
-    display: block; position: fixed; right: 40px; bottom: 28px; width: 176px; height: 176px;
-    opacity: 0.1; z-index: 9999;
-  }
-  .print-seal img { width: 100%; height: 100%; object-fit: contain; display: block; }
-  /* margin 0 → no browser header/footer text, and the 210mm parchment keeps full width so the text
-     column stays its exact on-screen width (~666px) → identical wrapping. All margins come from the
-     content (page-1 top padding + the 72px gaps + the A4−144px text area). */
-  @page { size: A4; margin: 0; }
+  /* (The .print-seal watermark — a faded fixed 176px logo behind the text on every page — was
+     REMOVED 2026-07-10 on Peter's call: no watermark in print, full stop. pdfimages-verified.) */
+  /* Side margins 0 → no browser header/footer text, and the 210mm parchment keeps full width so
+     the text column stays its exact on-screen width (~666px) → identical wrapping. TOP margin 0:
+     page tops come from the content (page-1 top padding + the break widgets' --iw-print-topm).
+     BOTTOM margin 64px (MARGIN_BOTTOM − 8) hosts the @bottom-center chrome box and stays inside
+     the 72px the canonical breaks already reserve, so forced breaks always land first — parity
+     can't flip. (This duplicates the top-level @page rule deliberately: `margin: 0` here used to
+     zero the margin-bottom set above — later declaration wins per descriptor.) */
+  @page { size: A4; margin: 0 0 64px 0; }
 }
 
 /* Find-in-PDF: a matched text-layer span gets a yellow highlight (the transparent glyphs sit on top). */

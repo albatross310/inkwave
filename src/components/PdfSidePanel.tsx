@@ -18,15 +18,26 @@ import { bibProvider } from '../citations/bibProvider'
 import { OPEN_PDF_EVENT, type OpenPdfDetail } from '../citations/pdfViewer'
 import { PdfViewer } from './PdfViewer'
 import { isTouchDevice } from '../editor/Scroll'
+import { pageBoxPx } from '../editor/pageModel'
+import { getPaperSize, getOrientation } from '../editor/pageSettings'
 
 const INK = '#5c2d8a'
 const MIN_W = 320, MIN_H = 200
 const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 const DOCK_SIDE_KEY = 'inkwave:pdfDockSide' // side dock on the 'left' or 'right' screen edge
-// Fullscreen float margins: the pane sits centred over the water like a big page — the editor
-// surface's waves stay visible in the side strips (and sway with the PDF scroll; see PdfViewer's
-// inkwave:pdf-sway feed into Scroll.tsx).
-const FS_SIDE = 64, FS_VERT = 12
+// Fullscreen float (Peter, 2026-07-10 rev2): a CANONICAL-PAGE-wide column — same width as the
+// editor's A4/Letter sheet (pageModel), centred, FULL viewport height, square corners; the water
+// stays visible in the side strips (and sways with the PDF scroll — see PdfViewer's
+// inkwave:pdf-sway feed into Scroll.tsx). Clamped to the viewport on narrow screens/phone.
+function fullscreenWidth(viewportW: number): number {
+  const ps = getPaperSize()
+  const { pageWidthPx } = pageBoxPx({
+    paperSize: ps === 'letter' ? 'letter' : 'a4',
+    orientation: getOrientation(),
+    topMarginPx: 0, bottomMarginPx: 0, // margins don't affect the width
+  })
+  return Math.round(Math.min(pageWidthPx, viewportW - 24))
+}
 // Phone top dock height: dvh tracks iOS's dynamic URL bar (vh fallback for old WebKit).
 const PHONE_TOP_H = typeof CSS !== 'undefined' && CSS.supports?.('height', '50dvh') ? '50dvh' : '50vh'
 
@@ -78,6 +89,15 @@ export function PdfSidePanel() {
   // FULLSCREEN (Peter, 2026-07-10): the viewer floats over the whole app window (water visible at
   // the sides). Per-session only — every open starts docked; Escape (or the ⛶ toggle) exits.
   const [fullscreen, setFullscreen] = useState(false)
+  // Live viewport width while fullscreen — the canonical-width column re-clamps on window resize.
+  const [fsViewportW, setFsViewportW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280))
+  useEffect(() => {
+    if (!fullscreen) return
+    const on = () => setFsViewportW(window.innerWidth)
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [fullscreen])
 
   const open = !!(viewing || error || loading || noAttachment)
 
@@ -219,9 +239,10 @@ export function PdfSidePanel() {
 
   const side = orientation === 'side'
   const panelPos: React.CSSProperties = fullscreen
-    // Fullscreen float: the pane is centred over the water with the wave strips visible either
-    // side (a big page floating on the water — not chrome-less edge-to-edge). Phone gets slim margins.
-    ? { top: FS_VERT, bottom: FS_VERT, left: isPhone ? 10 : FS_SIDE, right: isPhone ? 10 : FS_SIDE, borderRadius: 12, border: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
+    // Fullscreen float: a canonical-page-wide column, centred over the water, running the FULL
+    // viewport height with SQUARE corners (Peter, 2026-07-10 rev2) — like one of the editor's own
+    // sheets surfaced above the water, wave strips visible either side.
+    ? { top: 0, bottom: 0, left: '50%', width: fullscreenWidth(fsViewportW), transform: 'translateX(-50%)', borderRadius: 0, borderLeft: `1px solid ${INK}33`, borderRight: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
     : orientation === 'top'
       // PHONE: the viewer pops up ABOVE, full width, top half — the editor keeps the bottom half.
       ? { top: 0, left: 0, right: 0, height: PHONE_TOP_H, paddingTop: 'env(safe-area-inset-top)' /* notch, standalone PWA */, borderBottom: `1px solid ${INK}33`, boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }
@@ -255,8 +276,10 @@ export function PdfSidePanel() {
         {/* The header bar is gone — the viewer renders its close in the toolbar; the transient states
             below get a floating × so they stay dismissible. */}
         {!viewing && (
+          // Bottom-LEFT, in the toolbar ✕'s exact final position/style — the loading→revealed
+          // transition never moves or restyles the close control (Peter, 2026-07-10).
           <button type="button" onClick={close} title="Close (Esc)"
-            style={{ position: 'absolute', top: 8, right: 12, zIndex: 3, border: 'none', background: 'transparent', color: '#78716c', fontSize: '1.7rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+            style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 3, width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
 
         {loading && !viewing ? (

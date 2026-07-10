@@ -1062,9 +1062,6 @@ export function Scroll({
           above; the layers ride the same drift/coast keyframes + --wave-phase clock as the wave
           layers, so every fleck moves in lockstep with its crest. Pure visual layer. */}
       <div ref={twinkleRef} className="iw-wave-twinkles" aria-hidden="true" />
-      {/* Print-only: position:fixed repeats on every printed page (Chromium) — the bottom-centre
-          logo. Hidden on screen (inline none; the @media print rule wins with !important). */}
-      <img className="iw-print-logo" src="/inkwave-logo-v7.png" alt="" aria-hidden="true" style={{ display: 'none' }} />
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in
           the .iw-magnify-box wrapper below — the wrapper carries the centring (mx-auto + explicit
