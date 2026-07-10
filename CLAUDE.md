@@ -285,7 +285,9 @@ action time — never hold contentJson in state). Autosave failures dispatch `in
 - **No browser windows over Peter's screen.** Agents running HEADED browsers (Playwright probes
   that need GPU/compositor accuracy) must never pop a window over his workspace: use
   `xvfb-run` (virtual display — headed semantics, zero visible window) as the default, or launch
-  args `--window-position=-32000,-32000` as fallback. Headless remains the default where fidelity
+  args `--window-position=-32000,-32000` as fallback. WSLg GOTCHA: xvfb-run alone does NOT contain
+  Firefox — WAYLAND_DISPLAY routes it to the host compositor; use
+  `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0 xvfb-run …`. Headless remains the default where fidelity
   allows. Agent briefs that ask for headed runs must say this.
 - **Notifier (task #27, pending):** final reports start with the sentinel "📋 REPORT" so Peter's
   PowerShell hook can either FILTER to reports only, or keep all toasts but play a DIFFERENT SOUND
