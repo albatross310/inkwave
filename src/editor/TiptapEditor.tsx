@@ -247,6 +247,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // deferred-tick + lazy-doc-build machinery.
   const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
   const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scasOffRef = useRef(false)
+  useEffect(() => { try { scasOffRef.current = localStorage.getItem('inkwave:scasOff') === '1' } catch { /* private */ } }, [])
   const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
   // Phone windowed SCAS tick: the debounce window's accumulated edit range (current-doc coords,
   // remapped through each transaction) + the caret position at the LAST tick (a word commits when
@@ -557,6 +559,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (wt >= wf) scasWinRef.current = { from: wf, to: wt }
         }
         if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
+        // A/B KILL SWITCH (Peter, 2026-07-10, diagnosing wave-like typing lag): localStorage
+        // inkwave:scasOff = '1' disables the whole SCAS tick (scan + decorations). Diagnostic only.
+        if (scasOffRef.current) return
         // PHONE: the tick's engine scan + decoration rebuild is O(doc) — ~7ms/10k words in Node,
         // several × slower on a phone CPU (tens of ms on a thesis-length doc), and at 120ms it
         // landed between keystrokes during normal typing. 250ms keeps it in genuine gaps; verdicts
