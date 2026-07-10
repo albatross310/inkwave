@@ -150,7 +150,7 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
         </button>
         {setMenu && createPortal(
           <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSetMenu(false)} />
-          <div className="z-[99] min-w-[190px] iw-nightable bg-white rounded-lg shadow-lg py-1 text-sm"
+          <div className="z-[99] min-w-[190px] iw-touch-guard iw-nightable bg-white rounded-lg shadow-lg py-1 text-sm"
             style={{ ...aboveTrigger(), border: `1px solid ${INK}33` }}
             onMouseDown={(e) => e.stopPropagation()}>
             {/* Global show/hide — the MS-Word markup toggle: clean (as-if-accepted) vs marked-up */}

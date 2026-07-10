@@ -273,7 +273,38 @@ export function StyleBar({ editor, onActivity, phone }: {
     } else if (action === 'para-') {
       editor.chain().focus().setParaStyle({ textIndent: null }).run()
     } else {
-      editor.chain().focus().setParaStyle({ lineHeight: null, marginBottom: null, marginTop: null, paddingLeft: null, paddingRight: null, textIndent: null }).run()
+      // Clear line format — the one-click fix for pasted layout debris. Pasted "indents" arrive
+      // THREE different ways and this clears all of them: (1) the six ParagraphStyle attrs,
+      // (2) textAlign (justify/center riding in on pasted HTML is a separate TextAlign attr),
+      // (3) LITERAL leading whitespace/tabs — content, not attrs (Peter's stuck "Honours
+      // Proposal" title, 2026-07-10).
+      editor.chain().focus()
+        .setParaStyle({ lineHeight: null, marginBottom: null, marginTop: null, paddingLeft: null, paddingRight: null, textIndent: null })
+        .unsetTextAlign()
+        .run()
+      const { state } = editor
+      const dels: Array<{ from: number; to: number }> = []
+      state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+        if (!node.isTextblock) return
+        // Length of the block-leading whitespace run, walked across adjacent TEXT children only
+        // (a leading atom — math, citation — stops the walk so offsets stay position-true).
+        let len = 0
+        for (let i = 0; i < node.childCount; i++) {
+          const ch = node.child(i)
+          if (!ch.isText) break
+          const m = /^\s+/.exec(ch.text || '')
+          if (!m) break
+          len += m[0].length
+          if (m[0].length < (ch.text || '').length) break
+        }
+        if (len > 0) dels.push({ from: pos + 1, to: pos + 1 + len })
+        return false // don't descend into inline content
+      })
+      if (dels.length) {
+        const tr = editor.state.tr
+        for (const d of dels.sort((a, b) => b.from - a.from)) tr.delete(d.from, d.to)
+        editor.view.dispatch(tr)
+      }
     }
     setIndentOpen(false)
   }
@@ -327,7 +358,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(fontBtnRef), ...box(136) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(fontBtnRef), ...box(136) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONTS.map(f => (
             <button key={f.label} type="button"
@@ -352,7 +383,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {sizeOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONT_SIZES.map(sz => (
             <button key={sz} type="button"
@@ -376,7 +407,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {fmtOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFmtOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1" style={{ ...above(fmtBtnRef), ...box(140) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1" style={{ ...above(fmtBtnRef), ...box(140) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['bold', 'italic', 'underline', 'strike'] as CharFmt[]).map(fmt => (
             <button key={fmt} type="button"
@@ -402,7 +433,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {hlOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setHlOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl p-2" style={{ ...above(hlBtnRef), ...box(156) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl p-2" style={{ ...above(hlBtnRef), ...box(156) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           <div className="grid grid-cols-3 gap-1.5">
             {HIGHLIGHT_COLORS.map(h => (
@@ -429,7 +460,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {colorOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {TEXT_COLORS.map(c => (
             <button key={c.label} type="button"
@@ -456,7 +487,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {alignOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setAlignOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(alignBtnRef), ...box(110) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(alignBtnRef), ...box(110) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['left', 'center', 'right', 'justify'] as Align[]).map(a => (
             <button key={a} type="button"
@@ -481,7 +512,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {listOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setListOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(listBtnRef), ...box(148) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(listBtnRef), ...box(148) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {([
             { type: 'bulletList'  as ListType, label: 'Bullets',  preview: '•' },
@@ -523,7 +554,7 @@ export function StyleBar({ editor, onActivity, phone }: {
       </button>
       {indentOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
-        <div className="z-[99] iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {INDENT_ITEMS.map(item => (
             <button key={item.action} type="button"

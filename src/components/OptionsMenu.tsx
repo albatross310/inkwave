@@ -271,7 +271,7 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-no-print z-[60] w-[11.5rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
+          <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[11.5rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {/* LEFT column: Provenance/Print/Verify/About/Privacy … ending with Sign in/Logout. */}
             <div className="flex-1 border-r border-stone-100">

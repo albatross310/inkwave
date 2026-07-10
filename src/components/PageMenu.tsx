@@ -173,7 +173,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
       {open && createPortal(
         <>
           <div ref={panelRef} role="dialog" aria-label="Page settings"
-            className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+            className="iw-nightable iw-touch-guard z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
             style={{ ...menuStyle(), width: 384, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
             onMouseDown={e => e.stopPropagation()}>
 

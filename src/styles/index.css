@@ -575,6 +575,39 @@
     height: 39px;
   }
 
+  /* iOS long-press guard: the whole footer toolbar and every drop-up/picker must never start a
+     text selection or the loupe — iOS's touch-and-hold select gesture was firing when a hold began
+     on a bar button (and again when the finger then SLID up onto the editor; that half is the
+     document-level touchmove guard in TiptapEditor). Inputs inside menus stay selectable. */
+  .iw-touch-guard {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .iw-touch-guard input,
+  .iw-touch-guard textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* The footer toolbar band (pill height + keyboard-hug offset, live CSS vars written by
+     TiptapEditor) is RESERVED space: scroll-padding makes every native/programmatic
+     scroll-into-view — including the browser's own caret-reveal and selection-handle reveal —
+     target the region ABOVE the toolbar, so a caret/selection never settles behind it. */
+  :root {
+    /* Phone scrolls the BODY — this is the window scroller's reserve. */
+    scroll-padding-bottom: calc(var(--iw-toolbar-h, 0px) + var(--iw-kb-offset, 0px));
+  }
+  .inkwave-editor-surface.iw-fill:not(.is-phone) {
+    /* Desktop's scroller is the fixed surface itself — same reserve for its scrollIntoViews. */
+    scroll-padding-bottom: calc(var(--iw-toolbar-h, 0px) + var(--iw-kb-offset, 0px));
+  }
+  /* Phone (body-scroll): the same band is also real bottom padding on the editor surface, so the
+     document's end can always scroll clear of the toolbar — under it simply isn't content space. */
+  .inkwave-editor-surface.is-phone {
+    padding-bottom: calc(var(--iw-toolbar-h, 0px) + var(--iw-kb-offset, 0px));
+  }
+
   /* Parchment paper texture for the scroll body (the page the text sits on). UNIFORM colour: the
      base + a tiled (400×400, repeating) noise texture. The old full-height linear-gradients made the
      tint vary top→bottom, which read as the paper "changing colour" as you scrolled a long document. */
