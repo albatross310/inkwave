@@ -29,7 +29,9 @@ export function PdfSidePanel() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [noAttachment, setNoAttachment] = useState<string | null>(null) // label when the source has no PDF
-  const [width, setWidth] = useState(560)
+  // The popout fills HALF the screen by default in either orientation (Peter, 2026-07-10):
+  // side dock = half the width, bottom dock = half the height. The drag handle still resizes.
+  const [width, setWidth] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerWidth : 1280) * 0.5))
   const [height, setHeight] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.5))
   const [dragging, setDragging] = useState(false)
   const dragStart = useRef<{ axis: 'x' | 'y'; start: number; size: number } | null>(null)
