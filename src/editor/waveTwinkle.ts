@@ -48,6 +48,27 @@
 // original art); dashes ride the thick/thin PAIR MIDLINE — the same shape +14px — on either half
 // of the swell, ±jitter. Regeneration: whole field on resize; dashes on 'inkwave:zoom-settled'.
 // Every data-URI is decode()d before its element mounts. All animation is opacity/transform.
+//
+// NON-REPEATING STRIKES (Peter, 2026-07-10: "the glitters must never strike the same place
+// twice"). Two mechanisms, one sampler:
+//   • Every position draw (spark gen, spark respawn, dash gen/reseed) goes through memPick():
+//     candidates come from the EXISTING distributions (density + banding maths untouched), but
+//     are rejection-sampled against a per-band memory of past strikes — min wave-space distance
+//     MEM_EPS. 'Same place' = wave-space x (strip x mod stripW — recycling shifts by ±stripW so
+//     the identity is stable) within the band (kind+group+row). The memory is a per-band ring
+//     buffer persisted to localStorage, so strikes don't repeat within a load, across dash
+//     reseeds, OR across page loads (same viewport; a resize regenerates the whole field and
+//     resets the memory — different strip, different geography). The ring is a sliding window
+//     sized just under the band's ε-capacity (a finite crest can't hold unboundedly many
+//     ε-separated strikes — see memRing): ≈ one full load of glints, carried over the reload
+//     boundary. After MEM_TRIES failed draws the farthest candidate wins, so a position is
+//     ALWAYS placed — density is unchanged by construction.
+//   • Sparks additionally RESPAWN after every glint: the driver watches each spark's blink
+//     clock and, in the dark window right after a glint ends (opacity 0 — the move is
+//     invisible), redraws its position AND art through the sampler. The running opacity
+//     animation is never touched (period/delay/onS keep their epoch phase); only left/top and
+//     the art vars change, on every host's copy. Without this a spark re-glints at ITS OWN spot
+//     every 0.9–2.2s — the most visible "same place twice" of all.
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
 export const SPARK_COLOR = '#ffe14d' // sparkle strokes/satellites (day)
@@ -69,7 +90,8 @@ const SPARK_PERIOD: [number, number] = [0.9, 2.2]
 const SPARK_REPEAT_CHANCE = 0.3 // subset with quick re-glints
 const SPARK_REPEAT_PERIOD: [number, number] = [0.45, 0.8]
 const STATIC_ON_CHANCE = 0.5 // the resting fully-on subset
-const DRIFT_PX_S = 72 // must match the wave drift (140px / 1.944s)
+const DRIFT_PX_S = 140 / 1.944 // must match the wave drift EXACTLY (72 flat drifted the analytic
+// coast from-value ~0.0165px/s off the WAAPI ramp — and off the tiles' modular freeze maths)
 const V_REF = 1200 // scrollTop px/s that maps to blink rate 1
 const RATE_CAP = 1.2 // a brisk scroll maxes out slightly livelier than the drift
 const RATE_EPS = 0.02 // below this the water reads as still
@@ -84,6 +106,7 @@ type Mode = 'anim' | 'coast' | 'off'
 interface Inst {
   kind: 'spark' | 'dash'
   group: Group
+  row: number // 140px wave row — the strike-memory band, and the base for band-y maths
   x: number // field-local box left (px); field space ≡ wave space (recycle keeps it mod-140 true)
   y: number
   w: number
@@ -122,10 +145,89 @@ function midY(c: number, wx: number): number { // thick/thin pair midline at any
   return x < 70 ? c + 14 - bump : c + 14 + bump
 }
 
+// ─── Non-repeating strike sampler (see header) ───────────────────────────────────────────────
+const MEM_EPS = 12 // min wave-space x distance (px) from any remembered strike in the band
+const MEM_TRIES = 24 // rejection draws before settling for the farthest candidate
+// Remembered strikes per band. A band's strike manifold is FINITE (sparks: ~cells × 70·t-range
+// ≈ 50px of biased crest-half per 140px cell), so it cannot hold unboundedly many ε-separated
+// strikes — "never twice" must mean a sliding window, sized just under the band's ε-capacity
+// (≈ cells·56/(2·12) ≈ 2.3·cells): big enough to span ≈ a full load of glints (and carry the
+// previous load's tail across a reload) without saturating every draw into the fallback.
+function memRing(kind: 'spark' | 'dash'): number {
+  if (kind === 'dash') return 16 // dashes use the whole 140px cycle; only reseeds record
+  const cells = Math.max(1, Math.floor(stripW / 140))
+  return Math.min(24, Math.max(8, Math.round(cells * 1.5)))
+}
+const MEM_LS_KEY = 'inkwave:twkMem:v1'
+let mem: Map<string, number[]> | null = null // band key → ring of normalized strike positions
+let memW = 0 // the stripW the memory was built against
+let memSaveT: ReturnType<typeof setTimeout> | undefined
+
+function memLoad(): void {
+  if (mem && memW === stripW) return
+  mem = new Map()
+  memW = stripW
+  try {
+    const j = JSON.parse(localStorage.getItem(MEM_LS_KEY) ?? 'null') as
+      { w: number; bands: Record<string, number[]> } | null
+    // Positions are only comparable against the same strip width — a resize reshuffles the
+    // whole geography, so a mismatched blob just starts fresh (and is overwritten on next save).
+    if (j && j.w === stripW && j.bands)
+      for (const k of Object.keys(j.bands)) mem.set(k, j.bands[k].filter((n) => Number.isFinite(n)))
+  } catch { /* private mode / corrupt — in-session memory still applies */ }
+}
+
+function memSave(): void {
+  if (memSaveT) return // THROTTLE, not debounce — respawns record continuously through the whole
+  memSaveT = setTimeout(() => { // load; a trailing debounce would never fire until the water rests
+    memSaveT = undefined
+    try {
+      const bands: Record<string, number[]> = {}
+      for (const [k, v] of mem!) bands[k] = v
+      localStorage.setItem(MEM_LS_KEY, JSON.stringify({ w: memW, bands }))
+    } catch { /* best effort */ }
+  }, 800)
+}
+
+const wrapW = (x: number) => ((x % stripW) + stripW) % stripW
+const ringDist = (a: number, b: number) => { // wave-space is circular mod stripW
+  const d = Math.abs(a - b)
+  return Math.min(d, stripW - d)
+}
+
+// Draw a position through the band's strike memory: candidates come from `draw` (the existing
+// distribution — density and banding stay exact), the first one ≥ MEM_EPS from every remembered
+// strike wins; after MEM_TRIES the farthest candidate is taken (a position is ALWAYS placed).
+// The accepted strike is recorded (ring per band) and persisted.
+function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, draw: () => T, xOf: (c: T) => number): T {
+  memLoad()
+  const key = `${kind}:${group}:${row}`
+  const seen = mem!.get(key) ?? []
+  let best: T | null = null
+  let bestD = -1
+  for (let i = 0; i < MEM_TRIES; i++) {
+    const c = draw()
+    const nx = wrapW(xOf(c))
+    let dMin = Infinity
+    for (const p of seen) dMin = Math.min(dMin, ringDist(nx, p))
+    if (dMin >= MEM_EPS) { best = c; break }
+    if (dMin > bestD) { bestD = dMin; best = c }
+  }
+  const picked = best!
+  seen.push(Math.round(wrapW(xOf(picked))))
+  const cap = memRing(kind)
+  if (seen.length > cap) seen.splice(0, seen.length - cap)
+  mem!.set(key, seen)
+  memSave()
+  return picked
+}
+
 // ─── Instance generation ──────────────────────────────────────────────────────────────────────
 function genDash(rnd: () => number, group: Group, row: number, strip: number): Inst {
   const w = 24, h = 16
-  const cx = -PAD + rnd() * strip // box centre — anywhere along the strip, either swell half
+  // Box centre — anywhere along the strip, either swell half; drawn through the strike memory
+  // so a (re)seeded dash never lands where one recently sat in this band.
+  const cx = memPick('dash', group, row, () => -PAD + rnd() * strip, (c) => c)
   const wx = wrap140(cx)
   const c = CREST[group]
   const y0 = midY(c, wx)
@@ -141,7 +243,7 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   const duty = rnd() < DASH_REPEAT_CHANCE ? 0.75 + 0.1 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
   const period = onS / duty
   return {
-    kind: 'dash', group,
+    kind: 'dash', group, row,
     x: cx - w / 2, y: 140 * row + y0 + (rnd() - 0.5) * 5 - h / 2, w, h,
     day: svgUri(w, h, path(DASH_COLOR, op)),
     night: svgUri(w, h, path(DASH_COLOR_NIGHT, op * 0.92)),
@@ -150,11 +252,17 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   }
 }
 
-function genSpark(rnd: () => number, group: Group, row: number, strip: number): Inst {
-  const w = 30, h = 30
+// A spark strike position: crest half of a random swell, past-peak biased (the distribution the
+// original art baked in). Drawn through the strike memory by callers.
+function drawSparkPos(rnd: () => number, strip: number): { cx: number; t: number } {
   const t = Math.min(0.92, Math.max(0.12, 0.58 + (rnd() + rnd() - 1) * 0.35)) // past-peak bias
   const cells = Math.max(1, Math.floor(strip / 140))
-  const cx = -PAD + Math.floor(rnd() * cells) * 140 + 70 * t // crest half of a random swell
+  return { cx: -PAD + Math.floor(rnd() * cells) * 140 + 70 * t, t }
+}
+
+// The spark's lens-y + art for a given crest position — shared by gen and per-glint respawn.
+function sparkBody(rnd: () => number, group: Group, t: number): { cy: number; day: string; night: string } {
+  const w = 30, h = 30
   const c = CREST[group]
   const arc = arcY(c, t)
   const cy = arc + (0.12 + 0.73 * rnd()) * (c - arc) // inside the arc↔chord lens
@@ -176,13 +284,20 @@ function genSpark(rnd: () => number, group: Group, row: number, strip: number): 
   }
   const day = glyph(SPARK_COLOR, SPARK_CORE)
   const night = day.split(SPARK_COLOR).join(SPARK_COLOR_NIGHT).split(SPARK_CORE).join(SPARK_CORE_NIGHT)
+  return { cy, day: svgUri(w, h, day), night: svgUri(w, h, night) }
+}
+
+function genSpark(rnd: () => number, group: Group, row: number, strip: number): Inst {
+  const w = 30, h = 30
+  const { cx, t } = memPick('spark', group, row, () => drawSparkPos(rnd, strip), (c) => c.cx)
+  const { cy, day, night } = sparkBody(rnd, group, t)
   const rapid = rnd() < SPARK_REPEAT_CHANCE // some glints repeat in quick succession
   const [p0, p1] = rapid ? SPARK_REPEAT_PERIOD : SPARK_PERIOD
   const period = p0 + (p1 - p0) * rnd()
   return {
-    kind: 'spark', group,
+    kind: 'spark', group, row,
     x: cx - w / 2, y: 140 * row + cy - h / 2, w, h,
-    day: svgUri(w, h, day), night: svgUri(w, h, night),
+    day, night,
     period, delay: rnd() * period, onS: SPARK_ON_S,
     staticOn: false,
   }
@@ -309,6 +424,7 @@ function step(ts: number): void {
   const dt = Math.min(64, Math.max(0, ts - lastStep))
   lastStep = ts
   if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
+  respawnSparks(ts) // per-glint relocation — before the anim early-return (sparks glint all load)
   if (waterMode === 'anim') { // dashes play natively at full rate; the loop only recycles
     driver = requestAnimationFrame(step)
     return
@@ -431,6 +547,64 @@ function recycle(): void {
       if (moved) for (const h of hs) { const el = h[kind]?.els[i]; if (el) el.style.left = `${d.x}px` }
     })
   }
+}
+
+// ─── Per-glint spark respawn — a glitter never strikes the same place twice ──────────────────
+// Runs every driver frame (cheap: arithmetic per spark; real work only on a glint-end edge).
+// The blink ANIMATION is never touched — its epoch phase, period and compositor-driven opacity
+// carry on; only the instance's position and art move, inside the dark window (opacity 0).
+const sparkCycle = new WeakMap<Inst, number>() // last dark-window index acted on, per instance
+let liveRnd: (() => number) | null = null // respawn PRNG — independent of the gen streams
+
+function respawnSparks(now: number): void {
+  if (!defs || !hosts.size || waterMode === 'off') return // sparks exist only during the load
+  const hs = Array.from(hosts.values())
+  const fx: Partial<Record<Group, number>> = {}
+  const vw = window.innerWidth
+  defs.sparks.forEach((d, i) => {
+    // Blink clock (s): sparks always play full rate, epoch-anchored (see startBlink).
+    const clock = (now - epochMs) / 1000 + d.delay
+    // Dark-window id — increments just past each glint's opacity-0 edge (+60ms slack).
+    const dark = Math.floor((clock - d.onS - 0.06) / d.period)
+    const prev = sparkCycle.get(d)
+    if (prev === undefined) { sparkCycle.set(d, dark); return } // first sighting — don't move
+    if (dark <= prev) return
+    // Only move while ACTUALLY dark: a janky frame can land mid-glint of a later cycle — wait
+    // for that glint's own dark window rather than teleport a lit spark.
+    const phase = ((clock % d.period) + d.period) % d.period
+    if (phase < d.onS + 0.05) return
+    sparkCycle.set(d, dark)
+    if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
+    const rnd = liveRnd
+    const pos = memPick('spark', d.group, d.row, () => drawSparkPos(rnd, stripW), (c) => c.cx)
+    const body = sparkBody(rnd, d.group, pos.t)
+    // Fold the fresh strip position into current viewport coverage (recycle's invariant: shifts
+    // are multiples of stripW ≡ 0 mod 140 — wave-space identity and band-y stay true).
+    let x0 = fx[d.group]
+    if (x0 === undefined) {
+      const f = hs.find((h) => h.sparks)?.sparks?.fields[d.group]
+      x0 = f ? currentFieldX(f, d.group) : 0
+      fx[d.group] = x0
+    }
+    let cx = pos.cx
+    const sx = cx + x0
+    if (sx < -PAD) cx += stripW * Math.ceil((-PAD - sx) / stripW)
+    else if (sx > vw + PAD) cx -= stripW * Math.ceil((sx - vw - PAD) / stripW)
+    d.x = cx - d.w / 2
+    d.y = 140 * d.row + body.cy - d.h / 2
+    d.day = body.day
+    d.night = body.night
+    // Decode hints — the spark is dark; worst case the fresh art rasters a frame into the glint.
+    for (const u of [d.day, d.night]) { const img = new Image(); img.src = u; img.decode().catch(() => {}) }
+    for (const h of hs) {
+      const el = h.sparks?.els[i]
+      if (!el) continue
+      el.style.left = `${d.x}px`
+      el.style.top = `${d.y}px`
+      el.style.setProperty('--twk-day', `url("${d.day}")`)
+      el.style.setProperty('--twk-night', `url("${d.night}")`)
+    }
+  })
 }
 
 function pruneHosts(): void {
@@ -584,7 +758,7 @@ function regenAll(): void {
 // handoff land in the same flush as the surface's wave class swap — no flash frame).
 export function syncTwinkles(
   host: HTMLElement,
-  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean },
+  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean; coastStart?: number },
 ): void {
   if (!defs) {
     epochMs = resolveEpoch()
@@ -624,11 +798,15 @@ export function syncTwinkles(
     }
   }
   if (want.mode === 'coast' && prev !== 'coast' && !coast) {
-    coast = { start: performance.now(), T: want.phone ? 2000 : 3000, dist: want.phone ? 48 : 72 }
+    // Coast clock: the caller passes the tiles' EXACT freeze moment (Scroll.tsx coastT0) so the
+    // field coast and the (backdated) tile coast start from one number — performance.now() here
+    // runs ahead of the frozen frame clock by however long this commit has been running.
+    const start = want.coastStart ?? performance.now()
+    coast = { start, T: want.phone ? 2000 : 3000, dist: want.phone ? 48 : 72 }
     lastCoast = coast
     restRebase = null // the coming handoff freezes a fresh constant
     if (blinkMode === 'playing') {
-      vt = performance.now() - epochMs // seamless: the playing clock IS (now − epoch) + delay
+      vt = start - epochMs // seamless: the playing clock IS (now − epoch) + delay
       blinkMode = 'driven'
     }
     ensureDriver()
