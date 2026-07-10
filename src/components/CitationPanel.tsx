@@ -805,7 +805,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         role="dialog" aria-label="Citations"
         className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
         style={fullscreen
-          ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(1080px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
+          ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
           : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
@@ -952,8 +952,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             return (
               <div key={item.id} className="py-1 border-b border-stone-100 last:border-0 cursor-pointer hover:bg-stone-50/60 rounded transition-colors"
                 onClick={() => setEditItem(item)}>
-                {/* Top line: key + badges on the left, action buttons on the right. */}
-                <div className="flex items-center gap-2">
+                {/* TWO COLUMNS (Peter, 2026-07-10): left = key/title/author (ends where the
+                    buttons begin — titles no longer run under them); right = buttons + used/today. */}
+                <div className="flex items-start gap-2">
                   {refMode === 'manual' && (
                     <input type="checkbox" checked={manualKeys.has(item.id)} onClick={e => e.stopPropagation()} onChange={() => toggleManual(item)}
                       aria-label={`Include ${item.id} in references`} />
@@ -972,6 +973,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         : <span className="text-[11px] px-1 rounded flex-shrink-0" style={{ color: src.color, borderColor: src.color, borderWidth: 1, borderStyle: 'solid' }}>{src.label}</span>}
                       <span className="text-[13px] text-stone-600 flex-shrink-0">{typeLabel}</span>
                     </div>
+                    {/* Title on ONE line, truncated with an ellipsis; full title on hover. */}
+                    {!!String(item.title ?? '') && (
+                      <div title={String(item.title ?? '')} className="block max-w-full text-left">
+                        <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0 max-w-[48%]">
                    <div className="flex flex-wrap items-center justify-end gap-1">
@@ -1018,15 +1025,15 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       >↗</button>
                     )}
                    </div>
+                   {/* used / last-verified sit under the button stack (Peter, 2026-07-10). */}
+                   <div className="flex items-center justify-end gap-2">
+                    {used && <span className="text-[13px] text-green-600 flex-shrink-0">● used</span>}
+                    {(() => { const iw = (item as { _iw?: IwCitationMeta })._iw; return iw?.lastVerified && !iw?.deadUrl
+                      ? <span className="text-[12px] text-stone-400 flex-shrink-0" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ {relTime(iw.lastVerified)}</span>
+                      : null })()}
+                   </div>
                   </div>
                 </div>
-                {/* Title on ONE line, truncated with an ellipsis; full title on hover. */}
-                {!!String(item.title ?? '') && (
-                  <div title={String(item.title ?? '')}
-                    className="block max-w-full text-left rounded px-1 -mx-1">
-                    <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
-                  </div>
-                )}
                 {(() => {
                   const iw = (item as { _iw?: IwCitationMeta })._iw
                   const changelog = iw?.changelog ?? []
@@ -1048,8 +1055,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
-                        {used && <span className="text-[14px] text-green-600 flex-shrink-0">● used</span>}
-                        {iw?.lastVerified && !iw?.deadUrl && <span className="text-[12px] text-stone-400 flex-shrink-0" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ {relTime(iw.lastVerified)}</span>}
                       </div>
                       {open && changelog.length > 0 && (
                         <div className="mt-1 ml-1 border-l-2 border-stone-100 pl-2 space-y-1">

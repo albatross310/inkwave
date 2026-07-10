@@ -7,7 +7,7 @@
 
 export const GAP = 78 // px of aqua (waves) between sheets (+40%, Peter 2026-07-10)
 export const PHONE_GAP = 55 // 30% smaller on phone (Peter, 2026-07-10)
-export const PHONE_SHEET_RADIUS = 35 // must match .is-phone .inkwave-sheet border-radius
+export const PHONE_SHEET_RADIUS = 28 // must match .is-phone .inkwave-sheet border-radius
 
 // Phone pages are content-tall with COMPACT fixed margins: break POSITIONS are canonical (same
 // text per page as A4/print), but fill-to-page-bottom margins are canonical-space values that
