@@ -469,9 +469,6 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const dismissHelp = () => { setHelpDismissed(true); try { localStorage.setItem('inkwave:citeHelpDismissed', '1') } catch { /* private */ } }
   const changeSort = (by: 'added' | 'alpha' | 'author') => { setSortBy(by); try { localStorage.setItem('inkwave:citeSortBy', by) } catch { /* private */ } }
   const toggleSortDir = () => setSortDir(d => { const n = d === 'asc' ? 'desc' : 'asc'; try { localStorage.setItem('inkwave:citeSortDir', n) } catch { /* private */ }; return n })
-  // Click-and-hold the purple citekey to rename it (replaces the "ren" button); a short click edits.
-  const keyHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const keyHeld = useRef(false)
 
   useEffect(() => {
     const unsub = bibProvider.subscribe(rerender)
