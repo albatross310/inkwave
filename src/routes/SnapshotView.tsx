@@ -10,6 +10,7 @@ import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
+import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { Toast } from '../components/Toast'
@@ -820,17 +821,26 @@ function SplitDiffView({
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    // Zone/latch/cursor parity with the live editor (Peter, 2026-07-10 — zoomZone.ts): the doc
+    // pane's 'water' = cursor x outside its paper's text-column lines (the same x-line rule).
+    // The snapshot has no magnify pipeline — BOTH modes drive diffZoom — but the mode is latched
+    // per gesture (+0.5s cooldown) and drives the zoom cursor, matching the editor's feel.
+    const latch = createZoomLatch(() => containerRef.current)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       const pane = leftScrollRef.current?.contains(e.target as Node) ? leftScrollRef.current
         : rightScrollRef.current?.contains(e.target as Node) ? rightScrollRef.current : null
+      latch.resolve(
+        () => (pane && pane === leftScrollRef.current && isWaterAtX(pane, e.clientX) ? 'water' : 'text'),
+        e.deltaY > 0,
+      )
       if (pane) { const offY = e.clientY - pane.getBoundingClientRect().top; dzAnchor.current = { el: pane, offY, fracY: pane.scrollHeight ? (pane.scrollTop + offY) / pane.scrollHeight : 0 } }
       else dzAnchor.current = null
       setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
+    return () => { el.removeEventListener('wheel', onWheel); latch.dispose() }
   }, [])
   useEffect(() => {
     const a = dzAnchor.current

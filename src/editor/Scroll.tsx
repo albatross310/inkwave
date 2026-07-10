@@ -5,6 +5,7 @@ import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep } from './zoomStep'
+import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { syncTwinkles, reportSway } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
@@ -403,14 +404,13 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, 200)
     }
-    // Zone latch — POSITION-based: the zone is re-tested only when the CURSOR actually moves.
-    // Zooming moves the page under a stationary cursor (magnify grows/shrinks the paper across
-    // it; a gap band slides away as the page rescales), so any time- or per-event re-test flips
-    // a deliberate slow-notching gesture between magnify and font-reflow mid-flight (Peter hit
-    // this zooming out from a page gap). The user's INTENT is where they pointed: while the
-    // pointer stays put (< 8px), the zone they started in holds — however slowly they notch.
-    let zoneIsWater = false
-    let zoneX = Number.NaN, zoneY = Number.NaN // cursor position the current zone was tested at
+    // MODE LATCH + COOLDOWN (Peter, 2026-07-10): the FIRST zoom event of a gesture picks the
+    // mode (water = whole-page magnify, text = font reflow) and it stays LOCKED until 0.5s
+    // after the last zoom event — regardless of cursor movement. (Replaces the old 8px-cursor-
+    // movement latch: zooming moves the page under a stationary cursor, and a deliberate slow
+    // notching gesture must never flip modes mid-flight.) The latch also drives the zoom-cursor
+    // classes on the surface (zoomZone.ts + the .iw-zooming-* rules in index.css).
+    const latch = createZoomLatch(() => surfaceRef.current)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) {
         // CONTENT-PROPORTIONAL PLAIN SCROLL (Peter: "the scroll needs to change depending on how
@@ -434,31 +434,16 @@ export function Scroll({
       }
       e.preventDefault()
       if (e.deltaY === 0) return
-      // CURSOR-ZONE DUAL ZOOM (hybrid): the PAGE zone is the PAINTED PAGE BACKGROUND (Peter,
-      // 2026-07-10 — not the text margin): cursor anywhere on parchment, INCLUDING the page's
-      // blank margins around the text, = font-reflow zoom; outside the painted parchment — side
-      // water AND the between-page gaps — = whole-page magnify.
-      // GEOMETRIC test against the parchment's VISUAL rects — not DOM containment (the
-      // caret-gutter strips live inside the paper but stretch across the water; the gap widgets
-      // span the page margins, which ARE parchment). Gapped mode: the painted parchment is
-      // exactly the .inkwave-sheet panel bands (the same rects the step cache positions), so test
-      // those; ungapped: the paper element's rect is the one continuous painted parchment.
-      // gBCR is transform-aware, so this is exact at any magnify — no scaleFor conversion needed
-      // for a visual point-in-rect test.
-      if (!(Math.abs(e.clientX - zoneX) < 8 && Math.abs(e.clientY - zoneY) < 8)) {
-        const x = e.clientX, y = e.clientY
-        const inRect = (r: DOMRect) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
-        const panels = el.querySelectorAll<HTMLElement>('.inkwave-sheets .inkwave-sheet')
-        let overPage: boolean
-        if (panels.length) {
-          overPage = Array.from(panels).some((p) => inRect(p.getBoundingClientRect()))
-        } else {
-          const pr = paperElRef.current?.getBoundingClientRect()
-          overPage = !!(pr && inRect(pr))
-        }
-        zoneIsWater = hybrid && !overPage
-        zoneX = e.clientX; zoneY = e.clientY
-      }
+      // ZONE GEOMETRY v2 (Peter, 2026-07-10) — X-BASED, not point-in-panel: the text column's
+      // left/right edges (the live .ProseMirror rect — custom margins respected) are two
+      // imaginary vertical lines. Cursor x OUTSIDE them → WATER zoom (side water, the page's
+      // own side margins, and the parts of gaps/bottom margins beyond the lines); x INSIDE
+      // them → font zoom (text, bottom margins, gap regions within the column's x-range).
+      // y never enters the test. Latched per gesture — see zoomZone.ts.
+      const mode = latch.resolve(
+        () => (hybrid && isWaterAtX(el, e.clientX) ? 'water' : 'text'),
+        e.deltaY > 0,
+      )
       // LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly
       // ±1 step (identical to the old feel); trackpad ctrl-pinch fine-deltas (small |ΔY|)
       // contribute proportional FRACTIONS that accumulate until a whole step commits — so every
@@ -468,7 +453,7 @@ export function Scroll({
       const mag = Math.abs(e.deltaY)
       const stepDelta = (e.deltaY < 0 ? 1 : -1)
         * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
-      if (zoneIsWater) {
+      if (mode === 'water') {
         mSteps += stepDelta
       } else {
         steps += stepDelta
@@ -539,6 +524,7 @@ export function Scroll({
       el.removeEventListener('gesturechange', onGesture)
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
+      latch.dispose() // drop the mode latch + zoom-cursor classes with the listeners
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // never leave painters pinned
     }
   }, [phone, hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
