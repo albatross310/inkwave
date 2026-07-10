@@ -39,6 +39,19 @@ export function SyncStatus({
 }) {
   const [, tick] = useState(0)
   const [internalOpen, setInternalOpen] = useState(false)
+  // PDF panel open → shrink to the compact cloud so the pill never overlaps the toolbar
+  // (Peter, 2026-07-10: the wrapped 'Synced to OneDrive' pill collided, dead space at its left).
+  const [pdfOpen, setPdfOpen] = useState(false)
+  useEffect(() => {
+    const read = () => {
+      const cs = getComputedStyle(document.documentElement)
+      setPdfOpen(['--iw-pdf-room', '--iw-pdf-room-left', '--iw-pdf-room-top', '--iw-pdf-room-bottom']
+        .some(v => parseFloat(cs.getPropertyValue(v)) > 0))
+    }
+    read()
+    const t = setInterval(read, 1200)
+    return () => clearInterval(t)
+  }, [])
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
 
@@ -138,12 +151,12 @@ export function SyncStatus({
             setOpen(!open)
           }}
           title={tooltip}
-          className={`iw-nightable ${compact
+          className={`iw-nightable ${compact || pdfOpen
             ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
             : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}`}
           style={{ color: synced ? 'var(--iw-pill-fg, #6b7280)' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
         >
-          {compact ? '☁' : label}
+          {compact || pdfOpen ? '☁' : label}
         </button>
       )}
     </div>
