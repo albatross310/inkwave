@@ -199,25 +199,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     document.title = `Inkwave Zero: ${tabName}`
   }, [doc.title, doc.id, fileName])
 
-  // Swap to a document-style favicon while a studio file is open so browser tabs are
-  // distinguishable from other Inkwave pages (the default is the wave/logo mark).
-  useEffect(() => {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-      <rect x="4" y="2" width="18" height="24" rx="2" fill="#f5f0eb" stroke="#5c2d8a" stroke-width="1.5"/>
-      <path d="M19 2l5 5h-4a1 1 0 01-1-1z" fill="#c4a8e0" stroke="#5c2d8a" stroke-width="1"/>
-      <line x1="8" y1="12" x2="18" y2="12" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
-      <line x1="8" y1="16" x2="18" y2="16" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
-      <line x1="8" y1="20" x2="14" y2="20" stroke="#5c2d8a" stroke-width="1.2" stroke-linecap="round"/>
-    </svg>`
-    const url = `data:image/svg+xml,${encodeURIComponent(svg)}`
-    const existing = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
-    const link: HTMLLinkElement = existing ?? document.createElement('link')
-    const prev = link.href
-    if (!existing) { link.rel = 'icon'; document.head.appendChild(link) }
-    link.type = 'image/svg+xml'
-    link.href = url
-    return () => { link.href = prev }
-  }, [])
+  // NO dynamic favicon swap (2026-07-10). This used to flip the first link[rel~=icon] to an inline
+  // "document-style" SVG glyph once the editor mounted — but the editor IS the landing page, so
+  // EVERY load showed the wave logo for ~1s and then a tiny grey-purple page glyph that reads
+  // exactly like Firefox's default page icon. That was the long-hunted "favicon reverting in
+  // Firefox" (proven in a headed FF run: tab shows the seal at 2.5s, the doc glyph from ~5s on) —
+  // the head links were never the culprit. Tabs stay distinguishable via document.title above.
+  // Don't reintroduce an icon swap; if per-doc icons ever return, they must NOT run on '/' load.
 
   const [lastFileSave, setLastFileSave] = useState<number | null>(null)
   const [oneDriveUrl, setOneDriveUrl] = useState<string | null>(null) // synced file's webUrl (open in folder)

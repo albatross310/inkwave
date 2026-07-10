@@ -350,6 +350,7 @@ let restRebase: Record<Group, number> | null = null
 // water; 'static' = no animations, opacity is each dash's var(--twk-static).
 let blinkMode: 'playing' | 'driven' | 'static' = 'playing'
 const dashAnims = new Map<HTMLElement, Animation>()
+const blinkAnim = new WeakMap<HTMLElement, Animation>() // EVERY instance's live blink (epoch re-anchor)
 let vt = 0 // virtual blink clock (ms) — integrates the effective rate; phase base for new anims
 let lastEff = 1
 let driver = 0
@@ -386,6 +387,7 @@ function blinkKeyframes(d: Inst): Keyframe[] {
 function startBlink(el: HTMLElement, d: Inst): Animation {
   const a = el.animate(blinkKeyframes(d), { duration: d.period * 1000, iterations: Infinity })
   a.startTime = epochMs - d.delay * 1000
+  blinkAnim.set(el, a)
   return a
 }
 
@@ -393,6 +395,7 @@ function startDrivenBlink(el: HTMLElement, d: Inst): Animation {
   const a = el.animate(blinkKeyframes(d), { duration: d.period * 1000, iterations: Infinity })
   a.currentTime = Math.max(0, (vt + d.delay * 1000) % (d.period * 1000))
   a.playbackRate = lastEff
+  blinkAnim.set(el, a)
   return a
 }
 
@@ -588,7 +591,7 @@ function recycle(): void {
 // Runs every driver frame (cheap: arithmetic per spark; real work only on a glint-end edge).
 // The blink ANIMATION is never touched — its epoch phase, period and compositor-driven opacity
 // carry on; only the instance's position and art move, inside the dark window (opacity 0).
-const sparkCycle = new WeakMap<Inst, number>() // last dark-window index acted on, per instance
+let sparkCycle = new WeakMap<Inst, number>() // last dark-window index acted on, per instance
 let liveRnd: (() => number) | null = null // respawn PRNG — independent of the gen streams
 
 function respawnSparks(now: number): void {
@@ -756,7 +759,85 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
     host.appendChild(nodes.set)
     h[kind] = nodes
     ensureDriver() // owns recycling too, so it runs from first mount
+    maybeAnnounceReady(h)
   })
+}
+
+// ─── Atomic-water participation (2026-07-10, Peter: "they need to start atomically") ─────────
+// The .iw-water-ready gate (entry.client) now waits for the twinkle field too: once a host has
+// BOTH sets generated + decoded + in the DOM (hidden — the not-ready CSS keeps .iw-wave-twinkles
+// display:none), announce readiness. The window flag covers the race where the gate's listener
+// attaches after we fired (entry.client checks it first).
+let announced = false
+function maybeAnnounceReady(h: HostState): void {
+  if (announced || !h.sparks || !h.dashes) return
+  announced = true
+  ;(window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady = true
+  window.dispatchEvent(new Event('inkwave:twinkles-ready'))
+}
+
+// The gate just opened: THIS style recalc creates the wave pseudos' CSS drift animations (they
+// cannot exist while the not-ready CSS holds the water display:none), so every clock resolved
+// before now — Scroll's published __iwWaveEpoch and our provisional epochMs — is stale: the real
+// drift starts NOW. Adopt the drift animation's literal startTime (its ready promise resolves
+// inside the frame that first renders it, BEFORE that frame paints — so the re-anchor lands in
+// the same paint as the reveal) and re-anchor every field + blink animation: tiles and twinkles
+// share one clock from the first visible frame, with zero drift/blink discontinuity after it.
+function onWaterReady(): void {
+  if (waterMode !== 'anim') return // gate reopening never coincides with coast/rest choreography
+  const surface = document.querySelector('.inkwave-editor-surface.iw-wave-anim')
+  if (!surface) return
+  let drift: Animation | undefined
+  try {
+    drift = surface.getAnimations({ subtree: true }) // forces style — the animations exist after this
+      .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+  } catch { return }
+  if (!drift) return
+  const anchor = (start: number, anim?: Animation) => {
+    if (waterMode !== 'anim') return
+    // Republish the shared clock — Scroll's hydration-time publisher ran while the pseudos were
+    // display-gated (no animations) and recorded a too-early performance.now(); later surfaces
+    // and twinkle mounts must sync to the REAL drift.
+    const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
+    w.__iwWaveEpoch = start
+    if (anim) w.__iwWaveEpochAnim = anim
+    epochMs = start
+    sparkCycle = new WeakMap() // dark-window indices were computed against the previous epoch
+    for (const h of hosts.values()) {
+      for (const kind of ['sparks', 'dashes'] as const) {
+        const nodes = h[kind]
+        if (!nodes) continue
+        for (const g of ['a', 'b'] as Group[]) {
+          const a = fieldAnim.get(nodes.fields[g])
+          if (a && fieldMode.get(nodes.fields[g]) === 'anim') a.startTime = epochMs
+        }
+        if (kind === 'dashes' && blinkMode !== 'playing') continue // driven/static are vt-based
+        for (const el of nodes.els) {
+          const d = elDef.get(el)
+          const a = d && blinkAnim.get(el)
+          if (a) a.startTime = epochMs - d!.delay * 1000
+        }
+      }
+    }
+  }
+  if (typeof drift.startTime === 'number') anchor(drift.startTime, drift)
+  else {
+    // Play-pending: the drift's startTime resolves only once the compositor acks a commit (~a
+    // frame in Firefox; ~100ms measured on a busy Chromium boot) and its pseudos RENDER AT 0
+    // until then. So anchor to "now" — not the stale mount-time epoch (measured −12.4px) — and
+    // keep re-anchoring every frame while it stays pending (bounds the twinkle↔tile skew to ~one
+    // frame's drift, ~1px); adopt the literal startTime the moment ready resolves. Exact after.
+    anchor(performance.now())
+    const tick = () => {
+      if (typeof drift!.startTime === 'number' || waterMode !== 'anim') return
+      anchor(performance.now())
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    void drift.ready
+      .then(() => { if (typeof drift!.startTime === 'number') anchor(drift!.startTime as number, drift) })
+      .catch(() => { /* cancelled — a mode change owns the field now */ })
+  }
 }
 
 function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): void {
@@ -801,6 +882,7 @@ export function syncTwinkles(
   }
   if (!listening) {
     listening = true
+    window.addEventListener('inkwave:water-ready', onWaterReady)
     window.addEventListener('inkwave:zoom-settled', regenDashes)
     let rt: ReturnType<typeof setTimeout> | undefined
     window.addEventListener('resize', () => {

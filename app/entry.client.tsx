@@ -46,20 +46,33 @@ async function bootstrap() {
 void bootstrap()
 
 // ─── Atomic water reveal ───
-// The water (aqua gradient + wave tiles) is gated behind .iw-water-ready: decode EVERY wave tile
-// FIRST, then stamp the class — colour and waves paint in the same style recalc instead of
-// "blue first, waves a few frames later". Fallback timer covers decode() quirks. The generated
-// twinkle layers (waveTwinkle.ts) pre-decode their own tiles before each mounts. REFRESH: root.tsx
-// carries a pre-paint inline script that stamps the class immediately when the flag below says the
-// tiles have decoded on this client before — the neutral-parchment hold is a COLD-load device
-// only, so a refresh never flashes parchment→aqua again (the 2026-07-09 "refresh flash").
+// The water (aqua gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
+// and appears in ONE paint. TWO conditions open the gate (2026-07-10, Peter: "glimmers and short
+// lines … need to start atomically even if it takes longer"):
+//   1. every wave-tile data-URI has decoded;
+//   2. the twinkle field has generated + decoded + MOUNTED (hidden — the not-ready CSS keeps
+//      .iw-wave-twinkles display:none) — waveTwinkle.ts announces via 'inkwave:twinkles-ready'
+//      (+ the __iwTwinklesReady flag for the fired-before-we-listened race).
+// Until both, the page holds the neutral parchment; then colour, waves and twinkles land in the
+// same style recalc. The old single-condition gate let the twinkle layers mount LATER, mid-drift —
+// on Firefox that late mount re-rastered the wave layers (a blank flash at a consistent moment)
+// and the field popped in non-atomically. A generous timeout still opens the gate if anything
+// wedges (a decode failure must never hold the page hostage). On gate-open we dispatch
+// 'inkwave:water-ready': THAT style recalc creates the wave pseudos' CSS drift animations, and
+// waveTwinkle re-anchors its (provisionally-clocked, hidden-mounted) WAAPI animations to the real
+// drift's literal startTime in the same frame — drift/blink continuity across the gate.
+// REFRESH: the old localStorage pre-stamp (root.tsx head script) opened the gate pre-paint on
+// warm clients — which would let the water paint long before the twinkles mount. Removed: every
+// load gates identically now (the tiles are data URIs, so "warm" never made decoding faster
+// anyway — the wait is hydration-bound either way, and atomicity wins per Peter's directive).
 {
   const root = document.documentElement
   let stamped = false
   const ready = () => {
+    if (stamped) return
     stamped = true
     root.classList.add('iw-water-ready')
-    try { localStorage.setItem('inkwave:waterReady', '1') } catch { /* private mode */ }
+    window.dispatchEvent(new Event('inkwave:water-ready'))
   }
   // GUARD (2026-07-10, the iOS "gradient without waves"): if hydration ever fails, React 18's
   // recovery client-renders <html> from scratch and STRIPS attributes it doesn't render —
@@ -75,25 +88,28 @@ void bootstrap()
     if (!root.dataset.theme) applyTheme()
   }).observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] })
   if (root.classList.contains('iw-water-ready')) {
-    stamped = true // pre-stamped by the head script (warm client) — nothing to decode, guard armed
+    stamped = true // already stamped (bfcache restore / re-eval) — nothing to gate, guard armed
   } else {
     const surface = document.querySelector('.inkwave-editor-surface')
-    const urls: string[] = []
-    if (surface) {
+    if (!surface) ready() // no water on this page — nothing to gate
+    else {
+      // Condition 1 — the wave tiles. Decode every tile var the water uses (the sparkle tile
+      // taught us: any wave layer the gate does NOT decode pops in a few frames late).
+      const urls: string[] = []
       const cs = getComputedStyle(surface)
-      // Decode every wave-tile var the water uses (the sparkle tile taught us: any wave layer the
-      // gate does NOT decode pops in a few frames late, a visible hitch at a consistent time).
       for (const v of ['--iw-wave-a', '--iw-wave-b']) {
         const m = cs.getPropertyValue(v).match(/url\("(.+)"\)/)
         if (m) urls.push(m[1])
       }
-    }
-    if (urls.length === 0) ready()
-    else {
-      const t = setTimeout(ready, 500) // decode() should take ~a frame; never hold the water hostage
-      void Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() }))
-        .catch(() => {})
-        .then(() => { clearTimeout(t); ready() })
+      const tiles = Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() })).catch(() => {})
+      // Condition 2 — the twinkle field, but only where one will mount: the live-editor (iw-fill)
+      // surface's host div. /about, /verify etc. have no twinkles and must not wait 1.5s for them.
+      const host = document.querySelector('.inkwave-editor-surface.iw-fill .iw-wave-twinkles')
+      const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
+        ? Promise.resolve()
+        : new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
+      const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
+      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
     }
   }
 }
