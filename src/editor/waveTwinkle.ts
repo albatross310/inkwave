@@ -80,7 +80,7 @@ export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night w
 
 // ─── Field tuning ─────────────────────────────────────────────────────────────────────────────
 const PAD = 420 // offscreen coverage either side of the viewport (recycle headroom ≈ 5.8s of drift)
-const DASH_ROW_PX = 900 // one dash per this many px of strip width, per row, per field
+const DASH_ROW_PX = 650 // one dash per this many px of strip width, per row, per field (denser — Peter, 2026-07-10)
 const SPARK_ROW_PX = 800 // denser field — they were barely visible (Peter, 2026-07-10)
 const DASH_ON: [number, number] = [0.55, 0.65] // s lit per twinkle (~0.6s, Peter 2026-07-10)
 const DASH_REPEAT_CHANCE = 0.25 // subset with back-to-back blinks (high duty)
@@ -89,7 +89,7 @@ const SPARK_ON_S = 0.2 // a glint (0.1 read as barely visible)
 const SPARK_PERIOD: [number, number] = [0.9, 2.2]
 const SPARK_REPEAT_CHANCE = 0.3 // subset with quick re-glints
 const SPARK_REPEAT_PERIOD: [number, number] = [0.45, 0.8]
-const STATIC_ON_CHANCE = 0.5 // the resting fully-on subset
+const STATIC_ON_CHANCE = 0.65 // the resting fully-on subset (reseed-at-rest path)
 const DRIFT_PX_S = 140 / 1.944 // must match the wave drift EXACTLY (72 flat drifted the analytic
 // coast from-value ~0.0165px/s off the WAAPI ramp — and off the tiles' modular freeze maths)
 const V_REF = 1200 // scrollTop px/s that maps to blink rate 1
@@ -439,7 +439,21 @@ function step(ts: number): void {
   }
   vt += eff * dt
   lastEff = eff
-  if (blinkMode === 'driven') for (const a of dashAnims.values()) a.playbackRate = eff
+  if (blinkMode === 'driven') {
+    for (const [el, a] of dashAnims) {
+      a.playbackRate = eff
+      // COAST LATCH (Peter, 2026-07-10): during the slowdown, any dash that reaches full glow is
+      // LATCHED on — the lit set grows monotonically through the coast (no thinning), and the
+      // final static texture is whatever accumulated. getComputedStyle per frame is coast-only
+      // (~38 els for ~2.5s). Scroll-driven twinkling (no coast) never latches.
+      if (coast && el.isConnected && parseFloat(getComputedStyle(el).opacity) > 0.7) {
+        a.cancel()
+        dashAnims.delete(el)
+        el.style.setProperty('--twk-static', '1')
+        el.style.opacity = '' // → var(--twk-static)=1, eased by the CSS transition
+      }
+    }
+  }
   if (eff > RATE_EPS) stillSince = 0
   else if (!stillSince) stillSince = ts
   if (!coast && waterMode === 'off' && eff <= RATE_EPS && stillSince && ts - stillSince > STATIC_DWELL_MS) {
