@@ -269,6 +269,14 @@ Snapshot React state is METADATA-ONLY (`SnapshotMeta`; fetch full snapshots via 
 action time — never hold contentJson in state). Autosave failures dispatch `inkwave:save-failed`.
 
 **Standing preferences (Peter, 2026-07-10):**
+- **No browser windows over Peter's screen.** Agents running HEADED browsers (Playwright probes
+  that need GPU/compositor accuracy) must never pop a window over his workspace: use
+  `xvfb-run` (virtual display — headed semantics, zero visible window) as the default, or launch
+  args `--window-position=-32000,-32000` as fallback. Headless remains the default where fidelity
+  allows. Agent briefs that ask for headed runs must say this.
+- **Notifier (task #27, pending):** Peter's PowerShell toast should fire only on final reports —
+  final reports start with the sentinel "📋 REPORT" so his notification hook can filter on it.
+  Until his hook is updated, keep interim turns content-free anyway.
 - **Batch the reporting — protect Peter's focus.** He writes (thesis/essays) while agents run;
   every notification breaks his concentration. Do NOT ping per-merge: merge each through the full
   gate as it lands with a bare non-message turn-ending, and send ONE consolidated report when ALL
