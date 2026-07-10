@@ -141,10 +141,22 @@
      no per-frame style writes. The `*` leg beats descendants' own cursors (text carets etc.);
      !important beats inline cursor styles. Applies to any latch host (live editor surface,
      SnapshotView's split container). */
-  .iw-zooming-water, .iw-zooming-water *,
-  .iw-zooming-text, .iw-zooming-text * { cursor: zoom-in !important; }
-  .iw-zoom-out.iw-zooming-water, .iw-zoom-out.iw-zooming-water *,
-  .iw-zoom-out.iw-zooming-text, .iw-zoom-out.iw-zooming-text * { cursor: zoom-out !important; }
+  /* Jazzed zoom cursors (Peter, 2026-07-10): a magnifier with a WAVE in the lens for water zoom
+     (aqua), a serif 'A' for page/font zoom (ink purple); − variants swap the corner badge. Inline
+     SVG data URIs, 28px, hotspot at the lens centre (11,11); keyword fallbacks for engines that
+     reject SVG cursors. */
+  .iw-zooming-water, .iw-zooming-water * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Cpath d='M6 12 Q8.5 9.5 11 12 T16 12' fill='none' stroke='%2300b4d8' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
+  }
+  .iw-zooming-text, .iw-zooming-text * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%235c2d8a' stroke-width='2'/%3E%3Ctext x='11' y='14.8' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%235c2d8a' text-anchor='middle'%3EA%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%235c2d8a' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%235c2d8a'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
+  }
+  .iw-zoom-out.iw-zooming-water, .iw-zoom-out.iw-zooming-water * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Cpath d='M6 12 Q8.5 9.5 11 12 T16 12' fill='none' stroke='%2300b4d8' stroke-width='1.8' stroke-linecap='round'/%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
+  }
+  .iw-zoom-out.iw-zooming-text, .iw-zoom-out.iw-zooming-text * {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%235c2d8a' stroke-width='2'/%3E%3Ctext x='11' y='14.8' font-family='Georgia,serif' font-size='11' font-weight='bold' fill='%235c2d8a' text-anchor='middle'%3EA%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%235c2d8a' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%235c2d8a'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
+  }
 
   /* Review comments: commented text gets a soft amber underline (the sticky note is drawn in the
      gutter by CommentNotes). Subtle so it never competes with SCAS/citation colours. */
