@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/Scroll'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
@@ -886,7 +887,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #5c2d8a)', color: 'var(--iw-cite-color, #5c2d8a)' }
                   : { borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
               >
-                {m === 'cited' ? 'Auto' : m === 'all' ? 'All' : 'Manual'}
+                {m === 'cited' ? 'Auto' : m === 'all' ? 'All' : 'Man'}
               </button>
             ))}
             <select value={citationStyle} onChange={e => onStyleChange(e.target.value)}
@@ -897,20 +898,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             <select value={sortBy} onChange={e => changeSort(e.target.value as 'added' | 'alpha' | 'author')}
               title="Sort the library"
               className="h-8 text-[13px] text-stone-600 border border-stone-200 rounded px-1.5 bg-white">
-              <option value="added">Recently added</option>
-              <option value="alpha">Alphabetical</option>
+              <option value="added">{isTouchDevice() ? 'Recent' : 'Recently added'}</option>
+              <option value="alpha">{isTouchDevice() ? 'A–Z' : 'Alphabetical'}</option>
               <option value="author">Author</option>
             </select>
             <button type="button" onClick={toggleSortDir}
               title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
               className="h-8 w-8 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
               {sortDir === 'asc' ? '↑' : '↓'}
-            </button>
-            {/* + New before Re-verify (swapped per Peter). */}
-            <button type="button" onClick={openNewRef}
-              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
-              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
-              + New
             </button>
             {/* Re-verify all — with a CUSTOM styled tooltip (bigger, deep royal blue). */}
             <div className="relative flex-shrink-0" onMouseEnter={() => setRecheckTip(true)} onMouseLeave={() => setRecheckTip(false)}>
@@ -927,6 +922,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 </div>
               )}
             </div>
+            {/* ↻ before + New (swapped per Peter, 2026-07-10). */}
+            <button type="button" onClick={openNewRef}
+              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
+              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
+              + New
+            </button>
           </div>
         </div>
 
@@ -949,31 +950,29 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             const src = SOURCE_BADGE[itemSource(item)]
             const typeLabel = TYPE_LABELS[item.type] ?? item.type
             return (
-              <div key={item.id} className="py-1 border-b border-stone-100 last:border-0">
+              <div key={item.id} className="py-1 border-b border-stone-100 last:border-0 cursor-pointer hover:bg-stone-50/60 rounded transition-colors"
+                onClick={() => setEditItem(item)}>
                 {/* Top line: key + badges on the left, action buttons on the right. */}
                 <div className="flex items-center gap-2">
                   {refMode === 'manual' && (
-                    <input type="checkbox" checked={manualKeys.has(item.id)} onChange={() => toggleManual(item)}
+                    <input type="checkbox" checked={manualKeys.has(item.id)} onClick={e => e.stopPropagation()} onChange={() => toggleManual(item)}
                       aria-label={`Include ${item.id} in references`} />
                   )}
-                  <button
-                    type="button"
-                    className="flex-1 min-w-0 text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors"
-                    title="Click to edit · click & hold the key to rename"
-                    onPointerDown={() => { keyHeld.current = false; keyHoldTimer.current = setTimeout(() => { keyHeld.current = true; void renameCitation(item) }, 500) }}
-                    onPointerUp={() => { if (keyHoldTimer.current) clearTimeout(keyHoldTimer.current) }}
-                    onPointerLeave={() => { if (keyHoldTimer.current) clearTimeout(keyHoldTimer.current) }}
-                    onClick={() => { if (keyHeld.current) { keyHeld.current = false; return } setEditItem(item) }}
-                  >
+                  <div className="flex-1 min-w-0 text-left rounded px-1 -mx-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[13px] font-medium truncate" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{item.id}</span>
+                      {/* The PURPLE KEY renames on click; everything else in the row (that isn't a
+                          button) falls through to the row's click → the ref editor (Peter, 2026-07-10). */}
+                      <button type="button" title="Click to rename"
+                        className="text-[13px] font-medium truncate hover:underline"
+                        style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                        onClick={e => { e.stopPropagation(); void renameCitation(item) }}>{item.id}</button>
                       {/* Verified sources → a compact ✓ box (tooltip on hover); others keep their label. */}
                       {itemSource(item) === 'crossref'
                         ? <span title="verified" className="inline-flex items-center justify-center text-[11px] leading-none rounded flex-shrink-0" style={{ width: 16, height: 16, color: 'var(--iw-verified, #15803d)', border: `1px solid var(--iw-verified, #15803d)` }}>✓</span>
                         : <span className="text-[11px] px-1 rounded flex-shrink-0" style={{ color: src.color, borderColor: src.color, borderWidth: 1, borderStyle: 'solid' }}>{src.label}</span>}
                       <span className="text-[13px] text-stone-600 flex-shrink-0">{typeLabel}</span>
                     </div>
-                  </button>
+                  </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0 max-w-[48%]">
                    <div className="flex flex-wrap items-center justify-end gap-1">
                     {(() => {
@@ -1004,12 +1003,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       )
                     })()}
                     {/* "ren" button removed — rename is click-and-hold on the purple citekey. */}
-                    <button type="button" onClick={() => void del(item)}
+                    <button type="button" onClick={e => { e.stopPropagation(); void del(item) }}
                       className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-400 hover:border-red-300 hover:text-red-500">del</button>
                    </div>
                    {/* Second row: cite + visit source */}
                    <div className="flex items-center justify-end gap-1">
-                    <button type="button" onClick={() => cite(item)} title="Cite inline in the document at the cursor"
+                    <button type="button" onClick={e => { e.stopPropagation(); cite(item) }} title="Cite inline in the document at the cursor"
                       className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[15px] leading-none">@</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
@@ -1023,10 +1022,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 </div>
                 {/* Title on ONE line, truncated with an ellipsis; full title on hover. */}
                 {!!String(item.title ?? '') && (
-                  <button type="button" onClick={() => setEditItem(item)} title={String(item.title ?? '')}
-                    className="block max-w-full text-left hover:bg-stone-50 rounded px-1 -mx-1 transition-colors">
+                  <div title={String(item.title ?? '')}
+                    className="block max-w-full text-left rounded px-1 -mx-1">
                     <div className="text-[16px] text-stone-500 leading-snug truncate">{String(item.title ?? '')}</div>
-                  </button>
+                  </div>
                 )}
                 {(() => {
                   const iw = (item as { _iw?: IwCitationMeta })._iw
@@ -1038,12 +1037,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       {/* author/year + history + used all on ONE line, to save vertical space */}
                       <div className="mt-0.5 pl-1 flex items-center gap-2">
                         {!!authorYear && (
-                          <button type="button" onClick={() => setEditItem(item)} title="Click to edit"
-                            className="text-[15px] text-stone-400 leading-snug truncate min-w-0 flex-1 text-left hover:text-stone-600">{authorYear}</button>
+                          <span title="Click to edit"
+                            className="text-[15px] text-stone-400 leading-snug truncate min-w-0 flex-1 text-left">{authorYear}</span>
                         )}
                         {iw?.deadUrl && <span className="text-[12px] text-red-500 border border-red-200 rounded px-1 flex-shrink-0">⚠ dead link</span>}
                         {changelog.length > 0 && (
-                          <button type="button" onClick={() => toggleExpand(item.id)}
+                          <button type="button" onClick={e => { e.stopPropagation(); toggleExpand(item.id) }}
                             title="Show the correction history (old → new) for this citation"
                             className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] flex-shrink-0">
                             {open ? '▾' : '▸'} history ({changelog.length})
