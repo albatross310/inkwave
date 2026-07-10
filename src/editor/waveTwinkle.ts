@@ -144,6 +144,12 @@ function midY(c: number, wx: number): number { // thick/thin pair midline at any
   const bump = 36 * t * (1 - t)
   return x < 70 ? c + 14 - bump : c + 14 + bump
 }
+function midYd(wx: number): number { // midline slope dy/dx — ≡ the thick line's slope at the same x
+  const x = wrap140(wx)
+  const t = (x % 70) / 70
+  const s = (36 * (1 - 2 * t)) / 70
+  return x < 70 ? -s : s
+}
 
 // ─── Non-repeating strike sampler (see header) ───────────────────────────────────────────────
 const MEM_EPS = 12 // min wave-space x distance (px) from any remembered strike in the band
@@ -231,13 +237,28 @@ function genDash(rnd: () => number, group: Group, row: number, strip: number): I
   const wx = wrap140(cx)
   const c = CREST[group]
   const y0 = midY(c, wx)
-  // Local-space quadratic through three midline samples — the dash follows its swell's slope.
-  const yl = (u: number) => midY(c, wx + u) - y0 + h / 2
-  const y1 = yl(-8.5), y2 = yl(8.5)
-  const yc = 2 * (h / 2) - (y1 + y2) / 2
+  // The dash IS the exact midline arc over [wx−8.5, wx+8.5] (Peter, 2026-07-10: "always parallel
+  // with the thick line above"). The midline is piecewise-PARABOLIC with curvature flipping at
+  // every swell joint (x ≡ 0 mod 70) — the old single quadratic through 3 samples was exact
+  // inside one branch but a joint-straddling dash (17/70 ≈ 24% of them) got a near-straight
+  // segment at the averaged slope where the water S-bends: visibly not parallel. So: split the
+  // window at the joints and emit one quadratic Bézier per piece — a quadratic reproduces a
+  // parabola EXACTLY (control point = intersection of the end tangents), so every dash carries
+  // the thick line's own y(x) and tangents at its x, jitter being one whole-dash vertical offset.
+  const yAt = (X: number) => midY(c, X) - y0 + h / 2 // local-space midline (box centre = h/2)
+  const xa = wx - 8.5, xb = wx + 8.5
+  const cuts: number[] = [xa]
+  for (let k = Math.ceil(xa / 70) * 70; k < xb; k += 70) if (k > xa) cuts.push(k)
+  cuts.push(xb)
+  let dPath = `M${f1(w / 2 + (xa - wx))} ${f1(yAt(xa))}`
+  for (let s = 0; s < cuts.length - 1; s++) {
+    const A = cuts[s], B = cuts[s + 1]
+    dPath += ` Q${f1(w / 2 + ((A + B) / 2 - wx))} ${f1(yAt(A) + (midYd(A) * (B - A)) / 2)}` +
+      ` ${f1(w / 2 + (B - wx))} ${f1(yAt(B))}`
+  }
   const op = 0.32 + 0.12 * rnd()
   const path = (col: string, o: number) =>
-    `<path d='M${f1(w / 2 - 8.5)} ${f1(y1)} Q${f1(w / 2)} ${f1(yc)} ${f1(w / 2 + 8.5)} ${f1(y2)}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2' stroke-linecap='round'/>`
+    `<path d='${dPath}' fill='none' stroke='${col}' stroke-opacity='${f1(o)}' stroke-width='2' stroke-linecap='round'/>`
   const onS = DASH_ON[0] + (DASH_ON[1] - DASH_ON[0]) * rnd()
   // A repeat subset blinks nearly back-to-back (high duty = short dark gaps between flashes).
   const duty = rnd() < DASH_REPEAT_CHANCE ? 0.75 + 0.1 * rnd() : DASH_DUTY[0] + (DASH_DUTY[1] - DASH_DUTY[0]) * rnd()
