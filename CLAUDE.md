@@ -232,7 +232,20 @@ finished → waves forever) — dash respawns are boot-gated until `inkwave:edit
 4/frame; on phone the shell stays OPAQUE until `wave-rest` with the covered editor z-raised above
 it (fading the only water mid-coast exposed bare parchment = the iOS white-out). Every reveal-chain
 event has a fallback cap (reveal 1.5s, shell force-down 4s, covered lift 4s) — keep them when
-touching the chain.
+touching the chain. 2026-07-11 round 2: PHONE surfaces are in-flow (only `.iw-fill:not(.is-phone)`
+is fixed) — the shell surface must be VIEWPORT-PINNED (fixed, inset 0, z 0 under the z:1 covered
+editor) while its wave classes run, or the covered editor's height pushes the shell's gradient box
+off-screen = the "goes white" bug (its viewport-fixed pseudos still painted ghost lines); gradient
+uses background-attachment: scroll (WebKit's fixed-attachment compositing is flaky). Twinkle art
+must be CANVAS-RASTERED PNGs, never per-instance SVG data-URIs — Chromium builds a full
+IsolatedSVGDocumentHost per unique URI (~4.3s of boot at ~600 URIs; Firefox is cheap = the engine
+asymmetry). The lazy editor chunk is eagerly imported at module scope (browser-only guard) so it
+loads in PARALLEL with storage, not after doc-ready. Starved-boot coast: a first-coast-frame check
+re-freezes from the drift's extrapolated pose when >150ms late (rebaseCoast) — prevents
+full-speed-overlay-then-backward-snap; phone shell drop waits for wave-rest AND paper fade end.
+Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts). Known residual:
+the editor mounts TWICE per load (duplicate reveal events; Tiptap useEditor recreation) — needs
+its own pass.
 
 ## Open pipeline + cloud caching (2026-07-09)
 
