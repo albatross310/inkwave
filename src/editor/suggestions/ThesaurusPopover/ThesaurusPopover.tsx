@@ -453,7 +453,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
 
     const overTarget = (t: EventTarget | null) => {
       const el = t as HTMLElement | null
-      return !!el && (edEl.contains(el) || !!el.closest?.('.scas-cycle-card'))
+      return !!el && (edEl.contains(el) || !!el.closest?.('.scas-cycle-card, .scas-cycle-backing'))
     }
 
     // Trackpad/wheel reel-scrolling is DISABLED (per request): the reel is driven by press-drag and
@@ -547,7 +547,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         // at gesture start, so the browser never contests the pan and the reel owns the gesture
         // outright (onTouchMove's preventDefault is the imperative half). A pan starting anywhere
         // else — including an UNOPENED red word — is native page scroll exclusively.
-        dragArmed = !!cycleRef.current && !!el?.closest?.('.scas-cycle-card, .scas-focused')
+        dragArmed = !!cycleRef.current && !!el?.closest?.('.scas-cycle-card, .scas-cycle-backing, .scas-focused')
       } else {
         // Mouse: arm if the press lands on the word/reel — OR if it just OPENED a cycle.
         // The opening press is, by definition, on a red word; but the capture-phase open handler
@@ -555,7 +555,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         // resolve e.target to a sibling `.scas-comp-before/after` span (no matching class) →
         // dragArmed went false → the opening press couldn't scroll the reel. openedByPointerRef
         // (set by that handler) tells us this press opened a cycle, so arm it unconditionally.
-        dragArmed = openedByPointerRef.current || !!el?.closest?.('.scas-red, .scas-cycle-card')
+        dragArmed = openedByPointerRef.current || !!el?.closest?.('.scas-red, .scas-cycle-card, .scas-cycle-backing')
       }
     }
     function onPointerMove(e: PointerEvent) {
@@ -610,7 +610,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
         lastTapTime = e.timeStamp; lastTapX = e.clientX; lastTapY = e.clientY
         if (!c) return
         const el = e.target as HTMLElement | null
-        const onCard = !!el?.closest?.('.scas-cycle-card')
+        const onCard = !!el?.closest?.('.scas-cycle-card, .scas-cycle-backing')
         if (opened) {
           // Touch (phone model): the tap that OPENED the cycle leaves it open — browsing is a new
           // drag on the word/reel; confirming is a tap on it; dismissing is a tap outside.
@@ -789,7 +789,14 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // Overlay mode (touch): the word isn't expanded, so size the opaque card to the widest
   // synonym (minWidth) and give it the paper colour so it masks the text it floats over.
   const cardWidth = cycle.overlay ? Math.ceil(cycle.minWidth) : width
-  const cardBg    = cycle.overlay ? '#f7f2e8' : 'transparent'
+  const cardBg    = cycle.overlay ? 'var(--iw-paper, #f7f2e8)' : 'transparent'
+  // Parchment backing behind the reel (see .scas-cycle-backing): visible exactly while the
+  // neighbour rows are revealed (`moving`), because that's when the popup words overlap the text
+  // lines above/below; at rest only the centre word shows, on its own line, so the paragraph
+  // reads bare. On commit it fades over the same glide as the neighbours. While hidden it is
+  // non-interactive, so taps/pans on the adjacent lines behave as plain text.
+  const BACK_PAD_X = 10, BACK_PAD_Y = 6
+  const backingOn  = moving && !committing
 
   // Continuous windowed reel: render a band of rings around the live position, each
   // placed by its real distance from centre so the whole strip glides as reel moves.
@@ -871,8 +878,22 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   return (
     <>
       {ghostEls}
-      {/* Sliding reel card — fully transparent: no border/shadow/background, so the
-          word floats directly on the parchment (lines above/below may show through).
+      {/* Rounded parchment backing — a pure overlay sibling BELOW the card (z 45 < 50): masks the
+          adjacent text lines while the reel words are revealed over them. Geometry = the card's
+          box + comfortable padding; paint (paper token, ring, shadow, radius) lives in
+          .scas-cycle-backing. Never rendered in overlay mode (that card is already opaque). */}
+      {!cycle.overlay && (
+        <div className="absolute select-none scas-cycle-backing"
+          style={{ top: cardTop - BACK_PAD_Y, left: left - BACK_PAD_X,
+                   width: cardWidth + BACK_PAD_X * 2, height: cardH + BACK_PAD_Y * 2,
+                   zIndex: 45,
+                   opacity: backingOn ? 1 : 0,
+                   pointerEvents: backingOn ? 'auto' : 'none',
+                   transition: committing ? `opacity ${REFLOW_COMMIT_MS}ms ${REFLOW_EASE}` : 'opacity 140ms ease',
+                   WebkitTapHighlightColor: 'transparent' }} />
+      )}
+      {/* Sliding reel card — itself transparent: no border/shadow/background, so the word floats
+          directly on the parchment (the backing above masks the adjacent lines while revealed).
           NB: do NOT put a transform on this card to "snap" sub-pixel position — promoting it to a
           GPU layer disables subpixel-antialiasing on the reel text (visible colour/weight shift)
           and nudges horizontal sub-pixel position. Keep it a plain absolutely-positioned box. */}

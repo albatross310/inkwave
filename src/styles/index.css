@@ -765,6 +765,26 @@
     overscroll-behavior: none;
   }
 
+  /* Rounded parchment backing behind the reel words (Peter, 2026-07-10): at normal line spacing the
+     reel's prev/next candidates overlap the text lines above/below the focused word — this panel
+     masks that text beneath the popup words. It is a PURE OVERLAY sibling of the reel card
+     (geometry set inline from the card's own coords + padding): absolutely positioned, so it never
+     reflows the paragraph — the line-compression contract stays intact. Paint lives here;
+     visibility (opacity) is driven inline in step with the reel's `moving` reveal, so at rest
+     (centre word only, no overlap) the paragraph reads bare. Tokens --iw-paper/-line/-shadow give
+     night mode its dark sheet surface (see the night block). Subtle ring + shadow match the app's
+     panels; radius per Peter (~8–10px). */
+  .scas-cycle-backing {
+    background: var(--iw-paper, #f7f2e8);
+    border: 1px solid var(--iw-paper-line, rgba(80, 50, 10, 0.18));
+    border-radius: 9px;
+    box-shadow: 0 2px 10px var(--iw-paper-shadow, rgba(60, 40, 10, 0.16));
+    /* Same reel exclusivity as the card/word (phone): a touch starting on the visible backing
+       ring belongs to the cycle — never a page pan or a rubber-band. */
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+
   /* A substituted (secondary) word — committed from a synonym, not the original. Rendered the
      DARKER purple so it matches the reel's candidate colour: a committed synonym keeps the colour
      it had in the reel, and reopening it shows the same colour (no jump). The unchanged original
@@ -1039,6 +1059,14 @@
 :root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(147, 197, 253, 0.26); }
 
 /* Light purple / light green highlights. */
+/* Paper-surface tokens (SCAS reel backing + any future parchment-coloured overlay): the night
+   values mirror the night sheet (.inkwave-sheet #2c2e35 + its dark ring/shadow) so the backing
+   reads as the same paper the text sits on. Day values are the vars' fallbacks at use sites. */
+:root[data-theme="night"] {
+  --iw-paper: #2c2e35;
+  --iw-paper-line: rgba(0, 0, 0, 0.6);
+  --iw-paper-shadow: rgba(0, 0, 0, 0.55);
+}
 :root[data-theme="night"] .scas-red { color: #86e6a6; }               /* unresolved kicked word (green) */
 /* Committed / resolved / focused SCAS words are purple — lighten from #6f3b9e (too dark on charcoal). */
 :root[data-theme="night"] .scas-secondary,
