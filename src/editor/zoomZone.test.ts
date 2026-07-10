@@ -58,10 +58,10 @@ describe('createZoomLatch', () => {
   it('releases 0.3s after the LAST zoom event (cooldown re-arms per event)', () => {
     const latch = createZoomLatch(() => host)
     latch.resolve(() => 'water', false)
-    vi.advanceTimersByTime(400)
+    vi.advanceTimersByTime(200)
     latch.resolve(() => 'water', false)         // re-arms the cooldown
-    vi.advanceTimersByTime(400)
-    expect(latch.resolve(() => 'text', false)).toBe('water') // 800ms after start, 400 after last
+    vi.advanceTimersByTime(200)
+    expect(latch.resolve(() => 'text', false)).toBe('water') // 400ms after start, 200 after last
     vi.advanceTimersByTime(ZOOM_LATCH_COOLDOWN_MS + 1)       // full cooldown elapses untouched
     expect(latch.resolve(() => 'text', false)).toBe('text')  // fresh gesture re-computes
   })

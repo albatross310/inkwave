@@ -27,7 +27,7 @@ const INK = '#5c2d8a'
 const PANEL_GAP = 14
 
 type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export' }
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
