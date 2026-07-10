@@ -5,7 +5,9 @@ import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotV
 import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
 import { loadDocument } from '../storage/opfs'
 import { loadLibrary } from '../citations/library'
-import { diffWords, diffStats, splitChangesAtReturns, type DiffOp } from '../provenance/diff'
+import { diffStats, type DiffOp } from '../provenance/diff'
+import { opsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
+import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
 import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
@@ -435,11 +437,12 @@ function bestGrid(n: number, W: number, H: number): { rows: number; cols: number
 // A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
 // (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
 // Click or drag scrolls the panes so that point sits on the midline.
-function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
+function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
   leftRef: React.RefObject<HTMLDivElement | null>
   ops: DiffOp[] | null
   snapKey: string
   midFrac?: number
+  pageGeo?: StaticPageGeo[] | null // REAL canonical page regions (staticPagination); null → √2 fallback
 }) {
   const [pages, setPages] = useState(1)
   const [maxPages, setMaxPages] = useState(1) // largest page count seen → keep the grid structure stable
@@ -448,17 +451,44 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
   const pageHRef = useRef(1000)
   const gridRef = useRef<HTMLDivElement>(null)
   const marksSigRef = useRef('')
+  const modelRef = useRef<'fallback' | 'geo'>('fallback') // which page model produced maxPages
+
+  // Content-y ↔ (page, frac) through the REAL canonical page regions when the static paginator
+  // has run (this is what killed the old paper-width×√2 drift); √2 model as the pre-measure fallback.
+  const geo = pageGeo && pageGeo.length ? pageGeo : null
+  const pageAt = useCallback((y: number): { page: number; frac: number } => {
+    if (geo) {
+      let k = 0
+      while (k < geo.length - 1 && geo[k + 1].top <= y) k++
+      return { page: k, frac: Math.max(0, Math.min(1, (y - geo[k].top) / Math.max(1, geo[k].height))) }
+    }
+    const pageH = pageHRef.current
+    const p = Math.max(0, Math.floor(y / pageH))
+    return { page: p, frac: Math.max(0, Math.min(1, (y - p * pageH) / pageH)) }
+  }, [geo])
+  const yFor = useCallback((page: number, frac: number): number => {
+    if (geo) {
+      const p = geo[Math.max(0, Math.min(geo.length - 1, page))]
+      return p.top + frac * p.height
+    }
+    return (page + frac) * pageHRef.current
+  }, [geo])
 
   const measure = useCallback(() => {
     const el = leftRef.current
     if (!el || !el.scrollHeight) return
     const paper = el.querySelector('.scroll-paper') as HTMLElement | null
     const pw = paper?.clientWidth || el.clientWidth || 1
-    const pageH = Math.max(200, pw * Math.SQRT2) // A4 portrait ratio, matching the pagination
+    const pageH = Math.max(200, pw * Math.SQRT2) // fallback A4 ratio (pre-pagination only)
     pageHRef.current = pageH
-    const n = Math.max(1, Math.round(el.scrollHeight / pageH))
+    const n = geo ? geo.length : Math.max(1, Math.round(el.scrollHeight / pageH))
     setPages(n)
-    setMaxPages(m => Math.max(m, n))
+    // The √2 fallback can badly over-count before the paginator publishes (phone: narrow paper →
+    // small pageH) — latching maxPages on it left permanent empty grid slots. Reset the latch when
+    // the real canonical model takes over; keep the max WITHIN a model (grid stability while scrubbing).
+    const model = geo ? 'geo' as const : 'fallback' as const
+    if (model !== modelRef.current) { modelRef.current = model; setMaxPages(n) }
+    else setMaxPages(m => Math.max(m, n))
     const er = el.getBoundingClientRect()
     const m: Array<{ page: number; frac: number; add: boolean; opIdx: number }> = []
     el.querySelectorAll('[data-opidx]').forEach(o => {
@@ -467,8 +497,8 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
       if (!op || op.type === 'same') return
       const r = (o as HTMLElement).getBoundingClientRect()
       const y = r.top - er.top + el.scrollTop
-      const page = Math.max(0, Math.min(n - 1, Math.floor(y / pageH)))
-      m.push({ page, frac: Math.max(0, Math.min(1, (y - page * pageH) / pageH)), add: op.type === 'add', opIdx: idx })
+      const { page, frac } = pageAt(y)
+      m.push({ page: Math.max(0, Math.min(n - 1, page)), frac, add: op.type === 'add', opIdx: idx })
     })
     // Skip the setState when the marks are identical — the observers fire on every resize tick and a fresh
     // array would re-render the whole grid for nothing (same pattern PageGuides uses).
@@ -476,7 +506,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     if (sig === marksSigRef.current) return
     marksSigRef.current = sig
     setMarks(m)
-  }, [ops, leftRef])
+  }, [ops, leftRef, geo, pageAt])
 
   useLayoutEffect(() => { measure(); const t = setTimeout(measure, 350); return () => clearTimeout(t) }, [measure, snapKey])
   useEffect(() => {
@@ -532,10 +562,10 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     const page = c * height + r
     if (page >= pages) return
     const fracInCell = Math.max(0, Math.min(1, (rRaw - r * cellH) / (cellH - GAP)))
-    const y = (page + fracInCell) * pageHRef.current
+    const y = yFor(page, fracInCell)
     window.dispatchEvent(new Event('inkwave:minimap-seek')) // → diff pane follows gently, not springily
     el.scrollTo({ top: Math.max(0, y - el.clientHeight * midFrac), behavior: 'auto' })
-  }, [cols, height, pages, leftRef, midFrac])
+  }, [cols, height, pages, leftRef, midFrac, yFor])
 
   // Click a diff tick → both panes fly to THAT change (editor scrolls; the diff pane follows via the sync).
   const seekToY = useCallback((y: number) => {
@@ -559,14 +589,14 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
     const w = grid.clientWidth - 2 * P, h = grid.clientHeight - 2 * P
     const colStride = (w - (cols - 1) * GAP) / cols
     const cellH = (h - (height - 1) * GAP) / height
-    const pageH = pageHRef.current
     const yc = el.scrollTop + el.clientHeight * midFrac
-    const p = Math.max(0, Math.min(pages - 1, Math.floor(yc / pageH)))
-    const frac = Math.max(0, Math.min(1, (yc - p * pageH) / pageH))
+    const at = pageAt(yc)
+    const p = Math.max(0, Math.min(pages - 1, at.page))
+    const frac = at.frac
     const c = Math.floor(p / height), r = p % height
     const next = { top: P + r * (cellH + GAP) + frac * cellH, left: P + c * (colStride + GAP), width: colStride }
     setHere(prev => (prev && Math.abs(prev.top - next.top) < 0.4 && Math.abs(prev.left - next.left) < 0.4 && Math.abs(prev.width - next.width) < 0.4) ? prev : next)
-  }, [cols, height, pages, leftRef, midFrac])
+  }, [cols, height, pages, leftRef, midFrac, pageAt])
   useEffect(() => {
     const el = leftRef.current, grid = gridRef.current
     if (!el) return
@@ -624,7 +654,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5 }: {
                 const base = m.add ? '#16a34a' : '#dc2626', dark = m.add ? '#0d6b30' : '#8f1414'
                 return (
                   <div key={i} title="Jump both panes to this change"
-                    onClick={(e) => { e.stopPropagation(); seekToY((m.page + m.frac) * pageHRef.current) }}
+                    onClick={(e) => { e.stopPropagation(); seekToY(yFor(m.page, m.frac)) }}
                     onMouseEnter={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '5px'; b.style.background = dark }}
                     onMouseLeave={(e) => { const b = e.currentTarget.firstElementChild as HTMLElement; b.style.height = '2px'; b.style.background = base }}
                     style={{ position: 'absolute', left: 0, right: 0, top: `${m.frac * 100}%`, transform: 'translateY(-50%)', height: 10, display: 'flex', alignItems: 'center', cursor: 'pointer', zIndex: 4 }}
@@ -851,17 +881,28 @@ function SplitDiffView({
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
 
-  // Each diff's real DOCUMENT page, measured from the EDITOR's pagination (same pageH the minimap uses), so
-  // the diff panel's page-break rules carry the SAME numbers as the minimap.
+  // pageGeo: the REAL canonical page regions from the static paginator (effect below, after ops).
+  const [pageGeo, setPageGeo] = useState<StaticPageGeo[] | null>(null)
+  const pagRef = useRef<StaticPaginationHandle | null>(null)
+
+  // Each diff's real DOCUMENT page — now read off the canonical page regions (pageGeo), so the
+  // diff panel's page-break rules carry the SAME numbers as the minimap AND the true breaks.
   const [diffPages, setDiffPages] = useState<Record<number, number>>({})
   const [totalPages, setTotalPages] = useState(1)
   useEffect(() => {
     const L = leftScrollRef.current
     if (!L) return
     const compute = () => {
+      const geo = pageGeo && pageGeo.length ? pageGeo : null
       const paper = L.querySelector('.scroll-paper') as HTMLElement | null
       const pw = paper?.clientWidth || L.clientWidth || 1
-      const pageH = Math.max(200, pw * Math.SQRT2)
+      const pageH = Math.max(200, pw * Math.SQRT2) // fallback only, until the paginator publishes
+      const pageOf = (y: number): number => {
+        if (!geo) return Math.floor(y / pageH) + 1
+        let k = 0
+        while (k < geo.length - 1 && geo[k + 1].top <= y) k++
+        return k + 1
+      }
       const lr = L.getBoundingClientRect()
       const map: Record<number, number> = {}
       L.querySelectorAll('[data-opidx]').forEach((node) => {
@@ -869,9 +910,9 @@ function SplitDiffView({
         if (!el.classList.contains('diff-add') && !el.classList.contains('diff-del')) return
         const idx = Number(el.getAttribute('data-opidx'))
         const y = el.getBoundingClientRect().top - lr.top + L.scrollTop
-        map[idx] = Math.floor(y / pageH) + 1
+        map[idx] = pageOf(y)
       })
-      setTotalPages(Math.max(1, Math.ceil(L.scrollHeight / pageH)))
+      setTotalPages(geo ? geo.length : Math.max(1, Math.ceil(L.scrollHeight / pageH)))
       setDiffPages((prev) => {
         const mk = Object.keys(map)
         return (mk.length === Object.keys(prev).length && mk.every(k => prev[+k] === map[+k])) ? prev : map
@@ -881,7 +922,7 @@ function SplitDiffView({
     const t = setTimeout(compute, 400) // after fonts/pagination settle
     const ro = new ResizeObserver(() => compute()); ro.observe(L)
     return () => { cancelAnimationFrame(id); clearTimeout(t); ro.disconnect() }
-  }, [snapshot.id, diffZoom])
+  }, [snapshot.id, diffZoom, pageGeo])
 
   // Publish split position as a CSS variable so the parent can position the right nav.
   useEffect(() => {
@@ -891,19 +932,48 @@ function SplitDiffView({
   }, [splitPct, vertical])
 
   // Compute ops once; shared between both panes. resolveCitations:true → the diff shows the reader's
-  // "(Author, Year)" form, not the raw citekeys (the library is loaded on this route).
+  // "(Author, Year)" form, not the raw citekeys (the library is loaded on this route). Cache-through
+  // (diffCache): the scrub read-ahead precomputes these in idle time, so navigation is a cache hit.
   const ops = useMemo(() => {
-    if (!prevSnap) return null
-    const before = pmToText(prevSnap.contentJson, true)
-    const after  = pmToText(snapshot.contentJson, true)
-    // Split multi-paragraph changes at their returns → more, tighter bijection lock points.
-    return splitChangesAtReturns(diffWords(before, after))
+    return opsBetween(prevSnap, snapshot)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevSnap?.id, snapshot.id])
 
   // Keep a ref so imperative highlight helpers can read ops without stale closure
   const opsRef = useRef<DiffOp[] | null>(null)
   opsRef.current = ops
+
+  // ── Canonical gapped pages for the snapshot doc pane (staticPagination) ─────────────────────
+  // Runs pre-paint on every snapshot render: measures canonical breaks (cached as char offsets —
+  // revisits skip the forced reflows entirely), inserts the SAME gap widgets + sheet panels the
+  // live editor uses, and publishes the REAL page regions. Minimap + diff-panel page rules read
+  // pageGeo, so their numbers now come from the true canonical breaks (kills the √2 drift).
+  useLayoutEffect(() => {
+    const L = leftScrollRef.current
+    if (!L) return
+    let disposed = false
+    const run = () => {
+      if (disposed) return
+      pagRef.current?.destroy()
+      pagRef.current = paginateStaticDoc({
+        scroller: L,
+        cacheKey: `${snapshot.id}|${ops ? 'diff' : 'doc'}`,
+        onRepaint: (pages) => { if (!disposed) setPageGeo([...pages]) },
+      })
+      setPageGeo(pagRef.current ? [...pagRef.current.pages] : null)
+    }
+    run()
+    // Web fonts reflow the text after first paint → breaks move. Re-measure once ready (the spec
+    // cache keys on font status, so this measures fresh instead of reusing the pre-font entry).
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
+      document.fonts.ready.then(() => { if (!disposed) run() }).catch(() => { /* ignore */ })
+    }
+    return () => { disposed = true; pagRef.current?.destroy(); pagRef.current = null }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot.id, ops])
+  // Diff zoom reflows the pane (CSS zoom) — breaks are DOM positions and don't move, but the
+  // rendered band geometry does: reposition the panels + refresh pageGeo in the same commit.
+  useLayoutEffect(() => { pagRef.current?.repaint() }, [diffZoom])
 
   // ── Cross-pane highlight (injected CSS + data-attrs — zero React re-renders) ──
   // Inject once; CSS targets .diff-del / .diff-add spans that carry data-hover / data-active.
@@ -1251,7 +1321,8 @@ function SplitDiffView({
     const onResize = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(recompute) }
     window.addEventListener('resize', onResize)
     return () => { cancelAnimationFrame(rafId); window.removeEventListener('resize', onResize) }
-  }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx])
+  // pageGeo: the static paginator's gaps shift every diff's content-y — re-cache centres/knots after they land.
+  }, [snapshot.id, diffZoom, vertical, splitPct, sidePanelPx, pageGeo])
 
   // REVERSE SYNC (bijection): scrolling the DIFF panel maps the EDITOR to the inverse-bijection position
   // INSTANTLY — a true 1:1 bijection, no trailing. The DRIVER is simply whichever pane the CURSOR is over
@@ -1545,13 +1616,18 @@ function SplitDiffView({
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 'clamp(2px, 0.4vw, 6px)', zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'center' }}>
+      {/* LEFT-aligned to the pane edge (flex-start + left 0): the narrower toggles' left edges sit
+          flush against the diff panel's edge instead of floating centred under the wider counter. */}
+      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }}>
         {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
       <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
-        <Scroll phone={isPhone}><div style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
+        {/* key={snapshot.id}: each snapshot gets a FRESH subtree, so the static paginator's DOM
+            surgery (gap insertion splits text nodes) can never desync React's reconciliation —
+            React never patches inside a subtree it replaced wholesale. */}
+        <Scroll phone={isPhone}><div key={snapshot.id} style={{ zoom: diffZoom } as React.CSSProperties}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
       </div>
       {nav?.show && (<>
         <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
@@ -1595,7 +1671,7 @@ function SplitDiffView({
           ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
           : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
       </div>
-      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} midFrac={midFrac} />
+      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} midFrac={midFrac} pageGeo={pageGeo} />
     </div>
   )
   // Grid divider filling its template track. Same DOM element whether draggable (resize) or a fixed thin
@@ -1911,12 +1987,20 @@ export function SnapshotView() {
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
   const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
+  // ── Scrub read-ahead ──────────────────────────────────────────────────────────
+  // Precompute the ±20 window of adjacent-pair diffs around the current position in idle time
+  // (topped up every ~5 steps consumed — see diffCache), so a fast hard scrub hits only cache
+  // and every step paints instantly. One diff max per idle slot → never blocks the scrub input.
+  useEffect(() => {
+    preloadDiffWindow(allSnapshots, idx)
+  }, [allSnapshots, idx])
+  useEffect(() => () => cancelDiffPreload(), [])
+
   // Words added/removed vs the previous snapshot — now shown in the top header (not a bar over the diff).
+  // Reads the SAME cached ops the panes render (diffCache) — the diff used to be computed twice per step.
   const headerDiff = useMemo(() => {
     if (!snapshot || !prevSnap) return null
-    const before = pmToText(prevSnap.contentJson, true)
-    const after = pmToText(snapshot.contentJson, true)
-    return diffStats(diffWords(before, after))
+    return diffStats(opsBetween(prevSnap, snapshot) ?? [])
   }, [snapshot?.id, prevSnap?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // AI summary — now shown in the RHS side panel (no longer floating over the document).
