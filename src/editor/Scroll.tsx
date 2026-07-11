@@ -298,19 +298,105 @@ export function Scroll({
       const se = document.scrollingElement || document.documentElement
       return Math.max(1, se.scrollHeight - window.innerHeight)
     }
-    // Pinch state (phone): the gesture-START midpoint picks the anchor block; holding that element
-    // and correcting by its actual displacement keeps the pinched-on text stationary for the whole
-    // gesture (the same held-anchor rule as the wheel path, midpoint instead of viewport centre).
+    // Pinch state (phone): the gesture-START midpoint picks the anchor; holding it and correcting
+    // by its actual displacement keeps the pinched-on text stationary for the whole gesture (the
+    // same held-anchor rule as the wheel path, midpoint instead of viewport centre).
     let pinchDist = 0
     let pinchX = 0, pinchY = 0
-    // One STABLE anchor element per gesture. Re-picking under the viewport centre every frame made
-    // the anchor flip between elements at block boundaries, and the old correction pinned the picked
-    // element's TOP to the centre line (scrollTop += topAfter - anchorY) — with multi-step coalesced
-    // frames that per-frame snap compounded into a fast drift toward the doc top in BOTH directions.
-    // Instead: keep the element picked at gesture start and correct by its ACTUAL displacement
-    // (topAfter - topBefore), which holds the anchored text visually fixed for any zoom step size.
+    // One STABLE anchor per gesture — a TEXT POSITION (caret range), not a block top. Re-picking
+    // under the viewport centre every frame made the anchor flip between elements at block
+    // boundaries (drift toward the doc top in both directions — fixed 2026-07-09 by holding one
+    // element per gesture). But holding a BLOCK's TOP was still too coarse (Peter, 2026-07-11:
+    // "phone screen doesn't stay in fixed scroll position when zooming"): a font-zoom step scales a
+    // paragraph's height ≈ zoom² (line count × line height), so text N px into the block slides to
+    // N·zoom² while the block top sits perfectly pinned — on a phone one paragraph can exceed the
+    // screen, so the pinched-on words sailed off by hundreds of px (measured: 1300px over one
+    // gesture at the lattice cap). The anchor is now the CARET position at the pinch midpoint /
+    // cursor (caretRangeFromPoint), whose line-box rect tracks the exact content through any
+    // reflow; the block element is kept for connectivity checks and as the fallback when no text
+    // caret resolves (margins, gaps, empty paragraphs).
     let anchorEl: HTMLElement | null = null
+    let anchorNode: Node | null = null // text node of the caret anchor (null → block-top fallback)
+    let anchorOff = 0
     let anchorTop0 = 0 // the anchor's viewport top when picked — the gesture's PIN position
+    // Viewport top of a held anchor: the caret's line-box top when the text position is alive,
+    // else the block top, else null (both dead → caller falls back to the ratio correction).
+    // A skipped block (content-visibility mid-gesture) yields a degenerate 0×0 caret rect at the
+    // origin — fall through to the block-top placeholder box rather than trust it.
+    const anchorTopFor = (node: Node | null, off: number, block: HTMLElement | null): number | null => {
+      if (node && node.isConnected && node.nodeType === Node.TEXT_NODE) {
+        const len = (node as Text).length
+        if (len > 0) {
+          const o = Math.min(off, len - 1)
+          const r = document.createRange()
+          r.setStart(node, o)
+          r.setEnd(node, o + 1)
+          const rect = r.getBoundingClientRect()
+          if (rect.width !== 0 || rect.height !== 0) return rect.top
+        }
+      }
+      return block && block.isConnected ? block.getBoundingClientRect().top : null
+    }
+    const anchorTop = () => anchorTopFor(anchorNode, anchorOff, anchorEl)
+    // Resolve the content anchor at (x, y). Preferred: the CARET text position under the point
+    // (caretRangeFromPoint / caretPositionFromPoint), validated to sit in real editor text.
+    // Fallback: the old block probe — reject the big containers (.ProseMirror / .scroll-paper —
+    // they span the whole doc, so their top reflows toward the doc top and a correction against
+    // them lurches — the old "jump to top" bug) and the PAGE-GAP widgets/sheet chrome (their
+    // heights are pinned px that do NOT reflow with the font — the "funky near page gaps" bug).
+    // When the point falls in a gap/margin, probe outward until real text is found.
+    const pickAnchor = (x: number, y: number): void => {
+      anchorEl = null
+      anchorNode = null
+      const docAny = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+      }
+      const caret = docAny.caretRangeFromPoint
+        ? (() => { const r = docAny.caretRangeFromPoint!(x, y); return r ? { node: r.startContainer, offset: r.startOffset } : null })()
+        : docAny.caretPositionFromPoint
+          ? (() => { const p = docAny.caretPositionFromPoint!(x, y); return p ? { node: p.offsetNode, offset: p.offset } : null })()
+          : null
+      if (caret && caret.node.nodeType === Node.TEXT_NODE) {
+        const host = caret.node.parentElement
+        if (host && el.contains(host) && host.closest('.ProseMirror')
+          && !host.closest('.inkwave-page-gap') && !host.classList.contains('inkwave-page-gap-band')) {
+          const block = host.closest('.ProseMirror > *') as HTMLElement | null
+          if (block) {
+            anchorEl = block
+            anchorNode = caret.node
+            anchorOff = caret.offset
+            anchorTop0 = anchorTop() ?? 0
+            return
+          }
+        }
+      }
+      const pickAt = (py: number, strict: boolean): HTMLElement | null => {
+        const t = document.elementFromPoint(x, py) as HTMLElement | null
+        if (!t || !el.contains(t)) return null
+        if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
+        if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
+        if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
+        // STRICT pass: refuse blocks SPLIT by a page gap (a mid-paragraph break nests the fixed-px
+        // gap widget inside the block). Such a block's rect straddles the boundary, so as the text
+        // redistributes across it the top↔gap relationship warps and successive frame corrections
+        // alternate direction — the boundary-zoom flicker. Prefer a block fully inside one page.
+        if (strict && t.querySelector('.inkwave-page-gap')) return null
+        return t
+      }
+      // Probe the point first, then alternate above/below in growing steps — finds the nearest
+      // text block when the midline sits in a page gap. Two passes: strict (whole block inside
+      // one page), then lenient (a split block still beats the no-anchor ratio fallback).
+      for (const strict of [true, false]) {
+        anchorEl = pickAt(y, strict)
+        for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
+          if (anchorEl) break
+          anchorEl = pickAt(y + dy, strict)
+        }
+        if (anchorEl) break
+      }
+      if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
+    }
     // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the whole page about the VIEWPORT
     // CENTRE (Peter: "centre it around the centrepoint of screen" — the cursor position picks the
     // ZONE only, never the anchor). The wrapper box's rect IS the page's visual bounds (layout ≡
@@ -344,47 +430,28 @@ export function Scroll({
       applyMagnifyFrame()
       const net = Math.trunc(steps) // commit whole lattice steps; the fractional remainder carries
       steps -= net
-      if (!net) return
-      // Pick (or re-pick, if the node was destroyed) a TEXT block near the VIEWPORT CENTRE. Reject:
-      // the big containers (.ProseMirror / .scroll-paper — they span the whole doc, so their top
-      // reflows toward the doc top and a correction against them lurches — the old "jump to top"
-      // bug) and the PAGE-GAP widgets/sheet chrome (their heights are pinned px that do NOT reflow
-      // with the font, so anchoring against one warps the correction — the "funky near page gaps"
-      // bug). When the centre line falls inside a gap, probe outward until real text is found, so
-      // the anchor is effectively the nearest text above/below the gap.
       const vr = el.getBoundingClientRect()
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
       const anchorY = phone ? pinchY : vr.top + vr.height / 2
-      const pickAt = (y: number, strict: boolean): HTMLElement | null => {
-        const t = document.elementFromPoint(anchorX, y) as HTMLElement | null
-        if (!t || !el.contains(t)) return null
-        if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
-        if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
-        if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
-        // STRICT pass: refuse blocks SPLIT by a page gap (a mid-paragraph break nests the fixed-px
-        // gap widget inside the block). Such a block's rect straddles the boundary, so as the text
-        // redistributes across it the top↔gap relationship warps and successive frame corrections
-        // alternate direction — the boundary-zoom flicker. Prefer a block fully inside one page.
-        if (strict && t.querySelector('.inkwave-page-gap')) return null
-        return t
-      }
-      if (!anchorEl || !anchorEl.isConnected) {
-        // Probe the centre first, then alternate above/below in growing steps — finds the nearest
-        // text block when the midline sits in a page gap. Two passes: strict (whole block inside
-        // one page), then lenient (a split block still beats the no-anchor ratio fallback).
-        for (const strict of [true, false]) {
-          anchorEl = pickAt(anchorY, strict)
-          for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
-            if (anchorEl) break
-            anchorEl = pickAt(anchorY + dy, strict)
-          }
-          if (anchorEl) break
+      if (!net) {
+        // No step committed this frame — but a native pan that survived the pinch suppression (a
+        // scroll that began before the second finger landed is NON-CANCELABLE on iOS, so the
+        // touchmove preventDefault can't stop it) can still drag the viewport mid-pinch. While the
+        // gesture holds an anchor pin, re-pin it every frame so the pinched-on content cannot
+        // drift between lattice commits.
+        if (pinchDist && zoomLiveEd) {
+          const t = anchorTop()
+          if (t != null && Math.abs(t - anchorTop0) > 0.5) setScrollTop(getScrollTop() + (t - anchorTop0))
         }
-        if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
+        return
       }
+      // Pick (or re-pick, if the node was destroyed) the content anchor under the pinch midpoint /
+      // viewport centre (phone picks at touchstart; this is the desktop first-commit pick and the
+      // dead-anchor re-pick).
+      if (!anchorEl || !anchorEl.isConnected) pickAnchor(anchorX, anchorY)
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
       const ratio = getScrollTop() / scrollRange()
-      const topBefore = anchorEl ? anchorEl.getBoundingClientRect().top : 0 // at the CURRENT size
+      const topBefore = anchorTop() ?? 0 // at the CURRENT size
       // LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but
       // every reachable level is a shared lattice point the pagination step cache can precompute).
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
@@ -414,8 +481,8 @@ export function Scroll({
       const mag = getMagnify()
       if (mag !== 1 && magnifyBoxRef.current && paperElRef.current)
         magnifyBoxRef.current.style.height = `${paperElRef.current.offsetHeight * mag}px`
-      if (anchorEl && anchorEl.isConnected) {
-        const topAfter = anchorEl.getBoundingClientRect().top // forces synchronous layout at the new size
+      const topAfter = anchorTop() // forces synchronous layout at the new size
+      if (topAfter != null) {
         // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
         // content-visibility placeholder set re-evaluates between frames (scroll corrections move
         // the viewport), and per-frame displacement correction PRESERVES that inter-frame drift
@@ -443,16 +510,15 @@ export function Scroll({
         // the text lurch), but the gaps + sheet panels were measured at the OLD font size and sit
         // misaligned with the reflowed text. One clean re-measure now — and we re-anchor the viewport
         // around it (same held-anchor logic) so the adjustment doesn't move the text you're reading.
-        const held = anchorEl && anchorEl.isConnected ? anchorEl : null
-        anchorEl = null // gesture over → next gesture picks a fresh anchor under the centre
-        const topBeforeMeasure = held ? held.getBoundingClientRect().top : 0
+        const heldNode = anchorNode, heldOff = anchorOff, heldEl = anchorEl
+        anchorEl = null; anchorNode = null // gesture over → next gesture picks a fresh anchor
+        const topBeforeMeasure = anchorTopFor(heldNode, heldOff, heldEl)
         const onMeasured = () => {
           window.removeEventListener('inkwave:pagination-measured', onMeasured)
           requestAnimationFrame(() => { // re-anchor is a zoom correction too — inside the hold window
-            if (held && held.isConnected) {
-              const topAfterMeasure = held.getBoundingClientRect().top
+            const topAfterMeasure = anchorTopFor(heldNode, heldOff, heldEl)
+            if (topBeforeMeasure != null && topAfterMeasure != null)
               setScrollTop(getScrollTop() + (topAfterMeasure - topBeforeMeasure))
-            }
           })
         }
         window.addEventListener('inkwave:pagination-measured', onMeasured)
@@ -572,15 +638,21 @@ export function Scroll({
       // ENTRY BRACKET: switching blocks above the viewport to placeholder heights SHIFTS the
       // content the user is looking at — visible as a jump the instant a gesture starts (and it
       // poisoned the anchor pin, which would hold the SHIFTED position for the whole gesture).
-      // Hold the block at the gesture's anchor point still across the switch, same task.
-      const ref = document.elementFromPoint(ax, ay)?.closest('.ProseMirror > *') as HTMLElement | null
-      const before = ref ? ref.getBoundingClientRect().top : 0
+      // Hold the content at the gesture's anchor point still across the switch, same task —
+      // through the shared content anchor when one is picked (phone touchstart / desktop first
+      // commit pick it before entering), else a block ref under the point.
+      const anchored = anchorTop()
+      const ref = anchored == null
+        ? document.elementFromPoint(ax, ay)?.closest('.ProseMirror > *') as HTMLElement | null
+        : null
+      const before = anchored ?? (ref ? ref.getBoundingClientRect().top : 0)
       ed.style.setProperty('--iw-cis', `${Math.max(24, Math.round(sum / ed.children.length))}px`)
       ed.classList.add('iw-zoom-live')
       zoomLiveEd = ed
-      if (ref) {
-        const after = ref.getBoundingClientRect().top // forces the skipped layout now, pre-paint
-        setScrollTop(getScrollTop() + (after - before))
+      if (anchored != null || ref) {
+        // forces the skipped layout now, pre-paint
+        const after = anchored != null ? anchorTop() : ref!.getBoundingClientRect().top
+        if (after != null) setScrollTop(getScrollTop() + (after - before))
       }
     }
     const exitZoomLive = () => {
@@ -588,23 +660,23 @@ export function Scroll({
       if (!ed) return
       zoomLiveEd = null
       // Re-anchoring bracket: skipped blocks held placeholder heights; un-skipping lays them out
-      // at the committed zoom, displacing everything below — pin the held anchor back to its
-      // gesture-start viewport top in the same task so the anchored text never jumps.
-      const held = anchorEl && anchorEl.isConnected ? anchorEl : null
+      // at the committed zoom, displacing everything below — pin the held content anchor back to
+      // its gesture-start viewport top in the same task so the anchored text never jumps.
       ed.classList.remove('iw-zoom-live')
       ed.style.removeProperty('--iw-cis')
-      if (held) {
-        const after = held.getBoundingClientRect().top // forces the full relayout now, pre-paint
-        setScrollTop(getScrollTop() + (after - anchorTop0))
-      }
+      const after = anchorTop() // forces the full relayout now, pre-paint
+      if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
     }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
       pinchDist = touchDist(e.touches)
       pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
-      anchorEl = null // fresh gesture → applyFrame anchors the text block under THIS midpoint
       steps = 0
+      // Fresh gesture → anchor the TEXT POSITION under THIS midpoint, from the pre-gesture
+      // layout (before the live window's placeholder switch), so the pin holds exactly what the
+      // fingers grabbed for the whole gesture.
+      pickAnchor(pinchX, pinchY)
       // Hold from the FIRST touch (not the first commit): a queued SCAS tick landing mid-pinch
       // rebuilds the touched paragraph and the gesture dies on the detached node (iOS dispatches
       // a pinch's touchmoves to the ORIGINAL target). Cleared by the settle, or at touchend on a

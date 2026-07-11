@@ -1125,9 +1125,17 @@ function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): vo
 // Dashes recalculate on zoom settle (positions, art, schedules AND the static subset).
 function regenDashes(): void {
   if (!defs || !hosts.size) return
+  pruneHosts()
+  // PHONE zoom-settle lag (2026-07-11): at rest no phone surface mounts dashes (waves exist only
+  // during load — Scroll passes dashes: !phone || waveMode !== 'off'), yet genList rasterised a
+  // full viewport of fresh dash art (2 canvas PNG encodes per dash) on EVERY pinch settle — pure
+  // main-thread waste at the exact moment the fingers lift. Regenerate only when some host is
+  // actually showing dashes; desktop (always-mounted water) is unchanged.
+  let mounted = false
+  for (const h of hosts.values()) if (h.dashes) { mounted = true; break }
+  if (!mounted) return
   const rnd = mulberry32((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0)
   defs.dashes = genList(rnd, 'dashes')
-  pruneHosts()
   for (const [host, h] of hosts) if (h.dashes) remount(host, h, 'dashes')
 }
 
