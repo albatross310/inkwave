@@ -90,11 +90,17 @@ async function openInkwaveFileInner(
   applyViewSettings((data as { viewSettings?: Record<string, string> }).viewSettings)
 
   const now = new Date().toISOString()
+  // The bundle's cited library entries (portability extra) — restored into bibProvider below, and
+  // ALSO embedded as doc.bibliography so the OPFS copy is SELF-CONTAINED: doc.bibliography is the
+  // documented offline-resolution source for in-text citations (resolve.ts), and a device whose
+  // library write fails (the iOS dead-worker history) must still resolve them at the next boot.
+  const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
     schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: uuidv4(),
     // Restore the signed receipt chain from the bundle so the ReceiptPanel shows history.
     ...(data.receipts?.length ? { scasReceipts: data.receipts } : {}),
+    ...(bib?.length ? { bibliography: { source: 'library' as const, entries: bib, generatedAt: now } } : {}),
   })
   // Persist — but a persistence failure must NOT abort the open. The parsed doc is in hand and
   // travels in the open-doc event, so the writer can still read/work with it; failing here used to
@@ -126,7 +132,6 @@ async function openInkwaveFileInner(
   // Restore the embedded citation library (+ any embedded PDFs) AFTER the document is showing —
   // this used to run before the reveal and was most of the wait on PDF-heavy bundles. bibProvider
   // is reactive, so citations resolve the moment the library lands; PDFs/sidecars stream in behind.
-  const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
   const pdfs = (data as { pdfs?: Record<string, { name: string; data: string }> }).pdfs
   if (bib?.length || pdfs) {
     void (async () => {

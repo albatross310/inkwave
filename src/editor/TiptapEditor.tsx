@@ -75,7 +75,7 @@ import { CiteAutocomplete } from '../components/CiteAutocomplete'
 import { CitationPanel } from '../components/CitationPanel'
 import { PdfSidePanel } from '../components/PdfSidePanel'
 import { Toast } from '../components/Toast'
-import { loadLibrary } from '../citations/library'
+import { loadLibrary, persistLibrary } from '../citations/library'
 import { bibProvider } from '../citations/bibProvider'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
@@ -347,10 +347,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [shareCapture, setShareCapture] = useState<string | null>(null)
 
   // Hydrate the native citation library (OPFS) and seed the render bus with the doc's style.
+  // THEN fill any citekeys the device library lacks from the doc's own embedded bibliography —
+  // the documented offline-resolution source (resolve.ts). A phone whose library file never
+  // persisted (the iOS dead-worker OPFS history / Safari eviction) otherwise boots with an EMPTY
+  // bibProvider and every in-text citation renders as an unresolved red "?key" with no tappable
+  // hook (Peter's 2026-07-11 phone report). Library entries win (fresher verify metadata); the
+  // heal is persisted so the next boot resolves from the library file directly.
   useEffect(() => {
-    loadLibrary().catch(() => {})
+    void loadLibrary().catch(() => {}).then(() => {
+      const embedded = docRef.current.bibliography?.entries ?? []
+      const missing = embedded.filter((it) => !bibProvider.get(it.id))
+      for (const it of missing) bibProvider.upsert(it, 'library')
+      if (missing.length) void persistLibrary().catch(() => {}) // best-effort — resolution already works in-memory
+    })
     setCitationStyleBus(doc.citationStyle ?? 'apa')
-  }, [doc.citationStyle])
+  }, [doc.citationStyle]) // eslint-disable-line react-hooks/exhaustive-deps -- docRef is the stable mirror
 
   // Listen for citations handed over by the Inkwave browser extension (Phase 2 bridge).
   useEffect(() => startExtensionChannel(), [])
