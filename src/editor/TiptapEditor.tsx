@@ -504,6 +504,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }
   }
   const [selectionEmpty, setSelectionEmpty] = useState(true)
+  // Mirror of "the selection is a single atom node (citation/refList/math)" — those own their own
+  // popovers, so the TEXT style bar must not summon for them. State (not a render-time
+  // editor.state read): the editor no longer re-renders per transaction (see useEditor options).
+  const [selIsAtomNode, setSelIsAtomNode] = useState(false)
 
   // Ref to the relative container div — passed to ThesaurusPopover for accurate positioning.
   const containerRef = useRef<HTMLDivElement>(null)
@@ -546,6 +550,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
   const editor = useEditor({
+    // RE-RENDER STORM FIX (2026-07-11, the ablation's #1 keystroke cost): @tiptap/react's legacy
+    // default re-renders the OWNING component on EVERY transaction — every keystroke, caret move,
+    // SCAS repaint and pagination meta re-ran this whole ~2,500-line tree (footer, panels, menus).
+    // With it off, re-renders happen only when React state actually changes. Everything the render
+    // body used to read live off editor.state is mirrored into state by the selection-tracking
+    // effect below (selectionEmpty + selIsAtomNode); StyleBar/ReviewBar self-subscribe.
+    shouldRerenderOnTransaction: false,
     extensions: [
       StarterKit,
       Highlight.configure({ multicolor: true }),
@@ -812,8 +823,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // (empty selection) but stays up when text is selected so it can be formatted.
   useEffect(() => {
     if (!editor) return
-    const upd = () => setSelectionEmpty(editor.state.selection.empty)
-    const onSel = () => setSelectionEmpty(editor.state.selection.empty)
+    const upd = () => {
+      setSelectionEmpty(editor.state.selection.empty)
+      const n = (editor.state.selection as unknown as { node?: { type: { name: string } } }).node
+      setSelIsAtomNode(!!n && ['citation', 'referenceList', 'mathInline', 'mathBlock'].includes(n.type.name))
+    }
+    const onSel = upd
     // Also track native browser selection changes — iOS long-press doesn't always fire
     // Tiptap's selectionUpdate, so we read the DOM selection directly.
     const onNativeSel = () => {
@@ -1068,15 +1083,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
   // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
-  // Phone: the readout lives behind the ◈ panel (controlled `receiptOpen` on touch), so while it's
-  // CLOSED we don't count AT ALL — the O(doc) string build + unicode regex + the editor-shell
-  // re-render otherwise landed in every 1s inter-word pause (input priority #1). Opening the panel
-  // counts immediately (the effect re-runs on receiptOpen) and keeps counting at 1s while open.
-  // Desktop is untouched: receiptOpen never flips there (ReceiptPanel manages its own open state).
+  // The readout only renders INSIDE the open ◈ panel (ReceiptPanel is controlled on all platforms
+  // now), so while it's CLOSED we don't count AT ALL — the O(doc) string build + unicode regex +
+  // the editor-shell re-render otherwise landed in every typing pause (desktop counted every 300ms
+  // of a 100-page doc for a hidden number — 2026-07-11 ablation). Opening the panel counts
+  // immediately (the effect re-runs on receiptOpen) and keeps counting while open.
   useEffect(() => {
     if (!editor) return
     const touch = isTouchDevice()
-    if (touch && !receiptOpen) return
+    if (!receiptOpen) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const count = () => { const m = editor.getText().match(/[\p{L}\p{N}]+/gu); setWordCount(m ? m.length : 0) }
     const delay = touch ? 1000 : 300
@@ -1971,13 +1986,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // A single atom node (citation / reference list / math) selected via click-hold shouldn't summon the
   // TEXT formatting bar — those have their own popovers (e.g. the citation locator card). Treat that as
-  // "no text selection" for the style bar.
-  const selNode = (editor?.state.selection as unknown as { node?: { type: { name: string } } } | undefined)?.node
-  const selIsAtomNode = !!selNode && ['citation', 'referenceList', 'mathInline', 'mathBlock'].includes(selNode.type.name)
+  // "no text selection" for the style bar. (selIsAtomNode is state, mirrored by the selection effect —
+  // the render body must not read editor.state now that per-transaction re-renders are off.)
   // On phone with keyboard up + text selected: show ONLY the style bar (not the full toolbar).
   // styleBarOpen keeps the main row alive while the user is actively formatting.
   const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty && !selIsAtomNode
-  const selectionOnDesktop = !isTouch && !!(editor?.state.selection && !editor.state.selection.empty) && !selIsAtomNode
+  const selectionOnDesktop = !isTouch && !!editor && !selectionEmpty && !selIsAtomNode
   // The main row no longer retracts while typing on phone — the footer hugs the keyboard instead
   // (the --iw-kb-offset tracker above), so it stays visible and usable the whole time.
   const showMainRow = true
@@ -2057,8 +2071,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           onVerifyChain={verifyReceiptChain}
           wordCount={wordCount}
           compact={isTouch}
-          open={isTouch ? receiptOpen : undefined}
-          onOpenChange={isTouch ? setReceiptOpen : undefined}
+          open={receiptOpen}
+          onOpenChange={setReceiptOpen}
           hideTrigger={isTouch || keyboardUp}
         />
 
