@@ -6,6 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
+import { notePerf } from './perflog'
 import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
@@ -557,6 +558,7 @@ export function Scroll({
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
       const next = stepToZoom(stepNext)
       if (next === editorZoomRef.current) return // pinned at a lattice bound — nothing to apply
+      const commitT0 = performance.now() // perflog zoom-commit: reflow + anchor + bands, this task
       // Pin pagination's RO-driven painters for the whole gesture (per-frame LIVE repositioning
       // lagged the reflowing text 1–2 frames — the page-boundary up/down flicker). The step cache
       // below replaces live repositioning with instant precomputed geometry; the RO path stays
@@ -602,6 +604,7 @@ export function Scroll({
         if (!phone) el.scrollLeft = keepLeft
       }
       editorZoomRef.current = next
+      notePerf('zoom-commit', performance.now() - commitT0)
       if (settle) clearTimeout(settle)
       settle = setTimeout(function settleFn() {
         // Fingers still down = the gesture is NOT over (a paused pinch) — settling now would tear
@@ -822,6 +825,7 @@ export function Scroll({
     const exitZoomLive = () => {
       const ed = zoomLiveEd
       if (!ed) return
+      const exitT0 = performance.now() // perflog zoom-exit: un-skip relayout + atomic band re-derive
       zoomLiveEd = null
       if (guardRaf) { cancelAnimationFrame(guardRaf); guardRaf = 0 }
       // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
@@ -842,6 +846,7 @@ export function Scroll({
       // sheet min-height lands first (scroll-range clamp order).
       window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
       if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
+      notePerf('zoom-exit', performance.now() - exitT0)
     }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return

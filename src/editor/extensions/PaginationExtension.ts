@@ -659,28 +659,31 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const readBands = (): BandGeo | null => {
             if (!sheet || !layer) return null
             const s = scaleFor(sheet)
-            const sheetTop = sheet.getBoundingClientRect().top
+            const sheetR = sheet.getBoundingClientRect()
             const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
             const tops: number[] = []
             const heights: number[] = []
             for (const band of bands) {
               const r = band.getBoundingClientRect()
-              tops.push((r.top - sheetTop) / s)
+              tops.push((r.top - sheetR.top) / s)
               heights.push(r.height / s)
             }
-            // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
-            // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
-            // (taller) panels held the old height and every repaint re-measured its own stale
-            // extent — a self-sustaining fixpoint ("space below the page never retracts", gapped
-            // only, cleared by refresh/toggle because those rebuild the layer). Hiding the layer
-            // for one read costs one reflow per (debounced) paint pass. The full-final-page
-            // min-height (applyBands) is neutralized for the same reason — it would ratchet.
-            layer.style.display = 'none'
-            const prevMin = sheet.style.minHeight
-            sheet.style.minHeight = ''
-            const total = sheet.scrollHeight
-            sheet.style.minHeight = prevMin
-            layer.style.display = ''
+            // SINGLE-PASS content height (round-4, Peter: "zoom is slow now"): the old read hid
+            // the panel layer + cleared minHeight to take sheet.scrollHeight — a SECOND forced
+            // full layout on every paint pass, cache miss and atomic exit. Same rule
+            // staticPagination already proved (2026-07-12 swipe round): derive the content extent
+            // from the IN-FLOW children's rects in the SAME layout pass as the band reads. The
+            // absolutely-positioned panel layer is skipped explicitly, so its full-final-page
+            // extension can't ratchet the measure, and minHeight never enters a rect read (the
+            // old ratchet fixpoints stay impossible by construction).
+            let bottom = sheetR.top
+            for (const c of Array.from(sheet.children) as HTMLElement[]) {
+              if (c === layer) continue
+              const r = c.getBoundingClientRect()
+              if (r.bottom > bottom) bottom = r.bottom
+            }
+            const padB = parseFloat(getComputedStyle(sheet).paddingBottom) || 0
+            const total = (bottom - sheetR.top) / s + padB
             return { tops, heights, total }
           }
           // Position panels at every region NOT covered by a gap band: [0..band0], [band0..band1], …
@@ -837,7 +840,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const bumpQuiet = (ms: number) => {
             quietUntil = Math.max(quietUntil, performance.now() + ms)
           }
-          const onPreActivity = () => bumpQuiet(1500)
+          const onPreActivity = () => {
+            bumpQuiet(1500)
+            // CANCEL the zoom-scoped warm on any input (round-4, Peter: "scrolling is jittery"):
+            // each warm step is a full-document hypothetical reflow — running them under a
+            // scroll/keystroke is exactly the jank Peter felt. The 150ms grace exempts the
+            // settle's OWN scroll events (the atomic exit's correction fires 'scroll' right
+            // after zoomCb opens the window); anything later is a real user input.
+            if (performance.now() > zoomWarmStart + 150) zoomWarmUntil = 0
+          }
           const onPreChoreo = () => bumpQuiet(3000)
           const PRE_ACT_EVS = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
           const PRE_CHOREO_EVS = ['inkwave:open-begin', 'inkwave:reveal-imminent', 'inkwave:editor-revealed'] as const
@@ -854,6 +865,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // settle frames hit, without the full-lattice reflow burst on every settle. The full
           // lattice still warms at genuine idle, exactly as before.
           let zoomWarmUntil = 0
+          let zoomWarmStart = 0 // grace anchor: inputs within 150ms of the settle are our own
           const ZOOM_WARM_RADIUS = 5
           const preBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
@@ -1260,22 +1272,22 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // pass that repositions the sheet panels/bands against the REFLOWED live text, which IS
           // zoom-dependent. Scroll.tsx re-anchors the viewport around it (pagination-measured).
           //
-          // PHONE (2026-07-11, "iPhone lags ~500ms after finishing zooming"): the forced
-          // re-measure is pure VERIFICATION there — canonical breaks cannot move with zoom by
-          // construction — but it costs THREE full-document forced reflows (gap-clear → canonical
-          // A4/desktop-font context → restore) right as the fingers lift, on top of the live
-          // window's own un-skip relayout. The panels only need truing against the reflowed text:
-          // paint() (one live band read + style writes) does exactly that. Desktop keeps the
-          // cheap-enough verify + the step-cache warm-up (precompute never runs on phone anyway).
+          // BOTH PLATFORMS defer everything heavy off the settle (round-4, Peter: "text reflow
+          // should be no slower than before; pages painted instantly from the math"):
+          // canonical breaks cannot move with zoom by construction, and the ATOMIC EXIT already
+          // applied full-regime band geometry in the exit task — so the settle needs NO immediate
+          // measure and NO immediate paint. The full verify re-measure runs at genuine idle
+          // (scheduleIdleFull — input-gated, cancelled by any activity), and the zoom-scoped
+          // step-cache warm runs in the same quiet gaps (cancelled on input via onPreActivity;
+          // desktop only — precompute never runs on phone).
           const zoomCb = () => {
             if (destroyed) return
             liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next pinch
-            if (phoneLike()) { if (gapped && sheet && layer) schedulePaint(); return }
-            // Idle-after-settle warm (zoom-scoped — see zoomWarmUntil): the settle pause is the
-            // one guaranteed input gap in a zoom session; warm the neighbouring steps now so the
-            // next notches' exit/settle frames apply cached geometry instead of measuring.
-            zoomWarmUntil = performance.now() + 2000
-            forceRecompute(); schedulePrecompute(250)
+            if (phoneLike()) return // exit already applied bands; nothing settles-time on phone
+            zoomWarmStart = performance.now()
+            zoomWarmUntil = zoomWarmStart + 2000
+            scheduleIdleFull(600)
+            schedulePrecompute(250)
           }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           // PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical
