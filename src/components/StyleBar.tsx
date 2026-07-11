@@ -14,15 +14,22 @@ const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 
 const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 const HOLD_MS = 175        // ms before a press becomes a long-press
 
+// MATH-CERTIFIED FONTS ONLY (2026-07-12, round-7, Peter's call: "test all the fonts independently
+// and if some perform badly we replace them with better fonts"). The old system-font entries
+// (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) had DEVICE-DEPENDENT metrics — they could
+// never be math-certified for the upcoming arithmetic layout engine, and they were already a quiet
+// hole in cross-device canonical pagination (a marked run wrapped differently on phone vs desktop
+// vs print). Every family below is SELF-HOSTED (public/fonts, fetch-fonts.mjs) → identical metrics
+// everywhere. Legacy docs with old marks still render: each css string keeps the old system stack
+// as its fallback tail, and an old mark's own stack resolves exactly as before (no @font-face ever
+// existed for those names).
 const FONTS = [
-  { label: 'Fell',        css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
-  { label: 'Garamond',    css: "'EB Garamond', Georgia, serif" },
-  { label: 'Times',       css: "'Times New Roman', Times, serif" },
-  { label: 'Cambria',     css: "Cambria, Georgia, serif" },
-  { label: 'Georgia',     css: "Georgia, serif" },
-  { label: 'Palatino',    css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
-  { label: 'Baskerville', css: "'Baskerville Old Face', Baskerville, 'Book Antiqua', serif" },
-  { label: 'Sans',        css: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { label: 'Fell',     css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
+  { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
+  { label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
+  { label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
+  { label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
+  { label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
 ]
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
