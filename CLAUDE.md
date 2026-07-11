@@ -213,6 +213,22 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     07-10 flip). Perf probes: `probePerf` (perflog.ts) feeds window.__iwPerf when a harness
     defines it — zero cost otherwise; per-step timings for /snapshot live in SnapshotView +
     staticPagination.
+  ROUND 2 (2026-07-12, Peter's live phone test):
+  - HOLD-TO-ARM SCRUB: a plain flick steps EXACTLY ONE version regardless of distance; the
+    multi-snap position scrubber (FIRST/REST detents + fling coalescing) only arms when the
+    finger held ~280ms mostly still BEFORE the decisive move. Keep the arming check at
+    decisive-move time (elapsed since touchstart), not at touchstart.
+  - PHONE bottom bar owns everything: no version/"draft" label next to ◈ (date only), narrowed
+    Off + L←R toggles IN the bar (snapMode/bijMode state lives in SnapshotView now, passed down),
+    actions right-aligned with ⇥ bgst Δ + ← edit at the right end (flex `order` 8/9), NO Verify
+    button on phone, and the version pill floats over the side↔diff boundary (shares the d2 grid
+    track, pointer-events none). Desktop layout unchanged.
+  - Longtask fixes (keep): DocLayer's run() must clear the deferred warm timer (activation
+    between warm-mount and its +150ms pagination double-paginated the layer); staticPagination's
+    readBands computes total from the ROOT's rect + sheet padding in the SAME layout pass as the
+    band rects — never re-hide the panel layer / clear minHeight to read scrollHeight (that
+    forced 2 extra full re-layouts per band repaint); the layer-window LRU touch is a no-op when
+    the active id is already most-recent.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
