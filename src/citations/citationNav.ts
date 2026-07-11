@@ -184,28 +184,43 @@ export function occurrencePages(key: string, count: number): Array<{ occ: number
   return out
 }
 
+// ── Shared per-document citation index ──────────────────────────────────────
+// Every helper below used to run its own full doc.descendants walk — and they're called per
+// citation node view + per reference-list entry in the debounced post-typing rebuilds, so a
+// citation-heavy 100-page doc paid dozens of full-tree walks per typing pause (the 2026-07-11
+// typing-lag ablation). PM docs are persistent structures (same reference ⇔ unchanged), so ONE
+// memoised walk per document version serves them all; each helper then iterates only the ~dozens
+// of citation nodes. Results are byte-identical to the per-call walks (document order preserved).
+let _citeIndex: { doc: PMNode; nodes: Array<{ node: PMNode; pos: number }> } | null = null
+function citationNodes(doc: PMNode): Array<{ node: PMNode; pos: number }> {
+  if (!_citeIndex || _citeIndex.doc !== doc) {
+    const nodes: Array<{ node: PMNode; pos: number }> = []
+    doc.descendants((node, pos) => { if (node.type.name === 'citation') nodes.push({ node, pos }) })
+    _citeIndex = { doc, nodes }
+  }
+  return _citeIndex.nodes
+}
+
 /** Each in-text occurrence's pinpoint quote (the sentence linked from the source PDF), in document
  *  order — so a back-ref can preview the first few words to remind the reader which citation it is. */
 export function occurrenceQuotes(doc: PMNode, key: string): string[] {
   const quotes: string[] = []
-  doc.descendants(node => {
-    if (node.type.name !== 'citation') return
+  for (const { node } of citationNodes(doc)) {
     for (const k of (node.attrs.citekeys as string[]) ?? []) {
       if (k === key) quotes.push((node.attrs.quote as string) || '')
     }
-  })
+  }
   return quotes
 }
 
 /** Total in-text occurrences per citekey across the whole document, in order. */
 export function occurrenceCounts(doc: PMNode): Map<string, number> {
   const counts = new Map<string, number>()
-  doc.descendants(node => {
-    if (node.type.name !== 'citation') return
+  for (const { node } of citationNodes(doc)) {
     for (const k of (node.attrs.citekeys as string[]) ?? []) {
       counts.set(k, (counts.get(k) ?? 0) + 1)
     }
-  })
+  }
   return counts
 }
 
@@ -232,14 +247,13 @@ export function locatorPages(loc: string): number[] {
 /** All distinct page numbers cited for a source across the document (from citation locators), sorted. */
 export function citedPages(doc: PMNode, key: string): number[] {
   const set = new Set<number>()
-  doc.descendants(node => {
-    if (node.type.name !== 'citation') return
+  for (const { node } of citationNodes(doc)) {
     const keys = (node.attrs.citekeys as string[]) ?? []
-    if (!keys.includes(key)) return
+    if (!keys.includes(key)) continue
     const loc = node.attrs.locator as string | null
-    if (!loc) return
+    if (!loc) continue
     for (const [a, b] of parseRanges(loc)) for (let p = a; p <= Math.min(b, a + 999); p++) set.add(p)
-  })
+  }
   return [...set].sort((x, y) => x - y)
 }
 
@@ -265,15 +279,23 @@ export function formatPages(nums: number[]): string {
   return parts.join(', ')
 }
 
-/** Occurrence index (1-based) of each citekey AT the citation node located at `targetPos`. */
+/** Occurrence index (1-based) of each citekey AT the citation node located at `targetPos`.
+ *  MEMOISED per document version (PM docs are persistent — same reference ⇔ unchanged content):
+ *  every CitationNodeView calls this in its debounced label rebuild, so a citation-heavy doc paid
+ *  `citations × O(doc)` full-tree walks per typing pause (2026-07-11 typing-lag ablation). One
+ *  shared walk now serves all views; per-position results are byte-identical to the old walk. */
+let _occCache: { doc: PMNode; byPos: Map<number, Map<string, number>> } | null = null
 export function occurrencesAt(doc: PMNode, targetPos: number): Map<string, number> {
-  const counts = new Map<string, number>()
-  const result = new Map<string, number>()
-  doc.descendants((node, pos) => {
-    if (node.type.name !== 'citation') return
-    const keys = (node.attrs.citekeys as string[]) ?? []
-    for (const k of keys) counts.set(k, (counts.get(k) ?? 0) + 1)
-    if (pos === targetPos) for (const k of keys) result.set(k, counts.get(k) as number)
-  })
-  return result
+  if (!_occCache || _occCache.doc !== doc) {
+    const counts = new Map<string, number>()
+    const byPos = new Map<number, Map<string, number>>()
+    for (const { node, pos } of citationNodes(doc)) {
+      const keys = (node.attrs.citekeys as string[]) ?? []
+      const at = new Map<string, number>()
+      for (const k of keys) { const n = (counts.get(k) ?? 0) + 1; counts.set(k, n); at.set(k, n) }
+      byPos.set(pos, at)
+    }
+    _occCache = { doc, byPos }
+  }
+  return _occCache.byPos.get(targetPos) ?? new Map<string, number>()
 }

@@ -152,12 +152,18 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
 
   const ping = () => onActivity?.()
 
+  // Re-render (for the isActive button states) only while the bar is actually VISIBLE. The bar
+  // stays mounted inside the collapsed footer row, and this per-transaction force-update was a
+  // full re-render of the whole bar on EVERY keystroke while hidden (typing-lag ablation,
+  // 2026-07-11). Re-opening forces one refresh via the [barVisible] dep re-running the effect.
   useEffect(() => {
+    if (!barVisible) return
     const upd = () => force(n => n + 1)
+    upd() // refresh active states the moment the bar becomes visible
     editor.on('selectionUpdate', upd)
     editor.on('transaction', upd)
     return () => { editor.off('selectionUpdate', upd); editor.off('transaction', upd) }
-  }, [editor])
+  }, [editor, barVisible])
 
   // Highlight should never extend to newly typed text — clear it from stored marks whenever
   // the cursor lands anywhere, so typing always starts without an ambient highlight.

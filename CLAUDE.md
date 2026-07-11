@@ -351,6 +351,21 @@ write shim, so metadata can say a PDF exists with no local bytes).
   the first move). Pinch suppression = that preventDefault + gesture events + touch-action.
 - iPadOS masquerades as macOS (detect via maxTouchPoints); GIS popups need pre-loaded clients so
   requestAccessToken runs inside the tap's transient activation.
+- **The footer toolbar is slaved to the VISUAL viewport by transform (2026-07-11).** iOS never
+  resizes the layout viewport for the keyboard — it shrinks/pans the visual viewport, and WebKit
+  composites keyboard-up pans WITHOUT re-running layout, so a layout-property lift (`bottom`) on
+  the fixed wrapper doesn't apply mid-pan: the bar floated "all over the shop". The dock
+  (`editor/toolbarDock.ts`, unit-tested against a stubbed vv) writes `translate3d(0,-off,0)` on
+  the wrapper per frame while geometry moves (sync write on each vv resize/scroll + rAF follow
+  loop for momentum tails + 500ms drift watchdog); `--iw-kb-offset` carries the same value for
+  the scroll-padding reserve. PM's scrollThreshold/scrollMargin stay toolbarH + 28 ONLY:
+  prosemirror-view's windowRect bottom is ALREADY visualViewport.height, so a kb-inclusive PM
+  reserve double-counts the keyboard (probed: +180px over-scroll then −84px pull-back on
+  alternating Enters — a screen bounce per keystroke). Programmatic caret
+  reveals (keepCaret) are FORBIDDEN while the geometry is moving (`isSettled()` false) — they
+  fight iOS's own focus pan (the tap-to-type double-jump); the dock's onSettled runs them once.
+  Never move the lift back into `bottom`/CSS-var positioning, and never transition the wrapper's
+  transform.
 
 ## Working model (how these sessions run)
 
@@ -480,12 +495,72 @@ bodies.
   scroll reports within 200ms — a single caret-reveal scroll nudge (typing at the page bottom)
   must never wake the WAAPI field (it read as full-rate velocity and woke everything per wrapped
   line).
+- **Desktop scroll: --wave-x must never invalidate the page subtree (2026-07-11 ablation).** The
+  per-frame sway write of the INHERITED custom prop on the surface recalced the whole 100-page
+  subtree: scroll frames p50 417ms → 50ms at 4× throttle once (a) `.iw-magnify-box`/`.scroll-paper`/
+  `.iw-wave-twinkles` pin `--wave-x: 0px` (constant ⇒ the engine's no-change pruning stops the
+  walk; @property inherits:false was cleaner but WebKit never re-resolves a pseudo's explicit
+  `--wave-x: inherit` — frozen sway) and (b) twinkle fields take LITERAL transforms per sway frame
+  (`swayFields`) instead of consuming the var (kept ~300 instance leaves in the invalidation set).
+  Dash respawns NEVER rasterise now (the 140-lattice relocation runs everywhere — toDataURL on the
+  scroll path was the second ablation cell, ~150ms/frame; the boot respawn gate became moot and was
+  deleted). A new var(--wave-x) consumer must not sit under the firebreak roots.
 - **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
   full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
   after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
   writer's first scrolls ran (the post-open jank). PaginationExtension now also holds it while any
   input (pointer/wheel/key/scroll, 1.5s) or reveal-chain event (open-begin/reveal-imminent/
   editor-revealed, 3s) is recent. A cold cache stays CORRECT — onZoomStep measures a miss live.
+
+## Typing performance invariants (2026-07-11 ablation overhaul — measure before touching)
+
+Established by a CPU-throttled Playwright ablation matrix (4× Chromium desktop+phone emulation,
+2.5× cgroup-quota WebKit, 100-page synthetic .studio with citations + seeded SCAS state; cells:
+baseline / scasOff / gapped-off / both-off / review). Harness pattern: keydown→rAF latency +
+longtask observer + `inkwave:perflog=1`; doc injected via `inkwave:open-doc`. Findings + the rules
+that keep them fixed:
+
+- **`shouldRerenderOnTransaction: false` on useEditor must stay.** @tiptap/react's legacy default
+  re-rendered the entire TiptapEditor tree on EVERY transaction (keystroke, caret move, SCAS
+  repaint, pagination meta) — the largest single per-keystroke cost. Consequences: the render body
+  must NEVER read `editor.state`/`editor.isActive` — mirror what it needs into React state from an
+  editor-event subscription (`selectionEmpty`, `selIsAtomNode`). StyleBar force-updates for its
+  isActive states only while `barVisible`; ReviewBar/CommentNotes self-subscribe (mounted only in
+  review mode).
+- **The pagination measure must never do per-line hit-tests.** collectLines carries each line's
+  sample coords and resolves doc positions LAZILY (only the ~1 line per page a break lands on pays
+  `posAtCoords`); block boundaries come from ONE `posAtDOM` per top-level block (atoms keep the
+  old per-line orphan reset). The eager version was ~4,400 hit-tests per measure = 2.4s (desktop
+  4×) to 17–31s (phone emulation 4×) of main-thread freeze per measure — the phone "terrible"
+  report. Break positions are identical by construction (same sample formula, same snap/orphan/
+  refList decisions).
+- **The pagination ResizeObserver folds into the edit debounce on BOTH platforms** (rule (b) had
+  regressed to desktop-immediate): in UNGAPPED mode nothing pins the sheet height, so every
+  line-wrapping keystroke resized the sheet → immediate full canonical measure DURING typing —
+  which made gapped-OFF measurably WORSE than gapped-on (the ablation's surprise: Peter's "is it
+  gapped pages?" answer is "the measure, in both modes; ungapped was worse").
+- **SCAS scans ride the per-paragraph WeakMap cache** (`scas/controller.ts` scanCommitted): words
+  are position-free and per-paragraph pure (persistent PM nodes), the cursor's paragraph is never
+  cached, and the full-scan SEMANTICS (deletion pass sees whole-doc presence) is preserved — it's
+  assembled from cached arrays. Desktop stays a semantic full scan; don't undo the cache.
+- **All citation doc-walks go through the memoised per-doc citation index** (`citationNav.ts`
+  citationNodes): occurrencesAt/occurrenceCounts/occurrenceQuotes/citedPages. Before: 34 node
+  views × O(doc) walks per 350ms typing pause. Node-view rebuilds must NOT call `editor.getJSON()`
+  — `referenceListKeysFromDoc(editor.state.doc)` walks the PM doc directly.
+- **Word count runs only while the ◈ panel is open — both platforms** (ReceiptPanel is controlled
+  everywhere now); desktop was building the full doc string every 300ms of typing for a hidden
+  number.
+- **Residual (known, next target):** with SCAS decorations on, the steady-state keystroke cost is
+  now dominated by ProseMirror DecorationSet MAPPING/redraw — O(decorated words) per transaction
+  (CPU-profiled: forChild/posBeforeChild in the PM chunk). ~2,600 decorated words ⇒ ~22ms real per
+  keystroke on a 4×-throttled desktop. The fix is viewport-windowed decoration RENDERING (verdict
+  state stays doc-wide; only visible ranges get Decoration objects) — not attempted this round.
+- **Scroll-frame budget:** desktop scrolling of a long doc showed 300–900ms frames in ALL ablation
+  cells (phone was fine) — desktop-only per-scroll-frame work: the `--wave-x` sway write
+  (unregistered inherited custom property on the surface → subtree style invalidation) and the
+  waveTwinkle scroll-driven dash respawns (canvas PNG encodes). Owned by the wave/choreography
+  lane; attribute before optimising (probe pattern: stub `setProperty('--wave-x')` /
+  `toDataURL` in-page and compare frame times).
 
 ## Code map
 

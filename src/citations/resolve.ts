@@ -52,7 +52,32 @@ export function referenceListKeys(contentJson: TiptapJSON): string[] {
   const used = new Set<string>()
   const ref = { cfg: null as RefListConfig | null }
   walkNode(contentJson, used, ref)
-  const cfg = ref.cfg ?? { mode: 'cited' as RefMode, manualKeys: [] }
+  return resolveRefKeys(used, ref.cfg)
+}
+
+/** Same as referenceListKeys but walks the live PM document — no editor.getJSON() serialization.
+ *  The node view's debounced rebuild called getJSON per typing pause, which builds the ENTIRE
+ *  JSON tree of a 100-page doc just to read citekeys (2026-07-11 typing-lag work). Identical
+ *  semantics: pre-order document walk, first-appearance key order, last referenceList's cfg wins. */
+export function referenceListKeysFromDoc(doc: import('@tiptap/pm/model').Node): string[] {
+  const used = new Set<string>()
+  let cfg: RefListConfig | null = null
+  doc.descendants((node) => {
+    if (node.type.name === 'citation' && Array.isArray(node.attrs.citekeys)) {
+      for (const k of node.attrs.citekeys as string[]) used.add(k)
+    }
+    if (node.type.name === 'referenceList') {
+      cfg = {
+        mode: (node.attrs.mode as RefMode | undefined) ?? 'cited',
+        manualKeys: Array.isArray(node.attrs.manualKeys) ? (node.attrs.manualKeys as string[]) : [],
+      }
+    }
+  })
+  return resolveRefKeys(used, cfg)
+}
+
+function resolveRefKeys(used: Set<string>, cfgIn: RefListConfig | null): string[] {
+  const cfg = cfgIn ?? { mode: 'cited' as RefMode, manualKeys: [] }
   if (cfg.mode === 'all') return bibProvider.getAll().map(e => e.id)
   if (cfg.mode === 'manual') return cfg.manualKeys
   return [...used]

@@ -13,7 +13,7 @@ import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { addToLibrary } from '../../citations/library'
-import { referenceListKeys } from '../../citations/resolve'
+import { referenceListKeysFromDoc } from '../../citations/resolve'
 import { formatReferenceEntries, simpleRefList } from '../../citations/format'
 import { highlightPages } from '../../citations/pdfHighlights'
 import { hasPdf } from '../../citations/pdfSource'
@@ -146,7 +146,9 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
   const persistTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const rebuild = useCallback(async () => {
-    const keys = referenceListKeys(editor.getJSON())
+    // PM-doc walk, not referenceListKeys(editor.getJSON()) — getJSON serialized the whole 100-page
+    // doc per debounced rebuild just to read citekeys (2026-07-11 typing-lag work).
+    const keys = referenceListKeysFromDoc(editor.state.doc)
     const items: CSLItem[] = []
     for (const k of keys) { const it = bibProvider.get(k); if (it) items.push(it) }
     const counts = occurrenceCounts(editor.state.doc)

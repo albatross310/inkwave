@@ -215,12 +215,13 @@
      with the sway, so the engine's no-change pruning stops the recalc walk right there; only the
      surface, its pseudos and the (tiny) twinkle chain re-resolve per frame. Nothing under the
      paper reads --wave-x — the consumers are the wave pseudos' background-position and the
-     twinkle fields' rest transform, all OUTSIDE these roots (the fields get LITERAL transforms
-     written by waveTwinkle's swayFields(), never a var — transform doesn't inherit → zero child
-     invalidation). (@property inherits:false was the cleaner shape but WebKit fails to
-     re-resolve a pseudo's explicit `--wave-x: inherit` when the surface value changes — frozen
-     sway — so the firebreak does the same job portably.) If you add a NEW var(--wave-x)
-     consumer, it must not sit under these roots. */
+     twinkle fields' rest transform, all OUTSIDE these roots. (@property inherits:false was the
+     cleaner shape but WebKit fails to re-resolve a pseudo's explicit `--wave-x: inherit` when
+     the surface value changes — frozen sway — so the firebreak does the same job portably.)
+     The twinkle HOST is a firebreak too: its ~300 instance leaves were the residual recalc after
+     the paper prune (133ms p50) — the fields get LITERAL transforms written by waveTwinkle's
+     swayFields() instead of a var (transform doesn't inherit → zero child invalidation). If you
+     add a NEW var(--wave-x) consumer, it must not sit under these roots. */
   .iw-magnify-box,
   .scroll-paper,
   .iw-wave-twinkles {
@@ -702,17 +703,18 @@
     line-height: var(--inkwave-lh, 1.55);
   }
 
-  /* Phone footer toolbar: the nine circle buttons fill the row edge-to-edge, NEARLY TOUCHING
-     (Peter, 2026-07-11): each circle = the pill width split nine ways, so gaps stay ~1px on any
-     device (375px phone → 41px circles, 430px → 47px) with a tablet cap. Both the visible circle
-     AND the button's 44px min-width take the same size, so justify-between has almost no slack to
-     spread. Scoped override — desktop keeps the 36px circles + full 44px targets. */
+  /* Phone footer toolbar: EIGHT circle buttons (◈ moved into the ▲ drop-up 2026-07-11) with a
+     bit of visible breathing room between them (Peter, 2026-07-11 — supersedes the earlier
+     nearly-touching request): each circle = the pill width split eight ways minus ~45px of slack,
+     which justify-between spreads as ~6px gaps on any device (375px phone → 41px circles,
+     430px → 48px tablet cap). Both the visible circle AND the button's 44px min-width take the
+     same size. Scoped override — desktop keeps the 36px circles + full 44px targets. */
   .iw-phone-toolbar .min-w-\[44px\] {
-    min-width: clamp(36px, calc((100vw - 6px) / 9), 48px);
+    min-width: clamp(36px, calc((100vw - 45px) / 8), 48px);
   }
   .iw-phone-toolbar .w-9 {
-    width: clamp(36px, calc((100vw - 6px) / 9), 48px);
-    height: clamp(36px, calc((100vw - 6px) / 9), 48px);
+    width: clamp(36px, calc((100vw - 45px) / 8), 48px);
+    height: clamp(36px, calc((100vw - 45px) / 8), 48px);
   }
 
   /* iOS long-press guard: the whole footer toolbar and every drop-up/picker must never start a
