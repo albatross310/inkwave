@@ -19,9 +19,8 @@ import { Scroll, EmptyEditorSurface, isTouchDevice } from './Scroll'
 // water, and then unmounted at 520ms into Scroll's 0.8s fade (an opacity pop). Now: opaque
 // through the whole coast → at rest, fade over STILL water (the .iw-loading-veil CSS keeps the
 // phone surface pinned + water-painted through waveMode 'off' — a bare phone surface reverts to
-// parchment there). A 4s cap keeps the reveal bulletproof if wave-rest never fires (Scroll's own
-// coast finish() cap is 3.3s). Desktop keeps the editor's cadence — the fade starts with the
-// coast (content cross-fades in over decaying waves) — but unmounts only after the full 1s fade.
+// parchment there). Desktop keeps the editor's cadence — the fade starts with the coast (content
+// cross-fades in over decaying waves) — but unmounts only after the full 1s fade.
 export function LoadingVeil({ ready, zIndex = 300 }: { ready: boolean; zIndex?: number }) {
   const [phase, setPhase] = useState<'up' | 'fading' | 'down'>('up')
   const started = useRef(false)
@@ -34,12 +33,14 @@ export function LoadingVeil({ ready, zIndex = 300 }: { ready: boolean; zIndex?: 
       return () => clearTimeout(t)
     }
     // PHONE: fade only once the waves are at REST (parchment only at rest — the invariant).
+    // wave-rest always arrives (resolved-clock timer over compositor-only playback); the 30s
+    // load watchdog ('inkwave:load-watchdog', Scroll.tsx) is the one backstop.
     const fade = () => setPhase((p) => (p === 'up' ? 'fading' : p))
-    const cap = setTimeout(fade, 4000) // fallback cap — the veil may never persist forever
     window.addEventListener('inkwave:wave-rest', fade)
+    window.addEventListener('inkwave:load-watchdog', fade)
     return () => {
-      clearTimeout(cap)
       window.removeEventListener('inkwave:wave-rest', fade)
+      window.removeEventListener('inkwave:load-watchdog', fade)
     }
   }, [ready])
   useEffect(() => {

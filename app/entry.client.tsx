@@ -62,8 +62,8 @@ void bootstrap()
 // and the field popped in non-atomically. A generous timeout still opens the gate if anything
 // wedges (a decode failure must never hold the page hostage). On gate-open we dispatch
 // 'inkwave:water-ready': THAT style recalc creates the wave pseudos' CSS drift animations, and
-// waveTwinkle re-anchors its (provisionally-clocked, hidden-mounted) WAAPI animations to the real
-// drift's literal startTime in the same frame — drift/blink continuity across the gate.
+// waveTwinkle aligns its precomputed pool's playback clock to the drift's literal startTime in
+// the same first-visible frame (alignTracks — once per load).
 // REFRESH: the old localStorage pre-stamp (root.tsx head script) opened the gate pre-paint on
 // warm clients — which would let the water paint long before the twinkles mount. Removed: every
 // load gates identically now (the tiles are data URIs, so "warm" never made decoding faster

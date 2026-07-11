@@ -232,96 +232,82 @@ from your OWN refs); (b) the ResizeObserver must FOLD into the edit debounce, no
 identity; (d) 'scroll' paper must still measure font-canonically. Citation-label hydration reflows
 invisibly to inputSig → bibProvider.subscribe drives a debounced re-measure.
 
-## Wave / water system (2026-07-09)
+## Wave / water system (REBUILT 2026-07-11 — Peter's strip-down)
 
-Water = cyan→aquamarine gradient (`#00b4d8 → #00bfa8`, 98.5°, viewport-fixed). Waves = two 140px
-SVG data-URI tiles as vars `--iw-wave-a/b` on the surface (night block re-points them; thick line
-on TOP), drawn by `::before`/`::after` (±280px overdraw = exactly two tiles — keep it ≡0 mod 140 or
-transform↔background-position handoff tears). States: **anim** (fixed-velocity 72px/s drift,
-1.944s/tile loop, phase-synced across surfaces via `__iwWaveEpoch` from the real animation
-startTime), **coast** (pure-CSS exact-cubic ease-out `cubic-bezier(1/3,1,2/3,1)` ≡ x(t)=tx₀−d(1−(1−t/T)³),
-d=vT/3 so initial velocity = drift velocity: T/d from `--wave-coast-T`/`--wave-coast-dist`, 3s/72px
-desktop, 2s/48px phone), **off** (scroll sway via background-position ±`--wave-x` with a persistent
-base). Sparkles ride a dedicated child div (opacity independent of the lines). ATOMIC WATER: the
-whole water is gated behind `.iw-water-ready` on <html> (entry.client decodes the tile URIs first) —
-colour + waves land in one paint; add any NEW tile var to that decode list. LOAD CHOREOGRAPHY: one
-persistent shell (Edit.tsx `shellUp`) spans !doc + lazy chunk + pre-reveal; the settle gate fires
-`inkwave:reveal-imminent` (coast start) then reveals; open-begin/open-failed re-raise/restore it.
-Phone reveal waits for the coast tail. The coast freeze reads the compositor transform (which runs
-~2 frames AHEAD of getComputedStyle — compensate) and must NOT start in the same commit as the
-reveal (main-thread delay = backward flick). RELIABILITY (2026-07-11, the tri-engine load bug):
-per-frame twinkle respawn style writes LIVELOCKED React's time-sliced editor mount (boot never
-finished → waves forever) — dash respawns are boot-gated until `inkwave:editor-revealed`, budgeted
-4/frame; on phone the shell stays OPAQUE until `wave-rest` with the covered editor z-raised above
-it (fading the only water mid-coast exposed bare parchment = the iOS white-out). Every reveal-chain
-event has a fallback cap (reveal 1.5s, shell force-down 4s, covered lift 4s) — keep them when
-touching the chain. 2026-07-11 round 2: PHONE surfaces are in-flow (only `.iw-fill:not(.is-phone)`
-is fixed) — the shell surface must be VIEWPORT-PINNED (fixed, inset 0, z 0 under the z:1 covered
-editor) while its wave classes run, or the covered editor's height pushes the shell's gradient box
-off-screen = the "goes white" bug (its viewport-fixed pseudos still painted ghost lines); gradient
-uses background-attachment: scroll (WebKit's fixed-attachment compositing is flaky). Twinkle art
-must be CANVAS-RASTERED PNGs, never per-instance SVG data-URIs — Chromium builds a full
-IsolatedSVGDocumentHost per unique URI (~4.3s of boot at ~600 URIs; Firefox is cheap = the engine
-asymmetry). The lazy editor chunk is eagerly imported at module scope (browser-only guard) so it
-loads in PARALLEL with storage, not after doc-ready. Phone shell drop waits for wave-rest AND
-paper fade end.
-Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts). Known residual:
-the editor mounts TWICE per load (duplicate reveal events; Tiptap useEditor recreation) — needs
-its own pass (the coast is now immune to it — see round 4 — but the double mount still wastes work). 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
-PER-LOAD — Edit.tsx's closure vars (revealedAt/restSeen) and its pending force-down/cap timers
-must reset on `inkwave:open-begin`; the FIRST load's 4s phone cap fired ~1.7s into the SECOND
-load's covering shell = the open-document white-out (stale restSeen was a second path to the same
-drop). LoadingVeil (snapshot open) on phone now stays OPAQUE until wave-rest then fades over
-STILL water — a veil-scoped CSS block (`.iw-loading-veil` in index.css) keeps the phone veil
-surface viewport-pinned + water-painted through waveMode 'off' (a bare phone surface reverts to
-parchment + un-pins there); veil unmount waits the FULL Scroll fade (0.8s phone / 1s desktop —
-the old 520ms unmount popped mid-fade). Non-prerendered routes (/snapshot in a new tab) serve
-`__spa-fallback.html`, which now paints a STATIC water pre-hydration (root.tsx HydrateFallback →
-`.iw-boot-water`, deliberately NOT behind the iw-water-ready gate). Twinkle dash-respawn boot
-gate RE-ARMS on open-begin (bootDone stayed true forever after the first reveal, so every open
-ran the respawn raster storm the boot is protected from — 2 canvas PNG encodes per respawn wedged
-headless WebKit and ate ~8% of the Chromium open). PROBE GOTCHA: `vite preview` does NOT apply
-the vercel.json SPA rewrite — it serves the prerendered EDITOR page for /snapshot, hydration
-mismatches (#418/#423), React recreates <html> and iw-water-ready/data-theme die (gradient with
-no waves). Probe /snapshot against a fallback-faithful static server, never vite preview.
-2026-07-11 round 4 — ADDITIVE COAST v3 (the drift→coast "two snaps", desktop Chrome + phone
-refresh + snapshot veil). MEASURED root cause (CDP screencast + in-page transform trace): the
-editor double-mount dispatches reveal-imminent TWICE; each old freezeToCoast re-froze from a
-clock trailing the compositor and REWROTE the shared #iw-coast-kf keyframes under the running
-coast — two ~7-12px backward snaps with frozen frames between, plus per-surface startTime skew
-(a third snap at the shell-fade handoff); the round-2 refreeze (rebaseCoast) was a fourth writer.
-Fix: THE DRIFT IS NEVER STOPPED. `.iw-wave-coast.iw-coast-add` keeps the drift animation
-(name-matched across the class swap — preserved with its startTime on all three engines) and
-ADDS the coast via `animation-composition: replace, add`: injected literal keyframes worth
-(vT−d)·cubic-bezier(1/3,0,2/3,0.5) over T (≡ the exact old v(1−τ)² velocity profile) then a
-LINEAR HOLD at +v that cancels the drift — the TOTAL pose is static after T until the rest
-handoff, however late its commit lands. Zero additive value + zero velocity at start ⇒ the
-handoff is continuous BY CONSTRUCTION on any starvation: healthy path byte-inert, late path
-monotonic; rebaseCoast/refreeze are DELETED. ONE SHARED COAST PER LOAD (`sharedCoast` in
-Scroll.tsx, cleared on open-begin/finish, stale >T self-heals — a veil unmounted mid-coast must
-never donate its clock): every surface (shell + editor + any duplicate) adopts the same clock +
-snapped distance ⇒ pixel-identical copies. The clock resolves at the coast animation's `ready`
-(the first painted frame): snap d so the rest pose is an integer device pixel (≤0.5-device-px
-keyframe rewrite INSIDE that first frame — invisible) and `retimeCoast()` the twinkle fields to
-the same number. finish() = timer at t0+T+80ms (the hold makes slop invisible; animationend
-fires at T+hold, too late) + the 3300ms cap unchanged. Engines without animation-composition
-keep the classic replace path (freeze + backdate, `:not(.iw-coast-add)` rules). Twinkle round 4:
-field ramps get DYNAMIC headroom (K grows with now−epoch — the fixed 600 ramp EXPIRED ~19min
-into a session, freezing dashes against moving water on late-session opens); coasting fields
-also go ADDITIVE (ramp keeps running + WAAPI composite:'add'; 'off' cancels BOTH; the rest-
-rebase constant is unchanged — ramp+additive total ≡ the old formula exactly); mountSet runs
-recycle() immediately (a late-session mount otherwise shows an EMPTY field ≤500ms); the driver
-parks when every host is gone. Respawn boot-gate: re-arms on EVERY anim re-entry (snapshot
-opens + snapshot→editor restores are route navs that never fire open-begin) and re-opens at the
-'off' transition (wave rest), NOT at editor-revealed. While gated, dashes still CYCLE (Peter:
-"short lines repeating themselves"): raster-free 140px-LATTICE relocation — same wave-space
-phase ⇒ the SAME art stays exactly valid, two style writes, no encode — drawn through the
-never-twice memory with the current slot excluded; the dash memory ring scales with band
-population (~3 strikes of history; the fixed 16 held ~1 envelope and allowed A→B→A returns).
-Verified per-engine (Chromium/Firefox/WebKit incl. iPhone emulation, all four choreographies +
-a 2.5s main-thread-saturation stress): tile velocity monotone −72→0 with zero discontinuities,
-dash-field velocity tracks the tile at median |Δv|=0.0 (dashes ride their waves), S-curve blink
-envelopes confirmed per instance, zero same-spot respawn repeats, zero art churn during load.
+Peter's spec, verbatim intent: "just sine waves, some stochastic glitters and wave marks from a
+precalculated data pool, and an S-curve slow down — all of which on a different workflow to
+whatever has to load so it doesn't get interrupted." The load animation is a SELF-CONTAINED,
+PRECOMPUTED unit; playback is COMPOSITOR-ONLY (the "different workflow"); exactly TWO control
+events cross from the app into it.
+
+**The water.** Cyan→aquamarine gradient (`#00b4d8 → #00bfa8`, 98.5°). Waves = two 140px SVG
+data-URI tiles as vars `--iw-wave-a/b` (night re-points them; thick line on TOP), drawn by
+`::before`/`::after` with ±280px overdraw = exactly two tiles (keep it ≡0 mod 140 or the
+transform↔background-position handoff tears). Drift = CSS `iw-wave-drift-l/r`, 72px/s (140px per
+1.944s loop), in the prerendered class → runs from first paint.
+
+**The pool** (`waveTwinkle.ts`). Sparks (glitters) + dashes (wave marks) are generated in ONE
+pass before playback: positions through the never-strike-twice sampler (`memPick`, per-band ring
+memory, localStorage-persisted), canvas-rastered PNG art (NEVER per-instance SVG URIs — Chromium
+builds an IsolatedSVGDocumentHost per unique URI, ~4.3s at ~600), and a per-instance SCHEDULE: a
+~46.7s cycle (24 tile loops) of blink envelopes (dash: 0.3s S rise / 0.4s hold / 0.3s S fall),
+each at a fresh 140px-lattice slot (same wave phase ⇒ same art stays valid; own recent slots
+excluded ⇒ no repeats). Playback = two looping WAAPI tracks per instance (opacity envelopes +
+transform that moves at EXACTLY the drift velocity while lit — the mark rides its crest — and
+glides to the next slot while dark). ZERO per-frame JS during the load: no rAF driver, no
+respawns, no style writes — main-thread starvation is physically incapable of touching it. One
+clock, set once per load: `alignTracks()` batch-sets track startTimes ≡ the tile drift's literal
+startTime (mod 1944ms) with a random whole-loop offset. A `.iw-twk-rest` layer (static texture,
+hidden during drift) fades in over the coast; the blink layer fades out — twinkling calms exactly
+as the water slows.
+
+**The two events.**
+1. START — implicit: prerendered `.iw-wave-anim` + pool mount. ATOMIC WATER: everything is gated
+   behind `.iw-water-ready` on `<html>` (entry.client decodes the tile URIs AND waits for
+   `inkwave:twinkles-ready`) — colour, waves, twinkles land in one paint. Add any NEW tile var to
+   that decode list.
+2. SETTLE — `inkwave:reveal-imminent` (TiptapEditor's settle gate / LoadingVeil's ready): the
+   S-curve slow down. The drift is NEVER stopped — the coast class adds a BRAKE composited on top
+   (`animation-composition: replace, add`): injected literal keyframes (#iw-coast-kf, Scroll.tsx)
+   worth (vT−d)·cubic-bezier(1/3,0,2/3,0.5) over T (velocity v(1−τ)², monotone 72→0; T/d =
+   2.5s/60px desktop, 2s/48px phone) then a LINEAR HOLD at +v that cancels the drift — the total
+   pose is STATIC after T, so however late any commit lands the picture is identical. Zero value +
+   zero velocity at brake start ⇒ handoff continuous BY CONSTRUCTION under any starvation. The
+   twinkle FIELDS brake with the SAME injected keyframes via CSS (`.iw-twk-fa/fb`) — lockstep, no
+   plumbing. The clock resolves ONCE at the brake's `ready` (first painted frame): snap d so the
+   rest pose is an integer device pixel (≤0.5-device-px keyframe rewrite inside that same frame).
+   Rest handoff = timer at t0+T+80ms → write `--wave-x` = the snapped end, drop classes, dispatch
+   `inkwave:wave-rest` (Edit.tsx shell drop + TiptapEditor uncover batch into that commit).
+
+**Kept invariants (each was a live bug — do not regress):**
+- PHONE: surfaces are in-flow, so the shell surface is VIEWPORT-PINNED (fixed, inset 0, z 0 under
+  the z:1 transparent covered editor) while wave classes run; gradient `background-attachment:
+  scroll` + 100lvh sizing (WebKit fixed-attachment is flaky; browser-UI transitions must not
+  reshape the water). Shell stays OPAQUE until wave-rest AND the paper fade completes; parchment
+  only over still water. The covered phone editor renders NO wave classes and never syncs
+  twinkles (its early 'off' would clobber the global mode).
+- Editor mounts ONCE per load (no lazy/Suspense around TiptapEditor); the editor chunk is eagerly
+  imported at module scope. A surface mounting mid-load adopts its sibling's drift startTime
+  (pixel-identical copies — the old reveal hiccup); pre-gate mounts need nothing (same recalc).
+- PER-LOAD LIFECYCLE RESET: `inkwave:open-begin` clears the coast record + Edit.tsx's chain state;
+  twinkle anim re-entry re-aligns the pool clock. A new load never reuses timers or clocks.
+- ONE backstop only: the 30s load watchdog (Scroll.tsx) — if SETTLE never arrives it logs loudly
+  and forces the chain (`inkwave:load-watchdog`). It must never fire on a healthy load; the old
+  per-stage caps (reveal/shell/covered/veil 4s) are gone BECAUSE playback can't be starved.
+- Scroll-time (post-reveal): sway = `--wave-x` on the surface + LITERAL field transforms via
+  `swayFields()` — never var() into the twinkle subtree, and `--wave-x: 0px` firebreaks on
+  `.iw-magnify-box`/`.scroll-paper`/`.iw-wave-twinkles` (the inherited-var write invalidated the
+  whole PM subtree: p50 417→50ms; `@property inherits:false` breaks WebKit pseudo re-resolve).
+  Scroll twinkles = driven WAAPI blinks (velocity→playbackRate) with raster-free lattice
+  relocation through the same never-twice memory; full art regenerates only at zoom/resize
+  reseeds. `memPick`'s farthest-candidate fallback must init bestD to −Infinity (−1 left `best`
+  null on saturated rings — real bug).
+- PROBE RULES: /snapshot needs a fallback-faithful static server (vite preview serves the
+  prerendered editor page → hydration mismatch kills the water); never pkill vite preview; no
+  windows over Peter's screen (xvfb; Firefox needs `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0`).
+  `window.__iwTwkPool` exposes the pool for probes.
+
+Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
 
 ## Open pipeline + cloud caching (2026-07-09)
 

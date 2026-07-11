@@ -207,6 +207,25 @@
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the
      shimmer/moiré the old fast-scroll fade was working around. */
+  /* --wave-x INHERITANCE FIREBREAK (2026-07-11, THE desktop scroll-jank fix): the sway writes
+     --wave-x on the surface element every scroll frame, and as an inherited custom property that
+     write invalidated the computed style of the ENTIRE 100-page ProseMirror subtree — ablation
+     measured scroll frames at p50 417ms with the write vs 67ms without (4× throttle). Pinning it
+     to a CONSTANT at the paper subtree roots means those subtrees' computed styles never change
+     with the sway, so the engine's no-change pruning stops the recalc walk right there; only the
+     surface, its pseudos and the (tiny) twinkle chain re-resolve per frame. Nothing under the
+     paper reads --wave-x — the consumers are the wave pseudos' background-position and the
+     twinkle fields' rest transform, all OUTSIDE these roots (the fields get LITERAL transforms
+     written by waveTwinkle's swayFields(), never a var — transform doesn't inherit → zero child
+     invalidation). (@property inherits:false was the cleaner shape but WebKit fails to
+     re-resolve a pseudo's explicit `--wave-x: inherit` when the surface value changes — frozen
+     sway — so the firebreak does the same job portably.) If you add a NEW var(--wave-x)
+     consumer, it must not sit under these roots. */
+  .iw-magnify-box,
+  .scroll-paper,
+  .iw-wave-twinkles {
+    --wave-x: 0px;
+  }
   .inkwave-editor-surface,
   .iw-boot-water {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
@@ -248,12 +267,10 @@
      identical, an infinite seamless drift — with exactly TWO tiles (280px) of slack on BOTH sides so
      no edge is ever uncovered AND the element origin stays ≡ 0 (mod 140): a transform of +tx paints
      the same pixels as background-position +tx, which is what makes the coast→sway handoff identity.
-     --wave-phase syncs the live surface to the shell's animation mid-loop. At reveal, Scroll.tsx
-     freezes the live offset into --wave-t and the coast keyframes below CONTINUE the drift, easing
-     to rest — no boundary snapping; the final offset becomes the scroll sway's base (--wave-x). */
-  /* S-curve start: a 0.5s one-shot ramp (zero start velocity, ending at exactly the cruise speed —
-  /* Fixed-velocity drift from frame one (Peter cut the start ramp, 2026-07-09): one 140px tile per
-     1.944s loop = 72px/s. translate3d keeps the layer on the GPU. */
+     A surface that mounts mid-load adopts its sibling's animation startTime (Scroll.tsx) so every
+     copy is pixel-identical. At SETTLE the brake keyframes below decelerate it (never stopping the
+     drift); the final offset becomes the scroll sway's base (--wave-x). Fixed-velocity drift from
+     frame one: one 140px tile per 1.944s loop = 72px/s. translate3d keeps the layer on the GPU. */
   @keyframes iw-wave-drift-l { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-140px, 0, 0); } }
   @keyframes iw-wave-drift-r { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(140px, 0, 0); } }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before,
@@ -272,66 +289,38 @@
     background-position: 0 0;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::before {
-    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite;
+    animation: iw-wave-drift-l 1.944s linear infinite;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-anim::after {
-    animation: iw-wave-drift-r 1.944s linear var(--wave-phase, 0s) infinite;
+    animation: iw-wave-drift-r 1.944s linear infinite;
     will-change: transform;
   }
-  /* Reveal coast: CONTINUE the drift and ease to rest over 3s — x(t) = tx0 − 72px·(1 − (1 − t/T)³).
-     cubic-bezier(1/3, 1, 2/3, 1) IS that cubic exactly (Bx(u) = u, By(u) = 1 − (1 − u)³): initial
-     slope 3 → initial velocity 3·72px / 3s = 72px/s = the drift speed, a seamless takeover; zero end
-     velocity; monotonic — never backward, never a stop. Compositor-driven (keyframes, not JS), so a
-     busy main thread during the reveal can't stutter it. Scroll.tsx freezes the live offset into
-     --wave-t at reveal (same commit as the class swap → the first coast frame is already easing);
-     at animationend it writes the final offset (--wave-t − 72px) into --wave-x in the same commit
-     the class drops — with the ±280px (2-tile) overdraw above, that handoff is pixel-identical. */
-  /* ONE shared keyframe set for both platforms: the coast DISTANCE is a var so the seamless-takeover
-     maths (initial slope 3 → v0 = 3·dist/T = 72px/s) holds at any duration. Desktop: T=3s, dist=72px.
-     Phone: T=2s, dist = 72·2/3 = 48px (set below). The DURATION is a var too (--wave-coast-T) so the
-     sparkle layer's fade runs exactly the platform's coast length without duplicating the numbers. */
-  @keyframes iw-wave-coast-l {
-    from { transform: translate3d(var(--wave-t, 0px), 0, 0); }
-    to   { transform: translate3d(calc(var(--wave-t, 0px) - var(--wave-coast-dist, 60px)), 0, 0); }
-  }
-  @keyframes iw-wave-coast-r {
-    from { transform: translate3d(calc(-1 * var(--wave-t, 0px)), 0, 0); }
-    to   { transform: translate3d(calc(var(--wave-coast-dist, 60px) - var(--wave-t, 0px)), 0, 0); }
-  }
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast:not(.iw-coast-add)::before {
-    animation: iw-wave-coast-l var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
-    will-change: transform;
-  }
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast:not(.iw-coast-add)::after {
-    animation: iw-wave-coast-r var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
-    will-change: transform;
-  }
-
-  /* ADDITIVE COAST v3 (2026-07-11, the drift→coast double-snap fix). The drift is NEVER stopped:
-     the coast is a SECOND animation composited on top (`animation-composition: replace, add`),
-     whose value starts at 0 with ZERO initial velocity — so however starved the main thread is,
+  /* THE S-CURVE SLOW DOWN (the brake). The drift is NEVER stopped: at SETTLE the coast class
+     adds a SECOND animation composited on top (`animation-composition: replace, add`) whose
+     value starts at 0 with ZERO initial velocity — so however starved the main thread is,
      whenever the class-swap commit finally reaches the compositor the visible pose is continuous
-     BY CONSTRUCTION (the old replace-coast snapped backward by exactly the starvation window,
-     and every extra freezeToCoast writer — the double editor mount — snapped it again). Shape:
-     total x(t) = drift + add must equal the classic tx0 − d(1−(1−t/T)³), so
-     add(t) = v·t − d(1−(1−t/T)³) = (vT−d)·(3τ²−τ³)/2 — a monotone cubic ≡ EXACTLY
-     cubic-bezier(1/3, 0, 2/3, 0.5) on a 0 → (vT−d) keyframe pair (velocity profile identical to
-     the old coast: v(1−τ)²). After T a LINEAR HOLD segment continues at +v, cancelling the still-
-     running drift exactly: the total is STATIC until the rest handoff, so a late handoff commit
-     paints identical pixels no matter when it lands. Keyframes are injected literal px by
-     Scroll.tsx (#iw-coast-kf — d is device-pixel-snapped at coast-clock resolve); the drift item
-     must stay FIRST and name-identical so the running animation is preserved across the class
-     swap (name-matched — verified Chromium/Firefox/WebKit). Engines without animation-composition
-     never get .iw-coast-add and keep the replace-coast path above. */
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast.iw-coast-add::before {
-    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite,
+     BY CONSTRUCTION. Shape: total x(t) = drift + add ≡ tx0 − d(1−(1−t/T)³), so
+     add(t) = (vT−d)·(3τ²−τ³)/2 — a monotone cubic ≡ EXACTLY cubic-bezier(1/3, 0, 2/3, 0.5) on a
+     0 → (vT−d) keyframe pair (velocity profile v(1−τ)², monotone 72 → 0). After T a LINEAR HOLD
+     continues at +v, cancelling the still-running drift exactly: the total is STATIC until the
+     rest handoff, so a late handoff commit paints identical pixels no matter when it lands.
+     The iw-wave-coast-l/r keyframes are injected as literal px by Scroll.tsx (#iw-coast-kf —
+     var()-dependent keyframes can't composite; d is device-pixel-snapped at coast-clock
+     resolve). The drift item must stay FIRST and name-identical so the running animation is
+     preserved across the class swap (name-matched — verified Chromium/Firefox/WebKit). The
+     twinkle fields brake with the SAME injected keyframes (see the twinkle block), so every
+     layer decelerates in lockstep. Engines without animation-composition never enter coast
+     (Scroll.tsx stops cleanly instead). --wave-coast-T drives the coast-length fades (sparks,
+     blink→rest cross-fade): 2.5s desktop, 2s phone. */
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
+    animation: iw-wave-drift-l 1.944s linear infinite,
                iw-wave-coast-l 10.5s linear 1 forwards; /* D = T 2.5s + 8s hold */
     animation-composition: replace, add;
     will-change: transform;
   }
-  .inkwave-editor-surface:not(.is-phone).iw-wave-coast.iw-coast-add::after {
-    animation: iw-wave-drift-r 1.944s linear var(--wave-phase, 0s) infinite,
+  .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
+    animation: iw-wave-drift-r 1.944s linear infinite,
                iw-wave-coast-r 10.5s linear 1 forwards;
     animation-composition: replace, add;
     will-change: transform;
@@ -393,8 +382,7 @@
     z-index: 0;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast {
-    --wave-coast-dist: 48px; /* v·T/3 = 72·2/3 — keeps the 72px/s seamless takeover at 2s */
-    --wave-coast-T: 2s;
+    --wave-coast-T: 2s; /* drives the coast-length fades (sparks, blink→rest cross-fade) */
   }
   .inkwave-editor-surface.is-phone.iw-wave-anim::before,
   .inkwave-editor-surface.is-phone.iw-wave-coast::before {
@@ -413,30 +401,22 @@
     background-position: 0 0;
   }
   .inkwave-editor-surface.is-phone.iw-wave-anim::before {
-    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite;
+    animation: iw-wave-drift-l 1.944s linear infinite;
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-anim::after {
-    animation: iw-wave-drift-r 1.944s linear var(--wave-phase, 0s) infinite;
+    animation: iw-wave-drift-r 1.944s linear infinite;
     will-change: transform;
   }
-  .inkwave-editor-surface.is-phone.iw-wave-coast:not(.iw-coast-add)::before {
-    animation: iw-wave-coast-l var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
-    will-change: transform;
-  }
-  .inkwave-editor-surface.is-phone.iw-wave-coast:not(.iw-coast-add)::after {
-    animation: iw-wave-coast-r var(--wave-coast-T, 2.5s) cubic-bezier(0.33333, 1, 0.66667, 1) 1 forwards;
-    will-change: transform;
-  }
-  /* Additive coast, phone flavour (see the desktop block): T = 2s + 8s hold. */
-  .inkwave-editor-surface.is-phone.iw-wave-coast.iw-coast-add::before {
-    animation: iw-wave-drift-l 1.944s linear var(--wave-phase, 0s) infinite,
+  /* The brake, phone flavour (see the desktop block): D = T 2s + 8s hold. */
+  .inkwave-editor-surface.is-phone.iw-wave-coast::before {
+    animation: iw-wave-drift-l 1.944s linear infinite,
                iw-wave-coast-l 10s linear 1 forwards;
     animation-composition: replace, add;
     will-change: transform;
   }
-  .inkwave-editor-surface.is-phone.iw-wave-coast.iw-coast-add::after {
-    animation: iw-wave-drift-r 1.944s linear var(--wave-phase, 0s) infinite,
+  .inkwave-editor-surface.is-phone.iw-wave-coast::after {
+    animation: iw-wave-drift-r 1.944s linear infinite,
                iw-wave-coast-r 10s linear 1 forwards;
     animation-composition: replace, add;
     will-change: transform;
@@ -469,21 +449,20 @@
     height: 100lvh;
   }
 
-  /* ─── STOCHASTIC TWINKLES (Peter's spec, 2026-07-09/10) — sparkles + accent dashes ──────────
-     Generated per load by src/editor/waveTwinkle.ts as DISCRETE instances (v2 — the 140px tiled
-     layers repeated every dash at every tile with the same blink): small absolute divs, a few per
-     wave row, each with its own PRNG position/art/blink. They cannot live on the wave
-     ::before/::after — animating opacity there would dim the wave LINES too. Scroll.tsx renders a
-     stable EMPTY container (in the prerender too, so hydration matches); waveTwinkle populates it
-     post-hydration after every data-URI decode()s — no lazy-raster pops. Two sub-sets:
-     .iw-twk-sparks (loading only; the coast S-fade lives on the SUB-CONTAINER so it MULTIPLIES
-     with the instances' own blink) and .iw-twk-dashes (all stages; STATIC between scrolls at
-     rest). Each set holds two .iw-twk-field layers — one per drift direction (a-rows / b-rows) —
-     whose transforms are WAAPI-driven by waveTwinkle.ts (drift/coast phase-exact with the tiles
-     via the shared epoch animation; rest = translate3d(calc(±--wave-x + rebase)) sway). Blink
-     rate TRACKS WATER MOTION: full during drift, decelerating through the coast, zero at rest
-     (a ~50% static subset stays lit via --twk-static), scroll-velocity-proportional while
-     swaying — all WAAPI playbackRate, owned by waveTwinkle.ts. */
+  /* ─── STOCHASTIC TWINKLES — the PRECOMPUTED pool (see the waveTwinkle.ts header) ────────────
+     Sparks (glitters) + dashes (wave marks) as discrete divs, populated post-hydration from the
+     precalculated pool (positions never-twice sampled, canvas-rastered art, whole-load blink
+     schedules). They cannot live on the wave ::before/::after — animating opacity there would
+     dim the wave LINES too. Scroll.tsx renders a stable EMPTY container (in the prerender too,
+     so hydration matches). Structure per set (.iw-twk-sparks / .iw-twk-dashes): two
+     .iw-twk-field layers (a-rows / b-rows), each holding a .iw-twk-blink wrapper (the
+     precomputed envelope-track instances) and a .iw-twk-rest wrapper (the static resting
+     texture). During the LOAD everything is compositor-only: instance WAAPI tracks blink and
+     ride their crests; the fields carry NO transform. At SETTLE (.iw-wave-coast) the fields
+     brake with the SAME injected keyframes the tiles composite (lockstep deceleration), the
+     blink layer fades out and the rest layer fades in over the coast — the twinkling calms
+     exactly as the water slows. At REST the fields take literal sway transforms from
+     swayFields() and scroll-velocity-driven blinks take over (waveTwinkle.ts). */
   /* The live editor's water while the OPAQUE loading shell still covers it (Scroll's `covered`):
      the two wave copies are never pixel-identical mid-boot — the editor's fixed pseudos anchor to
      its still-shifting flow box, so the double-paint smears/dims every line (measured: peak 223
@@ -534,6 +513,40 @@
     inset: 0;
     will-change: transform;
     transform: translateZ(0); /* pre-promoted — raster exists before the drift's first frame */
+  }
+  /* The fields' brake — the SAME injected #iw-coast-kf keyframes the tiles composite, started by
+     the same class recalc: every twinkle layer decelerates in exact lockstep with the water,
+     main-thread-free (the fields carry no drift of their own — instance tracks bake it in). */
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fa {
+    animation: iw-wave-coast-l 10.5s linear 1 forwards;
+  }
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fb {
+    animation: iw-wave-coast-r 10.5s linear 1 forwards;
+  }
+  .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fa {
+    animation: iw-wave-coast-l 10s linear 1 forwards;
+  }
+  .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fb {
+    animation: iw-wave-coast-r 10s linear 1 forwards;
+  }
+  /* The blink → rest cross-fade over the coast (S-curve, coast-length). Base states: blink
+     visible, rest visible (it IS the resting texture once the wave classes drop); during the
+     drift the rest layer is hidden; through the coast the two cross-fade. */
+  .iw-twk-blink,
+  .iw-twk-rest {
+    position: absolute;
+    inset: 0;
+  }
+  @keyframes iw-twk-fade-out { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes iw-twk-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .inkwave-editor-surface.iw-wave-anim .iw-twk-rest { opacity: 0; }
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-blink {
+    animation: iw-twk-fade-out var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    will-change: opacity;
+  }
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-rest {
+    animation: iw-twk-fade-in var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    will-change: opacity;
   }
   .iw-twk-i {
     position: absolute;

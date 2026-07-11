@@ -100,42 +100,36 @@ export function Edit() {
       // the covered editor sits ABOVE it (z-raised, transparent — .iw-wave-covered.is-phone), so
       // the parchment + chrome fade in OVER the still-decelerating water. At 'inkwave:wave-rest'
       // the shell drops and the editor uncovers in one commit — parchment-to-parchment, no
-      // mid-motion swap. A CAP forces the drop 4s after reveal even if wave-rest never fires
-      // (bulletproof: the shell may never persist forever).
+      // mid-motion swap. (wave-rest ALWAYS arrives: the rest handoff is a resolved-clock timer
+      // over compositor-only playback; the 30s load watchdog in Scroll.tsx is the one backstop.)
       if (isTouchDevice()) {
-        clearTimeout(t)
-        t = window.setTimeout(() => setShellUp('down'), 4000) // safety net only — wave-rest is the real trigger
+        if (restSeen) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850) } // rest landed first (starved boot): drop once the fade completes
         return
       }
       setShellUp('fading')
       t = window.setTimeout(() => setShellUp('down'), 1030) // 1s desktop fade
     }
-    // ORDERING GUARD (2026-07-11): wave-rest is compositor-clocked (animationend ~2s after the
-    // freeze) while the reveal is a main-thread timer + React commit — on a slow phone the coast
-    // can END before the paper above has finished its 0.8s fade-in. Dropping the shell then would
-    // flash parchment through the half-faded paper (a paler echo of the white-out). So the drop
-    // waits for BOTH: the waves at rest AND the fade complete (revealedAt + 850ms). The still
-    // water lingering a few hundred ms is invisible next to a pale flash. The 4s post-reveal cap
-    // (onRevealed above) is unchanged — the shell can still never persist forever.
+    // ORDERING GUARD (2026-07-11): wave-rest is compositor-clocked while the reveal is a
+    // main-thread timer + React commit — on a slow phone the coast can END before the paper
+    // above has finished its 0.8s fade-in. Dropping the shell then would flash parchment through
+    // the half-faded paper. So the drop waits for BOTH: the waves at rest AND the fade complete
+    // (revealedAt + 850ms). The still water lingering a few hundred ms is invisible next to a
+    // pale flash.
     const onRest = () => {
       if (!isTouchDevice()) return
       restSeen = true
-      const wait = revealedAt ? Math.max(0, revealedAt + 850 - performance.now()) : 0
-      if (!revealedAt) return // reveal hasn't landed — onRevealed's cap (or the drop below) covers it
+      if (!revealedAt) return // reveal hasn't landed — onRevealed drops once its fade completes
+      const wait = Math.max(0, revealedAt + 850 - performance.now())
       if (wait === 0) setShellUp('down')
       else { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), wait) }
     }
-    // If rest arrived BEFORE the reveal (heavily starved boot), drop once the fade completes.
-    const onRevealedLate = () => {
-      if (isTouchDevice() && restSeen) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850) }
-    }
+    // THE WATCHDOG (the one backstop — Scroll.tsx fires it if SETTLE never arrived): log-and-
+    // force. Never fires on a healthy load.
+    const onWatchdog = () => setShellUp('down')
     // PER-LOAD RESET (2026-07-11, the OPEN-DOC white-out): these closure vars live for the
-    // component's whole life, but they describe ONE load. On the second load (open a document)
-    // the stale restSeen=true from the first load made onRevealedLate drop the shell 850ms after
-    // the reveal — mid-coast, while the covered editor is transparent — so the body parchment
-    // showed through until wave-rest (Peter's "white background coming up early ... opening a
-    // document"). Stale timers were live too: the first load's 4s force-down cap could fire INTO
-    // the next load's covering shell. Every open starts a fresh choreography — reset it all.
+    // component's whole life, but they describe ONE load — stale reveal/rest state (or a live
+    // timer) from the previous load must never act on the next one's covering shell. Every open
+    // starts a fresh choreography.
     const onBegin = () => {
       revealedAt = 0
       restSeen = false
@@ -144,15 +138,15 @@ export function Edit() {
     }
     window.addEventListener('inkwave:open-begin', onBegin)
     window.addEventListener('inkwave:editor-revealed', onRevealed)
-    window.addEventListener('inkwave:editor-revealed', onRevealedLate)
     window.addEventListener('inkwave:wave-rest', onRest)
+    window.addEventListener('inkwave:load-watchdog', onWatchdog)
     return () => {
       clearTimeout(t)
       clearTimeout(t2)
       window.removeEventListener('inkwave:open-begin', onBegin)
       window.removeEventListener('inkwave:editor-revealed', onRevealed)
-      window.removeEventListener('inkwave:editor-revealed', onRevealedLate)
       window.removeEventListener('inkwave:wave-rest', onRest)
+      window.removeEventListener('inkwave:load-watchdog', onWatchdog)
     }
   }, [])
 

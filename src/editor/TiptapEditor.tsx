@@ -237,19 +237,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // freeze-frame + gradient shift Peter saw. At rest the phone editor has no waves at all
   // (parchment), so the uncover is inert; the flag exists to hold `covered` through the coast.
   const [waveRest, setWaveRest] = useState(false)
+  // wave-rest ALWAYS arrives on a live page (the rest handoff is a resolved-clock timer over
+  // compositor-only playback); the 30s load watchdog (Scroll.tsx, 'inkwave:load-watchdog') is
+  // the one backstop — it force-lifts `covered` too.
   useEffect(() => {
     if (!isTouchDevice()) return
     const onRest = () => setWaveRest(true)
     window.addEventListener('inkwave:wave-rest', onRest)
-    return () => window.removeEventListener('inkwave:wave-rest', onRest)
+    window.addEventListener('inkwave:load-watchdog', onRest)
+    return () => {
+      window.removeEventListener('inkwave:wave-rest', onRest)
+      window.removeEventListener('inkwave:load-watchdog', onRest)
+    }
   }, [])
-  // BULLETPROOF cap (2026-07-11): if wave-rest never fires (any engine path that loses the
-  // coast), covered must still lift — 4s after the reveal, unconditionally.
-  useEffect(() => {
-    if (!settled || waveRest) return
-    const t = setTimeout(() => setWaveRest(true), 4000)
-    return () => clearTimeout(t)
-  }, [settled, waveRest])
   // PHONE REVEAL CHROME (Peter, 2026-07-09): the floating chrome (toolbar/pills — z-indexed ABOVE
   // the z:auto loading shell) is held invisible while the shell covers, then fades IN over 0.5s at
   // reveal, over the editor's own still-coasting waves (see .iw-chrome-hold/.iw-chrome-in in

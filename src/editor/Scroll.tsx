@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
-import { syncTwinkles, reportSway, retimeCoast } from './waveTwinkle'
+import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -42,40 +42,66 @@ function scrollScale(s: number): number {
   return Math.pow(s, 1 - SCROLL_ACCEL_STRENGTH * Math.min(1, t))
 }
 
-// ─── Additive coast (v3, 2026-07-11 — the drift→coast double-snap fix) ───────────────────────
-// The drift is never stopped: the coast is a SECOND animation composited with
-// `animation-composition: add` (see the .iw-coast-add block in index.css). Its value starts at 0
-// with zero initial velocity, so the handoff is continuous BY CONSTRUCTION whenever the commit
-// lands — the freeze-clock arithmetic, the compositor-lead compensation and the late-first-frame
-// refreeze (rebaseCoast) are all deleted. ONE COAST PER LOAD: the first surface to freeze creates
-// the shared record; every other surface (the loading shell + the editor underneath, and any
-// late-mounting duplicate — the editor double-mount dispatched reveal-imminent TWICE, each
-// rewriting the shared keyframes ≈7px apart = Peter's two visible snaps) adopts the same clock
-// and the same snapped distance, so all copies are pixel-identical by construction.
+// ─── The S-curve slow down — an ADDITIVE BRAKE over the never-stopped drift ──────────────────
+// The load unit's deceleration (Peter's spec, 2026-07-11): the drift animation is never stopped;
+// SETTLE adds a second animation composited with `animation-composition: add` whose value starts
+// at 0 with zero initial velocity — the handoff is continuous BY CONSTRUCTION whenever the
+// commit lands, however starved the main thread is. After the coast time T a linear hold cancels
+// the drift exactly, so the TOTAL pose is static until the rest handoff, however late its commit
+// lands. The twinkle fields ride the SAME injected keyframes via CSS (index.css), so every layer
+// decelerates in lockstep. ONE COAST PER LOAD: every surface (shell + editor) swaps class in the
+// same event dispatch and shares the injected keyframes + the resolved clock.
 export const ADDITIVE_COAST =
   typeof CSS !== 'undefined' && !!CSS.supports?.('animation-composition', 'add')
 const COAST_HOLD_MS = 8000 // linear hold after T: total pose static until the rest handoff lands
-interface SharedCoast {
-  t0: number // freeze-time guess (timeline clock) — staleness checks + the safety cap
+interface LoadCoast {
+  t0: number // settle-time guess (timeline clock) — staleness check only
   resolvedT0: number | null // the coast animations' actual start (first painted frame)
   d: number // coast travel; device-pixel-snapped at resolve
   end: number | null // the snapped rest offset ((drift pose at t0) − d) — the --wave-x handoff value
   phone: boolean
 }
-let sharedCoast: SharedCoast | null = null
+let loadCoast: LoadCoast | null = null
+const driftSurfaces = new Set<HTMLElement>() // mounted drifting surfaces — the sibling-clock registry
 if (typeof window !== 'undefined') {
-  // A new open aborts any in-flight coast choreography — never adopt a stale clock.
-  window.addEventListener('inkwave:open-begin', () => { sharedCoast = null })
+  // PER-LOAD LIFECYCLE RESET: a new open aborts any in-flight coast — never adopt a stale clock.
+  window.addEventListener('inkwave:open-begin', () => { loadCoast = null })
 }
 const timelineNow = (): number => {
   const t = typeof document !== 'undefined' ? (document.timeline?.currentTime as number | null) : null
   return t ?? performance.now()
 }
-// Inject the additive coast keyframes (literal px — var()-dependent keyframes can't composite).
+
+// ─── Load watchdog — the ONE backstop (replaces the old per-stage fallback caps) ─────────────
+// Playback is compositor-only and the rest handoff is a resolved-clock timer, so on any healthy
+// load the whole chain always completes; the only way it cannot is SETTLE never arriving (the
+// document never became ready) or the page's timers being dead. If a load is still drifting
+// WATCHDOG_MS after it began, LOG loudly and force the chain: start the coast and dispatch
+// 'inkwave:load-watchdog' (Edit.tsx force-drops the shell; TiptapEditor force-lifts `covered`).
+// 30s ≫ any healthy load (worst measured cold 20MB open ≈ 12s) — it must never fire on one.
+const WATCHDOG_MS = 30000
+let watchdogT: ReturnType<typeof setTimeout> | undefined
+function armLoadWatchdog(): void {
+  if (watchdogT !== undefined) return
+  watchdogT = setTimeout(() => {
+    watchdogT = undefined
+    console.error(`[inkwave] load watchdog: no SETTLE after ${WATCHDOG_MS / 1000}s — forcing the reveal chain`)
+    window.dispatchEvent(new Event('inkwave:reveal-imminent')) // drifting surfaces coast → rest
+    window.dispatchEvent(new Event('inkwave:load-watchdog'))
+  }, WATCHDOG_MS)
+}
+function disarmLoadWatchdog(): void {
+  if (watchdogT === undefined) return
+  clearTimeout(watchdogT)
+  watchdogT = undefined
+}
+
+// Inject the brake keyframes (literal px — var()-dependent keyframes can't composite).
 // add(t) = (vT−d)·(3τ²−τ³)/2 ≡ cubic-bezier(1/3, 0, 2/3, 0.5) on 0 → (vT−d), then linear +v to
 // D so the hold cancels the drift exactly. Direction: coast-l opposes drift-l (positive), coast-r
 // mirrored. Written once per load; the resolve step rewrites with the snapped d (≤0.5 device px
-// delta, landing in the same frame as the first coast paint — invisible).
+// delta, landing in the same frame as the first coast paint — invisible). The twinkle fields'
+// CSS brake uses these SAME keyframe names, so the rewrite retimes them too.
 function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
   const v = 140 / 1.944 // px/s — must match the drift exactly
   const T = phone ? 2 : 2.5
@@ -854,8 +880,14 @@ export function Scroll({
     // formula as a second scroll source, so the waves at the pane's sides sway with PDF scrolling
     // exactly like editor scrolling — one write path, and the zoom-hold/coast rules stay intact.
     let pdfTop = 0
-    const writeWave = () =>
-      el.style.setProperty('--wave-x', `${(waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1)}px`)
+    const writeWave = () => {
+      // ONE rounded value for both consumers: the surface var (wave pseudos) and the twinkle
+      // fields' literal transforms (swayFields — no var inheritance into the instance leaves;
+      // see the --wave-x firebreak block in index.css).
+      const wx = Number((waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1))
+      el.style.setProperty('--wave-x', `${wx}px`)
+      swayFields(el, wx)
+    }
     const apply = () => {
       raf = 0
       // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the
@@ -900,195 +932,119 @@ export function Scroll({
   }, [phone]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Loading wave drift — CSS/compositor does ALL the moving (`.iw-wave-anim`, in the prerendered
-  // HTML, so it starts at FIRST PAINT and never stutters however busy the main thread is; the reveal
-  // coast is a CSS keyframe animation too). JS only manages the phase boundaries, each a one-shot
-  // write: sync the surface to the shared animation clock at mount; at reveal-imminent ADD the
-  // additive coast on top of the still-running drift (v3 — see the module header; classic engines
-  // freeze the offset into --wave-t and swap to replace-keyframes instead); and at coast end hand
-  // the final offset to the scroll sway as its persistent base — no boundary snapping, so the
-  // waves can never stop or move backward.
+  // HTML, so it starts at FIRST PAINT and never stutters however busy the main thread is; the
+  // brake is a CSS keyframe animation too). JS touches the animation only at the TWO control
+  // events, each a one-shot write: SETTLE ('inkwave:reveal-imminent') adds the brake on top of
+  // the still-running drift, and the rest handoff hands the final offset to the scroll sway as
+  // its persistent base — no boundary snapping, so the waves can never stop or move backward.
   const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
   const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
   // Ref mirror for the scroll-sway rAF (declared above, runs later) — it must not write --wave-x
   // while the drift/coast animations own the wave position.
   const waveModeRef = useRef(waveMode)
   waveModeRef.current = waveMode
-  // useLayoutEffect: the FIRST paint of a freshly-mounted surface must already sit at the shared
-  // clock. As a plain effect this ran AFTER paint, so every surface remount painted one frame at
-  // ramp-start (offset ~0) then jumped to the synced phase — a visible wave flash per remount.
+  // SIBLING CLOCK ADOPT (the one cross-surface sync the tiles need). Two overlapping surfaces
+  // (the loading shell + the editor beneath it) each carry their own CSS drift; a surface that
+  // mounts MID-LOAD starts its animation at its own recalc, out of phase with the shell's — the
+  // reveal cross-fade would smear two offset copies (the 2026-07-09 ~10px hiccup). Adopting the
+  // sibling's literal startTime makes every copy pixel-identical by construction. Surfaces that
+  // mount BEFORE the atomic gate opens have no animations at all — then every copy is born in
+  // the same gate recalc and is identical without any adoption. useLayoutEffect: the adopt must
+  // land before this surface's first paint. Also arms the load watchdog (disarmed at rest).
   useLayoutEffect(() => {
-    // Pick up mid-loop where the first surface's animation is: negative delay = elapsed % loop.
     const el = surfaceRef.current
     if (!el || !startedHiddenRef.current) return
-    // ONE shared clock — the moment the FIRST surface's animation actually started (the prerendered
-    // shell's, at first paint). performance.now() alone overestimates elapsed by the first-paint
-    // latency (~50–300ms ≈ up to ~20px of drift), and re-setting the delay vars on the already-
-    // running hydrated shell would phase-shift (jump) it — so the first surface just PUBLISHES its
-    // animation's true start time and leaves its own vars untouched; later surfaces sync to it.
-    const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
-    const drifts = () => {
+    armLoadWatchdog()
+    driftSurfaces.add(el)
+    let sibling: number | null = null
+    for (const s of driftSurfaces) {
+      if (s === el || !s.isConnected) continue
       try {
-        return el.getAnimations({ subtree: true }) // includes ::before/::after + twinkle children
-          .filter((x) => ((x as CSSAnimation).animationName ?? '').startsWith('iw-wave-drift'))
-      } catch { return [] }
+        const a = s.getAnimations({ subtree: true })
+          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+        if (typeof a?.startTime === 'number') { sibling = a.startTime as number; break }
+      } catch { /* getAnimations unavailable */ }
     }
-    if (w.__iwWaveEpoch === undefined) {
-      let start = performance.now() // fallback ≈ this mount (fresh mounts start their animation now)
-      const a = drifts().find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-      if (typeof a?.startTime === 'number') start = a.startTime as number
-      else if (typeof a?.currentTime === 'number') start = performance.now() - (a.currentTime as number)
-      w.__iwWaveEpoch = start
-      w.__iwWaveEpochAnim = a ?? undefined
-      return // this surface's own running animation IS the clock
+    if (sibling != null) {
+      try {
+        for (const a of el.getAnimations({ subtree: true })) {
+          const n = (a as CSSAnimation).animationName ?? ''
+          if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
+            try { a.startTime = sibling } catch { /* pending — resolves ≈ sibling anyway */ }
+          }
+        }
+      } catch { /* getAnimations unavailable */ }
     }
-    // EXACT clock share (2026-07-09, the ~10px reveal hiccup): wall-clock --wave-phase math left
-    // later surfaces ~10px behind the first (animation origins land frames after the delay was
-    // computed), and the shell's fade at reveal swapped the visible water BACKWARD by that gap.
-    // Adopting the epoch animation's literal startTime makes every surface pixel-identical by
-    // construction — no delay/origin arithmetic at all. Twinkle children ride the same call.
-    const epochStart = (typeof w.__iwWaveEpochAnim?.startTime === 'number')
-      ? w.__iwWaveEpochAnim.startTime as number
-      : w.__iwWaveEpoch // fallback: the recorded number (close, not exact)
-    const own = drifts()
-    if (own.length) {
-      for (const a of own) { try { a.startTime = epochStart } catch { /* not ready */ } }
-    } else {
-      // No animations yet (display gated) — fall back to the delay var; close enough as a fallback.
-      const elapsed = Math.max(0, performance.now() - (w.__iwWaveEpoch ?? performance.now())) / 1000
-      el.style.setProperty('--wave-phase', `-${(elapsed % 1.944).toFixed(3)}s`)
-    }
+    return () => { driftSurfaces.delete(el) }
   }, [])
-  // Two effects, deliberately: the freeze (read the animated transform, switch class) must not share
-  // an effect with the handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the
-  // effect and its CLEANUP tore down the just-armed listeners, leaving .iw-wave-coast stuck forever
-  // (frozen waves + background-position pinned at 0 → the scroll sway looked "broken").
-  // useLayoutEffect: --wave-t + the coast class land in the SAME commit that drops the anim class,
-  // before the browser paints — the first coast frame is already easing from the frozen offset, so
-  // there is no dead frame (and no intermediate render ever lacks both classes: waveMode swaps
-  // 'anim' → 'coast' atomically in one state).
-  // Start (additive path: adopt/create the load's SHARED coast — the drift keeps running) or
-  // freeze (classic path: sample the drift into --wave-t) — shared by the desktop trigger
-  // (revealed, below) and the phone trigger ('inkwave:reveal-imminent'). coastT0 = the load's one
-  // coast clock (additive: the resolved first-paint start; classic: the freeze moment). The
-  // twinkle fields coast from the same number, so tiles + twinkles share one start by construction.
+  // Two effects, deliberately: the settle (switch class) must not share an effect with the
+  // handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the effect and its
+  // CLEANUP tore down the just-armed listeners, leaving .iw-wave-coast stuck forever.
+  // SETTLE → coast. The drift is never stopped: the brake is added on top (see the module
+  // header), so there is nothing to freeze and no clock to compensate — shared by the desktop
+  // trigger (revealed, below) and the 'inkwave:reveal-imminent' event. ONE coast per load: every
+  // surface adopts the same record (injected keyframes + resolved clock + snapped travel).
   const coastT0Ref = useRef(0)
   const coastEndRef = useRef<number | null>(null) // device-pixel-snapped coast end offset (see below)
-  const coastDistRef = useRef<number | null>(null) // the snapped coast travel (tx − end)
-  const freezeToCoast = () => {
+  const settleToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
-    // PHONE + covered (2026-07-10): this surface renders NO wave classes (see the className) —
-    // the SHELL owns the only water. WebKit proved hidden-pseudo animations unreliable (its
-    // covered coast never fired animationend → wave classes lingered as a parchment "freeze
-    // frame"), and a class-less surface has no drift to freeze — running the maths here would
-    // clobber the shell's injected keyframes with tx=0. Drop straight to rest.
+    // PHONE + covered: this surface renders NO wave classes (see the className) — the SHELL owns
+    // the only water, and a class-less surface has nothing to coast. Drop straight to rest.
     if (phone && covered) { setWaveMode('off'); return }
-    if (ADDITIVE_COAST) {
-      // ADDITIVE PATH (v3): no freeze at all — the drift keeps running and the additive coast
-      // starts from zero. ONE coast per load: adopt the shared record when a coast is already
-      // in flight (< T old — a stale record is an abandoned choreography, e.g. a veil unmounted
-      // mid-coast), otherwise create it. All surfaces therefore share d + the resolved clock.
-      const now = timelineNow()
-      const T = phone ? 2000 : 2500
-      let sc = sharedCoast
-      if (!sc || now - sc.t0 > T) {
-        const d0 = phone ? 48 : 60 // v·T/3 — snapped to a device pixel at resolve
-        if (!injectAdditiveCoastFrames(phone, d0)) {
-          // Injection failed → the stylesheet's var-based replace keyframes would ADD garbage.
-          // Fall back to the classic replace path for this load.
-          freezeToCoastClassic(el)
-          return
-        }
-        sc = sharedCoast = { t0: now, resolvedT0: null, d: d0, end: null, phone }
-      }
-      coastT0Ref.current = sc.resolvedT0 ?? sc.t0
-      coastDistRef.current = sc.d
-      coastEndRef.current = sc.end
-      setWaveMode('coast')
+    // No animation-composition (pre-2023 engines): no brake possible — stop cleanly instead.
+    // Read the drift pose from the animation clock, hand it to the sway, done. A hard stop, not
+    // a coast; acceptable degrade on engines none of our targets ship.
+    if (!ADDITIVE_COAST) {
+      let tx = 0
+      try {
+        const a = el.getAnimations({ subtree: true })
+          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+        if (typeof a?.currentTime === 'number') tx = -140 * (((a.currentTime as number) / 1000) % 1.944) / 1.944
+      } catch { /* pose unreadable → rest at 0 */ }
+      disarmLoadWatchdog()
+      waveBaseRef.current = tx - el.scrollTop * WAVE_SWAY
+      el.style.setProperty('--wave-x', `${tx.toFixed(3)}px`)
+      setWaveMode('off')
+      window.dispatchEvent(new Event('inkwave:wave-rest'))
       return
     }
-    freezeToCoastClassic(el)
-  }
-  // CLASSIC (replace) coast — only for engines without animation-composition. Freeze the drift
-  // offset from the animation clock and swap to keyframes that continue it.
-  const freezeToCoastClassic = (el: HTMLElement) => {
-    let tx = 0
-    let t0 = (document.timeline?.currentTime as number | null) ?? performance.now()
-    try {
-      const a = el.getAnimations({ subtree: true })
-        .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-      if (typeof a?.currentTime === 'number') {
-        tx = -140 * (((a.currentTime as number) / 1000) % 1.944) / 1.944
-        // The exact timeline moment tx corresponds to — NOT performance.now(), which runs ahead
-        // of the frozen frame clock by however long this task has been running.
-        if (typeof a.startTime === 'number') t0 = (a.startTime as number) + (a.currentTime as number)
-      } else {
-        const m = getComputedStyle(el, '::before').transform
-        if (m && m !== 'none') tx = new DOMMatrixReadOnly(m).m41
-      }
-    } catch { /* transform unreadable → coast from 0 */ }
-    coastT0Ref.current = t0
-    // LITERAL coast keyframes (2026-07-10, Peter's phone "style change at the slowdown"): the
-    // stylesheet's iw-wave-coast-l/r keyframes read var(--wave-t)/var(--wave-coast-dist), and
-    // var()-dependent keyframes CANNOT run on the compositor — the coast ran as a MAIN-THREAD
-    // animation whose fractional transform is re-rastered CRISP each frame, while the drift
-    // (literal keyframes, composited) is GPU-sampled at fractional texel offsets = slightly
-    // SOFTENED lines. The swap therefore visibly sharpened/brightened every wave line in one
-    // frame (measured: line peak RGB ~[177,225,228] drifting → ~[227,238,234] coasting). Fix:
-    // inject the SAME keyframe names with literal px values into a late <style> (last definition
-    // wins) so the coast composites exactly like the drift — identical rendering, only motion
-    // differs. The END offset is snapped to an integer DEVICE pixel: at rest the composited
-    // texture then sits texel-exact (bilinear ≡ nearest), so dropping to background-position at
-    // the coast→off handoff paints identical pixels too — no sharpen-pop at either boundary.
-    // The var-based CSS keyframes remain as the no-JS fallback (today's behaviour).
-    writeCoastFrames(el, tx)
+    const now = timelineNow()
+    const T = phone ? 2000 : 2500
+    let sc = loadCoast
+    if (!sc || now - sc.t0 > T) { // a stale record is an abandoned choreography (self-heals)
+      const d0 = phone ? 48 : 60 // v·T/3 — snapped to a device pixel at resolve
+      injectAdditiveCoastFrames(phone, d0)
+      sc = loadCoast = { t0: now, resolvedT0: null, d: d0, end: null, phone }
+    }
+    coastT0Ref.current = sc.resolvedT0 ?? sc.t0
+    coastEndRef.current = sc.end
     setWaveMode('coast')
-  }
-  // CLASSIC PATH ONLY — freeze offset → literal replace-coast keyframes + refs + --wave-t.
-  const writeCoastFrames = (el: HTMLElement, tx: number) => {
-    const dist = phone ? 48 : 60
-    const dpr = window.devicePixelRatio || 1
-    const end = Math.round((tx - dist) * dpr) / dpr
-    coastEndRef.current = end
-    coastDistRef.current = tx - end // the snapped travel — the twinkle fields must coast EXACTLY this
-    try {
-      const css =
-        `@keyframes iw-wave-coast-l{from{transform:translate3d(${tx.toFixed(3)}px,0,0)}to{transform:translate3d(${end.toFixed(3)}px,0,0)}}` +
-        `@keyframes iw-wave-coast-r{from{transform:translate3d(${(-tx).toFixed(3)}px,0,0)}to{transform:translate3d(${(-end).toFixed(3)}px,0,0)}}`
-      let st = document.getElementById('iw-coast-kf') as HTMLStyleElement | null
-      if (!st) { st = document.createElement('style'); st.id = 'iw-coast-kf'; document.head.appendChild(st) }
-      if (st.textContent !== css) st.textContent = css // both surfaces freeze the same clock — one write
-    } catch { /* injection failed → var-based keyframes still coast (pre-fix rendering) */ }
-    el.style.setProperty('--wave-t', `${tx.toFixed(2)}px`)
   }
   useLayoutEffect(() => {
     if (!revealed || waveMode !== 'anim') return
-    freezeToCoast()
+    settleToCoast()
     // Normally a no-op FALLBACK on both platforms: 'inkwave:reveal-imminent' (below) already
     // swapped to 'coast' before revealed flips — but if the event never fired, coast at reveal.
   }, [revealed, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
-  // BOTH platforms (2026-07-09, the backward-flicker fix): TiptapEditor dispatches
-  // 'inkwave:reveal-imminent' at gate-ready and the coast starts THEN, on a light frame. The old
-  // desktop path froze inside the reveal commit itself — the busiest frame of the whole load: the
-  // compositor kept drifting for the ~100ms that commit blocked the main thread, so the waves were
-  // ~7px past the frozen --wave-t when the coast finally started → a visible backward snap. Phone
-  // additionally delays the reveal by 1.5s so the page pops as the waves reach rest; desktop
-  // reveals two rAFs later (imperceptible — the coast is already easing when the heavy commit
-  // lands). Every drifting surface listens — the visible loading SHELL (revealed never flips
+  // SETTLE arrives as 'inkwave:reveal-imminent' (TiptapEditor's gate; LoadingVeil's ready). The
+  // brake starts on that light frame, ahead of the heavy reveal commit — and because it is
+  // additive with zero start velocity, a starved commit cannot make the handoff discontinuous
+  // anyway. Every drifting surface listens — the visible loading SHELL (revealed never flips
   // there; it unmounts at/after the reveal) and the editor's own surface underneath coast in
-  // lockstep (same --wave-phase clock → same frozen offset), so the shell swap is seamless.
+  // lockstep (same adopted clock, same injected keyframes), so the shell swap is seamless.
   useEffect(() => {
     if (waveMode !== 'anim') return
-    const onImminent = () => freezeToCoast()
+    const onImminent = () => settleToCoast()
     window.addEventListener('inkwave:reveal-imminent', onImminent)
     return () => window.removeEventListener('inkwave:reveal-imminent', onImminent)
   }, [waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
-  // Coast END → sway handoff. The 2s ease-out itself is pure CSS (iw-wave-coast-l/r); JS wakes only
-  // at animationend to hand over: the final offset (--wave-t − 72px, the keyframes' end value) is
-  // written into --wave-x in the same commit the coast class drops. Because the coast geometry's
-  // ±280px overdraw is exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping
-  // the class while setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and
-  // the sway then continues from that offset (base = txFinal − scrollTop·0.06, rebased here).
+  // Coast END → sway handoff. The deceleration itself is pure CSS (drift + brake); JS wakes only
+  // at the resolved-clock timer to hand over: the snapped rest offset is written into --wave-x in
+  // the same commit the coast class drops. Because the coast geometry's ±280px overdraw is
+  // exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping the class while
+  // setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and the sway then
+  // continues from that offset (base = txFinal − scrollTop·WAVE_SWAY, rebased here).
   useLayoutEffect(() => {
     if (waveMode !== 'coast') return
     const el = surfaceRef.current
@@ -1098,119 +1054,89 @@ export function Scroll({
     const finish = () => {
       if (done) return
       done = true
+      disarmLoadWatchdog()
       // On phone the waves cease to exist the moment the classes drop (parchment surface,
       // ::before display:none), so the sway base/--wave-x write is inert there — kept
       // unconditional for one code path.
       // The coast ends on a device-pixel-SNAPPED offset (coastEndRef) — the --wave-x handoff
       // must write that same number or the bg-position repaint shifts sub-pixel.
-      const txFinal = coastEndRef.current
-        ?? (ADDITIVE_COAST && sharedCoast ? sharedCoast.end : null)
-        ?? (parseFloat(el.style.getPropertyValue('--wave-t')) || 0) - (phone ? 48 : 60) // v·T/3: 2s/48 phone, 2.5s/60 desktop
+      const txFinal = coastEndRef.current ?? loadCoast?.end ?? -(phone ? 48 : 60)
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(3)}px`) // 3 decimals — must carry the device-px snap exactly
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
       // This load's coast is over — the next load must never adopt its clock. (Sibling surfaces
       // finishing moments later already carry the resolved values in their own refs.)
-      if (sharedCoast && timelineNow() - sharedCoast.t0 > (phone ? 1900 : 2400)) sharedCoast = null
-      // The waves are at REST — the phone load choreography keys on this (Edit.tsx drops the
-      // shell + TiptapEditor uncovers the editor's water in listeners of this same dispatch, so
-      // React batches all three into ONE commit: no frame ever shows a mid-motion swap).
+      if (loadCoast && timelineNow() - loadCoast.t0 > (phone ? 1900 : 2400)) loadCoast = null
+      // The waves are at REST — the load choreography keys on this (Edit.tsx drops the shell +
+      // TiptapEditor uncovers the editor's water in listeners of this same dispatch, so React
+      // batches all three into ONE commit: no frame ever shows a mid-motion swap).
       window.dispatchEvent(new Event('inkwave:wave-rest'))
     }
-    // animationend fires at T on the classic path only (the additive coast's duration is T + the
-    // hold); the additive path finishes on the resolved-clock timer below. Harmless on both.
-    const onEnd = (e: AnimationEvent) => { if (e.animationName === 'iw-wave-coast-l') finish() }
-    el.addEventListener('animationend', onEnd)
-    let cap = setTimeout(finish, 3300) // safety net if the animation never ran (e.g. reduced paint states)
+    // The rest handoff is a resolved-clock timer (armed in schedule() below once the coast's
+    // actual start is known); until then a provisional timer covers a coast whose animations
+    // never ran (display-gated pseudos in exotic states).
+    let cap = setTimeout(finish, (phone ? 2000 : 2500) + 800)
 
-    if (ADDITIVE_COAST && sharedCoast) {
-      // ADDITIVE PATH: nothing to backdate — the coast animations start naturally at their first
-      // painted frame (continuous by construction; the drift never stopped). This effect's job is
-      // the ONE-SHOT CLOCK RESOLVE: the first surface whose coast `ready` resolves stamps the
-      // load's effective start (t0), snaps the coast distance so the REST pose lands on an
-      // integer device pixel (rewriting the shared keyframes by ≤0.5 device px INSIDE the frame
-      // that first paints the coast — invisible), and retimes the twinkle fields to the same
-      // clock. Every other surface — including a late-mounting duplicate editor (the double-mount
-      // dispatched reveal-imminent TWICE; each old-path freeze rewrote the shared keyframes ≈7px
-      // apart = Peter's two visible snaps) — aligns its own coast animations to the stamped t0,
-      // so all copies are pixel-identical.
-      const coastAnims = () => {
-        try {
-          return el.getAnimations({ subtree: true }).filter((a) => {
-            const n = (a as CSSAnimation).animationName ?? ''
-            return n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade'
-          })
-        } catch { return [] }
-      }
-      const align = (t0: number) => {
-        for (const a of coastAnims()) { try { a.startTime = t0 } catch { /* pending — resolves to ~t0 anyway */ } }
-      }
-      const schedule = (t0: number) => {
-        // The rest handoff: T after the resolved start (+ a small margin). The linear hold keeps
-        // the total pose STATIC after T, so timer slop — even a starved commit — is invisible.
-        const T = phone ? 2000 : 2500
-        clearTimeout(cap)
-        cap = setTimeout(finish, Math.max(0, t0 + T + 80 - timelineNow()))
-      }
-      const resolve = () => {
-        if (cancelled || waveModeRef.current !== 'coast') return
-        const sc = sharedCoast
-        if (!sc) return
-        let t0 = sc.resolvedT0
-        if (t0 == null) {
-          const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
-          t0 = (typeof a0?.startTime === 'number') ? a0.startTime as number : timelineNow()
-          const w = window as unknown as { __iwWaveEpoch?: number; __iwWaveEpochAnim?: Animation }
-          const epoch = (typeof w.__iwWaveEpochAnim?.startTime === 'number')
-            ? w.__iwWaveEpochAnim.startTime as number
-            : w.__iwWaveEpoch ?? t0
-          const tx0 = -140 * (((t0 - epoch) / 1000) % 1.944) / 1.944 // drift pose at the coast start
-          const dpr = window.devicePixelRatio || 1
-          const end = Math.round((tx0 - sc.d) * dpr) / dpr // rest pose on an integer device pixel
-          sc.resolvedT0 = t0
-          sc.d = tx0 - end
-          sc.end = end
-          injectAdditiveCoastFrames(phone, sc.d) // ≤0.5 device px rewrite, same frame as first paint
-          retimeCoast(t0, sc.d) // twinkle fields ride the same resolved clock + snapped travel
-        }
-        coastT0Ref.current = t0
-        coastDistRef.current = sc.d
-        coastEndRef.current = sc.end
-        align(t0)
-        schedule(t0)
-      }
-      if (sharedCoast.resolvedT0 != null) {
-        // A surface joining an in-flight coast (the duplicate-mount case): adopt, don't re-stamp.
-        resolve()
-      } else {
-        const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
-        if (a0) void a0.ready.then(resolve).catch(() => { /* cancelled — a mode change owns it */ })
-        else requestAnimationFrame(() => resolve()) // display-gated pseudos: best-effort clock
-      }
-    } else {
-      // CLASSIC PATH (no animation-composition): BACKDATE the coast animations to the freeze
-      // clock. A CSS animation created by the class swap is PLAY-PENDING until the compositor
-      // acks a commit — through that window the compositor keeps running the LAST committed
-      // state (the infinite drift), so an un-backdated coast snapped every wave line BACKWARD
-      // to --wave-t when it finally activated. Setting startTime = coastT0 resolves the pending
-      // start NOW (residual = the deceleration over the starved window — sub-pixel in the
-      // normal ~1-frame case). The spark S-fade rides the same clock.
+    // ONE-SHOT CLOCK RESOLVE: the first surface whose coast `ready` resolves stamps the load's
+    // effective start (t0), snaps the coast travel so the REST pose lands on an integer device
+    // pixel (rewriting the shared keyframes by ≤0.5 device px INSIDE the frame that first paints
+    // the coast — invisible; the twinkle fields share the same keyframe names, so this retimes
+    // them too), and schedules the rest handoff at t0 + T. The linear hold keeps the total pose
+    // STATIC after T, so timer slop — even a starved commit — is invisible. Every other surface
+    // aligns its own coast animations to the stamped t0, so all copies are pixel-identical.
+    const coastAnims = () => {
       try {
-        for (const a of el.getAnimations({ subtree: true })) {
+        return el.getAnimations({ subtree: true }).filter((a) => {
           const n = (a as CSSAnimation).animationName ?? ''
-          if (n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade') {
-            try { a.startTime = coastT0Ref.current } catch { /* not ready — pending start is the fallback */ }
-          }
-        }
-      } catch { /* getAnimations unavailable → original pending-start behaviour */ }
+          return n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade'
+        })
+      } catch { return [] }
     }
-    return () => { cancelled = true; el.removeEventListener('animationend', onEnd); clearTimeout(cap) }
+    const align = (t0: number) => {
+      for (const a of coastAnims()) { try { a.startTime = t0 } catch { /* pending — resolves to ~t0 anyway */ } }
+    }
+    const schedule = (t0: number) => {
+      const T = phone ? 2000 : 2500
+      clearTimeout(cap)
+      cap = setTimeout(finish, Math.max(0, t0 + T + 80 - timelineNow()))
+    }
+    const resolve = () => {
+      if (cancelled || waveModeRef.current !== 'coast') return
+      const sc = loadCoast
+      if (!sc) return
+      let t0 = sc.resolvedT0
+      if (t0 == null) {
+        const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
+        t0 = (typeof a0?.startTime === 'number') ? a0.startTime as number : timelineNow()
+        // The drift pose at the coast start comes from the drift animation's own clock.
+        let tx0 = 0
+        try {
+          const drift = el.getAnimations({ subtree: true })
+            .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+          if (typeof drift?.startTime === 'number')
+            tx0 = -140 * ((((t0 - (drift.startTime as number)) / 1000) % 1.944) / 1.944)
+        } catch { /* pose unreadable — coast lands within a tile of true */ }
+        const dpr = window.devicePixelRatio || 1
+        const end = Math.round((tx0 - sc.d) * dpr) / dpr // rest pose on an integer device pixel
+        sc.resolvedT0 = t0
+        sc.d = tx0 - end
+        sc.end = end
+        injectAdditiveCoastFrames(phone, sc.d) // ≤0.5 device px rewrite, same frame as first paint
+      }
+      coastT0Ref.current = t0
+      coastEndRef.current = sc.end
+      align(t0)
+      schedule(t0)
+    }
+    if (loadCoast?.resolvedT0 != null) {
+      resolve() // a surface joining an in-flight coast: adopt, don't re-stamp
+    } else {
+      const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
+      if (a0) void a0.ready.then(resolve).catch(() => { /* cancelled — a mode change owns it */ })
+      else requestAnimationFrame(() => resolve()) // display-gated pseudos: best-effort clock
+    }
+    return () => { cancelled = true; clearTimeout(cap) }
   }, [waveMode, phone])
-  // --wave-t is inert once the coast class is gone; tidy it away after the 'off' commit (removing it
-  // BEFORE the class dropped was the old backward-jump bug — the still-coasting transform fell to 0).
-  useEffect(() => {
-    if (waveMode === 'off') surfaceRef.current?.style.removeProperty('--wave-t')
-  }, [waveMode])
 
   // Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or when the pointer is
   // near the right edge, and fades out (via .iw-sb-idle - CSS makes it transparent) after 1.4s of
@@ -1252,20 +1178,17 @@ export function Scroll({
     const host = twinkleRef.current
     if (!host || !fill) return
     // PHONE + covered: no twinkles on this host, and — critically — do NOT call syncTwinkles at
-    // all: waterMode is GLOBAL, and this surface's early drop to 'off' (freezeToCoast) would
+    // all: waterMode is GLOBAL, and this surface's early drop to 'off' (settleToCoast) would
     // clobber the shell's live coast for every host. The shell owns the water until wave-rest.
     if (phone && covered) return
+    // No clock/travel plumbing: the fields' brake is the SAME injected CSS keyframes the tiles
+    // composite (one writer), and the pool's playback clock is aligned once per load inside
+    // waveTwinkle (alignTracks).
     syncTwinkles(host, {
       sparks: waveMode !== 'off',
       dashes: !phone || waveMode !== 'off',
       mode: waveMode,
       phone,
-      // The tiles' exact coast clock (see freezeToCoast) — fields must coast from the SAME number
-      // or they shear off the crests by the task-time skew between the freeze and this effect.
-      coastStart: waveMode === 'coast' ? coastT0Ref.current : undefined,
-      // …and the same SNAPPED travel (the tiles' end offset is rounded to a device pixel), or the
-      // dashes end ≤1 device px off their crests at rest.
-      coastDist: waveMode === 'coast' ? coastDistRef.current ?? undefined : undefined,
     })
     // covered IS a dep: the phone editor skips sync while covered (above), so the uncover at
     // wave-rest must run one sync — it carries the global twinkle mode to 'off' (the shell
@@ -1273,7 +1196,7 @@ export function Scroll({
   }, [fill, phone, waveMode, covered])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ` iw-wave-coast${ADDITIVE_COAST && sharedCoast ? ' iw-coast-add' : ''}` : ''}${covered ? ' iw-wave-covered' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the
@@ -1283,8 +1206,8 @@ export function Scroll({
       {/* Twinkle host — sparkles + accent dashes live in here as generated layers, NOT on the wave
           ::before/::after (fading/blinking those would dim the wave lines too). Rendered EMPTY
           (deterministic — identical in the prerender), populated post-hydration by the effect
-          above; the layers ride the same drift/coast keyframes + --wave-phase clock as the wave
-          layers, so every fleck moves in lockstep with its crest. Pure visual layer. */}
+          above with the precomputed pool; every fleck rides its crest by construction (see the
+          waveTwinkle.ts header). Pure visual layer. */}
       <div ref={twinkleRef} className="iw-wave-twinkles" aria-hidden="true" />
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in
