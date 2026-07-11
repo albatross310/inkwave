@@ -1910,26 +1910,32 @@ function SplitDiffView({
   // scrubber (Apple-Photos style): NO flick/momentum. A small detent (FIRST) commits the first snap, then
   // every REST px is another, applied as a NET hop per event so a light swipe flies through 10-30. A pause
   // resets the gesture so the next swipe re-arms the detent. Vertical wheels are untouched.
+  // GESTURE STATE LIVES IN REFS (round 3): this effect re-subscribes on every step (per-render `nav`
+  // identity + the per-landing scroller swap), and effect-local accum/started reset the detent
+  // mid-gesture — every step cost ~5 more events (probed: a 22-step scrub degenerated to ~3 hops).
+  const hAccumRef = useRef(0)
+  const hStartedRef = useRef(false)
+  const onScrub = nav?.onScrub
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
-    let accum = 0, started = false, idle: ReturnType<typeof setTimeout> | undefined
+    let idle: ReturnType<typeof setTimeout> | undefined
     const FIRST = 34, REST = 7
     const onWheel = (e: WheelEvent) => {
       if (e.shiftKey || e.ctrlKey || e.metaKey) return
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.3) return // not a horizontal swipe
       e.preventDefault()
       clearTimeout(idle)
-      idle = setTimeout(() => { started = false; accum = 0 }, 140) // pause → re-arm the detent
-      accum += e.deltaX
+      idle = setTimeout(() => { hStartedRef.current = false; hAccumRef.current = 0 }, 140) // pause → re-arm the detent
+      hAccumRef.current += e.deltaX
       let net = 0
-      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // reversed: right → previous
-      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
-      if (net) nav?.onScrub(net, e.timeStamp, 'scrub') // position scrubber = bitmap scrub from step 1
+      if (!hStartedRef.current && Math.abs(hAccumRef.current) >= FIRST) { hStartedRef.current = true; const s = hAccumRef.current > 0 ? 1 : -1; hAccumRef.current -= s * FIRST; net += -s } // reversed: right → previous
+      if (hStartedRef.current) while (Math.abs(hAccumRef.current) >= REST) { const s = hAccumRef.current > 0 ? 1 : -1; hAccumRef.current -= s * REST; net += -s }
+      if (net) onScrub?.(net, e.timeStamp, 'scrub') // position scrubber = bitmap scrub from step 1
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
     R?.addEventListener('wheel', onWheel, { passive: false })
     return () => { clearTimeout(idle); L?.removeEventListener('wheel', onWheel); R?.removeEventListener('wheel', onWheel) }
-  }, [nav, snapshot.id])
+  }, [onScrub, snapshot.id])
 
   // On snapshot change: reposition the new content under the midline. Two modes:
   //  • 'center'  — keep the SAME words on the midline (content-anchored; the default).

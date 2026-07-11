@@ -231,12 +231,22 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     the active id is already most-recent.
   ROUND 3 (2026-07-12, "flash through — raster them as PNGs at current resolution of screen"):
   SCRUB BITMAP LAYER (`editor/scrubRaster.ts` + wiring in SnapshotView). During rapid stepping
-  (2nd+ input <250ms apart — the same chokepoint as fling coalescing, in goTo) the doc pane,
-  diff panel and minimap flip through PRE-RASTERISED bitmaps: per-pane overlay hosts
-  (`.iw-scrub-overlay`, absolute inset-0, z 4 under the midline) get cached <canvas> elements
-  swapped in per step — sub-ms show(), zero layout; at rest the presenter holds the overlay
-  until the LANDING snapshot's live render has painted (notifyLanded on heavySnap.id + double
-  rAF; 1.5s safety), then lifts it off the identical frame. Invariants:
+  the doc pane, diff panel and minimap flip through PRE-RASTERISED bitmaps: per-pane overlay
+  hosts (`.iw-scrub-overlay`, absolute inset-0, z 4 under the midline) get cached <canvas>
+  elements swapped in per step — sub-ms show(), zero layout; at rest the presenter holds the
+  overlay until the LANDING snapshot's live render has painted (notifyLanded on heavySnap.id +
+  double rAF; 1.5s safety), then lifts it off the identical frame. Invariants:
+  - ENGAGEMENT (each clause was a probed failure): (a) rapid detection reads the INPUT events'
+    own timeStamps (stamped ONCE per input at each source — keyboard, shift-wheel, trackpad
+    scrubber, touch flick/scrub, buttons; the old goTo-spacing check stays as an OR) — goTo
+    runs after the previous step's synchronous render, so goTo spacing missed rapid streams
+    exactly when flips rendered slowly. (b) ARMED scrubs (hold-armed touch drag, trackpad
+    position scrubber) pass mode 'scrub' → freeze + bitmap from their FIRST step — the first
+    step's live cold render (300-1100ms) bunched queued inputs into fling jumps (a 21-step
+    scrub collapsed into ~3 goTos). (c) The trackpad scrubber's detent state (accum/started)
+    lives in REFS — its effect re-subscribes every render (fresh `nav` identity per step) and
+    closure state reset the detent mid-gesture (~5 events per step). An ISOLATED flick stays
+    the live path (single-flick semantics untouched).
   - CAPTURE is SVG-foreignObject rasterisation of the live pane subtree: whole app CSS inlined
     from CSSOM with `:root`/`html` selectors re-pointed at the `.iw-raster-root` clone wrapper
     (theme attr + documentElement inline style copied onto it); LOADED webfont faces fetched
@@ -250,6 +260,13 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     pane, so its scroller measures in local px; doc-pane zoom lives on the paper INSIDE the
     clone). Blank-detect before caching (a WebKit FO failure must not cache an empty rect);
     opaque bg backstop composited UNDER (transparent bitmaps let the frozen pane peek through).
+  - CAPTURE-COST BOMBS (defused; keep): the clone is TRIMMED to the crop band (Range-delete at
+    `.inkwave-page-gap` block boundaries — text after a gap widget starts a fresh line, so far
+    content can't re-wrap the kept band; pixel-exact spacer, CSS-zoom-corrected; the diff panel
+    falls back to its block children); twinkle/spark fields are STRIPPED (per-instance PNG data
+    URIs); small-rendered <img>s (≤128px declared — the page seals) get DOWNSCALED data URIs —
+    the 95KB logo × ~125 sheet + minimap copies serialised to ~13MB of XML per capture and the
+    SVG doc decoded every copy. Together: captures 4.5-13s → 130-500ms (xml 16.8MB → ~1.8MB).
   - CACHE: LRU keyed kind|snap.id|WxH|zoom|dpr, hard byte budget 60MB desktop / 24MB touch;
     eviction protects the on-screen canvases + target±2. Misses show the NEAREST cached
     snapshot's bitmap in the same bucket (never blank); unknown target → exact-only.
@@ -257,13 +274,17 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     while scrubbing / within 350ms of nav input; sources = active panes 700ms after settle
     (re-keyed on zoom/pane geometry), scroll-settle recapture (700ms), and warm DocLayers via
     hooks.onWarmReady (hidden layers are capturable — opacity 0.001 keeps them painted).
-  - An ISOLATED flick never enters bitmap mode (single-flick semantics untouched); the counter/
-    header stay live outside the overlays. Probes: scrub.step/scrub.step.miss/scrub.capture/
-    scrub.swap/scrub.mem in __iwPerf; window.__iwScrub exposes the presenter (stats(), show()).
-    Measured (20-step scrub, warmed cache): Chromium desktop input→painted-frame p50 ~8ms/step
-    with bitmaps vs the frozen-pane no-progress "before"; captures ~100-400ms each in idle.
-    Playwright's Linux WebKit has NO navigator.storage — probe seeds via an init-script OPFS
-    shim (scratchpad scrub-probe), NOT vite preview (fallback-faithful server + prod-like CSP).
+  - The counter/header stay live outside the overlays. MEASURED (36-snapshot 20k-word doc,
+    22-event trackpad scrub over a walked region): Chromium desktop 17 bitmap flips, show()
+    p50 0.4ms/max 2.1ms, burst frames p50 16.7ms (one >50ms), at-rest swap pixel-diff 0.00%
+    (1600×900); isolated flips 50-182ms live with ZERO bitmap-mode entries; cache 62.1MB ≤
+    budget. WebKit iPhone-emu: shows 1-3ms, swap diff 0.11%, but its slower renders coalesce a
+    burst into ~4 fling-style goTos (each shows a bitmap) — real-device touch scrubbing paces
+    by finger position; re-probe on device. Probes: scrub.step/scrub.step.miss/
+    scrub.capture(.prep/.img/.draw/.xmlKB)/scrub.swap/scrub.mem in __iwPerf; window.__iwScrub
+    exposes the presenter (stats(), show()). Playwright's Linux WebKit has NO navigator.storage
+    — the probe seeds via an init-script OPFS shim (scratchpad scrub-probe), NOT vite preview
+    (fallback-faithful static server + prod-like CSP).
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
