@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
@@ -585,11 +586,40 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       TaskItem.configure({ nested: true }),
     ],
     content: doc.contentJson,
+    // DOUBLE-MOUNT NOTE (2026-07-11): this component must mount in a default-lane render — NOT a
+    // time-sliced one (lazy/Suspense retry). useEditor's in-render creation + its 1ms
+    // scheduleDestroy safety timer otherwise race across the slices: two full editor creations
+    // and a doubled reveal chain per load. Edit.tsx holds the resolved module in state (no
+    // Suspense) precisely for this — see the note there before changing how this mounts.
     editorProps: {
       attributes: {
         class: 'tiptap-editor',
         'data-placeholder': 'Begin writing…',
         spellcheck: 'false',
+      },
+      // ── Task #28: keydown-synchronous typing (flag: inkwave:kdSync; desktop default ON,
+      // touch default OFF — the virtual keyboard's native path + autocorrect must never be
+      // intercepted). Plain printable keys dispatch their ProseMirror transaction synchronously
+      // IN the keydown task, so the character paints in the SAME frame — instead of the native
+      // route (browser mutates the DOM → PM's MutationObserver reconciles a task later).
+      // handleTextInput runs first, exactly like the native path, so input rules (smart quotes,
+      // math shortcuts, citation triggers) behave identically. Backspace/Enter are already
+      // keydown-synchronous via the keymaps. Guards: no modifiers (shift ok), no IME
+      // composition, no open word-cycle (it owns j/k/space/tab), text selections only.
+      handleKeyDown: (view, event) => {
+        if (!kdSyncEnabled()) return false
+        if (event.ctrlKey || event.metaKey || event.altKey) return false
+        if (event.key.length !== 1 || event.isComposing || view.composing) return false
+        if (hintStateRef.current.focusedPos !== null) return false
+        const { state } = view
+        if (!(state.selection instanceof TextSelection)) return false
+        const t0 = performance.now()
+        const { from, to } = state.selection
+        const deflt = () => state.tr.insertText(event.key, from, to) // what the native path would apply
+        const handled = view.someProp('handleTextInput', (f) => f(view, from, to, event.key, deflt))
+        if (!handled) view.dispatch(state.tr.insertText(event.key).scrollIntoView())
+        notePerf('kd-sync', performance.now() - t0)
+        return true // preventDefault — the async browser-mutation path is skipped entirely
       },
     },
     onTransaction: ({ editor: e, transaction }) => {
@@ -654,19 +684,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           const tickT0 = performance.now()
           const hadDeletion = scasHadDeletionRef.current
           scasHadDeletionRef.current = false
-          // PHONE WINDOWED TICK (2026-07-10, round-2 lag): scan only where this tick's edits/caret
-          // moves happened — the window = accumulated edit range ∪ last-tick caret ∪ current caret
-          // (a word commits when the caret LEAVES it, so both caret paragraphs must be scanned).
-          // Full scan stays for: desktop (byte-identical), any tick with a DELETION (the engine's
-          // vanished-lemma pass needs whole-doc word presence — the phantom-snapshot guard), and
-          // the decoration repaint whenever the tick DID change state (a verdict change repaints
-          // every instance of that lemma doc-wide).
+          // WINDOWED TICK (phone 2026-07-10; desktop joined 2026-07-11 — the tick's O(doc) scan +
+          // decoration rebuild at the 120ms cadence was part of the desktop "waves of lag"): scan
+          // only where this tick's edits/caret moves happened — the window = accumulated edit
+          // range ∪ last-tick caret ∪ current caret (a word commits when the caret LEAVES it, so
+          // both caret paragraphs must be scanned). Full scan stays for: any tick with a DELETION
+          // (the engine's vanished-lemma pass needs whole-doc word presence — the phantom-snapshot
+          // guard), and the decoration repaint whenever the tick DID change state (a verdict
+          // change repaints every instance of that lemma doc-wide). Windowed ≡ full equivalence is
+          // unit-pinned in scas/controller.window.test.ts + extensions/redHighlightWindow.test.ts.
           const caretNow = e.state.selection.from
           const acc = scasWinRef.current
           scasWinRef.current = null
           const lastCaret = scasLastCaretRef.current
           scasLastCaretRef.current = caretNow
-          const win = isTouchDevice() && !hadDeletion
+          const win = !hadDeletion
             ? {
                 from: Math.min(acc ? acc.from : caretNow, caretNow, lastCaret),
                 to: Math.max(acc ? acc.to : caretNow, caretNow, lastCaret),
@@ -706,7 +738,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // actually needs it — the 200ms save beat, any snapshot/signing work, or a mirror. The beat
       // stays data-only; the shell re-renders only when the title changed.
       docStaleRef.current = true
-      scheduleSave(() => ensureDocFresh(), () => {
+      scheduleSave(() => {
+        const t0 = performance.now() // perflog: the save beat's O(doc) doc build (desktop lag hunt)
+        const d = ensureDocFresh()
+        notePerf('autosave-build', performance.now() - t0)
+        return d
+      }, () => {
         const d = docRef.current
         if (d.title !== lastNotifiedTitleRef.current) {
           lastNotifiedTitleRef.current = d.title
@@ -926,7 +963,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const root = document.documentElement
     const write = () => {
       // Rect height (not offsetHeight): includes the desktop ×1.12 scale transform.
-      root.style.setProperty('--iw-toolbar-h', `${Math.ceil(el.getBoundingClientRect().height)}px`)
+      const h = Math.ceil(el.getBoundingClientRect().height)
+      root.style.setProperty('--iw-toolbar-h', `${h}px`)
+      syncPmScrollReserve(h)
       keepCaretRef.current() // rows opening/closing move the pill's top edge — keep the caret clear
     }
     const ro = new ResizeObserver(write)
@@ -934,6 +973,30 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     write()
     return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
   }, [])
+  // ENTER-CARET FIX (2026-07-11, Peter: "press Enter … the cursor isn't visible until you type"):
+  // ProseMirror's own scrollIntoView (what Tiptap's Enter/splitBlock dispatches) IGNORES CSS
+  // scroll-padding — it scrolls the new caret line to the scroller's RAW bottom edge, which is
+  // exactly the band the floating toolbar reserves via scroll-padding-bottom (index.css). The
+  // new empty line (and its caret) settled BEHIND the toolbar; the next typed character made the
+  // BROWSER's native caret-reveal run, which does honour scroll-padding — hence "appears when
+  // you type". Give PM the same reserve through its own mechanism: scrollThreshold (when a
+  // position counts as too close to the edge) + scrollMargin (how far clear to scroll), kept in
+  // sync with the live toolbar height by the ResizeObserver above.
+  const syncPmScrollReserve = (h: number) => {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed) return
+    // +28 over the pill: PM scrolls the CARET rect clear, but the paragraph's line box extends a
+    // few px of leading below it — clear the whole line, with margin to spare.
+    const reserve = { top: 8, left: 0, right: 0, bottom: h + 28 }
+    ed.view.setProps({ scrollThreshold: reserve, scrollMargin: reserve })
+  }
+  useEffect(() => {
+    // The RO's first write can precede editor creation (immediatelyRender: false) — re-sync when
+    // the editor lands.
+    if (!editor || editor.isDestroyed) return
+    const el = footerRef.current
+    if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
+  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // iOS touch-and-hold guard, half two (half one = .iw-touch-guard user-select CSS): a touch that
   // STARTS on the toolbar or any of its drop-ups must never start a text selection mid-slide when
@@ -2471,6 +2534,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       </div>
     </ComplianceContext.Provider>
   )
+}
+
+// Task #28: keydown-synchronous typing flag — 'inkwave:kdSync' = '1'/'0'; unset defaults to ON
+// for mouse/keyboard devices and OFF on touch (never intercept the virtual keyboard/autocorrect).
+// Cached at first read (it's on the per-keystroke path); toggling requires a reload.
+let _kdSync: boolean | null = null
+function kdSyncEnabled(): boolean {
+  if (_kdSync !== null) return _kdSync
+  try {
+    const v = window.localStorage.getItem('inkwave:kdSync')
+    _kdSync = v === null ? !isTouchDevice() : v === '1'
+  } catch { _kdSync = false }
+  return _kdSync
 }
 
 function deriveTitle(text: string): string {

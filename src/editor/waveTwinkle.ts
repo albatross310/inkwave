@@ -107,6 +107,8 @@ const SCROLL_STALE_MS = 160 // a velocity report older than this reads as "stopp
 const COAST_EASE = 'cubic-bezier(0.33333, 1, 0.66667, 1)' // the wave coast's exact cubic
 const CREST = { a: 22, b: 92 } // thick-line inflection y within a 140px row
 
+import { notePerf } from './perflog'
+
 type Group = 'a' | 'b'
 type Mode = 'anim' | 'coast' | 'off'
 
@@ -526,6 +528,7 @@ function ensureDriver(): void {
 function step(ts: number): void {
   driver = 0
   const raw = ts - lastStep
+  const stepT0 = performance.now() // perflog: driver frame cost while awake (desktop lag hunt)
   // STORM BREAKER (2026-07-11, Peter's Chrome "waves forever"): with no vsync (headless, some
   // GPU-less/occluded states) rAF can fire back-to-back at CPU speed; the driver's own style
   // writes then re-invalidate every "frame" and the loop eats the main thread — the boot never
@@ -581,8 +584,10 @@ function step(ts: number): void {
   else if (!stillSince) stillSince = ts
   if (!coast && waterMode === 'off' && eff <= RATE_EPS && stillSince && ts - stillSince > STATIC_DWELL_MS) {
     if (blinkMode === 'driven') goStatic()
+    notePerf('twinkle-step', performance.now() - stepT0)
     return // park — reportSway / the next coast wakes the loop
   }
+  notePerf('twinkle-step', performance.now() - stepT0)
   driver = requestAnimationFrame(step)
 }
 
@@ -1253,11 +1258,25 @@ export function rebaseCoast(start: number, dist: number): void {
 
 // Genuine scrollTop velocity (px/s) from the sway handler — zoom-hold-compensated deltas are
 // excluded UPSTREAM (Scroll.tsx), so zoom corrections never read as water motion.
+let swayPrimeTs = -1e9 // last isolated report — the sustained-scroll wake gate below
 export function reportSway(pxPerSec: number): void {
   if (waterMode !== 'off' || !hosts.size) return
+  const now = performance.now()
   scrollTargetV = Math.min(RATE_CAP, pxPerSec / V_REF)
-  scrollTs = performance.now()
+  scrollTs = now
   if (scrollTargetV <= 0) return
+  // SUSTAINED-SCROLL WAKE (desktop typing lag, 2026-07-11): a caret-reveal scroll — typing at
+  // the bottom of the page nudges scrollTop once per wrapped line — is a SINGLE discrete scroll
+  // event, but its one-frame delta reads as a huge velocity (20px/16ms ≈ full rate) and woke the
+  // whole dash field from park: WAAPI restarts for every dash, driver frames until the rate
+  // decayed, and a getComputedStyle sweep at re-park — per line wrap, while typing. Waking from
+  // PARK now needs TWO scroll frames within 200ms (a real scroll produces dozens; the second
+  // frame wakes ~16ms late — imperceptible). An already-running driver is untouched.
+  if (blinkMode === 'static' && !driver) {
+    const prev = swayPrimeTs
+    swayPrimeTs = now
+    if (now - prev > 200) return // isolated report — prime only, stay parked
+  }
   wakeFromStatic()
   ensureDriver()
 }
