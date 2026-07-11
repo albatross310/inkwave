@@ -854,7 +854,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // settle frames hit, without the full-lattice reflow burst on every settle. The full
           // lattice still warms at genuine idle, exactly as before.
           let zoomWarmUntil = 0
-          const ZOOM_WARM_RADIUS = 3
+          const ZOOM_WARM_RADIUS = 5
           const preBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
             || editDebounce !== undefined
