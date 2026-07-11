@@ -439,11 +439,24 @@ write shim, so metadata can say a PDF exists with no local bytes).
   The prover (scratchpad font-calib.mjs): canvas measureText vs DOM parity across family ×
   {400,700} × {normal,italic} × 7 sizes (8pt-72pt + canonical 18px) — advance widths (Δ≤0.05px),
   greedy-wrap break indices at 500px, mixed-run tallest-line-box rule. CERTIFIED + SHIPPED:
-  IM Fell DW Pica, EB Garamond (identity — both pass, the math engine is viable), Gelasio
-  (Georgia-genre), Lora (Cambria/Palatino-genre), Spectral (Times-genre), Carlito (sans). FAILED
+  15 families (Peter's palette budget), grouped in the picker (Identity/Serif/Display/Slab/Sans/
+  Mono): IM Fell DW Pica + EB Garamond (identity — both pass: the math engine is viable),
+  'Times' = TeX GYRE TERMES and 'Arial' = TeX GYRE HEROS (certified CLONES, GUST licence,
+  fetched via the DIRECT list in fetch-fonts.mjs — display labels are decoupled from css stacks;
+  NB 'Times'/'Arial' are Monotype trademarks: the safe commercial pattern is the clone's own name
+  — one-line change in StyleBar FONTS), Crimson Pro, Spectral, Lora (the Cambria-warmth stand-in
+  — Caladea failed twice; system Cambria is DEFINITIVELY unshippable: canonical breaks must be
+  identical cross-device and a system font can't be), Gelasio, Gentium Plus (classical languages),
+  Cormorant Garamond + Fraunces (display), Bitter (slab), Carlito (Calibri twin — also the
+  closest shipped cousin to Aptos, which is licence-locked; Open Sans certified as the nearest
+  open face in spirit if ever wanted), Atkinson Hyperlegible (a11y), JetBrains Mono. ALSO
+  CERTIFIED but cut for palette budget: Cardo, Noto Sans, Noto Serif, Open Sans, Fira Code,
+  Nimbus Roman. FAILED
   (integer-px advance quantization — hinting/ligature divergence; also a cross-device canonical-
-  break hazard): Tinos, Caladea, Vollkorn, Libre Baskerville, PT Serif, Source Serif 4, Alegreya,
-  Baskervville — none shipped; NO metric-reliable Baskerville found (genre dropped). The old
+  break hazard): Tinos, Arimo, Caladea (×2), Vollkorn (×2), Libre Baskerville, PT Serif,
+  Source Serif 4 (×2), Alegreya (×2), Baskervville, Libre Caslon Text, Quattrocento, STIX Two
+  Text, Inter (700 only) — none shipped. BASKERVILLE GENRE: DEFINITIVELY no passer across four
+  candidates (Peter has let it go). The old
   system-font entries (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) are GONE from the
   StyleBar (device-dependent metrics = uncertifiable + they already broke cross-device canonical
   breaks for marked runs); legacy docs still render — each new css stack keeps the old system
