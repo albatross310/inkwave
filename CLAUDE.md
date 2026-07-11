@@ -450,6 +450,11 @@ that keep them fixed:
 - **Word count runs only while the ◈ panel is open — both platforms** (ReceiptPanel is controlled
   everywhere now); desktop was building the full doc string every 300ms of typing for a hidden
   number.
+- **Residual (known, next target):** with SCAS decorations on, the steady-state keystroke cost is
+  now dominated by ProseMirror DecorationSet MAPPING/redraw — O(decorated words) per transaction
+  (CPU-profiled: forChild/posBeforeChild in the PM chunk). ~2,600 decorated words ⇒ ~22ms real per
+  keystroke on a 4×-throttled desktop. The fix is viewport-windowed decoration RENDERING (verdict
+  state stays doc-wide; only visible ranges get Decoration objects) — not attempted this round.
 - **Scroll-frame budget:** desktop scrolling of a long doc showed 300–900ms frames in ALL ablation
   cells (phone was fine) — desktop-only per-scroll-frame work: the `--wave-x` sway write
   (unregistered inherited custom property on the surface → subtree style invalidation) and the
