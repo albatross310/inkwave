@@ -490,7 +490,6 @@ interface HostState { sparks?: SetNodes; dashes?: SetNodes; tok: { sparks: numbe
 let defs: { sparks: Inst[]; dashes: Inst[] } | null = null
 let stripW = 0
 const hosts = new Map<HTMLElement, HostState>()
-const elDef = new WeakMap<HTMLElement, Inst>()
 const trackAnims = new Map<HTMLElement, Animation[]>() // blink els → [opacity, transform] tracks
 const restDrift = new Map<HTMLElement, Animation>() // rest wrappers → tile-clocked WAAPI drift
 let waterMode: Mode = 'anim'
@@ -840,7 +839,6 @@ function instEl(d: Inst): HTMLElement {
   el.style.setProperty('--twk-day', `url("${d.day}")`)
   el.style.setProperty('--twk-night', `url("${d.night}")`)
   if (d.kind === 'dash') el.style.setProperty('--twk-static', d.staticOn ? '1' : '0')
-  elDef.set(el, d)
   return el
 }
 
@@ -1095,7 +1093,22 @@ function enterCoast(): void {
         restDrift.set(wrap, a)
       }
       if (typeof brake.startTime === 'number') start()
-      else void brake.ready.then(start).catch(() => { /* class dropped — a newer mode owns it */ })
+      else {
+        // Pending: `ready` resolves at the coast's first painted frame — but on a BUSY main
+        // thread the notification can starve for hundreds of ms while the compositor already
+        // animates (round-4 finding). Poll startTime as a fallback; whichever lands first wins
+        // (start() is idempotent). Statics are near-invisible that early in their fade, so a
+        // late anchor is imperceptible; the anchor itself stays EXACT (t0c is the literal
+        // resolved startTime, however late we read it).
+        void brake.ready.then(start).catch(() => { /* class dropped — a newer mode owns it */ })
+        let polls = 0
+        const poll = () => {
+          if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected || polls++ > 12) return
+          if (typeof brake!.startTime === 'number') start()
+          else setTimeout(poll, 100)
+        }
+        setTimeout(poll, 100)
+      }
     }
   }
 }

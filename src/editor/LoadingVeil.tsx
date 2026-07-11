@@ -3,7 +3,7 @@ import { Scroll, EmptyEditorSurface, isTouchDevice } from './Scroll'
 
 // ─── LoadingVeil — the wave loading choreography for secondary routes (Peter, 2026-07-09) ────
 // A route-level, full-screen wave shell (Edit.tsx's persistent loading shell, distilled): it
-// mounts covering everything — waves drifting on the shared --wave-phase clock — and when
+// mounts covering everything — waves drifting on the shared sibling-adopted clock — and when
 // `ready` flips true it runs the SAME reveal sequence as the editor: the coast starts FIRST on a
 // light frame ('inkwave:reveal-imminent', which every drifting surface obeys; see Scroll.tsx and
 // the backward-flicker fix in TiptapEditor's gate), then the veil fades out so the content

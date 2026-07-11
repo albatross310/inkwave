@@ -975,7 +975,12 @@ export function Scroll({
         }
       } catch { /* getAnimations unavailable */ }
     }
-    return () => { driftSurfaces.delete(el) }
+    return () => {
+      driftSurfaces.delete(el)
+      // The last drifting surface unmounting (the desktop /snapshot veil fades out mid-coast and
+      // takes its animations with it) ends the choreography — there is no chain left to watch.
+      if (driftSurfaces.size === 0) disarmLoadWatchdog()
+    }
   }, [])
   // Two effects, deliberately: the settle (switch class) must not share an effect with the
   // handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the effect and its
