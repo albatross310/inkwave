@@ -369,9 +369,28 @@ write shim, so metadata can say a PDF exists with no local bytes).
   ≈2× a plain char): the paragraph-snapshot trigger reads ONLY the completed paragraph's
   textContent, and the snapshot chain (ensureDocFresh + JCS + hash + OPFS + OTS) is deferred to a
   genuine input pause (runWhenQuiet 1.5s — content is captured at WORK time, as it always was).
-  Residual tail on BOTH Enter and backspace-over-return: the ~1.1s (4× phone emu) canonical
-  measure at the 850/1200ms pause — phase-independent, hits plain chars equally; the next
-  architectural target is an incremental break recompute from cached per-block lines.
+  The old residual tail (the ~1.1s canonical measure at the 850/1200ms pause) is FIXED by the
+  round-5 incremental break recompute below.
+- **INCREMENTAL BREAK RECOMPUTE (2026-07-12, round-5).** The full measure's cost was the TWO
+  full-document reflows its forced canonical context implies (phase-probed: ~300-500ms at the
+  first read + 259-637ms at restore/scroll-clamp, of a ~1s phone measure). The incremental path
+  (PaginationExtension `computeIncremental`) produces the SAME lines with ZERO live reflows:
+  unchanged blocks (node identity vs the last measure's IncMeta) reuse cached block-relative
+  lines at the previous measure's tops (bit-identical above the edit; one telescoped delta
+  below); changed blocks are measured in a hidden MEASUREMENT HOST that mirrors the canonical
+  context (same .ProseMirror classes, canonical font/zoom inline, captured canonical block width,
+  cloned live DOM with nested gap widgets stripped); the shared `computeBreaks` loop then decides
+  breaks — byte-identical BY CONSTRUCTION. Unresolved break-line doc positions resolve in the
+  host (single-char Range binary search → same-index live text node → posAtDOM — no hit-test)
+  and bake forever per (node, line). FALLBACK IS THE RULE: non-paragraph blocks in/beside the
+  changed region, refLists there, pure end-appends, missing cache entries, failed resolutions,
+  >24 changed blocks — all return null and the full forced-context measure runs (it refreshes
+  IncMeta; clearLineCache also nulls it). PROOF: `inkwave:pagCheck=1` runs BOTH paths per measure
+  and compares signatures (console.error + __iwPagMismatch on divergence) — the round-5 storm
+  (chars end/mid/boundary/last-page, Enter splits, backspace joins) scored 23/23 identical.
+  Measured (4× phone emu, 20k words): page-measure 636-1364ms → page-measure-inc 18-81ms;
+  backspace-over-return p90 1592→197ms; plain-char max 1766→89ms; Enter p50 80ms ≈1.6× char.
+  perflog: page-measure-inc + pm-clear/pm-compute/pm-restore/pm-dispatch/pm-paint phases.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
