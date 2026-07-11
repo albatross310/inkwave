@@ -589,7 +589,7 @@ export function Scroll({
       // text). The surface is included so the SnapshotView's zoom (its own Scroll dispatches too)
       // can never drive the live editor's panels. Dispatched before the scroll correction below —
       // applyBands' sheet min-height write must precede the scroll write or the range could clamp.
-      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el } }))
+      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el, z0: zoomLiveZ0 } }))
       if (topAfter != null) {
         // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
         // content-visibility placeholder set re-evaluates between frames (scroll corrections move
@@ -770,7 +770,7 @@ export function Scroll({
           // The wave moved sheet-local geometry too: commit-time bands (and every placeholder-
           // regime cache entry) are stale — re-derive from the CURRENT layout, same task.
           window.dispatchEvent(new CustomEvent('inkwave:zoom-step', {
-            detail: { step: zoomToStep(editorZoomRef.current), surface: el, resync: true },
+            detail: { step: zoomToStep(editorZoomRef.current), surface: el, z0: zoomLiveZ0, resync: true },
           }))
         }
       } else guardStats.noAnchor++
