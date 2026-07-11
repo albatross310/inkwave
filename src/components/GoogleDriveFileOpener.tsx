@@ -7,7 +7,7 @@ import { getListing, putListing, listingKey, type CachedListing } from '../stora
 // drive.file only lets Inkwave see files/folders IT created, so this browses the app's own folders +
 // files (not your whole Drive). Pick a file → the caller downloads it, opens it, keeps syncing to it,
 // and remembers its folder as a Recent folder. Files OTHERS shared with you aren't visible to
-// drive.file — open those via "This computer" (the mounted Drive folder) on desktop.
+// drive.file — open those via "This device" (the mounted Drive folder) on desktop.
 const G_BLUE = '#4285F4'
 const G_HOVER = '#f5f9ff'
 
@@ -213,7 +213,7 @@ export function GoogleDriveFileOpener({ onOpen, onClose }: {
           ))}
           {!error && !needsAuth && folders?.length === 0 && files?.length === 0 && <p className="text-sm text-stone-400 p-3">Nothing here. Open a sub-folder, or pick a .studio file.</p>}
         </div>
-        <p className="text-xs text-stone-400 mt-3">Pick a file — it opens and keeps syncing back to Drive (no Save needed). For files shared with you, use “This computer” on desktop.</p>
+        <p className="text-xs text-stone-400 mt-3">Pick a file — it opens and keeps syncing back to Drive (no Save needed). For files shared with you, use “This device” on desktop.</p>
       </div>
     </div>,
     document.body,

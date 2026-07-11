@@ -404,7 +404,7 @@ function SaveCopyPanel({ folderAvailable, onSaveAs, onSaveAsOneDrive, onSaveAsGo
         <MenuButton onClick={() => { onExportBundle(); onDone() }}>⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span></MenuButton>
       )}
       {folderAvailable && onSaveAs && (
-        <MenuButton onClick={() => { onSaveAs(); onDone() }}>🗁 This computer<span className="block text-xs text-stone-400">a new file in a folder, then keep it updated</span></MenuButton>
+        <MenuButton onClick={() => { onSaveAs(); onDone() }}>🗁 This device<span className="block text-xs text-stone-400">a new file in a folder, then keep it updated</span></MenuButton>
       )}
       {onSaveAsOneDrive && (
         <MenuButton onClick={() => { onSaveAsOneDrive(); onDone() }}>☁ OneDrive<span className="block text-xs text-stone-400">name a new file in OneDrive, then keep it updated</span></MenuButton>
@@ -483,7 +483,7 @@ function UploadPanel({ onComputer, onGoogleDrive, onOneDrive, onDone }: { onComp
     <div className="mt-2 flex flex-col gap-2.5">
       <p className="text-xs text-stone-400 px-1">Open a file — it keeps syncing to where it lives, so you only Save for a new file or a copy.</p>
       <MenuButton onClick={onComputer}>
-        🗁 This computer<span className="block text-xs text-stone-400">use Chrome/Edge/Brave to sync via Windows Explorer (incl. your Drive/OneDrive folders)</span>
+        🗁 This device<span className="block text-xs text-stone-400">use Chrome/Edge/Brave to sync via Windows Explorer (incl. your Drive/OneDrive folders)</span>
       </MenuButton>
       {onOneDrive && (
         <MenuButton onClick={() => { onOneDrive(); onDone() }}>

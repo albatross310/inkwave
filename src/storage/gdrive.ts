@@ -284,7 +284,7 @@ export async function getGDriveFileInfo(docId: string): Promise<{ webUrl: string
 
 // List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
 // your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
-// open via "This computer" (the mounted Drive folder) on desktop.
+// open via "This device" (the mounted Drive folder) on desktop.
 
 /** An openable Drive file, with the change-tag the open cache keys on: md5Checksum changes only
  *  with the CONTENT; `version` (which also bumps on metadata changes — over-invalidates, always
