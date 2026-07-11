@@ -788,10 +788,20 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
           const onZoomStep = (e: Event) => {
-            const d = (e as CustomEvent).detail as { step?: number; surface?: Element } | undefined
+            const d = (e as CustomEvent).detail as { step?: number; surface?: Element; resync?: boolean } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
-            const cache = (view.dom as HTMLElement).classList.contains('iw-zoom-live') ? liveCache : stepCache
+            const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
+            const cache = placeholders ? liveCache : stepCache
+            if (d.resync) {
+              // The zoom guard (Scroll.tsx) detected a content-visibility relevancy wave between
+              // commits: the layout shifted, so every placeholder-regime entry is stale — drop
+              // them and re-derive the bands from the CURRENT layout in this same task.
+              liveCache.clear()
+              const geo = readBands()
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
+              return
+            }
             const hit = cache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
             else {
@@ -834,15 +844,27 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           PRE_ACT_EVS.forEach((ev) => window.addEventListener(ev, onPreActivity, { passive: true, capture: true }))
           PRE_CHOREO_EVS.forEach((ev) => window.addEventListener(ev, onPreChoreo))
           bumpQuiet(3000) // the mount itself is a choreography
+          // ZOOM-SCOPED WARM WINDOW (round-3, Peter: "build/refresh the step cache only on
+          // zoom-zone entry / first step / idle after settle — never on the typing path"): the
+          // genuine-idle gate's activity events include 'wheel'/'scroll', so a zoom session kept
+          // pushing its own warm-up out 1.5s forever — the cache was measured COLD through whole
+          // gestures (0 precomputed). A zoom SETTLE opens this window: inside it the quietUntil
+          // input gate is bypassed (typing/edit debounce + the gesture hold still block) and the
+          // warm is RADIUS-LIMITED to the steps around the current one — the next notches' exit/
+          // settle frames hit, without the full-lattice reflow burst on every settle. The full
+          // lattice still warms at genuine idle, exactly as before.
+          let zoomWarmUntil = 0
+          const ZOOM_WARM_RADIUS = 3
           const preBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
             || editDebounce !== undefined
             || bibDebounce !== undefined
-            || performance.now() < quietUntil
+            || (performance.now() < quietUntil && performance.now() >= zoomWarmUntil)
             || document.visibilityState === 'hidden'
           const nextUncached = (): number | null => {
             const k0 = currentStep()
-            for (let d = 0; d <= ZOOM_STEP_MAX - ZOOM_STEP_MIN; d++) {
+            const radius = performance.now() < zoomWarmUntil ? ZOOM_WARM_RADIUS : ZOOM_STEP_MAX - ZOOM_STEP_MIN
+            for (let d = 0; d <= radius; d++) {
               for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
                 if (k < ZOOM_STEP_MIN || k > ZOOM_STEP_MAX) continue
                 if (!stepCache.has(k)) return k
@@ -1249,7 +1271,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (destroyed) return
             liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next pinch
             if (phoneLike()) { if (gapped && sheet && layer) schedulePaint(); return }
-            forceRecompute(); schedulePrecompute()
+            // Idle-after-settle warm (zoom-scoped — see zoomWarmUntil): the settle pause is the
+            // one guaranteed input gap in a zoom session; warm the neighbouring steps now so the
+            // next notches' exit/settle frames apply cached geometry instead of measuring.
+            zoomWarmUntil = performance.now() + 2000
+            forceRecompute(); schedulePrecompute(250)
           }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           // PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical
