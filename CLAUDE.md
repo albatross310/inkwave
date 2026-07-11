@@ -293,12 +293,12 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
-- Phone SCAS tick is WINDOWED (2026-07-10): the 250ms tick scans/repaints only the tick's
-  edit+caret paragraphs (~200× cheaper than O(doc)). INVARIANT: any tick with a DELETION does the
-  FULL scan — the engine's vanished-lemma pass needs whole-doc word presence (a window that hides a
-  removal ⇒ false lock + phantom snapshot); and the windowed decoration splice is only legal when
-  the tick did NOT change SCAS state (a verdict change repaints that lemma doc-wide). Desktop keeps
-  the full scan (byte-identical). Word count now runs ONLY while the ◈ panel is open on phone.
+- The SCAS tick is WINDOWED on BOTH platforms (phone 2026-07-10; desktop joined 2026-07-11): the
+  tick scans/repaints only the tick's edit+caret paragraphs (~200× cheaper than O(doc)).
+  INVARIANT: any tick with a DELETION does the FULL scan — the engine's vanished-lemma pass needs
+  whole-doc word presence (a window that hides a removal ⇒ false lock + phantom snapshot); and the
+  windowed decoration splice is only legal when the tick did NOT change SCAS state (a verdict
+  change repaints that lemma doc-wide). Word count runs ONLY while the ◈ panel is open on phone.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
@@ -405,6 +405,35 @@ Rule of thumb: nothing that reads/parses/encodes the whole `.studio` or hits the
 may run synchronously on load. Stamp on creation, sweep on demand, cache encodes, read metadata not
 bodies.
 
+- **Canonical measure block-line cache (2026-07-11 — THE desktop "waves of lag" fix).** The
+  measure's per-line range.getClientRects walk over every block cost 1.5-4s on a 20k-word doc
+  (4×-throttled probe) at every 150ms desktop typing pause. collectLines now caches each block's
+  lines RELATIVE to its own top, keyed by PM NODE IDENTITY (WeakMap — persistent structures:
+  untouched block ⇒ same node ⇒ same canonical geometry); an edit re-measures only changed blocks
+  (measured: 133-277ms, ~15-20×). INVARIANTS: replace the WeakMap whenever the canonical CONTEXT
+  changes (fonts ready/loadingdone, page settings, bibliography hydration — clearLineCache sits
+  beside clearStepCache at those sites); never pass the cache for fluid 'scroll' paper (its
+  canonical width is the live width); cache reads/writes only on the gap-cleared measure.
+- **Editor mounts ONCE per load (2026-07-11 double-mount fix).** TiptapEditor must mount in a
+  default-lane render — React.lazy/Suspense retries render at TRANSITION priority (time-sliced),
+  and @tiptap/react's in-render editor creation + its 1ms scheduleDestroy timer race across the
+  slices: two ~950ms creations + the whole reveal chain doubled. Edit.tsx holds the eagerly-
+  imported module in STATE (no Suspense) — do not reintroduce lazy/Suspense around the editor.
+- **Keydown-synchronous typing (task #28, 2026-07-11).** editorProps.handleKeyDown dispatches
+  plain printable keys synchronously (handleTextInput someProp first — input rules identical to
+  the native path; storedMarks via tr.insertText). Flag 'inkwave:kdSync': unset = ON for
+  non-touch, OFF on touch (never intercept the virtual keyboard/autocorrect). Guards: no
+  modifiers, no composition, no open word-cycle, TextSelection only. Measured (4× throttle,
+  20k words): median keydown→paint 80ms → 48ms. perflog label: kd-sync.
+- **Enter-caret reveal (2026-07-11).** PM's scrollIntoView IGNORES CSS scroll-padding — Enter
+  scrolled the new empty line to the scroller's raw bottom edge, exactly behind the toolbar
+  reserve; the caret "appeared when you type" because the browser's native caret-reveal DOES
+  honour scroll-padding. The toolbar RO now mirrors the reserve into PM's scrollThreshold/
+  scrollMargin (view.setProps) — keep them in sync with any new floating bottom chrome.
+- **Twinkle wake needs SUSTAINED scroll (2026-07-11).** A parked dash field only wakes on two
+  scroll reports within 200ms — a single caret-reveal scroll nudge (typing at the page bottom)
+  must never wake the WAAPI field (it read as full-rate velocity and woke everything per wrapped
+  line).
 - **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
   full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
   after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the

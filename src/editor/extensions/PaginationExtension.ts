@@ -58,7 +58,10 @@ export interface PaginationOptions {
 // so divide all measured distances by `scale` to bring lines into the parchment's own (unscaled) coords.
 // Height-only gap heights (set in unscaled px) also render scaled, so accumAbove is scaled too → the
 // single division keeps everything consistent. scale=1 (no magnify / reflow zone) is a no-op.
-function collectLines(view: EditorView, editorTop: number, scale: number): Array<{ top: number; pos: number }> {
+interface BlockLines { relTops: number[]; relPos: number[] } // block-relative line geometry (canonical)
+type LineCache = WeakMap<object, BlockLines>
+
+function collectLines(view: EditorView, editorTop: number, scale: number, cache?: LineCache): Array<{ top: number; pos: number }> {
   const dom = view.dom as HTMLElement
   const s = scale > 0.01 ? scale : 1
   const gaps = Array.from(dom.querySelectorAll('.inkwave-page-gap')).map((g) => {
@@ -68,36 +71,71 @@ function collectLines(view: EditorView, editorTop: number, scale: number): Array
     let acc = 0; for (const g of gaps) if (g.top <= top - 2) acc += g.h; return acc
   }
   const lines: Array<{ top: number; pos: number }> = []
-  for (const child of Array.from(dom.children) as HTMLElement[]) {
-    if (child.classList?.contains('inkwave-page-gap')) continue // the widget itself isn't a line
+  // ── PER-BLOCK LINE CACHE (2026-07-11, the desktop "waves of lag") ────────────────────────────
+  // The per-line range.getClientRects walk over EVERY block was 1.5-4s of forced-layout reads on
+  // a 20k-word doc (4×-throttled probe) at every 150ms desktop typing pause — THE wave. PM docs
+  // are persistent structures: an untouched block keeps its NODE IDENTITY across edits, and
+  // inside the forced canonical context (fixed width/margins/font/zoom) the same node renders the
+  // same line geometry — so each block's lines are cached RELATIVE to its own top, keyed by the
+  // node object. An edit re-measures only the block(s) whose identity changed; every other block
+  // costs one getBoundingClientRect. The caller owns the WeakMap and REPLACES it whenever the
+  // canonical context itself changes (fonts, page settings, bibliography label hydration) or the
+  // paper is fluid ('scroll' — its canonical width is the live width, so no cache is passed).
+  // Cache entries are only written/read on the gap-free measure (compute clears the widgets
+  // first), so gap subtraction can never be baked into a cached top.
+  const usable = cache && gaps.length === 0
+  const doc = view.state.doc
+  doc.forEach((child, offset) => {
+    const el = view.nodeDOM(offset) as HTMLElement | null
+    if (!el || el.nodeType !== 1 || el.classList?.contains('inkwave-page-gap')) return
+    const br = el.getBoundingClientRect()
+    const blockTop = (br.top - editorTop - accumAbove(br.top)) / s
+    if (usable) {
+      const hit = cache.get(child)
+      if (hit) {
+        for (let k = 0; k < hit.relTops.length; k++) {
+          const rel = hit.relPos[k]
+          lines.push({ top: blockTop + hit.relTops[k], pos: Number.isNaN(rel) ? 0 : offset + rel })
+        }
+        return
+      }
+    }
+    const relTops: number[] = []
+    const relPos: number[] = []
+    const push = (top: number, at: number | null | undefined) => {
+      const abs = at != null && at > 0 ? at : 0
+      lines.push({ top, pos: abs })
+      relTops.push(top - blockTop)
+      relPos.push(abs > 0 ? abs - offset : NaN)
+    }
     let rects: DOMRect[] = []
-    try { const range = document.createRange(); range.selectNodeContents(child); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
+    try { const range = document.createRange(); range.selectNodeContents(el); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
     if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
-      const r = child.getBoundingClientRect()
-      const at = view.posAtCoords({ left: r.left + 1, top: r.top + Math.min(8, r.height / 2) })?.pos
-      lines.push({ top: (r.top - editorTop - accumAbove(r.top)) / s, pos: at != null && at > 0 ? at : 0 })
-      continue
+      const at = view.posAtCoords({ left: br.left + 1, top: br.top + Math.min(8, br.height / 2) })?.pos
+      push((br.top - editorTop - accumAbove(br.top)) / s, at)
+    } else {
+      let lastTop = -1e9
+      for (const r of rects) {
+        // dedup inline rects on the same line; skip tall boxes (a nested gap widget, not a text line).
+        // Height thresholds are in SCREEN px, so scale them by `s` to match the magnified rendering.
+        if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
+        lastTop = r.top
+        const at = view.posAtCoords({ left: r.left + 1, top: r.top + r.height / 2 })?.pos
+        push((r.top - editorTop - accumAbove(r.top)) / s, at)
+      }
     }
-    let lastTop = -1e9
-    for (const r of rects) {
-      // dedup inline rects on the same line; skip tall boxes (a nested gap widget, not a text line).
-      // Height thresholds are in SCREEN px, so scale them by `s` to match the magnified rendering.
-      if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
-      lastTop = r.top
-      const at = view.posAtCoords({ left: r.left + 1, top: r.top + r.height / 2 })?.pos
-      lines.push({ top: (r.top - editorTop - accumAbove(r.top)) / s, pos: at != null && at > 0 ? at : 0 })
-    }
-  }
+    if (usable) cache.set(child, { relTops, relPos })
+  })
   lines.sort((a, b) => a.top - b.top)
   return lines
 }
 
-function compute(view: EditorView, pageH: number, topM: number, scale: number, gapped: boolean): { set: DecorationSet; sig: string } {
+function compute(view: EditorView, pageH: number, topM: number, scale: number, gapped: boolean, cache?: LineCache): { set: DecorationSet; sig: string } {
   if (pageH <= 0) return { set: DecorationSet.empty, sig: 'empty' }
   const editorTop = (view.dom as HTMLElement).getBoundingClientRect().top
   const doc = view.state.doc
 
-  const lines = collectLines(view, editorTop, scale)
+  const lines = collectLines(view, editorTop, scale, cache)
   if (!lines.length) return { set: DecorationSet.empty, sig: 'empty' }
 
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
@@ -447,7 +485,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (preBusy()) { schedulePrecompute(500); return } // back off, retry when quiet
             const k = nextUncached()
             if (k == null) return // the whole lattice is warm
+            const preT0 = performance.now() // perflog: each step is a full hypothetical reflow
             measureStep(k)
+            notePerf('precompute-step', performance.now() - preT0)
             preRaf = requestAnimationFrame(precomputeTick) // spread: one hypothetical reflow per frame
           }
           const schedulePrecompute = (delay = 350) => {
@@ -588,7 +628,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // unscaled and rects come back in layout px. scale=1 here is therefore CORRECT (do
               // NOT wire the live magnify.getMagnify() in: it describes the DOM outside this
               // window). collectLines keeps its scale param for any future out-of-window measure.
-              measured = compute(view, pageH, topM, 1, gapped)
+              // Fluid 'scroll' paper measures at the LIVE width — its canonical layout changes with
+              // the window, so the block-line cache (fixed-context only) is not passed there.
+              measured = compute(view, pageH, topM, 1, gapped, fluid ? undefined : lineCache)
             } finally {
               restore()
               if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
@@ -643,13 +685,19 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // would skip re-measuring (the break sits wrong until an edit nudges it). Force a fresh
           // measure once fonts are ready (and on any later font load).
           let destroyed = false
-          const fontCb = () => { if (!destroyed) { clearStepCache(); forceRecompute() } }
+          // Block-line cache (see collectLines): valid while the canonical CONTEXT is stable.
+          // Replaced wholesale on the same triggers that invalidate the zoom step cache below —
+          // fonts, page settings, bibliography label hydration. Doc edits self-invalidate by
+          // node identity. WeakMap keys are PM nodes, so dropped blocks collect naturally.
+          let lineCache: LineCache = new WeakMap()
+          const clearLineCache = () => { lineCache = new WeakMap() }
+          const fontCb = () => { if (!destroyed) { clearLineCache(); clearStepCache(); forceRecompute() } }
           if (typeof document !== 'undefined' && document.fonts) {
             document.fonts.ready.then(fontCb).catch(() => {})
             document.fonts.addEventListener?.('loadingdone', fontCb)
           }
           // Re-measure when page settings (top margin, paper size, orientation) change.
-          const settingsCb = () => { if (!destroyed) { clearStepCache(); forceRecompute() } }
+          const settingsCb = () => { if (!destroyed) { clearLineCache(); clearStepCache(); forceRecompute() } }
           window.addEventListener('inkwave:page-settings-changed', settingsCb)
           // Re-measure when the bibliography hydrates or changes. Citation labels render "?key"
           // until the library loads, then rebuild asynchronously to their real widths ("Author &
@@ -660,6 +708,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // queueMicrotask/setState rebuild; the sig guards make it a no-op when breaks didn't move.
           let bibDebounce: ReturnType<typeof setTimeout> | undefined
           const bibCb = () => {
+            clearLineCache() // citation labels change block rendering without changing node identity
             clearStepCache() // citation labels re-measure → per-step geometry stale
             if (destroyed) return
             if (bibDebounce) clearTimeout(bibDebounce)
