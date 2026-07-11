@@ -269,12 +269,9 @@ export async function listFolders(parentId: string | null): Promise<DriveFolder[
   const token = await getSilentToken()
   if (!token) throw new Error('not signed in')
   const base = parentId ? `${GRAPH}/me/drive/items/${parentId}/children` : `${GRAPH}/me/drive/root/children`
-  const res = await fetch(`${base}?$select=id,name,folder&$top=200&$orderby=name`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
-  const data = (await res.json()) as { value: Array<{ id: string; name: string; folder?: unknown }> }
-  return data.value.filter((it) => it.folder).map((it) => ({ id: it.id, name: it.name }))
+  const items = await listAllPages<{ id: string; name: string; folder?: unknown }>(
+    `${base}?$select=id,name,folder&$top=200&$orderby=name`, token)
+  return items.filter((it) => it.folder).map((it) => ({ id: it.id, name: it.name }))
 }
 
 /** Create a sub-folder in `parentId` (null/'' = OneDrive root) and return it. Auto-renames on clash. */
@@ -303,6 +300,22 @@ const OPENABLE_FILE_RE = /\.(studio|studio\.gz|inkwave|trace\.json|insig\.json|j
  *  is the fallback for the rare items without one (over-invalidates, which is always safe). */
 export interface OneDriveFileEntry { id: string; name: string; cTag?: string; size?: number; modifiedAt?: number }
 
+// Graph pages children at $top and every doc's PDF sidecars live in the SAME folder — past one
+// page, .studio files sorting after the cut silently vanish from the picker (2026-07-11 "open
+// file is not showing the studio files"). Follow @odata.nextLink to exhaustion (capped).
+async function listAllPages<T>(firstUrl: string, token: string): Promise<T[]> {
+  const out: T[] = []
+  let url: string | null = firstUrl
+  for (let page = 0; url && page < 20; page++) {
+    const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
+    const data = (await res.json()) as { value: T[]; '@odata.nextLink'?: string }
+    out.push(...data.value)
+    url = data['@odata.nextLink'] ?? null
+  }
+  return out
+}
+
 /** List the openable FILES in a folder (null/'' = root) for the file opener. */
 export async function listOneDriveFiles(parentId: string | null): Promise<OneDriveFileEntry[]> {
   const token = await getSilentToken()
@@ -313,14 +326,15 @@ export async function listOneDriveFiles(parentId: string | null): Promise<OneDri
   // rejected field would 400 the WHOLE listing — the picker regression ("not seeing the files",
   // 2026-07-10). So: any failure of the enriched request retries the proven pre-cache minimal
   // listing before erroring. Files then still list + open; the byte cache just misses (safe).
-  let res = await fetch(`${base}?$select=id,name,file,cTag,eTag,size,lastModifiedDateTime&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
-  if (!res.ok) {
-    console.warn(`[inkwave] enriched OneDrive listing failed (${res.status}) — retrying the minimal listing`)
-    res = await fetch(`${base}?$select=id,name,file&$top=200&$orderby=name`, { headers: { Authorization: `Bearer ${token}` } })
+  type Item = { id: string; name: string; file?: unknown; cTag?: string; eTag?: string; size?: number; lastModifiedDateTime?: string }
+  let items: Item[]
+  try {
+    items = await listAllPages<Item>(`${base}?$select=id,name,file,cTag,eTag,size,lastModifiedDateTime&$top=200&$orderby=name`, token)
+  } catch (err) {
+    console.warn(`[inkwave] enriched OneDrive listing failed (${String(err)}) — retrying the minimal listing`)
+    items = await listAllPages<Item>(`${base}?$select=id,name,file&$top=200&$orderby=name`, token)
   }
-  if (!res.ok) throw new Error(`Graph list failed (${res.status})`)
-  const data = (await res.json()) as { value: Array<{ id: string; name: string; file?: unknown; cTag?: string; eTag?: string; size?: number; lastModifiedDateTime?: string }> }
-  return data.value
+  return items
     .filter((it) => it.file && OPENABLE_FILE_RE.test(it.name))
     .map((it) => ({
       id: it.id,
