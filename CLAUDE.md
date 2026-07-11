@@ -511,6 +511,56 @@ bodies.
   input (pointer/wheel/key/scroll, 1.5s) or reveal-chain event (open-begin/reveal-imminent/
   editor-revealed, 3s) is recent. A cold cache stays CORRECT — onZoomStep measures a miss live.
 
+## Typing performance invariants (2026-07-11 ablation overhaul — measure before touching)
+
+Established by a CPU-throttled Playwright ablation matrix (4× Chromium desktop+phone emulation,
+2.5× cgroup-quota WebKit, 100-page synthetic .studio with citations + seeded SCAS state; cells:
+baseline / scasOff / gapped-off / both-off / review). Harness pattern: keydown→rAF latency +
+longtask observer + `inkwave:perflog=1`; doc injected via `inkwave:open-doc`. Findings + the rules
+that keep them fixed:
+
+- **`shouldRerenderOnTransaction: false` on useEditor must stay.** @tiptap/react's legacy default
+  re-rendered the entire TiptapEditor tree on EVERY transaction (keystroke, caret move, SCAS
+  repaint, pagination meta) — the largest single per-keystroke cost. Consequences: the render body
+  must NEVER read `editor.state`/`editor.isActive` — mirror what it needs into React state from an
+  editor-event subscription (`selectionEmpty`, `selIsAtomNode`). StyleBar force-updates for its
+  isActive states only while `barVisible`; ReviewBar/CommentNotes self-subscribe (mounted only in
+  review mode).
+- **The pagination measure must never do per-line hit-tests.** collectLines carries each line's
+  sample coords and resolves doc positions LAZILY (only the ~1 line per page a break lands on pays
+  `posAtCoords`); block boundaries come from ONE `posAtDOM` per top-level block (atoms keep the
+  old per-line orphan reset). The eager version was ~4,400 hit-tests per measure = 2.4s (desktop
+  4×) to 17–31s (phone emulation 4×) of main-thread freeze per measure — the phone "terrible"
+  report. Break positions are identical by construction (same sample formula, same snap/orphan/
+  refList decisions).
+- **The pagination ResizeObserver folds into the edit debounce on BOTH platforms** (rule (b) had
+  regressed to desktop-immediate): in UNGAPPED mode nothing pins the sheet height, so every
+  line-wrapping keystroke resized the sheet → immediate full canonical measure DURING typing —
+  which made gapped-OFF measurably WORSE than gapped-on (the ablation's surprise: Peter's "is it
+  gapped pages?" answer is "the measure, in both modes; ungapped was worse").
+- **SCAS scans ride the per-paragraph WeakMap cache** (`scas/controller.ts` scanCommitted): words
+  are position-free and per-paragraph pure (persistent PM nodes), the cursor's paragraph is never
+  cached, and the full-scan SEMANTICS (deletion pass sees whole-doc presence) is preserved — it's
+  assembled from cached arrays. Desktop stays a semantic full scan; don't undo the cache.
+- **All citation doc-walks go through the memoised per-doc citation index** (`citationNav.ts`
+  citationNodes): occurrencesAt/occurrenceCounts/occurrenceQuotes/citedPages. Before: 34 node
+  views × O(doc) walks per 350ms typing pause. Node-view rebuilds must NOT call `editor.getJSON()`
+  — `referenceListKeysFromDoc(editor.state.doc)` walks the PM doc directly.
+- **Word count runs only while the ◈ panel is open — both platforms** (ReceiptPanel is controlled
+  everywhere now); desktop was building the full doc string every 300ms of typing for a hidden
+  number.
+- **Residual (known, next target):** with SCAS decorations on, the steady-state keystroke cost is
+  now dominated by ProseMirror DecorationSet MAPPING/redraw — O(decorated words) per transaction
+  (CPU-profiled: forChild/posBeforeChild in the PM chunk). ~2,600 decorated words ⇒ ~22ms real per
+  keystroke on a 4×-throttled desktop. The fix is viewport-windowed decoration RENDERING (verdict
+  state stays doc-wide; only visible ranges get Decoration objects) — not attempted this round.
+- **Scroll-frame budget:** desktop scrolling of a long doc showed 300–900ms frames in ALL ablation
+  cells (phone was fine) — desktop-only per-scroll-frame work: the `--wave-x` sway write
+  (unregistered inherited custom property on the surface → subtree style invalidation) and the
+  waveTwinkle scroll-driven dash respawns (canvas PNG encodes). Owned by the wave/choreography
+  lane; attribute before optimising (probe pattern: stub `setProperty('--wave-x')` /
+  `toDataURL` in-page and compare frame times).
+
 ## Code map
 
 ```
