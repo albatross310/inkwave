@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
-import { syncTwinkles, reportSway, retimeCoast } from './waveTwinkle'
+import { syncTwinkles, reportSway, retimeCoast, swayFields } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -782,8 +782,14 @@ export function Scroll({
     // formula as a second scroll source, so the waves at the pane's sides sway with PDF scrolling
     // exactly like editor scrolling — one write path, and the zoom-hold/coast rules stay intact.
     let pdfTop = 0
-    const writeWave = () =>
-      el.style.setProperty('--wave-x', `${(waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1)}px`)
+    const writeWave = () => {
+      // ONE rounded value for both consumers: the surface var (wave pseudos) and the twinkle
+      // fields' literal transforms (swayFields — no var inheritance into the instance leaves;
+      // see the --wave-x firebreak block in index.css).
+      const wx = Number((waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1))
+      el.style.setProperty('--wave-x', `${wx}px`)
+      swayFields(el, wx)
+    }
     const apply = () => {
       raf = 0
       // NEVER write --wave-x mid-drift/coast (2026-07-09 regression fix): during the load the

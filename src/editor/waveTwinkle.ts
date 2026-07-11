@@ -689,12 +689,36 @@ function applyFieldMode(field: HTMLElement, group: Group, m: Mode, surface: HTML
     }
     const rebase = restRebase[group]
     fieldRebase.set(field, rebase)
+    // LITERAL px, not calc(var(--wave-x)…) (2026-07-11 scroll-jank round): a var-consuming field
+    // put the whole ~300-leaf instance subtree inside --wave-x's invalidation set on every sway
+    // frame. The sway now pushes literal transforms per frame via swayFields() below (transform
+    // doesn't inherit — zero child invalidation), and .iw-wave-twinkles is a --wave-x firebreak.
+    const waveX = surface ? parseFloat(surface.style.getPropertyValue('--wave-x')) || 0 : 0
     field.style.transform = group === 'a'
-      ? `translate3d(calc(var(--wave-x, 0px) + ${rebase.toFixed(2)}px), 0, 0)`
-      : `translate3d(calc(${rebase.toFixed(2)}px - var(--wave-x, 0px)), 0, 0)`
+      ? `translate3d(${(waveX + rebase).toFixed(2)}px, 0, 0)`
+      : `translate3d(${(rebase - waveX).toFixed(2)}px, 0, 0)`
     fieldAnim.delete(field)
   }
   prev?.cancel()
+}
+
+// Per-sway-frame field transforms — called by Scroll's writeWave with the value it just wrote to
+// the surface's --wave-x, so tiles (var) and fields (literal) carry the SAME number each frame.
+export function swayFields(surface: HTMLElement, waveX: number): void {
+  for (const [hostEl, hs] of hosts) {
+    if (hostEl.parentElement !== surface) continue
+    for (const nodes of [hs.sparks, hs.dashes]) {
+      if (!nodes) continue
+      for (const g of ['a', 'b'] as Group[]) {
+        const f = nodes.fields[g]
+        if (fieldMode.get(f) !== 'off') continue
+        const rb = fieldRebase.get(f) ?? 0
+        f.style.transform = g === 'a'
+          ? `translate3d(${(waveX + rb).toFixed(2)}px, 0, 0)`
+          : `translate3d(${(rb - waveX).toFixed(2)}px, 0, 0)`
+      }
+    }
+  }
 }
 
 // Current field offset — analytic (no forced style reads).
@@ -836,28 +860,30 @@ function respawnSparks(now: number): void {
 // static dashes have no live animation → no more envelopes → they rest where they are (the
 // lit-at-stop texture must not shuffle). One respawn per envelope = constant population.
 let respawnCursor = 0 // round-robin start index — the budget must not starve the tail
-// RASTER-FREE dash cycling while the app BOOTS (2026-07-11 round 4). History: per-envelope
-// full-art respawns (2 canvas rasters + PNG encodes each) LIVELOCKED React's time-sliced editor
-// mount, so round 3 boot-gated them entirely — but a fully static seeded field re-blinks each
-// dash at ITS OWN spot every ~1.5s for the whole load = Peter's "the short lines are still
-// repeating themselves". His guidance: full uniqueness isn't required — CYCLE the positions on a
-// long rotation, like the scroll-time twinkles. The 140px-LATTICE relocation delivers that for
-// free: a dash's art is a pure function of its wave-space phase (wrap140), so moving it by any
-// multiple of 140px keeps the art EXACTLY valid — the respawn becomes two style writes (left/
-// top), no raster, no encode, boot-safe. Position still draws through the never-twice memory
-// (memPick), so the rotation never revisits a recent strike. After the load (bootDone), the
-// full-art respawn returns for rest/scroll twinkling, exactly as before.
-let bootDone = false
+// RASTER-FREE dash cycling — EVERYWHERE (2026-07-11 rounds 4+5). History: per-envelope full-art
+// respawns (2 canvas rasters + PNG encodes each) LIVELOCKED React's time-sliced editor mount, so
+// round 3 boot-gated them entirely — but a fully static seeded field re-blinks each dash at ITS
+// OWN spot every ~1.5s for the whole load = Peter's "the short lines are still repeating
+// themselves". His guidance: full uniqueness isn't required — CYCLE the positions on a long
+// rotation, like the scroll-time twinkles. The 140px-LATTICE relocation delivers that for free:
+// a dash's art is a pure function of its wave-space phase (wrap140), so moving it by any multiple
+// of 140px keeps the art EXACTLY valid — the respawn becomes two style writes (left/top), no
+// raster, no encode. Position still draws through the never-twice memory (memPick), so the
+// rotation never revisits a recent strike. Round 5 (the desktop scroll-jank ablation): the
+// post-boot FULL-ART respawn path is deleted too — scroll-twinkling dashes were re-rastering
+// toDataURL PNGs on the scroll path (~150ms/frame of the 417ms jank cell at 4× throttle). The
+// respawn NEVER rasterises now; full art regenerates only at reseeds (zoom-settled / resize),
+// which also made the boot gate moot — the lattice path is boot-safe by construction.
 function respawnDashes(now: number): void {
   if (!defs || !hosts.size || blinkMode === 'static') return
   const hs = Array.from(hosts.values())
   const fx: Partial<Record<Group, number>> = {}
   const vw = window.innerWidth
   const clockBase = (blinkMode === 'playing' ? now - epochMs : vt) / 1000
-  // BUDGET (2026-07-11): at ~250 dashes a bad frame could respawn dozens at once (art build +
-  // URI encode + style writes ×hosts) — bound the per-frame work; demand is ~3/frame at 60Hz,
-  // so a budget of 4 keeps up while capping worst-case frames. Deferred ones keep their dark
-  // window (the phase guard) or take the next envelope — never a visible move.
+  // BUDGET (2026-07-11): at ~250 dashes a bad frame could respawn dozens at once — bound the
+  // per-frame work; demand is ~3/frame at 60Hz, so a budget of 4 keeps up while capping
+  // worst-case frames. Deferred ones keep their dark window (the phase guard) or take the next
+  // envelope — never a visible move.
   let budget = 4
   const list = defs.dashes
   const n = list.length
@@ -881,30 +907,21 @@ function respawnDashes(now: number): void {
     dashCycle.set(d, dark)
     if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
     const rnd = liveRnd
-    let nx: number
-    let ny = d.y
-    let art: { x: number; y: number; day: string; night: string } | null = null
-    if (!bootDone) {
-      // LOAD WINDOW — raster-free 140-lattice cycling (see the header note): keep the art, move
-      // the dash to another lattice slot with the same wave-space phase, via the strike memory.
-      const wx = wrap140(d.x + d.w / 2)
-      const cells = Math.max(1, Math.floor(stripW / 140))
-      const k0 = Math.ceil((-PAD - wx) / 140)
-      // Never redraw the CURRENT slot (a saturated band ring can fall back to it — the one
-      // visible "same spot again" case): draw from the other cells−1 lattice slots.
-      const curK = Math.round((d.x + d.w / 2 - wx) / 140) - k0
-      const cx = memPick('dash', d.group, d.row, d.hw, () => {
-        let k = Math.floor(rnd() * Math.max(1, cells - 1))
-        if (cells > 1 && k >= ((curK % cells) + cells) % cells) k++
-        return (k0 + k) * 140 + wx
-      }, (c) => c)
-      nx = cx - d.w / 2
-      ny = 140 * d.row + midY(CREST[d.group], wx) + (rnd() - 0.5) * 5 - d.h / 2 // fresh jitter, same phase
-    } else {
-      art = dashArt(rnd, d.group, d.row, d.hw, d.w, d.h, stripW)
-      nx = art.x
-      ny = art.y
-    }
+    // Raster-free 140-lattice cycling (see the header note): keep the art, move the dash to
+    // another lattice slot with the same wave-space phase, via the strike memory.
+    const wx = wrap140(d.x + d.w / 2)
+    const cells = Math.max(1, Math.floor(stripW / 140))
+    const k0 = Math.ceil((-PAD - wx) / 140)
+    // Never redraw the CURRENT slot (a saturated band ring can fall back to it — the one
+    // visible "same spot again" case): draw from the other cells−1 lattice slots.
+    const curK = Math.round((d.x + d.w / 2 - wx) / 140) - k0
+    const cx = memPick('dash', d.group, d.row, d.hw, () => {
+      let k = Math.floor(rnd() * Math.max(1, cells - 1))
+      if (cells > 1 && k >= ((curK % cells) + cells) % cells) k++
+      return (k0 + k) * 140 + wx
+    }, (c) => c)
+    let nx = cx - d.w / 2
+    const ny = 140 * d.row + midY(CREST[d.group], wx) + (rnd() - 0.5) * 5 - d.h / 2 // fresh jitter, same phase
     // Fold into current viewport coverage (multiples of stripW ≡ 0 mod 140 — see respawnSparks).
     let x0 = fx[d.group]
     if (x0 === undefined) {
@@ -917,17 +934,11 @@ function respawnDashes(now: number): void {
     else if (sx > vw + PAD) nx -= stripW * Math.ceil((sx - vw - PAD) / stripW)
     d.x = nx
     d.y = ny
-    if (art) { d.day = art.day; d.night = art.night }
-    // (No decode hints — see respawnSparks: per-respawn SVG decodes wedged the boot.)
     for (const h of hs) {
       const el = h.dashes?.els[i]
       if (!el) continue
       el.style.left = `${d.x}px`
       el.style.top = `${d.y}px`
-      if (art) {
-        el.style.setProperty('--twk-day', `url("${d.day}")`)
-        el.style.setProperty('--twk-night', `url("${d.night}")`)
-      }
     }
     budget--
     })(d, i)
@@ -1256,19 +1267,8 @@ export function syncTwinkles(
   }
   if (!listening) {
     listening = true
-    // PER-LOAD RE-ARM (2026-07-11, the open-doc analogue of the boot livelock): the gate below
-    // exists because dash-respawn art rebuilds (2 canvas rasters + PNG encodes each, up to
-    // 4/frame) livelocked React's time-sliced editor mount at boot — but bootDone stayed true
-    // forever after the FIRST reveal, so every OPEN-DOCUMENT choreography (a full editor remount
-    // behind the same drifting shell) ran the respawn storm the boot is protected from. Profiled
-    // 2026-07-11: toDataURL was ~8% of the Chromium open-mount window, and headless WebKit
-    // wedged for ~19s. open-begin re-arms EARLY (before the shell's commit); the anim re-entry
-    // below re-arms EVERY load — including snapshot opens and snapshot→editor restores, which
-    // are plain route navigations that never fire open-begin (2026-07-11 round 4). The gate
-    // re-opens when the water RESTS (the 'off' transition below), not at editor-revealed: the
-    // reveal commit + the coast tail are still choreography-critical frames, and the !bootDone
-    // window now cycles dashes raster-free anyway (see respawnDashes).
-    window.addEventListener('inkwave:open-begin', () => { bootDone = false })
+    // (The old bootDone respawn gate is GONE — round 5: dash respawns never rasterise anywhere,
+    // so the lattice cycling is boot-safe by construction and needs no per-load re-arm.)
     window.addEventListener('inkwave:water-ready', onWaterReady)
     window.addEventListener('inkwave:zoom-settled', regenDashes)
     let rt: ReturnType<typeof setTimeout> | undefined
@@ -1287,7 +1287,6 @@ export function syncTwinkles(
   if (want.mode === 'anim' && prev !== 'anim') {
     // Re-open choreography: a NEW load drifts again — fresh coast/handoff state, and the dashes
     // return to full-rate compositor blinks.
-    bootDone = false // every load re-arms the respawn boot gate (route navs never fire open-begin)
     coast = null
     restRebase = null
     if (blinkMode !== 'playing') {
@@ -1297,11 +1296,6 @@ export function syncTwinkles(
       latchGen++ // the lit-at-stop set belongs to the finished load — a fresh drift re-arms all
       syncDashLiveliness() // viewport-capped full-rate blinks
     }
-  }
-  if (want.mode === 'off' && prev !== 'off') {
-    // The load choreography is over (waves at rest) — full-art respawns are safe again; the
-    // rest/scroll twinkling relies on them for the never-twice contract.
-    bootDone = true
   }
   if (want.mode === 'coast' && prev !== 'coast' && (!coast || performance.now() - coast.start > coast.T)) {
     // (The staleness check heals an ABANDONED coast — a veil unmounted mid-coast leaves

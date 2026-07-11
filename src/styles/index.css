@@ -207,6 +207,26 @@
      Scroll.tsx nudges --wave-x / --wave-y from scrollY, so the waves drift slowly (a slow parallax
      + a gentle left/right sway) while the content moves fast. Fixed positioning also kills the
      shimmer/moiré the old fast-scroll fade was working around. */
+  /* --wave-x INHERITANCE FIREBREAK (2026-07-11, THE desktop scroll-jank fix): the sway writes
+     --wave-x on the surface element every scroll frame, and as an inherited custom property that
+     write invalidated the computed style of the ENTIRE 100-page ProseMirror subtree — ablation
+     measured scroll frames at p50 417ms with the write vs 67ms without (4× throttle). Pinning it
+     to a CONSTANT at the paper subtree roots means those subtrees' computed styles never change
+     with the sway, so the engine's no-change pruning stops the recalc walk right there; only the
+     surface, its pseudos and the (tiny) twinkle chain re-resolve per frame. Nothing under the
+     paper reads --wave-x — the consumers are the wave pseudos' background-position and the
+     twinkle fields' rest transform, all OUTSIDE these roots. (@property inherits:false was the
+     cleaner shape but WebKit fails to re-resolve a pseudo's explicit `--wave-x: inherit` when
+     the surface value changes — frozen sway — so the firebreak does the same job portably.)
+     The twinkle HOST is a firebreak too: its ~300 instance leaves were the residual recalc after
+     the paper prune (133ms p50) — the fields get LITERAL transforms written by waveTwinkle's
+     swayFields() instead of a var (transform doesn't inherit → zero child invalidation). If you
+     add a NEW var(--wave-x) consumer, it must not sit under these roots. */
+  .iw-magnify-box,
+  .scroll-paper,
+  .iw-wave-twinkles {
+    --wave-x: 0px;
+  }
   .inkwave-editor-surface,
   .iw-boot-water {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
