@@ -46,7 +46,7 @@ export interface PaginationOptions {
   gapped: boolean  // true: tall gap widgets + sheet panels; false: zero-size break markers
 }
 
-// Collect every LINE as { intrinsic top, doc position of its start } — so a page break can land
+// Collect every LINE as { intrinsic top, LAZY doc position } — so a page break can land
 // mid-paragraph (a gap widget at a line-start splits the paragraph in two). "Intrinsic" = the layout
 // AS IF no gap widgets existed: each line's top has the total height of all gap widgets ABOVE it (by
 // screen Y) subtracted. Subtracting by Y — not by walking top-level children — is what makes this
@@ -58,10 +58,53 @@ export interface PaginationOptions {
 // so divide all measured distances by `scale` to bring lines into the parchment's own (unscaled) coords.
 // Height-only gap heights (set in unscaled px) also render scaled, so accumAbove is scaled too → the
 // single division keeps everything consistent. scale=1 (no magnify / reflow zone) is a no-op.
-interface BlockLines { relTops: number[]; relPos: number[] } // block-relative line geometry (canonical)
+//
+// LAZY POSITIONS (2026-07-11, the typing-lag ablation): the old collector called view.posAtCoords
+// for EVERY line — ~4,400 browser hit-tests on a 100-page doc, the bulk of the 2.4s (4× throttle)
+// measure freeze. Only ~1 line per PAGE ever needs its position (the line a break lands on), so
+// each line now carries the coords the old call used and resolves its pos on demand (identical
+// posAtCoords formula ⇒ identical break positions). Block identity/boundaries — needed per line
+// for orphan snapping — come from ONE view.posAtDOM per top-level block instead of per-line
+// doc.resolve. Everything downstream (snap rule, refList forcing, sig strings) is unchanged.
+//
+// PER-BLOCK LINE CACHE (2026-07-11, the desktop "waves of lag" — merged with lazy positions):
+// the per-line range.getClientRects walk over EVERY block was 1.5-4s of forced-layout reads on a
+// 20k-word doc (4×-throttled probe) at every 150ms desktop typing pause. PM docs are persistent
+// structures: an untouched block keeps its NODE IDENTITY across edits, and inside the forced
+// canonical context (fixed width/margins/font/zoom) the same node renders the same line geometry
+// — so each block's line geometry is cached RELATIVE to its own rect, keyed by the node object.
+// An edit re-measures only the block(s) whose identity changed; every other block costs one
+// getBoundingClientRect. Positions stay LAZY on both paths: a cache entry starts with relPos NaN
+// and posOf writes each resolution back BLOCK-RELATIVE, so a break line pays its one hit-test at
+// most once per node identity — future measures rebuild it by offset arithmetic alone. The caller
+// owns the WeakMap and REPLACES it whenever the canonical context itself changes (fonts, page
+// settings, bibliography label hydration) or the paper is fluid ('scroll' — its canonical width
+// is the live width, so no cache is passed). Cache entries are only written/read on the gap-free
+// measure (compute clears the widgets first), so gap subtraction can never bake into a cached top.
+const POS_LAZY = -2
+interface MeasuredLine {
+  top: number      // intrinsic top (unscaled, editor-relative)
+  blockIdx: number // index into the blocks array (per top-level DOM block)
+  cx: number       // screen coords for the lazy posAtCoords (exact same point the old code sampled)
+  cy: number
+  pos: number      // POS_LAZY until resolved; then the old `at > 0 ? at : 0` value
+  bake?: BlockLines   // cache entry to persist a lazy resolution into (block-relative)
+  bakeIdx?: number    // line index within that entry
+  bakeOffset?: number // the block's doc offset at collect time (rel = pos - offset)
+}
+interface MeasuredBlock { start: number; end: number } // doc pos range; start -1 = unresolvable
+interface BlockLines { // block-relative line geometry (canonical context only)
+  atomLike: boolean  // top-level atom → pseudo-block per line (per-line orphan reset)
+  relStart: number   // block range relative to the node's doc offset (NaN = unresolvable → -1)
+  relEnd: number
+  relTops: number[]  // line tops relative to the block's intrinsic top
+  relCx: number[]    // posAtCoords sample point relative to the block's own rect (screen px)
+  relCy: number[]
+  relPos: number[]   // NaN = still lazy; -Infinity = resolved to 0 (failed); else pos - offset
+}
 type LineCache = WeakMap<object, BlockLines>
 
-function collectLines(view: EditorView, editorTop: number, scale: number, cache?: LineCache): Array<{ top: number; pos: number }> {
+function collectLines(view: EditorView, editorTop: number, scale: number, cache?: LineCache): { lines: MeasuredLine[]; blocks: MeasuredBlock[] } {
   const dom = view.dom as HTMLElement
   const s = scale > 0.01 ? scale : 1
   const gaps = Array.from(dom.querySelectorAll('.inkwave-page-gap')).map((g) => {
@@ -70,19 +113,8 @@ function collectLines(view: EditorView, editorTop: number, scale: number, cache?
   const accumAbove = (top: number): number => {
     let acc = 0; for (const g of gaps) if (g.top <= top - 2) acc += g.h; return acc
   }
-  const lines: Array<{ top: number; pos: number }> = []
-  // ── PER-BLOCK LINE CACHE (2026-07-11, the desktop "waves of lag") ────────────────────────────
-  // The per-line range.getClientRects walk over EVERY block was 1.5-4s of forced-layout reads on
-  // a 20k-word doc (4×-throttled probe) at every 150ms desktop typing pause — THE wave. PM docs
-  // are persistent structures: an untouched block keeps its NODE IDENTITY across edits, and
-  // inside the forced canonical context (fixed width/margins/font/zoom) the same node renders the
-  // same line geometry — so each block's lines are cached RELATIVE to its own top, keyed by the
-  // node object. An edit re-measures only the block(s) whose identity changed; every other block
-  // costs one getBoundingClientRect. The caller owns the WeakMap and REPLACES it whenever the
-  // canonical context itself changes (fonts, page settings, bibliography label hydration) or the
-  // paper is fluid ('scroll' — its canonical width is the live width, so no cache is passed).
-  // Cache entries are only written/read on the gap-free measure (compute clears the widgets
-  // first), so gap subtraction can never be baked into a cached top.
+  const lines: MeasuredLine[] = []
+  const blocks: MeasuredBlock[] = []
   const usable = cache && gaps.length === 0
   const doc = view.state.doc
   doc.forEach((child, offset) => {
@@ -90,29 +122,69 @@ function collectLines(view: EditorView, editorTop: number, scale: number, cache?
     if (!el || el.nodeType !== 1 || el.classList?.contains('inkwave-page-gap')) return
     const br = el.getBoundingClientRect()
     const blockTop = (br.top - editorTop - accumAbove(br.top)) / s
+    // CACHE HIT: rebuild this block's lines from block-relative geometry — one
+    // getBoundingClientRect, zero getClientRects, zero posAtDOM. Tops rebase from the block's
+    // intrinsic top; the lazy sample point rebases from the block's live rect; an already-baked
+    // relPos rebuilds its absolute position by offset arithmetic (no hit-test ever again).
     if (usable) {
       const hit = cache.get(child)
       if (hit) {
+        const start = Number.isNaN(hit.relStart) ? -1 : offset + hit.relStart
+        const end = Number.isNaN(hit.relEnd) ? -1 : offset + hit.relEnd
+        let blockIdx = -1
+        if (!hit.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
         for (let k = 0; k < hit.relTops.length; k++) {
+          if (hit.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 } // pseudo-block per line
           const rel = hit.relPos[k]
-          lines.push({ top: blockTop + hit.relTops[k], pos: Number.isNaN(rel) ? 0 : offset + rel })
+          lines.push({
+            top: blockTop + hit.relTops[k],
+            blockIdx,
+            cx: br.left + hit.relCx[k],
+            cy: br.top + hit.relCy[k],
+            pos: Number.isNaN(rel) ? POS_LAZY : rel === -Infinity ? 0 : offset + rel,
+            bake: hit, bakeIdx: k, bakeOffset: offset,
+          })
         }
         return
       }
     }
-    const relTops: number[] = []
-    const relPos: number[] = []
-    const push = (top: number, at: number | null | undefined) => {
-      const abs = at != null && at > 0 ? at : 0
-      lines.push({ top, pos: abs })
-      relTops.push(top - blockTop)
-      relPos.push(abs > 0 ? abs - offset : NaN)
+    // MISS (or cache off): block boundaries once per block — posAtDOM on the block's own element
+    // (cheap DOM-tree walk, not a hit-test), resolved to the top-level range — the same
+    // $p.before(1)/after(1) the old per-line resolve produced for every line inside this block
+    // (for depth-1 blocks this equals {offset, offset + child.nodeSize}; cached offset-relative
+    // so hits reconstruct it exactly wherever the block has moved to).
+    let start = -1, end = -1, atomLike = false
+    try {
+      const inner = view.posAtDOM(el, 0)
+      const $p = doc.resolve(Math.min(Math.max(0, inner), doc.content.size))
+      if ($p.depth >= 1) { start = $p.before(1); end = $p.after(1) }
+      else if ($p.nodeAfter) { start = $p.pos; end = $p.pos + $p.nodeAfter.nodeSize; atomLike = true } // top-level ATOM (refList, math block)
+      else if ($p.nodeBefore) { end = $p.pos; start = $p.pos - $p.nodeBefore.nodeSize; atomLike = true }
+    } catch { /* widget/unmapped element — lines fall back to their own resolved pos */ }
+    // Atom blocks: the OLD per-line resolve gave every line inside an atom its own degenerate
+    // block (posAtCoords at an atom returns its boundary → the {p, p+1} fallback), so the orphan
+    // baseline reset per line. Replicate with one pseudo-block PER LINE — the snap/orphan
+    // decisions (and hence the sig) stay byte-identical around tall atoms.
+    const entry: BlockLines = {
+      atomLike,
+      relStart: start < 0 ? NaN : start - offset,
+      relEnd: end < 0 ? NaN : end - offset,
+      relTops: [], relCx: [], relCy: [], relPos: [],
+    }
+    let blockIdx = -1
+    if (!atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
+    const push = (top: number, cx: number, cy: number) => {
+      if (atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
+      entry.relTops.push(top - blockTop)
+      entry.relCx.push(cx - br.left)
+      entry.relCy.push(cy - br.top)
+      entry.relPos.push(NaN) // lazy — posOf bakes the resolution back when a break needs it
+      lines.push({ top, blockIdx, cx, cy, pos: POS_LAZY, bake: usable ? entry : undefined, bakeIdx: entry.relTops.length - 1, bakeOffset: offset })
     }
     let rects: DOMRect[] = []
     try { const range = document.createRange(); range.selectNodeContents(el); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
     if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
-      const at = view.posAtCoords({ left: br.left + 1, top: br.top + Math.min(8, br.height / 2) })?.pos
-      push((br.top - editorTop - accumAbove(br.top)) / s, at)
+      push((br.top - editorTop - accumAbove(br.top)) / s, br.left + 1, br.top + Math.min(8, br.height / 2))
     } else {
       let lastTop = -1e9
       for (const r of rects) {
@@ -120,14 +192,13 @@ function collectLines(view: EditorView, editorTop: number, scale: number, cache?
         // Height thresholds are in SCREEN px, so scale them by `s` to match the magnified rendering.
         if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
         lastTop = r.top
-        const at = view.posAtCoords({ left: r.left + 1, top: r.top + r.height / 2 })?.pos
-        push((r.top - editorTop - accumAbove(r.top)) / s, at)
+        push((r.top - editorTop - accumAbove(r.top)) / s, r.left + 1, r.top + r.height / 2)
       }
     }
-    if (usable) cache.set(child, { relTops, relPos })
+    if (usable) cache.set(child, entry)
   })
   lines.sort((a, b) => a.top - b.top)
-  return lines
+  return { lines, blocks }
 }
 
 function compute(view: EditorView, pageH: number, topM: number, scale: number, gapped: boolean, cache?: LineCache): { set: DecorationSet; sig: string } {
@@ -135,8 +206,21 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
   const editorTop = (view.dom as HTMLElement).getBoundingClientRect().top
   const doc = view.state.doc
 
-  const lines = collectLines(view, editorTop, scale, cache)
+  const { lines, blocks } = collectLines(view, editorTop, scale, cache)
   if (!lines.length) return { set: DecorationSet.empty, sig: 'empty' }
+  // Resolve a line's doc position on demand — the exact posAtCoords sample the old eager path made.
+  // Must run before any DOM mutation (compute never mutates; the caller dispatches after).
+  // The resolution is baked back into the line cache BLOCK-RELATIVE, so the next measure rebuilds
+  // it from the node's (possibly shifted) offset without repeating the hit-test.
+  const posOf = (l: MeasuredLine): number => {
+    if (l.pos !== POS_LAZY) return l.pos
+    const at = view.posAtCoords({ left: l.cx, top: l.cy })?.pos
+    l.pos = at != null && at > 0 ? at : 0
+    if (l.bake && l.bakeIdx !== undefined && l.bakeOffset !== undefined) {
+      l.bake.relPos[l.bakeIdx] = l.pos > 0 ? l.pos - l.bakeOffset : -Infinity
+    }
+    return l.pos
+  }
 
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
   // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
@@ -156,29 +240,28 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
   // break to a block boundary is nice for a couple of orphan lines, but pushing a TALL block whole
   // leaves the page half-empty (the short-page artifact). So snap only small orphans; otherwise break
   // mid-block to fill the page (stable because we measure the natural, gap-free wrapping).
-  // Resolve the top-level block boundaries ONCE PER BLOCK (its [start,end) pos range), not per line —
-  // a per-line doc.resolve() over a long document was per-keystroke lag.
-  let blockStart = -1, blockEnd = -1, blockStartUsed = 0
+  // Block identity comes from the collector (one posAtDOM per block); doc positions of individual
+  // lines resolve LAZILY via posOf — only the line a break actually lands on pays the hit-test.
+  // `curBlock = -1` after a break mirrors the old reset: orphan counting restarts per page.
+  let curBlock = -1, blockStartUsed = 0
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    const p = lines[i].pos
-    if (p < blockStart || p >= blockEnd) {
-      try {
-        const $p = doc.resolve(Math.min(p, doc.content.size - 1))
-        if ($p.depth >= 1) { blockStart = $p.before(1); blockEnd = $p.after(1) } else { blockStart = p; blockEnd = p + 1 }
-      } catch { blockStart = p; blockEnd = p + 1 }
+    if (lines[i].blockIdx !== curBlock) {
+      curBlock = lines[i].blockIdx
       blockStartUsed = used
     }
-    // Force the reference list onto a fresh page (before the normal overflow check).
-    if (refListPos > 0 && !refBroken && lines[i].pos >= refListPos && used > 4) {
+    const blockStart = blocks[lines[i].blockIdx].start
+    // Force the reference list onto a fresh page (before the normal overflow check). Block-level
+    // test: a line is at/after the refList exactly when its block starts at/after refListPos.
+    if (refListPos > 0 && !refBroken && blockStart >= refListPos && used > 4) {
       const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - used)
       const gapTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
-      pageNo++; used = 0; blockStart = -1; blockEnd = -1; refBroken = true
+      pageNo++; used = 0; curBlock = -1; refBroken = true
     }
     // Break before the LINE that would overflow the text area.
-    if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
+    if (i > 0 && used + lh > textArea && posOf(lines[i]) > 0) {
       const orphan = used - blockStartUsed             // height of the current block already on this page
       const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
@@ -192,7 +275,7 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
-        blockStart = -1; blockEnd = -1  // recompute the block on the new page
+        curBlock = -1             // recompute the block-on-page baseline at the next line
       }
     }
     used += lh
@@ -232,12 +315,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           let lastPageH = 0 // canonical page height from the last recompute — the full-final-page fallback
           let lastMinH = 0  // applyBands' full-final-page sheet extension — recompute's baseline must
                             // respect it or the RO oscillates (reset→shrink→paint→grow→RO→reset…)
-          // PHONE INPUT PRIORITY: a keystroke that adds/removes a LINE resizes the sheet, so this
-          // observer fired one frame after the edit and — doc size changed ⇒ fresh inputSig — ran
-          // the full triple-reflow measure IMMEDIATELY, bypassing the edit debounce entirely. On
-          // phone, a resize arriving while an edit's re-measure is pending folds into that debounce
-          // (pushes it back); genuine resizes (rotate, keyboard, panel dock — no edit pending) still
-          // measure straight away. Desktop keeps the original immediate path, byte-identical.
+          // INPUT PRIORITY (both platforms since 2026-07-11): a keystroke that adds/removes a LINE
+          // resizes the sheet, so this observer fired one frame after the edit and — doc size
+          // changed ⇒ fresh inputSig — ran the full multi-reflow measure IMMEDIATELY, bypassing
+          // the edit debounce entirely (CLAUDE.md pagination rule (b); the desktop path had crept
+          // back to immediate and every line-wrapping keystroke paid a full canonical measure the
+          // very next frame — the ablation's biggest desktop longtask source). A resize arriving
+          // while an edit's re-measure is pending folds into that debounce (pushes it back);
+          // genuine resizes (rotate, keyboard, panel dock — no edit pending) still measure
+          // straight away.
           const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
             // ZOOM-GESTURE HOLD (the page-boundary flicker fix): every font-zoom frame resizes the
             // sheet, so this observer re-ran per frame — recompute early-returns on the unchanged
@@ -247,7 +333,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // dispatches zoom-settled), so the panels stay pinned during the gesture and the settle
             // re-measure repaints them once, cleanly, against the settled layout.
             if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) return
-            if (phoneLike() && editDebounce) scheduleAfterEdit()
+            if (editDebounce) scheduleAfterEdit()
             else schedule()
           }) : null
 

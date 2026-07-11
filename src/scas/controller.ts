@@ -51,9 +51,28 @@ export interface ScanWindow { from: number; to: number }
  * DELETION pass needs whole-document presence, so processDoc ignores the window when a deletion
  * happened (see below) — a window is never allowed to hide a removal.
  */
+// Per-paragraph scan cache (2026-07-11 typing-lag ablation). ScannedWord is position-free and —
+// for a paragraph NOT containing the cursor — a pure function of the paragraph node (persistent
+// PM structure: same reference ⇔ identical text+marks), so its word list can be reused across
+// ticks. The FULL scan stays semantically full (the deletion pass still sees whole-document word
+// presence — the hard invariant); it's just assembled from cached per-paragraph arrays, so a
+// desktop tick (or a phone deletion tick) costs O(changed paragraphs), not O(doc). The cursor's
+// paragraph is never cached (the uncommitted-word test depends on cursorPos).
+const _scanCache = new WeakMap<PMNode, ScannedWord[]>()
+
 function scanCommitted(pmDoc: PMNode, cursorPos: number, window?: ScanWindow): ScannedWord[] {
   const out: ScannedWord[] = []
   const scanParagraph = (node: PMNode, pos: number) => {
+    const cursorInside = cursorPos >= pos && cursorPos <= pos + node.nodeSize
+    if (!cursorInside) {
+      const hit = _scanCache.get(node)
+      if (hit) { for (const w of hit) out.push(w); return }
+    }
+    const startLen = out.length
+    scanParagraphFresh(node, pos)
+    if (!cursorInside) _scanCache.set(node, out.slice(startLen))
+  }
+  const scanParagraphFresh = (node: PMNode, pos: number) => {
     node.forEach((child: PMNode, offset: number) => {
       if (!child.isText || !child.text) return
       const text = child.text
