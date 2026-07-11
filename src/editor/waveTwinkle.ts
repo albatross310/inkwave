@@ -107,6 +107,8 @@ const SCROLL_STALE_MS = 160 // a velocity report older than this reads as "stopp
 const COAST_EASE = 'cubic-bezier(0.33333, 1, 0.66667, 1)' // the wave coast's exact cubic
 const CREST = { a: 22, b: 92 } // thick-line inflection y within a 140px row
 
+import { notePerf } from './perflog'
+
 type Group = 'a' | 'b'
 type Mode = 'anim' | 'coast' | 'off'
 
@@ -186,7 +188,14 @@ const MEM_TRIES = 24 // rejection draws before settling for the farthest candida
 // (≈ cells·56/(2·12) ≈ 2.3·cells): big enough to span ≈ a full load of glints (and carry the
 // previous load's tail across a reload) without saturating every draw into the fallback.
 function memRing(kind: 'spark' | 'dash'): number {
-  if (kind === 'dash') return 16 // dashes use the whole 140px cycle; only reseeds record
+  if (kind === 'dash') {
+    // Dashes RECORD on every relocation now (reseeds + the load-window lattice cycling), and a
+    // band holds ~stripW/DASH_ROW_PX of them — a 16-ring was ~one envelope of shared history, so
+    // a dash could return to a spot from two envelopes ago (visible "same place again"). Hold ~3
+    // strikes of history per band dash, still under the band's ε-capacity (~60 for a 2240 strip)
+    // so draws don't saturate into the farthest-candidate fallback.
+    return Math.max(16, Math.round((stripW / DASH_ROW_PX) * 3))
+  }
   const cells = Math.max(1, Math.floor(stripW / 140))
   return Math.min(24, Math.max(8, Math.round(cells * 1.5)))
 }
@@ -401,8 +410,16 @@ const fieldMode = new WeakMap<HTMLElement, Mode>()
 const fieldAnim = new WeakMap<HTMLElement, Animation>()
 const fieldRebase = new WeakMap<HTMLElement, number>()
 let waterMode: Mode = 'anim'
-let coast: { start: number; T: number; dist: number } | null = null
-let lastCoast: { start: number; T: number; dist: number } | null = null
+interface CoastState { start: number; T: number; dist: number; resolved?: boolean }
+let coast: CoastState | null = null
+let lastCoast: CoastState | null = null
+// ADDITIVE COAST (v3, 2026-07-11 — mirrors Scroll.tsx): where animation-composition exists, a
+// coasting field KEEPS its drift ramp running and adds a composite:'add' deceleration on top —
+// zero value + zero velocity at start, so the handoff is continuous whenever the commit lands,
+// and a linear hold after T cancels the ramp exactly (total static until the rest handoff).
+const ADDITIVE_TWK = typeof CSS !== 'undefined' && !!CSS.supports?.('animation-composition', 'add')
+const TWK_COAST_HOLD_MS = 8000 // must cover the worst finish-timer lag (Scroll's cap is 3.3s)
+const fieldAdd = new WeakMap<HTMLElement, Animation>() // the coast additive, alongside fieldAnim (the ramp)
 // The rest-state transform constant per group, frozen ONCE at the coast→off handoff (where
 // --wave-x ≡ the coast's end offset, so it is ≈0 mod 140). Later mounts (zoom reseed, resize)
 // MUST reuse it — recomputing against the CURRENT --wave-x would fold the accumulated scroll
@@ -526,6 +543,7 @@ function ensureDriver(): void {
 function step(ts: number): void {
   driver = 0
   const raw = ts - lastStep
+  const stepT0 = performance.now() // perflog: driver frame cost while awake (desktop lag hunt)
   // STORM BREAKER (2026-07-11, Peter's Chrome "waves forever"): with no vsync (headless, some
   // GPU-less/occluded states) rAF can fire back-to-back at CPU speed; the driver's own style
   // writes then re-invalidate every "frame" and the loop eats the main thread — the boot never
@@ -538,6 +556,7 @@ function step(ts: number): void {
   const dt = Math.min(64, Math.max(0, raw))
   lastStep = ts
   if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
+  if (!hosts.size) return // every host gone (route without water) — park; ensureDriver re-arms
   respawnSparks(ts) // per-glint relocation — before the anim early-return (sparks glint all load)
   respawnDashes(ts) // per-envelope relocation — dashes never strike the same place twice either
   if (waterMode === 'anim') { // dashes play natively at full rate; the loop only recycles
@@ -581,29 +600,66 @@ function step(ts: number): void {
   else if (!stillSince) stillSince = ts
   if (!coast && waterMode === 'off' && eff <= RATE_EPS && stillSince && ts - stillSince > STATIC_DWELL_MS) {
     if (blinkMode === 'driven') goStatic()
+    notePerf('twinkle-step', performance.now() - stepT0)
     return // park — reportSway / the next coast wakes the loop
   }
+  notePerf('twinkle-step', performance.now() - stepT0)
   driver = requestAnimationFrame(step)
 }
 
 // ─── Field transforms — mirror the wave layers exactly ───────────────────────────────────────
+// The drift ramp: one long linear WAAPI translate — NOT a 140px loop (the field isn't periodic;
+// a loop restart would teleport it). Backdated to the epoch → phase-exact with the tiles from
+// any mount time. K is DYNAMIC (2026-07-11): the old fixed 600 gave ~19min of headroom from the
+// EPOCH — a veil/shell mounted later in a long session created a ramp that had already finished
+// (fill:forwards) = dashes frozen dead still against moving water (Peter's "short lines stop
+// moving, lose touch with their wave" on late-session snapshot opens).
+function startRamp(field: HTMLElement, dir: number): Animation {
+  const K = 600 + Math.ceil(Math.max(0, performance.now() - epochMs) / 1944) // ≥ ~19min from NOW
+  const a = field.animate(
+    [{ transform: 'translate3d(0,0,0)' }, { transform: `translate3d(${dir * 140 * K}px,0,0)` }],
+    { duration: 1944 * K, easing: 'linear', fill: 'forwards' },
+  )
+  a.startTime = epochMs
+  return a
+}
+// The additive coast keyframes for a field (see the Scroll.tsx block): value opposes the ramp
+// direction, (vT−d)·bezier(1/3,0,2/3,0.5) over T then linear +v·t − d (cancels the ramp).
+function addCoastFrames(dir: number, c: CoastState): Keyframe[] {
+  const s = -dir
+  const D = c.T + TWK_COAST_HOLD_MS
+  const mid = DRIFT_PX_S * (c.T / 1000) - c.dist
+  const endV = DRIFT_PX_S * (D / 1000) - c.dist
+  return [
+    { transform: 'translate3d(0,0,0)', easing: 'cubic-bezier(0.33333, 0, 0.66667, 0.5)', offset: 0 },
+    { transform: `translate3d(${(s * mid).toFixed(3)}px,0,0)`, easing: 'linear', offset: c.T / D },
+    { transform: `translate3d(${(s * endV).toFixed(3)}px,0,0)`, offset: 1 },
+  ]
+}
 function applyFieldMode(field: HTMLElement, group: Group, m: Mode, surface: HTMLElement | null): void {
   if (fieldMode.get(field) === m) return
   fieldMode.set(field, m)
   const dir = group === 'a' ? -1 : 1
   const prev = fieldAnim.get(field)
+  const prevAdd = fieldAdd.get(field)
   if (m === 'anim') {
-    // One long linear ramp — NOT a 140px loop (the field isn't periodic; a loop restart would
-    // teleport it). Backdated to the epoch → phase-exact with the tiles from any mount time.
-    const K = 600 // ~19min of drift headroom; no load approaches it
-    const a = field.animate(
-      [{ transform: 'translate3d(0,0,0)' }, { transform: `translate3d(${dir * 140 * K}px,0,0)` }],
-      { duration: 1944 * K, easing: 'linear', fill: 'forwards' },
-    )
-    a.startTime = epochMs
-    fieldAnim.set(field, a)
+    fieldAnim.set(field, startRamp(field, dir))
     field.style.transform = '' // drop any stale rest transform (re-open) — the animation owns it now
+    prevAdd?.cancel()
+    fieldAdd.delete(field)
   } else if (m === 'coast' && coast) {
+    if (ADDITIVE_TWK) {
+      // Keep the ramp running (create it if this field mounted mid-coast) and ADD the coast.
+      if (!prev) fieldAnim.set(field, startRamp(field, dir))
+      const a = field.animate(addCoastFrames(dir, coast), {
+        duration: coast.T + TWK_COAST_HOLD_MS, composite: 'add', fill: 'forwards',
+      })
+      // Resolved clock known (late mount) → align exactly; else natural start (first painted
+      // frame — continuous by construction), retimed by retimeCoast at Scroll's clock resolve.
+      if (coast.resolved) { try { a.startTime = coast.start } catch { /* pending fallback */ } }
+      fieldAdd.set(field, a)
+      return // the ramp stays — nothing to cancel
+    }
     const x0 = dir * DRIFT_PX_S * (coast.start - epochMs) / 1000 // analytic — same clock as the tiles' freeze
     const a = field.animate(
       [
@@ -615,6 +671,8 @@ function applyFieldMode(field: HTMLElement, group: Group, m: Mode, surface: HTML
     a.startTime = coast.start
     fieldAnim.set(field, a)
   } else {
+    prevAdd?.cancel()
+    fieldAdd.delete(field)
     // REST: ride the scroll sway. rebase makes the coast→sway handoff paint identical pixels;
     // it is ≡ 0 (mod 140) by construction (both sides derive from the same animation clock), so
     // every instance's wave-space phase — and its band-y — stays valid. Frozen ONCE at the
@@ -648,6 +706,15 @@ function currentFieldX(field: HTMLElement, group: Group): number {
   if (m === 'coast') {
     const c = coast ?? lastCoast
     if (!c) return 0
+    if (ADDITIVE_TWK) {
+      // ramp + additive: base keeps running; add = −dir·[(vT−d)·(3τ²−τ³)/2 | v·t−d after T].
+      const base = dir * DRIFT_PX_S * (now - epochMs) / 1000
+      const tau = Math.max(0, (now - c.start) / c.T)
+      const add = tau <= 1
+        ? (DRIFT_PX_S * (c.T / 1000) - c.dist) * (3 * tau * tau - tau ** 3) / 2
+        : DRIFT_PX_S * (now - c.start) / 1000 - c.dist
+      return base - dir * add
+    }
     const t = Math.min(1, (now - c.start) / c.T)
     return dir * DRIFT_PX_S * (c.start - epochMs) / 1000 + dir * c.dist * (1 - (1 - t) ** 3)
   }
@@ -769,15 +836,20 @@ function respawnSparks(now: number): void {
 // static dashes have no live animation → no more envelopes → they rest where they are (the
 // lit-at-stop texture must not shuffle). One respawn per envelope = constant population.
 let respawnCursor = 0 // round-robin start index — the budget must not starve the tail
-// NO dash respawns while the app BOOTS (2026-07-11, Peter's Chrome "waves forever"): the
-// respawn's per-frame style writes kept every frame busy, so React's time-sliced editor mount
-// yielded, rescheduled, yielded… and the boot NEVER completed — a livelock, not a loop (the
-// compositor waves ran forever over a page that never revealed). Dash never-twice matters at
-// rest/scroll twinkling; the load drift keeps its seeded field. Sparks (few, load-only, cheap)
-// keep respawning as before. If the reveal never fires, respawns simply stay off — graceful.
+// RASTER-FREE dash cycling while the app BOOTS (2026-07-11 round 4). History: per-envelope
+// full-art respawns (2 canvas rasters + PNG encodes each) LIVELOCKED React's time-sliced editor
+// mount, so round 3 boot-gated them entirely — but a fully static seeded field re-blinks each
+// dash at ITS OWN spot every ~1.5s for the whole load = Peter's "the short lines are still
+// repeating themselves". His guidance: full uniqueness isn't required — CYCLE the positions on a
+// long rotation, like the scroll-time twinkles. The 140px-LATTICE relocation delivers that for
+// free: a dash's art is a pure function of its wave-space phase (wrap140), so moving it by any
+// multiple of 140px keeps the art EXACTLY valid — the respawn becomes two style writes (left/
+// top), no raster, no encode, boot-safe. Position still draws through the never-twice memory
+// (memPick), so the rotation never revisits a recent strike. After the load (bootDone), the
+// full-art respawn returns for rest/scroll twinkling, exactly as before.
 let bootDone = false
 function respawnDashes(now: number): void {
-  if (!bootDone || !defs || !hosts.size || blinkMode === 'static') return
+  if (!defs || !hosts.size || blinkMode === 'static') return
   const hs = Array.from(hosts.values())
   const fx: Partial<Record<Group, number>> = {}
   const vw = window.innerWidth
@@ -808,7 +880,31 @@ function respawnDashes(now: number): void {
     if (phase < d.onS + 0.05 && phase > 0.1) return
     dashCycle.set(d, dark)
     if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
-    const art = dashArt(liveRnd, d.group, d.row, d.hw, d.w, d.h, stripW)
+    const rnd = liveRnd
+    let nx: number
+    let ny = d.y
+    let art: { x: number; y: number; day: string; night: string } | null = null
+    if (!bootDone) {
+      // LOAD WINDOW — raster-free 140-lattice cycling (see the header note): keep the art, move
+      // the dash to another lattice slot with the same wave-space phase, via the strike memory.
+      const wx = wrap140(d.x + d.w / 2)
+      const cells = Math.max(1, Math.floor(stripW / 140))
+      const k0 = Math.ceil((-PAD - wx) / 140)
+      // Never redraw the CURRENT slot (a saturated band ring can fall back to it — the one
+      // visible "same spot again" case): draw from the other cells−1 lattice slots.
+      const curK = Math.round((d.x + d.w / 2 - wx) / 140) - k0
+      const cx = memPick('dash', d.group, d.row, d.hw, () => {
+        let k = Math.floor(rnd() * Math.max(1, cells - 1))
+        if (cells > 1 && k >= ((curK % cells) + cells) % cells) k++
+        return (k0 + k) * 140 + wx
+      }, (c) => c)
+      nx = cx - d.w / 2
+      ny = 140 * d.row + midY(CREST[d.group], wx) + (rnd() - 0.5) * 5 - d.h / 2 // fresh jitter, same phase
+    } else {
+      art = dashArt(rnd, d.group, d.row, d.hw, d.w, d.h, stripW)
+      nx = art.x
+      ny = art.y
+    }
     // Fold into current viewport coverage (multiples of stripW ≡ 0 mod 140 — see respawnSparks).
     let x0 = fx[d.group]
     if (x0 === undefined) {
@@ -816,22 +912,22 @@ function respawnDashes(now: number): void {
       x0 = f ? currentFieldX(f, d.group) : 0
       fx[d.group] = x0
     }
-    let nx = art.x
     const sx = nx + d.w / 2 + x0
     if (sx < -PAD) nx += stripW * Math.ceil((-PAD - sx) / stripW)
     else if (sx > vw + PAD) nx -= stripW * Math.ceil((sx - vw - PAD) / stripW)
     d.x = nx
-    d.y = art.y
-    d.day = art.day
-    d.night = art.night
+    d.y = ny
+    if (art) { d.day = art.day; d.night = art.night }
     // (No decode hints — see respawnSparks: per-respawn SVG decodes wedged the boot.)
     for (const h of hs) {
       const el = h.dashes?.els[i]
       if (!el) continue
       el.style.left = `${d.x}px`
       el.style.top = `${d.y}px`
-      el.style.setProperty('--twk-day', `url("${d.day}")`)
-      el.style.setProperty('--twk-night', `url("${d.night}")`)
+      if (art) {
+        el.style.setProperty('--twk-day', `url("${d.day}")`)
+        el.style.setProperty('--twk-night', `url("${d.night}")`)
+      }
     }
     budget--
     })(d, i)
@@ -988,6 +1084,12 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
     host.appendChild(nodes.set)
     h[kind] = nodes
     ensureDriver() // owns recycling too, so it runs from first mount
+    // IMMEDIATE recycle (2026-07-11): a host mounting minutes into a session gets a field whose
+    // drift ramp is already thousands of px along (startTime = the boot epoch), so every shared
+    // instance sits far offscreen until the next 500ms recycle tick — a dashless open. Sweep now.
+    lastRecycleFx = {}
+    lastRecycle = performance.now()
+    recycle()
     maybeAnnounceReady(h)
   })
 }
@@ -1125,9 +1227,17 @@ function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): vo
 // Dashes recalculate on zoom settle (positions, art, schedules AND the static subset).
 function regenDashes(): void {
   if (!defs || !hosts.size) return
+  pruneHosts()
+  // PHONE zoom-settle lag (2026-07-11): at rest no phone surface mounts dashes (waves exist only
+  // during load — Scroll passes dashes: !phone || waveMode !== 'off'), yet genList rasterised a
+  // full viewport of fresh dash art (2 canvas PNG encodes per dash) on EVERY pinch settle — pure
+  // main-thread waste at the exact moment the fingers lift. Regenerate only when some host is
+  // actually showing dashes; desktop (always-mounted water) is unchanged.
+  let mounted = false
+  for (const h of hosts.values()) if (h.dashes) { mounted = true; break }
+  if (!mounted) return
   const rnd = mulberry32((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0)
   defs.dashes = genList(rnd, 'dashes')
-  pruneHosts()
   for (const [host, h] of hosts) if (h.dashes) remount(host, h, 'dashes')
 }
 
@@ -1154,14 +1264,18 @@ export function syncTwinkles(
   }
   if (!listening) {
     listening = true
-    window.addEventListener('inkwave:editor-revealed', () => { bootDone = true })
     // PER-LOAD RE-ARM (2026-07-11, the open-doc analogue of the boot livelock): the gate below
     // exists because dash-respawn art rebuilds (2 canvas rasters + PNG encodes each, up to
     // 4/frame) livelocked React's time-sliced editor mount at boot — but bootDone stayed true
     // forever after the FIRST reveal, so every OPEN-DOCUMENT choreography (a full editor remount
     // behind the same drifting shell) ran the respawn storm the boot is protected from. Profiled
     // 2026-07-11: toDataURL was ~8% of the Chromium open-mount window, and headless WebKit
-    // wedged for ~19s. Each open re-arms the gate; its reveal re-opens it, exactly like boot.
+    // wedged for ~19s. open-begin re-arms EARLY (before the shell's commit); the anim re-entry
+    // below re-arms EVERY load — including snapshot opens and snapshot→editor restores, which
+    // are plain route navigations that never fire open-begin (2026-07-11 round 4). The gate
+    // re-opens when the water RESTS (the 'off' transition below), not at editor-revealed: the
+    // reveal commit + the coast tail are still choreography-critical frames, and the !bootDone
+    // window now cycles dashes raster-free anyway (see respawnDashes).
     window.addEventListener('inkwave:open-begin', () => { bootDone = false })
     window.addEventListener('inkwave:water-ready', onWaterReady)
     window.addEventListener('inkwave:zoom-settled', regenDashes)
@@ -1181,6 +1295,7 @@ export function syncTwinkles(
   if (want.mode === 'anim' && prev !== 'anim') {
     // Re-open choreography: a NEW load drifts again — fresh coast/handoff state, and the dashes
     // return to full-rate compositor blinks.
+    bootDone = false // every load re-arms the respawn boot gate (route navs never fire open-begin)
     coast = null
     restRebase = null
     if (blinkMode !== 'playing') {
@@ -1191,10 +1306,17 @@ export function syncTwinkles(
       syncDashLiveliness() // viewport-capped full-rate blinks
     }
   }
-  if (want.mode === 'coast' && prev !== 'coast' && !coast) {
-    // Coast clock: the caller passes the tiles' EXACT freeze moment (Scroll.tsx coastT0) so the
-    // field coast and the (backdated) tile coast start from one number — performance.now() here
-    // runs ahead of the frozen frame clock by however long this commit has been running.
+  if (want.mode === 'off' && prev !== 'off') {
+    // The load choreography is over (waves at rest) — full-art respawns are safe again; the
+    // rest/scroll twinkling relies on them for the never-twice contract.
+    bootDone = true
+  }
+  if (want.mode === 'coast' && prev !== 'coast' && (!coast || performance.now() - coast.start > coast.T)) {
+    // (The staleness check heals an ABANDONED coast — a veil unmounted mid-coast leaves
+    // waterMode 'coast' with no finish; the next load must not adopt its dead clock.)
+    // Coast clock: the caller passes the tiles' freeze/adopt moment (Scroll.tsx coastT0) so the
+    // field coast and the tile coast start from one number; on the additive path Scroll's clock
+    // resolve retimes both to the actual first painted frame (retimeCoast).
     const start = want.coastStart ?? performance.now()
     // T/dist must mirror the tiles' coast exactly (CSS: 2s/48px phone, 2.5s/60px desktop — the
     // old 3s/72px here left desktop fields ending 12px off their crests). want.coastDist carries
@@ -1227,15 +1349,15 @@ export function syncTwinkles(
   else if (!want.dashes && h.dashes) { disarmDashes(h.dashes); h.dashes.set.remove(); h.dashes = undefined; h.tok.dashes++ }
 }
 
-// LATE-FIRST-FRAME COAST REBASE (2026-07-11 — see Scroll.tsx): when the coast's first painted
-// frame landed late (starved boot), the tiles re-freeze from the drift's extrapolated pose at
-// that frame; the twinkle FIELDS must ride the same rebased clock or they'd snap to the stale
-// deep-coast pose the tiles just abandoned. Recreates each coasting field's WAAPI animation
-// against the new start (applyFieldMode's coast branch derives x0 from coast.start, which is
-// exactly the drift pose at the rebased moment — same analytic clock as the tiles).
-export function rebaseCoast(start: number, dist: number): void {
+// COAST CLOCK RESOLVE (2026-07-11, additive coast — see Scroll.tsx): the tiles' coast start
+// resolves at their first painted frame; Scroll stamps the load's effective t0 + the device-
+// pixel-snapped travel and calls this so the twinkle fields ride the SAME clock. Each coasting
+// field's additive animation gets the resolved startTime (it was created pending in the same
+// commit, so this is a ≤1-frame alignment, not a restart) and its keyframes are re-derived for
+// the snapped distance (≤0.5 device px — invisible).
+export function retimeCoast(start: number, dist: number): void {
   if (waterMode !== 'coast' || !coast) return
-  coast = { start, T: coast.T, dist }
+  coast = { start, T: coast.T, dist, resolved: true }
   lastCoast = coast
   for (const h of hosts.values()) {
     for (const kind of ['sparks', 'dashes'] as const) {
@@ -1244,8 +1366,13 @@ export function rebaseCoast(start: number, dist: number): void {
       for (const g of ['a', 'b'] as Group[]) {
         const f = nodes.fields[g]
         if (fieldMode.get(f) !== 'coast') continue
-        fieldMode.delete(f) // force applyFieldMode through its same-mode no-op guard
-        applyFieldMode(f, g, 'coast', f.closest('.inkwave-editor-surface') as HTMLElement | null)
+        const a = fieldAdd.get(f)
+        if (!a) continue
+        try {
+          const dir = g === 'a' ? -1 : 1
+          ;(a.effect as KeyframeEffect | null)?.setKeyframes(addCoastFrames(dir, coast))
+          a.startTime = start
+        } catch { /* keep the natural-start animation — continuous either way */ }
       }
     }
   }
@@ -1253,11 +1380,25 @@ export function rebaseCoast(start: number, dist: number): void {
 
 // Genuine scrollTop velocity (px/s) from the sway handler — zoom-hold-compensated deltas are
 // excluded UPSTREAM (Scroll.tsx), so zoom corrections never read as water motion.
+let swayPrimeTs = -1e9 // last isolated report — the sustained-scroll wake gate below
 export function reportSway(pxPerSec: number): void {
   if (waterMode !== 'off' || !hosts.size) return
+  const now = performance.now()
   scrollTargetV = Math.min(RATE_CAP, pxPerSec / V_REF)
-  scrollTs = performance.now()
+  scrollTs = now
   if (scrollTargetV <= 0) return
+  // SUSTAINED-SCROLL WAKE (desktop typing lag, 2026-07-11): a caret-reveal scroll — typing at
+  // the bottom of the page nudges scrollTop once per wrapped line — is a SINGLE discrete scroll
+  // event, but its one-frame delta reads as a huge velocity (20px/16ms ≈ full rate) and woke the
+  // whole dash field from park: WAAPI restarts for every dash, driver frames until the rate
+  // decayed, and a getComputedStyle sweep at re-park — per line wrap, while typing. Waking from
+  // PARK now needs TWO scroll frames within 200ms (a real scroll produces dozens; the second
+  // frame wakes ~16ms late — imperceptible). An already-running driver is untouched.
+  if (blinkMode === 'static' && !driver) {
+    const prev = swayPrimeTs
+    swayPrimeTs = now
+    if (now - prev > 200) return // isolated report — prime only, stay parked
+  }
   wakeFromStatic()
   ensureDriver()
 }

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 // CRITICAL-PATH SPLIT: the editor graph (Tiptap/PM, KaTeX, the 30k-word list, citations, Clerk)
 // is the bulk of the app's JS. Lazy-loading it means the tiny shell chunk hydrates immediately —
@@ -10,8 +10,19 @@ import { v4 as uuidv4 } from 'uuid'
 // 4.0s, the moment the doc resolved). Kicking it here restores the designed parallelism: the
 // fetch+eval overlap the OPFS/IndexedDB load, and any storage stall no longer adds to boot.
 // (browser only: the prerender/SSR pass must not eval the editor graph at module scope)
+//
+// DOUBLE-MOUNT FIX (2026-07-11, "the editor mounts TWICE per load"): the module is consumed via
+// STATE below, NOT React.lazy/Suspense. lazy always suspends its first render (even with the
+// promise long resolved), and React retries suspended boundaries at TRANSITION priority — a
+// TIME-SLICED render. @tiptap/react's useEditor (default immediatelyRender) creates the editor
+// synchronously inside that sliced render, and its 1ms not-yet-mounted safety timer
+// (scheduleDestroy) fired between slices: editor #1 destroyed mid-render, the mount effect built
+// editor #2 — two ~950ms creations and every [editor]-keyed effect (the whole reveal chain,
+// pagination-ready, reveal-imminent, editor-revealed) running TWICE per load. Holding the
+// resolved component in state mounts it in ONE default-lane (non-interruptible) render+commit
+// task, so the timer can never interleave — one editor, one reveal chain, and creation still
+// starts early (in-render). Do not reintroduce lazy/Suspense here.
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
-const TiptapEditor = lazy(() => (tiptapEditorImport ?? import('../editor/TiptapEditor')).then(m => ({ default: m.TiptapEditor })))
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
 import { loadDocument, emptyTiptapDoc } from '../storage/opfs'
@@ -42,6 +53,14 @@ function migrateDocument(doc: InkwaveDocument): InkwaveDocument {
 
 export function Edit() {
   const [doc, setDoc] = useState<InkwaveDocument | null>(null)
+  // The editor component, held in state once its chunk resolves (see the double-mount note at
+  // the top of the file). null until then — the loading shell covers either way.
+  const [EditorComp, setEditorComp] = useState<typeof import('../editor/TiptapEditor').TiptapEditor | null>(null)
+  useEffect(() => {
+    let alive = true
+    void tiptapEditorImport?.then((m) => { if (alive) setEditorComp(() => m.TiptapEditor) })
+    return () => { alive = false }
+  }, [])
   // ONE persistent loading shell (the waves). The old shape rendered the waves surface in THREE
   // tree positions across a load — the !doc return, the Suspense fallback, then the editor's own
   // surface — and each swap REMOUNTED .inkwave-editor-surface, recreating the wave pseudo-layers:
@@ -227,15 +246,13 @@ export function Edit() {
   // shellUp=true → shell only) is a direct CSS function of the editor, and the editor reveals under
   // it with no visual jump.
   // key={doc.id} → switching documents in place cleanly remounts the editor (sessions, snapshots,
-  // sync reconnect all re-run for the new doc). fallback={null}: the shell on top already provides
-  // the loading visuals — a fallback surface here would be a second instance that remounts on every
-  // suspend (one of the old load flashes).
+  // sync reconnect all re-run for the new doc). No Suspense here — the shell on top provides the
+  // loading visuals, and the editor must mount in a default-lane render (see the double-mount
+  // note at the top of the file).
   return (
     <>
-      {doc && (
-        <Suspense fallback={null}>
-          <TiptapEditor key={doc.id} doc={doc} onDocChange={handleDocChange} />
-        </Suspense>
+      {doc && EditorComp && (
+        <EditorComp key={doc.id} doc={doc} onDocChange={handleDocChange} />
       )}
       {shellUp !== 'down' && (
         <Scroll phone={shellPhone} fill revealed={false} fadingOut={shellUp === 'fading'}>

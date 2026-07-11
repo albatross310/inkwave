@@ -263,12 +263,11 @@ uses background-attachment: scroll (WebKit's fixed-attachment compositing is fla
 must be CANVAS-RASTERED PNGs, never per-instance SVG data-URIs — Chromium builds a full
 IsolatedSVGDocumentHost per unique URI (~4.3s of boot at ~600 URIs; Firefox is cheap = the engine
 asymmetry). The lazy editor chunk is eagerly imported at module scope (browser-only guard) so it
-loads in PARALLEL with storage, not after doc-ready. Starved-boot coast: a first-coast-frame check
-re-freezes from the drift's extrapolated pose when >150ms late (rebaseCoast) — prevents
-full-speed-overlay-then-backward-snap; phone shell drop waits for wave-rest AND paper fade end.
+loads in PARALLEL with storage, not after doc-ready. Phone shell drop waits for wave-rest AND
+paper fade end.
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts). Known residual:
 the editor mounts TWICE per load (duplicate reveal events; Tiptap useEditor recreation) — needs
-its own pass. 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
+its own pass (the coast is now immune to it — see round 4 — but the double mount still wastes work). 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
 PER-LOAD — Edit.tsx's closure vars (revealedAt/restSeen) and its pending force-down/cap timers
 must reset on `inkwave:open-begin`; the FIRST load's 4s phone cap fired ~1.7s into the SECOND
 load's covering shell = the open-document white-out (stale restSeen was a second path to the same
@@ -285,6 +284,44 @@ headless WebKit and ate ~8% of the Chromium open). PROBE GOTCHA: `vite preview` 
 the vercel.json SPA rewrite — it serves the prerendered EDITOR page for /snapshot, hydration
 mismatches (#418/#423), React recreates <html> and iw-water-ready/data-theme die (gradient with
 no waves). Probe /snapshot against a fallback-faithful static server, never vite preview.
+2026-07-11 round 4 — ADDITIVE COAST v3 (the drift→coast "two snaps", desktop Chrome + phone
+refresh + snapshot veil). MEASURED root cause (CDP screencast + in-page transform trace): the
+editor double-mount dispatches reveal-imminent TWICE; each old freezeToCoast re-froze from a
+clock trailing the compositor and REWROTE the shared #iw-coast-kf keyframes under the running
+coast — two ~7-12px backward snaps with frozen frames between, plus per-surface startTime skew
+(a third snap at the shell-fade handoff); the round-2 refreeze (rebaseCoast) was a fourth writer.
+Fix: THE DRIFT IS NEVER STOPPED. `.iw-wave-coast.iw-coast-add` keeps the drift animation
+(name-matched across the class swap — preserved with its startTime on all three engines) and
+ADDS the coast via `animation-composition: replace, add`: injected literal keyframes worth
+(vT−d)·cubic-bezier(1/3,0,2/3,0.5) over T (≡ the exact old v(1−τ)² velocity profile) then a
+LINEAR HOLD at +v that cancels the drift — the TOTAL pose is static after T until the rest
+handoff, however late its commit lands. Zero additive value + zero velocity at start ⇒ the
+handoff is continuous BY CONSTRUCTION on any starvation: healthy path byte-inert, late path
+monotonic; rebaseCoast/refreeze are DELETED. ONE SHARED COAST PER LOAD (`sharedCoast` in
+Scroll.tsx, cleared on open-begin/finish, stale >T self-heals — a veil unmounted mid-coast must
+never donate its clock): every surface (shell + editor + any duplicate) adopts the same clock +
+snapped distance ⇒ pixel-identical copies. The clock resolves at the coast animation's `ready`
+(the first painted frame): snap d so the rest pose is an integer device pixel (≤0.5-device-px
+keyframe rewrite INSIDE that first frame — invisible) and `retimeCoast()` the twinkle fields to
+the same number. finish() = timer at t0+T+80ms (the hold makes slop invisible; animationend
+fires at T+hold, too late) + the 3300ms cap unchanged. Engines without animation-composition
+keep the classic replace path (freeze + backdate, `:not(.iw-coast-add)` rules). Twinkle round 4:
+field ramps get DYNAMIC headroom (K grows with now−epoch — the fixed 600 ramp EXPIRED ~19min
+into a session, freezing dashes against moving water on late-session opens); coasting fields
+also go ADDITIVE (ramp keeps running + WAAPI composite:'add'; 'off' cancels BOTH; the rest-
+rebase constant is unchanged — ramp+additive total ≡ the old formula exactly); mountSet runs
+recycle() immediately (a late-session mount otherwise shows an EMPTY field ≤500ms); the driver
+parks when every host is gone. Respawn boot-gate: re-arms on EVERY anim re-entry (snapshot
+opens + snapshot→editor restores are route navs that never fire open-begin) and re-opens at the
+'off' transition (wave rest), NOT at editor-revealed. While gated, dashes still CYCLE (Peter:
+"short lines repeating themselves"): raster-free 140px-LATTICE relocation — same wave-space
+phase ⇒ the SAME art stays exactly valid, two style writes, no encode — drawn through the
+never-twice memory with the current slot excluded; the dash memory ring scales with band
+population (~3 strikes of history; the fixed 16 held ~1 envelope and allowed A→B→A returns).
+Verified per-engine (Chromium/Firefox/WebKit incl. iPhone emulation, all four choreographies +
+a 2.5s main-thread-saturation stress): tile velocity monotone −72→0 with zero discontinuities,
+dash-field velocity tracks the tile at median |Δv|=0.0 (dashes ride their waves), S-curve blink
+envelopes confirmed per instance, zero same-spot respawn repeats, zero art churn during load.
 
 ## Open pipeline + cloud caching (2026-07-09)
 
@@ -316,12 +353,12 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
-- Phone SCAS tick is WINDOWED (2026-07-10): the 250ms tick scans/repaints only the tick's
-  edit+caret paragraphs (~200× cheaper than O(doc)). INVARIANT: any tick with a DELETION does the
-  FULL scan — the engine's vanished-lemma pass needs whole-doc word presence (a window that hides a
-  removal ⇒ false lock + phantom snapshot); and the windowed decoration splice is only legal when
-  the tick did NOT change SCAS state (a verdict change repaints that lemma doc-wide). Desktop keeps
-  the full scan (byte-identical). Word count now runs ONLY while the ◈ panel is open on phone.
+- The SCAS tick is WINDOWED on BOTH platforms (phone 2026-07-10; desktop joined 2026-07-11): the
+  tick scans/repaints only the tick's edit+caret paragraphs (~200× cheaper than O(doc)).
+  INVARIANT: any tick with a DELETION does the FULL scan — the engine's vanished-lemma pass needs
+  whole-doc word presence (a window that hides a removal ⇒ false lock + phantom snapshot); and the
+  windowed decoration splice is only legal when the tick did NOT change SCAS state (a verdict
+  change repaints that lemma doc-wide). Word count runs ONLY while the ◈ panel is open on phone.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
@@ -428,6 +465,35 @@ Rule of thumb: nothing that reads/parses/encodes the whole `.studio` or hits the
 may run synchronously on load. Stamp on creation, sweep on demand, cache encodes, read metadata not
 bodies.
 
+- **Canonical measure block-line cache (2026-07-11 — THE desktop "waves of lag" fix).** The
+  measure's per-line range.getClientRects walk over every block cost 1.5-4s on a 20k-word doc
+  (4×-throttled probe) at every 150ms desktop typing pause. collectLines now caches each block's
+  lines RELATIVE to its own top, keyed by PM NODE IDENTITY (WeakMap — persistent structures:
+  untouched block ⇒ same node ⇒ same canonical geometry); an edit re-measures only changed blocks
+  (measured: 133-277ms, ~15-20×). INVARIANTS: replace the WeakMap whenever the canonical CONTEXT
+  changes (fonts ready/loadingdone, page settings, bibliography hydration — clearLineCache sits
+  beside clearStepCache at those sites); never pass the cache for fluid 'scroll' paper (its
+  canonical width is the live width); cache reads/writes only on the gap-cleared measure.
+- **Editor mounts ONCE per load (2026-07-11 double-mount fix).** TiptapEditor must mount in a
+  default-lane render — React.lazy/Suspense retries render at TRANSITION priority (time-sliced),
+  and @tiptap/react's in-render editor creation + its 1ms scheduleDestroy timer race across the
+  slices: two ~950ms creations + the whole reveal chain doubled. Edit.tsx holds the eagerly-
+  imported module in STATE (no Suspense) — do not reintroduce lazy/Suspense around the editor.
+- **Keydown-synchronous typing (task #28, 2026-07-11).** editorProps.handleKeyDown dispatches
+  plain printable keys synchronously (handleTextInput someProp first — input rules identical to
+  the native path; storedMarks via tr.insertText). Flag 'inkwave:kdSync': unset = ON for
+  non-touch, OFF on touch (never intercept the virtual keyboard/autocorrect). Guards: no
+  modifiers, no composition, no open word-cycle, TextSelection only. Measured (4× throttle,
+  20k words): median keydown→paint 80ms → 48ms. perflog label: kd-sync.
+- **Enter-caret reveal (2026-07-11).** PM's scrollIntoView IGNORES CSS scroll-padding — Enter
+  scrolled the new empty line to the scroller's raw bottom edge, exactly behind the toolbar
+  reserve; the caret "appeared when you type" because the browser's native caret-reveal DOES
+  honour scroll-padding. The toolbar RO now mirrors the reserve into PM's scrollThreshold/
+  scrollMargin (view.setProps) — keep them in sync with any new floating bottom chrome.
+- **Twinkle wake needs SUSTAINED scroll (2026-07-11).** A parked dash field only wakes on two
+  scroll reports within 200ms — a single caret-reveal scroll nudge (typing at the page bottom)
+  must never wake the WAAPI field (it read as full-rate velocity and woke everything per wrapped
+  line).
 - **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
   full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
   after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
