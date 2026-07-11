@@ -229,7 +229,10 @@ function parseRanges(loc: string): Array<[number, number]> {
   const out: Array<[number, number]> = []
   const re = /(\d+)\s*[–-]\s*(\d+)|(\d+)/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(loc))) {
+  // Legacy docs store numeric locators (locator: 12, not '12') — coerce; a non-string here
+  // was a live keydown TypeError (2026-07-12, locator.trim on the esp-split path).
+  const s = typeof loc === 'string' ? loc : String(loc ?? '')
+  while ((m = re.exec(s))) {
     if (m[1] && m[2]) out.push([Number(m[1]), Number(m[2])])
     else if (m[3]) out.push([Number(m[3]), Number(m[3])])
   }
@@ -263,7 +266,7 @@ export function mergePages(locator: string | null | undefined, extra: number[]):
   const set = new Set<number>(extra)
   if (locator) for (const [a, b] of parseRanges(locator)) for (let p = a; p <= Math.min(b, a + 999); p++) set.add(p)
   const s = formatPages([...set].sort((x, y) => x - y))
-  return s || (locator ?? '')
+  return s || String(locator ?? '')
 }
 
 /** Merge sorted page numbers into a compact "2, 4–6, 9" string. */
