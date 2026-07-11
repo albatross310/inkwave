@@ -477,32 +477,35 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // and text must land in the SAME frame, cached or not. The settle's verify paint still
           // snaps everything atomically at the end (a no-op when the cache was accurate).
           const stepCache = new Map<number, BandGeo>()
+          // Per-GESTURE cache: band geometry measured under the live window's placeholder heights
+          // (.iw-zoom-live) is a DIFFERENT geometry regime — it must never leak into stepCache
+          // (placeholder-squashed panels replayed at rest) and stepCache's full-layout geometry
+          // must never apply mid-gesture (panels misaligned with the placeholder-rendered text).
+          // Routing mid-gesture steps here keeps a within-pinch step RETRACE pure style writes
+          // (phone precomputes nothing, so without this every retraced step re-measured — 2026-07-11
+          // gesture-latency fix). Cleared at settle (zoomCb) and on any doc change.
+          const liveCache = new Map<number, BandGeo>()
           const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
-          const clearStepCache = () => stepCache.clear()
+          const clearStepCache = () => { stepCache.clear(); liveCache.clear() }
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
           const onZoomStep = (e: Event) => {
             const d = (e as CustomEvent).detail as { step?: number; surface?: Element } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
-            const hit = stepCache.get(d.step)
+            const cache = (view.dom as HTMLElement).classList.contains('iw-zoom-live') ? liveCache : stepCache
+            const hit = cache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
             else {
-              // MISS → measure the bands LIVE, synchronously, in this same task. The zoom var is
-              // already at the new step, so readBands() forces the new layout once and the panel
-              // writes batch into it — visually identical to a hit, one reflow dearer. (The old
+              // MISS → measure the bands LIVE, synchronously, in this same task. Scroll.tsx forces
+              // the step's layout (its anchor read) before dispatching, so readBands' rect reads
+              // ride it — visually identical to a hit, one scrollHeight reflow dearer. (The old
               // pin-until-settle fallback left stale bands under reflowed text: the between-page
               // gap "joined up" and text flashed out over the water.) Cache it so a re-pass hits.
               cacheStats.misses++
               const geo = readBands()
-              // Mid-gesture the live-reflow window (.iw-zoom-live) holds off-screen blocks at
-              // PLACEHOLDER heights, so this geometry matches what's rendered right now (bands and
-              // text land in the same frame — correct to APPLY) but is wrong for the step's true
-              // layout — caching it would replay placeholder-squashed panels on a later pass
-              // through this step (phone retraces every step; no precompute overwrites it there).
-              const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
-              if (geo) { applyBands(geo); if (!placeholders) stepCache.set(d.step, geo) }
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
             }
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
@@ -822,6 +825,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // cheap-enough verify + the step-cache warm-up (precompute never runs on phone anyway).
           const zoomCb = () => {
             if (destroyed) return
+            liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next pinch
             if (phoneLike()) { if (gapped && sheet && layer) schedulePaint(); return }
             forceRecompute(); schedulePrecompute()
           }

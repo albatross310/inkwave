@@ -508,6 +508,16 @@ export function Scroll({
       raf = 0
       holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
+      // GESTURE REBASE (Peter, 2026-07-11: "if it has to load, it has to measure the zoom from
+      // when it starts working, not the finger width at the start — so there's not a big jump"):
+      // when the main thread is busy at gesture start (a previous settle's relayout, a SCAS tick),
+      // the queued touchmoves burst in together and the whole backlog would commit as one
+      // multi-step leap (then the next frames replay the rest — Peter's "multiple jumps"). The
+      // FIRST responsive frame of a pinch instead DISCARDS the backlog and takes the current
+      // finger spread as the gesture's baseline (pinchDist already tracks it — every queued move
+      // updated it), so zoom follows finger movement from the moment the pipeline actually
+      // responds. Costs at most one frame's worth of spread on a responsive start.
+      if (!gestureRebased) { gestureRebased = true; steps = 0 }
       const net = Math.trunc(steps) // commit whole lattice steps; the fractional remainder carries
       steps -= net
       const vr = el.getBoundingClientRect()
@@ -542,18 +552,13 @@ export function Scroll({
       // below replaces live repositioning with instant precomputed geometry; the RO path stays
       // gated as the cache-MISS fallback. Cleared in the settle, right before zoom-settled.
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
-      // DESKTOP lazy off-screen too (Peter, 2026-07-10: "sometimes lag in the reflow zoom on
-      // desktop"): the live-reflow window makes each step lay out ~one screenful. Phone enters at
-      // touchstart; desktop enters on the first committed step; both exit in the settle below.
-      enterZoomLive(anchorX, anchorY)
+      // Lazy off-screen (both platforms): the live-reflow window makes each step lay out ~one
+      // screenful. BOTH enter on the first committed step (2026-07-11 — phone used to enter at
+      // touchstart, which forced a full placeholder-switch relayout inside the touchstart task
+      // and a second reflow at the first commit; entering here folds the switch into the commit's
+      // one forced layout below). Both exit in the settle.
+      enterZoomLive()
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
-      // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed, SYNCHRONOUSLY
-      // and before any layout read below — a cache hit applies the precomputed page-band geometry
-      // as pure style writes that batch into the SAME reflow as the font change, so the panels
-      // move WITH the text instead of waiting for the settle. The surface is included so the
-      // SnapshotView's zoom (its own Scroll dispatches too) can never drive the live editor's
-      // panels. A miss is fine — the panels hold (the old pinning) and the settle verifies.
-      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el } }))
       // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
       // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
       // could bite against the stale height near the document end. One offsetHeight read in a
@@ -561,7 +566,16 @@ export function Scroll({
       const mag = getMagnify()
       if (mag !== 1 && magnifyBoxRef.current && paperElRef.current)
         magnifyBoxRef.current.style.height = `${paperElRef.current.offsetHeight * mag}px`
-      const topAfter = anchorTop() // forces synchronous layout at the new size
+      // ONE forced layout for the whole frame (2026-07-11 first-response cost): placeholder
+      // switch + font reflow + wrapper sync all land in this single anchor read.
+      const topAfter = anchorTop()
+      // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed — AFTER the
+      // anchor read, so a cache MISS's band measure rides the layout just forced above (a hit is
+      // pure style writes that batch into this frame's paint; the panels still move WITH the
+      // text). The surface is included so the SnapshotView's zoom (its own Scroll dispatches too)
+      // can never drive the live editor's panels. Dispatched before the scroll correction below —
+      // applyBands' sheet min-height write must precede the scroll write or the range could clamp.
+      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el } }))
       if (topAfter != null) {
         // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
         // content-visibility placeholder set re-evaluates between frames (scroll corrections move
@@ -684,6 +698,7 @@ export function Scroll({
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     let pinchMoveArmed = false
     let gestureStartZoom = 1 // zoom level at pinch start — detects a no-commit gesture
+    let gestureRebased = true // false between a pinch's touchstart and its first responsive frame
     const armPinchMove = () => {
       if (!pinchMoveArmed) { pinchMoveArmed = true; el.addEventListener('touchmove', onTouchMove, { passive: false }) }
     }
@@ -706,44 +721,53 @@ export function Scroll({
     // SCAS tick / PageGuides also deferring on the hold). Scoped to the GESTURE only.
     const CV_LIVE = typeof CSS !== 'undefined' && !!CSS.supports?.('content-visibility', 'auto')
     let zoomLiveEd: HTMLElement | null = null
-    const enterZoomLive = (ax: number, ay: number) => {
+    let zoomLiveStyle: HTMLStyleElement | null = null
+    const enterZoomLive = () => {
       if (!CV_LIVE || zoomLiveEd) return
       const ed = el.querySelector('.ProseMirror') as HTMLElement | null
       if (!ed || !ed.children.length) return
-      // Mean of the blocks' REAL heights (reads only — PM-safe), not scrollHeight/n: container
-      // padding / page-fill min-heights skewed that high, and oversize placeholders churned the
-      // geometry on every placeholder↔real swap as the viewport moved.
+      // EXACT per-block placeholder heights, via ONE generated stylesheet — :nth-child rules,
+      // NEVER inline styles on PM-owned nodes (PM's DOM observer rebuilds touched blocks and the
+      // gesture dies on the detached touch target — the original --iw-cis lesson). Exactness
+      // matters (2026-07-12): a flat mean placeholder shifted off-screen geometry by Σ(real−mean),
+      // so the entry needed a huge compensating scroll (~5,000px at the doc bottom) which DRAGGED
+      // the content-visibility relevancy set across the doc — and WebKit's async relevancy
+      // relayout landed AFTER that frame's pin correction: one painted frame with the pinched
+      // text ~2,400px off (deterministic at the document bottom). Height-identical placeholders
+      // make the switch geometry-neutral at the current zoom — no compensating scroll, no
+      // relevancy drag, no second-wave jump. --iw-cis stays as the fallback for any child beyond
+      // these rules; the :nth-child specificity beats the base `> *` rule in index.css.
+      const kids = Array.from(ed.children) as HTMLElement[]
+      let css = ''
       let sum = 0
-      for (const c of Array.from(ed.children) as HTMLElement[]) sum += c.offsetHeight
-      // ENTRY BRACKET: switching blocks above the viewport to placeholder heights SHIFTS the
-      // content the user is looking at — visible as a jump the instant a gesture starts (and it
-      // poisoned the anchor pin, which would hold the SHIFTED position for the whole gesture).
-      // Hold the content at the gesture's anchor point still across the switch, same task —
-      // through the shared content anchor when one is picked (phone touchstart / desktop first
-      // commit pick it before entering), else a block ref under the point.
-      const anchored = anchorTop()
-      const ref = anchored == null
-        ? document.elementFromPoint(ax, ay)?.closest('.ProseMirror > *') as HTMLElement | null
-        : null
-      const before = anchored ?? (ref ? ref.getBoundingClientRect().top : 0)
-      ed.style.setProperty('--iw-cis', `${Math.max(24, Math.round(sum / ed.children.length))}px`)
+      for (let i = 0; i < kids.length; i++) {
+        const h = kids[i].offsetHeight
+        sum += h
+        css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto ${h}px}\n`
+      }
+      // No entry bracket (2026-07-11): the ONLY caller is applyFrame's commit path, immediately
+      // before the zoom var write — the (geometry-neutral) switch and the font reflow land in ONE
+      // forced layout (the anchor read that follows), and the pin correction against anchorTop0
+      // absorbs the frame's whole displacement. The old touchstart-time entry paid a separate
+      // full bracketed relayout inside the touchstart task (gesture-start lag).
+      zoomLiveStyle = document.createElement('style')
+      zoomLiveStyle.textContent = css
+      document.head.appendChild(zoomLiveStyle)
+      ed.style.setProperty('--iw-cis', `${Math.max(24, Math.round(sum / kids.length))}px`)
       ed.classList.add('iw-zoom-live')
       zoomLiveEd = ed
-      if (anchored != null || ref) {
-        // forces the skipped layout now, pre-paint
-        const after = anchored != null ? anchorTop() : ref!.getBoundingClientRect().top
-        if (after != null) setScrollTop(getScrollTop() + (after - before))
-      }
     }
     const exitZoomLive = () => {
       const ed = zoomLiveEd
       if (!ed) return
       zoomLiveEd = null
-      // Re-anchoring bracket: skipped blocks held placeholder heights; un-skipping lays them out
-      // at the committed zoom, displacing everything below — pin the held content anchor back to
-      // its gesture-start viewport top in the same task so the anchored text never jumps.
+      // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
+      // them out at the committed zoom, displacing everything below — pin the held content anchor
+      // back to its gesture-start viewport top in the same task so the anchored text never jumps.
       ed.classList.remove('iw-zoom-live')
       ed.style.removeProperty('--iw-cis')
+      zoomLiveStyle?.remove()
+      zoomLiveStyle = null
       const after = anchorTop() // forces the full relayout now, pre-paint
       if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
     }
@@ -753,9 +777,11 @@ export function Scroll({
       pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
       steps = 0
+      gestureRebased = false // first responsive frame discards the backlog (see applyFrame)
       // Fresh gesture → anchor the TEXT POSITION under THIS midpoint, from the pre-gesture
       // layout (before the live window's placeholder switch), so the pin holds exactly what the
-      // fingers grabbed for the whole gesture.
+      // fingers grabbed for the whole gesture. This hit-test is the touchstart task's ONLY
+      // layout-touching work — the live window enters lazily at the first commit (applyFrame).
       pickAnchor(pinchX, pinchY)
       // Hold from the FIRST touch (not the first commit): a queued SCAS tick landing mid-pinch
       // rebuilds the touched paragraph and the gesture dies on the detached node (iOS dispatches
@@ -763,7 +789,6 @@ export function Scroll({
       // gesture that never commits.
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       gestureStartZoom = editorZoomRef.current
-      enterZoomLive(pinchX, pinchY)
       armPinchMove()
     }
     const onTouchMove = (e: TouchEvent) => {
