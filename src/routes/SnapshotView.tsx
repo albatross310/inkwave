@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
@@ -17,6 +17,7 @@ import { summariseDiff, summariseVersionDiff } from '../provenance/summarise'
 import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiSettings'
 import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
+import { probePerf } from '../editor/perflog'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
@@ -486,6 +487,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
   const measure = useCallback(() => {
     const el = leftRef.current
     if (!el || !el.scrollHeight) return
+    const tMm = performance.now()
     const paper = el.querySelector('.scroll-paper') as HTMLElement | null
     const pw = paper?.clientWidth || el.clientWidth || 1
     const pageH = Math.max(200, pw * Math.SQRT2) // fallback A4 ratio (pre-pagination only)
@@ -512,6 +514,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
     // Skip the setState when the marks are identical — the observers fire on every resize tick and a fresh
     // array would re-render the whole grid for nothing (same pattern PageGuides uses).
     const sig = n + '|' + m.map(k => `${k.page}:${Math.round(k.frac * 100)}:${k.add ? 1 : 0}`).join(',')
+    probePerf('minimap', performance.now() - tMm)
     if (sig === marksSigRef.current) return
     marksSigRef.current = sig
     setMarks(m)
@@ -724,10 +727,122 @@ const WARP_WELL = 0.3         // well pull strength (how hard the nearest diff g
 const WARP_WELL_PAD = 20      // well half-width beyond each diff's own half-height
 const WARP_IMPULSE = 0.14     // wheel delta → velocity impulse (≈ resistance scale, so scroll is ~1:1 with input, not 5-6×)
 
+// ── DocLayer — one snapshot's fully-rendered, fully-paginated doc pane, KEPT ALIVE ────────────
+// The flip-to-card architecture (2026-07-11): each recently-visited snapshot keeps its whole
+// rendered pane (static HTML + inserted gaps + sheet panels + its own scroll position) mounted in
+// an absolutely-positioned layer; only the active one is visible. `visibility:hidden` (NEVER
+// display:none) keeps the hidden layers' layout alive, so flipping to a warm layer is paint-only —
+// no React remount, no re-layout of a 40-page document, no gap re-insertion. Pagination runs ONCE
+// per layer: immediately when it mounts active, ~150ms deferred when it mounts as a hidden warm
+// neighbour (splits the warm into two shorter tasks: subtree layout, then canonical measure).
+// On activation the layer points the shared refs (leftScrollRef/pagRef/pageGeo) at itself in a
+// LAYOUT effect, so every parent effect keyed on snapshot.id still reads the right scroller.
+interface DocLayerHooks {
+  onActivate: (scroller: HTMLDivElement, handle: StaticPaginationHandle | null, pages: StaticPageGeo[] | null) => void
+  onGeo: (pages: StaticPageGeo[]) => void
+  onScroll: () => void
+  onOpClick: (opIdx: number) => void
+  onHoverOp: (opIdx: number | null) => void
+  getZoom: () => number
+  getAnchorTop: () => number // the active pane's scrollTop — primes warm layers near their landing position
+}
+
+const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: {
+  snap: Snapshot; prev: Snapshot | null; active: boolean; isPhone: boolean; hooks: DocLayerHooks
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const pagRef = useRef<StaticPaginationHandle | null>(null)
+  const runRef = useRef<(() => void) | null>(null)
+  const activeRef = useRef(active); activeRef.current = active
+  const ops = useMemo(() => opsBetween(prev, snap), [prev?.id, snap.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pagination — once per layer (spec cache makes revisits cheap; the layer itself makes them free).
+  useLayoutEffect(() => {
+    const L = scrollerRef.current
+    if (!L) return
+    let disposed = false
+    let timer = 0
+    const run = () => {
+      if (disposed) return
+      const t0 = performance.now()
+      pagRef.current?.destroy()
+      pagRef.current = paginateStaticDoc({
+        scroller: L,
+        cacheKey: `${snap.id}|${ops ? 'diff' : 'doc'}`,
+        // Repaints (pane resize, zoom) publish geometry only while this layer drives the view.
+        onRepaint: (pages) => { if (!disposed && activeRef.current) hooks.onGeo([...pages]) },
+      })
+      probePerf(activeRef.current ? 'paginate' : 'paginate.warm', performance.now() - t0)
+      if (activeRef.current && pagRef.current) hooks.onActivate(L, pagRef.current, [...pagRef.current.pages])
+      // Warm layers pre-scroll to the active pane's position: adjacent snapshots lay out almost
+      // identically, so the flip's midline reposition then moves ~0px — the compositor keeps the
+      // already-rastered tiles instead of tiling a fresh scroll offset.
+      else if (!activeRef.current) L.scrollTop = hooks.getAnchorTop()
+    }
+    runRef.current = run
+    // A hidden warm layer renders at the parent's current pane zoom so activation needs no repaint.
+    const z = hooks.getZoom()
+    const paper = L.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+    if (paper && Math.abs(z - 1) > 0.0005) paper.style.setProperty('zoom', String(+z.toFixed(4)))
+    if (activeRef.current) run()
+    else timer = window.setTimeout(run, 150) // warm layers paginate a beat after their layout task
+    // Web fonts reflow the text after first paint → breaks move. Re-measure once ready (the spec
+    // cache keys on font status, so this measures fresh instead of reusing the pre-font entry).
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
+      document.fonts.ready.then(() => { if (!disposed) run() }).catch(() => { /* ignore */ })
+    }
+    return () => { disposed = true; window.clearTimeout(timer); runRef.current = null; pagRef.current?.destroy(); pagRef.current = null }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.id, ops])
+
+  // Activation: point the shared refs at THIS layer + publish its cached page regions. A layout
+  // effect so it lands BEFORE the parent's per-snapshot effects read leftScrollRef. Child effects
+  // flush before parent effects in the same commit, so ordering is guaranteed by React.
+  useLayoutEffect(() => {
+    if (!active) return
+    const t0 = performance.now()
+    if (!pagRef.current) runRef.current?.() // activated before its deferred warm pagination — run now
+    const L = scrollerRef.current
+    if (L) hooks.onActivate(L, pagRef.current, pagRef.current ? [...pagRef.current.pages] : null)
+    probePerf('flip.activate', performance.now() - t0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
+  return (
+    <div
+      className={active ? 'iw-snap-layer iw-snap-layer-active' : 'iw-snap-layer'}
+      data-snap={snap.id}
+      aria-hidden={active ? undefined : true}
+      style={{
+        position: 'absolute', inset: 0,
+        // NEAR-ZERO opacity (NOT 0 / visibility / display): a truly-hidden layer loses its
+        // compositor backing store, and re-rastering a 40-page text pane stalled frames ~500ms on
+        // the flip. At 0.001 the layer stays painted (imperceptible, under the active layer's
+        // opaque paper) so flipping to a warm layer is a compositor-only frame.
+        opacity: active ? 1 : 0.001,
+        zIndex: active ? 2 : 1,
+        pointerEvents: active ? 'auto' : 'none',
+      }}
+    >
+      <div
+        ref={scrollerRef}
+        onScroll={active ? hooks.onScroll : undefined}
+        className="iw-snap-scroll"
+        style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto', touchAction: 'pan-y' }}
+      >
+        {/* The layer key (snap.id) gives each snapshot a private subtree, so the static paginator's
+            DOM surgery (gap insertion splits text nodes) can never desync React's reconciliation. */}
+        <Scroll phone={isPhone}><div><FullDiffView ops={ops} snapshot={snap} onOpClick={ops ? hooks.onOpClick : undefined} onHoverOp={hooks.onHoverOp} /></div></Scroll>
+      </div>
+    </div>
+  )
+})
+
 function SplitDiffView({
-  snapshot, prevSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav,
+  snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav, allSnaps,
 }: {
-  snapshot: Snapshot; prevSnap: Snapshot | null; isPhone: boolean; isNarrow: boolean
+  snapshot: Snapshot; prevSnap: Snapshot | null; nextSnap: Snapshot | null; allSnaps: Snapshot[]
+  isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
   summariesOn?: boolean; onOptInSummaries?: () => void
   nav?: {
@@ -848,7 +963,8 @@ function SplitDiffView({
   }, [setAlignGlow])
   const sideDragging = useRef(false)
   const containerRef   = useRef<HTMLDivElement>(null)
-  const leftScrollRef  = useRef<HTMLDivElement>(null)
+  const leftScrollRef  = useRef<HTMLDivElement>(null)   // the ACTIVE layer's scroller (set on activation)
+  const layerHostRef   = useRef<HTMLDivElement>(null)   // stable wrapper around the layer stack
   const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
   const anchorRatioRef  = useRef(0.5)
   const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
@@ -911,6 +1027,7 @@ function SplitDiffView({
     const L = leftScrollRef.current
     if (!L) return
     const compute = () => {
+      const tDp = performance.now()
       const geo = pageGeo && pageGeo.length ? pageGeo : null
       const paper = L.querySelector('.scroll-paper') as HTMLElement | null
       const pw = paper?.clientWidth || L.clientWidth || 1
@@ -935,6 +1052,7 @@ function SplitDiffView({
         const mk = Object.keys(map)
         return (mk.length === Object.keys(prev).length && mk.every(k => prev[+k] === map[+k])) ? prev : map
       })
+      probePerf('diffPages', performance.now() - tDp)
     }
     const id = requestAnimationFrame(compute)
     const t = setTimeout(compute, 400) // after fonts/pagination settle
@@ -953,7 +1071,10 @@ function SplitDiffView({
   // "(Author, Year)" form, not the raw citekeys (the library is loaded on this route). Cache-through
   // (diffCache): the scrub read-ahead precomputes these in idle time, so navigation is a cache hit.
   const ops = useMemo(() => {
-    return opsBetween(prevSnap, snapshot)
+    const t0 = performance.now()
+    const r = opsBetween(prevSnap, snapshot)
+    probePerf('ops', performance.now() - t0)
+    return r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prevSnap?.id, snapshot.id])
 
@@ -961,34 +1082,51 @@ function SplitDiffView({
   const opsRef = useRef<DiffOp[] | null>(null)
   opsRef.current = ops
 
-  // ── Canonical gapped pages for the snapshot doc pane (staticPagination) ─────────────────────
-  // Runs pre-paint on every snapshot render: measures canonical breaks (cached as char offsets —
-  // revisits skip the forced reflows entirely), inserts the SAME gap widgets + sheet panels the
-  // live editor uses, and publishes the REAL page regions. Minimap + diff-panel page rules read
-  // pageGeo, so their numbers now come from the true canonical breaks (kills the √2 drift).
-  useLayoutEffect(() => {
-    const L = leftScrollRef.current
-    if (!L) return
-    let disposed = false
-    const run = () => {
-      if (disposed) return
-      pagRef.current?.destroy()
-      pagRef.current = paginateStaticDoc({
-        scroller: L,
-        cacheKey: `${snapshot.id}|${ops ? 'diff' : 'doc'}`,
-        onRepaint: (pages) => { if (!disposed) setPageGeo([...pages]) },
-      })
-      setPageGeo(pagRef.current ? [...pagRef.current.pages] : null)
+  // ── Keep-alive doc-pane layer window (2026-07-11 — the flip-to-card fix) ────────────────────
+  // Pagination + rendering moved INTO DocLayer (one per snapshot, kept alive). Here we manage the
+  // LRU window: the active id joins at render time (a flip to an unwarmed snapshot must mount this
+  // commit); the ±1 neighbours warm AFTER the flip has painted, staggered so each warm (a hidden
+  // full render + canonical measure) is its own task; old layers beyond MAX_LAYERS evict LRU,
+  // never evicting current/prev/next.
+  const MAX_LAYERS = 5
+  const [layerIds, setLayerIds] = useState<string[]>([])
+  const renderLayerIds = layerIds.includes(snapshot.id) ? layerIds : [...layerIds, snapshot.id]
+  useEffect(() => {
+    // LRU-touch the active id (array order = recency, most recent last)
+    setLayerIds((prev) => {
+      const rest = prev.filter((i) => i !== snapshot.id)
+      return [...rest, snapshot.id]
+    })
+    const keep = new Set([snapshot.id, prevSnap?.id, nextSnap?.id].filter(Boolean) as string[])
+    const prune = (list: string[]): string[] => {
+      const out = [...list]
+      for (let i = 0; i < out.length && out.length > MAX_LAYERS; ) {
+        if (!keep.has(out[i])) out.splice(i, 1)
+        else i++
+      }
+      return out
     }
-    run()
-    // Web fonts reflow the text after first paint → breaks move. Re-measure once ready (the spec
-    // cache keys on font status, so this measures fresh instead of reusing the pre-font entry).
-    if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
-      document.fonts.ready.then(() => { if (!disposed) run() }).catch(() => { /* ignore */ })
+    const timers: number[] = []
+    const warm = (id: string | undefined, delay: number) => {
+      if (!id) return
+      timers.push(window.setTimeout(() => {
+        setLayerIds((prev) => prev.includes(id) ? prev : prune([...prev, id]))
+      }, delay))
     }
-    return () => { disposed = true; pagRef.current?.destroy(); pagRef.current = null }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot.id, ops])
+    warm(nextSnap?.id, 300)
+    warm(prevSnap?.id, 900)
+    setLayerIds((prev) => prune(prev))
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [snapshot.id, prevSnap?.id, nextSnap?.id])
+
+  // Layer activation: the active DocLayer points the shared refs here in ITS layout effect (which
+  // flushes before this component's own per-snapshot effects — React guarantees child-first).
+  const handleLayerActivate = useCallback((scroller: HTMLDivElement, handle: StaticPaginationHandle | null, pages: StaticPageGeo[] | null) => {
+    ;(leftScrollRef as React.MutableRefObject<HTMLDivElement | null>).current = scroller
+    pagRef.current = handle
+    setPageGeo(pages)
+  }, [])
+  const handleLayerGeo = useCallback((pages: StaticPageGeo[]) => setPageGeo(pages), [])
   // ── Fit cap + effective pane zoom (Peter, 2026-07-10 — the main editor's fit-to-width floor) ──
   // The doc pane's zoom lives as CSS `zoom` on the PAPER (applied imperatively below), so scaling
   // shrinks the whole page — sheet, panels, gaps, text — and a narrow pane always shows the FULL
@@ -999,7 +1137,7 @@ function SplitDiffView({
   // effective zoom is pinned to 1 and the page spans edge-to-edge with no side water.
   const [paneFit, setPaneFit] = useState(1)
   useLayoutEffect(() => {
-    const L = leftScrollRef.current
+    const L = layerHostRef.current // stable across layer flips (same box as every layer's scroller)
     if (!L || isPhone || getPaperSize() === 'scroll') return // phone/fluid: paper is already pane-width
     const { pageWidthPx } = pageBoxPx({
       paperSize: getPaperSize() === 'letter' ? 'letter' : 'a4',
@@ -1027,10 +1165,14 @@ function SplitDiffView({
   // band paint, so the CSS-`zoom`-breaks-the-paginator rule (CLAUDE.md) doesn't apply here.
   useLayoutEffect(() => {
     const paper = leftScrollRef.current?.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
-    if (paper) {
-      if (effZoom === 1) paper.style.removeProperty('zoom')
-      else paper.style.setProperty('zoom', String(+effZoom.toFixed(4)))
-    }
+    if (!paper) return
+    // Skip when the layer is already rendered at this zoom (the common case on a flip — warm
+    // layers pre-render at the current zoom): repaint() re-reads band geometry with several
+    // forced layouts, ~100-200ms of pure waste when nothing changed.
+    const cur = parseFloat(paper.style.getPropertyValue('zoom') || '1') || 1
+    if (Math.abs(cur - effZoom) < 0.0005) return
+    if (effZoom === 1) paper.style.removeProperty('zoom')
+    else paper.style.setProperty('zoom', String(+effZoom.toFixed(4)))
     pagRef.current?.repaint()
   }, [effZoom, snapshot.id])
   // Cursor-anchored zoom correction — displacement math (see dzAnchor above); a fit-capped left
@@ -1059,15 +1201,19 @@ function SplitDiffView({
   // passive and the non-passive touchmove is armed only while two fingers are down.
   useEffect(() => {
     if (!isPhone) return
-    const L = leftScrollRef.current
-    if (!L) return
-    const paperOf = () => L.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+    // Listeners live on the STABLE layer host (the active scroller changes identity per flip);
+    // the handlers resolve the live scroller/paper through leftScrollRef at gesture time.
+    const host = layerHostRef.current
+    if (!host) return
+    const scrollerOf = () => leftScrollRef.current
+    const paperOf = () => scrollerOf()?.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     let d0 = 0, z0 = 1, midX = 0, midY = 0, pendingZ = 0, raf = 0, armed = false
     const apply = () => {
       raf = 0
+      const L = scrollerOf()
       const p = paperOf()
-      if (!p || !pendingZ) return
+      if (!L || !p || !pendingZ) return
       const zPrev = parseFloat(p.style.getPropertyValue('zoom') || '1') || 1
       if (Math.abs(pendingZ - zPrev) < 0.002) return
       const lr = L.getBoundingClientRect()
@@ -1086,8 +1232,8 @@ function SplitDiffView({
       pendingZ = Math.max(0.5, Math.min(2.5, z0 * (d / d0)))
       if (!raf) raf = requestAnimationFrame(apply)
     }
-    const arm = () => { if (!armed) { armed = true; L.addEventListener('touchmove', onMove, { capture: true, passive: false }) } }
-    const disarm = () => { if (armed) { armed = false; L.removeEventListener('touchmove', onMove, { capture: true } as EventListenerOptions) } }
+    const arm = () => { if (!armed) { armed = true; host.addEventListener('touchmove', onMove, { capture: true, passive: false }) } }
+    const disarm = () => { if (armed) { armed = false; host.removeEventListener('touchmove', onMove, { capture: true } as EventListenerOptions) } }
     const onStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
       e.stopPropagation() // this pane's pinch is OURS — keep Scroll's font pipeline dormant
@@ -1103,17 +1249,19 @@ function SplitDiffView({
       d0 = 0
       disarm()
       if (raf) { cancelAnimationFrame(raf); raf = 0; apply() } // land the final frame
-      if (pendingZ) { phoneZoomRef.current = pendingZ; setPhoneZoom(pendingZ) } // commit → repaint/pageGeo
+      // Commit → refresh band panels + pageGeo. The zoom-apply effect now SKIPS when the paper is
+      // already at effZoom (which it is — apply() set it live), so repaint explicitly here.
+      if (pendingZ) { phoneZoomRef.current = pendingZ; setPhoneZoom(pendingZ); pagRef.current?.repaint() }
     }
-    L.addEventListener('touchstart', onStart, { capture: true, passive: true })
-    L.addEventListener('touchend', onEnd, { capture: true, passive: true })
-    L.addEventListener('touchcancel', onEnd, { capture: true, passive: true })
+    host.addEventListener('touchstart', onStart, { capture: true, passive: true })
+    host.addEventListener('touchend', onEnd, { capture: true, passive: true })
+    host.addEventListener('touchcancel', onEnd, { capture: true, passive: true })
     return () => {
       disarm()
       if (raf) cancelAnimationFrame(raf)
-      L.removeEventListener('touchstart', onStart, { capture: true } as EventListenerOptions)
-      L.removeEventListener('touchend', onEnd, { capture: true } as EventListenerOptions)
-      L.removeEventListener('touchcancel', onEnd, { capture: true } as EventListenerOptions)
+      host.removeEventListener('touchstart', onStart, { capture: true } as EventListenerOptions)
+      host.removeEventListener('touchend', onEnd, { capture: true } as EventListenerOptions)
+      host.removeEventListener('touchcancel', onEnd, { capture: true } as EventListenerOptions)
     }
   }, [isPhone])
 
@@ -1456,6 +1604,7 @@ function SplitDiffView({
     const recompute = () => {
       const L = leftScrollRef.current, R = rightScrollRef.current
       if (!L) return
+      const tKn = performance.now()
       centresRef.current = diffCentres(L)
       if (R) rCentresRef.current = diffCentres(R)
       if (R) {
@@ -1490,6 +1639,7 @@ function SplitDiffView({
         rules.sort((a, b) => a.top - b.top)
         rulesRef.current = rules
       }
+      probePerf('knots', performance.now() - tKn)
     }
     // rAF-coalesce: a window resize fires many events per drag; run the heavy layout-read sweep at most once
     // per frame on the settled size instead of synchronously per event.
@@ -1784,6 +1934,8 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el) return
     const id = requestAnimationFrame(() => {
+      const tMid = performance.now()
+      try {
       if (lineMode === 'longest') {
         const li = longestChangeOpIdx(opsRef.current)
         const target = li != null ? (el.querySelector(`[data-opidx="${li}"]`) as HTMLElement | null) : null
@@ -1806,6 +1958,7 @@ function SplitDiffView({
       // these same words even if the user never manually scrolls.
       const s = midlineSignature(el)
       if (s) anchorSigRef.current = s
+      } finally { probePerf('midline', performance.now() - tMid) }
     })
     return () => cancelAnimationFrame(id)
   }, [snapshot.id, lineMode])
@@ -1860,6 +2013,18 @@ function SplitDiffView({
     window.addEventListener('touchend', onUp)
   }, [vertical])
 
+  // Stable hooks bundle for the keep-alive layers (identity-stable so memoised layers only
+  // re-render when their own snap/active props change).
+  const layerHooks = useMemo<DocLayerHooks>(() => ({
+    onActivate: handleLayerActivate,
+    onGeo: handleLayerGeo,
+    onScroll: onLeftScroll,
+    onOpClick: handleLeftPaneClick,
+    onHoverOp: handleHoverOp,
+    getZoom: () => effZoomRef.current,
+    getAnchorTop: () => leftScrollRef.current?.scrollTop ?? 0,
+  }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp])
+
   // A dotted reading-line at the pane centre (both panes share it).
   const midline = (
     <div aria-hidden="true" style={{
@@ -1898,13 +2063,24 @@ function SplitDiffView({
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
-      <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto', touchAction: 'pan-y' }}>
-        {/* key={snapshot.id}: each snapshot gets a FRESH subtree, so the static paginator's DOM
-            surgery (gap insertion splits text nodes) can never desync React's reconciliation —
-            React never patches inside a subtree it replaced wholesale. */}
-        {/* Pane zoom now lives on the PAPER (fit-capped effZoom, imperative — see the fit-cap
-            effect) so a narrow pane scales the whole page down instead of cutting it. */}
-        <Scroll phone={isPhone}><div key={snapshot.id}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
+      {/* Keep-alive layer stack (see DocLayer): recently-visited snapshots stay mounted +
+          laid out (visibility:hidden), so flipping between them is paint-only. Pane zoom lives
+          on each layer's PAPER (fit-capped effZoom, imperative — see the fit-cap effect). */}
+      <div ref={layerHostRef} style={{ position: 'relative', height: '100%' }}>
+        {renderLayerIds.map((id) => {
+          const li = allSnaps.findIndex((s) => s.id === id)
+          if (li < 0) return null
+          return (
+            <DocLayer
+              key={id}
+              snap={allSnaps[li]}
+              prev={li > 0 ? allSnaps[li - 1] : null}
+              active={id === snapshot.id}
+              isPhone={isPhone}
+              hooks={layerHooks}
+            />
+          )
+        })}
       </div>
       {nav?.show && (<>
         <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: isPhone ? 2 : 8 }} />
@@ -2010,9 +2186,29 @@ export function SnapshotView() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const docId = params.get('doc')
-  const snapId = params.get('snap')
+  const urlSnapId = params.get('snap')
+  // In-view navigation is LOCAL-FIRST (2026-07-11): goTo flips this state immediately (one cheap
+  // render) and syncs the URL 200ms after the last input — react-router's per-navigation work was
+  // ~50-100ms per scrub step on a phone. External URL changes (back/forward, fresh open) still
+  // flow through urlSnapId whenever no local navigation is pending.
+  const [liveSnapId, setLiveSnapId] = useState<string | null>(null)
+  const pendingUrlSyncRef = useRef<string | null>(null) // id our own deferred navigate() will write
+  const snapId = liveSnapId ?? urlSnapId
+  // Hand authority back to the URL only AFTER it catches up. navigate() lands as a TRANSITION
+  // (lower priority), so clearing liveSnapId alongside it rendered an intermediate frame with the
+  // OLD url — the view ping-ponged A→B→A→B on every step. An external URL change (back/forward)
+  // while local nav is pending also clears — the URL wins.
+  useEffect(() => {
+    if (liveSnapId == null) return
+    if (urlSnapId === liveSnapId) { setLiveSnapId(null); pendingUrlSyncRef.current = null }
+    else if (urlSnapId !== null && pendingUrlSyncRef.current !== null && urlSnapId !== pendingUrlSyncRef.current) {
+      pendingUrlSyncRef.current = null
+      setLiveSnapId(null)
+    }
+  }, [urlSnapId, liveSnapId])
 
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
+  const allSnapshotsRef = useRef(allSnapshots); allSnapshotsRef.current = allSnapshots
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [libReady, setLibReady] = useState(false)
   const [, setNavDir] = useState<'back' | 'fwd'>('fwd')
@@ -2076,12 +2272,19 @@ export function SnapshotView() {
 
   // Load snapshots + set status on every navigation. Stays lean so it doesn't cancel
   // the background generation (which lives in its own effect below).
+  // PERF (2026-07-11): a pure snapId change (every scrub step) must NOT re-read the archive —
+  // the list is already in state and a fresh `.slice()` per step invalidated every downstream
+  // memo. Only a doc change (or an unknown snap) goes back to the store.
+  const loadedDocRef = useRef<string | null>(null)
   useEffect(() => {
     let cancelled = false
     if (!docId || !snapId) { setStatus('missing'); return }
+    const cur = allSnapshotsRef.current
+    if (loadedDocRef.current === docId && cur.some((s) => s.id === snapId)) { setStatus('ready'); return }
     void (async () => {
       const snaps = await listSnapshots(docId)
       if (cancelled) return
+      loadedDocRef.current = docId
       setAllSnapshots(snaps)
       setStatus(snaps.some((s) => s.id === snapId) ? 'ready' : 'missing')
     })()
@@ -2138,8 +2341,34 @@ export function SnapshotView() {
   const snapshot = idx >= 0 ? allSnapshots[idx] : null
   const groupIdx = groups.findIndex((g) => g.items.some((s) => s.id === snapId))
 
+  // Freeze machinery (used by goTo below; derivation lives with prevSnap further down).
+  const heavySnapIdRef = useRef<string | null>(null)
+  const [frozenSnapId, setFrozenSnapId] = useState<string | null>(null)
+  const lastNavInputAtRef = useRef(0)
+  const unfreezeTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(unfreezeTimerRef.current), [])
+
+  const urlSyncTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(urlSyncTimerRef.current), [])
   const goTo = useCallback((s: Snapshot) => {
-    navigate(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, { replace: true })
+    probePerf('nav.goTo', 0)
+    const now = performance.now()
+    if (now - lastNavInputAtRef.current < 250) {
+      // Second-plus step of a rapid stream → freeze the heavy view until inputs go quiet.
+      setFrozenSnapId((p) => p ?? heavySnapIdRef.current)
+      window.clearTimeout(unfreezeTimerRef.current)
+      unfreezeTimerRef.current = window.setTimeout(() => setFrozenSnapId(null), 180)
+    }
+    lastNavInputAtRef.current = now
+    // Local-first: flip the view now, sync the URL once inputs go quiet (see liveSnapId).
+    setLiveSnapId(s.id)
+    window.clearTimeout(urlSyncTimerRef.current)
+    urlSyncTimerRef.current = window.setTimeout(() => {
+      pendingUrlSyncRef.current = s.id
+      navigate(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, { replace: true })
+      // liveSnapId clears in the catch-up effect above once the URL reflects s.id.
+    }, 200)
+    probePerf('nav.returned', 0)
   }, [navigate])
 
   const goBack    = useCallback(() => { if (idx > 0) { setNavDir('back'); setLeftSnapFlash(n => n + 1); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo])
@@ -2168,16 +2397,33 @@ export function SnapshotView() {
   // scrolling still flies because the OS streams many notches, but each is a single, legible step.
   const idxRef = useRef(idx); idxRef.current = idx
   const allRef = useRef(allSnapshots); allRef.current = allSnapshots
-  // Scrub by a NET number of snapshots at once (positive = forward). idxRef is stale within a frame, so the
-  // swipe handlers accumulate a net delta and apply it in one hop.
+  // Scrub by a NET number of snapshots at once (positive = forward). rAF-COALESCED (2026-07-11):
+  // a fast drag streams several touchmoves per frame and each used to navigate — now the steps
+  // accumulate and ONE navigation per frame moves by the net. virtualIdx tracks the last COMMANDED
+  // index so flushes landing before React re-renders don't re-base off a stale idx.
+  const virtualIdxRef = useRef(-1)
+  useEffect(() => { virtualIdxRef.current = idx }, [idx]) // reality catch-up (buttons/keys too)
+  const pendingStepsRef = useRef(0)
+  const scrubRafRef = useRef(0)
   const scrubBy = useCallback((steps: number) => {
-    const cur = idxRef.current, all = allRef.current
-    if (!steps || cur < 0 || !all.length) return
-    const target = Math.max(0, Math.min(all.length - 1, cur + steps))
-    if (target === cur) return
-    setNavDir(steps > 0 ? 'fwd' : 'back')
-    goTo(all[target])
+    if (!steps) return
+    pendingStepsRef.current += steps
+    if (scrubRafRef.current) return
+    scrubRafRef.current = requestAnimationFrame(() => {
+      scrubRafRef.current = 0
+      const n = pendingStepsRef.current
+      pendingStepsRef.current = 0
+      const all = allRef.current
+      const cur = virtualIdxRef.current >= 0 ? virtualIdxRef.current : idxRef.current
+      if (!n || cur < 0 || !all.length) return
+      const target = Math.max(0, Math.min(all.length - 1, cur + n))
+      if (target === cur) return
+      virtualIdxRef.current = target
+      setNavDir(n > 0 ? 'fwd' : 'back')
+      goTo(all[target])
+    })
   }, [goTo])
+  useEffect(() => () => cancelAnimationFrame(scrubRafRef.current), [])
   const wheelAccum = useRef(0)
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
@@ -2242,8 +2488,9 @@ export function SnapshotView() {
           // the native x-pan, so we do it manually); otherwise it scrubs. Gate on the pane's zoom,
           // NOT scrollWidth — the full-bleed 100vw gap bands give the unzoomed phone pane a few px
           // of intrinsic x-overflow that made every drag pan instead of scrub.
-          const panes = Array.from(el.querySelectorAll<HTMLElement>('.iw-snap-scroll'))
-          const doc = panes.find((p) => p.querySelector('.tiptap-editor'))
+          // Keep-alive layers: hidden panes also host a .tiptap-editor — gate on the ACTIVE one.
+          const doc = (el.querySelector('.iw-snap-layer-active .iw-snap-scroll')
+            ?? Array.from(el.querySelectorAll<HTMLElement>('.iw-snap-scroll')).find((p) => p.querySelector('.tiptap-editor'))) as HTMLElement | null
           const paper = doc?.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
           const z = paper ? parseFloat(paper.style.getPropertyValue('zoom') || '1') || 1 : 1
           if (doc && z > 1.01) { dir = 'pan'; panEl = doc }
@@ -2254,10 +2501,10 @@ export function SnapshotView() {
       if (dir === 'pan') { if (panEl) panEl.scrollLeft -= x - lastX; lastX = x; return }
       accum += x - lastX; lastX = x
       let net = 0
-      // REVERSED (Peter, 2026-07-10): slide right → NEXT, slide left → previous (the sign used to
-      // be flipped — dragging felt like it moved the timeline the wrong way).
-      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += s }
-      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += s }
+      // Slide LEFT = NEXT version, slide RIGHT = previous — the natural page-turn feel
+      // (Peter, 2026-07-11; this reverts the 2026-07-10 flip).
+      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net -= s }
+      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net -= s }
       if (net) scrubBy(net)
     }
     const onEnd = () => { dir = '?'; panEl = null }
@@ -2288,6 +2535,21 @@ export function SnapshotView() {
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
   const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
+  // ── Fling coalescing (2026-07-11) ────────────────────────────────────────────
+  // Rapid navigation streams (fling / held key / shift-wheel storm) FREEZE the heavy split view on
+  // the snapshot it's already showing and render only the LANDING version once inputs go quiet.
+  // Detection lives in goTo (the chokepoint for every navigation) and keys off INPUT spacing —
+  // detecting off render spacing failed: when each step renders slowly the steps land >160ms
+  // apart and nothing froze, which was the whole case that needed freezing. An isolated step
+  // (a normal swipe) never freezes, so single flips stay immediate. The header counter/word-diff
+  // stay live off the real idx, so the user still sees the position fly during a fling.
+  // (State/refs declared above goTo, which owns the rapid-stream detection.)
+  const frozenIdx = frozenSnapId ? allSnapshots.findIndex((s) => s.id === frozenSnapId) : -1
+  const heavyIdx = frozenIdx >= 0 ? frozenIdx : idx
+  const heavySnap = heavyIdx >= 0 ? allSnapshots[heavyIdx] : null
+  const heavyPrev = heavyIdx > 0 ? allSnapshots[heavyIdx - 1] : null
+  heavySnapIdRef.current = heavySnap?.id ?? null
+
   // ── Scrub read-ahead ──────────────────────────────────────────────────────────
   // Precompute the ±20 window of adjacent-pair diffs around the current position in idle time
   // (topped up every ~5 steps consumed — see diffCache), so a fast hard scrub hits only cache
@@ -2299,10 +2561,13 @@ export function SnapshotView() {
 
   // Words added/removed vs the previous snapshot — now shown in the top header (not a bar over the diff).
   // Reads the SAME cached ops the panes render (diffCache) — the diff used to be computed twice per step.
+  // Pinned to the HEAVY (possibly frozen) pair: during a fling the live adjacent pairs may be
+  // uncached, and an LCS per intermediate step would jank the gesture for a number nobody reads
+  // mid-fling. It lands with the landing snapshot.
   const headerDiff = useMemo(() => {
-    if (!snapshot || !prevSnap) return null
-    return diffStats(opsBetween(prevSnap, snapshot) ?? [])
-  }, [snapshot?.id, prevSnap?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!heavySnap || !heavyPrev) return null
+    return diffStats(opsBetween(heavyPrev, heavySnap) ?? [])
+  }, [heavySnap?.id, heavyPrev?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // AI summary — now shown in the RHS side panel (no longer floating over the document).
   const currentDiff = snapshot?.diffSummary?.bullets ?? null
@@ -2439,6 +2704,8 @@ export function SnapshotView() {
               const p = new URLSearchParams()
               p.set('doc', docId)
               p.set('snap', remaining[newIdx].id)
+              window.clearTimeout(urlSyncTimerRef.current) // direct navigation supersedes any pending local sync
+              setLiveSnapId(null)
               navigate(`/snapshot?${p.toString()}`)
               setAllSnapshots(remaining)
             }}
@@ -2484,10 +2751,12 @@ export function SnapshotView() {
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
           </p>
         )}
-        {status === 'ready' && libReady && snapshot && (
+        {status === 'ready' && libReady && snapshot && heavySnap && (
           <SplitDiffView
-            snapshot={snapshot}
-            prevSnap={prevSnap}
+            snapshot={heavySnap}
+            prevSnap={heavyPrev}
+            nextSnap={heavyIdx >= 0 && heavyIdx < allSnapshots.length - 1 ? allSnapshots[heavyIdx + 1] : null}
+            allSnaps={allSnapshots}
             isPhone={isPhone}
             isNarrow={!isWide}
             lineMode={lineMode}

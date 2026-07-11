@@ -190,6 +190,29 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   converts visual→local px in the band paint); FULL FINAL PAGE (last sheet extends to avg of prior
   ≤5 page regions, sheet min-height grows to cover — recompute's baseline must respect lastMinH or
   the RO ping-pongs; same treatment in PaginationExtension); minimap wheel = exactly 2× the pane.
+  2026-07-11 SWIPE PERF (the 500ms-per-swipe fix — keep these invariants):
+  - KEEP-ALIVE LAYERS: each recently-visited snapshot's doc pane (static HTML + gaps + sheet
+    panels + its own scrollTop) stays mounted in a `DocLayer` (LRU window ≤5, current±1 warmed
+    post-flip, staggered 300/900ms). Hidden layers use **opacity:0.001** — NEVER 0 / visibility /
+    display — a truly-hidden layer loses its compositor backing store and re-rastering the pane
+    stalled the flip ~500ms. Layers keyed by snapshot.id (DOM surgery still never fights React).
+  - ACTIVATION: the active DocLayer points leftScrollRef/pagRef/pageGeo at itself in a child
+    LAYOUT effect (child effects flush before the parent's per-snapshot effects — that ordering is
+    what keeps every [snapshot.id]-keyed effect reading the right scroller). Pagination runs ONCE
+    per layer (warm = deferred 150ms, primed to the active pane's scrollTop); the zoom-apply
+    effect SKIPS repaint when the paper is already at effZoom (pinch commit repaints explicitly).
+  - FLING COALESCING: rapid streams (inputs <250ms apart, detected in goTo — NOT by render
+    spacing, which misses exactly when steps render slowly) freeze the heavy SplitDiffView on its
+    current snapshot and render only the landing one; counter/header stay live. Scrub steps are
+    rAF-coalesced (virtualIdx re-bases flushes that beat React's render).
+  - LOCAL-FIRST NAV: goTo flips liveSnapId immediately; the URL syncs 200ms after quiet. Clear
+    liveSnapId ONLY in the catch-up effect once urlSnapId matches — navigate() lands as a
+    TRANSITION, so clearing it alongside renders one frame with the OLD url (A→B→A→B ping-pong).
+    A pure snapId change never re-reads the snapshot archive (loadedDocRef guard).
+  - Swipe direction: slide LEFT = next, slide RIGHT = previous (Peter 2026-07-11, reverts the
+    07-10 flip). Perf probes: `probePerf` (perflog.ts) feeds window.__iwPerf when a harness
+    defines it — zero cost otherwise; per-step timings for /snapshot live in SnapshotView +
+    staticPagination.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

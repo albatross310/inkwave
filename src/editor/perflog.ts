@@ -33,3 +33,12 @@ export function notePerf(label: string, ms: number): void {
   if (ms > (worst[label] ?? -1)) worst[label] = ms
   if (!flushTimer) flushTimer = setTimeout(flush, 2000)
 }
+
+/** Per-event probe hook: pushes [label, ms, endTime] onto window.__iwPerf when a harness defined
+ *  that array (automated profiling runs) — a single property check otherwise. Unlike notePerf
+ *  (worst-per-2s console lines) this records EVERY event, which per-step profiling needs. */
+export function probePerf(label: string, ms: number): void {
+  if (typeof window === 'undefined') return
+  const buf = (window as unknown as { __iwPerf?: Array<[string, number, number]> }).__iwPerf
+  if (Array.isArray(buf)) buf.push([label, ms, performance.now()])
+}

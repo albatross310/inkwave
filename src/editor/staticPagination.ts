@@ -23,6 +23,7 @@
 // scrubbing back through visited snapshots re-inserts gaps with NO canonical re-measure (zero
 // forced hypothetical reflows; just the insertion itself).
 
+import { probePerf } from './perflog'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from './pageSettings'
 import { pageBoxPx } from './pageModel'
 import { forceCanonicalContext } from './canonicalMeasure'
@@ -320,7 +321,9 @@ export function paginateStaticDoc(opts: {
     fluid ? `w${sheet.clientWidth}` : '',
   ].join('|')
 
+  const t0 = performance.now()
   let specs = cacheGet(key)
+  const specHit = !!specs
   if (!specs) {
     // CANONICAL MEASUREMENT — the same forced context as the editor (see canonicalMeasure.ts),
     // plus the snapshot pane's own fit-capped zoom, which is a CSS `zoom` on the PAPER (or any
@@ -355,8 +358,11 @@ export function paginateStaticDoc(opts: {
     }
     cacheSet(key, specs)
   }
+  probePerf(specHit ? 'sp.specs.hit' : 'sp.specs.measure', performance.now() - t0)
 
+  const tIns = performance.now()
   const inserted = insertGaps(blocks, specs, gapped)
+  probePerf('sp.insert', performance.now() - tIns)
 
   // Sheet prep + the panel layer — the same classes/contract as the extension's ensureSheet.
   const prevPadTop = sheet.style.paddingTop
@@ -479,7 +485,10 @@ export function paginateStaticDoc(opts: {
     return pages
   }
 
+  const tPaint = performance.now()
   paint()
+  probePerf('sp.paint', performance.now() - tPaint)
+  const tPages = performance.now()
   const handle: StaticPaginationHandle = {
     pages: computePages(),
     repaint: () => {
@@ -500,6 +509,8 @@ export function paginateStaticDoc(opts: {
       }
     },
   }
+
+  probePerf('sp.pages', performance.now() - tPages)
 
   // Phone/narrow layouts reflow the sheet with the pane width — breaks are DOM positions and
   // never move, but the rendered bands do: repaint (rAF-coalesced) whenever the sheet resizes.
