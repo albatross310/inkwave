@@ -284,16 +284,18 @@ as the water slows.
    that decode list.
 2. SETTLE — `inkwave:reveal-imminent` (TiptapEditor's settle gate / LoadingVeil's ready): the
    S-curve slow down. The drift is NEVER stopped — the coast class adds a BRAKE composited on top
-   (`animation-composition: replace, add`): injected literal keyframes (#iw-coast-kf, Scroll.tsx)
-   worth (vT−d)·cubic-bezier(1/3,0,2/3,0.5) over T (velocity v(1−τ)², monotone 72→0; T/d =
-   2.5s/60px desktop, 2s/48px phone) then a LINEAR HOLD at +v that cancels the drift — the total
-   pose is STATIC after T, so however late any commit lands the picture is identical. Zero value +
-   zero velocity at brake start ⇒ handoff continuous BY CONSTRUCTION under any starvation. The
-   twinkle FIELDS brake with the SAME injected keyframes via CSS (`.iw-twk-fa/fb`) — lockstep, no
-   plumbing. The clock resolves ONCE at the brake's `ready` (first painted frame): snap d so the
-   rest pose is an integer device pixel (≤0.5-device-px keyframe rewrite inside that same frame).
-   Rest handoff = timer at t0+T+80ms → write `--wave-x` = the snapped end, drop classes, dispatch
-   `inkwave:wave-rest` (Edit.tsx shell drop + TiptapEditor uncover batch into that commit).
+   (`animation-composition: replace, add`): injected literal sampled keyframes (#iw-coast-kf,
+   Scroll.tsx) of the ZERO-JERK profile v(τ) = −v·(1−smoothstep(τ)) (add ∝ τ³ near 0; T/d =
+   2.5s/90px desktop, 2s/72px phone) then a LINEAR HOLD at +v that cancels the drift — the total
+   pose is STATIC after T. Brakes (and the coast-length fades) are born CSS-PAUSED and started by
+   the FORWARD ANCHOR: one rAF after the swap commit, t_a = timeline.currentTime + 150ms slack;
+   drift pose at t_a computed from the drift animation's own startTime, rest pose device-pixel
+   snapped, keyframes finalized, then every coast animation gets play() + startTime = t_a. This
+   is THE tick fix (2026-07-12): engines resolve pending CSS animations at STYLE time, so under a
+   CPU spike the first presented brake frame showed brake(commit-lag) — a backward step ∝ lag².
+   Paused-birth + future anchor makes the start compositor-exact at any spike size, and the τ³
+   curve makes any residual lag sub-pixel. Rest handoff = timer at t_a+T+80ms → write `--wave-x`
+   = the snapped end, drop classes, dispatch `inkwave:wave-rest`.
 
 **Kept invariants (each was a live bug — do not regress):**
 - PHONE: surfaces are in-flow, so the shell surface is VIEWPORT-PINNED (fixed, inset 0, z 0 under
@@ -305,6 +307,15 @@ as the water slows.
 - Editor mounts ONCE per load (no lazy/Suspense around TiptapEditor); the editor chunk is eagerly
   imported at module scope. A surface mounting mid-load adopts its sibling's drift startTime
   (pixel-identical copies — the old reveal hiccup); pre-gate mounts need nothing (same recalc).
+  The adopt must RE-ASSERT at each animation's `ready`: a startTime write to a play-pending CSS
+  animation is CLOBBERED when the pending start resolves (live 2026-07-12: the covered editor ran
+  33-500ms out of phase → doubled lines through the reveal fade + marks off their crests).
+- Mark tracks are NEVER created-then-re-clocked on VISIBLE water: creation is gated on
+  clockReady() (the load clock stamped from the drift's literal startTime), and any deferred
+  creation fades the field layer through the transition (a late batch re-clock/mass creation was
+  a whole-field teleport/pop measured at +18-62px — Peter's live "backward tick just before the
+  slowdown"). Pre-gate boot mounts are exempt (hidden until the gate recalc). A host whose dashes
+  mount mid-coast still gets its statics ramp (startRestDrift from mountSet).
 - PER-LOAD LIFECYCLE RESET: `inkwave:open-begin` clears the coast record + Edit.tsx's chain state;
   twinkle anim re-entry re-aligns the pool clock. A new load never reuses timers or clocks.
 - ONE backstop only: the 30s load watchdog (Scroll.tsx) — if SETTLE never arrives it logs loudly
@@ -318,6 +329,11 @@ as the water slows.
   relocation through the same never-twice memory; full art regenerates only at zoom/resize
   reseeds. `memPick`'s farthest-candidate fallback must init bestD to −Infinity (−1 left `best`
   null on saturated rings — real bug).
+- IN-FLOW surfaces (SnapshotView doc/diff panes — anything :not(.iw-fill)) get PANE-SCOPED water
+  pseudos (position:absolute override in index.css): the snapshot card-flip keep-alive layers are
+  stacking contexts, so the old viewport-fixed ::before painted wave lines OVER the minimap/
+  summary/diff panels (Peter's 2026-07-12 screenshots; pixel-verified fixed with seeded snapshot
+  data). Only .iw-fill surfaces (live editor, LoadingVeil) keep viewport-fixed water.
 - PROBE RULES: /snapshot needs a fallback-faithful static server (vite preview serves the
   prerendered editor page → hydration mismatch kills the water); never pkill vite preview; no
   windows over Peter's screen (xvfb; Firefox needs `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0`).

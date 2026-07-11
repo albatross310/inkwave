@@ -529,13 +529,54 @@ function alignTracks(): void {
     if (typeof st !== 'number') return
     alignedForLoad = true
     trackT0 = st - LOOP_MS * Math.floor(Math.random() * CYCLE_LOOPS)
+    // Batch re-clock of anims created BEFORE the clock resolved. Only the pre-gate boot mounts
+    // ever get here with existing tracks (they are display-hidden until the same recalc that
+    // starts the drift, so the batch is invisible); on VISIBLE water, track creation is gated on
+    // clockReady() below — a late batch re-clock of live marks was a MASS TELEPORT of the whole
+    // field (Peter's live "backward tick just before the slowdown", 2026-07-12: +24-62px phase
+    // steps on the screencast, ~40ms before reveal-imminent — the batch landed as the editor
+    // mount drained, right before the settle gate fired).
     for (const anims of trackAnims.values())
       for (const a of anims) { try { a.startTime = trackT0 } catch { /* pending — natural start */ } }
+    for (const r of clockWaiters.splice(0)) r()
   }
   if (typeof drift.startTime === 'number') apply()
   // Pending (the atomic gate just opened): ready resolves inside the frame that first renders
   // the drift, BEFORE it paints — the batch lands in the same paint. One await, once per load.
   else void drift.ready.then(apply).catch(() => { /* cancelled — a newer load owns the clock */ })
+}
+// Resolves once THIS load's clock is stamped (alignTracks' apply). Callers that would otherwise
+// create mark tracks on visible water wait here — marks stay dark (var(--twk-static)) for the
+// frame or two until the clock exists, then start already-aligned: no teleport, ever.
+const clockWaiters: (() => void)[] = []
+// Entry fade for mark tracks created on VISIBLE water: hold the layer at 0, create, then fade
+// in over the CSS transition — deferred creation must never pop the whole layer in one frame.
+// ON THE FIELD, not the blink wrapper: the coast's paused fade ANIMATION overrides any wrapper
+// inline opacity the moment the coast class lands (first keyframe = 1 — measured re-pop); the
+// field only ever animates TRANSFORM, so its inline opacity survives every phase.
+function fadeWrapsOut(nodes: SetNodes): void {
+  for (const g of ['a', 'b'] as Group[]) nodes.fields[g].style.opacity = '0'
+}
+function fadeWrapsIn(nodes: SetNodes): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    for (const g of ['a', 'b'] as Group[]) nodes.fields[g].style.opacity = ''
+  }))
+}
+function clockReady(): Promise<void> {
+  if (alignedForLoad) return Promise.resolve()
+  alignTracks()
+  if (alignedForLoad) return Promise.resolve()
+  return new Promise((res) => {
+    clockWaiters.push(res)
+    // The drift animation may not exist yet (surface still mounting) — retry until it does.
+    let tries = 0
+    const kick = () => {
+      if (alignedForLoad || waterMode !== 'anim' || tries++ > 240) return
+      alignTracks()
+      if (!alignedForLoad) requestAnimationFrame(kick)
+    }
+    requestAnimationFrame(kick)
+  })
 }
 
 // ─── Blink machinery (scroll-time) ────────────────────────────────────────────────────────────
@@ -943,12 +984,20 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
   const startAll = () => nodes.els.forEach((el, i) => {
     if (list[i].role === 'blink' && !trackAnims.has(el)) startTracks(el, list[i])
   })
+  const gateOpen = document.documentElement.classList.contains('iw-water-ready')
   if (waterMode === 'off') {
     for (const g of ['a', 'b'] as Group[]) setFieldRest(nodes.fields[g], g, lastWaveX)
-  } else if (!announced) {
+  } else if (!announced && !gateOpen) {
     // The GATE host (its mount is what twinkles-ready waits on): tracks must exist before the
-    // first visible frame — create them now, in the one synchronous pass.
+    // first visible frame — create them now, in the one synchronous pass. Everything is hidden
+    // until the gate recalc, so the water-ready clock batch re-times them invisibly.
     startAll()
+  } else if (!announced) {
+    // Gate already open but nothing announced (shouldn't happen in practice) — clock-gate anyway.
+    fadeWrapsOut(nodes)
+    void clockReady().then(() => {
+      if (host.isConnected && waterMode !== 'off') { startAll(); fadeWrapsIn(nodes) }
+    })
   } else {
     // A LATER host (the covered editor under the shell): its copy is invisible until the
     // reveal, so its ~330 track animations (~250ms measured) move OFF the boot's critical
@@ -965,12 +1014,15 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
         if (d.role === 'blink' && !trackAnims.has(nodes.els[cursor])) startTracks(nodes.els[cursor], d)
       }
       if (cursor < nodes.els.length) scheduleSlice()
+      else fadeWrapsIn(nodes) // whole layer created — ease it in
     }
     const scheduleSlice = () => {
       if ('requestIdleCallback' in window) (window as Window & typeof globalThis).requestIdleCallback(slice, { timeout: 500 })
       else setTimeout(slice, 40)
     }
-    scheduleSlice()
+    fadeWrapsOut(nodes)
+    void clockReady().then(scheduleSlice) // tracks are born aligned — never re-clocked while visible
+
   }
   void decodeAll(list).then(() => {
     const stale = h.tok[kind] !== token || h[kind] || !host.isConnected || !defs
@@ -982,6 +1034,7 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
     host.appendChild(nodes.set)
     h[kind] = nodes
     if (waterMode === 'anim') alignTracks() // no-op if this load is already aligned
+    if (waterMode === 'coast' && kind === 'dashes') startRestDrift(host, nodes) // mid-coast mount: statics must ride
     if (waterMode === 'off') {
       lastRecycleFx = {}
       lastRecycle = performance.now()
@@ -1052,6 +1105,12 @@ function regenAll(): void {
 // (one-shot: clock the rest layer's drift to the tiles; CSS does the brake + cross-fade). The
 // rest handoff arrives as mode 'off' (one-shot: literal sway transforms, tracks cancelled).
 function enterCoast(): void {
+  for (const [hostEl, h] of hosts) { if (h.dashes) startRestDrift(hostEl, h.dashes) }
+}
+// Give ONE host's rest layer its coast ramp (see enterCoast's doc below). Also called from
+// mountSet for a host whose dashes finish mounting mid-coast — statics must never fade in
+// standing while the water still moves.
+function startRestDrift(hostEl: HTMLElement, nodes: SetNodes): void {
   // The static rest layer fades in over the coast and must decelerate ON its crests. Each rest
   // wrapper gets a NON-wrapping WAAPI drift ramp anchored to its enclosing field's CSS brake:
   // the brake's `ready` resolves at the coast's first painted frame with its literal startTime
@@ -1061,60 +1120,54 @@ function enterCoast(): void {
   // CONSTRUCTION. (A looping 140px ramp would visibly teleport the lit statics at every wrap;
   // an anchor at settle-time had a wrap ambiguity against the resolve — both real.) Statics are
   // near-invisible for the ramp's ≤1-frame pending window (their fade-in starts at 0).
-  for (const [hostEl, h] of hosts) {
-    const nodes = h.dashes
-    if (!nodes) continue
-    const surface = hostEl.parentElement
-    let driftT0: number | null = null
+  const surface = hostEl.parentElement
+  let driftT0: number | null = null
+  try {
+    const drift = surface?.getAnimations({ subtree: true })
+      .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+    if (typeof drift?.startTime === 'number') driftT0 = drift.startTime as number
+  } catch { /* getAnimations unavailable */ }
+  if (driftT0 == null) return // no running drift (degenerate) — statics fade in standing
+  for (const g of ['a', 'b'] as Group[]) {
+    const wrap = nodes.rest[g]
+    if (restDrift.has(wrap)) continue
+    let brake: Animation | undefined
     try {
-      const drift = surface?.getAnimations({ subtree: true })
-        .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-      if (typeof drift?.startTime === 'number') driftT0 = drift.startTime as number
+      brake = nodes.fields[g].getAnimations()
+        .find((x) => ((x as CSSAnimation).animationName ?? '').startsWith('iw-wave-coast'))
     } catch { /* getAnimations unavailable */ }
-    if (driftT0 == null) continue // no running drift (degenerate) — statics fade in standing
-    for (const g of ['a', 'b'] as Group[]) {
-      const wrap = nodes.rest[g]
-      if (restDrift.has(wrap)) continue
-      let brake: Animation | undefined
-      try {
-        brake = nodes.fields[g].getAnimations()
-          .find((x) => ((x as CSSAnimation).animationName ?? '').startsWith('iw-wave-coast'))
-      } catch { /* getAnimations unavailable */ }
-      if (!brake) continue
-      const dT0 = driftT0
-      const start = () => {
-        if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected) return
-        const t0c = typeof brake!.startTime === 'number' ? brake!.startTime as number : timelineMs()
-        const x0 = -140 * ((((t0c - dT0) / LOOP_MS) % 1 + 1) % 1) // wrapped drift pose at t0c
-        const dir = g === 'a' ? 1 : -1
-        const D = 14000 // covers T + the 8s hold + slop; fill holds after (the rest commit lands long before)
-        const a = wrap.animate(
-          [
-            { transform: `translate3d(${(dir * x0).toFixed(3)}px,0,0)` },
-            { transform: `translate3d(${(dir * (x0 - DRIFT_PX_S * (D / 1000))).toFixed(3)}px,0,0)` },
-          ],
-          { duration: D, fill: 'forwards' },
-        )
-        try { a.startTime = t0c } catch { /* pending resolves ≈ t0c — sub-frame */ }
-        restDrift.set(wrap, a)
+    if (!brake) continue
+    const dT0 = driftT0
+    const start = () => {
+      if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected) return
+      const t0c = typeof brake!.startTime === 'number' ? brake!.startTime as number : timelineMs()
+      const x0 = -140 * ((((t0c - dT0) / LOOP_MS) % 1 + 1) % 1) // wrapped drift pose at t0c
+      const dir = g === 'a' ? 1 : -1
+      const D = 14000 // covers T + the 8s hold + slop; fill holds after (the rest commit lands long before)
+      const a = wrap.animate(
+        [
+          { transform: `translate3d(${(dir * x0).toFixed(3)}px,0,0)` },
+          { transform: `translate3d(${(dir * (x0 - DRIFT_PX_S * (D / 1000))).toFixed(3)}px,0,0)` },
+        ],
+        { duration: D, fill: 'forwards' },
+      )
+      try { a.startTime = t0c } catch { /* pending resolves ≈ t0c — sub-frame */ }
+      restDrift.set(wrap, a)
+    }
+    if (typeof brake.startTime === 'number') start()
+    else {
+      // Pending until the forward anchor plays it (~1 rAF + slack) — `ready` + a poll fallback;
+      // whichever lands first wins (start() is idempotent). Statics are near-invisible that
+      // early in their fade, and the anchor stays EXACT (t0c is the literal startTime,
+      // however late we read it).
+      void brake.ready.then(start).catch(() => { /* class dropped — a newer mode owns it */ })
+      let polls = 0
+      const poll = () => {
+        if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected || polls++ > 12) return
+        if (typeof brake!.startTime === 'number') start()
+        else setTimeout(poll, 100)
       }
-      if (typeof brake.startTime === 'number') start()
-      else {
-        // Pending: `ready` resolves at the coast's first painted frame — but on a BUSY main
-        // thread the notification can starve for hundreds of ms while the compositor already
-        // animates (round-4 finding). Poll startTime as a fallback; whichever lands first wins
-        // (start() is idempotent). Statics are near-invisible that early in their fade, so a
-        // late anchor is imperceptible; the anchor itself stays EXACT (t0c is the literal
-        // resolved startTime, however late we read it).
-        void brake.ready.then(start).catch(() => { /* class dropped — a newer mode owns it */ })
-        let polls = 0
-        const poll = () => {
-          if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected || polls++ > 12) return
-          if (typeof brake!.startTime === 'number') start()
-          else setTimeout(poll, 100)
-        }
-        setTimeout(poll, 100)
-      }
+      setTimeout(poll, 100)
     }
   }
 }
@@ -1191,14 +1244,29 @@ export function syncTwinkles(
           restDrift.get(nodes.rest[g])?.cancel()
           restDrift.delete(nodes.rest[g])
         }
-        // Elements mounted at rest (zoom reseeds) have no tracks yet — start them for this load.
-        nodes.els.forEach((el, i) => {
-          const list = nodes === hs.sparks ? defs!.sparks : defs!.dashes
-          const d = list[i]
-          if (d?.role === 'blink' && !trackAnims.has(el)) startTracks(el, d)
-        })
       }
     }
+    // Surviving rest elements (and zoom-reseeded ones) get THIS load's tracks only once the new
+    // load's clock exists — creating them on a provisional clock and re-timing later teleported
+    // every visible mark at once (the live backward tick). The wrappers fade out (taking the old
+    // rest texture with them, gently), the tracks land aligned, then the layer eases back in.
+    for (const [, hs2] of hosts) {
+      for (const nodes2 of [hs2.sparks, hs2.dashes]) if (nodes2) fadeWrapsOut(nodes2)
+    }
+    void clockReady().then(() => {
+      if (waterMode !== 'anim') return
+      for (const [, hs2] of hosts) {
+        for (const nodes2 of [hs2.sparks, hs2.dashes]) {
+          if (!nodes2) continue
+          const list2 = nodes2 === hs2.sparks ? defs!.sparks : defs!.dashes
+          nodes2.els.forEach((el, i) => {
+            const d = list2[i]
+            if (d?.role === 'blink' && !trackAnims.has(el)) startTracks(el, d)
+          })
+          fadeWrapsIn(nodes2)
+        }
+      }
+    })
     alignTracks()
   }
   if (want.mode === 'coast' && prev === 'anim') enterCoast()
