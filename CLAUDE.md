@@ -426,6 +426,33 @@ write shim, so metadata can say a PDF exists with no local bytes).
   rules, refList). Measured (4× throttle, 20k words): desktop scoped 6-33ms (was 133-277 full);
   phone scoped 311-526ms — the two reflows are the price of exactness there (was 636-1364 full;
   round-5's 18-81ms was wrong on real docs). perflog: page-measure-scoped / page-measure.
+  ROUND-7 (2026-07-12): after a scoped success where the full measure is cheap (canonicalIsLive
+  desktop), the lazy re-verify runs FAST (450ms, input-gated) so any deferred far-field break
+  correction — incl. mid-paragraph splits — lands ~0.5s after the pause (Peter's bar: "paras
+  split over pages even if they render 0.2s late; the cursor line moves instantly"). Mid-block
+  splits themselves were verified live: page-exceeding paragraphs split at load and stay split
+  through edits (mid-split probe on the Honours fixture); scoped==full sig equality already
+  covers split placement. `window.__iwPagInc.reasons` counts scoped-bail causes for on-device
+  diagnosis (the first edit after any open bails once — open-flow normalization widens the diff).
+- **MATH-CERTIFIED FONTS (2026-07-12, round-7 — groundwork for the arithmetic layout engine).**
+  Peter's directive: replace fonts that defeat exact math layout rather than carry DOM fallbacks.
+  The prover (scratchpad font-calib.mjs): canvas measureText vs DOM parity across family ×
+  {400,700} × {normal,italic} × 7 sizes (8pt-72pt + canonical 18px) — advance widths (Δ≤0.05px),
+  greedy-wrap break indices at 500px, mixed-run tallest-line-box rule. CERTIFIED + SHIPPED:
+  IM Fell DW Pica, EB Garamond (identity — both pass, the math engine is viable), Gelasio
+  (Georgia-genre), Lora (Cambria/Palatino-genre), Spectral (Times-genre), Carlito (sans). FAILED
+  (integer-px advance quantization — hinting/ligature divergence; also a cross-device canonical-
+  break hazard): Tinos, Caladea, Vollkorn, Libre Baskerville, PT Serif, Source Serif 4, Alegreya,
+  Baskervville — none shipped; NO metric-reliable Baskerville found (genre dropped). The old
+  system-font entries (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) are GONE from the
+  StyleBar (device-dependent metrics = uncertifiable + they already broke cross-device canonical
+  breaks for marked runs); legacy docs still render — each new css stack keeps the old system
+  stack as its fallback tail, and old marks' own stacks resolve exactly as before. Only the
+  identity serifs PRELOAD (fetch-fonts.mjs PRELOAD_FAMILIES); the rest load on demand and the
+  pagination re-measures on 'loadingdone'. THE MATH LAYOUT ENGINE ITSELF is the designed
+  follow-up: per-run canvas advances + greedy breaking feeding computeBreaks as a third
+  acquisition path, DOM full measure as idle verifier, pagCheck as prover, gated on
+  document.fonts.ready + certified fonts only.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault

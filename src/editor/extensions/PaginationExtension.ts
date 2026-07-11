@@ -396,6 +396,7 @@ function computeScoped(
   topM: number,
   gapped: boolean,
   ctx: ScopedCtx,
+  why: (reason: string) => void = () => {},
 ): { set: DecorationSet; sig: string; meta: IncMeta } | null {
   const doc = view.state.doc
   const newNodes: object[] = []
@@ -404,14 +405,14 @@ function computeScoped(
   const { s, eo, en } = diffBlocks(incState.nodes, newNodes)
   const changedNew = newNodes.slice(s, en + 1)
   const changedOld = incState.nodes.slice(s, eo + 1)
-  if (changedNew.length > INC_MAX_CHANGED || changedOld.length > INC_MAX_CHANGED) return null
+  if (changedNew.length > INC_MAX_CHANGED || changedOld.length > INC_MAX_CHANGED) { why('region-size'); return null }
   // Paragraphs only, in AND beside the region (the tops arithmetic assumes bottom-only margins).
   const isPara = (n: object) => (n as { type: { name: string } }).type.name === 'paragraph'
-  for (const n of [...changedNew, ...changedOld]) if (!isPara(n)) return null
-  if (s > 0 && !isPara(newNodes[s - 1])) return null
-  if (en + 1 < newNodes.length && !isPara(newNodes[en + 1])) return null
+  for (const n of [...changedNew, ...changedOld]) if (!isPara(n)) { why('region-nonpara'); return null }
+  if (s > 0 && !isPara(newNodes[s - 1])) { why('seam-above'); return null }
+  if (en + 1 < newNodes.length && !isPara(newNodes[en + 1])) { why('seam-below'); return null }
   // Pure append at the very end has no measured advance below the last old block — full measure.
-  if (s > 0 && s >= incState.nodes.length) return null
+  if (s > 0 && s >= incState.nodes.length) { why('end-append'); return null }
   const refListPos = findRefListPos(doc)
 
   // Natural wrapping around the edit: clear gap widgets inside/adjacent to the changed region
@@ -448,7 +449,7 @@ function computeScoped(
     const els: HTMLElement[] = []
     for (let i = 0; i < changedNew.length; i++) {
       const el = renderBlock(newOffsets[s + i])
-      if (!el) return null
+      if (!el) { why('no-el'); return null }
       els.push(el)
     }
     for (let i = 0; i < changedNew.length; i++) {
@@ -458,7 +459,7 @@ function computeScoped(
       if (!rects.length && node.content.size > 0) {
         renderBlock(newOffsets[s + i]) // re-scroll (long region can outgrow the window) and retry
         rects = blockRects(el)
-        if (!rects.length) return null // still skipped/unrendered — full measure
+        if (!rects.length) { why('unrendered'); return null } // full measure
       }
       const br = el.getBoundingClientRect()
       // Block boundaries exactly like the live collector (posAtDOM — tree walk, no layout).
@@ -494,7 +495,7 @@ function computeScoped(
     for (let i = 0; i < changedNew.length - 1; i++) changedAdvances.push(tops[i + 1] - tops[i])
     if (en + 1 < newNodes.length) {
       const nextEl = renderBlock(newOffsets[en + 1])
-      if (!nextEl) return null
+      if (!nextEl) { why('no-next'); return null }
       changedAdvances.push(nextEl.getBoundingClientRect().top - els[els.length - 1].getBoundingClientRect().top)
     } else {
       changedAdvances.push(0) // region ends the document — advance below it is never used
@@ -528,7 +529,7 @@ function computeScoped(
   for (let i = 0; i < newNodes.length; i++) {
     const offset = newOffsets[i]
     const entry = i >= s && i <= en ? changedEntries[i - s] : cache.get(newNodes[i])
-    if (!entry) return null // unchanged block never measured under this context — full measure
+    if (!entry) { why('missing-entry'); return null } // full measure
     homeOf.set(entry, { offset })
     const start = Number.isNaN(entry.relStart) ? -1 : offset + entry.relStart
     const end = Number.isNaN(entry.relEnd) ? -1 : offset + entry.relEnd
@@ -546,7 +547,7 @@ function computeScoped(
       })
     }
   }
-  if (!lines.length) return null
+  if (!lines.length) { why('no-lines'); return null }
   lines.sort((a, b) => a.top - b.top)
 
   // ── the shared break loop; unresolved positions use the REAL posAtCoords in this window ──
@@ -568,7 +569,7 @@ function computeScoped(
   try {
     out = computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf)
   } catch (e) {
-    if (e instanceof IncBail) return null
+    if (e instanceof IncBail) { why('pos-unresolved'); return null }
     throw e
   }
   return {
@@ -1006,7 +1007,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 }
                 inc = computeScoped(view, incState, lineCache, pageH, topM, gapped, {
                   surfaceEl: surfaceEl0, scroller: scroller0, clearGapsIn,
-                })
+                }, (reason) => { incStats.reasons[reason] = (incStats.reasons[reason] ?? 0) + 1 })
               } finally {
                 restore0()
                 if (scroller0) { scroller0.scrollTop = savedTop0; scroller0.scrollLeft = savedLeft0 }
@@ -1026,7 +1027,12 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                   if (gapped) schedulePaint()
                   announceMeasured()
                   notePerf('page-measure-scoped', performance.now() - measureT0)
-                  scheduleIdleFull() // the lazy exact refresh (Peter: defer distance, never approximate print)
+                  // The lazy exact refresh. Round-7 (Peter: "paras should split over pages even if
+                  // they render 0.2s late; the cursor line moves instantly"): where the full
+                  // measure is CHEAP (desktop at defaults — canonicalIsLive skips both reflows),
+                  // re-verify FAST so any deferred mid-paragraph split lands ~0.5s after the
+                  // pause, not 2.5s. Phone keeps the long fuse (its full measure costs real time).
+                  scheduleIdleFull(canonicalIsLive(surfaceEl0) ? 450 : 2500)
                   return
                 }
                 // pagCheck: remember the scoped result, fall through to the full measure, compare
@@ -1189,17 +1195,17 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // the whole document quietly (sig-guard → no visible change when the scoped result was
           // exact) and refreshes the incremental base. Input-gated by the same recency signal the
           // step-cache precompute uses (preBusy), so it never lands in a typing pause.
-          const scheduleIdleFull = () => {
+          const scheduleIdleFull = (delay = 2500) => {
             if (idleFullTimer) clearTimeout(idleFullTimer)
             idleFullTimer = setTimeout(function idleFull() {
               idleFullTimer = undefined
               if (destroyed) return
-              if (preBusy()) { idleFullTimer = setTimeout(idleFull, 1200); return }
+              if (preBusy()) { idleFullTimer = setTimeout(idleFull, Math.min(1200, delay)); return }
               forceFullOnce = true
               forceRecompute()
-            }, 2500)
+            }, delay)
           }
-          const incStats = { inc: 0, full: 0, bail: 0 } // probe counters
+          const incStats = { inc: 0, full: 0, bail: 0, reasons: {} as Record<string, number> } // probe counters
           ;(window as unknown as { __iwPagInc?: typeof incStats }).__iwPagInc = incStats
           const clearLineCache = () => { lineCache = new WeakMap(); incState = null }
           const fontCb = () => { if (!destroyed) { clearLineCache(); clearStepCache(); forceRecompute() } }

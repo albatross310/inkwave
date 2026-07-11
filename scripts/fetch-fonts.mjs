@@ -13,9 +13,20 @@ import fs from 'node:fs'
 
 // Google Fonts css2 `family=` specifiers. Add new families here.
 const FAMILIES = [
-  'EB+Garamond:ital,wght@0,400;0,500;1,400;1,500',
+  'EB+Garamond:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700',
   'IM+Fell+DW+Pica:ital@0;1',
+  // MATH-CERTIFIED StyleBar families only (2026-07-12 round-7 certification — see CLAUDE.md).
+  // Tinos, Caladea, Vollkorn, Libre Baskerville, PT Serif, Source Serif 4, Alegreya and
+  // Baskervville all FAILED the measureText↔DOM parity prover (integer-px advance quantization —
+  // hinting/ligature divergence) and were not shipped. No metric-reliable Baskerville exists yet.
+  'Gelasio:ital,wght@0,400;0,700;1,400;1,700',   // Georgia-metric serif
+  'Lora:ital,wght@0,400;0,700;1,400;1,700',      // Cambria/Palatino-character contemporary serif
+  'Spectral:ital,wght@0,400;0,700;1,400;1,700',  // Times-character editorial serif
+  'Carlito:ital,wght@0,400;0,700;1,400;1,700',   // metric-stable sans (Calibri-compatible)
 ]
+// Only the IDENTITY serifs preload (boot weight — see CLAUDE.md load-performance rules); the
+// StyleBar families self-host but load on demand, and the pagination re-measures on 'loadingdone'.
+const PRELOAD_FAMILIES = new Set(['EB Garamond', 'IM Fell DW Pica'])
 // Subsets to PRELOAD (fetched eagerly on page load). Others (greek, cyrillic, vietnamese, …) still
 // self-host and load on demand — we just don't force them upfront.
 const PRELOAD_SUBSETS = new Set(['latin', 'latin-ext'])
@@ -47,7 +58,7 @@ while ((m = re.exec(css))) {
   fs.writeFileSync(`public/fonts/${name}`, buf)
   bytes += buf.length
   out += '@font-face {' + body.replace(src, `/fonts/${name}`) + '}\n\n'
-  if (subset && PRELOAD_SUBSETS.has(subset)) preload.push(`/fonts/${name}`)
+  if (subset && PRELOAD_SUBSETS.has(subset) && PRELOAD_FAMILIES.has(fam)) preload.push(`/fonts/${name}`)
   i++
 }
 
