@@ -54,6 +54,7 @@ function scrollScale(s: number): number {
 export const ADDITIVE_COAST =
   typeof CSS !== 'undefined' && !!CSS.supports?.('animation-composition', 'add')
 const COAST_HOLD_MS = 8000 // linear hold after T: total pose static until the rest handoff lands
+const ANCHOR_SLACK_MS = 150 // brake anchor headroom: the startTime write must reach the compositor first
 interface LoadCoast {
   t0: number // settle-time guess (timeline clock) — staleness check only
   resolvedT0: number | null // the coast animations' actual start (first painted frame)
@@ -97,23 +98,31 @@ function disarmLoadWatchdog(): void {
 }
 
 // Inject the brake keyframes (literal px — var()-dependent keyframes can't composite).
-// add(t) = (vT−d)·(3τ²−τ³)/2 ≡ cubic-bezier(1/3, 0, 2/3, 0.5) on 0 → (vT−d), then linear +v to
-// D so the hold cancels the drift exactly. Direction: coast-l opposes drift-l (positive), coast-r
-// mirrored. Written once per load; the resolve step rewrites with the snapped d (≤0.5 device px
-// delta, landing in the same frame as the first coast paint — invisible). The twinkle fields'
-// CSS brake uses these SAME keyframe names, so the rewrite retimes them too.
+// ZERO-JERK S-CURVE (2026-07-11 live-tick round): total velocity = −v·(1 − smoothstep(τ)) — the
+// water holds full speed with ZERO initial deceleration, eases into the slowdown, and lands with
+// zero end velocity: a true S-curve slow down (Peter's spec), and any residual anchor lag ε now
+// costs add(ε) ∝ ε³ (sub-pixel even at hundreds of ms) instead of ∝ ε². add(τ) = vT(τ³ − τ⁴/2),
+// d = vT/2 (90px desktop / 72px phone), sampled as ~24 linear segments (max deviation from the
+// true quartic ≈ 0.06px); after T a linear hold at +v cancels the still-running drift exactly.
+// Direction: coast-l opposes drift-l (positive), coast-r mirrored. The twinkle fields' CSS brake
+// uses these SAME keyframe names, so one injection drives every layer in lockstep.
 function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
   const v = 140 / 1.944 // px/s — must match the drift exactly
   const T = phone ? 2 : 2.5
   const D = T + COAST_HOLD_MS / 1000
-  const p = ((T / D) * 100).toFixed(4)
-  const mid = v * T - d
   const endV = v * D - d
-  const kf = (s: number) =>
-    `0%{transform:translate3d(0,0,0);animation-timing-function:cubic-bezier(0.33333,0,0.66667,0.5)}` +
-    `${p}%{transform:translate3d(${(s * mid).toFixed(3)}px,0,0);animation-timing-function:linear}` +
-    `100%{transform:translate3d(${(s * endV).toFixed(3)}px,0,0)}`
-  const css = `@keyframes iw-wave-coast-l{${kf(1)}}@keyframes iw-wave-coast-r{${kf(-1)}}`
+  const N = 24
+  const seg = (s: number) => {
+    let out = ''
+    for (let k = 0; k <= N; k++) {
+      const tau = k / N
+      const add = v * T * (tau * tau * tau - (tau * tau * tau * tau) / 2) + (v * T * 0.5 - d) * tau // exact at ends for any snapped d
+      out += `${((tau * T / D) * 100).toFixed(4)}%{transform:translate3d(${(s * add).toFixed(3)}px,0,0)}`
+    }
+    out += `100%{transform:translate3d(${(s * endV).toFixed(3)}px,0,0)}`
+    return out
+  }
+  const css = `@keyframes iw-wave-coast-l{${seg(1)}}@keyframes iw-wave-coast-r{${seg(-1)}}`
   try {
     let st = document.getElementById('iw-coast-kf') as HTMLStyleElement | null
     if (!st) { st = document.createElement('style'); st.id = 'iw-coast-kf'; document.head.appendChild(st) }
@@ -966,11 +975,18 @@ export function Scroll({
       } catch { /* getAnimations unavailable */ }
     }
     if (sibling != null) {
+      const sib = sibling
       try {
         for (const a of el.getAnimations({ subtree: true })) {
           const n = (a as CSSAnimation).animationName ?? ''
           if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
-            try { a.startTime = sibling } catch { /* pending — resolves ≈ sibling anyway */ }
+            try { a.startTime = sib } catch { /* pending write below re-asserts */ }
+            // STICKY (2026-07-11 live tick/doubling round): a write to a PLAY-PENDING CSS
+            // animation is CLOBBERED when the pending start resolves (measured: the covered
+            // editor kept its own natural start, 33ms-500ms out of phase with the shell —
+            // doubled lines through the reveal fade and marks off their crests after it).
+            // Re-assert at ready, when the write sticks.
+            void a.ready.then(() => { try { if (a.startTime !== sib) a.startTime = sib } catch { /* detached */ } }).catch(() => { /* cancelled */ })
           }
         }
       } catch { /* getAnimations unavailable */ }
@@ -1018,7 +1034,7 @@ export function Scroll({
     const T = phone ? 2000 : 2500
     let sc = loadCoast
     if (!sc || now - sc.t0 > T) { // a stale record is an abandoned choreography (self-heals)
-      const d0 = phone ? 48 : 60 // v·T/3 — snapped to a device pixel at resolve
+      const d0 = phone ? 72 : 90 // v·T/2 — snapped to a device pixel at the anchor
       injectAdditiveCoastFrames(phone, d0)
       sc = loadCoast = { t0: now, resolvedT0: null, d: d0, end: null, phone }
     }
@@ -1065,7 +1081,7 @@ export function Scroll({
       // unconditional for one code path.
       // The coast ends on a device-pixel-SNAPPED offset (coastEndRef) — the --wave-x handoff
       // must write that same number or the bg-position repaint shifts sub-pixel.
-      const txFinal = coastEndRef.current ?? loadCoast?.end ?? -(phone ? 48 : 60)
+      const txFinal = coastEndRef.current ?? loadCoast?.end ?? -(phone ? 72 : 90)
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(3)}px`) // 3 decimals — must carry the device-px snap exactly
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
@@ -1077,69 +1093,70 @@ export function Scroll({
       // batches all three into ONE commit: no frame ever shows a mid-motion swap).
       window.dispatchEvent(new Event('inkwave:wave-rest'))
     }
-    // The rest handoff is a resolved-clock timer (armed in schedule() below once the coast's
-    // actual start is known); until then a provisional timer covers a coast whose animations
-    // never ran (display-gated pseudos in exotic states).
-    let cap = setTimeout(finish, (phone ? 2000 : 2500) + 800)
+    // Provisional cap until the anchor lands (covers exotic states where no frame ever runs).
+    let cap = setTimeout(finish, (phone ? 2000 : 2500) + ANCHOR_SLACK_MS + 1200)
 
-    // ONE-SHOT CLOCK RESOLVE: the first surface whose coast `ready` resolves stamps the load's
-    // effective start (t0), snaps the coast travel so the REST pose lands on an integer device
-    // pixel (rewriting the shared keyframes by ≤0.5 device px INSIDE the frame that first paints
-    // the coast — invisible; the twinkle fields share the same keyframe names, so this retimes
-    // them too), and schedules the rest handoff at t0 + T. The linear hold keeps the total pose
-    // STATIC after T, so timer slop — even a starved commit — is invisible. Every other surface
-    // aligns its own coast animations to the stamped t0, so all copies are pixel-identical.
+    // FORWARD ANCHOR (2026-07-11, Peter's live "backward tick"). The brake animations are born
+    // CSS-PAUSED (zero additive value — the drift alone keeps rendering, byte-identical), so
+    // engines that resolve a pending CSS animation at STYLE time (Firefox; Chromium under
+    // starved compositor acks) can never present brake(lag) as a first frame — the old tick:
+    // when a CPU spike delayed the swap commit, the compositor had drifted past the brake's
+    // recorded start and its first presented frame applied a cancellation computed for a pose
+    // N frames ago (a backward step proportional to the spike). Instead, ONE rAF after the swap
+    // commit we stamp the load's anchor t_a = now + slack ON THE TIMELINE CLOCK, compute the
+    // drift pose AT t_a analytically from the drift animation's own startTime (presentation-
+    // exact for a long-running compositor animation), snap the rest pose to a device pixel,
+    // inject the final keyframes, and start every coast animation (tiles + twinkle-field brakes
+    // + the layer fades, both surfaces — all name-matched in the subtree) at exactly t_a. The
+    // brake then begins at zero value/velocity at a future compositor time: continuous BY
+    // CONSTRUCTION however starved the main thread was, and every copy shares one clock.
     const coastAnims = () => {
       try {
         return el.getAnimations({ subtree: true }).filter((a) => {
           const n = (a as CSSAnimation).animationName ?? ''
           return n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade'
+            || n === 'iw-twk-fade-out' || n === 'iw-twk-fade-in'
         })
       } catch { return [] }
-    }
-    const align = (t0: number) => {
-      for (const a of coastAnims()) { try { a.startTime = t0 } catch { /* pending — resolves to ~t0 anyway */ } }
     }
     const schedule = (t0: number) => {
       const T = phone ? 2000 : 2500
       clearTimeout(cap)
       cap = setTimeout(finish, Math.max(0, t0 + T + 80 - timelineNow()))
     }
-    const resolve = () => {
+    const anchor = () => {
       if (cancelled || waveModeRef.current !== 'coast') return
       const sc = loadCoast
       if (!sc) return
-      let t0 = sc.resolvedT0
-      if (t0 == null) {
-        const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
-        t0 = (typeof a0?.startTime === 'number') ? a0.startTime as number : timelineNow()
-        // The drift pose at the coast start comes from the drift animation's own clock.
+      let tA = sc.resolvedT0
+      if (tA == null) {
+        tA = timelineNow() + ANCHOR_SLACK_MS
+        // The drift pose at t_a, from the drift animation's own clock (shared across surfaces
+        // via the sticky sibling adopt).
         let tx0 = 0
         try {
           const drift = el.getAnimations({ subtree: true })
             .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
           if (typeof drift?.startTime === 'number')
-            tx0 = -140 * ((((t0 - (drift.startTime as number)) / 1000) % 1.944) / 1.944)
+            tx0 = -140 * ((((tA - (drift.startTime as number)) / 1000) % 1.944) / 1.944)
         } catch { /* pose unreadable — coast lands within a tile of true */ }
         const dpr = window.devicePixelRatio || 1
         const end = Math.round((tx0 - sc.d) * dpr) / dpr // rest pose on an integer device pixel
-        sc.resolvedT0 = t0
+        sc.resolvedT0 = tA
         sc.d = tx0 - end
         sc.end = end
-        injectAdditiveCoastFrames(phone, sc.d) // ≤0.5 device px rewrite, same frame as first paint
+        injectAdditiveCoastFrames(phone, sc.d) // final keyframes, before the brake ever plays
       }
-      coastT0Ref.current = t0
+      coastT0Ref.current = tA
       coastEndRef.current = sc.end
-      align(t0)
-      schedule(t0)
+      for (const a of coastAnims()) {
+        // play() first: it marks the WAAPI override (the CSS paused declaration must never
+        // re-pause on a later recalc), then the explicit startTime sets the exact shared clock.
+        try { a.play(); a.startTime = tA } catch { /* detached — a mode change owns it */ }
+      }
+      schedule(tA)
     }
-    if (loadCoast?.resolvedT0 != null) {
-      resolve() // a surface joining an in-flight coast: adopt, don't re-stamp
-    } else {
-      const a0 = coastAnims().find((a) => (a as CSSAnimation).animationName === 'iw-wave-coast-l')
-      if (a0) void a0.ready.then(resolve).catch(() => { /* cancelled — a mode change owns it */ })
-      else requestAnimationFrame(() => resolve()) // display-gated pseudos: best-effort clock
-    }
+    requestAnimationFrame(() => anchor())
     return () => { cancelled = true; clearTimeout(cap) }
   }, [waveMode, phone])
 

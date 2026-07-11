@@ -260,6 +260,18 @@
     transform: translateZ(0);
     contain: strict;
   }
+  /* IN-FLOW surfaces (SnapshotView's doc/diff panes — anything not .iw-fill): the water pseudos
+     must be PANE-SCOPED, not viewport-fixed. The snapshot card-flip keep-alive layers
+     (.iw-snap-layer, position:absolute + z-index) are stacking contexts, so a viewport-wide
+     fixed ::before at z:-1 inside them paints ABOVE sibling panels (minimap cells, the summary
+     card, the diff panel — Peter's 2026-07-12 screenshots; present since the card-flip merge,
+     surfaced by the rebuild's deploy). Absolute-inset pseudos paint the same tiles strictly
+     within the surface's own box, under its parchment, occluded by everything above the pane.
+     The live editor + LoadingVeil (.iw-fill) keep the fixed, viewport-anchored water. */
+  .inkwave-editor-surface:not(.iw-fill)::before,
+  .inkwave-editor-surface:not(.iw-fill)::after {
+    position: absolute;
+  }
 
   /* Loading wave drift — COMPOSITOR (transform) animations, so they start at first paint (the class
      is in the prerendered HTML) and stay perfectly smooth however busy the main thread is while the
@@ -318,12 +330,18 @@
     animation: iw-wave-drift-l 1.944s linear infinite,
                iw-wave-coast-l 10.5s linear 1 forwards; /* D = T 2.5s + 8s hold */
     animation-composition: replace, add;
+    /* Brakes are born PAUSED (zero additive value — pure drift keeps rendering) and started by
+       Scroll's forward anchor at an exact future timeline time: engines that resolve pending CSS
+       animations at STYLE time would otherwise present brake(commit-lag) as the first frame —
+       Peter's live "backward tick" under CPU spikes. */
+    animation-play-state: running, paused;
     will-change: transform;
   }
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::after {
     animation: iw-wave-drift-r 1.944s linear infinite,
                iw-wave-coast-r 10.5s linear 1 forwards;
     animation-composition: replace, add;
+    animation-play-state: running, paused;
     will-change: transform;
   }
 
@@ -414,12 +432,14 @@
     animation: iw-wave-drift-l 1.944s linear infinite,
                iw-wave-coast-l 10s linear 1 forwards;
     animation-composition: replace, add;
+    animation-play-state: running, paused; /* forward-anchored — see the desktop block */
     will-change: transform;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast::after {
     animation: iw-wave-drift-r 1.944s linear infinite,
                iw-wave-coast-r 10s linear 1 forwards;
     animation-composition: replace, add;
+    animation-play-state: running, paused;
     will-change: transform;
   }
 
@@ -507,6 +527,7 @@
   }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-sparks {
     animation: iw-spark-fade var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    animation-play-state: paused; /* forward-anchored — fades run in lockstep with the brake */
     will-change: opacity;
   }
   .iw-twk-field {
@@ -514,21 +535,26 @@
     inset: 0;
     will-change: transform;
     transform: translateZ(0); /* pre-promoted — raster exists before the drift's first frame */
+    transition: opacity 0.5s ease; /* the deferred-creation entry fade (see waveTwinkle) */
   }
   /* The fields' brake — the SAME injected #iw-coast-kf keyframes the tiles composite, started by
      the same class recalc: every twinkle layer decelerates in exact lockstep with the water,
      main-thread-free (the fields carry no drift of their own — instance tracks bake it in). */
   .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fa {
     animation: iw-wave-coast-l 10.5s linear 1 forwards;
+    animation-play-state: paused; /* forward-anchored with the tiles — see the tile coast block */
   }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fb {
     animation: iw-wave-coast-r 10.5s linear 1 forwards;
+    animation-play-state: paused;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fa {
     animation: iw-wave-coast-l 10s linear 1 forwards;
+    animation-play-state: paused;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fb {
     animation: iw-wave-coast-r 10s linear 1 forwards;
+    animation-play-state: paused;
   }
   /* The blink → rest cross-fade over the coast (S-curve, coast-length). Base states: blink
      visible, rest visible (it IS the resting texture once the wave classes drop); during the
@@ -537,16 +563,25 @@
   .iw-twk-rest {
     position: absolute;
     inset: 0;
+    /* Entry/exit fades: mark tracks created on VISIBLE water (open-doc loads, re-entries) land
+       whenever the starved main thread drains — an instant en-masse appearance measured as a
+       +18-25px pattern step on the screencast (Peter's live "backward tick"). The wrappers fade
+       through any such transition instead (waveTwinkle sets inline opacity around deferred
+       creation; the anim-class rest-layer hide transitions too). The coast cross-fade is an
+       ANIMATION — it overrides this transition, unaffected. */
+    transition: opacity 0.5s ease;
   }
   @keyframes iw-twk-fade-out { from { opacity: 1; } to { opacity: 0; } }
   @keyframes iw-twk-fade-in { from { opacity: 0; } to { opacity: 1; } }
   .inkwave-editor-surface.iw-wave-anim .iw-twk-rest { opacity: 0; }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-blink {
     animation: iw-twk-fade-out var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    animation-play-state: paused; /* forward-anchored */
     will-change: opacity;
   }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-rest {
     animation: iw-twk-fade-in var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+    animation-play-state: paused; /* forward-anchored */
     will-change: opacity;
   }
   .iw-twk-i {
