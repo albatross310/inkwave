@@ -405,13 +405,19 @@ function buildSchedule(rnd: () => number, d: Inst, vw: number): void {
     // the slot's wave-space x, stable under the drift). The instance's own last few slots are
     // excluded OUTRIGHT — the band ring's farthest-candidate fallback could otherwise hand a
     // saturated draw straight back to the previous spot (the one visible "same place again").
+    const mOf = (u: number) => Math.round((u - dir * DRIFT_PX_S * tMid - cx0) / 140)
     const slot = memPickLight(d.kind === 'dash' ? 'dash' : 'spark', d.group, d.row, d.hw, () => {
       for (let tries = 0; tries < 8; tries++) {
-        const u = edge + rnd() * Math.max(40, vw - 2 * edge)
-        const m = Math.round((u - dir * DRIFT_PX_S * tMid - cx0) / 140)
+        const m = mOf(edge + rnd() * Math.max(40, vw - 2 * edge))
         if (!recent.includes(m)) return m
       }
-      return Math.round((edge + rnd() * Math.max(40, vw - 2 * edge) - dir * DRIFT_PX_S * tMid - cx0) / 140)
+      // Exhausted (≈0.4% of draws): scan the viewport's slot range for the first non-recent m —
+      // the fallback must honour the exclusion too, or it hands back the previous spot (the one
+      // measured leak: 1-4 same-slot repeats per pool).
+      const mLo = Math.min(mOf(edge), mOf(vw - edge))
+      const mHi = Math.max(mOf(edge), mOf(vw - edge))
+      for (let m = mLo; m <= mHi; m++) if (!recent.includes(m)) return m
+      return mOf(edge + rnd() * Math.max(40, vw - 2 * edge)) // range ≤ exclusion window (tiny phones)
     }, (m) => cx0 + 140 * m)
     d.slots.push({ m: slot, dy: lensJit() })
     recent.push(slot)
