@@ -271,6 +271,24 @@
   .inkwave-editor-surface:not(.iw-fill)::before,
   .inkwave-editor-surface:not(.iw-fill)::after {
     position: absolute;
+    /* NO own compositor layer here (2026-07-12 — "snapshots lagging massively"): in-flow surfaces
+       are CONTENT-tall, not viewport-tall — a thesis-scale snapshot pane is >60,000px — so the
+       base rule's will-change/translateZ promotion allocated a ~90-megapixel water backing store
+       PER keep-alive layer (3-5 resident: 300MB+ of raster, tile thrash, phone memory pressure).
+       Unpromoted, the water paints with the pane's own near-viewport tiles only. */
+    will-change: auto;
+    transform: none;
+  }
+  /* Hidden keep-alive layers (.iw-snap-layer at opacity 0.001 — kept "visible" so the TEXT keeps
+     its backing store for instant card-flips) paint NO water at all: only the ACTIVE pane pays
+     for water raster; a flip re-rasters just the incoming pane's visible water tiles. */
+  .iw-snap-layer:not(.iw-snap-layer-active) .inkwave-editor-surface::before,
+  .iw-snap-layer:not(.iw-snap-layer-active) .inkwave-editor-surface::after {
+    content: none;
+  }
+  .iw-snap-layer:not(.iw-snap-layer-active) .iw-wave-twinkles,
+  .iw-snap-layer:not(.iw-snap-layer-active) .iw-twk-field {
+    display: none; /* twinkle/spark fields are also content-tall + pre-promoted — active pane only */
   }
 
   /* Loading wave drift — COMPOSITOR (transform) animations, so they start at first paint (the class

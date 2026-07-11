@@ -334,6 +334,13 @@ as the water slows.
   stacking contexts, so the old viewport-fixed ::before painted wave lines OVER the minimap/
   summary/diff panels (Peter's 2026-07-12 screenshots; pixel-verified fixed with seeded snapshot
   data). Only .iw-fill surfaces (live editor, LoadingVeil) keep viewport-fixed water.
+  PANE-SCOPED WATER MUST STAY UNPROMOTED (2026-07-12 "snapshots lagging massively"): in-flow
+  surfaces are CONTENT-tall (>60,000px on a thesis-scale snapshot pane), so the base rule's
+  will-change/translateZ gave every keep-alive layer a ~90-megapixel promoted water layer (3-5
+  resident = 300MB+ raster, scroll 37fps → 60 once removed). The :not(.iw-fill) override pins
+  will-change:auto + transform:none; hidden .iw-snap-layer surfaces paint NO water at all
+  (content:none — only the active pane pays); SnapshotView writes NO --wave-x sway (a sway write
+  invalidates the whole content-tall pseudo's paint per scroll event).
 - PROBE RULES: /snapshot needs a fallback-faithful static server (vite preview serves the
   prerendered editor page → hydration mismatch kills the water); never pkill vite preview; no
   windows over Peter's screen (xvfb; Firefox needs `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0`).

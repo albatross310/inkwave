@@ -1466,10 +1466,11 @@ function SplitDiffView({
     const el = leftScrollRef.current
     if (!el || !el.scrollHeight) return
     anchorRatioRef.current = (el.scrollTop + el.clientHeight * midFracRef.current) / el.scrollHeight
-    // Sway the parchment waves on scroll here too — in diff mode the scroll happens on THIS wrapper, not
-    // the Scroll surface, so its own scroll handler never fires.
-    const surf = el.querySelector('.inkwave-editor-surface') as HTMLElement | null
-    if (surf) surf.style.setProperty('--wave-x', `${(el.scrollTop * 0.06).toFixed(1)}px`)
+    // NO --wave-x scroll sway here (2026-07-12 "snapshots lagging massively"): the pane-scoped
+    // water pseudo is CONTENT-tall (>60,000px on a thesis), so every sway write invalidated its
+    // whole paint and re-rastered the visible water tiles per scroll event — the same class of
+    // bug as the editor's --wave-x subtree invalidation (see the typing-invariants block). The
+    // absolute pseudo already scrolls WITH the content; the waves in the page gaps move naturally.
     // caret hit-testing is comparatively costly — recompute the signature at most once per frame
     if (!sigTickRef.current) {
       sigTickRef.current = true
