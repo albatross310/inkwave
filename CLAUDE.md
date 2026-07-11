@@ -494,6 +494,16 @@ bodies.
   scroll reports within 200ms — a single caret-reveal scroll nudge (typing at the page bottom)
   must never wake the WAAPI field (it read as full-rate velocity and woke everything per wrapped
   line).
+- **Desktop scroll: --wave-x must never invalidate the page subtree (2026-07-11 ablation).** The
+  per-frame sway write of the INHERITED custom prop on the surface recalced the whole 100-page
+  subtree: scroll frames p50 417ms → 50ms at 4× throttle once (a) `.iw-magnify-box`/`.scroll-paper`/
+  `.iw-wave-twinkles` pin `--wave-x: 0px` (constant ⇒ the engine's no-change pruning stops the
+  walk; @property inherits:false was cleaner but WebKit never re-resolves a pseudo's explicit
+  `--wave-x: inherit` — frozen sway) and (b) twinkle fields take LITERAL transforms per sway frame
+  (`swayFields`) instead of consuming the var (kept ~300 instance leaves in the invalidation set).
+  Dash respawns NEVER rasterise now (the 140-lattice relocation runs everywhere — toDataURL on the
+  scroll path was the second ablation cell, ~150ms/frame; the boot respawn gate became moot and was
+  deleted). A new var(--wave-x) consumer must not sit under the firebreak roots.
 - **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
   full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
   after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
