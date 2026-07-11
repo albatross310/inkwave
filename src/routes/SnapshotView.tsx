@@ -860,7 +860,7 @@ function SplitDiffView({
     show: boolean
     onBack: () => void; canBack: boolean
     onFwd: () => void; canFwd: boolean
-    onScrub: (steps: number, inputAt?: number) => void
+    onScrub: (steps: number, inputAt?: number, mode?: 'flick' | 'scrub') => void
     onVerBack: () => void; canVerBack: boolean
     onVerFwd: () => void; canVerFwd: boolean
     hasVersions: boolean
@@ -1924,7 +1924,7 @@ function SplitDiffView({
       let net = 0
       if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // reversed: right → previous
       if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
-      if (net) nav?.onScrub(net, e.timeStamp)
+      if (net) nav?.onScrub(net, e.timeStamp, 'scrub') // position scrubber = bitmap scrub from step 1
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
     R?.addEventListener('wheel', onWheel, { passive: false })
@@ -2460,6 +2460,7 @@ export function SnapshotView() {
     r.prev = r.last
     r.last = typeof t === 'number' && t > 0 ? t : performance.now()
   }, [])
+  const scrubArmedRef = useRef(false) // set by armed-scrub inputs; consumed by the next goTo (see scrubBy)
 
   // ── Scrub bitmap presenter (round 3 — editor/scrubRaster.ts) ─────────────────────────────────
   // During rapid stepping the panes flip through pre-rasterised bitmaps (ms-speed, zero layout);
@@ -2479,7 +2480,7 @@ export function SnapshotView() {
     probePerf('nav.goTo', 0)
     const now = performance.now()
     const inp = inputTimesRef.current
-    if (now - lastNavInputAtRef.current < 250 || inp.last - inp.prev < 250) {
+    if (now - lastNavInputAtRef.current < 250 || inp.last - inp.prev < 250 || scrubArmedRef.current) {
       // Second-plus step of a rapid stream → freeze the heavy view until inputs go quiet, and
       // flip the pane overlays to the target's cached bitmaps (nearest on a miss) — the ms-speed
       // scrub Peter asked for; the real render catches up at rest (presenter holds the overlay
@@ -2538,9 +2539,15 @@ export function SnapshotView() {
   useEffect(() => { virtualIdxRef.current = idx }, [idx]) // reality catch-up (buttons/keys too)
   const pendingStepsRef = useRef(0)
   const scrubRafRef = useRef(0)
-  const scrubBy = useCallback((steps: number, inputAt?: number) => {
+  // ARMED-SCRUB inputs (the hold-armed touch drag, the trackpad position scrubber) are bitmap
+  // mode from their FIRST step (Peter's spec: "armed multi-scrub AND rapid single flips") — the
+  // first step of a burst otherwise takes the live path, and its 300-1100ms cold render bunches
+  // the queued inputs into fling jumps (probed: 21 steps collapsed into ~3 goTos). Flicks stay
+  // 'flick' → the isolated single-step live flip is untouched.
+  const scrubBy = useCallback((steps: number, inputAt?: number, mode: 'flick' | 'scrub' = 'flick') => {
     if (!steps) return
     stampInput(inputAt) // one stamp per scrub input (touch/trackpad event time — see inputTimesRef)
+    if (mode === 'scrub') scrubArmedRef.current = true
     pendingStepsRef.current += steps
     if (scrubRafRef.current) return
     scrubRafRef.current = requestAnimationFrame(() => {
@@ -2549,12 +2556,14 @@ export function SnapshotView() {
       pendingStepsRef.current = 0
       const all = allRef.current
       const cur = virtualIdxRef.current >= 0 ? virtualIdxRef.current : idxRef.current
-      if (!n || cur < 0 || !all.length) return
-      const target = Math.max(0, Math.min(all.length - 1, cur + n))
-      if (target === cur) return
-      virtualIdxRef.current = target
-      setNavDir(n > 0 ? 'fwd' : 'back')
-      goTo(all[target])
+      try {
+        if (!n || cur < 0 || !all.length) return
+        const target = Math.max(0, Math.min(all.length - 1, cur + n))
+        if (target === cur) return
+        virtualIdxRef.current = target
+        setNavDir(n > 0 ? 'fwd' : 'back')
+        goTo(all[target])
+      } finally { scrubArmedRef.current = false } // consumed by this flush's goTo
     })
   }, [goTo, stampInput])
   useEffect(() => () => cancelAnimationFrame(scrubRafRef.current), [])
@@ -2654,7 +2663,7 @@ export function SnapshotView() {
       let net = 0
       if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net -= s }
       if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net -= s }
-      if (net) scrubBy(net, e.timeStamp)
+      if (net) scrubBy(net, e.timeStamp, 'scrub') // hold-armed drag = bitmap scrub from step 1
     }
     const onEnd = () => { dir = '?'; panEl = null; flicked = false; armed = false }
     el.addEventListener('touchstart', onStart, { passive: true })

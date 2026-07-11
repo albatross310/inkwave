@@ -194,7 +194,11 @@ function collectCss(): Promise<string> {
 
 /** Strip what an SVG-image document can't/mustn't render and inline same-origin <img> srcs. */
 async function prepareClone(clone: HTMLElement): Promise<void> {
-  clone.querySelectorAll('script, iframe, video, audio, .iw-scrub-overlay').forEach((n) => n.remove())
+  // Twinkle/spark fields: hundreds of instances each carrying its own PNG data URI — the SVG
+  // document would decode every one (the pool's raster art). They're WAAPI-driven ephemera the
+  // bitmap doesn't need (the wave lines are CSS pseudos and survive); the live view hides them
+  // on hidden layers anyway.
+  clone.querySelectorAll('script, iframe, video, audio, .iw-scrub-overlay, .iw-wave-twinkles, .iw-twk-field, .iw-twk-rest').forEach((n) => n.remove())
   // Canvases lose their pixels on cloneNode — bake them to data URIs (best-effort; tainted → drop).
   // (The snapshot panes have none today; belt-and-braces for future content.)
   clone.querySelectorAll('canvas').forEach((c) => {
@@ -211,12 +215,50 @@ async function prepareClone(clone: HTMLElement): Promise<void> {
   clone.querySelectorAll('img').forEach((img) => {
     const src = img.getAttribute('src') || ''
     if (!src || src.startsWith('data:')) return
-    jobs.push(fetchAsDataUri(src).then((data) => {
+    // SMALL-RENDERED images (page-number seals, minimap logos — declared inline px) get a
+    // DOWNSCALED data URI: the 95KB logo × ~125 sheet copies serialised to ~13MB of XML per
+    // capture (measured — THE capture-cost bomb; the SVG doc decoded every copy).
+    const m = /width:\s*([\d.]+)px/.exec(img.getAttribute('style') || '')
+    const declared = m ? parseFloat(m[1]) : (Number(img.getAttribute('width')) || null)
+    const job = declared !== null && declared > 0 && declared <= 128
+      ? smallDataUri(src, declared)
+      : fetchAsDataUri(src)
+    jobs.push(job.then((data) => {
       if (data) img.setAttribute('src', data)
       else img.removeAttribute('src') // unloadable in an SVG image doc — blank beats a broken glyph
     }))
   })
   await Promise.all(jobs)
+}
+
+/** Downscaled data URI for an image rendered at `displayPx` (2× for crispness, cached per
+ *  src+bucket). Falls back to the full data URI when decode/canvas fails. */
+function smallDataUri(src: string, displayPx: number): Promise<string | null> {
+  const px = Math.min(128, Math.max(16, Math.ceil(displayPx / 16) * 16)) * 2
+  const key = `${src}@${px}`
+  let p = assetDataUris.get(key)
+  if (!p) {
+    p = (async () => {
+      const full = await fetchAsDataUri(src)
+      if (!full) return null
+      const img = new Image()
+      const ok = await new Promise<boolean>((resolve) => {
+        img.onload = () => resolve(true)
+        img.onerror = () => resolve(false)
+        img.src = full
+      })
+      if (!ok || img.naturalWidth <= px) return full
+      const c = document.createElement('canvas')
+      c.width = px
+      c.height = Math.max(1, Math.round(px * (img.naturalHeight / Math.max(1, img.naturalWidth))))
+      const ctx = c.getContext('2d')
+      if (!ctx) return full
+      ctx.drawImage(img, 0, 0, c.width, c.height)
+      try { return c.toDataURL('image/png') } catch { return full }
+    })()
+    assetDataUris.set(key, p)
+  }
+  return p
 }
 
 // ── Band trimming — the capture-cost fix ─────────────────────────────────────────────────────
@@ -361,6 +403,7 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
 
   const xml = new XMLSerializer().serializeToString(wrap)
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xml}</foreignObject></svg>`
+  probePerf('scrub.capture.xmlKB', xml.length / 1024)
   probePerf('scrub.capture.prep', performance.now() - t0)
   const tImg = performance.now()
   const img = new Image()
