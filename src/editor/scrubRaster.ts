@@ -163,7 +163,10 @@ async function inlineFontFaces(): Promise<string> {
       if (!data) continue
       total += data.length
       if (total > FONT_TOTAL_CAP) return out.join('\n')
-      out.push(`@font-face{font-family:${st.getPropertyValue('font-family')};font-style:${style};font-weight:${weight};unicode-range:${st.getPropertyValue('unicode-range') || 'U+0-10FFFF'};src:url("${data}") format("woff2");}`)
+      // Format from the file extension — the six-font palette ships .otf/.ttf too, and a wrong
+      // format() hint makes the SVG document skip the face entirely.
+      const fmt = /\.otf(\?|$)/i.test(m[2]) ? 'opentype' : /\.ttf(\?|$)/i.test(m[2]) ? 'truetype' : /\.woff(\?|$)/i.test(m[2]) ? 'woff' : 'woff2'
+      out.push(`@font-face{font-family:${st.getPropertyValue('font-family')};font-style:${style};font-weight:${weight};unicode-range:${st.getPropertyValue('unicode-range') || 'U+0-10FFFF'};src:url("${data}") format("${fmt}");}`)
     }
   }
   return out.join('\n')
