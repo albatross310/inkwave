@@ -21,6 +21,7 @@ import { probePerf } from '../editor/perflog'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
+import { createScrubPresenter, type ScrubPresenter } from '../editor/scrubRaster'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
@@ -745,6 +746,7 @@ interface DocLayerHooks {
   onHoverOp: (opIdx: number | null) => void
   getZoom: () => number
   getAnchorTop: () => number // the active pane's scrollTop — primes warm layers near their landing position
+  onWarmReady?: (snapId: string, scroller: HTMLDivElement) => void // warm layer painted → scrub-bitmap capture
 }
 
 const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: {
@@ -780,8 +782,9 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       if (activeRef.current && pagRef.current) hooks.onActivate(L, pagRef.current, [...pagRef.current.pages])
       // Warm layers pre-scroll to the active pane's position: adjacent snapshots lay out almost
       // identically, so the flip's midline reposition then moves ~0px — the compositor keeps the
-      // already-rastered tiles instead of tiling a fresh scroll offset.
-      else if (!activeRef.current) L.scrollTop = hooks.getAnchorTop()
+      // already-rastered tiles instead of tiling a fresh scroll offset. Once painted here, the
+      // layer is also ready for its scrub-bitmap capture (idle — see scrubRaster).
+      else if (!activeRef.current) { L.scrollTop = hooks.getAnchorTop(); hooks.onWarmReady?.(snap.id, L) }
     }
     runRef.current = run
     // A hidden warm layer renders at the parent's current pane zoom so activation needs no repaint.
@@ -844,7 +847,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
 
 function SplitDiffView({
   snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav, allSnaps,
-  snapMode, bijMode, onCycleSnap, onCycleBijection,
+  snapMode, bijMode, onCycleSnap, onCycleBijection, presenter,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; nextSnap: Snapshot | null; allSnaps: Snapshot[]
   isPhone: boolean; isNarrow: boolean
@@ -852,6 +855,7 @@ function SplitDiffView({
   summariesOn?: boolean; onOptInSummaries?: () => void
   snapMode: SnapMode; bijMode: BijMode // lifted to SnapshotView (phone hosts the toggles in the bottom bar)
   onCycleSnap: () => void; onCycleBijection: () => void
+  presenter: ScrubPresenter // scrub bitmap overlays (round 3 — see editor/scrubRaster.ts)
   nav?: {
     show: boolean
     onBack: () => void; canBack: boolean
@@ -959,6 +963,11 @@ function SplitDiffView({
   const leftScrollRef  = useRef<HTMLDivElement>(null)   // the ACTIVE layer's scroller (set on activation)
   const layerHostRef   = useRef<HTMLDivElement>(null)   // stable wrapper around the layer stack
   const rightScrollRef = useRef<HTMLDivElement>(null)   // right pane scroll container
+  // Scrub bitmap overlay hosts (one per pane) + the minimap capture wrapper — see scrubRaster.ts.
+  const docOverlayRef  = useRef<HTMLDivElement>(null)
+  const diffOverlayRef = useRef<HTMLDivElement>(null)
+  const mapOverlayRef  = useRef<HTMLDivElement>(null)
+  const mapHostRef     = useRef<HTMLDivElement>(null)
   const anchorRatioRef  = useRef(0.5)
   const anchorSigRef    = useRef<string | null>(null)  // words currently on the midline
   const sigTickRef      = useRef(false)                // throttle signature recompute to 1/frame
@@ -2019,7 +2028,63 @@ function SplitDiffView({
     onHoverOp: handleHoverOp,
     getZoom: () => effZoomRef.current,
     getAnchorTop: () => leftScrollRef.current?.scrollTop ?? 0,
-  }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp])
+    // A warm layer that just painted is capturable while hidden (opacity 0.001 keeps it laid
+    // out + painted) — pre-rasters the ±1 neighbours before they're ever flipped to.
+    onWarmReady: (id, scroller) => presenter.queueCapture('doc', id, () => scroller),
+  }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp, presenter])
+
+  // ── Scrub bitmap wiring (round 3 — editor/scrubRaster.ts) ────────────────────────────────────
+  // Surfaces: each pane gets an overlay host (absolute, inset 0, hidden at rest) the presenter
+  // swaps cached <canvas> bitmaps into during rapid stepping. getZoom feeds the cache KEY (a
+  // zoom change re-buckets); the diff pane's CSS zoom additionally scales its raster (the zoom
+  // wraps that whole pane, so its scroller measures in local px).
+  useEffect(() => {
+    presenter.registerSurface('doc', docOverlayRef.current, () => leftScrollRef.current, () => effZoomRef.current)
+    presenter.registerSurface('diff', diffOverlayRef.current, () => rightScrollRef.current, () => diffZoomRef.current)
+    presenter.registerSurface('map', mapOverlayRef.current, () => mapHostRef.current, () => 1)
+    return () => {
+      presenter.registerSurface('doc', null, () => null, () => 1)
+      presenter.registerSurface('diff', null, () => null, () => 1)
+      presenter.registerSurface('map', null, () => null, () => 1)
+    }
+  }, [presenter])
+  // Capture the ACTIVE panes once they settle (fonts/pagination/midline reposition land well
+  // inside the delay) — re-keyed on zoom / pane geometry changes. Idle-pumped off the input path.
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      presenter.queueCapture('doc', snapshot.id)
+      presenter.queueCapture('diff', snapshot.id)
+      presenter.queueCapture('map', snapshot.id)
+    }, 700)
+    return () => window.clearTimeout(t)
+  }, [presenter, snapshot.id, effZoom, diffZoom, pageGeo, vertical, splitPct, sidePanelPx])
+  // A scroll moves what's on screen → the stored bitmaps go stale; recapture on scroll settle
+  // (the minimap too — its "you are here" marker tracks the doc pane).
+  useEffect(() => {
+    const L = leftScrollRef.current, R = rightScrollRef.current
+    if (!L && !R) return
+    let t = 0
+    const onScroll = () => {
+      window.clearTimeout(t)
+      t = window.setTimeout(() => {
+        presenter.queueCapture('doc', snapshot.id)
+        presenter.queueCapture('diff', snapshot.id)
+        presenter.queueCapture('map', snapshot.id)
+      }, 700)
+    }
+    L?.addEventListener('scroll', onScroll, { passive: true })
+    R?.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.clearTimeout(t)
+      L?.removeEventListener('scroll', onScroll)
+      R?.removeEventListener('scroll', onScroll)
+    }
+  }, [presenter, snapshot.id])
+  // The overlay hosts: hidden at rest, pointer-transparent, UNDER the midline/nav chrome (z 4 <
+  // midline 5) so the reading line + counters stay visible over the bitmaps.
+  const scrubOverlayStyle: React.CSSProperties = {
+    position: 'absolute', inset: 0, zIndex: 4, display: 'none', overflow: 'hidden', pointerEvents: 'none',
+  }
 
   // A dotted reading-line at the pane centre (both panes share it).
   const midline = (
@@ -2079,6 +2144,8 @@ function SplitDiffView({
           )
         })}
       </div>
+      {/* Scrub bitmap overlay — the presenter flips cached pane rasters here during rapid steps. */}
+      <div ref={docOverlayRef} className="iw-scrub-overlay" aria-hidden="true" style={scrubOverlayStyle} />
       {nav?.show && (<>
         <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: isPhone ? 2 : 8 }} />
         <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', right: isPhone ? 2 : 8 }} />
@@ -2103,6 +2170,8 @@ function SplitDiffView({
     <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
       {midline}
       <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} diffPages={diffPages} totalPages={totalPages} />
+      {/* Scrub bitmap overlay — inside the zoomed pane, so its local-px canvas scales with the content. */}
+      <div ref={diffOverlayRef} className="iw-scrub-overlay" aria-hidden="true" style={scrubOverlayStyle} />
       {nav?.show && (<>
         {thinNav('left', nav.onBack, !nav.canBack, '‹', 'Previous snapshot (←)')}
         {thinNav('right', nav.onFwd, !nav.canFwd, '›', 'Next snapshot (→)')}
@@ -2123,7 +2192,11 @@ function SplitDiffView({
           ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
           : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
       </div>
-      <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} midFrac={midFrac} pageGeo={pageGeo} />
+      {/* mapHost wraps the minimap so the scrub capture (and its overlay) covers exactly its box. */}
+      <div ref={mapHostRef} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <MinimapPanel leftRef={leftScrollRef} ops={ops} snapKey={snapshot.id} midFrac={midFrac} pageGeo={pageGeo} />
+        <div ref={mapOverlayRef} className="iw-scrub-overlay" aria-hidden="true" style={scrubOverlayStyle} />
+      </div>
     </div>
   )
   // Grid divider filling its template track. Same DOM element whether draggable (resize) or a fixed thin
@@ -2377,17 +2450,34 @@ export function SnapshotView() {
   const unfreezeTimerRef = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(unfreezeTimerRef.current), [])
 
+  // ── Scrub bitmap presenter (round 3 — editor/scrubRaster.ts) ─────────────────────────────────
+  // During rapid stepping the panes flip through pre-rasterised bitmaps (ms-speed, zero layout);
+  // the live DOM swaps back in at rest. Created once; getLiveId lets it hold the overlay until
+  // the landing snapshot's real render has painted underneath it.
+  const presenterRef = useRef<ScrubPresenter | null>(null)
+  if (presenterRef.current === null || presenterRef.current.disposed) {
+    presenterRef.current = createScrubPresenter({ touch: isTouchDevice(), getLiveId: () => heavySnapIdRef.current })
+  }
+  const presenter = presenterRef.current
+  useEffect(() => () => presenterRef.current?.dispose(), [])
+  useEffect(() => { presenter.setOrder(allSnapshots.map((s) => s.id)) }, [presenter, allSnapshots])
+
   const urlSyncTimerRef = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(urlSyncTimerRef.current), [])
   const goTo = useCallback((s: Snapshot) => {
     probePerf('nav.goTo', 0)
     const now = performance.now()
     if (now - lastNavInputAtRef.current < 250) {
-      // Second-plus step of a rapid stream → freeze the heavy view until inputs go quiet.
+      // Second-plus step of a rapid stream → freeze the heavy view until inputs go quiet, and
+      // flip the pane overlays to the target's cached bitmaps (nearest on a miss) — the ms-speed
+      // scrub Peter asked for; the real render catches up at rest (presenter holds the overlay
+      // until the landing frame has painted). An isolated flick never enters bitmap mode.
       setFrozenSnapId((p) => p ?? heavySnapIdRef.current)
       window.clearTimeout(unfreezeTimerRef.current)
       unfreezeTimerRef.current = window.setTimeout(() => setFrozenSnapId(null), 180)
+      presenter.show(s.id)
     }
+    presenter.noteInput()
     lastNavInputAtRef.current = now
     // Local-first: flip the view now, sync the URL once inputs go quiet (see liveSnapId).
     setLiveSnapId(s.id)
@@ -2398,7 +2488,7 @@ export function SnapshotView() {
       // liveSnapId clears in the catch-up effect above once the URL reflects s.id.
     }, 200)
     probePerf('nav.returned', 0)
-  }, [navigate])
+  }, [navigate, presenter])
 
   const goBack    = useCallback(() => { if (idx > 0) { setNavDir('back'); setLeftSnapFlash(n => n + 1); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo])
   const goFwd     = useCallback(() => { if (idx < allSnapshots.length - 1) { setNavDir('fwd'); setRightSnapFlash(n => n + 1); goTo(allSnapshots[idx + 1]) } }, [idx, allSnapshots, goTo])
@@ -2612,6 +2702,10 @@ export function SnapshotView() {
     return diffStats(opsBetween(heavyPrev, heavySnap) ?? [])
   }, [heavySnap?.id, heavyPrev?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The landing snapshot's live render committed → the presenter can lift the bitmap overlay off
+  // the (now identical) painted frame. Runs post-commit; the presenter double-rAFs past paint.
+  useEffect(() => { presenter.notifyLanded(heavySnap?.id ?? null) }, [presenter, heavySnap?.id])
+
   // AI summary — now shown in the RHS side panel (no longer floating over the document).
   const currentDiff = snapshot?.diffSummary?.bullets ?? null
 
@@ -2822,6 +2916,7 @@ export function SnapshotView() {
             bijMode={bijMode}
             onCycleSnap={cycleSnap}
             onCycleBijection={cycleBijection}
+            presenter={presenter}
             isPhone={isPhone}
             isNarrow={!isWide}
             lineMode={lineMode}

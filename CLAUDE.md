@@ -229,6 +229,41 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     band rects — never re-hide the panel layer / clear minHeight to read scrollHeight (that
     forced 2 extra full re-layouts per band repaint); the layer-window LRU touch is a no-op when
     the active id is already most-recent.
+  ROUND 3 (2026-07-12, "flash through — raster them as PNGs at current resolution of screen"):
+  SCRUB BITMAP LAYER (`editor/scrubRaster.ts` + wiring in SnapshotView). During rapid stepping
+  (2nd+ input <250ms apart — the same chokepoint as fling coalescing, in goTo) the doc pane,
+  diff panel and minimap flip through PRE-RASTERISED bitmaps: per-pane overlay hosts
+  (`.iw-scrub-overlay`, absolute inset-0, z 4 under the midline) get cached <canvas> elements
+  swapped in per step — sub-ms show(), zero layout; at rest the presenter holds the overlay
+  until the LANDING snapshot's live render has painted (notifyLanded on heavySnap.id + double
+  rAF; 1.5s safety), then lifts it off the identical frame. Invariants:
+  - CAPTURE is SVG-foreignObject rasterisation of the live pane subtree: whole app CSS inlined
+    from CSSOM with `:root`/`html` selectors re-pointed at the `.iw-raster-root` clone wrapper
+    (theme attr + documentElement inline style copied onto it); LOADED webfont faces fetched
+    same-origin and embedded as data: URIs (an SVG-image document may not fetch ANYTHING — and
+    the CSP img-src has data:, NOT blob:, so the SVG itself must load as a data: URI too).
+    Crop = the pane's viewport region at its own scrollTop, selected by NEGATIVE MARGINS inside
+    a pane-sized foreignObject — never viewBox/transform (WebKit foreignObject bugs). The clone
+    pins the live client box (width AND height: %-height children — diff-panel spacers, minimap
+    1fr rows — collapse under height:auto). Raster at device resolution: pane px × DPR (desktop
+    full DPR per Peter; phone capped ×2) × CSS zoom for the DIFF pane only (its `zoom` wraps the
+    pane, so its scroller measures in local px; doc-pane zoom lives on the paper INSIDE the
+    clone). Blank-detect before caching (a WebKit FO failure must not cache an empty rect);
+    opaque bg backstop composited UNDER (transparent bitmaps let the frozen pane peek through).
+  - CACHE: LRU keyed kind|snap.id|WxH|zoom|dpr, hard byte budget 60MB desktop / 24MB touch;
+    eviction protects the on-screen canvases + target±2. Misses show the NEAREST cached
+    snapshot's bitmap in the same bucket (never blank); unknown target → exact-only.
+  - Captures run strictly OFF the input path: idle-pumped (rIC; WebKit setTimeout), paused
+    while scrubbing / within 350ms of nav input; sources = active panes 700ms after settle
+    (re-keyed on zoom/pane geometry), scroll-settle recapture (700ms), and warm DocLayers via
+    hooks.onWarmReady (hidden layers are capturable — opacity 0.001 keeps them painted).
+  - An ISOLATED flick never enters bitmap mode (single-flick semantics untouched); the counter/
+    header stay live outside the overlays. Probes: scrub.step/scrub.step.miss/scrub.capture/
+    scrub.swap/scrub.mem in __iwPerf; window.__iwScrub exposes the presenter (stats(), show()).
+    Measured (20-step scrub, warmed cache): Chromium desktop input→painted-frame p50 ~8ms/step
+    with bitmaps vs the frozen-pane no-progress "before"; captures ~100-400ms each in idle.
+    Playwright's Linux WebKit has NO navigator.storage — probe seeds via an init-script OPFS
+    shim (scratchpad scrub-probe), NOT vite preview (fallback-faithful server + prod-like CSP).
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
