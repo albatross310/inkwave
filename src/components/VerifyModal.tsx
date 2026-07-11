@@ -28,11 +28,13 @@ export function VerifyModal({
   const [busy, setBusy] = useState(false)
   const [verifiedTitle, setVerifiedTitle] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  // Countdown from 10 while verifying, so a slow check doesn't feel stuck (holds at 1 if it overruns).
-  const [countdown, setCountdown] = useState(10)
+  // Countdown from 15 while verifying, so a slow check doesn't feel stuck (holds at 1 if it
+  // overruns). Rendered big, inside a conic-gradient progress ring (Peter, 2026-07-10).
+  const COUNTDOWN_FROM = 15
+  const [countdown, setCountdown] = useState(COUNTDOWN_FROM)
   useEffect(() => {
     if (!busy) return
-    setCountdown(10)
+    setCountdown(COUNTDOWN_FROM)
     const id = setInterval(() => setCountdown(c => (c > 1 ? c - 1 : 1)), 1000)
     return () => clearInterval(id)
   }, [busy])
@@ -115,7 +117,30 @@ export function VerifyModal({
 
         <div className="px-5 py-4 text-stone-700">
           {busy && (
-            <p className="text-stone-500 mb-4">Verifying… <span className="tabular-nums" style={{ color: INK }}>{countdown}</span></p>
+            <div className="flex items-center gap-4 mb-4">
+              {/* Progress ring: the conic fill sweeps as the countdown runs; the inner disc keeps
+                  the bg-white class so .iw-nightable themes it. */}
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 64, height: 64, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: `conic-gradient(${INK} ${((COUNTDOWN_FROM - countdown) / COUNTDOWN_FROM) * 360}deg, rgba(92,45,138,0.14) 0deg)`,
+                }}
+              >
+                <div
+                  className="bg-white tabular-nums"
+                  style={{
+                    width: 54, height: 54, borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.7rem', fontWeight: 700, color: INK, lineHeight: 1,
+                  }}
+                >
+                  {countdown}
+                </div>
+              </div>
+              <p className="text-stone-500">Verifying…</p>
+            </div>
           )}
           {error && (
             <p className="text-red-700 mb-4">⚠ {error}</p>

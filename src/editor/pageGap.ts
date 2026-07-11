@@ -34,6 +34,9 @@ export function gapEl(botMargin: number, topMargin: number, gapped: boolean): HT
   // screen (it was hard-coded 72px, wrong whenever the top-margin setting differs).
   el.style.setProperty('--iw-print-topm', `${Math.round(topMargin)}px`)
   el.contentEditable = 'false'
+  // A gap inserted INSIDE a diff span would inherit the span's title — the browser floated the
+  // tooltip over open water mid-gap (SnapshotView hover, 2026-07-10). An own empty title stops it.
+  el.title = ''
   if (!gapped) {
     // Ungapped: an invisible zero-HEIGHT break marker (see .iw-break-marker in index.css). Still a
     // block, so the break it forces coincides with the line start it sits at (a visual no-op at

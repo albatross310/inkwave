@@ -2,8 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
-import { pmToText, buildExportBundle, composeTraceFile } from '../provenance/bundle'
+import { pmToText } from '../provenance/bundle'
 import { loadDocument } from '../storage/opfs'
+import { VerifyModal } from '../components/VerifyModal'
+import type { InkwaveDocument } from '../types/document'
 import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
 import { opsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
@@ -52,7 +54,9 @@ function NavSide({
   const btnSize    = isPhone ? 41 : 53   // ~20% bigger
   const showVer    = hasVersions && !isPhone
 
-  const dim = isPhone ? 'clamp(30px, 8vw, 41px)' : 'clamp(34px, 3.6vw, 53px)'
+  // Phone: a slim 15px sliver hugging the pane edge (the old 30-41px lozenge sat OVER the text —
+  // Peter, 2026-07-10); desktop keeps the full-size button.
+  const dim = isPhone ? '15px' : 'clamp(34px, 3.6vw, 53px)'
   void btnSize
   const btnStyle = (disabled: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -267,7 +271,7 @@ function InlineDiffView({
         ref={scrollBodyRef}
         className="iw-snap-scroll"
         style={{
-          flex: 1, overflowY: 'scroll', overflowX: 'auto', padding: '1rem 1.5rem',
+          flex: 1, overflowY: 'scroll', overflowX: 'auto', touchAction: 'pan-y', padding: '1rem 1.5rem',
           lineHeight: 1.7, fontSize: '0.88rem', whiteSpace: 'pre-wrap',
           fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
         }}
@@ -419,13 +423,15 @@ function stackHeight(pages: number): number {
   return Math.ceil(Math.sqrt(pages))
 }
 
-// Pick the rows×cols to tile `n` page thumbnails into a W×H panel so each page CELL is portrait — its
-// height:width sits in [MIN,MAX] (≈ a page). We try every row count, score how far the resulting cell ratio
-// falls outside the band (heavily) plus its distance from the ideal (lightly), and take the best. Cells are
-// 1fr so they then scale to fill the panel. Recomputed whenever the panel resizes.
+// Pick the rows×cols to tile `n` page thumbnails into a W×H panel so each page CELL is portrait —
+// height:width clamped to Peter's band 1:2 … 1:4 (2026-07-10 revision: never taller than 1:4, never
+// squatter than 1:2 — the old [3,5] band rendered "longer than 1:5" on the phone's half-height
+// panel). We try every row count, score how far the resulting cell ratio falls outside the band
+// (heavily) plus its distance from the ideal (lightly), and take the best. Cells are 1fr so they
+// then scale to fill the panel. Recomputed whenever the panel resizes.
 function bestGrid(n: number, W: number, H: number): { rows: number; cols: number } {
   if (n <= 1 || W <= 0 || H <= 0) return { rows: Math.max(1, n), cols: 1 }
-  const MIN = 3, MAX = 5, IDEAL = 4 // page thumbnail height:width
+  const MIN = 2, MAX = 4, IDEAL = 3 // page thumbnail height:width
   let best = { rows: 1, cols: n }, bestScore = Infinity
   for (let rows = 1; rows <= n; rows++) {
     const cols = Math.ceil(n / rows)
@@ -668,7 +674,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
               })}
             </div>
             {/* logo + number in the clear bottom margin */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.28, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.1 /* number hugs its wave-seal (Peter, 2026-07-11) */, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
               <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 0.85, height: numFont * 0.85, opacity: 0.66 }} />
               {p + 1}
             </div>
@@ -740,7 +746,9 @@ function SplitDiffView({
   // A ref so the sync effects (which don't re-subscribe on the flip) always read the current value.
   const midFrac = vertical ? 0.5 : 0.382
   const midFracRef = useRef(midFrac); midFracRef.current = midFrac
-  const [splitPct, setSplitPct] = useState(28) // diff pane % (narrower by default); editor takes the rest
+  const [splitPct, setSplitPct] = useState(28) // WIDE: diff pane % (narrower by default); editor takes the rest
+  // VERTICAL (phone/narrow): editor row % — GOLDEN RATIO editor:panels = φ:1 (Peter, 2026-07-10).
+  const [vSplitPct, setVSplitPct] = useState(61.8)
   const [sidePanelPx, setSidePanelPx] = useState(240)
   const [snapMode, setSnapMode] = useState<SnapMode>(() => {
     try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
@@ -850,7 +858,12 @@ function SplitDiffView({
   // Own Ctrl+wheel zoom for the diff view (like the PDF viewer): scales the diff text and — crucially —
   // preventDefaults so it never triggers the browser's whole-page zoom. Cursor-anchored per pane.
   const [diffZoom, setDiffZoom] = useState(() => { try { return Number(localStorage.getItem('inkwave:diffZoom')) || 1 } catch { return 1 } })
-  const dzAnchor = useRef<{ el: HTMLDivElement; offY: number; fracY: number } | null>(null)
+  const diffZoomRef = useRef(diffZoom); diffZoomRef.current = diffZoom
+  // Displacement-based zoom anchor (2026-07-10 — the old fraction-of-scrollHeight anchor drifted:
+  // the pane has unzoomed chrome above/around the zoomed paper, so a pure ratio skews). LEFT pane:
+  // the paper alone zooms → the content point at rel px into the paper lands at paperTop + rel·(z1/z0).
+  // RIGHT pane: the whole pane content zooms → pure ratio is exact.
+  const dzAnchor = useRef<{ el: HTMLDivElement; offY: number; mode: 'left' | 'right'; z0: number; rel: number; paperTop: number } | null>(null)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -868,19 +881,21 @@ function SplitDiffView({
         () => (pane && pane === leftScrollRef.current && isWaterAtX(pane, e.clientX) ? 'water' : 'text'),
         e.deltaY > 0,
       )
-      if (pane) { const offY = e.clientY - pane.getBoundingClientRect().top; dzAnchor.current = { el: pane, offY, fracY: pane.scrollHeight ? (pane.scrollTop + offY) / pane.scrollHeight : 0 } }
-      else dzAnchor.current = null
+      if (pane) {
+        const offY = e.clientY - pane.getBoundingClientRect().top
+        if (pane === leftScrollRef.current) {
+          const paper = pane.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+          const paperTop = paper ? paper.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop : 0
+          dzAnchor.current = { el: pane, offY, mode: 'left', z0: effZoomRef.current, paperTop, rel: pane.scrollTop + offY - paperTop }
+        } else {
+          dzAnchor.current = { el: pane, offY, mode: 'right', z0: diffZoomRef.current, paperTop: 0, rel: pane.scrollTop + offY }
+        }
+      } else dzAnchor.current = null
       setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => { el.removeEventListener('wheel', onWheel); latch.dispose() }
   }, [])
-  useEffect(() => {
-    const a = dzAnchor.current
-    if (!a) return
-    const id = requestAnimationFrame(() => { a.el.scrollTop = Math.max(0, a.fracY * a.el.scrollHeight - a.offY) })
-    return () => cancelAnimationFrame(id)
-  }, [diffZoom])
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
 
@@ -1000,7 +1015,12 @@ function SplitDiffView({
     compute()
     return () => { ro.disconnect(); cancelAnimationFrame(raf) }
   }, [isPhone])
-  const effZoom = isPhone || getPaperSize() === 'scroll' ? 1 : Math.min(diffZoom, paneFit)
+  // Phone pane zoom (pinch-driven, below) — the fluid paper has no fit identity, so it's clamped
+  // rather than fit-capped; defaults to 1 = the edge-to-edge phone view.
+  const [phoneZoom, setPhoneZoom] = useState(1)
+  const phoneZoomRef = useRef(1)
+  const effZoom = isPhone ? phoneZoom : getPaperSize() === 'scroll' ? 1 : Math.min(diffZoom, paneFit)
+  const effZoomRef = useRef(effZoom); effZoomRef.current = effZoom
   // Apply the effective zoom to the paper + reposition the band panels in the SAME commit — the
   // breaks are DOM positions and never move, only the rendered geometry does. staticPagination
   // forces this zoom to 1 inside its canonical measure window and converts visual→local px in its
@@ -1013,6 +1033,89 @@ function SplitDiffView({
     }
     pagRef.current?.repaint()
   }, [effZoom, snapshot.id])
+  // Cursor-anchored zoom correction — displacement math (see dzAnchor above); a fit-capped left
+  // pane (z1 == z0) resolves to the original position, so a capped wheel never nudges the scroll.
+  useEffect(() => {
+    const a = dzAnchor.current
+    if (!a) return
+    const id = requestAnimationFrame(() => {
+      const z1 = a.mode === 'left' ? effZoomRef.current : diffZoomRef.current
+      const k = z1 / (a.z0 || 1)
+      a.el.scrollTop = Math.max(0, a.mode === 'left' ? a.paperTop + a.rel * k - a.offY : a.rel * k - a.offY)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [diffZoom, effZoom])
+
+
+  // ── Phone PINCH → pane zoom (Peter, 2026-07-10: "two-finger zoom doesn't work at all") ───────
+  // Two fingers on the doc pane drive the SAME CSS-zoom effZoom pipeline, live: the zoom writes
+  // are imperative + rAF-coalesced during the gesture (CSS zoom on the static pane is one cheap
+  // uniform rescale — the sheet panels/gaps live INSIDE the zoomed paper, so nothing needs
+  // repositioning mid-gesture), and the gesture end commits to phoneZoom state → one repaint
+  // refreshes pageGeo. The pinch midpoint's content point is held stationary via scroll
+  // correction. CAPTURE-phase listeners + stopPropagation own the two-finger gesture on this
+  // pane: Scroll.tsx's surface pinch (the font-reflow pipeline) must never double-zoom, and the
+  // swipe scrub's multi-touch bail hands off here. Per the phone input invariant, touchstart is
+  // passive and the non-passive touchmove is armed only while two fingers are down.
+  useEffect(() => {
+    if (!isPhone) return
+    const L = leftScrollRef.current
+    if (!L) return
+    const paperOf = () => L.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    let d0 = 0, z0 = 1, midX = 0, midY = 0, pendingZ = 0, raf = 0, armed = false
+    const apply = () => {
+      raf = 0
+      const p = paperOf()
+      if (!p || !pendingZ) return
+      const zPrev = parseFloat(p.style.getPropertyValue('zoom') || '1') || 1
+      if (Math.abs(pendingZ - zPrev) < 0.002) return
+      const lr = L.getBoundingClientRect()
+      const ox = midX - lr.left, oy = midY - lr.top
+      p.style.setProperty('zoom', String(+pendingZ.toFixed(4)))
+      // hold the content point under the pinch midpoint still (content scales about 0,0)
+      L.scrollTop = Math.max(0, (L.scrollTop + oy) * (pendingZ / zPrev) - oy)
+      L.scrollLeft = Math.max(0, (L.scrollLeft + ox) * (pendingZ / zPrev) - ox)
+    }
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !d0) return
+      e.stopPropagation()
+      e.preventDefault() // our zoom replaces the browser's — no native pinch
+      const d = dist(e.touches)
+      if (d < 8) return // fingers (nearly) touching — degenerate ratio
+      pendingZ = Math.max(0.5, Math.min(2.5, z0 * (d / d0)))
+      if (!raf) raf = requestAnimationFrame(apply)
+    }
+    const arm = () => { if (!armed) { armed = true; L.addEventListener('touchmove', onMove, { capture: true, passive: false }) } }
+    const disarm = () => { if (armed) { armed = false; L.removeEventListener('touchmove', onMove, { capture: true } as EventListenerOptions) } }
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return
+      e.stopPropagation() // this pane's pinch is OURS — keep Scroll's font pipeline dormant
+      d0 = dist(e.touches)
+      z0 = phoneZoomRef.current
+      midX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      midY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      pendingZ = 0
+      arm()
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length >= 2 || !d0) return
+      d0 = 0
+      disarm()
+      if (raf) { cancelAnimationFrame(raf); raf = 0; apply() } // land the final frame
+      if (pendingZ) { phoneZoomRef.current = pendingZ; setPhoneZoom(pendingZ) } // commit → repaint/pageGeo
+    }
+    L.addEventListener('touchstart', onStart, { capture: true, passive: true })
+    L.addEventListener('touchend', onEnd, { capture: true, passive: true })
+    L.addEventListener('touchcancel', onEnd, { capture: true, passive: true })
+    return () => {
+      disarm()
+      if (raf) cancelAnimationFrame(raf)
+      L.removeEventListener('touchstart', onStart, { capture: true } as EventListenerOptions)
+      L.removeEventListener('touchend', onEnd, { capture: true } as EventListenerOptions)
+      L.removeEventListener('touchcancel', onEnd, { capture: true } as EventListenerOptions)
+    }
+  }, [isPhone])
 
   // ── Midline PAGE SYNC (Peter, 2026-07-10) ────────────────────────────────────────────────────
   // When the DRIVER pane's midline crosses a page boundary, the FOLLOWER flies to that page — the
@@ -1037,16 +1140,24 @@ function SplitDiffView({
     if (el) el.setAttribute('data-dv', uid)
     const style = document.createElement('style')
     style.textContent = [
-      // hover: NO gold. Just the same green/red outline, THICKENED — from 1× (unlit) up to 2× when the diff
+      // hover: NO gold. Just the same green/red ring, THICKENED — from 1× (unlit) up to 2× when the diff
       // is fully lit (--iw-align=1), proportionally in between. Full-alpha so the hover reads on any diff.
-      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; outline: calc(2px * (1 + var(--iw-align, 0))) solid rgba(185,28,28,0.95) !important; outline-offset: 1px !important; border-radius: 2px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; outline: calc(2px * (1 + var(--iw-align, 0))) solid rgba(21,128,61,0.95) !important; outline-offset: 1px !important; border-radius: 2px !important; }`,
-      // active (clicked): darker + outline, both panes
-      `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; outline: 2px solid #991b1b !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; outline: 2px solid #15803d !important; outline-offset: 2px !important; border-radius: 3px !important; }`,
-      // hover + active simultaneously: combine outline with hover shade
-      `[data-dv="${uid}"] span.diff-del[data-hover][data-active] { background: rgba(185,28,28,0.28) !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover][data-active] { background: rgba(22,163,74,0.38)  !important; }`,
+      // PER-FRAGMENT (Peter, 2026-07-10): `outline` paints ONE rect around the union of an inline's
+      // fragments, and a diff span straddling a page break hosts a BLOCK gap/marker child (block-in-
+      // inline split) — the union rect became a giant empty box spanning the water / the whole page
+      // (gapped AND marker mode). An inset ring shadow + box-decoration-break:clone paints per LINE
+      // FRAGMENT instead — each wrapped line gets its own ring, gaps get nothing, and the browser
+      // recomputes fragments on any reflow (zoom included) for free. Ring listed before the fill so
+      // it stays on top.
+      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(185,28,28,0.95), inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(21,128,61,0.95), inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
+      // active (clicked): darker + ring, both panes — same per-fragment treatment
+      `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; box-shadow: inset 0 0 0 2px #991b1b !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; box-shadow: inset 0 0 0 2px #15803d !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
+      // hover + active simultaneously: both are box-shadow now, so the combined rule must restate
+      // ring + fill (higher specificity wins over either single-attr rule)
+      `[data-dv="${uid}"] span.diff-del[data-hover][data-active] { background: rgba(185,28,28,0.28) !important; box-shadow: inset 0 0 0 2px #991b1b, inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover][data-active] { background: rgba(22,163,74,0.38)  !important; box-shadow: inset 0 0 0 2px #15803d, inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; }`,
       // text selection: a darker, opaque-ish shade that OVERWRITES the diff tint on the chars you highlight.
       `[data-dv="${uid}"] ::selection { background: rgba(70,50,110,0.85) !important; color: #fff !important; }`,
       `[data-dv="${uid}"] ::-moz-selection { background: rgba(70,50,110,0.85) !important; color: #fff !important; }`,
@@ -1708,7 +1819,8 @@ function SplitDiffView({
       const raw = vertical
         ? ((y - rect.top)  / rect.height) * 100
         : ((x - rect.left) / rect.width)  * 100
-      setSplitPct(Math.max(20, Math.min(80, Math.round(raw))))
+      if (vertical) setVSplitPct(Math.max(20, Math.min(80, Math.round(raw))))
+      else setSplitPct(Math.max(20, Math.min(80, Math.round(raw))))
     }
     const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
     const onTouchMove = (e: TouchEvent) => { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY) }
@@ -1768,17 +1880,25 @@ function SplitDiffView({
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      {/* LEFT-aligned to the pane edge (flex-start + left 0): the narrower toggles' left edges sit
-          flush against the diff panel's edge instead of floating centred under the wider counter. */}
-      <div style={{ position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }}>
-        {/* The counter pill is wider than the toggles: CENTRE it over their column (x-centre =
-            toggle width / 2) so its extra width extends LEFT over the pane boundary/diff panel,
-            never rightward over the document text (Peter, 2026-07-10). */}
-        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none', transform: 'translateX(calc(clamp(52px, 9vw, 78px) / 2 - 50%))' }}>{counter}</div>)}
+      {/* Control stack (version pill / snap / bijection) — three placements (Peter, 2026-07-10):
+          PHONE: a fixed BOTTOM row next to Verify (thumb reach; the old top-left column sat over
+          the text). WIDE DESKTOP: fixed, right-edge anchored a hair past the divider (left =
+          --snap-split-pct, the split var published above) so even the widest pill ends LEFT of
+          the editor's text column — the stack floats OVER the diff panel + its scrollbar on a
+          higher layer, still fully clickable; position:fixed also escapes the pane's
+          overflow:hidden, which would clip any in-pane leftward overhang. NARROW (non-phone)
+          keeps the in-pane top-left column — the diff panel is below the editor there, so there
+          is nothing to overhang. */}
+      <div style={isPhone
+        ? { position: 'fixed', bottom: 56, left: 8, zIndex: 56, display: 'flex', flexDirection: 'row', gap: 8, alignItems: 'center' }
+        : vertical
+          ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
+          : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
+        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
-      <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto' }}>
+      <div ref={leftScrollRef} onScroll={onLeftScroll} className="iw-snap-scroll" style={{ height: '100%', overflowY: 'scroll', overflowX: 'auto', touchAction: 'pan-y' }}>
         {/* key={snapshot.id}: each snapshot gets a FRESH subtree, so the static paginator's DOM
             surgery (gap insertion splits text nodes) can never desync React's reconciliation —
             React never patches inside a subtree it replaced wholesale. */}
@@ -1787,8 +1907,8 @@ function SplitDiffView({
         <Scroll phone={isPhone}><div key={snapshot.id}><FullDiffView ops={ops} snapshot={snapshot} onOpClick={ops ? handleLeftPaneClick : undefined} onHoverOp={handleHoverOp} /></div></Scroll>
       </div>
       {nav?.show && (<>
-        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: 8 }} />
-        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', right: 8 }} />
+        <NavSide side="left" snapDir="back" onSnap={nav.onBack} snapDisabled={!nav.canBack} onVer={nav.onVerBack} verDisabled={!nav.canVerBack} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', left: isPhone ? 2 : 8 }} />
+        <NavSide side="right" snapDir="fwd" onSnap={nav.onFwd} snapDisabled={!nav.canFwd} onVer={nav.onVerFwd} verDisabled={!nav.canVerFwd} hasVersions={nav.hasVersions} isPhone={isPhone} midPct={vertical ? 84 : midFrac * 100} overridePos={{ position: 'absolute', right: isPhone ? 2 : 8 }} />
       </>)}
     </div>
   )
@@ -1817,7 +1937,9 @@ function SplitDiffView({
     </div>
   )
   const sidePaneEl = (sz: React.CSSProperties) => (
-    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
+    // Phone: extra bottom padding lifts the minimap clear of the fixed bottom control row
+    // (counter + toggles, relocated there — see editorPaneEl) and the Verify button.
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: isPhone ? '10px 10px 96px' : 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
       <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px' }}>
         {!summariesOn ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
@@ -1862,7 +1984,7 @@ function SplitDiffView({
   //   wide:  [ diff | d1 | editor | d2 | side ]           (one row)
   //   narrow: editor on top; d1 splits it from a bottom row of [ side | d2 | diff ]
   const grid: React.CSSProperties = vertical
-    ? { gridTemplateColumns: '1fr 3px 1fr', gridTemplateRows: `${splitPct}% 7px 1fr`,
+    ? { gridTemplateColumns: '1fr 3px 1fr', gridTemplateRows: `${vSplitPct}% 7px 1fr`,
         gridTemplateAreas: '"editor editor editor" "d1 d1 d1" "side d2 diff"' }
     : { gridTemplateColumns: `${splitPct}% 7px 1fr 7px ${sidePanelPx}px`, gridTemplateRows: '1fr',
         gridTemplateAreas: '"diff d1 editor d2 side"' }
@@ -1900,6 +2022,7 @@ export function SnapshotView() {
   // editor's Settings — bumps genSeed so the backfill effect fills every missing summary.
   const [aiOn, setAiOn] = useState(aiSummariesEnabled)
   const [consentOpen, setConsentOpen] = useState(false)
+  const [verifyDoc, setVerifyDoc] = useState<InkwaveDocument | null>(null) // Verify → the editor's auto-verify modal
   useEffect(() => {
     const onChange = () => {
       const on = aiSummariesEnabled()
@@ -2088,15 +2211,22 @@ export function SnapshotView() {
   // A roughly-HORIZONTAL drag scrubs snapshots — a PURE position-based scrubber (like Apple Photos): NO
   // flick/momentum. A small detent (FIRST) to commit the first snap, then every REST px is another — so a
   // normal drag sweeps through 10-30. Vertical stays native scroll. Works starting on either pane.
+  // The swipe OWNS horizontal on this view: `touch-action: pan-y` on the root + panes (overriding the
+  // universal phone pan-x pan-y) keeps the browser's native x-pan from racing the scrub, and the
+  // horizontal branch preventDefaults. EXCEPTION: when the doc pane is pinch-zoomed wider than itself
+  // (scrollWidth > clientWidth), a horizontal drag PANS the zoomed page instead of scrubbing — native
+  // x-pan is suppressed, so the scrub handler is the only one left to do it.
   const swipeRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = swipeRef.current
     if (!el) return
-    let dir: '?' | 'h' | 'v' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
+    let dir: '?' | 'h' | 'v' | 'pan' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
+    let panEl: HTMLElement | null = null
     const FIRST = 38, REST = 9 // detent for the first snap, then heaps
     const onStart = (e: TouchEvent) => {
-      // Multi-touch = a PINCH (master's Scroll zoom handlers own it) — never a scrub. Without this
-      // guard, finger-0's drift during a pinch scrubbed snapshots mid-gesture (merge fix, 2026-07-10).
+      // Multi-touch = a PINCH (the doc pane's pane-zoom pinch, or Scroll's on other surfaces) —
+      // never a scrub. Without this guard, finger-0's drift during a pinch scrubbed snapshots
+      // mid-gesture (merge fix, 2026-07-10).
       if (e.touches.length > 1) { dir = 'v'; return }
       dir = '?'; accum = 0; started = false; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY
     }
@@ -2107,16 +2237,30 @@ export function SnapshotView() {
         const dx = x - startX, dy = y - startY
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return          // wait for a decisive move
         dir = Math.abs(dx) > Math.abs(dy) * 1.7 ? 'h' : 'v'         // must be pretty horizontal
+        if (dir === 'h') {
+          // PINCH-ZOOMED doc pane → this horizontal drag pans the page (touch-action pan-y killed
+          // the native x-pan, so we do it manually); otherwise it scrubs. Gate on the pane's zoom,
+          // NOT scrollWidth — the full-bleed 100vw gap bands give the unzoomed phone pane a few px
+          // of intrinsic x-overflow that made every drag pan instead of scrub.
+          const panes = Array.from(el.querySelectorAll<HTMLElement>('.iw-snap-scroll'))
+          const doc = panes.find((p) => p.querySelector('.tiptap-editor'))
+          const paper = doc?.querySelector('.scroll-paper')?.parentElement as HTMLElement | null
+          const z = paper ? parseFloat(paper.style.getPropertyValue('zoom') || '1') || 1 : 1
+          if (doc && z > 1.01) { dir = 'pan'; panEl = doc }
+        }
       }
-      if (dir !== 'h') return                                        // vertical → let the pane scroll natively
+      if (dir === 'v') return                                        // vertical → let the pane scroll natively
       e.preventDefault()
+      if (dir === 'pan') { if (panEl) panEl.scrollLeft -= x - lastX; lastX = x; return }
       accum += x - lastX; lastX = x
       let net = 0
-      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // slide right → previous
-      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
+      // REVERSED (Peter, 2026-07-10): slide right → NEXT, slide left → previous (the sign used to
+      // be flipped — dragging felt like it moved the timeline the wrong way).
+      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += s }
+      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += s }
       if (net) scrubBy(net)
     }
-    const onEnd = () => { dir = '?' }
+    const onEnd = () => { dir = '?'; panEl = null }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
@@ -2168,7 +2312,9 @@ export function SnapshotView() {
     <div
       ref={swipeRef}
       className="font-serif"
-      style={{ height: '100dvh', overflow: 'hidden', color: '#3a3a3a', display: 'flex', flexDirection: 'column' }}
+      // touchAction pan-y: the swipe scrub owns horizontal on this view (native x-pan raced it);
+      // touch-action doesn't inherit, so the scrollable panes repeat it below.
+      style={{ height: '100dvh', overflow: 'hidden', color: '#3a3a3a', display: 'flex', flexDirection: 'column', touchAction: 'pan-y' }}
     >
       {/* Wave loading choreography (Peter, 2026-07-09): the same drifting-waves veil as the
           editor's load covers the snapshot view until its content is genuinely ready (snapshots
@@ -2194,15 +2340,23 @@ export function SnapshotView() {
           >×</button>
         </div>
       )}
-      {/* Fixed header */}
+      {/* Fixed bar — TOP on desktop; BOTTOM on phone ("easier for the thumb to reach", Peter
+          2026-07-10 — the whole top bar + controls + Verify gather into a two-row bottom region
+          there, and the top of the view becomes pure content). */}
       <div
         className="z-50 flex items-center bg-white/95 backdrop-blur"
-        style={{ position: 'fixed', top: 0, left: 0, right: 0, borderBottom: `1px solid ${INK}33`, fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)' }}
+        style={{
+          position: 'fixed', left: 0, right: 0,
+          ...(isPhone ? { bottom: 0, borderTop: `1px solid ${INK}33` } : { top: 0, borderBottom: `1px solid ${INK}33` }),
+          fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)',
+        }}
       >
-        <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0 }}>
+        {/* Phone: tighter tracking + no "read-only" — the whole bar must fit one 390px row
+            (Peter, 2026-07-10; the buttons used to collide with this block). */}
+        <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0, letterSpacing: isPhone ? '-0.04em' : undefined }}>
           ◈ {snapshot
             ? `${versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
-            : 'Snapshot'} · read-only
+            : 'Snapshot'}{isPhone ? '' : ' · read-only'}
         </span>
 
         {snapshot && (
@@ -2221,7 +2375,7 @@ export function SnapshotView() {
         <div className="flex-1 flex items-center justify-center" style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
         {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
         {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
-          <span className="flex items-baseline gap-x-2 tabular-nums" style={{ fontSize: 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: 'clamp(6px, 1.4vw, 16px)' }} title="words added / removed vs the previous snapshot">
+          <span className="flex items-baseline tabular-nums" style={{ fontSize: isPhone ? '0.72rem' : 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: isPhone ? 2 : 'clamp(6px, 1.4vw, 16px)', columnGap: isPhone ? 3 : 8, letterSpacing: isPhone ? '-0.03em' : undefined }} title="words added / removed vs the previous snapshot">
             <span style={{ color: '#15803d', fontWeight: 800 }}>+{headerDiff.added}</span>
             <span style={{ color: '#b91c1c', fontWeight: 800 }}>−{headerDiff.removed}</span>
           </span>
@@ -2234,7 +2388,7 @@ export function SnapshotView() {
           onClick={toggleLineMode}
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
+            fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
             background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -2243,7 +2397,7 @@ export function SnapshotView() {
             ? 'Dotted line snaps just above the biggest change in each snapshot — click to keep it centred on the same words'
             : 'Dotted line stays centred on the same words — click to snap it above the biggest change'}
         >
-          {lineMode === 'longest' ? '⇥ biggest change' : '↔ centred line'}
+          {isPhone ? (lineMode === 'longest' ? '⇥ bgst Δ' : '↔ centred') : (lineMode === 'longest' ? '⇥ biggest change' : '↔ centred line')}
         </button>
         {docId && aiOn && (
           <button
@@ -2261,7 +2415,7 @@ export function SnapshotView() {
             }}
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
             style={{
-              fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
+              fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
               background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
               border: '1px solid rgba(92, 45, 138, 0.35)',
               color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
@@ -2269,7 +2423,7 @@ export function SnapshotView() {
             }}
             title="Clear and regenerate all AI summaries"
           >
-            {isRegenerating ? 'regenerating…' : '↺ summaries'}
+            {isRegenerating ? (isPhone ? '…' : 'regenerating…') : (isPhone ? '↺ sums' : '↺ summaries')}
           </button>
         )}
         {docId && snapshot && (
@@ -2290,7 +2444,7 @@ export function SnapshotView() {
             }}
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm"
             style={{
-              fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
+              fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
               background: 'rgba(185,28,28,0.07)',
               border: '1px solid rgba(185,28,28,0.25)',
               color: '#b91c1c',
@@ -2298,7 +2452,7 @@ export function SnapshotView() {
             }}
             title="Permanently delete this snapshot"
           >
-            ✕ snapshot
+            {isPhone ? '✕ snap' : '✕ snapshot'}
           </button>
         )}
         <button
@@ -2306,7 +2460,7 @@ export function SnapshotView() {
           onClick={() => navigate('/')}
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
-            fontSize: 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap',
+            fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
             background: 'rgba(92, 45, 138, 0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -2314,13 +2468,13 @@ export function SnapshotView() {
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.16)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.08)')}
         >
-          ← editor
+          {isPhone ? '← edit' : '← editor'}
         </button>
         </div>
       </div>
 
-      {/* Spacer for fixed header */}
-      <div style={{ height: 'clamp(38px, 7vh, 48px)', flexShrink: 0 }} />
+      {/* Spacer for the fixed bar — above the panes on desktop (top bar)… */}
+      {!isPhone && <div style={{ height: 'clamp(38px, 7vh, 48px)', flexShrink: 0 }} />}
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -2351,6 +2505,9 @@ export function SnapshotView() {
         )}
       </div>
 
+      {/* …and below them on phone (bottom bar). */}
+      {isPhone && <div style={{ height: 'clamp(38px, 7vh, 48px)', flexShrink: 0 }} />}
+
       {consentOpen && (
         <AiConsentDialog
           feature="summaries"
@@ -2365,7 +2522,9 @@ export function SnapshotView() {
 
       {/* Side navigation now renders INSIDE the central editor pane (flanking it) — see above. */}
 
-      {/* Fixed purple Verify button — bottom right, opens the verifier for this document */}
+      {/* Fixed purple Verify button — opens the SAME auto-verify countdown modal as the editor's
+          toolbar (VerifyModal: builds the bundle from the live doc + snapshots and verifies it);
+          /verify is only the no-doc fallback. Phone: joins the bottom control row above the bar. */}
       <button
         type="button"
         onClick={async () => {
@@ -2373,26 +2532,27 @@ export function SnapshotView() {
           try {
             const doc = await loadDocument(docId)
             if (!doc) { navigate('/verify'); return }
-            const bundle = buildExportBundle(doc, allSnapshots)
-            const bundleText = composeTraceFile(bundle)
-            navigate('/verify', { state: { bundleText } })
+            setVerifyDoc(doc)
           } catch {
             navigate('/verify')
           }
         }}
         style={{
-          position: 'fixed', bottom: 16, right: 16, zIndex: 55,
+          position: 'fixed', zIndex: 56,
+          ...(isPhone ? { bottom: 56, right: 8, padding: '5px 12px' } : { bottom: 16, right: 16, padding: '8px 18px' }),
           background: '#5c2d8a', color: '#fff',
           border: 'none', borderRadius: 8,
-          padding: '8px 18px', fontSize: '0.9rem', fontWeight: 600,
+          fontSize: '0.9rem', fontWeight: 600,
           cursor: 'pointer', boxShadow: '0 2px 8px rgba(92,45,138,0.35)',
         }}
         onMouseEnter={e => (e.currentTarget.style.background = '#7a3fb5')}
         onMouseLeave={e => (e.currentTarget.style.background = '#5c2d8a')}
-        title="Open the verifier for this document"
+        title="Verify this document — the same auto-verify flow as the editor"
       >
         Verify
       </button>
+
+      {verifyDoc && <VerifyModal doc={verifyDoc} onClose={() => setVerifyDoc(null)} />}
     </div>
   )
 }
