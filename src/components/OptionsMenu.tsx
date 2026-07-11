@@ -203,6 +203,10 @@ export function OptionsMenu({
     { label: 'Export…', run: () => setModal('export') },
   ]
   const items: Array<{ label: string; run: () => void }> = [
+    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
+    { label: 'About', run: () => navigate('/about') },
+    { label: 'Privacy', run: () => navigate('/privacy') },
+    { label: 'Print', run: () => onPrint?.() },
     {
       label: 'Provenance',
       run: () => {
@@ -219,10 +223,6 @@ export function OptionsMenu({
         })()
       },
     },
-    { label: 'Print', run: () => onPrint?.() },
-    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
-    { label: 'About', run: () => navigate('/about') },
-    { label: 'Privacy', run: () => navigate('/privacy') },
   ]
   if (installPrompt) {
     items.push({
@@ -281,7 +281,7 @@ export function OptionsMenu({
               not the pill's CSS-transform context (which would break the coordinates). */}
           <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[11.5rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
-            {/* LEFT column: Provenance/Print/Verify/About/Privacy … ending with Sign in/Logout. */}
+            {/* LEFT column: Verify/About/Privacy/Print/Provenance … ending with Sign in/Logout. */}
             <div className="flex-1 border-r border-stone-100">
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
