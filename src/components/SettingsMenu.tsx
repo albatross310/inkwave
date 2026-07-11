@@ -29,6 +29,11 @@ interface SettingsMenuProps {
 
 export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
   const [open, setOpen] = useState(false)
+  // Phone with the keyboard up: the panel must fit the REDUCED visual viewport above the
+  // keyboard — render the rows in TWO columns (wider, half the height). Captured at open time
+  // (__iwKeyboardUp is the editor's live flag; the toolbar focus guard keeps the keyboard up
+  // while the menu is open, so the state can't flip under it).
+  const [twoCol, setTwoCol] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const [, rerender] = useState(0)
   const [consentFor, setConsentFor] = useState<AiFeature | null>(null)
@@ -42,19 +47,26 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
     return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions) }
   }, [open])
 
-  function toggle() { setOpen(o => !o) }
+  function toggle() {
+    setTwoCol(!!(window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp)
+    setOpen(o => !o)
+  }
 
   // Centred above the button, with the shared PANEL_GAP — same model as the hamburger menu.
   function menuStyle(): React.CSSProperties {
     const br = btnRef.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)' }
-    const HALF = 104 // ~half the panel width, for edge clamping
+    const HALF = twoCol ? 184 : 104 // ~half the panel width, for edge clamping
     const center = Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, br.left + br.width / 2))
+    // Keyboard up: cap the panel to the visual-viewport band above the docked pill (the panel
+    // opens above the toolbar, which hugs the keyboard) and scroll any overflow.
+    const vvH = window.visualViewport?.height ?? window.innerHeight
     return {
       position: 'fixed',
       bottom: Math.round(window.innerHeight - br.top + PANEL_GAP),
       left: Math.round(center),
       transform: 'translateX(-50%)',
+      ...(twoCol ? { maxHeight: Math.max(160, vvH - 120), overflowY: 'auto' as const } : {}),
     }
   }
 
@@ -82,11 +94,13 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
           <div
             role="dialog"
             aria-label="Settings"
-            className="iw-nightable iw-touch-guard z-[91] w-52 bg-white shadow-lg font-serif text-sm text-stone-600"
+            className={`iw-nightable iw-touch-guard z-[91] ${twoCol ? 'w-[23rem] max-w-[94vw]' : 'w-52'} bg-white shadow-lg font-serif text-sm text-stone-600`}
             style={{ ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
             onMouseDown={e => e.stopPropagation()}
           >
             <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-stone-400">Settings</div>
+            {/* Keyboard-up phone: two columns so every row fits the shortened viewport. */}
+            <div className={twoCol ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
 
             {/* Night mode — dark writing surface */}
             <Row
@@ -177,6 +191,8 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
                 void flushThenReload()
               }}
             />
+
+            </div>
 
             {/* Build marker — which deploy is this device actually running? (Peter checks on
                 phone, where devtools aren't available; the console line logs the same pair.) */}

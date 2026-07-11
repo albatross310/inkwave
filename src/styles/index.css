@@ -717,6 +717,14 @@
     height: clamp(36px, calc((100vw - 45px) / 8), 48px);
   }
 
+  /* While a slot drag is live (touch-hold reorder), every slot circle's disc goes OPAQUE —
+     day = the pill's white, night = the nightable dolphin grey (--iw-slot-drag-bg token) —
+     so the lifted, z-raised circle passes OVER its neighbours instead of both glyphs
+     superimposing through transparent discs. */
+  .iw-slot-dragging .iw-slot .w-9 {
+    background-color: var(--iw-slot-drag-bg, #fff);
+  }
+
   /* iOS long-press guard: the whole footer toolbar and every drop-up/picker must never start a
      text selection or the loupe — iOS's touch-and-hold select gesture was firing when a hold began
      on a bar button (and again when the finger then SLID up onto the editor; that half is the
@@ -1283,6 +1291,7 @@
   --iw-addbtn-border: #a68fd6;
   --iw-toggle-on: #8b6fc8;                    /* switch track — on / off in night */
   --iw-toggle-off: #5c6672;
+  --iw-slot-drag-bg: #454e59;                 /* opaque slot-circle disc during toolbar drags */
   --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
   --iw-badge-manual: #a8b0bc;
   --iw-verify-tick: #4a9d6a;                  /* verify ✓ — muted green (darker than a vivid tick) on dark */

@@ -82,6 +82,12 @@ describe('kbOffsetFor', () => {
   it('rounds to whole px (iOS reports fractional heights mid-slide)', () => {
     expect(kbOffsetFor({ ...RESTING, height: 507.6 })).toBe(336)
   })
+  it('ignores NEGATIVE offsetTop (pull-to-refresh rubber-band is not keyboard space)', () => {
+    // Top elastic with no keyboard: must stay docked at 0, not ride up by the elastic amount.
+    expect(kbOffsetFor({ ...RESTING, offsetTop: -120, height: 844 })).toBe(0)
+    // Top elastic WITH the keyboard: the lift stays the REAL keyboard overlap.
+    expect(kbOffsetFor({ ...RESTING, offsetTop: -120, height: 508 })).toBe(KEYBOARD_H)
+  })
 })
 
 describe('dockedVisualTop', () => {
@@ -256,6 +262,33 @@ describe('createDock', () => {
     h.frames(SETTLE_FRAMES)
     expect(dock.isSettled()).toBe(true)
     expect(h.settled).toEqual([0, KEYBOARD_H]) // one reveal opportunity per episode
+    dock.stop()
+  })
+
+  it('freezes through an elastic overscroll phase and resumes when it releases', () => {
+    const h = makeHarness({ ...RESTING, height: 508 })
+    const dock = createDock(h.host)
+    dock.kick()
+    h.frames(SETTLE_FRAMES)
+    expect(h.settled).toEqual([KEYBOARD_H])
+    const writes = h.applied.length
+    // Pull-to-refresh: elastic geometry (offsetTop wobbles negative) + overscroll flag.
+    h.geom.overscroll = true
+    for (let f = 1; f <= 10; f++) {
+      h.geom.offsetTop = -f * 15
+      if (f === 1) dock.kick()
+      h.frame()
+      expect(h.applied.length).toBe(writes) // frozen: no writes during the elastic phase
+      expect(h.settled.length).toBe(1) // and no settle mid-elastic
+    }
+    // The loop must still be alive (overscroll resets stability — no park mid-elastic).
+    expect(h.pendingFrames()).toBe(1)
+    // Release: elastic snaps back, keyboard still up — tracking resumes immediately.
+    h.geom.overscroll = false
+    h.geom.offsetTop = 0
+    h.frame()
+    expectFlush(h)
+    expect(h.lastApplied()).toBe(KEYBOARD_H)
     dock.stop()
   })
 

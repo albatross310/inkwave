@@ -98,21 +98,27 @@ import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/docum
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
 
 // ─── Toolbar slot customisation ───
-type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page'
+// ONE reorderable population (2026-07-11, Peter's round 2): the main-row circles AND the
+// ▲-menu overflow — the S style toggle and ⚙ settings are slots too. SLOT_COUNT ride the
+// row; the rest live in the ▲ drop-up (pool minus row). Only ▲ and ⋮ are fixed.
+type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings'
 const SLOT_KEY = 'inkwave-toolbar-slots'
-const DEFAULT_SLOTS: [SlotId, SlotId, SlotId, SlotId] = ['bib', 'guide', 'math', 'receipt']
-const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page']
+const SLOT_COUNT = 6
+const DEFAULT_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'style', 'settings']
+const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page', 'style', 'settings']
 
-function loadToolbarSlots(): [SlotId, SlotId, SlotId, SlotId] {
+function loadToolbarSlots(): SlotId[] {
   try {
     const raw = localStorage.getItem(SLOT_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as unknown
-      if (Array.isArray(parsed) && parsed.length >= 4) {
-        const slice = parsed.slice(0, 4)
-        const valid = slice.every(id => (ALL_SLOTS as string[]).includes(id as string))
-        const unique = new Set(slice).size === 4
-        if (valid && unique) return slice as [SlotId, SlotId, SlotId, SlotId]
+      if (Array.isArray(parsed)) {
+        // Legacy 4-slot configs (pre style/settings-as-slots) migrate by appending the two
+        // buttons that used to be fixed after the slots — same visual order as before.
+        const slice = parsed.length === 4 ? [...parsed, 'style', 'settings'] : parsed.slice(0, SLOT_COUNT)
+        const valid = slice.length === SLOT_COUNT && slice.every(id => (ALL_SLOTS as string[]).includes(id as string))
+        const unique = new Set(slice).size === SLOT_COUNT
+        if (valid && unique) return slice as SlotId[]
       }
     }
   } catch {}
@@ -382,19 +388,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [])
 
   // Toolbar customisation slots
-  const [toolbarSlots, setToolbarSlots] = useState<[SlotId, SlotId, SlotId, SlotId]>(loadToolbarSlots)
+  const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(loadToolbarSlots)
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
-  function updateSlots(newSlots: [SlotId, SlotId, SlotId, SlotId]) {
+  function updateSlots(newSlots: SlotId[]) {
     setToolbarSlots(newSlots)
     try { localStorage.setItem(SLOT_KEY, JSON.stringify(newSlots)) } catch {}
   }
 
   const dragIdRef = useRef<SlotId | null>(null)
 
-  // ─── Phone: touch-hold drag-to-reorder for the 4 slot circles ──────────────
+  // ─── Phone: touch-hold drag-to-reorder for the row's slot circles ──────────
   // HTML5 drag events never fire from touch in this UI (and the iOS long-press guards
   // deliberately swallow the native gestures), so phone reorder is hand-rolled: hold a
   // circle ~400ms → it arms (scale-up pulse = the haptic-feel cue), drag horizontally →
@@ -459,7 +465,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (el) { el.style.transform = ''; el.style.transition = ''; el.style.zIndex = ''; el.style.position = '' }
       setSlotDragView(null)
       if (commit && overIdx !== fromIdx) {
-        updateSlots(moveSlot(toolbarSlots, fromIdx, overIdx) as [SlotId, SlotId, SlotId, SlotId])
+        updateSlots(moveSlot(toolbarSlots, fromIdx, overIdx))
       }
     }
     if (el && commit) {
@@ -511,6 +517,101 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     },
     onTouchEnd: () => endSlotDrag(true),
     onTouchCancel: () => endSlotDrag(false),
+  })
+
+  // ─── Phone: touch-hold drag FROM the ▲ drop-up ONTO a row slot ─────────────
+  // The overflow entries are the same population as the row circles — hold one (same 400ms
+  // arm + pulse), drag it down over the row, the hovered slot shrinks/dims (it will be
+  // displaced back into the ▲ pool), release to swap. 2D follow (popup sits above the row).
+  const popupDragRef = useRef<{
+    id: SlotId
+    el: HTMLElement
+    startX: number
+    startY: number
+    slotRects: DOMRect[]
+    armed: boolean
+    dropping: boolean
+    timer: number
+    targetIdx: number | null
+  } | null>(null)
+  const [popupDragTarget, setPopupDragTarget] = useState<number | null>(null)
+  const armPopupDrag = () => {
+    const st = popupDragRef.current
+    if (!st) return
+    const rects = toolbarSlots.map((_, j) => slotElsRef.current[j]?.getBoundingClientRect())
+    if (rects.some(r => !r)) { popupDragRef.current = null; return }
+    st.slotRects = rects as DOMRect[]
+    st.armed = true
+    st.el.style.zIndex = '40'
+    st.el.style.position = 'relative'
+    slotDragStyle(st.el as HTMLDivElement, 'scale(1.18)', 'transform 120ms ease')
+    setPopupDragActive(true)
+  }
+  const endPopupDrag = (commit: boolean) => {
+    const st = popupDragRef.current
+    if (!st) return
+    clearTimeout(st.timer)
+    if (!st.armed || st.dropping) { if (!st.armed) popupDragRef.current = null; return }
+    st.dropping = true
+    suppressSlotClickUntilRef.current = Date.now() + 400
+    popupDragRef.current = null
+    st.el.style.transform = ''
+    st.el.style.transition = ''
+    st.el.style.zIndex = ''
+    st.el.style.position = ''
+    setPopupDragTarget(null)
+    setPopupDragActive(false)
+    if (commit && st.targetIdx != null) {
+      // Swap: the popup entry takes the hovered slot; the displaced circle returns to the
+      // ▲ pool (it's simply no longer in the slots array). Same semantics as desktop's
+      // popup→row HTML5 drop.
+      const next = [...toolbarSlots]
+      next[st.targetIdx] = st.id
+      updateSlots(next)
+      setToolbarPickerOpen(false)
+    }
+  }
+  const [popupDragActive, setPopupDragActive] = useState(false)
+  const popupTouchHandlers = (id: SlotId) => ({
+    onTouchStart: (e: React.TouchEvent) => {
+      if (e.touches.length !== 1 || popupDragRef.current || slotDragRef.current) return
+      const t = e.touches[0]
+      const el = e.currentTarget as HTMLElement
+      popupDragRef.current = {
+        id, el,
+        startX: t.clientX,
+        startY: t.clientY,
+        slotRects: [],
+        armed: false,
+        dropping: false,
+        timer: window.setTimeout(armPopupDrag, HOLD_MS),
+        targetIdx: null,
+      }
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      const st = popupDragRef.current
+      if (!st || st.dropping) return
+      const t = e.touches[0]
+      const dx = t.clientX - st.startX
+      const dy = t.clientY - st.startY
+      if (!st.armed) {
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(st.timer); popupDragRef.current = null }
+        return
+      }
+      slotDragStyle(st.el as HTMLDivElement, `translate(${dx}px, ${dy}px) scale(1.18)`, 'none')
+      // Hit-test the FINGER against the row slots (rects inflated 8px — forgiving targets).
+      let target: number | null = null
+      for (let j = 0; j < st.slotRects.length; j++) {
+        const r = st.slotRects[j]
+        if (t.clientX >= r.left - 8 && t.clientX <= r.right + 8 && t.clientY >= r.top - 8 && t.clientY <= r.bottom + 8) { target = j; break }
+      }
+      if (target !== st.targetIdx) {
+        st.targetIdx = target
+        setPopupDragTarget(target)
+      }
+    },
+    onTouchEnd: () => endPopupDrag(true),
+    onTouchCancel: () => endPopupDrag(false),
   })
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -1086,18 +1187,44 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const vv = window.visualViewport
     if (!vv) return
     const root = document.documentElement
+    let lastApplied = 0
+    let clearTransTimer = 0
+    let revealTimers: number[] = []
     const dock = createDock({
-      readGeom: () => ({
-        innerHeight: window.innerHeight,
-        offsetTop: vv.offsetTop,
-        height: vv.height,
-        scale: vv.scale,
-      }),
+      readGeom: () => {
+        // Rubber-band detection: during elastic overscroll fixed elements ride the elastic
+        // layout viewport and vv geometry goes garbage — the dock freezes (see toolbarDock.ts).
+        const se = document.scrollingElement
+        const maxY = se ? Math.max(0, se.scrollHeight - se.clientHeight) : Infinity
+        const y = window.scrollY
+        return {
+          innerHeight: window.innerHeight,
+          offsetTop: vv.offsetTop,
+          height: vv.height,
+          scale: vv.scale,
+          overscroll: y < -1 || y > maxY + 1,
+        }
+      },
       apply: (off) => {
         vvSettledRef.current = false
+        revealTimers.forEach(clearTimeout)
+        revealTimers = []
         root.style.setProperty('--iw-kb-offset', `${off}px`)
         const wrap = footerWrapRef.current
-        if (wrap) wrap.style.transform = off ? `translate3d(0, ${-off}px, 0)` : ''
+        if (wrap) {
+          // KEYBOARD-SLIDE CHASE (Peter round 2, nice-to-have): iOS reports the keyboard's
+          // final geometry in one/few big resize steps — a raw write teleports the bar. A
+          // LARGE jump gets a short ease-out transition (transform-only; CSS retargets
+          // smoothly if another step lands mid-glide), so the bar visually chases the slide.
+          // Small per-frame follow deltas (pans, momentum) stay immediate — never transition
+          // those, the compositor tracking IS the mechanism.
+          clearTimeout(clearTransTimer)
+          const jump = Math.abs(off - lastApplied)
+          wrap.style.transition = jump > 60 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
+          if (jump > 60) clearTransTimer = window.setTimeout(() => { wrap.style.transition = '' }, 300)
+          wrap.style.transform = off ? `translate3d(0, ${-off}px, 0)` : ''
+        }
+        lastApplied = off
       },
       onSettled: () => {
         // Geometry is still — NOW follow-up reveals can't fight an in-flight iOS pan.
@@ -1105,6 +1232,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         const el = footerRef.current
         if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
         keepCaretRef.current()
+        // TAP-REVEAL (Peter round 2: "revealed the moment you tap, not on the first key"):
+        // iOS runs its OWN focus pan AFTER the keyboard geometry settles, which can re-park
+        // the caret just above the keyboard but BEHIND the pill. Two delayed no-op-guarded
+        // passes (keepCaret only scrolls when actually obstructed >4px — the single-reveal
+        // rule holds) catch whatever iOS does after our settle. Cleared on any new episode.
+        revealTimers = [
+          window.setTimeout(() => keepCaretRef.current(), 250),
+          window.setTimeout(() => keepCaretRef.current(), 600),
+        ]
       },
       raf: (cb) => requestAnimationFrame(cb),
       caf: (id) => cancelAnimationFrame(id),
@@ -1128,8 +1264,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       window.removeEventListener('scroll', check)
       clearInterval(watchdog)
       dock.stop()
+      revealTimers.forEach(clearTimeout)
+      clearTimeout(clearTransTimer)
       root.style.removeProperty('--iw-kb-offset')
-      if (footerWrapRef.current) footerWrapRef.current.style.transform = ''
+      if (footerWrapRef.current) {
+        footerWrapRef.current.style.transform = ''
+        footerWrapRef.current.style.transition = ''
+      }
       vvSettledRef.current = true
     }
   }, [])
@@ -1191,6 +1332,28 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const el = footerRef.current
     if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // MENU FOCUS GUARD (Peter round 2: "the toolbar retracts when opening menus"): on iOS any tap
+  // outside the contenteditable blurs it → the keyboard dismisses → the docked pill (and the
+  // just-opened menu) slide to the screen bottom mid-interaction. The pill used to preventDefault
+  // its own pointerdowns, but every drop-up PANEL is PORTALED to <body> — taps inside Settings/
+  // Options/Page/Guide/Math dropped focus. One document-level capture guard covers the pill AND
+  // every portaled panel (they all carry .iw-touch-guard): while the editor owns focus,
+  // preventDefault pointerdowns on guard surfaces so focus (and the keyboard) stay put. Real
+  // form fields inside menus are exempt — they legitimately take focus.
+  useEffect(() => {
+    if (!isTouchDevice()) return
+    const onPointerDown = (e: PointerEvent) => {
+      const pm = editorRef.current?.view.dom
+      if (!pm || !(pm === document.activeElement || pm.contains(document.activeElement))) return
+      const t = e.target as Element | null
+      if (!t?.closest?.('.iw-touch-guard')) return
+      if (t.closest('input, textarea, select, [contenteditable]')) return
+      e.preventDefault()
+    }
+    document.addEventListener('pointerdown', onPointerDown, { capture: true })
+    return () => document.removeEventListener('pointerdown', onPointerDown, { capture: true } as EventListenerOptions)
+  }, [])
 
   // iOS touch-and-hold guard, half two (half one = .iw-touch-guard user-select CSS): a touch that
   // STARTS on the toolbar or any of its drop-ups must never start a text selection mid-slide when
@@ -1263,7 +1426,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const onChange = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => keepCaretRef.current()) }
     editor.on('selectionUpdate', onChange)
     editor.on('update', onChange)
-    return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); cancelAnimationFrame(raf) }
+    // Fresh focus (tap-to-type): the reveal belongs to the tap, not the first keystroke — the
+    // dock's settle + its delayed passes do the work once the keyboard geometry lands; this
+    // covers the keyboard-ALREADY-up refocus case where no geometry episode fires.
+    editor.on('focus', onChange)
+    return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); editor.off('focus', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reveal gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
@@ -1389,10 +1556,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [editor])
-  // When the keyboard opens, the caret may already be behind it — lift it once.
-  useEffect(() => {
-    if (keyboardUp) requestAnimationFrame(() => keepCaretRef.current())
-  }, [keyboardUp])
+  // (The old "lift once when keyboardUp flips" effect is gone: it fired MID-SLIDE, the settle
+  // gate skipped it, and it never retried — the caret only surfaced on the first keystroke.
+  // The dock's onSettled + its 250/600ms follow-up passes own that reveal now.)
 
   // Track the paper's right edge in viewport coords (used to position the options menu).
   // Viewport-space consumer (fixed chrome), so the VISUAL rect is the right value — but it moves
@@ -2247,6 +2413,47 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
 
+  // ONE renderer for every slot button — the same population renders in the main row and in
+  // the ▲ drop-up (wherever the id currently lives), so behaviour can't drift between homes.
+  const renderSlotButton = (id: SlotId, inRow: boolean) => (
+    <>
+      {id === 'guide' && <GuideMenu />}
+      {id === 'math' && <MathMenuButton editor={editor} />}
+      {id === 'bib' && (
+        <button ref={inRow ? bibBtnRef : undefined} type="button"
+          onClick={() => setBibPanelOpen(o => !o)}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+          title="Bibliography / citations"
+        >
+          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
+        </button>
+      )}
+      {id === 'receipt' && (
+        <button type="button"
+          data-iw-bar="review" onClick={() => toggleBar('review')}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+          title="Review — comments & track changes"
+        >
+          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
+        </button>
+      )}
+      {id === 'page' && <PageMenu editor={editor ?? undefined} />}
+      {id === 'style' && (
+        <button
+          type="button"
+          aria-pressed={styleBarOpen}
+          data-iw-bar="style"
+          onClick={() => toggleBar('style')}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+          title="Style"
+        >
+          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">S</span>
+        </button>
+      )}
+      {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+    </>
+  )
+
   return (
     <ComplianceContext.Provider value={compliance}>
       {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
@@ -2449,15 +2656,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           <div
             ref={footerRef}
             className={`iw-nightable iw-touch-guard pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
-            onPointerDown={isTouch ? (e) => {
-              // Prevent the toolbar from stealing focus from the editor on iOS.
-              // Without this, tapping a toolbar button dismisses the text selection
-              // before the click handler fires, making formatting impossible.
-              const pm = editor?.view.dom
-              if (pm && (pm === document.activeElement || pm.contains(document.activeElement))) {
-                e.preventDefault()
-              }
-            } : undefined}
             style={{
               border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
@@ -2505,13 +2703,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             )}
 
             {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) sizes the EIGHT circles
-                (▲ 4 slots S ⚙ ⋮ — ◈ lives in the ▲ drop-up) to (100vw − 45px)/8 and caps each
-                button's 44px min-WIDTH at the same size; justify-between spreads the ~45px of
-                slack as ~6px breathing-room gaps. py-1.5 (vs desktop py-0.5) gives the row
-                vertical air — the footer RO mirrors whatever height results into --iw-toolbar-h
-                + the PM scroll reserve, so never hardcode the pill height anywhere. */}
+                (▲ + 6 slots + ⋮ — S and ⚙ are SLOTS now; ◈/☁ live in the ▲ drop-up) to
+                (100vw − 45px)/8 and caps each button's 44px min-WIDTH at the same size;
+                justify-between spreads the ~45px of slack as ~6px breathing-room gaps. py-1.5
+                (vs desktop py-0.5) gives the row vertical air — the footer RO mirrors whatever
+                height results into --iw-toolbar-h + the PM scroll reserve, so never hardcode
+                the pill height anywhere. iw-slot-dragging paints every circle's disc opaque
+                while a drag is live so the lifted one passes OVER its neighbours. */}
             {showMainRow && (
-            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'gap-0.5 px-2 py-0.5'}`}
+            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'gap-0.5 px-2 py-0.5'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               onClickCapture={(e) => {
                 // A click synthesised from a just-finished touch-hold drag must not activate the
                 // dropped button (or close the bars) — swallow it here in the capture phase.
@@ -2598,32 +2798,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                       {available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
                       {available.map(id => (
                         <div key={id}
-                          draggable
+                          className="iw-slot"
+                          draggable={!isTouch}
                           onDragStart={() => { dragIdRef.current = id }}
                           onDragEnd={() => { dragIdRef.current = null }}
                           onClick={() => setToolbarPickerOpen(false)}
+                          {...(isTouch ? popupTouchHandlers(id) : {})}
+                          style={isTouch ? { touchAction: 'none' } : undefined}
                         >
-                          {id === 'guide' && <GuideMenu />}
-                          {id === 'math' && <MathMenuButton editor={editor} />}
-                          {id === 'bib' && (
-                            <button type="button"
-                              onClick={() => { setBibPanelOpen(o => !o) }}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Bibliography / citations"
-                            >
-                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
-                            </button>
-                          )}
-                          {id === 'receipt' && (
-                            <button type="button"
-                              data-iw-bar="review" onClick={() => toggleBar('review')}
-                              className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                              title="Review — comments & track changes"
-                            >
-                              <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
-                            </button>
-                          )}
-                          {id === 'page' && <PageMenu editor={editor ?? undefined} />}
+                          {renderSlotButton(id, false)}
                         </div>
                       ))}
                     </div>
@@ -2634,6 +2817,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
+                  className="iw-slot"
                   ref={el => { slotElsRef.current[slotIdx] = el }}
                   draggable={!isTouch}
                   onDragStart={() => { dragIdRef.current = slotId }}
@@ -2642,7 +2826,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     e.preventDefault()
                     const from = dragIdRef.current; dragIdRef.current = null
                     if (!from || from === slotId) return
-                    const newSlots = [...toolbarSlots] as typeof toolbarSlots
+                    const newSlots = [...toolbarSlots]
                     const fromIdx = newSlots.indexOf(from as SlotId)
                     if (fromIdx >= 0) newSlots[fromIdx] = slotId  // swap: put old slot where new slot was
                     newSlots[slotIdx] = from as SlotId
@@ -2656,54 +2840,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     // armed drag owns the gesture. Neighbour preview: transform-only FLIP slide;
                     // the transition is dropped the instant the drag ends so the commit's
                     // layout-reorder + transform-reset land as one motionless frame.
-                    const shift = slotDragView && slotIdx !== slotDragView.fromIdx
-                      ? neighborShift(slotIdx, slotDragView.fromIdx, slotDragView.overIdx) * slotDragView.step
-                      : 0
-                    return {
-                      touchAction: 'none' as const,
-                      ...(slotDragView && slotIdx !== slotDragView.fromIdx
-                        ? { transform: `translateX(${shift}px)`, transition: 'transform 180ms ease' }
-                        : {}),
+                    const base: React.CSSProperties = { touchAction: 'none' }
+                    if (slotDragView && slotIdx !== slotDragView.fromIdx) {
+                      const shift = neighborShift(slotIdx, slotDragView.fromIdx, slotDragView.overIdx) * slotDragView.step
+                      base.transform = `translateX(${shift}px)`
+                      base.transition = 'transform 180ms ease'
+                    } else if (popupDragTarget === slotIdx) {
+                      // A ▲-menu entry hovers this slot: it will be displaced back into the
+                      // pool — shrink/dim as the drop preview.
+                      base.transform = 'scale(0.72)'
+                      base.opacity = 0.45
+                      base.transition = 'transform 150ms ease, opacity 150ms ease'
                     }
+                    return base
                   })() : undefined}
                 >
-                  {slotId === 'guide' && <GuideMenu />}
-                  {slotId === 'math' && <MathMenuButton editor={editor} />}
-                  {slotId === 'bib' && (
-                    <button ref={bibBtnRef} type="button"
-                      onClick={() => setBibPanelOpen(o => !o)}
-                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                      title="Bibliography / citations"
-                    >
-                      <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
-                    </button>
-                  )}
-                  {slotId === 'receipt' && (
-                    <button type="button"
-                      data-iw-bar="review" onClick={() => toggleBar('review')}
-                      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                      title="Review — comments & track changes"
-                    >
-                      <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
-                    </button>
-                  )}
-                  {slotId === 'page' && <PageMenu editor={editor ?? undefined} />}
+                  {renderSlotButton(slotId, true)}
                 </div>
               ))}
-              {/* s-in-circle: toggle the style bar; auto-retreats after 5 s of inactivity */}
-              <button
-                type="button"
-                aria-pressed={styleBarOpen}
-                data-iw-bar="style"
-                onClick={() => toggleBar('style')}
-                className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-                title="Style"
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">
-                  S
-                </span>
-              </button>
-              <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />
               <OptionsMenu
                 paperRight={paperRight}
                 installPrompt={installPrompt}

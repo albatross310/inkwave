@@ -390,9 +390,29 @@ write shim, so metadata can say a PDF exists with no local bytes).
   reserve double-counts the keyboard (probed: +180px over-scroll then −84px pull-back on
   alternating Enters — a screen bounce per keystroke). Programmatic caret
   reveals (keepCaret) are FORBIDDEN while the geometry is moving (`isSettled()` false) — they
-  fight iOS's own focus pan (the tap-to-type double-jump); the dock's onSettled runs them once.
-  Never move the lift back into `bottom`/CSS-var positioning, and never transition the wrapper's
-  transform.
+  fight iOS's own focus pan (the tap-to-type double-jump); the dock's onSettled runs them once,
+  then re-runs at +250/600ms (no-op-guarded — iOS's focus pan can land AFTER our settle and
+  re-hide the caret behind the pill; the tap, not the first keystroke, owns the reveal).
+  Never move the lift back into `bottom`/CSS-var positioning. Transitioning the transform is
+  allowed ONLY for large event-driven jumps (>60px = a keyboard show/hide step gets a 250ms
+  ease-out "chase"); per-frame follow writes (pans/momentum) must stay transition-free.
+  Rubber-band/pull-to-refresh: kbOffsetFor clamps negative offsetTop AND the dock freezes
+  whole while `overscroll` (scrollY outside [0,max]) — elastic geometry is garbage and the
+  old math rode the bar to mid-screen.
+- **Toolbar menus must not dismiss the keyboard (2026-07-12).** Any tap outside the
+  contenteditable blurs it on iOS → keyboard retracts → the docked pill + its just-opened menu
+  slide to the screen bottom. A document-level capture pointerdown guard preventDefaults taps
+  on `.iw-touch-guard` surfaces (the pill AND every PORTALED drop-up panel — Settings/Options/
+  Page/Guide/Math all carry the class) while the editor owns focus; real form fields
+  (input/textarea/select/contenteditable) are exempt. New footer drop-ups MUST carry
+  `iw-touch-guard` or their taps will retract the keyboard.
+- **Toolbar slots are ONE population (2026-07-12):** the 6 main-row circles + the ▲ drop-up
+  overflow (S style and ⚙ settings are slots too; only ▲/⋮ fixed). `inkwave-toolbar-slots`
+  stores 6 (legacy 4 migrates by appending style,settings). Touch: hold-drag reorders the row
+  (insertion semantics, FLIP previews) and hold-drag a ▲ entry ONTO a row slot to swap it in;
+  desktop keeps HTML5 drag. During any drag the circle discs go opaque
+  (`--iw-slot-drag-bg`; night token in the nightable block) so the lifted circle passes OVER
+  neighbours.
 
 ## Working model (how these sessions run)
 

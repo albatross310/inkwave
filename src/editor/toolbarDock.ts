@@ -25,6 +25,13 @@ export interface DockGeom {
   height: number
   /** visualViewport.scale — >1 means pinch-zoomed (fixed elements don't scale; pin at 0). */
   scale: number
+  /**
+   * The page is in a rubber-band phase (scrollY < 0 at the top — pull-to-refresh — or past
+   * the max at the bottom). Fixed elements ride the elastic layout viewport WITH the content
+   * and vv.offsetTop goes elastic, so geometry reads are garbage — the dock FREEZES its last
+   * good value until the elastic releases.
+   */
+  overscroll?: boolean
 }
 
 /**
@@ -32,10 +39,13 @@ export interface DockGeom {
  * edge = how far a fixed-bottom element must LIFT (translateY(-off)) to sit flush
  * on the keyboard / collapsed-URL-bar assembly. 0 when nothing overlaps.
  * Pinch-zoom shrinks vv.height without moving fixed elements — pin at 0 there.
+ * offsetTop is clamped at 0: NEGATIVE offsetTop (top rubber-band / pull-to-refresh)
+ * is elastic displacement, not keyboard space — counting it lifted the bar to
+ * mid-screen. The lift can never exceed the REAL keyboard/URL-bar overlap.
  */
 export function kbOffsetFor(g: DockGeom): number {
   if (g.scale > 1.01) return 0
-  return Math.max(0, Math.round(g.innerHeight - g.offsetTop - g.height))
+  return Math.max(0, Math.round(g.innerHeight - Math.max(0, g.offsetTop) - g.height))
 }
 
 /**
@@ -91,7 +101,14 @@ export function createDock(host: DockHost): Dock {
   }
 
   const step = () => {
-    const off = measure()
+    const g = host.readGeom()
+    if (g?.overscroll) {
+      // Elastic phase: freeze the last good value; keep the loop alive (no settle, no
+      // park) so tracking resumes the frame the rubber-band releases.
+      stable = 0
+      return
+    }
+    const off = g ? kbOffsetFor(g) : 0
     if (off !== lastOff) {
       lastOff = off
       stable = 0
