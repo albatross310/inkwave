@@ -341,6 +341,13 @@ as the water slows.
 
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
 
+KNOWN RESIDUALS (Peter's live verdict, 2026-07-12, build 72783da — "workable on the whole"):
+no consistent tick remains, but inconsistent performance artifacts persist, worst on PHONE then
+Chrome: occasional blue flash; white lines briefly lagging their wave. Probes pass 9/9 — these
+are real-device/raster-scheduling class issues the emulated probes don't catch. Next wave round
+starts HERE, not from "all green"; candidate tools: on-device capture, WebKit raster ahead-of-time
+hints, reduced phone pool density.
+
 ## Open pipeline + cloud caching (2026-07-09)
 
 `storage/openCache.ts`: cloud `.studio` bytes cached in OPFS keyed by change-tag (Graph cTag/eTag,
