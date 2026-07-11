@@ -219,6 +219,86 @@ async function prepareClone(clone: HTMLElement): Promise<void> {
   await Promise.all(jobs)
 }
 
+// ── Band trimming — the capture-cost fix ─────────────────────────────────────────────────────
+// Serialising + laying out the WHOLE pane in the SVG document cost seconds on a thesis-scale doc
+// (measured 4.5-13s per capture). Only the crop band matters, so the clone is trimmed to it:
+// far content is Range-deleted at SAFE block boundaries and a pixel-exact spacer preserves the
+// kept band's offsets. Safe boundaries: the canonical `.inkwave-page-gap` widgets (block-in-
+// inline — text after one always starts a fresh line, so removing content before an earlier gap
+// or after a later one can't re-wrap the kept band; the absolute `.inkwave-sheets` panel layer
+// lives OUTSIDE the text flow and is untouched); fallback for the diff panel: its own block
+// children. The minimap (short content) skips trimming entirely.
+function trimCloneToBand(liveEl: HTMLElement, clone: HTMLElement, y0: number, y1: number): void {
+  if (liveEl.scrollHeight <= (y1 - y0) * 3 + 400) return // short content — not worth it
+  const elRect = liveEl.getBoundingClientRect()
+  // CSS `zoom` (the diff pane's wrapper / the doc paper) renders rects in VISUAL px while
+  // scrollTop/clientHeight stay LOCAL — divide rect deltas by the effective zoom factor.
+  const zf = elRect.width > 0 && liveEl.offsetWidth > 0 ? elRect.width / liveEl.offsetWidth : 1
+  const yTop = (r: DOMRect) => (r.top - elRect.top) / zf + liveEl.scrollTop
+  const mkSpacer = (h: number) => {
+    const sp = document.createElement('div')
+    sp.style.cssText = `display:block;height:${Math.max(0, h)}px;margin:0;padding:0;border:0;overflow:hidden;`
+    return sp
+  }
+  const liveGaps = Array.from(liveEl.querySelectorAll<HTMLElement>('.inkwave-page-gap'))
+  const liveFlow = liveEl.querySelector<HTMLElement>('.tiptap-editor')
+  const cloneFlow = clone.querySelector<HTMLElement>('.tiptap-editor')
+  if (liveGaps.length >= 2 && liveFlow && cloneFlow) {
+    const cloneGaps = Array.from(clone.querySelectorAll<HTMLElement>('.inkwave-page-gap'))
+    if (cloneGaps.length !== liveGaps.length) return
+    let si = -1, ei = -1
+    for (let i = 0; i < liveGaps.length; i++) {
+      const r = liveGaps[i].getBoundingClientRect()
+      if (yTop(r) + r.height < y0) si = i          // last gap fully above the band
+      if (ei < 0 && yTop(r) > y1) { ei = i; break } // first gap fully below the band
+    }
+    if (ei >= 0) { // suffix first — earlier indices/rects stay valid
+      const r = document.createRange()
+      r.setStartAfter(cloneGaps[ei])
+      r.setEnd(cloneFlow, cloneFlow.childNodes.length)
+      r.deleteContents()
+    }
+    if (si >= 0) {
+      const r = document.createRange()
+      r.setStart(cloneFlow, 0)
+      r.setEndBefore(cloneGaps[si])
+      r.deleteContents()
+      const fr = liveFlow.getBoundingClientRect()
+      const fcs = getComputedStyle(liveFlow)
+      const gcs = getComputedStyle(liveGaps[si])
+      // The spacer lives INSIDE the (possibly zoomed) flow — its height must be flow-local px.
+      const fzf = fr.width > 0 && liveFlow.offsetWidth > 0 ? fr.width / liveFlow.offsetWidth : 1
+      const h = (liveGaps[si].getBoundingClientRect().top - fr.top) / fzf
+        - (parseFloat(fcs.paddingTop) || 0) - (parseFloat(fcs.borderTopWidth) || 0)
+        - (parseFloat(gcs.marginTop) || 0)
+      cloneFlow.insertBefore(mkSpacer(h), cloneFlow.firstChild)
+    }
+    return
+  }
+  // Fallback: direct block children of the scroller (the diff panel's hunk list).
+  const liveKids = Array.from(liveEl.children) as HTMLElement[]
+  const cloneKids = Array.from(clone.children) as HTMLElement[]
+  if (liveKids.length !== cloneKids.length || liveKids.length < 8) return
+  let first = -1, last = -1
+  const rects = liveKids.map((k) => k.getBoundingClientRect())
+  for (let i = 0; i < liveKids.length; i++) {
+    const pos = getComputedStyle(liveKids[i]).position
+    const inBand = pos === 'absolute' || pos === 'fixed' || pos === 'sticky' ||
+      (yTop(rects[i]) + rects[i].height >= y0 && yTop(rects[i]) <= y1)
+    if (inBand) { if (first < 0) first = i; last = i }
+  }
+  if (first < 0) return
+  for (let i = cloneKids.length - 1; i > last; i--) cloneKids[i].remove()
+  for (let i = first - 1; i >= 0; i--) cloneKids[i].remove()
+  if (first > 0) {
+    const cs = getComputedStyle(liveEl)
+    const kcs = getComputedStyle(liveKids[first])
+    const h = yTop(rects[first]) - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.borderTopWidth) || 0)
+      - (parseFloat(kcs.marginTop) || 0)
+    clone.insertBefore(mkSpacer(h), clone.firstChild)
+  }
+}
+
 function resolveBg(el: HTMLElement): string {
   let n: HTMLElement | null = el
   while (n) {
@@ -252,6 +332,10 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
   clone.style.width = `${w}px`
   clone.style.height = `${h}px`
   clone.style.overflow = 'visible'
+  // Trim the clone to the crop band (± half a viewport of slack) — the SVG document then lays
+  // out ~2-3 pages instead of a whole thesis (whole-pane captures measured 4.5-13s; trimmed
+  // captures are a few hundred ms).
+  try { trimCloneToBand(el, clone, y - h / 2, y + h + h / 2) } catch { /* untrimmed still correct */ }
 
   const wrap = document.createElement('div')
   wrap.className = 'iw-raster-root'
@@ -277,6 +361,8 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
 
   const xml = new XMLSerializer().serializeToString(wrap)
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xml}</foreignObject></svg>`
+  probePerf('scrub.capture.prep', performance.now() - t0)
+  const tImg = performance.now()
   const img = new Image()
   img.decoding = 'async'
   const loaded = new Promise<boolean>((resolve) => {
@@ -286,6 +372,7 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
   if (!(await loaded)) return null
   try { await img.decode() } catch { /* decode() is advisory — drawImage below still works */ }
+  probePerf('scrub.capture.img', performance.now() - tImg)
 
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(w * scale))
@@ -297,7 +384,9 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
   canvas.style.height = `${h}px`
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
+  const tDraw = performance.now()
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  probePerf('scrub.capture.draw', performance.now() - tDraw)
   // Blank-detect BEFORE the opaque backstop: engines that refuse foreignObject-in-image (the
   // documented WebKit failure mode) paint nothing — don't cache an empty rectangle. A tainted
   // canvas throws here; it still displays fine, so treat taint as success.

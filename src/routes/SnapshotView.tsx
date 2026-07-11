@@ -860,7 +860,7 @@ function SplitDiffView({
     show: boolean
     onBack: () => void; canBack: boolean
     onFwd: () => void; canFwd: boolean
-    onScrub: (steps: number) => void
+    onScrub: (steps: number, inputAt?: number) => void
     onVerBack: () => void; canVerBack: boolean
     onVerFwd: () => void; canVerFwd: boolean
     hasVersions: boolean
@@ -1924,7 +1924,7 @@ function SplitDiffView({
       let net = 0
       if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net += -s } // reversed: right → previous
       if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net += -s }
-      if (net) nav?.onScrub(net)
+      if (net) nav?.onScrub(net, e.timeStamp)
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
     R?.addEventListener('wheel', onWheel, { passive: false })
@@ -2449,6 +2449,17 @@ export function SnapshotView() {
   const lastNavInputAtRef = useRef(0)
   const unfreezeTimerRef = useRef<number | undefined>(undefined)
   useEffect(() => () => window.clearTimeout(unfreezeTimerRef.current), [])
+  // INPUT-TIME rapid detection (round 3): goTo runs AFTER the previous step's synchronous React
+  // render, so goTo-to-goTo spacing ≈ render time — a heavy cold flip (300-500ms) kept every
+  // pair >250ms and rapid mode never engaged EXACTLY when it was needed (probed). Events carry
+  // hardware timestamps (e.timeStamp, performance.now() clock): each input source stamps ONCE
+  // per user input; goTo checks the last INPUT pair. The old goTo-spacing check stays as an OR.
+  const inputTimesRef = useRef({ prev: -1e9, last: -1e9 })
+  const stampInput = useCallback((t?: number) => {
+    const r = inputTimesRef.current
+    r.prev = r.last
+    r.last = typeof t === 'number' && t > 0 ? t : performance.now()
+  }, [])
 
   // ── Scrub bitmap presenter (round 3 — editor/scrubRaster.ts) ─────────────────────────────────
   // During rapid stepping the panes flip through pre-rasterised bitmaps (ms-speed, zero layout);
@@ -2467,7 +2478,8 @@ export function SnapshotView() {
   const goTo = useCallback((s: Snapshot) => {
     probePerf('nav.goTo', 0)
     const now = performance.now()
-    if (now - lastNavInputAtRef.current < 250) {
+    const inp = inputTimesRef.current
+    if (now - lastNavInputAtRef.current < 250 || inp.last - inp.prev < 250) {
       // Second-plus step of a rapid stream → freeze the heavy view until inputs go quiet, and
       // flip the pane overlays to the target's cached bitmaps (nearest on a miss) — the ms-speed
       // scrub Peter asked for; the real render catches up at rest (presenter holds the overlay
@@ -2490,10 +2502,12 @@ export function SnapshotView() {
     probePerf('nav.returned', 0)
   }, [navigate, presenter])
 
-  const goBack    = useCallback(() => { if (idx > 0) { setNavDir('back'); setLeftSnapFlash(n => n + 1); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo])
-  const goFwd     = useCallback(() => { if (idx < allSnapshots.length - 1) { setNavDir('fwd'); setRightSnapFlash(n => n + 1); goTo(allSnapshots[idx + 1]) } }, [idx, allSnapshots, goTo])
-  const goVerBack = useCallback(() => { if (groupIdx > 0) { setNavDir('back'); setLeftVerFlash(n => n + 1); goTo(groups[groupIdx - 1].items[0]) } }, [groupIdx, groups, goTo])
-  const goVerFwd  = useCallback(() => { if (groupIdx >= 0 && groupIdx < groups.length - 1) { setNavDir('fwd'); setRightVerFlash(n => n + 1); goTo(groups[groupIdx + 1].items[0]) } }, [groupIdx, groups, goTo])
+  // Nav actions stamp ONE input each. They double as onClick handlers (React passes the event) —
+  // only a real numeric timestamp (the keyboard path) is used; anything else falls back to now().
+  const goBack    = useCallback((t?: unknown) => { if (idx > 0) { stampInput(typeof t === 'number' ? t : undefined); setNavDir('back'); setLeftSnapFlash(n => n + 1); goTo(allSnapshots[idx - 1]) } }, [idx, allSnapshots, goTo, stampInput])
+  const goFwd     = useCallback((t?: unknown) => { if (idx < allSnapshots.length - 1) { stampInput(typeof t === 'number' ? t : undefined); setNavDir('fwd'); setRightSnapFlash(n => n + 1); goTo(allSnapshots[idx + 1]) } }, [idx, allSnapshots, goTo, stampInput])
+  const goVerBack = useCallback(() => { if (groupIdx > 0) { stampInput(); setNavDir('back'); setLeftVerFlash(n => n + 1); goTo(groups[groupIdx - 1].items[0]) } }, [groupIdx, groups, goTo, stampInput])
+  const goVerFwd  = useCallback(() => { if (groupIdx >= 0 && groupIdx < groups.length - 1) { stampInput(); setNavDir('fwd'); setRightVerFlash(n => n + 1); goTo(groups[groupIdx + 1].items[0]) } }, [groupIdx, groups, goTo, stampInput])
 
   const canBack    = idx > 0
   const canFwd     = idx >= 0 && idx < allSnapshots.length - 1
@@ -2504,8 +2518,8 @@ export function SnapshotView() {
   // ── Keyboard ← / → ──────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); goBack() }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goFwd() }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); goBack(e.timeStamp) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); goFwd(e.timeStamp) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -2524,8 +2538,9 @@ export function SnapshotView() {
   useEffect(() => { virtualIdxRef.current = idx }, [idx]) // reality catch-up (buttons/keys too)
   const pendingStepsRef = useRef(0)
   const scrubRafRef = useRef(0)
-  const scrubBy = useCallback((steps: number) => {
+  const scrubBy = useCallback((steps: number, inputAt?: number) => {
     if (!steps) return
+    stampInput(inputAt) // one stamp per scrub input (touch/trackpad event time — see inputTimesRef)
     pendingStepsRef.current += steps
     if (scrubRafRef.current) return
     scrubRafRef.current = requestAnimationFrame(() => {
@@ -2541,7 +2556,7 @@ export function SnapshotView() {
       setNavDir(n > 0 ? 'fwd' : 'back')
       goTo(all[target])
     })
-  }, [goTo])
+  }, [goTo, stampInput])
   useEffect(() => () => cancelAnimationFrame(scrubRafRef.current), [])
   const wheelAccum = useRef(0)
   useEffect(() => {
@@ -2563,6 +2578,7 @@ export function SnapshotView() {
       if (cur < 0 || !all.length) return
       const target = Math.max(0, Math.min(all.length - 1, cur + n))
       if (target === cur) return
+      stampInput(e.timeStamp)
       setNavDir(n > 0 ? 'fwd' : 'back')
       goTo(all[target])
     }
@@ -2570,7 +2586,7 @@ export function SnapshotView() {
     // pre-scroll before the snap kicks in).
     window.addEventListener('wheel', onWheel, { passive: false, capture: true })
     return () => window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
-  }, [goTo])
+  }, [goTo, stampInput])
 
   // ── Touch swipe → snapshot scrub (phone) ──────────────────────────────────────
   // TWO modes, split by a PRESS-AND-HOLD (Peter, round 2: "a single flick goes over lots of
@@ -2632,13 +2648,13 @@ export function SnapshotView() {
       // Slide LEFT = NEXT version, slide RIGHT = previous — the natural page-turn feel.
       if (!armed) {
         // FLICK: exactly one step per gesture, however long the swipe.
-        if (!flicked && Math.abs(accum) >= FIRST) { flicked = true; scrubBy(accum > 0 ? -1 : 1) }
+        if (!flicked && Math.abs(accum) >= FIRST) { flicked = true; scrubBy(accum > 0 ? -1 : 1, e.timeStamp) }
         return
       }
       let net = 0
       if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net -= s }
       if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net -= s }
-      if (net) scrubBy(net)
+      if (net) scrubBy(net, e.timeStamp)
     }
     const onEnd = () => { dir = '?'; panEl = null; flicked = false; armed = false }
     el.addEventListener('touchstart', onStart, { passive: true })
