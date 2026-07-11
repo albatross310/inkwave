@@ -28,7 +28,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
-import { forceCanonicalContext, CANONICAL_FONT_SIZE } from '../canonicalMeasure'
+import { forceCanonicalContext } from '../canonicalMeasure'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
@@ -319,180 +319,47 @@ function computeBreaks(
   return { decos, sig: sig.join('|') }
 }
 
-// ─── INCREMENTAL BREAK RECOMPUTE (2026-07-12, round-5: "do the next step for enter/backspace") ──
-// The full measure's dominant cost was never the reads — it is the TWO full-document reflows the
-// forced canonical context implies (force → first read reflows the whole doc at canonical width;
-// restore + scroll-clamp reflows it back: phase-probed at ~300-500ms + 259-637ms of a ~1s phone
-// measure). This path produces the SAME lines without touching the live layout at all:
-//   • unchanged blocks (node identity, vs the last measure's IncMeta) reuse their cached
-//     block-relative lines; their absolute tops are the PREVIOUS measure's floats — bit-identical
-//     for blocks above the edit, one shared delta added below it;
-//   • changed blocks are measured in a hidden MEASUREMENT HOST that mirrors the canonical context
-//     exactly (same .ProseMirror classes so every stylesheet rule applies, canonical font/zoom
-//     vars inline, width = the captured canonical block width, cloned LIVE block DOM with any
-//     nested gap widgets stripped — the same "natural wrapping" the gap-clear dispatch used to
-//     provide); block advances (top→next-top) come from the host via a sentinel paragraph;
-//   • the shared computeBreaks loop then decides breaks — byte-identical by construction;
-//   • a break landing on a line with no baked doc position resolves it ON DEMAND in the host:
-//     binary-search the line's first character over the clone's text (single-char Range rects),
-//     map the clone text node to the live block's SAME-INDEX text node, and view.posAtDOM (a DOM
-//     tree walk — no layout, no hit-test). Resolutions bake block-relative, so each (node, line)
-//     pays at most once ever.
-// FALLBACK IS THE RULE: any doubt — non-paragraph blocks in or beside the changed region, a
-// refList inside it, missing cache entries, a failed resolution, oversized regions — returns null
-// and the caller runs the full forced-context measure (which also refreshes IncMeta). Correctness
-// never depends on this path; `inkwave:pagCheck=1` runs BOTH and compares sigs (the equivalence
-// storm probe drives it).
+// ─── SCOPED CANONICAL MEASURE (2026-07-12, round-6 — Peter's redesign spec) ───────────────────
+// Round-5's measurement-host clones could not replicate NodeView-rendered content exactly (a
+// cloned <math-field> loses its shadow DOM; citation labels are React output; atom-interior DOM
+// positions map wrongly), and one bad lazily-baked position poisons every later measure. Peter's
+// verdict: EXACT behaviour near the writer is non-negotiable — approximate nothing locally, defer
+// distance instead. So the scoped measure now runs in the REAL forced canonical context (the same
+// context the full measure uses — real DOM, real NodeViews, real posAtCoords), but with the
+// live-reflow window (.iw-zoom-live: content-visibility on off-screen blocks) so the forced
+// layout renders ~only the region around the edit instead of the whole document:
+//   • unchanged blocks reuse their cached block-relative lines at the previous measure's tops
+//     (bit-identical above the edit; one telescoped delta below) — that data itself came from
+//     earlier REAL canonical measures, never from clones;
+//   • changed blocks are measured LIVE inside the window (scrolled into the canonical viewport so
+//     content-visibility renders them fully);
+//   • gap widgets inside/adjacent to the changed region are cleared by a REGION-SCOPED decoration
+//     dispatch (natural wrapping, exactly like the full measure's whole-set clear);
+//   • any break line whose doc position isn't baked yet resolves via the SAME view.posAtCoords
+//     sample the full path uses (its block scrolled into the window first) — exact by identity.
+// A full measure still runs LAZILY after every scoped one (idle-scheduled, input-gated): it
+// re-verifies everything quietly (sig-guard = no visible change when the scoped result was right)
+// and refreshes the incremental base. And it runs SYNCHRONOUSLY before print (the hard floor —
+// see the beforeprint/measure-now wiring below). FALLBACK IS THE RULE: non-paragraph blocks in or
+// beside the changed region, refLists there, pure end-appends, unrendered blocks, failed
+// resolutions, >24 changed blocks — the full measure answers instead.
+// The live layout IS the canonical layout whenever nothing canonical-relevant is overridden:
+// desktop (no phone width/font rules), editor zoom 1, magnify 1 (mm paper width + desktop side
+// margins are the live defaults — both read from the same settings the canonical force uses).
+// Then forceCanonicalContext would be a byte-level no-op — skip it and save BOTH full-document
+// reflows (the force's first read and the restore's live relayout).
+function canonicalIsLive(surface: HTMLElement | null): boolean {
+  if (phoneLike()) return false
+  if (!surface) return false
+  const zoom = parseFloat(surface.style.getPropertyValue('--iw-editor-zoom') || '') || 1
+  if (zoom !== 1) return false
+  const magnify = parseFloat(surface.style.getPropertyValue('--iw-magnify') || '') || 1
+  if (magnify !== 1) return false
+  if ((surface.querySelector('.ProseMirror') as HTMLElement | null)?.classList.contains('iw-zoom-live')) return false
+  return true
+}
+
 const INC_MAX_CHANGED = 24
-
-interface HostState { host: HTMLElement; clones: Map<object, { el: HTMLElement; top: number }> }
-
-function makeHost(view: EditorView, blockW: number): HostState {
-  const editorEl = view.dom as HTMLElement
-  const host = document.createElement('div')
-  host.className = editorEl.className // .ProseMirror etc — the stylesheet rules must all apply
-  const st = host.style
-  st.position = 'fixed'
-  st.left = '0'
-  st.top = '0'
-  st.width = `${blockW}px`
-  st.padding = '0'
-  st.minHeight = '0'
-  st.visibility = 'hidden' // laid out (rects readable), never painted, never hit-testable
-  st.zIndex = '-1'
-  st.contain = 'layout paint'
-  st.fontSize = CANONICAL_FONT_SIZE
-  st.setProperty('--iw-editor-zoom', '1')
-  st.setProperty('--iw-cv', 'visible')
-  // Inherited ratio vars the block styles consume (line-height, paragraph spacing) — copy the
-  // RESOLVED values the live editor sees so the host matches wherever they were set.
-  const cs = getComputedStyle(editorEl)
-  for (const v of ['--inkwave-lh', '--para-spacing']) {
-    const val = cs.getPropertyValue(v)
-    if (val) st.setProperty(v, val)
-  }
-  document.body.appendChild(host)
-  return { host, clones: new Map() }
-}
-
-// Clone a live block into the host (idempotent per node). Strips nested page-gap widgets — the
-// exact effect the full path's gap-clear dispatch had on measurement.
-function hostClone(view: EditorView, hs: HostState, node: object, offset: number): { el: HTMLElement; top: number } | null {
-  const hit = hs.clones.get(node)
-  if (hit) return hit
-  const live = view.nodeDOM(offset) as HTMLElement | null
-  if (!live || live.nodeType !== 1) return null
-  const el = live.cloneNode(true) as HTMLElement
-  el.querySelectorAll('.inkwave-page-gap').forEach((g) => g.remove())
-  hs.host.appendChild(el)
-  const entry = { el, top: 0 } // top read lazily after append (one layout for the batch)
-  hs.clones.set(node, entry)
-  return entry
-}
-
-// Measure a clone's lines with the SAME formula as the live collector (s=1, no gaps by
-// construction). Returns the BlockLines entry + the block's host-relative top.
-function measureClone(el: HTMLElement, nodeSize: number, offset: number): { entry: BlockLines; top: number } {
-  const br = el.getBoundingClientRect()
-  const entry: BlockLines = {
-    atomLike: false,
-    relStart: 0,             // depth-1 paragraph: $p.before(1) === offset
-    relEnd: nodeSize,        // $p.after(1) === offset + nodeSize
-    relTops: [], relCx: [], relCy: [], relPos: [],
-  }
-  void offset
-  let rects: DOMRect[] = []
-  try { const range = document.createRange(); range.selectNodeContents(el); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
-  if (!rects.length) {
-    entry.relTops.push(0)
-    entry.relCx.push(1)
-    entry.relCy.push(Math.min(8, br.height / 2))
-    entry.relPos.push(NaN)
-  } else {
-    let lastTop = -1e9
-    for (const r of rects) {
-      if (r.width < 1 || r.height < 1 || r.height > 80 || r.top - lastTop <= 3) continue
-      lastTop = r.top
-      entry.relTops.push(r.top - br.top)
-      entry.relCx.push(r.left + 1 - br.left)
-      entry.relCy.push(r.top + r.height / 2 - br.top)
-      entry.relPos.push(NaN)
-    }
-  }
-  return { entry, top: br.top }
-}
-
-const textNodesOf = (root: HTMLElement): Text[] => {
-  const out: Text[] = []
-  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  for (let n = w.nextNode(); n; n = w.nextNode()) out.push(n as Text)
-  return out
-}
-
-// Resolve the doc position of visual line k of `node` WITHOUT the live canonical layout: find the
-// line's first character in the block's HOST CLONE (binary search over single-char Range rects —
-// characters are ordered line-major, so "char top reaches line k's top" is a monotone predicate),
-// then map the clone text node to the live block's same-index text node and posAtDOM it (a DOM
-// tree walk — no layout). Returns the pos (>0) or null (caller bails to the full measure).
-function resolveLineInHost(
-  view: EditorView,
-  hs: HostState,
-  node: { nodeSize: number },
-  offset: number,
-  entry: BlockLines,
-  k: number,
-): number | null {
-  const clone = hostClone(view, hs, node, offset)
-  const live = view.nodeDOM(offset) as HTMLElement | null
-  if (!clone || !live) return null
-  const cloneTexts = textNodesOf(clone.el)
-  const liveTexts = textNodesOf(live)
-  if (cloneTexts.length === 0) {
-    // Empty block: the single line's position is the paragraph start (what posAtCoords resolves
-    // to at the block's own sample point).
-    try { const p = view.posAtDOM(live, 0); return p > 0 ? p : null } catch { return null }
-  }
-  // liveTexts includes gap-widget text? gaps carry no text; page numbers live in the panel layer,
-  // not the widget — but a mismatch in text-node COUNT means the trees no longer parallel: bail.
-  if (liveTexts.length !== cloneTexts.length) return null
-  const cloneTop = clone.el.getBoundingClientRect().top
-  const targetTop = cloneTop + entry.relTops[k] - 3 // 3px tolerance ≪ line height
-  const lens: number[] = []
-  let total = 0
-  for (const t of cloneTexts) { lens.push(total); total += t.data.length }
-  if (total === 0) {
-    try { const p = view.posAtDOM(live, 0); return p > 0 ? p : null } catch { return null }
-  }
-  const charTop = (c: number): number => {
-    // locate (nodeIdx, off) for global char index c
-    let lo = 0, hi = cloneTexts.length - 1
-    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lens[mid] <= c) lo = mid; else hi = mid - 1 }
-    const off = c - lens[lo]
-    const r = document.createRange()
-    r.setStart(cloneTexts[lo], off)
-    r.setEnd(cloneTexts[lo], Math.min(off + 1, cloneTexts[lo].data.length))
-    const rect = r.getBoundingClientRect()
-    return rect.top
-  }
-  // First char whose rect top reaches line k's top.
-  let lo = 0, hi = total - 1, found = -1
-  if (charTop(hi) < targetTop) return null // line beyond the text (shouldn't happen)
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    if (charTop(mid) >= targetTop) { found = mid; hi = mid - 1 } else lo = mid + 1
-  }
-  if (found < 0) return null
-  // map to the live tree
-  let ni = 0
-  { let l = 0, h = cloneTexts.length - 1; while (l < h) { const m = (l + h + 1) >> 1; if (lens[m] <= found) l = m; else h = m - 1 } ni = l }
-  const off = found - lens[ni]
-  const liveText = liveTexts[ni]
-  if (!liveText || liveText.data.length < off) return null
-  try {
-    const p = view.posAtDOM(liveText, off)
-    return p > 0 ? p : null
-  } catch { return null }
-}
 
 // Identity diff of top-level blocks: shared prefix + suffix; [s..eo] replaced by [s..en].
 function diffBlocks(oldN: object[], newN: object[]): { s: number; eo: number; en: number } {
@@ -504,13 +371,31 @@ function diffBlocks(oldN: object[], newN: object[]): { s: number; eo: number; en
   return { s, eo, en }
 }
 
-function computeIncremental(
+// The live rect→lines formula — ONE implementation shared with collectLines (byte-identity).
+function pushLineRects(rects: DOMRect[], push: (top: number, cx: number, cy: number) => void, s: number, topOf: (r: DOMRect) => number): void {
+  let lastTop = -1e9
+  for (const r of rects) {
+    if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
+    lastTop = r.top
+    push(topOf(r), r.left + 1, r.top + r.height / 2)
+  }
+}
+
+interface ScopedCtx {
+  surfaceEl: HTMLElement | null
+  scroller: HTMLElement | null // null = window/body scroll (phone)
+  /** Region-scoped gap-widget clear (dispatches a decoration removal) — natural wrapping. */
+  clearGapsIn: (from: number, to: number) => void
+}
+
+function computeScoped(
   view: EditorView,
   incState: IncMeta,
   cache: LineCache,
   pageH: number,
   topM: number,
   gapped: boolean,
+  ctx: ScopedCtx,
 ): { set: DecorationSet; sig: string; meta: IncMeta } | null {
   const doc = view.state.doc
   const newNodes: object[] = []
@@ -520,132 +405,176 @@ function computeIncremental(
   const changedNew = newNodes.slice(s, en + 1)
   const changedOld = incState.nodes.slice(s, eo + 1)
   if (changedNew.length > INC_MAX_CHANGED || changedOld.length > INC_MAX_CHANGED) return null
-  // Paragraphs only, in AND beside the region (the arithmetic assumes bottom-only margins).
+  // Paragraphs only, in AND beside the region (the tops arithmetic assumes bottom-only margins).
   const isPara = (n: object) => (n as { type: { name: string } }).type.name === 'paragraph'
   for (const n of [...changedNew, ...changedOld]) if (!isPara(n)) return null
   if (s > 0 && !isPara(newNodes[s - 1])) return null
   if (en + 1 < newNodes.length && !isPara(newNodes[en + 1])) return null
-  // A refList inside/adjacent to the region → full measure (its forced-break rule interacts).
+  // Pure append at the very end has no measured advance below the last old block — full measure.
+  if (s > 0 && s >= incState.nodes.length) return null
   const refListPos = findRefListPos(doc)
 
-  let hs: HostState | null = null
-  try {
-    // ── changed blocks: measure in the host ──
-    const changedEntries: BlockLines[] = []
-    const changedAdvances: number[] = []
-    if (changedNew.length) {
-      hs = makeHost(view, incState.blockW)
-      const cloneRefs: Array<{ el: HTMLElement }> = []
-      for (let i = 0; i < changedNew.length; i++) {
-        const c = hostClone(view, hs, changedNew[i], newOffsets[s + i])
-        if (!c) return null
-        cloneRefs.push(c)
-      }
-      const sentinel = document.createElement('p')
-      hs.host.appendChild(sentinel)
-      // ONE layout for the whole batch; per-clone reads after it.
-      const tops: number[] = []
-      for (let i = 0; i < changedNew.length; i++) {
-        const nodeSize = (changedNew[i] as { nodeSize: number }).nodeSize
-        const m = measureClone(cloneRefs[i].el, nodeSize, newOffsets[s + i])
-        changedEntries.push(m.entry)
-        tops.push(m.top)
-      }
-      const sentinelTop = sentinel.getBoundingClientRect().top
-      for (let i = 0; i < changedNew.length; i++) {
-        const next = i + 1 < changedNew.length ? tops[i + 1] : sentinelTop
-        changedAdvances.push(next - tops[i])
-      }
-      sentinel.remove()
-      // Freshly-measured entries join the cache (node identity — future measures reuse them).
-      for (let i = 0; i < changedNew.length; i++) cache.set(changedNew[i], changedEntries[i])
+  // Natural wrapping around the edit: clear gap widgets inside/adjacent to the changed region
+  // (the full measure clears the WHOLE set for exactly this; the final dispatch replaces it all).
+  if (changedNew.length) {
+    const clearTo = (en + 1 < newNodes.length ? newOffsets[en + 1] : doc.content.size) + 1
+    ctx.clearGapsIn(newOffsets[s], clearTo)
+  }
+  const getScrollTop = () => (ctx.scroller ? ctx.scroller.scrollTop : window.scrollY)
+  const setScrollTop = (y: number) => {
+    if (ctx.scroller) ctx.scroller.scrollTop = Math.max(0, y)
+    else window.scrollTo(window.scrollX, Math.max(0, y))
+  }
+  // Bring a block into the canonical render window (content-visibility renders viewport blocks).
+  const renderBlock = (offset: number): HTMLElement | null => {
+    const el = view.nodeDOM(offset) as HTMLElement | null
+    if (!el || el.nodeType !== 1) return null
+    const vh = ctx.scroller ? ctx.scroller.clientHeight : window.innerHeight
+    const r = el.getBoundingClientRect()
+    const refTop = ctx.scroller ? ctx.scroller.getBoundingClientRect().top : 0
+    if (r.top - refTop < 0 || r.bottom - refTop > vh) {
+      setScrollTop(getScrollTop() + (r.top - refTop) - Math.min(150, vh / 4))
     }
-    // ── absolute tops: prefix bit-identical; region from the seam; suffix shifted by one delta ──
-    const newTops: number[] = new Array(newNodes.length)
-    for (let i = 0; i < s; i++) newTops[i] = incState.tops[i]
-    // top of the first region block = previous block's old top + its old advance (both exact
-    // floats from the last measure) — or the document's first-block top when the region starts
-    // the doc (the editor's padding: constant while the canonical context is unchanged).
-    // Pure append at the very end (s === old length) has no measured advance below the last old
-    // block — full measure. (Ordinary typing/Enter at the end CHANGES the last block's identity,
-    // so s ≤ old length − 1 and tops[s] exists.)
-    if (s > 0 && s >= incState.nodes.length) return null
-    let seamTop: number
-    if (s === 0) seamTop = incState.tops.length ? incState.tops[0] : 0
-    else seamTop = incState.tops[s] // = tops[s-1] + advance(s-1), telescoped EXACTLY (both old floats)
-    let cursor = seamTop
+    return el
+  }
+  const blockRects = (el: HTMLElement): DOMRect[] => {
+    try { const range = document.createRange(); range.selectNodeContents(el); return Array.from(range.getClientRects()) } catch { return [] }
+  }
+
+  // ── measure the changed blocks LIVE in the canonical window ──
+  const changedEntries: BlockLines[] = []
+  const changedAdvances: number[] = []
+  if (changedNew.length) {
+    const els: HTMLElement[] = []
     for (let i = 0; i < changedNew.length; i++) {
-      newTops[s + i] = cursor
-      cursor += changedAdvances[i]
+      const el = renderBlock(newOffsets[s + i])
+      if (!el) return null
+      els.push(el)
     }
-    // suffix: old top + delta, where delta telescopes exactly against the old region span
-    const oldAfterIdx = eo + 1
-    if (oldAfterIdx < incState.nodes.length) {
-      const delta = cursor - incState.tops[oldAfterIdx]
-      for (let i = en + 1; i < newNodes.length; i++) {
-        const oldIdx = oldAfterIdx + (i - (en + 1))
-        newTops[i] = incState.tops[oldIdx] + delta
+    for (let i = 0; i < changedNew.length; i++) {
+      const el = els[i]
+      const node = changedNew[i] as { nodeSize: number; content: { size: number } }
+      let rects = blockRects(el)
+      if (!rects.length && node.content.size > 0) {
+        renderBlock(newOffsets[s + i]) // re-scroll (long region can outgrow the window) and retry
+        rects = blockRects(el)
+        if (!rects.length) return null // still skipped/unrendered — full measure
       }
-    }
-    // ── assemble lines/blocks from cache entries at the reconstructed tops ──
-    const lines: MeasuredLine[] = []
-    const blocks: MeasuredBlock[] = []
-    for (let i = 0; i < newNodes.length; i++) {
-      const node = newNodes[i]
-      const offset = newOffsets[i]
-      const entry = i >= s && i <= en ? changedEntries[i - s] : cache.get(node)
-      if (!entry) return null // unchanged block never measured under this context — full measure
-      const start = Number.isNaN(entry.relStart) ? -1 : offset + entry.relStart
-      const end = Number.isNaN(entry.relEnd) ? -1 : offset + entry.relEnd
-      // refList (or any atom) inside the CHANGED region already bailed via the paragraph rule;
-      // unchanged atoms replicate their per-line pseudo-blocks exactly like the live collector.
-      let blockIdx = -1
-      if (!entry.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
-      for (let k = 0; k < entry.relTops.length; k++) {
-        if (entry.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
-        const rel = entry.relPos[k]
-        lines.push({
-          top: newTops[i] + entry.relTops[k],
-          blockIdx,
-          cx: 0, cy: 0, // never hit-tested on this path (resolution goes through the host)
-          pos: Number.isNaN(rel) ? POS_LAZY : rel === -Infinity ? 0 : offset + rel,
-          bake: entry, bakeIdx: k, bakeOffset: offset,
-        })
+      const br = el.getBoundingClientRect()
+      // Block boundaries exactly like the live collector (posAtDOM — tree walk, no layout).
+      let bStart = -1, bEnd = -1
+      try {
+        const inner = view.posAtDOM(el, 0)
+        const $p = doc.resolve(Math.min(Math.max(0, inner), doc.content.size))
+        if ($p.depth >= 1) { bStart = $p.before(1); bEnd = $p.after(1) }
+      } catch { /* fall through; -1 keeps the full-path fallback semantics */ }
+      const entry: BlockLines = {
+        atomLike: false,
+        relStart: bStart < 0 ? NaN : bStart - newOffsets[s + i],
+        relEnd: bEnd < 0 ? NaN : bEnd - newOffsets[s + i],
+        relTops: [], relCx: [], relCy: [], relPos: [],
       }
+      if (!rects.length) {
+        entry.relTops.push(0)
+        entry.relCx.push(1)
+        entry.relCy.push(Math.min(8, br.height / 2))
+        entry.relPos.push(NaN)
+      } else {
+        pushLineRects(rects, (top, cx, cy) => {
+          entry.relTops.push(top)
+          entry.relCx.push(cx - br.left)
+          entry.relCy.push(cy - br.top)
+          entry.relPos.push(NaN)
+        }, 1, (r) => r.top - br.top)
+      }
+      changedEntries.push(entry)
     }
-    if (!lines.length) return null
-    lines.sort((a, b) => a.top - b.top)
-    // ── the shared break loop; unresolved break positions resolve through the host ──
-    const nodeAt = new Map<BlockLines, { node: object; offset: number }>()
-    for (let i = 0; i < newNodes.length; i++) {
-      const entry = i >= s && i <= en ? changedEntries[i - s] : cache.get(newNodes[i])
-      if (entry) nodeAt.set(entry, { node: newNodes[i], offset: newOffsets[i] })
+    // Advances from consecutive live canonical tops; the block AFTER the region provides the last.
+    const tops = els.map((el) => el.getBoundingClientRect().top)
+    for (let i = 0; i < changedNew.length - 1; i++) changedAdvances.push(tops[i + 1] - tops[i])
+    if (en + 1 < newNodes.length) {
+      const nextEl = renderBlock(newOffsets[en + 1])
+      if (!nextEl) return null
+      changedAdvances.push(nextEl.getBoundingClientRect().top - els[els.length - 1].getBoundingClientRect().top)
+    } else {
+      changedAdvances.push(0) // region ends the document — advance below it is never used
     }
-    const posOf = (l: MeasuredLine): number => {
-      if (l.pos !== POS_LAZY) return l.pos
-      const home = l.bake ? nodeAt.get(l.bake) : undefined
-      if (!home || l.bakeIdx === undefined) throw new IncBail()
-      if (!hs) hs = makeHost(view, incState.blockW)
-      const p = resolveLineInHost(view, hs, home.node as { nodeSize: number }, home.offset, l.bake!, l.bakeIdx)
-      if (p == null) throw new IncBail()
-      l.pos = p
-      l.bake!.relPos[l.bakeIdx] = p - home.offset // eternal per (node, line)
-      return p
+    for (let i = 0; i < changedNew.length; i++) cache.set(changedNew[i], changedEntries[i])
+  }
+
+  // ── absolute tops: prefix bit-identical; region from the telescoped seam; suffix + one delta ──
+  const newTops: number[] = new Array(newNodes.length)
+  for (let i = 0; i < s; i++) newTops[i] = incState.tops[i]
+  let seamTop: number
+  if (s === 0) seamTop = incState.tops.length ? incState.tops[0] : 0
+  else seamTop = incState.tops[s] // = tops[s-1] + advance(s-1), telescoped EXACTLY
+  let cursor = seamTop
+  for (let i = 0; i < changedNew.length; i++) {
+    newTops[s + i] = cursor
+    cursor += changedAdvances[i]
+  }
+  const oldAfterIdx = eo + 1
+  if (oldAfterIdx < incState.nodes.length) {
+    const delta = cursor - incState.tops[oldAfterIdx]
+    for (let i = en + 1; i < newNodes.length; i++) {
+      newTops[i] = incState.tops[oldAfterIdx + (i - (en + 1))] + delta
     }
-    let out: { decos: Decoration[]; sig: string }
-    try {
-      out = computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf)
-    } catch (e) {
-      if (e instanceof IncBail) return null
-      throw e
+  }
+
+  // ── assemble lines/blocks from entries at the reconstructed tops ──
+  const lines: MeasuredLine[] = []
+  const blocks: MeasuredBlock[] = []
+  const homeOf = new Map<BlockLines, { offset: number }>()
+  for (let i = 0; i < newNodes.length; i++) {
+    const offset = newOffsets[i]
+    const entry = i >= s && i <= en ? changedEntries[i - s] : cache.get(newNodes[i])
+    if (!entry) return null // unchanged block never measured under this context — full measure
+    homeOf.set(entry, { offset })
+    const start = Number.isNaN(entry.relStart) ? -1 : offset + entry.relStart
+    const end = Number.isNaN(entry.relEnd) ? -1 : offset + entry.relEnd
+    let blockIdx = -1
+    if (!entry.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
+    for (let k = 0; k < entry.relTops.length; k++) {
+      if (entry.atomLike) { blocks.push({ start, end }); blockIdx = blocks.length - 1 }
+      const rel = entry.relPos[k]
+      lines.push({
+        top: newTops[i] + entry.relTops[k],
+        blockIdx,
+        cx: 0, cy: 0, // rebuilt from the LIVE canonical block rect at resolution time (below)
+        pos: Number.isNaN(rel) ? POS_LAZY : rel === -Infinity ? 0 : offset + rel,
+        bake: entry, bakeIdx: k, bakeOffset: offset,
+      })
     }
-    return {
-      set: DecorationSet.create(doc, out.decos),
-      sig: out.sig,
-      meta: { nodes: newNodes, offsets: newOffsets, tops: newTops, blockW: incState.blockW },
-    }
-  } finally {
-    hs?.host.remove()
+  }
+  if (!lines.length) return null
+  lines.sort((a, b) => a.top - b.top)
+
+  // ── the shared break loop; unresolved positions use the REAL posAtCoords in this window ──
+  const posOf = (l: MeasuredLine): number => {
+    if (l.pos !== POS_LAZY) return l.pos
+    const home = l.bake ? homeOf.get(l.bake) : undefined
+    if (!home || l.bakeIdx === undefined) throw new IncBail()
+    const el = renderBlock(home.offset)
+    if (!el) throw new IncBail()
+    const br = el.getBoundingClientRect()
+    if (br.height < 1) throw new IncBail() // still unrendered — full measure
+    // EXACTLY the full path's lazy sample: same block-relative point, same posAtCoords.
+    const at = view.posAtCoords({ left: br.left + l.bake!.relCx[l.bakeIdx], top: br.top + l.bake!.relCy[l.bakeIdx] })?.pos
+    l.pos = at != null && at > 0 ? at : 0
+    l.bake!.relPos[l.bakeIdx] = l.pos > 0 ? l.pos - home.offset : -Infinity
+    return l.pos
+  }
+  let out: { decos: Decoration[]; sig: string }
+  try {
+    out = computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf)
+  } catch (e) {
+    if (e instanceof IncBail) return null
+    throw e
+  }
+  return {
+    set: DecorationSet.create(doc, out.decos),
+    sig: out.sig,
+    meta: { nodes: newNodes, offsets: newOffsets, tops: newTops, blockW: incState.blockW },
   }
 }
 
@@ -1039,12 +968,50 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             lastInputSig = inputSig
             const measureT0 = performance.now() // perflog: the full canonical-measure cost (phone lag hunt)
 
-            // ── INCREMENTAL FIRST (round-5): reuse the last measure's block layout + a hidden
-            // canonical host for the changed blocks — zero full-document reflows. Any bail (null)
-            // falls through to the full forced-context measure below, which refreshes the base.
-            // 'inkwave:pagCheck=1' (equivalence storm) runs BOTH and compares signatures.
-            if (!fluid && incState) {
-              const inc = computeIncremental(view, incState, lineCache, pageH, topM, gapped)
+            // ── SCOPED FIRST (round-6, Peter's spec): the REAL forced canonical context with the
+            // live-reflow window (.iw-zoom-live content-visibility) — exact local measurement,
+            // ~one-screenful layout cost, cached geometry + one delta for the distance. A bail
+            // (null) falls through to the full measure below (which refreshes the base); a FULL
+            // measure is also idle-scheduled after every scoped one and forced before print.
+            // 'inkwave:pagCheck=1' runs BOTH and compares signatures.
+            if (!fluid && incState && !forceFullOnce) {
+              const surfaceEl0 = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+              const editorEl0 = view.dom as HTMLElement
+              const scroller0 = surfaceEl0 && surfaceEl0.classList.contains('iw-fill') && !surfaceEl0.classList.contains('is-phone')
+                ? surfaceEl0 : null
+              const savedTop0 = scroller0 ? scroller0.scrollTop : window.scrollY
+              const savedLeft0 = scroller0 ? scroller0.scrollLeft : window.scrollX
+              // NO content-visibility window here (round-6 storms: cv-rendered blocks measure
+              // subtly differently — ~9px advance drift even on plain paragraphs, worse around
+              // citation nodeviews). EXACTNESS RULES: the scoped measure runs in the plain forced
+              // canonical context. The reflow cost is skipped entirely whenever the live context
+              // already IS canonical (canonicalIsLive below — desktop at default zoom/magnify),
+              // which is the common desktop case; elsewhere (phone) the reflows are the price of
+              // correctness and the savings come from region-scoped reads + baked positions.
+              const restore0 = canonicalIsLive(surfaceEl0)
+                ? () => { /* live layout ≡ canonical — nothing to force */ }
+                : forceCanonicalContext(
+                    { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl0, editor: editorEl0 },
+                    { pageWidthPx, sideMarginPx: getSideMarginPx() },
+                  )
+              let inc: ReturnType<typeof computeScoped> = null
+              try {
+                // Region-scoped gap clear (natural wrapping around the edit — the full measure
+                // clears the WHOLE set for the same reason; the final dispatch replaces it anyway).
+                const clearGapsIn = (from: number, to: number) => {
+                  const cur = KEY.getState(view.state)
+                  if (!cur || cur === DecorationSet.empty) return
+                  const found = cur.find(Math.max(0, from), Math.min(view.state.doc.content.size, to))
+                  if (found.length) view.dispatch(view.state.tr.setMeta(KEY, cur.remove(found)).setMeta('addToHistory', false))
+                }
+                inc = computeScoped(view, incState, lineCache, pageH, topM, gapped, {
+                  surfaceEl: surfaceEl0, scroller: scroller0, clearGapsIn,
+                })
+              } finally {
+                restore0()
+                if (scroller0) { scroller0.scrollTop = savedTop0; scroller0.scrollLeft = savedLeft0 }
+                else window.scrollTo(savedLeft0, savedTop0)
+              }
               if (inc) {
                 let pagCheck = false
                 try { pagCheck = localStorage.getItem('inkwave:pagCheck') === '1' } catch { /* private */ }
@@ -1058,16 +1025,18 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                   view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
                   if (gapped) schedulePaint()
                   announceMeasured()
-                  notePerf('page-measure-inc', performance.now() - measureT0)
+                  notePerf('page-measure-scoped', performance.now() - measureT0)
+                  scheduleIdleFull() // the lazy exact refresh (Peter: defer distance, never approximate print)
                   return
                 }
-                // pagCheck: remember the incremental result, fall through to the full measure,
-                // compare after (the full result is authoritative either way).
+                // pagCheck: remember the scoped result, fall through to the full measure, compare
+                // after (the full result is authoritative either way).
                 ;(window as unknown as { __iwPagIncSig?: string }).__iwPagIncSig = inc.sig
               } else {
                 incStats.bail++
               }
             }
+            forceFullOnce = false
 
             // CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at
             // every editor zoom and on every device (phone = desktop = print). So the measure runs
@@ -1090,12 +1059,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // no paper/sheet keeps width + margins live; zoom/magnify/font are still pinned.
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
             const editorEl = view.dom as HTMLElement
-            const restore = forceCanonicalContext(
-              fluid
-                ? { surface: surfaceEl, editor: editorEl }
-                : { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl, editor: editorEl },
-              { pageWidthPx, sideMarginPx: getSideMarginPx() },
-            )
+            const restore = !fluid && canonicalIsLive(surfaceEl)
+              ? () => { /* live layout ≡ canonical (desktop at defaults) — skip both reflows */ }
+              : forceCanonicalContext(
+                  fluid
+                    ? { surface: surfaceEl, editor: editorEl }
+                    : { paper: sheet?.parentElement ?? null, sheet, surface: surfaceEl, editor: editorEl },
+                  { pageWidthPx, sideMarginPx: getSideMarginPx() },
+                )
             // The canonical layout is usually SHORTER than a zoomed/phone one, so the forced
             // layout can CLAMP the scroll offset — capture it and put it back after the restore.
             // Desktop live editor scrolls the surface (.iw-fill:not(.is-phone) in index.css);
@@ -1142,7 +1113,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 ;(window as unknown as { __iwPagChecked?: number }).__iwPagChecked =
                   ((window as unknown as { __iwPagChecked?: number }).__iwPagChecked ?? 0) + 1
                 if (w.__iwPagIncSig !== sig) {
-                  console.error('[inkwave:pagCheck] INCREMENTAL/FULL BREAK MISMATCH', { inc: w.__iwPagIncSig, full: sig })
+                  const a = w.__iwPagIncSig.split('|')
+                  const b = sig.split('|')
+                  let d = 0
+                  while (d < a.length && d < b.length && a[d] === b[d]) d++
+                  console.error(`[inkwave:pagCheck] INCREMENTAL/FULL BREAK MISMATCH at seg ${d}: inc=${a.slice(d, d + 3).join('|')} full=${b.slice(d, d + 3).join('|')} (${a.length}/${b.length} segs)`)
                   ;(window as unknown as { __iwPagMismatch?: number }).__iwPagMismatch =
                     ((window as unknown as { __iwPagMismatch?: number }).__iwPagMismatch ?? 0) + 1
                 }
@@ -1208,6 +1183,22 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // node identity. WeakMap keys are PM nodes, so dropped blocks collect naturally.
           let lineCache: LineCache = new WeakMap()
           let incState: IncMeta | null = null // last successful measure's block layout (incremental base)
+          let forceFullOnce = false // next recompute skips the scoped path (idle refresh / print floor)
+          let idleFullTimer: ReturnType<typeof setTimeout> | undefined
+          // LAZY EXACT REFRESH: after every scoped measure, a genuine-idle full measure re-verifies
+          // the whole document quietly (sig-guard → no visible change when the scoped result was
+          // exact) and refreshes the incremental base. Input-gated by the same recency signal the
+          // step-cache precompute uses (preBusy), so it never lands in a typing pause.
+          const scheduleIdleFull = () => {
+            if (idleFullTimer) clearTimeout(idleFullTimer)
+            idleFullTimer = setTimeout(function idleFull() {
+              idleFullTimer = undefined
+              if (destroyed) return
+              if (preBusy()) { idleFullTimer = setTimeout(idleFull, 1200); return }
+              forceFullOnce = true
+              forceRecompute()
+            }, 2500)
+          }
           const incStats = { inc: 0, full: 0, bail: 0 } // probe counters
           ;(window as unknown as { __iwPagInc?: typeof incStats }).__iwPagInc = incStats
           const clearLineCache = () => { lineCache = new WeakMap(); incState = null }
@@ -1255,6 +1246,21 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             forceRecompute(); schedulePrecompute()
           }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
+          // PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical
+          // consumers must NEVER see lazily-stale breaks. Before the print dialog (and on the
+          // explicit measure-now request the export paths dispatch), run the FULL measure
+          // SYNCHRONOUSLY — with a warm line cache it is cheap; correctness is absolute.
+          const measureNowCb = () => {
+            if (destroyed) return
+            if (raf) { cancelAnimationFrame(raf); raf = 0 }
+            forceFullOnce = true
+            lastInputSig = ''
+            recompute()
+            if (paintRaf) { cancelAnimationFrame(paintRaf); paintRaf = 0 }
+            paint() // panels/bands must match the fresh breaks before the dialog snapshots layout
+          }
+          window.addEventListener('beforeprint', measureNowCb)
+          window.addEventListener('inkwave:measure-now', measureNowCb)
           return {
             // Phone: only a DOC change pushes the queued measure back. This update hook also fires
             // for decoration repaints (the SCAS tick) and every React re-render of the editor
@@ -1288,11 +1294,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               document.fonts?.removeEventListener?.('loadingdone', fontCb)
               window.removeEventListener('inkwave:page-settings-changed', settingsCb)
               window.removeEventListener('inkwave:zoom-settled', zoomCb)
+              window.removeEventListener('beforeprint', measureNowCb)
+              window.removeEventListener('inkwave:measure-now', measureNowCb)
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
               PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)
               if (preRaf) cancelAnimationFrame(preRaf)
+              if (idleFullTimer) clearTimeout(idleFullTimer)
               layer?.remove()
               if (gapped) {
                 sheet?.classList.remove('inkwave-gapped')

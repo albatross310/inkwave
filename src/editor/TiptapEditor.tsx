@@ -1898,6 +1898,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Print / Export PDF — the print stylesheet renders just the writing; the browser dialog lets the
   // writer pick a printer or "Save as PDF". Set the title so the PDF gets a sensible filename.
   function printDoc() {
+    // PRINT FLOOR (round-6): breaks may be lazily stale between a scoped measure and its idle
+    // refresh — print is a canonical consumer and must NEVER see that. The pagination plugin runs
+    // a synchronous FULL canonical measure + repaint on this event (belt) and on 'beforeprint'
+    // (braces — Chromium fires it before the dialog; some engines are flaky, hence the event).
+    window.dispatchEvent(new Event('inkwave:measure-now'))
     const prev = document.title
     document.title = (docRef.current.title || 'inkwave').trim()
     const restore = () => { document.title = prev; window.removeEventListener('afterprint', restore) }
@@ -1907,6 +1912,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Export PDF → server-rendered, selectable-text A4 PDF in a new tab (no print dialog). Falls back to
   // the browser print dialog if the /api/pdf route is unavailable (e.g. local dev with no Chrome).
   async function exportPdf() {
+    // exportPdfToNewTab CLONES the live body — the gap widgets in it must be the exact canonical
+    // breaks, not a lazily-stale set (print floor, round-6).
+    window.dispatchEvent(new Event('inkwave:measure-now'))
     const ok = await exportPdfToNewTab(docRef.current.title || 'inkwave')
     if (!ok) printDoc()
   }
