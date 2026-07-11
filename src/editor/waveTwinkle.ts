@@ -69,7 +69,7 @@ const SPARK_PERIOD: [number, number] = [0.9, 2.2]
 const SPARK_REPEAT_CHANCE = 0.3 // subset with quick re-glints
 const SPARK_REPEAT_PERIOD: [number, number] = [0.6, 0.9]
 const LOOP_MS = 1944 // the tile loop — one 140px tile per loop = 72 px/s exactly
-const CYCLE_LOOPS = 24 // pool cycle = 24 tile loops ≈ 46.7s — positions repeat only after this
+const CYCLE_LOOPS = 12 // pool cycle = 12 tile loops ≈ 23.3s — positions repeat only after this (≫ a load; ~half the track keyframes of 24)
 const CYCLE_S = (LOOP_MS * CYCLE_LOOPS) / 1000
 const DRIFT_PX_S = 140 / 1.944 // must match the wave drift EXACTLY
 const V_REF = 1200 // scrollTop px/s that maps to blink rate 1
@@ -230,6 +230,33 @@ function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: numbe
   return picked
 }
 
+// Light sampler for SCHEDULE slots (thousands of draws in the one build pass): same never-twice
+// semantics, but few tries against only the band ring's most recent strikes — the full scan on a
+// saturated ring measured ~110ms of the pre-gate pass for marginal extra spacing.
+function memPickLight<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: number, draw: () => T, xOf: (c: T) => number): T {
+  memLoad()
+  const key = `${kind}:${group}:${row}`
+  const seen = mem!.get(key) ?? []
+  const tail = seen.slice(-14)
+  let best: T | null = null
+  let bestD = -Infinity
+  for (let i = 0; i < 8; i++) {
+    const c = draw()
+    const nx = wrapW(xOf(c))
+    let dMin = Infinity
+    for (const p of tail) dMin = Math.min(dMin, ringDist(nx, p[0]) - hw - p[1])
+    if (dMin >= MEM_EPS) { best = c; break }
+    if (dMin > bestD) { bestD = dMin; best = c }
+  }
+  const picked = best!
+  seen.push([Math.round(wrapW(xOf(picked))), hw])
+  const cap = memRing(kind)
+  if (seen.length > cap) seen.splice(0, seen.length - cap)
+  mem!.set(key, seen)
+  memSave()
+  return picked
+}
+
 // ─── Instance generation ──────────────────────────────────────────────────────────────────────
 // A dash strike: position via the never-twice memory + the exact-midline art at that position.
 function dashArt(rnd: () => number, group: Group, row: number, hw: number, w: number, h: number, strip: number):
@@ -378,8 +405,8 @@ function buildSchedule(rnd: () => number, d: Inst, vw: number): void {
     // the slot's wave-space x, stable under the drift). The instance's own last few slots are
     // excluded OUTRIGHT — the band ring's farthest-candidate fallback could otherwise hand a
     // saturated draw straight back to the previous spot (the one visible "same place again").
-    const slot = memPick('dash' /* shared spacing semantics */, d.group, d.row, d.hw, () => {
-      for (let tries = 0; tries < 12; tries++) {
+    const slot = memPickLight(d.kind === 'dash' ? 'dash' : 'spark', d.group, d.row, d.hw, () => {
+      for (let tries = 0; tries < 8; tries++) {
         const u = edge + rnd() * Math.max(40, vw - 2 * edge)
         const m = Math.round((u - dir * DRIFT_PX_S * tMid - cx0) / 140)
         if (!recent.includes(m)) return m
@@ -906,15 +933,47 @@ function buildSet(setCls: string, list: Inst[]): SetNodes {
 function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): void {
   const token = ++h.tok[kind]
   const list = kind === 'sparks' ? defs!.sparks : defs!.dashes
+  // Build the DOM + playback SYNCHRONOUSLY (detached — WAAPI runs on detached elements), so the
+  // ~130ms of track creation overlaps the async art-decode wait instead of serializing after it.
+  const nodes = buildSet(kind === 'sparks' ? 'iw-twk-sparks' : 'iw-twk-dashes', list)
+  const startAll = () => nodes.els.forEach((el, i) => {
+    if (list[i].role === 'blink' && !trackAnims.has(el)) startTracks(el, list[i])
+  })
+  if (waterMode === 'off') {
+    for (const g of ['a', 'b'] as Group[]) setFieldRest(nodes.fields[g], g, lastWaveX)
+  } else if (!announced) {
+    // The GATE host (its mount is what twinkles-ready waits on): tracks must exist before the
+    // first visible frame — create them now, in the one synchronous pass.
+    startAll()
+  } else {
+    // A LATER host (the covered editor under the shell): its copy is invisible until the
+    // reveal, so its ~330 track animations (~250ms measured) move OFF the boot's critical
+    // path — created in CHUNKED idle slices (each ~35 elements ≈ 25ms), so the editor boot's
+    // fonts/pagination work interleaves and the reveal never waits on a long task. Complete
+    // long before the uncover on any healthy load; clock-exact either way (startTracks stamps
+    // trackT0 at creation).
+    let cursor = 0
+    const slice = () => {
+      if (!host.isConnected || h[kind] !== nodes || waterMode === 'off') return
+      const end = Math.min(nodes.els.length, cursor + 35)
+      for (; cursor < end; cursor++) {
+        const d = list[cursor]
+        if (d.role === 'blink' && !trackAnims.has(nodes.els[cursor])) startTracks(nodes.els[cursor], d)
+      }
+      if (cursor < nodes.els.length) scheduleSlice()
+    }
+    const scheduleSlice = () => {
+      if ('requestIdleCallback' in window) (window as Window & typeof globalThis).requestIdleCallback(slice, { timeout: 500 })
+      else setTimeout(slice, 40)
+    }
+    scheduleSlice()
+  }
   void decodeAll(list).then(() => {
-    if (h.tok[kind] !== token || h[kind] || !host.isConnected || !defs) return
-    const current = kind === 'sparks' ? defs.sparks : defs.dashes
-    if (current !== list) return // regenerated while decoding — the newer mount wins
-    const nodes = buildSet(kind === 'sparks' ? 'iw-twk-sparks' : 'iw-twk-dashes', list)
-    if (waterMode === 'off') {
-      for (const g of ['a', 'b'] as Group[]) setFieldRest(nodes.fields[g], g, lastWaveX)
-    } else {
-      nodes.els.forEach((el, i) => { if (list[i].role === 'blink') startTracks(el, list[i]) })
+    const stale = h.tok[kind] !== token || h[kind] || !host.isConnected || !defs
+      || (kind === 'sparks' ? defs.sparks : defs.dashes) !== list // regenerated while decoding — the newer mount wins
+    if (stale) {
+      for (const el of nodes.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) }
+      return
     }
     host.appendChild(nodes.set)
     h[kind] = nodes
@@ -989,41 +1048,59 @@ function regenAll(): void {
 // (one-shot: clock the rest layer's drift to the tiles; CSS does the brake + cross-fade). The
 // rest handoff arrives as mode 'off' (one-shot: literal sway transforms, tracks cancelled).
 function enterCoast(): void {
-  // The static rest layer fades in over the coast and must decelerate ON its crests: give each
-  // rest wrapper a WAAPI drift clocked to the TILES' literal startTime (exact by construction —
-  // the drift has been running for seconds, its startTime is long resolved; a starved commit
-  // cannot skew a past startTime). The CSS brake on the enclosing field decelerates it.
-  const drift = findDriftAny()
-  const t0 = typeof drift?.startTime === 'number' ? drift.startTime as number : null
-  for (const h of hosts.values()) {
+  // The static rest layer fades in over the coast and must decelerate ON its crests. Each rest
+  // wrapper gets a NON-wrapping WAAPI drift ramp anchored to its enclosing field's CSS brake:
+  // the brake's `ready` resolves at the coast's first painted frame with its literal startTime
+  // t0c — the SAME clock Scroll's resolve stamps — and the ramp starts at the drift's wrapped
+  // pose at t0c, exactly the tx0 the brake keyframes were snapped against. Standing pose at the
+  // hold = tx0 − d = the handed-off --wave-x, so the rest commit swaps in identical pixels BY
+  // CONSTRUCTION. (A looping 140px ramp would visibly teleport the lit statics at every wrap;
+  // an anchor at settle-time had a wrap ambiguity against the resolve — both real.) Statics are
+  // near-invisible for the ramp's ≤1-frame pending window (their fade-in starts at 0).
+  for (const [hostEl, h] of hosts) {
     const nodes = h.dashes
     if (!nodes) continue
+    const surface = hostEl.parentElement
+    let driftT0: number | null = null
+    try {
+      const drift = surface?.getAnimations({ subtree: true })
+        .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+      if (typeof drift?.startTime === 'number') driftT0 = drift.startTime as number
+    } catch { /* getAnimations unavailable */ }
+    if (driftT0 == null) continue // no running drift (degenerate) — statics fade in standing
     for (const g of ['a', 'b'] as Group[]) {
       const wrap = nodes.rest[g]
       if (restDrift.has(wrap)) continue
-      if (t0 == null) break // no running drift (degenerate) — statics fade in standing
-      const to = g === 'a' ? -140 : 140
-      const a = wrap.animate(
-        [{ transform: 'translate3d(0,0,0)' }, { transform: `translate3d(${to}px,0,0)` }],
-        { duration: LOOP_MS, iterations: Infinity },
-      )
-      try { a.startTime = t0 } catch { /* pending resolves ≈ t0 — sub-frame */ }
-      restDrift.set(wrap, a)
+      let brake: Animation | undefined
+      try {
+        brake = nodes.fields[g].getAnimations()
+          .find((x) => ((x as CSSAnimation).animationName ?? '').startsWith('iw-wave-coast'))
+      } catch { /* getAnimations unavailable */ }
+      if (!brake) continue
+      const dT0 = driftT0
+      const start = () => {
+        if (waterMode !== 'coast' || restDrift.has(wrap) || !wrap.isConnected) return
+        const t0c = typeof brake!.startTime === 'number' ? brake!.startTime as number : timelineMs()
+        const x0 = -140 * ((((t0c - dT0) / LOOP_MS) % 1 + 1) % 1) // wrapped drift pose at t0c
+        const dir = g === 'a' ? 1 : -1
+        const D = 14000 // covers T + the 8s hold + slop; fill holds after (the rest commit lands long before)
+        const a = wrap.animate(
+          [
+            { transform: `translate3d(${(dir * x0).toFixed(3)}px,0,0)` },
+            { transform: `translate3d(${(dir * (x0 - DRIFT_PX_S * (D / 1000))).toFixed(3)}px,0,0)` },
+          ],
+          { duration: D, fill: 'forwards' },
+        )
+        try { a.startTime = t0c } catch { /* pending resolves ≈ t0c — sub-frame */ }
+        restDrift.set(wrap, a)
+      }
+      if (typeof brake.startTime === 'number') start()
+      else void brake.ready.then(start).catch(() => { /* class dropped — a newer mode owns it */ })
     }
   }
 }
-function findDriftAny(): Animation | undefined {
-  for (const host of hosts.keys()) {
-    const surface = host.parentElement
-    if (!surface) continue
-    try {
-      const a = surface.getAnimations({ subtree: true })
-        .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-      if (a) return a
-    } catch { /* getAnimations unavailable */ }
-  }
-  return undefined
-}
+const timelineMs = (): number =>
+  (document.timeline?.currentTime as number | null) ?? performance.now()
 
 function enterRest(): void {
   // ONE commit, same flush as the surface's wave classes dropping: cancel the load playback
