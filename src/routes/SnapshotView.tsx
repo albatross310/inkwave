@@ -764,6 +764,10 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
     let timer = 0
     const run = () => {
       if (disposed) return
+      // Cancel the deferred warm timer: when activation forces the run first (a flip landing
+      // between a warm MOUNT and its +150ms pagination), the stale timer re-paginated the same
+      // layer ~150ms later — a duplicated 130-270ms longtask right after the flip (probed).
+      window.clearTimeout(timer)
       const t0 = performance.now()
       pagRef.current?.destroy()
       pagRef.current = paginateStaticDoc({
@@ -840,11 +844,14 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
 
 function SplitDiffView({
   snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav, allSnaps,
+  snapMode, bijMode, onCycleSnap, onCycleBijection,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; nextSnap: Snapshot | null; allSnaps: Snapshot[]
   isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
   summariesOn?: boolean; onOptInSummaries?: () => void
+  snapMode: SnapMode; bijMode: BijMode // lifted to SnapshotView (phone hosts the toggles in the bottom bar)
+  onCycleSnap: () => void; onCycleBijection: () => void
   nav?: {
     show: boolean
     onBack: () => void; canBack: boolean
@@ -865,26 +872,12 @@ function SplitDiffView({
   // VERTICAL (phone/narrow): editor row % — GOLDEN RATIO editor:panels = φ:1 (Peter, 2026-07-10).
   const [vSplitPct, setVSplitPct] = useState(61.8)
   const [sidePanelPx, setSidePanelPx] = useState(240)
-  const [snapMode, setSnapMode] = useState<SnapMode>(() => {
-    try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
-  })
-  const cycleSnap = () => setSnapMode((m) => {
-    const next: SnapMode = m === 'off' ? 'warp' : 'off'
-    try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
-    return next
-  })
-  // 3-way cross-pane bijection: 'both' (each drives the other), 'reverse' (diff→editor only, right-to-left),
-  // or 'off'. A ref mirrors it so the scroll handlers read the live value without re-subscribing.
-  const [bijMode, setBijMode] = useState<BijMode>(() => {
-    try { const s = localStorage.getItem('inkwave:bijection'); return s === 'both' || s === 'reverse' || s === 'off' ? s : 'reverse' } catch { return 'reverse' }
-  })
+  // snapMode/bijMode are lifted props (see SnapshotView). A ref mirrors the bijection so the
+  // scroll handlers read the live value without re-subscribing.
   const bijectionRef = useRef<BijMode>(bijMode)
   bijectionRef.current = bijMode
-  const cycleBijection = () => setBijMode((m) => {
-    const next: BijMode = m === 'both' ? 'reverse' : m === 'reverse' ? 'off' : 'both'
-    try { localStorage.setItem('inkwave:bijection', next) } catch { /* private */ }
-    return next
-  })
+  const cycleSnap = onCycleSnap
+  const cycleBijection = onCycleBijection
   // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
   // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
   const centresRef = useRef<Centre[]>([])   // editor-pane diff centres (for the editor warp)
@@ -1092,8 +1085,10 @@ function SplitDiffView({
   const [layerIds, setLayerIds] = useState<string[]>([])
   const renderLayerIds = layerIds.includes(snapshot.id) ? layerIds : [...layerIds, snapshot.id]
   useEffect(() => {
-    // LRU-touch the active id (array order = recency, most recent last)
+    // LRU-touch the active id (array order = recency, most recent last). No-op when it's already
+    // most-recent — the extra setState re-rendered the whole split view after every flip.
     setLayerIds((prev) => {
+      if (prev[prev.length - 1] === snapshot.id) return prev
       const rest = prev.filter((i) => i !== snapshot.id)
       return [...rest, snapshot.id]
     })
@@ -2045,24 +2040,25 @@ function SplitDiffView({
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      {/* Control stack (version pill / snap / bijection) — three placements (Peter, 2026-07-10):
-          PHONE: a fixed BOTTOM row next to Verify (thumb reach; the old top-left column sat over
-          the text). WIDE DESKTOP: fixed, right-edge anchored a hair past the divider (left =
-          --snap-split-pct, the split var published above) so even the widest pill ends LEFT of
-          the editor's text column — the stack floats OVER the diff panel + its scrollbar on a
-          higher layer, still fully clickable; position:fixed also escapes the pane's
-          overflow:hidden, which would clip any in-pane leftward overhang. NARROW (non-phone)
-          keeps the in-pane top-left column — the diff panel is below the editor there, so there
-          is nothing to overhang. */}
-      <div style={isPhone
-        ? { position: 'fixed', bottom: 56, left: 8, zIndex: 56, display: 'flex', flexDirection: 'row', gap: 8, alignItems: 'center' }
-        : vertical
-          ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
-          : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
+      {/* Control stack (version pill / snap / bijection) — placements (Peter, round 2 2026-07-11):
+          PHONE: nothing here — the toggles live IN the bottom bar (SnapshotView) and the version
+          pill floats over the side/diff boundary (see the grid render below), freeing the old
+          floating row so the minimap + summaries can use the space. WIDE DESKTOP: fixed,
+          right-edge anchored a hair past the divider (left = --snap-split-pct, the split var
+          published above) so even the widest pill ends LEFT of the editor's text column — the
+          stack floats OVER the diff panel + its scrollbar on a higher layer, still fully
+          clickable; position:fixed also escapes the pane's overflow:hidden, which would clip any
+          in-pane leftward overhang. NARROW (non-phone) keeps the in-pane top-left column — the
+          diff panel is below the editor there, so there is nothing to overhang. */}
+      {!isPhone && (
+      <div style={vertical
+        ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
+        : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
         {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
+      )}
       {/* Keep-alive layer stack (see DocLayer): recently-visited snapshots stay mounted +
           laid out (visibility:hidden), so flipping between them is paint-only. Pane zoom lives
           on each layer's PAPER (fit-capped effZoom, imperative — see the fit-cap effect). */}
@@ -2113,9 +2109,9 @@ function SplitDiffView({
     </div>
   )
   const sidePaneEl = (sz: React.CSSProperties) => (
-    // Phone: extra bottom padding lifts the minimap clear of the fixed bottom control row
-    // (counter + toggles, relocated there — see editorPaneEl) and the Verify button.
-    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: isPhone ? '10px 10px 96px' : 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
+    // Phone: the old floating control row + Verify button are gone (round 2), so the minimap and
+    // summaries get the full pane height — plain padding all round.
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
       <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px' }}>
         {!summariesOn ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
@@ -2172,6 +2168,18 @@ function SplitDiffView({
         {editorPaneEl({ gridArea: 'editor', minWidth: 0, minHeight: 0 })}
         {gridDivider('d2', 'col', () => startSideDrag(), sideDragging, !vertical, 'Drag to resize the side panel')}
         {sidePaneEl({ gridArea: 'side', minWidth: 0, minHeight: 0 })}
+        {/* PHONE version pill — floats over the side↔diff boundary (shares the d2 grid track,
+            overflowing it; Peter, round 2 2026-07-11). Pointer-events off: it's a readout. */}
+        {isPhone && counter && (
+          <div style={{ gridArea: 'd2', position: 'relative', zIndex: 30, pointerEvents: 'none', minWidth: 0, minHeight: 0 }}>
+            <div style={{
+              position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8,
+              padding: '2px 8px', fontSize: '0.72rem', fontFamily: 'inherit', whiteSpace: 'nowrap',
+              boxShadow: '0 2px 8px rgba(80,50,10,0.15)', letterSpacing: '-0.02em',
+            }}>{counter}</div>
+          </div>
+        )}
       </div>
       <Toast />
     </>
@@ -2235,6 +2243,26 @@ export function SnapshotView() {
   const [, setRightSnapFlash] = useState(0)
   const [, setLeftVerFlash]   = useState(0)
   const [, setRightVerFlash]  = useState(0)
+  // Editor-snap (warp physics) + cross-pane bijection modes — lifted from SplitDiffView (round 2,
+  // 2026-07-11) so the PHONE bottom bar can host the toggles; desktop's control stack gets them
+  // as props. Both persisted.
+  const [snapMode, setSnapMode] = useState<SnapMode>(() => {
+    try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
+  })
+  const cycleSnap = useCallback(() => setSnapMode((m) => {
+    const next: SnapMode = m === 'off' ? 'warp' : 'off'
+    try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
+    return next
+  }), [])
+  const [bijMode, setBijMode] = useState<BijMode>(() => {
+    try { const s = localStorage.getItem('inkwave:bijection'); return s === 'both' || s === 'reverse' || s === 'off' ? s : 'reverse' } catch { return 'reverse' }
+  })
+  const cycleBijection = useCallback(() => setBijMode((m) => {
+    const next: BijMode = m === 'both' ? 'reverse' : m === 'reverse' ? 'off' : 'both'
+    try { localStorage.setItem('inkwave:bijection', next) } catch { /* private */ }
+    return next
+  }), [])
+
   // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
   // above the biggest change in each snapshot. Persisted.
   const [lineMode, setLineMode] = useState<'center' | 'longest'>(() => {
@@ -2454,27 +2482,35 @@ export function SnapshotView() {
   }, [goTo])
 
   // ── Touch swipe → snapshot scrub (phone) ──────────────────────────────────────
-  // A roughly-HORIZONTAL drag scrubs snapshots — a PURE position-based scrubber (like Apple Photos): NO
-  // flick/momentum. A small detent (FIRST) to commit the first snap, then every REST px is another — so a
-  // normal drag sweeps through 10-30. Vertical stays native scroll. Works starting on either pane.
-  // The swipe OWNS horizontal on this view: `touch-action: pan-y` on the root + panes (overriding the
-  // universal phone pan-x pan-y) keeps the browser's native x-pan from racing the scrub, and the
-  // horizontal branch preventDefaults. EXCEPTION: when the doc pane is pinch-zoomed wider than itself
-  // (scrollWidth > clientWidth), a horizontal drag PANS the zoomed page instead of scrubbing — native
-  // x-pan is suppressed, so the scrub handler is the only one left to do it.
+  // TWO modes, split by a PRESS-AND-HOLD (Peter, round 2: "a single flick goes over lots of
+  // snapshots — we need a short click-and-hold before the many-snaps-at-once kicks in"):
+  //  • FLICK (default): a plain horizontal swipe steps EXACTLY ONE version — slide LEFT = next,
+  //    slide RIGHT = previous — no matter how far or fast the finger travels.
+  //  • SCRUB (armed): hold the finger ~280ms mostly still FIRST, then drag — the position-based
+  //    scrubber (FIRST detent + REST px per step, like Apple Photos) with the fling coalescing.
+  // Vertical stays native scroll. Works starting on either pane. The swipe OWNS horizontal on
+  // this view: `touch-action: pan-y` on the root + panes keeps the browser's native x-pan from
+  // racing it, and the horizontal branch preventDefaults. EXCEPTION: a pinch-zoomed doc pane
+  // (zoom > 1) pans the page horizontally instead of scrubbing.
   const swipeRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = swipeRef.current
     if (!el) return
     let dir: '?' | 'h' | 'v' | 'pan' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
     let panEl: HTMLElement | null = null
-    const FIRST = 38, REST = 9 // detent for the first snap, then heaps
+    let downAt = 0        // touchstart time — decisive-move delay ≥ HOLD arms the scrub
+    let armed = false     // true = many-snaps scrub; false = single-step flick
+    let flicked = false   // the flick's one step has fired — ignore the rest of the gesture
+    const HOLD = 280      // press-and-hold before moving to arm the multi-snap scrub
+    const FIRST = 38, REST = 9 // scrub detents: first snap, then heaps
     const onStart = (e: TouchEvent) => {
       // Multi-touch = a PINCH (the doc pane's pane-zoom pinch, or Scroll's on other surfaces) —
       // never a scrub. Without this guard, finger-0's drift during a pinch scrubbed snapshots
       // mid-gesture (merge fix, 2026-07-10).
       if (e.touches.length > 1) { dir = 'v'; return }
-      dir = '?'; accum = 0; started = false; startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY
+      dir = '?'; accum = 0; started = false; flicked = false; armed = false
+      downAt = performance.now()
+      startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY
     }
     const onMove = (e: TouchEvent) => {
       if (e.touches.length > 1) { dir = 'v'; return } // a second finger landed mid-gesture → hand off to the pinch
@@ -2483,6 +2519,8 @@ export function SnapshotView() {
         const dx = x - startX, dy = y - startY
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return          // wait for a decisive move
         dir = Math.abs(dx) > Math.abs(dy) * 1.7 ? 'h' : 'v'         // must be pretty horizontal
+        // The finger sat (nearly) still for the hold period before this decisive move → armed.
+        armed = performance.now() - downAt >= HOLD
         if (dir === 'h') {
           // PINCH-ZOOMED doc pane → this horizontal drag pans the page (touch-action pan-y killed
           // the native x-pan, so we do it manually); otherwise it scrubs. Gate on the pane's zoom,
@@ -2500,14 +2538,18 @@ export function SnapshotView() {
       e.preventDefault()
       if (dir === 'pan') { if (panEl) panEl.scrollLeft -= x - lastX; lastX = x; return }
       accum += x - lastX; lastX = x
+      // Slide LEFT = NEXT version, slide RIGHT = previous — the natural page-turn feel.
+      if (!armed) {
+        // FLICK: exactly one step per gesture, however long the swipe.
+        if (!flicked && Math.abs(accum) >= FIRST) { flicked = true; scrubBy(accum > 0 ? -1 : 1) }
+        return
+      }
       let net = 0
-      // Slide LEFT = NEXT version, slide RIGHT = previous — the natural page-turn feel
-      // (Peter, 2026-07-11; this reverts the 2026-07-10 flip).
       if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net -= s }
       if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net -= s }
       if (net) scrubBy(net)
     }
-    const onEnd = () => { dir = '?'; panEl = null }
+    const onEnd = () => { dir = '?'; panEl = null; flicked = false; armed = false }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
@@ -2616,11 +2658,11 @@ export function SnapshotView() {
           fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)',
         }}
       >
-        {/* Phone: tighter tracking + no "read-only" — the whole bar must fit one 390px row
-            (Peter, 2026-07-10; the buttons used to collide with this block). */}
+        {/* Phone: tighter tracking, no "read-only", and NO version label next to the ◈ icon
+            (Peter, round 2 2026-07-11 — the "draft"/vN word is gone; the date suffices). */}
         <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0, letterSpacing: isPhone ? '-0.04em' : undefined }}>
           ◈ {snapshot
-            ? `${versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+            ? `${!isPhone && versionLabel ? versionLabel + ' · ' : ''}${new Date(snapshot.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
             : 'Snapshot'}{isPhone ? '' : ' · read-only'}
         </span>
 
@@ -2636,8 +2678,24 @@ export function SnapshotView() {
           </span>
         )}
 
-        {/* Centred, jazzed action buttons — the words-diff sits just left of the first (biggest-change) toggle */}
-        <div className="flex-1 flex items-center justify-center" style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
+        {/* PHONE: the snap/bijection toggles live IN the bar (narrowed) — the freed floating row
+            gives the minimap + summaries their space (Peter, round 2 2026-07-11). */}
+        {isPhone && (<>
+          <button type="button" onClick={cycleSnap} title="Editor snap to diffs — on/off" style={{
+            height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
+            background: snapMode !== 'off' ? INK : '#fff', color: snapMode !== 'off' ? '#fff' : INK,
+            border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
+          }}>{snapMode === 'off' ? 'Off' : 'On'}</button>
+          <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both · L ← R · Off" style={{
+            height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
+            background: bijMode !== 'off' ? INK : '#fff', color: bijMode !== 'off' ? '#fff' : INK,
+            border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
+          }}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L←R' : 'Off'}</button>
+        </>)}
+
+        {/* Action buttons — centred on desktop; pushed to the RIGHT end on phone (Peter, round 2).
+            The words-diff sits just left of the first (biggest-change) toggle. */}
+        <div className={`flex-1 flex items-center ${isPhone ? 'justify-end' : 'justify-center'}`} style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
         {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
         {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
           <span className="flex items-baseline tabular-nums" style={{ fontSize: isPhone ? '0.72rem' : 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: isPhone ? 2 : 'clamp(6px, 1.4vw, 16px)', columnGap: isPhone ? 3 : 8, letterSpacing: isPhone ? '-0.03em' : undefined }} title="words added / removed vs the previous snapshot">
@@ -2654,6 +2712,7 @@ export function SnapshotView() {
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
             fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
+            order: isPhone ? 8 : undefined, // phone: bgst Δ + ← edit hold the right end (Peter, round 2)
             background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -2728,6 +2787,7 @@ export function SnapshotView() {
           className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
           style={{
             fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
+            order: isPhone ? 9 : undefined, // phone: rightmost
             background: 'rgba(92, 45, 138, 0.08)',
             border: '1px solid rgba(92, 45, 138, 0.35)',
             color: INK,
@@ -2757,6 +2817,10 @@ export function SnapshotView() {
             prevSnap={heavyPrev}
             nextSnap={heavyIdx >= 0 && heavyIdx < allSnapshots.length - 1 ? allSnapshots[heavyIdx + 1] : null}
             allSnaps={allSnapshots}
+            snapMode={snapMode}
+            bijMode={bijMode}
+            onCycleSnap={cycleSnap}
+            onCycleBijection={cycleBijection}
             isPhone={isPhone}
             isNarrow={!isWide}
             lineMode={lineMode}
@@ -2793,7 +2857,9 @@ export function SnapshotView() {
 
       {/* Fixed purple Verify button — opens the SAME auto-verify countdown modal as the editor's
           toolbar (VerifyModal: builds the bundle from the live doc + snapshots and verifies it);
-          /verify is only the no-doc fallback. Phone: joins the bottom control row above the bar. */}
+          /verify is only the no-doc fallback. DESKTOP ONLY — removed from phone entirely
+          (Peter, round 2 2026-07-11; verify from the editor there). */}
+      {!isPhone && (
       <button
         type="button"
         onClick={async () => {
@@ -2808,7 +2874,7 @@ export function SnapshotView() {
         }}
         style={{
           position: 'fixed', zIndex: 56,
-          ...(isPhone ? { bottom: 56, right: 8, padding: '5px 12px' } : { bottom: 16, right: 16, padding: '8px 18px' }),
+          bottom: 16, right: 16, padding: '8px 18px',
           background: '#5c2d8a', color: '#fff',
           border: 'none', borderRadius: 8,
           fontSize: '0.9rem', fontWeight: 600,
@@ -2820,6 +2886,7 @@ export function SnapshotView() {
       >
         Verify
       </button>
+      )}
 
       {verifyDoc && <VerifyModal doc={verifyDoc} onClose={() => setVerifyDoc(null)} />}
     </div>
