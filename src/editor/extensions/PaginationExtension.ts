@@ -410,7 +410,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // gap "joined up" and text flashed out over the water.) Cache it so a re-pass hits.
               cacheStats.misses++
               const geo = readBands()
-              if (geo) { applyBands(geo); stepCache.set(d.step, geo) }
+              // Mid-gesture the live-reflow window (.iw-zoom-live) holds off-screen blocks at
+              // PLACEHOLDER heights, so this geometry matches what's rendered right now (bands and
+              // text land in the same frame — correct to APPLY) but is wrong for the step's true
+              // layout — caching it would replay placeholder-squashed panels on a later pass
+              // through this step (phone retraces every step; no precompute overwrites it there).
+              const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
+              if (geo) { applyBands(geo); if (!placeholders) stepCache.set(d.step, geo) }
             }
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
@@ -720,7 +726,19 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // (the stable-set guard makes the dispatch a no-op) — but it still drives the paint()
           // pass that repositions the sheet panels/bands against the REFLOWED live text, which IS
           // zoom-dependent. Scroll.tsx re-anchors the viewport around it (pagination-measured).
-          const zoomCb = () => { if (!destroyed) { forceRecompute(); schedulePrecompute() } }
+          //
+          // PHONE (2026-07-11, "iPhone lags ~500ms after finishing zooming"): the forced
+          // re-measure is pure VERIFICATION there — canonical breaks cannot move with zoom by
+          // construction — but it costs THREE full-document forced reflows (gap-clear → canonical
+          // A4/desktop-font context → restore) right as the fingers lift, on top of the live
+          // window's own un-skip relayout. The panels only need truing against the reflowed text:
+          // paint() (one live band read + style writes) does exactly that. Desktop keeps the
+          // cheap-enough verify + the step-cache warm-up (precompute never runs on phone anyway).
+          const zoomCb = () => {
+            if (destroyed) return
+            if (phoneLike()) { if (gapped && sheet && layer) schedulePaint(); return }
+            forceRecompute(); schedulePrecompute()
+          }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           return {
             // Phone: only a DOC change pushes the queued measure back. This update hook also fires
