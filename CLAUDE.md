@@ -365,6 +365,21 @@ write shim, so metadata can say a PDF exists with no local bytes).
   the first move). Pinch suppression = that preventDefault + gesture events + touch-action.
 - iPadOS masquerades as macOS (detect via maxTouchPoints); GIS popups need pre-loaded clients so
   requestAccessToken runs inside the tap's transient activation.
+- **The footer toolbar is slaved to the VISUAL viewport by transform (2026-07-11).** iOS never
+  resizes the layout viewport for the keyboard — it shrinks/pans the visual viewport, and WebKit
+  composites keyboard-up pans WITHOUT re-running layout, so a layout-property lift (`bottom`) on
+  the fixed wrapper doesn't apply mid-pan: the bar floated "all over the shop". The dock
+  (`editor/toolbarDock.ts`, unit-tested against a stubbed vv) writes `translate3d(0,-off,0)` on
+  the wrapper per frame while geometry moves (sync write on each vv resize/scroll + rAF follow
+  loop for momentum tails + 500ms drift watchdog); `--iw-kb-offset` carries the same value for
+  the scroll-padding reserve. PM's scrollThreshold/scrollMargin stay toolbarH + 28 ONLY:
+  prosemirror-view's windowRect bottom is ALREADY visualViewport.height, so a kb-inclusive PM
+  reserve double-counts the keyboard (probed: +180px over-scroll then −84px pull-back on
+  alternating Enters — a screen bounce per keystroke). Programmatic caret
+  reveals (keepCaret) are FORBIDDEN while the geometry is moving (`isSettled()` false) — they
+  fight iOS's own focus pan (the tap-to-type double-jump); the dock's onSettled runs them once.
+  Never move the lift back into `bottom`/CSS-var positioning, and never transition the wrapper's
+  transform.
 
 ## Working model (how these sessions run)
 

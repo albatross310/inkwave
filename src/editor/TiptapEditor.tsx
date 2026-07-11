@@ -38,6 +38,8 @@ import { LineNumbers } from './extensions/LineNumbers'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Scroll, isTouchDevice } from './Scroll'
+import { createDock } from './toolbarDock'
+import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
@@ -381,6 +383,126 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   const dragIdRef = useRef<SlotId | null>(null)
 
+  // ─── Phone: touch-hold drag-to-reorder for the 4 slot circles ──────────────
+  // HTML5 drag events never fire from touch in this UI (and the iOS long-press guards
+  // deliberately swallow the native gestures), so phone reorder is hand-rolled: hold a
+  // circle ~400ms → it arms (scale-up pulse = the haptic-feel cue), drag horizontally →
+  // neighbours FLIP-slide out of the way (transform-only, 180ms) previewing the drop,
+  // release → the order commits + persists. Coexists with the guards: .iw-touch-guard
+  // suppresses selection/loupe, the slot wrappers get touch-action:none (per-element —
+  // it doesn't inherit), and the post-drop synthetic click is swallowed.
+  const HOLD_MS = 400
+  const slotElsRef = useRef<(HTMLDivElement | null)[]>([])
+  const slotDragRef = useRef<{
+    fromIdx: number
+    startX: number
+    startY: number
+    centers: number[]
+    step: number
+    armed: boolean
+    dropping: boolean
+    moved: boolean
+    timer: number
+    overIdx: number
+  } | null>(null)
+  // Render-side mirror: neighbours read their preview shift from this (null = no drag).
+  const [slotDragView, setSlotDragView] = useState<{ fromIdx: number; overIdx: number; step: number } | null>(null)
+  const suppressSlotClickUntilRef = useRef(0)
+
+  const slotDragStyle = (el: HTMLDivElement | null, t: string, transition: string) => {
+    if (!el) return
+    el.style.transition = transition
+    el.style.transform = t
+  }
+  const armSlotDrag = () => {
+    const st = slotDragRef.current
+    if (!st) return
+    const els = slotElsRef.current
+    const rects = toolbarSlots.map((_, j) => els[j]?.getBoundingClientRect())
+    if (rects.some(r => !r)) { slotDragRef.current = null; return }
+    st.centers = rects.map(r => r!.left + r!.width / 2)
+    st.step = st.centers.length > 1 ? st.centers[1] - st.centers[0] : 0
+    st.armed = true
+    const el = els[st.fromIdx]
+    if (el) {
+      el.style.zIndex = '30'
+      el.style.position = 'relative'
+      slotDragStyle(el, 'scale(1.18)', 'transform 120ms ease') // the arm pulse
+    }
+    setSlotDragView({ fromIdx: st.fromIdx, overIdx: st.fromIdx, step: st.step })
+  }
+  const endSlotDrag = (commit: boolean) => {
+    const st = slotDragRef.current
+    if (!st) return
+    clearTimeout(st.timer)
+    if (!st.armed || st.dropping) { if (!st.armed) slotDragRef.current = null; return }
+    st.dropping = true
+    suppressSlotClickUntilRef.current = Date.now() + 400
+    const el = slotElsRef.current[st.fromIdx]
+    const { fromIdx, overIdx, centers } = st
+    const finish = () => {
+      if (slotDragRef.current !== st) return
+      slotDragRef.current = null
+      // Clear the imperative styles IN THE SAME COMMIT as the reorder: the element lands at
+      // its new layout slot exactly where the drop animation left it — no flash.
+      if (el) { el.style.transform = ''; el.style.transition = ''; el.style.zIndex = ''; el.style.position = '' }
+      setSlotDragView(null)
+      if (commit && overIdx !== fromIdx) {
+        updateSlots(moveSlot(toolbarSlots, fromIdx, overIdx) as [SlotId, SlotId, SlotId, SlotId])
+      }
+    }
+    if (el && commit) {
+      // Drop animation: glide from the finger to the target slot's centre, then commit.
+      slotDragStyle(el, `translateX(${centers[overIdx] - centers[fromIdx]}px) scale(1)`, 'transform 150ms ease')
+      window.setTimeout(finish, 160)
+    } else {
+      if (el) slotDragStyle(el, '', 'transform 150ms ease')
+      window.setTimeout(finish, 160)
+    }
+  }
+  const slotTouchHandlers = (slotIdx: number) => ({
+    onTouchStart: (e: React.TouchEvent) => {
+      if (e.touches.length !== 1 || slotDragRef.current) return
+      const t = e.touches[0]
+      slotDragRef.current = {
+        fromIdx: slotIdx,
+        startX: t.clientX,
+        startY: t.clientY,
+        centers: [],
+        step: 0,
+        armed: false,
+        dropping: false,
+        moved: false,
+        timer: window.setTimeout(armSlotDrag, HOLD_MS),
+        overIdx: slotIdx,
+      }
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      const st = slotDragRef.current
+      if (!st || st.dropping) return
+      const t = e.touches[0]
+      const dx = t.clientX - st.startX
+      const dy = t.clientY - st.startY
+      if (!st.armed) {
+        // A real drag begins with stillness — movement before the hold elapses is a tap/slide.
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(st.timer); slotDragRef.current = null }
+        return
+      }
+      st.moved = true
+      const el = slotElsRef.current[st.fromIdx]
+      // Follow the finger raw (no transition while tracking — the pulse transition ends itself).
+      slotDragStyle(el, `translateX(${dx}px) scale(1.18)`, st.moved ? 'none' : 'transform 120ms ease')
+      const over = nearestSlot(st.centers, st.centers[st.fromIdx] + dx)
+      if (over !== st.overIdx) {
+        st.overIdx = over
+        setSlotDragView({ fromIdx: st.fromIdx, overIdx: over, step: st.step })
+      }
+    },
+    onTouchEnd: () => endSlotDrag(true),
+    onTouchCancel: () => endSlotDrag(false),
+  })
+  // ────────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!toolbarPickerOpen) return
     function closeOnOutside(e: MouseEvent) {
@@ -512,6 +634,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const paperRef = useRef<HTMLDivElement>(null)
   // Footer bar + live mirrors of derived flags, read by the caret-keep-visible handler.
   const footerRef = useRef<HTMLDivElement>(null)
+  // The footer's fixed WRAPPER — the keyboard dock lifts it with a compositor transform
+  // (see toolbarDock.ts; layout-property writes on fixed elements don't apply mid-pan on iOS).
+  const footerWrapRef = useRef<HTMLDivElement>(null)
+  // False while a visual-viewport pan / keyboard slide is in flight — programmatic caret
+  // reveals must NOT run then (they fight iOS's own reveal pan = the double-jump).
+  const vvSettledRef = useRef(true)
   const keyboardUpRef = useRef(false)
   const barVisibleRef = useRef(false)
 
@@ -906,50 +1034,65 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [keyboardUp])
 
   // PHONE: the footer toolbar HUGS the keyboard instead of retracting — pinned flush to the visual
-  // viewport's bottom edge (keyboard top / URL bar) through the whole slide. The offset feeds the
-  // fixed wrapper via --iw-kb-offset on <html> (outside React, so re-renders never clobber it);
-  // an rAF loop runs while the viewport geometry is CHANGING (per-frame tracking of the keyboard
-  // animation — vv only fires sparse resize/scroll events mid-slide) and parks once stable.
+  // viewport's bottom edge (keyboard top / URL bar) at ALL times. iOS never resizes the layout
+  // viewport for the keyboard, and scrolling with the keyboard up PANS the visual viewport within
+  // it — during which WebKit composites the pan WITHOUT re-running layout, so writing a layout
+  // property (the old `bottom`) left the bar drifting anywhere the pan took it ("all over the
+  // shop"). The dock (editor/toolbarDock.ts) instead slaves a compositor-path transform:
+  // translateY(-off) on the fixed wrapper, one write per frame while the geometry moves (rAF
+  // follow loop — vv events are sparse mid-slide and unreliable in momentum tails), parked once
+  // stable. --iw-kb-offset still carries the same value for the scroll-padding reserve (outside
+  // React, so re-renders never clobber it).
   useEffect(() => {
     if (!isTouchDevice()) return
     const vv = window.visualViewport
     if (!vv) return
     const root = document.documentElement
-    let raf = 0
-    let lastOff = -1
-    let stable = 0
-    // Distance from the LAYOUT viewport bottom up to the visual viewport bottom = the keyboard
-    // (or collapsed-URL-bar) overlap that fixed-bottom elements sit behind on iOS. Pinch-zoom
-    // shrinks vv.height without moving fixed elements, so a zoomed viewport pins the bar at 0.
-    const measure = () =>
-      vv.scale > 1.01 ? 0 : Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height))
-    const tick = () => {
-      const off = measure()
-      if (off !== lastOff) {
-        lastOff = off
-        stable = 0
+    const dock = createDock({
+      readGeom: () => ({
+        innerHeight: window.innerHeight,
+        offsetTop: vv.offsetTop,
+        height: vv.height,
+        scale: vv.scale,
+      }),
+      apply: (off) => {
+        vvSettledRef.current = false
         root.style.setProperty('--iw-kb-offset', `${off}px`)
-        // The footer just moved — keep the caret clear of its NEW position (reads the live rect).
+        const wrap = footerWrapRef.current
+        if (wrap) wrap.style.transform = off ? `translate3d(0, ${-off}px, 0)` : ''
+      },
+      onSettled: () => {
+        // Geometry is still — NOW follow-up reveals can't fight an in-flight iOS pan.
+        vvSettledRef.current = true
+        const el = footerRef.current
+        if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
         keepCaretRef.current()
-      } else stable++
-      if (stable < 30) raf = requestAnimationFrame(tick) // park after ~0.5s of no movement
-      else raf = 0
-    }
-    const kick = () => { stable = 0; if (!raf) raf = requestAnimationFrame(tick) }
+      },
+      raf: (cb) => requestAnimationFrame(cb),
+      caf: (id) => cancelAnimationFrame(id),
+    })
+    const kick = () => dock.kick()
+    const check = () => dock.check()
     vv.addEventListener('resize', kick)
     vv.addEventListener('scroll', kick)
     window.addEventListener('resize', kick)
-    // Watchdog: vv events can be missed around load/orientation races — three property reads every
-    // 500ms re-kicks the loop if the parked value has drifted, so the bar can never stick wrong.
-    const watchdog = setInterval(() => { if (measure() !== lastOff) kick() }, 500)
+    // Keyboard-up page scrolls fire window scroll even when vv events go missing (momentum
+    // tails); check() is two property reads and only kicks on real drift.
+    window.addEventListener('scroll', check, { passive: true })
+    // Watchdog: vv events can be missed around load/orientation races — a drift probe every
+    // 500ms re-kicks the loop if the parked value has gone stale, so the bar can never stick wrong.
+    const watchdog = setInterval(check, 500)
     kick()
     return () => {
       vv.removeEventListener('resize', kick)
       vv.removeEventListener('scroll', kick)
       window.removeEventListener('resize', kick)
+      window.removeEventListener('scroll', check)
       clearInterval(watchdog)
-      cancelAnimationFrame(raf)
+      dock.stop()
       root.style.removeProperty('--iw-kb-offset')
+      if (footerWrapRef.current) footerWrapRef.current.style.transform = ''
+      vvSettledRef.current = true
     }
   }, [])
 
@@ -982,12 +1125,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // you type". Give PM the same reserve through its own mechanism: scrollThreshold (when a
   // position counts as too close to the edge) + scrollMargin (how far clear to scroll), kept in
   // sync with the live toolbar height by the ResizeObserver above.
+  const lastPmReserveRef = useRef<{ view: unknown; bottom: number } | null>(null)
   const syncPmScrollReserve = (h: number) => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
+    // Pill height ONLY — do NOT add the keyboard offset. prosemirror-view's windowRect bottom is
+    // ALREADY visualViewport.height (the keyboard is excluded from PM's window box), so a
+    // kb-inclusive reserve DOUBLE-COUNTS it: the bottom rule then fires on every Enter (bounds
+    // 328 − 421 < 0) → +180px over-scroll, and the next Enter's top rule yanks −84 back — the
+    // probed "screen moves, then moves again" bounce. The toolbar band above the vv bottom is a
+    // CONSTANT h regardless of keyboard state; the CSS scroll-padding (a LAYOUT-viewport
+    // scroller mechanism) is the one that needs --iw-toolbar-h + --iw-kb-offset.
     // +28 over the pill: PM scrolls the CARET rect clear, but the paragraph's line box extends a
     // few px of leading below it — clear the whole line, with margin to spare.
-    const reserve = { top: 8, left: 0, right: 0, bottom: h + 28 }
+    const bottom = h + 28
+    // setProps triggers a full PM updateState — skip when nothing changed (the dock settles after
+    // every scroll episode), but never skip a NEW view (editor recreation must be re-synced).
+    if (lastPmReserveRef.current?.view === ed.view && lastPmReserveRef.current.bottom === bottom) return
+    lastPmReserveRef.current = { view: ed.view, bottom }
+    const reserve = { top: 8, left: 0, right: 0, bottom }
     ed.view.setProps({ scrollThreshold: reserve, scrollMargin: reserve })
   }
   useEffect(() => {
@@ -1048,6 +1204,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   keepCaretRef.current = () => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed || !keyboardUpRef.current) return
+    // A keyboard slide / vv pan is in flight: iOS is running its OWN caret-reveal pan and the
+    // geometry we'd measure against is mid-animation — scrolling now fights it (the tap-to-type
+    // "screen moves, then moves again" double-jump). The dock's onSettled re-runs us once still.
+    if (!vvSettledRef.current) return
     const vv = window.visualViewport
     let obstructionTop = vv ? vv.offsetTop + vv.height : window.innerHeight
     if (footerRef.current && barVisibleRef.current) {
@@ -2224,6 +2384,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {/* Footer bar. On a phone it docks flush to the bottom (the top of the Safari URL
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
         <div
+          ref={footerWrapRef}
           className="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none"
           style={{
             // Phone: the safe-area padding melts away as the keyboard overlap grows (max() keeps the
@@ -2236,12 +2397,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // When the PDF panel is open: a side dock stops the centring box at the docked edge
             // (--iw-pdf-room right / --iw-pdf-room-left left) so the toolbar recentres over the
             // writing; a bottom dock lifts the whole toolbar above it (--iw-pdf-room-bottom).
-            // Phone adds --iw-kb-offset (the keyboard-hug tracker) on top.
             left: 'var(--iw-pdf-room-left, 0px)',
             right: 'var(--iw-pdf-room, 0px)',
-            bottom: isTouch ? 'calc(var(--iw-kb-offset, 0px) + var(--iw-pdf-room-bottom, 0px))' : 'var(--iw-pdf-room-bottom, 0px)',
-            // No bottom transition on phone: the keyboard tracker writes bottom per-frame — a CSS
-            // transition would trail the keyboard instead of hugging it.
+            // Phone: the keyboard/URL-bar lift is NOT part of `bottom` — the dock
+            // (editor/toolbarDock.ts) writes translate3d(0,-kbOffset,0) imperatively on this
+            // wrapper per frame. transform composites during iOS pans; `bottom` (layout) does
+            // NOT apply mid-pan, which left the bar floating "all over the shop". Never move
+            // the lift back into a layout property, and never transition transform here.
+            bottom: 'var(--iw-pdf-room-bottom, 0px)',
+            willChange: isTouch ? 'transform' : undefined,
             transition: isTouch ? 'left 0.18s ease, right 0.18s ease' : 'left 0.18s ease, right 0.18s ease, bottom 0.18s ease',
           }}
         >
@@ -2303,14 +2467,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
-            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) grows every circle to 40px
-                (the max nine fit) and caps each button's 44px min-WIDTH at the same 40px;
-                justify-between distributes whatever slack the screen leaves.
-                Width arithmetic @360px: 0 (px-0) + 9 × 40 (◈ ▲ 4 slots S ⚙ ⋮) = 360 — exact fit;
-                wider screens gain gaps via justify-between. */}
+            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) sizes the EIGHT circles
+                (▲ 4 slots S ⚙ ⋮ — ◈ lives in the ▲ drop-up) to (100vw − 45px)/8 and caps each
+                button's 44px min-WIDTH at the same size; justify-between spreads the ~45px of
+                slack as ~6px breathing-room gaps. py-1.5 (vs desktop py-0.5) gives the row
+                vertical air — the footer RO mirrors whatever height results into --iw-toolbar-h
+                + the PM scroll reserve, so never hardcode the pill height anywhere. */}
             {showMainRow && (
-            <div className={`flex items-center py-0.5 ${isTouch ? 'iw-phone-toolbar justify-between px-0' : 'gap-0.5 px-2'}`}
+            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'gap-0.5 px-2 py-0.5'}`}
               onClickCapture={(e) => {
+                // A click synthesised from a just-finished touch-hold drag must not activate the
+                // dropped button (or close the bars) — swallow it here in the capture phase.
+                if (Date.now() < suppressSlotClickUntilRef.current) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  return
+                }
                 // Any toolbar button closes the style + review bars — except each bar's own toggle
                 // (its onClick still runs after this capture, so its toggle semantics survive).
                 const b = (e.target as HTMLElement).closest('button')
@@ -2319,18 +2491,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 setStyleBarOpen(false); clearStyleTimer()
                 setReviewOpen(false)
               }}>
-              {/* Mobile-only: ◈ snapshot trigger (leftmost) */}
-              {isTouch && (
-                <button
-                  type="button"
-                  onClick={() => setReceiptOpen(o => !o)}
-                  className="flex items-center justify-center min-h-[44px]"
-                  style={{ color: '#5c2d8a' }}
-                  title="Provenance record"
-                >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
-                </button>
-              )}
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
@@ -2369,6 +2529,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           document.body,
                         )}
                       </div>
+                      {/* Phone-only: ◈ provenance/snapshots — moved here from the main row
+                          (Peter 2026-07-11: fewer circles, more breathing room). */}
+                      {isTouch && (
+                        <>
+                          <div className="w-px h-6 bg-stone-100 mx-1" />
+                          <button type="button"
+                            onClick={() => { setReceiptOpen(o => !o); setToolbarPickerOpen(false) }}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: '#5c2d8a' }}
+                            title="Provenance record — snapshots"
+                          >
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
+                          </button>
+                        </>
+                      )}
                       {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
                       {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
                         <>
@@ -2417,10 +2592,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     </div>
                   )
                 })()}</div>
-              {/* Customisable slots — drag between slots or from the ▲ popup to reorder */}
+              {/* Customisable slots — desktop: HTML5 drag between slots or from the ▲ popup;
+                  phone: touch-hold a circle to arm, drag sideways, neighbours FLIP-slide out of
+                  the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
-                  draggable
+                  ref={el => { slotElsRef.current[slotIdx] = el }}
+                  draggable={!isTouch}
                   onDragStart={() => { dragIdRef.current = slotId }}
                   onDragOver={e => e.preventDefault()}
                   onDrop={e => {
@@ -2435,6 +2613,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                     setToolbarPickerOpen(false)
                   }}
                   onDragEnd={() => { dragIdRef.current = null }}
+                  {...(isTouch ? slotTouchHandlers(slotIdx) : {})}
+                  style={isTouch ? (() => {
+                    // touch-action:none is per-element (it does NOT inherit) — required so the
+                    // armed drag owns the gesture. Neighbour preview: transform-only FLIP slide;
+                    // the transition is dropped the instant the drag ends so the commit's
+                    // layout-reorder + transform-reset land as one motionless frame.
+                    const shift = slotDragView && slotIdx !== slotDragView.fromIdx
+                      ? neighborShift(slotIdx, slotDragView.fromIdx, slotDragView.overIdx) * slotDragView.step
+                      : 0
+                    return {
+                      touchAction: 'none' as const,
+                      ...(slotDragView && slotIdx !== slotDragView.fromIdx
+                        ? { transform: `translateX(${shift}px)`, transition: 'transform 180ms ease' }
+                        : {}),
+                    }
+                  })() : undefined}
                 >
                   {slotId === 'guide' && <GuideMenu />}
                   {slotId === 'math' && <MathMenuButton editor={editor} />}
