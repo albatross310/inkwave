@@ -60,6 +60,56 @@ export interface ScanWindow { from: number; to: number }
 // paragraph is never cached (the uncommitted-word test depends on cursorPos).
 const _scanCache = new WeakMap<PMNode, ScannedWord[]>()
 
+// ─── Whole-document lemma-presence index (2026-07-11, round-4 "deleting lags in waves") ────────
+// The deletion pass needs whole-doc WORD PRESENCE, not a full rescan: the controller keeps two
+// multisets — every word's lemma, and every slot-marked word's ORIGINAL lemma — updated per tick
+// by a top-level block diff against the previous doc (persistent PM structures: identical
+// reference ⇔ identical content, so only ADDED/REMOVED block identities contribute). A deletion
+// tick then answers "is this nudged lemma still present anywhere" in O(changed blocks) and the
+// scan itself can stay WINDOWED. Per-block contributions are position-free and cached by node
+// identity; word definition matches scanCommitted exactly (paragraph descendants, [a-zA-Z]{2,}).
+interface BlockLemmas { lemmas: string[]; slots: string[] }
+const _blockLemmaCache = new WeakMap<PMNode, BlockLemmas>()
+
+function blockLemmas(block: PMNode): BlockLemmas {
+  const hit = _blockLemmaCache.get(block)
+  if (hit) return hit
+  const lemmas: string[] = []
+  const slots: string[] = []
+  const visitParagraph = (para: PMNode) => {
+    para.forEach((child: PMNode) => {
+      if (!child.isText || !child.text) return
+      const slotMark = child.marks.find((m) => m.type.name === 'scasSlot')
+      const slotOriginal = (slotMark?.attrs.original as string | null) ?? null
+      const slotOriginalLemma = slotOriginal ? lemmaOf(slotOriginal) : null
+      let match: RegExpExecArray | null
+      WORD_RE.lastIndex = 0
+      while ((match = WORD_RE.exec(child.text)) !== null) {
+        if (match[0].length < 2) continue
+        lemmas.push(lemmaOf(match[0]))
+        if (slotOriginalLemma) slots.push(slotOriginalLemma)
+      }
+    })
+  }
+  if (block.type.name === 'paragraph') visitParagraph(block)
+  else block.descendants((n: PMNode) => {
+    if (n.type.name !== 'paragraph') return true
+    visitParagraph(n)
+    return false
+  })
+  const out = { lemmas, slots }
+  _blockLemmaCache.set(block, out)
+  return out
+}
+
+function bumpCounts(map: Map<string, number>, keys: string[], sign: 1 | -1): void {
+  for (const k of keys) {
+    const next = (map.get(k) ?? 0) + sign
+    if (next <= 0) map.delete(k)
+    else map.set(k, next)
+  }
+}
+
 function scanCommitted(pmDoc: PMNode, cursorPos: number, window?: ScanWindow): ScannedWord[] {
   const out: ScannedWord[] = []
   const scanParagraph = (node: PMNode, pos: number) => {
@@ -135,6 +185,49 @@ export class ScasController {
   private setSize: number
   private currentSet: Set<string>
   private commitIndex = 0 // monotonic order of resolved word nudges (for state-machine replay)
+  // Presence index (see blockLemmas above): whole-doc lemma/slot-original multisets + the doc
+  // they describe. null presence = never built (rebuilt from scratch on the next tick).
+  private presence: Map<string, number> | null = null
+  private slotPresence: Map<string, number> = new Map()
+  private lastDoc: PMNode | null = null
+
+  /** Bring the presence multisets up to `pmDoc` — O(changed top-level blocks) via identity diff. */
+  private syncIndex(pmDoc: PMNode): void {
+    if (this.presence && this.lastDoc === pmDoc) return
+    if (!this.presence || !this.lastDoc) {
+      this.presence = new Map()
+      this.slotPresence = new Map()
+      pmDoc.forEach((block: PMNode) => {
+        const bl = blockLemmas(block)
+        bumpCounts(this.presence!, bl.lemmas, 1)
+        bumpCounts(this.slotPresence, bl.slots, 1)
+      })
+      this.lastDoc = pmDoc
+      return
+    }
+    // Top-level identity diff: shared prefix + suffix contribute unchanged; the middle region's
+    // old blocks are subtracted and new blocks added. Worst case (whole-doc paste) = a rebuild.
+    const oldCh: PMNode[] = []
+    const newCh: PMNode[] = []
+    this.lastDoc.forEach((n: PMNode) => { oldCh.push(n) })
+    pmDoc.forEach((n: PMNode) => { newCh.push(n) })
+    let s = 0
+    while (s < oldCh.length && s < newCh.length && oldCh[s] === newCh[s]) s++
+    let eo = oldCh.length - 1
+    let en = newCh.length - 1
+    while (eo >= s && en >= s && oldCh[eo] === newCh[en]) { eo--; en-- }
+    for (let i = s; i <= eo; i++) {
+      const bl = blockLemmas(oldCh[i])
+      bumpCounts(this.presence, bl.lemmas, -1)
+      bumpCounts(this.slotPresence, bl.slots, -1)
+    }
+    for (let i = s; i <= en; i++) {
+      const bl = blockLemmas(newCh[i])
+      bumpCounts(this.presence, bl.lemmas, 1)
+      bumpCounts(this.slotPresence, bl.slots, 1)
+    }
+    this.lastDoc = pmDoc
+  }
 
   constructor(state: ScasState, seedRef: string, docId: string, setSize: number) {
     this.state = state
@@ -151,6 +244,8 @@ export class ScasController {
     this.docId = docId
     this.setSize = setSize
     this.currentSet = deriveSet(seedRef, docId, state.version, setSize)
+    this.presence = null // new document → the presence index rebuilds on the next tick
+    this.lastDoc = null
   }
 
   /**
@@ -196,15 +291,17 @@ export class ScasController {
    * Process a document change: fire word nudges, resolve substitutions, and (only when content was
    * removed) lock deleted nudged lemmas. Returns true if the state changed.
    *
-   * `window` (optional): bound the scan to the tick's edit+caret range — the phone's O(doc)-off-
-   * the-typing-path optimisation. HARD GUARD: whenever `hadDeletion` is set the window is ignored
-   * and the whole document is scanned, because the deletion pass decides "a nudged lemma VANISHED"
-   * from word presence — a windowed scan can't see removals outside itself, and a false "vanished"
-   * would lock the lemma AND take a phantom snapshot (the phantom-snapshot guard).
+   * `window` (optional): bound the scan to the tick's edit+caret range — the O(doc)-off-the-
+   * typing-path optimisation. DELETION ticks stay windowed too (round-4 "deleting lags in
+   * waves"): the vanished-lemma pass needs whole-document WORD PRESENCE, not a full rescan, and
+   * the presence INDEX (syncIndex above — O(changed blocks) per tick) answers it exactly. The
+   * phantom-snapshot guard holds because the index is global by construction: a removal anywhere
+   * decrements it whether or not the window saw it.
    */
   processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean, window?: ScanWindow | null): boolean {
     if (this.setSize === 0) return false // Infinite mode: no constraint encounters
-    const words = scanCommitted(pmDoc, cursorPos, !hadDeletion && window ? window : undefined)
+    this.syncIndex(pmDoc) // presence multisets track EVERY tick (cheap identity diff when clean)
+    const words = scanCommitted(pmDoc, cursorPos, window ?? undefined)
     const before = this.state
     let st = this.state
 
@@ -255,11 +352,12 @@ export class ScasController {
 
     // 3. Deletions — a nudged lemma that vanished (and wasn't resolved via a slot) is a dodge → lock.
     //    Gated on an actual deletion so merely-not-yet-committed words aren't mistaken for deletes.
+    //    Presence comes from the whole-document INDEX (multiset counts include the uncommitted
+    //    cursor word and every slot-marked word's original — the exact sets the old full scan
+    //    built), so this pass is O(liveKicks) map lookups regardless of document size.
     if (hadDeletion) {
-      const present = new Set(words.map((w) => w.lemma)) // includes the uncommitted cursor word
-      const slotRefs = new Set(words.map((w) => w.slotOriginalLemma).filter(Boolean) as string[])
       for (const L of before.liveKicks) {
-        if (!present.has(L) && !slotRefs.has(L)) {
+        if (!this.presence!.has(L) && !this.slotPresence.has(L)) {
           st = lock(st, L)
           this.nudges.emit({
             lemma: L,

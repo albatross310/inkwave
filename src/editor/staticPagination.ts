@@ -397,16 +397,17 @@ export function paginateStaticDoc(opts: {
       tops.push((r.top - sr.top) / z)
       heights.push(r.height / z)
     })
-    // Content height with the panel layer hidden — the absolutely-positioned panels extend
-    // scrollHeight themselves (the "never retracts" fixpoint the extension hit). The full-final-
-    // page minHeight (applyBands) must be neutralized for the same reason: it would hold the
-    // previous extension and ratchet the content height forever.
-    layer.style.display = 'none'
-    const prevMin = sheet.style.minHeight
-    sheet.style.minHeight = ''
-    const total = sheet.scrollHeight
-    sheet.style.minHeight = prevMin
-    layer.style.display = ''
+    // CONTENT height (panels + full-final-page minHeight excluded) from the SAME clean layout as
+    // the band rects: content bottom = the editor root's rect bottom + the sheet's own bottom
+    // padding. The old display:none + minHeight-clear scrollHeight read forced a SECOND full
+    // re-layout of the pane per paint (and a third when restored + re-read by computePages) —
+    // roughly half of every band repaint's cost on a thesis-sized doc (probed 2026-07-11). The
+    // panels are absolutely positioned and minHeight never moves the ROOT, so this equals the
+    // old hidden-layer scrollHeight by construction — the "never retracts" fixpoint and the
+    // minHeight ratchet both only ever inflated scrollHeight, never the root's bottom.
+    const rr = root.getBoundingClientRect()
+    const pb = parseFloat(getComputedStyle(sheet).paddingBottom) || 0
+    const total = (rr.bottom - sr.top) / z + pb
     return { tops, heights, total }
   }
   const applyBands = (geo: { tops: number[]; heights: number[]; total: number }) => {

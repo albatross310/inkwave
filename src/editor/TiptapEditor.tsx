@@ -848,12 +848,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           scasWinRef.current = null
           const lastCaret = scasLastCaretRef.current
           scasLastCaretRef.current = caretNow
-          const win = !hadDeletion
-            ? {
-                from: Math.min(acc ? acc.from : caretNow, caretNow, lastCaret),
-                to: Math.max(acc ? acc.to : caretNow, caretNow, lastCaret),
-              }
-            : null
+          // Deletion ticks are windowed too (round-4 "deleting lags in waves"): the controller's
+          // whole-doc presence INDEX answers the vanished-lemma pass, so the scan never needs to
+          // leave the window.
+          const win = {
+            from: Math.min(acc ? acc.from : caretNow, caretNow, lastCaret),
+            to: Math.max(acc ? acc.to : caretNow, caretNow, lastCaret),
+          }
           const stateChanged = scasRef.current!.processDoc(e.state.doc, caretNow, hadDeletion, win)
           // Always repaint: the deferred decorations need it after edits, and it refreshes the
           // cursor-word suppression after pure caret moves. Windowed splice only when nothing
@@ -923,16 +924,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
         if (paraCount === prev + 1 && pIdx >= 2) {
-          const allParas: string[] = []
-          e.state.doc.forEach((node) => {
-            if (node.type.name === 'paragraph') allParas.push(node.textContent)
-          })
+          // ONLY the completed paragraph's text (round-4 Enter "mega lag": collecting EVERY
+          // paragraph's textContent was an O(doc) string build ON the Enter keystroke).
           // pIdx-1 is the 0-based current (new empty) paragraph; pIdx-2 is the just-completed one.
-          const completedText = (allParas[pIdx - 2] ?? '').trim()
+          let completedRaw = ''
+          let paraIdx = 0
+          e.state.doc.forEach((node) => {
+            if (node.type.name !== 'paragraph') return
+            if (paraIdx === pIdx - 2) completedRaw = node.textContent
+            paraIdx++
+          })
+          const completedText = completedRaw.trim()
           if (completedText.length > 0) {
             const wordCount = completedText.match(/[\p{L}\p{N}]+/gu)?.length ?? 0
 
-            const takeParaSnapshot = (summaryFn: () => Promise<string>) => {
+            // Round-4 Enter "mega lag" (b): the snapshot chain (ensureDocFresh getJSON +
+            // JCS canonicalize + hash + OPFS write + OTS stamp) started right on the Enter
+            // keystroke. Defer it to a GENUINE input pause — content is captured at WORK time
+            // (enqueueSnapshotWork always ran ensureDocFresh at work time, so the capture-drift
+            // semantics are unchanged in kind); the buffer bookkeeping below stays synchronous
+            // so Enter ordering is deterministic.
+            const takeParaSnapshot = (summaryFn: () => Promise<string>) => runWhenQuiet(() => {
               enqueueSnapshotWork(async () => {
                 const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
                 if (!snap) return
@@ -949,7 +961,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   })
                 }).catch(() => {})
               })
-            }
+            }, 1500)
 
             if (wordCount >= 70) {
               // Flush any buffered short paras first.

@@ -213,6 +213,22 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     07-10 flip). Perf probes: `probePerf` (perflog.ts) feeds window.__iwPerf when a harness
     defines it — zero cost otherwise; per-step timings for /snapshot live in SnapshotView +
     staticPagination.
+  ROUND 2 (2026-07-12, Peter's live phone test):
+  - HOLD-TO-ARM SCRUB: a plain flick steps EXACTLY ONE version regardless of distance; the
+    multi-snap position scrubber (FIRST/REST detents + fling coalescing) only arms when the
+    finger held ~280ms mostly still BEFORE the decisive move. Keep the arming check at
+    decisive-move time (elapsed since touchstart), not at touchstart.
+  - PHONE bottom bar owns everything: no version/"draft" label next to ◈ (date only), narrowed
+    Off + L←R toggles IN the bar (snapMode/bijMode state lives in SnapshotView now, passed down),
+    actions right-aligned with ⇥ bgst Δ + ← edit at the right end (flex `order` 8/9), NO Verify
+    button on phone, and the version pill floats over the side↔diff boundary (shares the d2 grid
+    track, pointer-events none). Desktop layout unchanged.
+  - Longtask fixes (keep): DocLayer's run() must clear the deferred warm timer (activation
+    between warm-mount and its +150ms pagination double-paginated the layer); staticPagination's
+    readBands computes total from the ROOT's rect + sheet padding in the SAME layout pass as the
+    band rects — never re-hide the panel layer / clear minHeight to read scrollHeight (that
+    forced 2 extra full re-layouts per band repaint); the layer-window LRU touch is a no-op when
+    the active id is already most-recent.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
@@ -339,12 +355,23 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
-- The SCAS tick is WINDOWED on BOTH platforms (phone 2026-07-10; desktop joined 2026-07-11): the
-  tick scans/repaints only the tick's edit+caret paragraphs (~200× cheaper than O(doc)).
-  INVARIANT: any tick with a DELETION does the FULL scan — the engine's vanished-lemma pass needs
-  whole-doc word presence (a window that hides a removal ⇒ false lock + phantom snapshot); and the
-  windowed decoration splice is only legal when the tick did NOT change SCAS state (a verdict
-  change repaints that lemma doc-wide). Word count runs ONLY while the ◈ panel is open on phone.
+- The SCAS tick is WINDOWED on BOTH platforms — INCLUDING deletion ticks (round-4, 2026-07-11,
+  Peter's "deleting lags in waves"): the vanished-lemma pass needs whole-doc word PRESENCE, not a
+  full rescan, and the controller now maintains a lemma-presence MULTISET (+ slot-original
+  multiset) updated per tick by a top-level block IDENTITY diff (persistent PM nodes; per-block
+  contributions cached by node identity — `blockLemmas`). The phantom-snapshot guard holds because
+  the index is global by construction: a removal anywhere decrements it whether or not the window
+  saw it (`controller.presence.test.ts` pins outside-window deletion, duplicate-lemma survival,
+  slot protection, split/join). Measured: deletion-tick scas-tick 150ms → ≤21ms (4× phone emu,
+  20k words). The windowed decoration splice is only legal when the tick did NOT change SCAS state
+  (a verdict change repaints that lemma doc-wide). Word count runs ONLY while ◈ is open.
+- Enter must do NO O(doc) work on the keystroke (round-4 "mega lag": Enter p50 300ms → ~100ms,
+  ≈2× a plain char): the paragraph-snapshot trigger reads ONLY the completed paragraph's
+  textContent, and the snapshot chain (ensureDocFresh + JCS + hash + OPFS + OTS) is deferred to a
+  genuine input pause (runWhenQuiet 1.5s — content is captured at WORK time, as it always was).
+  Residual tail on BOTH Enter and backspace-over-return: the ~1.1s (4× phone emu) canonical
+  measure at the 850/1200ms pause — phase-independent, hits plain chars equally; the next
+  architectural target is an incremental break recompute from cached per-block lines.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
