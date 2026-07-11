@@ -401,26 +401,31 @@ write shim, so metadata can say a PDF exists with no local bytes).
   genuine input pause (runWhenQuiet 1.5s — content is captured at WORK time, as it always was).
   The old residual tail (the ~1.1s canonical measure at the 850/1200ms pause) is FIXED by the
   round-5 incremental break recompute below.
-- **INCREMENTAL BREAK RECOMPUTE (2026-07-12, round-5).** The full measure's cost was the TWO
-  full-document reflows its forced canonical context implies (phase-probed: ~300-500ms at the
-  first read + 259-637ms at restore/scroll-clamp, of a ~1s phone measure). The incremental path
-  (PaginationExtension `computeIncremental`) produces the SAME lines with ZERO live reflows:
-  unchanged blocks (node identity vs the last measure's IncMeta) reuse cached block-relative
-  lines at the previous measure's tops (bit-identical above the edit; one telescoped delta
-  below); changed blocks are measured in a hidden MEASUREMENT HOST that mirrors the canonical
-  context (same .ProseMirror classes, canonical font/zoom inline, captured canonical block width,
-  cloned live DOM with nested gap widgets stripped); the shared `computeBreaks` loop then decides
-  breaks — byte-identical BY CONSTRUCTION. Unresolved break-line doc positions resolve in the
-  host (single-char Range binary search → same-index live text node → posAtDOM — no hit-test)
-  and bake forever per (node, line). FALLBACK IS THE RULE: non-paragraph blocks in/beside the
-  changed region, refLists there, pure end-appends, missing cache entries, failed resolutions,
-  >24 changed blocks — all return null and the full forced-context measure runs (it refreshes
-  IncMeta; clearLineCache also nulls it). PROOF: `inkwave:pagCheck=1` runs BOTH paths per measure
-  and compares signatures (console.error + __iwPagMismatch on divergence) — the round-5 storm
-  (chars end/mid/boundary/last-page, Enter splits, backspace joins) scored 23/23 identical.
-  Measured (4× phone emu, 20k words): page-measure 636-1364ms → page-measure-inc 18-81ms;
-  backspace-over-return p90 1592→197ms; plain-char max 1766→89ms; Enter p50 80ms ≈1.6× char.
-  perflog: page-measure-inc + pm-clear/pm-compute/pm-restore/pm-dispatch/pm-paint phases.
+- **SCOPED CANONICAL MEASURE + LAZY FULL REFRESH (2026-07-12, round-6 — supersedes round-5's
+  measurement-host recompute, which Peter's live thesis falsified: host clones cannot replicate
+  NodeViews (math shadow DOM, citation labels) and cv-rendered blocks measure ~9px off even on
+  plain text).** EXACT NEAR THE WRITER, DEFERRED FAR AWAY — never approximated: the scoped
+  measure (PaginationExtension `computeScoped`) runs in the REAL forced canonical context — live
+  DOM, live NodeViews, real posAtCoords — but reads ONLY the changed blocks (+ the block below,
+  for the advance); unchanged blocks reuse cached block-relative lines at the previous measure's
+  tops (bit-identical above the edit, one telescoped delta below); gap widgets in/next to the
+  region are cleared by a REGION-SCOPED decoration dispatch (same natural-wrapping rule as the
+  full clear); unresolved break-line positions use the identical posAtCoords sample, baked per
+  (node, line). NO content-visibility tricks in measures — the round-6 storms showed cv-rendered
+  geometry diverges. `canonicalIsLive()`: on desktop at defaults (no phone rules, zoom 1,
+  magnify 1) the live layout IS canonical, so the force — and BOTH its full-document reflows —
+  is skipped for scoped AND full measures. A FULL measure re-verifies lazily after every scoped
+  one (idle-gated ~2.5s, sig-guard = visually quiet) and refreshes the incremental base.
+  PRINT FLOOR (Peter: "render it all properly at time of print"): 'inkwave:measure-now' /
+  'beforeprint' run a SYNCHRONOUS full measure + paint; printDoc() and exportPdf() dispatch it
+  explicitly (exportPdfToNewTab clones the live body — its widgets must be exact). Snapshot
+  staticPagination runs its own canonical pipeline (never lazy); citationNav page labels read
+  live widgets (≤2.5s self-healing drift — accepted). PROOF: 'inkwave:pagCheck=1' runs BOTH
+  paths per measure and compares signatures — round-6 storms: 23/23 plain-paragraph synthetic
+  AND 27/27 on Peter's real citation-heavy Honours doc ×6 (13k words, 174 citation nodes, lists,
+  rules, refList). Measured (4× throttle, 20k words): desktop scoped 6-33ms (was 133-277 full);
+  phone scoped 311-526ms — the two reflows are the price of exactness there (was 636-1364 full;
+  round-5's 18-81ms was wrong on real docs). perflog: page-measure-scoped / page-measure.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
