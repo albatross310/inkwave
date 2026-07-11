@@ -10,37 +10,66 @@ function tokenize(s: string): string[] {
   return s.match(/\S+\s*|\s+/g) ?? []
 }
 
+// LCS table area cap for the (already prefix/suffix-trimmed) middle. Beyond this a wholesale
+// rewrite would allocate a gigantic quadratic table for a diff nobody could read anyway — emit a
+// coarse del+add of the middles instead. 4M cells ≈ a ~2000-token edit region on each side.
+const LCS_MAX_CELLS = 4_000_000
+
 /** Word-level diff: returns ops in reading order. `add` = present only in `next`, `del` = only in `prev`. */
 export function diffWords(prev: string, next: string): DiffOp[] {
   const a = tokenize(prev)
   const b = tokenize(next)
-  const n = a.length
-  const m = b.length
 
-  // LCS length table (rows over `a`, cols over `b`).
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
-    }
-  }
-
-  // Walk the table to emit ops, coalescing runs of the same type.
   const ops: DiffOp[] = []
   const push = (type: DiffOp['type'], text: string) => {
+    if (!text) return
     const last = ops[ops.length - 1]
     if (last && last.type === type) last.text += text
     else ops.push({ type, text })
   }
-  let i = 0
-  let j = 0
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { push('same', a[i]); i++; j++ }
-    else if (lcs[i + 1][j] >= lcs[i][j + 1]) { push('del', a[i]); i++ }
-    else { push('add', b[j]); j++ }
+
+  // ── Common prefix/suffix trim (2026-07-10 — the /snapshot open-time + memory fix) ────────────
+  // Adjacent snapshots share almost all their text, but the LCS table below is O(n·m) MEMORY:
+  // ~9M cells on a 3k-word document and hundreds of MB on a thesis-sized one. One such diff per
+  // navigation was borderline; the snapshot view's ±20 read-ahead turned it into a per-open storm
+  // that ground the page for seconds (and crashed headless renderers outright). Trimming the
+  // shared ends first makes the table proportional to the EDIT REGION (typically a few hundred
+  // tokens between adjacent snapshots), not the whole document.
+  let lo = 0
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++
+  let hiA = a.length
+  let hiB = b.length
+  while (hiA > lo && hiB > lo && a[hiA - 1] === b[hiB - 1]) { hiA--; hiB-- }
+  if (lo) push('same', a.slice(0, lo).join(''))
+
+  const ma = a.slice(lo, hiA)
+  const mb = b.slice(lo, hiB)
+  const n = ma.length
+  const m = mb.length
+  if (n * m > LCS_MAX_CELLS) {
+    push('del', ma.join(''))
+    push('add', mb.join(''))
+  } else if (n || m) {
+    // LCS length table (rows over `ma`, cols over `mb`).
+    const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        lcs[i][j] = ma[i] === mb[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+      }
+    }
+    // Walk the table to emit ops, coalescing runs of the same type.
+    let i = 0
+    let j = 0
+    while (i < n && j < m) {
+      if (ma[i] === mb[j]) { push('same', ma[i]); i++; j++ }
+      else if (lcs[i + 1][j] >= lcs[i][j + 1]) { push('del', ma[i]); i++ }
+      else { push('add', mb[j]); j++ }
+    }
+    while (i < n) { push('del', ma[i]); i++ }
+    while (j < m) { push('add', mb[j]); j++ }
   }
-  while (i < n) { push('del', a[i]); i++ }
-  while (j < m) { push('add', b[j]); j++ }
+
+  if (hiA < a.length) push('same', a.slice(hiA).join(''))
   return ops
 }
 

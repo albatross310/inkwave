@@ -1260,15 +1260,25 @@
 
 /* Synchronised alignment glow: CONTINUOUS, driven by --iw-align (0..1) set each scroll frame. Brightest
    (1) when a diff's centre sits on the midline in BOTH panes, tapering out ~40px past its top/bottom edges
-   as a Gaussian. Layered via outline + an inset fill so it rides on top of the base diff tint (inline). */
+   as a Gaussian. PER-FRAGMENT (Peter, 2026-07-10): `outline` paints ONE rect around the union of an
+   inline's fragments — a diff straddling a page break hosts a block gap/marker child, so the union
+   became a giant empty box over the water (gapped AND ungapped-after-zoom-out). A cloned inset ring
+   shadow paints per LINE FRAGMENT instead, and the browser re-fragments on any reflow (zoom settle
+   included) for free. Ring listed first so it sits on top of the fill. */
 .diff-add {
-  outline: 2px solid rgba(21,128,61, var(--iw-align, 0));
-  box-shadow: inset 0 0 0 100vmax rgba(22,163,74, calc(var(--iw-align, 0) * 0.32));
+  box-shadow:
+    inset 0 0 0 2px rgba(21,128,61, var(--iw-align, 0)),
+    inset 0 0 0 100vmax rgba(22,163,74, calc(var(--iw-align, 0) * 0.32));
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
   border-radius: 2px;
 }
 .diff-del {
-  outline: 2px solid rgba(185,28,28, var(--iw-align, 0));
-  box-shadow: inset 0 0 0 100vmax rgba(200,30,30, calc(var(--iw-align, 0) * 0.30));
+  box-shadow:
+    inset 0 0 0 2px rgba(185,28,28, var(--iw-align, 0)),
+    inset 0 0 0 100vmax rgba(200,30,30, calc(var(--iw-align, 0) * 0.30));
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
   border-radius: 2px;
 }
 
