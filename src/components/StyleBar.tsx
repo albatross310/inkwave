@@ -24,12 +24,28 @@ const HOLD_MS = 175        // ms before a press becomes a long-press
 // as its fallback tail, and an old mark's own stack resolves exactly as before (no @font-face ever
 // existed for those names).
 const FONTS = [
-  { label: 'Fell',     css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
-  { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
-  { label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
-  { label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
-  { label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
-  { label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  // Identity
+  { group: 'Identity', label: 'Fell',      css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
+  { group: 'Identity', label: 'Garamond',  css: "'EB Garamond', Georgia, serif" },
+  // Serif — 'Times' and 'Arial' are certified CLONES (TeX Gyre Termes/Heros, GUST licence);
+  // labels are display-only and decoupled from the css stack (Peter: "call it Times").
+  { group: 'Serif', label: 'Times',    css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
+  { group: 'Serif', label: 'Crimson',  css: "'Crimson Pro', 'Times New Roman', serif" },
+  { group: 'Serif', label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
+  { group: 'Serif', label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
+  { group: 'Serif', label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
+  { group: 'Serif', label: 'Gentium',  css: "'Gentium Plus', 'Palatino Linotype', serif" },
+  // Display — headings/titles
+  { group: 'Display', label: 'Cormorant', css: "'Cormorant Garamond', 'EB Garamond', serif" },
+  { group: 'Display', label: 'Fraunces',  css: "'Fraunces', Georgia, serif" },
+  // Slab
+  { group: 'Slab', label: 'Bitter', css: "'Bitter', 'Roboto Slab', Georgia, serif" },
+  // Sans
+  { group: 'Sans', label: 'Arial',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
+  { group: 'Sans', label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { group: 'Sans', label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+  // Mono — code / logic notation
+  { group: 'Mono', label: 'JetBrains', css: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace" },
 ]
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
@@ -381,8 +397,12 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
         <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(fontBtnRef), ...box(136) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
-          {FONTS.map(f => (
-            <button key={f.label} type="button"
+          {FONTS.map((f, i) => (<div key={f.label}>
+            {(i === 0 || FONTS[i - 1].group !== f.group) && (
+              <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-widest select-none"
+                style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{f.group}</div>
+            )}
+            <button type="button"
               onPointerDown={e => e.preventDefault()} onPointerUp={() => setFont(f.css)}
               className="w-full text-left px-3 py-1.5 text-sm hover:bg-stone-50 truncate"
               style={{ fontFamily: f.css, color: f.label === curFont ? INK : '#374151',
@@ -390,7 +410,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
                 borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent' }}>
               {f.label}
             </button>
-          ))}
+          </div>))}
         </div></>,
         document.body,
       )}

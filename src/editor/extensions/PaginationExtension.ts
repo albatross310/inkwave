@@ -659,28 +659,31 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const readBands = (): BandGeo | null => {
             if (!sheet || !layer) return null
             const s = scaleFor(sheet)
-            const sheetTop = sheet.getBoundingClientRect().top
+            const sheetR = sheet.getBoundingClientRect()
             const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
             const tops: number[] = []
             const heights: number[] = []
             for (const band of bands) {
               const r = band.getBoundingClientRect()
-              tops.push((r.top - sheetTop) / s)
+              tops.push((r.top - sheetR.top) / s)
               heights.push(r.height / s)
             }
-            // Measure the CONTENT height with the panel layer hidden: the absolutely-positioned
-            // panels extend sheet.scrollHeight themselves, so after a zoom-out the previous
-            // (taller) panels held the old height and every repaint re-measured its own stale
-            // extent — a self-sustaining fixpoint ("space below the page never retracts", gapped
-            // only, cleared by refresh/toggle because those rebuild the layer). Hiding the layer
-            // for one read costs one reflow per (debounced) paint pass. The full-final-page
-            // min-height (applyBands) is neutralized for the same reason — it would ratchet.
-            layer.style.display = 'none'
-            const prevMin = sheet.style.minHeight
-            sheet.style.minHeight = ''
-            const total = sheet.scrollHeight
-            sheet.style.minHeight = prevMin
-            layer.style.display = ''
+            // SINGLE-PASS content height (round-4, Peter: "zoom is slow now"): the old read hid
+            // the panel layer + cleared minHeight to take sheet.scrollHeight — a SECOND forced
+            // full layout on every paint pass, cache miss and atomic exit. Same rule
+            // staticPagination already proved (2026-07-12 swipe round): derive the content extent
+            // from the IN-FLOW children's rects in the SAME layout pass as the band reads. The
+            // absolutely-positioned panel layer is skipped explicitly, so its full-final-page
+            // extension can't ratchet the measure, and minHeight never enters a rect read (the
+            // old ratchet fixpoints stay impossible by construction).
+            let bottom = sheetR.top
+            for (const c of Array.from(sheet.children) as HTMLElement[]) {
+              if (c === layer) continue
+              const r = c.getBoundingClientRect()
+              if (r.bottom > bottom) bottom = r.bottom
+            }
+            const padB = parseFloat(getComputedStyle(sheet).paddingBottom) || 0
+            const total = (bottom - sheetR.top) / s + padB
             return { tops, heights, total }
           }
           // Position panels at every region NOT covered by a gap band: [0..band0], [band0..band1], …
@@ -788,10 +791,20 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
           const onZoomStep = (e: Event) => {
-            const d = (e as CustomEvent).detail as { step?: number; surface?: Element } | undefined
+            const d = (e as CustomEvent).detail as { step?: number; surface?: Element; resync?: boolean } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
-            const cache = (view.dom as HTMLElement).classList.contains('iw-zoom-live') ? liveCache : stepCache
+            const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
+            const cache = placeholders ? liveCache : stepCache
+            if (d.resync) {
+              // The zoom guard (Scroll.tsx) detected a content-visibility relevancy wave between
+              // commits: the layout shifted, so every placeholder-regime entry is stale — drop
+              // them and re-derive the bands from the CURRENT layout in this same task.
+              liveCache.clear()
+              const geo = readBands()
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
+              return
+            }
             const hit = cache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
             else {
@@ -827,22 +840,43 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const bumpQuiet = (ms: number) => {
             quietUntil = Math.max(quietUntil, performance.now() + ms)
           }
-          const onPreActivity = () => bumpQuiet(1500)
+          const onPreActivity = () => {
+            bumpQuiet(1500)
+            // CANCEL the zoom-scoped warm on any input (round-4, Peter: "scrolling is jittery"):
+            // each warm step is a full-document hypothetical reflow — running them under a
+            // scroll/keystroke is exactly the jank Peter felt. The 150ms grace exempts the
+            // settle's OWN scroll events (the atomic exit's correction fires 'scroll' right
+            // after zoomCb opens the window); anything later is a real user input.
+            if (performance.now() > zoomWarmStart + 150) zoomWarmUntil = 0
+          }
           const onPreChoreo = () => bumpQuiet(3000)
           const PRE_ACT_EVS = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
           const PRE_CHOREO_EVS = ['inkwave:open-begin', 'inkwave:reveal-imminent', 'inkwave:editor-revealed'] as const
           PRE_ACT_EVS.forEach((ev) => window.addEventListener(ev, onPreActivity, { passive: true, capture: true }))
           PRE_CHOREO_EVS.forEach((ev) => window.addEventListener(ev, onPreChoreo))
           bumpQuiet(3000) // the mount itself is a choreography
+          // ZOOM-SCOPED WARM WINDOW (round-3, Peter: "build/refresh the step cache only on
+          // zoom-zone entry / first step / idle after settle — never on the typing path"): the
+          // genuine-idle gate's activity events include 'wheel'/'scroll', so a zoom session kept
+          // pushing its own warm-up out 1.5s forever — the cache was measured COLD through whole
+          // gestures (0 precomputed). A zoom SETTLE opens this window: inside it the quietUntil
+          // input gate is bypassed (typing/edit debounce + the gesture hold still block) and the
+          // warm is RADIUS-LIMITED to the steps around the current one — the next notches' exit/
+          // settle frames hit, without the full-lattice reflow burst on every settle. The full
+          // lattice still warms at genuine idle, exactly as before.
+          let zoomWarmUntil = 0
+          let zoomWarmStart = 0 // grace anchor: inputs within 150ms of the settle are our own
+          const ZOOM_WARM_RADIUS = 5
           const preBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
             || editDebounce !== undefined
             || bibDebounce !== undefined
-            || performance.now() < quietUntil
+            || (performance.now() < quietUntil && performance.now() >= zoomWarmUntil)
             || document.visibilityState === 'hidden'
           const nextUncached = (): number | null => {
             const k0 = currentStep()
-            for (let d = 0; d <= ZOOM_STEP_MAX - ZOOM_STEP_MIN; d++) {
+            const radius = performance.now() < zoomWarmUntil ? ZOOM_WARM_RADIUS : ZOOM_STEP_MAX - ZOOM_STEP_MIN
+            for (let d = 0; d <= radius; d++) {
               for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
                 if (k < ZOOM_STEP_MIN || k > ZOOM_STEP_MAX) continue
                 if (!stepCache.has(k)) return k
@@ -1238,18 +1272,22 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // pass that repositions the sheet panels/bands against the REFLOWED live text, which IS
           // zoom-dependent. Scroll.tsx re-anchors the viewport around it (pagination-measured).
           //
-          // PHONE (2026-07-11, "iPhone lags ~500ms after finishing zooming"): the forced
-          // re-measure is pure VERIFICATION there — canonical breaks cannot move with zoom by
-          // construction — but it costs THREE full-document forced reflows (gap-clear → canonical
-          // A4/desktop-font context → restore) right as the fingers lift, on top of the live
-          // window's own un-skip relayout. The panels only need truing against the reflowed text:
-          // paint() (one live band read + style writes) does exactly that. Desktop keeps the
-          // cheap-enough verify + the step-cache warm-up (precompute never runs on phone anyway).
+          // BOTH PLATFORMS defer everything heavy off the settle (round-4, Peter: "text reflow
+          // should be no slower than before; pages painted instantly from the math"):
+          // canonical breaks cannot move with zoom by construction, and the ATOMIC EXIT already
+          // applied full-regime band geometry in the exit task — so the settle needs NO immediate
+          // measure and NO immediate paint. The full verify re-measure runs at genuine idle
+          // (scheduleIdleFull — input-gated, cancelled by any activity), and the zoom-scoped
+          // step-cache warm runs in the same quiet gaps (cancelled on input via onPreActivity;
+          // desktop only — precompute never runs on phone).
           const zoomCb = () => {
             if (destroyed) return
             liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next pinch
-            if (phoneLike()) { if (gapped && sheet && layer) schedulePaint(); return }
-            forceRecompute(); schedulePrecompute()
+            if (phoneLike()) return // exit already applied bands; nothing settles-time on phone
+            zoomWarmStart = performance.now()
+            zoomWarmUntil = zoomWarmStart + 2000
+            scheduleIdleFull(600)
+            schedulePrecompute(250)
           }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           // PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical

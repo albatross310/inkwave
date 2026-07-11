@@ -6,6 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
+import { notePerf } from './perflog'
 import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
@@ -350,7 +351,11 @@ export function Scroll({
   const [editorZoom, setEditorZoom] = useState(() => {
     try { return stepToZoom(zoomToStep(Number(localStorage.getItem('inkwave:editorZoom')) || 1)) } catch { return 1 }
   })
-  const editorZoomRef = useRef(editorZoom); editorZoomRef.current = editorZoom
+  // The ref is the AUTHORITATIVE live zoom; React state only trails it (the settle's catch-up
+  // setEditorZoom). Do NOT re-assign the ref from state on render — any re-render landing
+  // MID-GESTURE (reveal chain, panel updates) reset it to the stale state and the next commit
+  // stepped from zoom 1: a visible multi-step snap-back (probed: a −9-step jump mid-pinch).
+  const editorZoomRef = useRef(editorZoom)
   // Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
   // reading the anchored element's new position, then correct scrollTop in the SAME frame — all before
   // the browser paints. The anchor is the actual element under the cursor (exact — a fraction estimate
@@ -381,6 +386,11 @@ export function Scroll({
     const setScrollTop = (y: number) => {
       if (phone) window.scrollTo(window.scrollX, Math.max(0, y))
       else el.scrollTop = Math.max(0, y)
+      // The zoom guard discriminates OUR writes from user scrolls (rebase vs pin): record every
+      // write's clamped result so commit/exit corrections never read as user scrolls — the guard
+      // was rebasing its pin onto relevancy-wave displacement whenever a commit's correction
+      // landed between its ticks (probed: 11 rebases vs 3 pins over one wheel session).
+      guardScrollTop = getScrollTop()
     }
     const scrollRange = () => {
       if (!phone) return Math.max(1, el.scrollHeight - el.clientHeight)
@@ -532,18 +542,10 @@ export function Scroll({
       const vr = el.getBoundingClientRect()
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
       const anchorY = phone ? pinchY : vr.top + vr.height / 2
-      if (!net) {
-        // No step committed this frame — but a native pan that survived the pinch suppression (a
-        // scroll that began before the second finger landed is NON-CANCELABLE on iOS, so the
-        // touchmove preventDefault can't stop it) can still drag the viewport mid-pinch. While the
-        // gesture holds an anchor pin, re-pin it every frame so the pinched-on content cannot
-        // drift between lattice commits.
-        if (pinchDist && zoomLiveEd) {
-          const t = anchorTop()
-          if (t != null && Math.abs(t - anchorTop0) > 0.5) setScrollTop(getScrollTop() + (t - anchorTop0))
-        }
-        return
-      }
+      // No step committed this frame → nothing to apply. Between-commit drift (native pan on
+      // phone, content-visibility relevancy waves on both platforms) is owned by the zoom GUARD
+      // loop (guardTick below), which runs every frame while the live window is up.
+      if (!net) return
       // Pick (or re-pick, if the node was destroyed) the content anchor under the pinch midpoint /
       // viewport centre (phone picks at touchstart; this is the desktop first-commit pick and the
       // dead-anchor re-pick).
@@ -556,6 +558,7 @@ export function Scroll({
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
       const next = stepToZoom(stepNext)
       if (next === editorZoomRef.current) return // pinned at a lattice bound — nothing to apply
+      const commitT0 = performance.now() // perflog zoom-commit: reflow + anchor + bands, this task
       // Pin pagination's RO-driven painters for the whole gesture (per-frame LIVE repositioning
       // lagged the reflowing text 1–2 frames — the page-boundary up/down flicker). The step cache
       // below replaces live repositioning with instant precomputed geometry; the RO path stays
@@ -568,6 +571,8 @@ export function Scroll({
       // one forced layout below). Both exit in the settle.
       enterZoomLive()
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
+      // Skipped-placeholder heights track the committed zoom (see enterZoomLive) — same recalc.
+      if (zoomLiveEd) el.style.setProperty('--iw-cis-scale', ((next / zoomLiveZ0) ** 2).toFixed(4))
       // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
       // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
       // could bite against the stale height near the document end. One offsetHeight read in a
@@ -599,6 +604,7 @@ export function Scroll({
         if (!phone) el.scrollLeft = keepLeft
       }
       editorZoomRef.current = next
+      notePerf('zoom-commit', performance.now() - commitT0)
       if (settle) clearTimeout(settle)
       settle = setTimeout(function settleFn() {
         // Fingers still down = the gesture is NOT over (a paused pinch) — settling now would tear
@@ -731,6 +737,46 @@ export function Scroll({
     const CV_LIVE = typeof CSS !== 'undefined' && !!CSS.supports?.('content-visibility', 'auto')
     let zoomLiveEd: HTMLElement | null = null
     let zoomLiveStyle: HTMLStyleElement | null = null
+    let zoomLiveZ0 = 1 // zoom at live-window entry — the placeholder rules' height baseline
+    // ── ZOOM GUARD (round-3 flicker, 2026-07-12): the live window's placeholder regime is only
+    // piecewise-consistent AT commit instants — the browser re-evaluates content-visibility
+    // RELEVANCY asynchronously between frames, and each wave (skipped↔rendered swaps, heights
+    // start-zoom vs current-zoom) shifts the layout with NO handler running: the text moved but
+    // the pin and the band/panel geometry were commit-time — measured 93-546px of band/text
+    // desync lasting until the next commit ("text flows over gap", "page joins gap"). While the
+    // live window is up, this rAF loop re-pins the anchor and re-syncs the bands the frame a
+    // wave lands. A DESKTOP scrollTop change between commits is a genuine user scroll (wheel
+    // without ctrl) — accept it (rebase the pin); on PHONE fingers are down, so any scroll not
+    // ours is a native pan that survived suppression — fight it (pin), the round-2 rule.
+    let guardRaf = 0
+    let guardScrollTop = 0
+    // Shared across Scroll instances (the loading shell's instance would otherwise shadow the
+    // live editor's counters) — debug/probe only.
+    const gw = window as unknown as { __iwZoomGuard?: { ticks: number; rebase: number; pin: number; noAnchor: number } }
+    const guardStats = (gw.__iwZoomGuard ||= { ticks: 0, rebase: 0, pin: 0, noAnchor: 0 })
+    const guardTick = () => {
+      guardRaf = 0
+      if (!zoomLiveEd) return
+      guardStats.ticks++
+      const st = getScrollTop()
+      const t = anchorTop()
+      if (t != null) {
+        if (!phone && Math.abs(st - guardScrollTop) > 0.5) {
+          guardStats.rebase++
+          anchorTop0 = t // user scrolled mid-window (desktop) — keep guarding from the new pose
+        } else if (Math.abs(t - anchorTop0) > 1) {
+          guardStats.pin++
+          setScrollTop(st + (t - anchorTop0))
+          // The wave moved sheet-local geometry too: commit-time bands (and every placeholder-
+          // regime cache entry) are stale — re-derive from the CURRENT layout, same task.
+          window.dispatchEvent(new CustomEvent('inkwave:zoom-step', {
+            detail: { step: zoomToStep(editorZoomRef.current), surface: el, resync: true },
+          }))
+        }
+      } else guardStats.noAnchor++
+      guardScrollTop = getScrollTop()
+      guardRaf = requestAnimationFrame(guardTick)
+    }
     const enterZoomLive = () => {
       if (!CV_LIVE || zoomLiveEd) return
       const ed = el.querySelector('.ProseMirror') as HTMLElement | null
@@ -746,14 +792,22 @@ export function Scroll({
       // make the switch geometry-neutral at the current zoom — no compensating scroll, no
       // relevancy drag, no second-wave jump. --iw-cis stays as the fallback for any child beyond
       // these rules; the :nth-child specificity beats the base `> *` rule in index.css.
+      // Placeholders TRACK the zoom (2026-07-12, the residual single-frame blips): a multiline
+      // block's height ≈ lines·lineHeight ∝ zoom² (both factors scale), so frozen gesture-start
+      // heights diverge from rendered blocks as the gesture moves — every relevancy swap then
+      // jumped by (z/z0)²−1 of the block (probed: 90-450px single-frame blips at commits). Each
+      // rule multiplies the measured height by --iw-cis-scale = (zoom/z0)², written next to the
+      // zoom var each commit (same style recalc — zero extra invalidation), so swap deltas drop
+      // to line-quantization noise.
       const kids = Array.from(ed.children) as HTMLElement[]
       let css = ''
       let sum = 0
       for (let i = 0; i < kids.length; i++) {
         const h = kids[i].offsetHeight
         sum += h
-        css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto ${h}px}\n`
+        css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto calc(${h}px*var(--iw-cis-scale,1))}\n`
       }
+      zoomLiveZ0 = editorZoomRef.current
       // No entry bracket (2026-07-11): the ONLY caller is applyFrame's commit path, immediately
       // before the zoom var write — the (geometry-neutral) switch and the font reflow land in ONE
       // forced layout (the anchor read that follows), and the pin correction against anchorTop0
@@ -765,20 +819,34 @@ export function Scroll({
       ed.style.setProperty('--iw-cis', `${Math.max(24, Math.round(sum / kids.length))}px`)
       ed.classList.add('iw-zoom-live')
       zoomLiveEd = ed
+      guardScrollTop = getScrollTop()
+      if (!guardRaf) guardRaf = requestAnimationFrame(guardTick)
     }
     const exitZoomLive = () => {
       const ed = zoomLiveEd
       if (!ed) return
+      const exitT0 = performance.now() // perflog zoom-exit: un-skip relayout + atomic band re-derive
       zoomLiveEd = null
+      if (guardRaf) { cancelAnimationFrame(guardRaf); guardRaf = 0 }
       // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
       // them out at the committed zoom, displacing everything below — pin the held content anchor
       // back to its gesture-start viewport top in the same task so the anchored text never jumps.
       ed.classList.remove('iw-zoom-live')
       ed.style.removeProperty('--iw-cis')
+      el.style.removeProperty('--iw-cis-scale')
       zoomLiveStyle?.remove()
       zoomLiveStyle = null
       const after = anchorTop() // forces the full relayout now, pre-paint
+      // ATOMIC EXIT (round-3 flicker): the un-skip relayout must never paint under the
+      // placeholder-era panels — that window (exit → settle recompute → paint, 2 rAFs + a forced
+      // measure) showed 779-1170px of band/text desync for ~180ms at EVERY settle. Re-derive the
+      // band geometry from the full layout in this same task: the class is off, so onZoomStep
+      // routes to the full-regime stepCache (hit = pure writes; miss = one band read riding the
+      // layout the anchor read just forced). Dispatched BEFORE the scroll write so applyBands'
+      // sheet min-height lands first (scroll-range clamp order).
+      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
       if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
+      notePerf('zoom-exit', performance.now() - exitT0)
     }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return

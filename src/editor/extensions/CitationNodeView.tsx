@@ -114,12 +114,15 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       // and the actually-linked locator gets ', esp. X' (the clickable ref). Locator pages are
       // deduped OUT of the plain list; if that empties it, only one kind remains → render as today.
       let plainPages = '', espLoc = ''
-      if (item && a.locator && hlPages.length) {
-        const locSet = new Set(locatorPages(a.locator))
+      // Legacy docs carry numeric locators (locator: 12, not '12') — coerce before any string
+      // ops (a bare .trim() here was a live keydown TypeError on Peter's thesis, 2026-07-12).
+      const locStr = a.locator == null ? '' : String(a.locator)
+      if (item && locStr && hlPages.length) {
+        const locSet = new Set(locatorPages(locStr))
         const rest = [...new Set(hlPages.filter(p => !locSet.has(p)))].sort((x, y) => x - y)
-        if (rest.length && (locSet.size || a.locator.trim())) { plainPages = formatPages(rest); espLoc = a.locator.trim() }
+        if (rest.length && (locSet.size || locStr.trim())) { plainPages = formatPages(rest); espLoc = locStr.trim() }
       }
-      const pages = item && !espLoc ? mergePages(a.locator, hlPages) : ''
+      const pages = item && !espLoc ? mergePages(locStr, hlPages) : ''
       const pageLabel = pages ? (/[–-]/.test(pages) || /,/.test(pages) ? `pp. ${pages}` : `p. ${pages}`) : ''
       return item
         // text is author-year only (pages passed empty) so the page can be its OWN clickable link.

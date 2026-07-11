@@ -15,14 +15,35 @@ import fs from 'node:fs'
 const FAMILIES = [
   'EB+Garamond:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700',
   'IM+Fell+DW+Pica:ital@0;1',
-  // MATH-CERTIFIED StyleBar families only (2026-07-12 round-7 certification — see CLAUDE.md).
-  // Tinos, Caladea, Vollkorn, Libre Baskerville, PT Serif, Source Serif 4, Alegreya and
-  // Baskervville all FAILED the measureText↔DOM parity prover (integer-px advance quantization —
-  // hinting/ligature divergence) and were not shipped. No metric-reliable Baskerville exists yet.
-  'Gelasio:ital,wght@0,400;0,700;1,400;1,700',   // Georgia-metric serif
-  'Lora:ital,wght@0,400;0,700;1,400;1,700',      // Cambria/Palatino-character contemporary serif
-  'Spectral:ital,wght@0,400;0,700;1,400;1,700',  // Times-character editorial serif
-  'Carlito:ital,wght@0,400;0,700;1,400;1,700',   // metric-stable sans (Calibri-compatible)
+  // MATH-CERTIFIED StyleBar families only (2026-07-12 certification waves 1-4 — see CLAUDE.md).
+  // FAILED the measureText↔DOM prover (integer-px advance/hinting-ligature divergence), NOT
+  // shipped: Tinos, Arimo, Caladea, Vollkorn, Libre Baskerville, Baskervville, Libre Caslon Text,
+  // Quattrocento (Baskerville genre: definitively no passer), PT Serif, Source Serif 4, Alegreya,
+  // STIX Two Text, Inter (700 fails). Certified-but-cut (palette budget 15): Cardo, Noto Sans,
+  // Noto Serif, Open Sans, Fira Code, Nimbus Roman.
+  'Gelasio:ital,wght@0,400;0,700;1,400;1,700',
+  'Lora:ital,wght@0,400;0,700;1,400;1,700',
+  'Spectral:ital,wght@0,400;0,700;1,400;1,700',
+  'Carlito:ital,wght@0,400;0,700;1,400;1,700',
+  'Crimson+Pro:ital,wght@0,400;0,700;1,400;1,700',
+  'Gentium+Plus:ital,wght@0,400;0,700;1,400;1,700',
+  'Cormorant+Garamond:ital,wght@0,400;0,700;1,400;1,700',
+  'Fraunces:ital,wght@0,400;0,700;1,400;1,700',
+  'Bitter:ital,wght@0,400;0,700;1,400;1,700',
+  'Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700',
+  'JetBrains+Mono:ital,wght@0,400;0,700;1,400;1,700',
+]
+// Non-Google certified clones (GUST Font Licence — freely redistributable): the 'Times' and
+// 'Arial' picker slots. Downloaded as OTF from CTAN and served like every other self-hosted face.
+const DIRECT = [
+  ['TeX Gyre Termes', 400, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyretermes-regular.otf'],
+  ['TeX Gyre Termes', 700, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyretermes-bold.otf'],
+  ['TeX Gyre Termes', 400, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyretermes-italic.otf'],
+  ['TeX Gyre Termes', 700, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyretermes-bolditalic.otf'],
+  ['TeX Gyre Heros', 400, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyreheros-regular.otf'],
+  ['TeX Gyre Heros', 700, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyreheros-bold.otf'],
+  ['TeX Gyre Heros', 400, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyreheros-italic.otf'],
+  ['TeX Gyre Heros', 700, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyreheros-bolditalic.otf'],
 ]
 // Only the IDENTITY serifs preload (boot weight — see CLAUDE.md load-performance rules); the
 // StyleBar families self-host but load on demand, and the pagination re-measures on 'loadingdone'.
@@ -35,6 +56,14 @@ const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Geck
 const url = `https://fonts.googleapis.com/css2?${FAMILIES.map((f) => `family=${f}`).join('&')}&display=swap`
 
 const css = await (await fetch(url, { headers: { 'User-Agent': UA } })).text()
+// DIRECT assets survive regeneration (CTAN mirrors are flaky; the bytes are pinned releases) —
+// carry any existing copies across the wipe and only fetch the ones we don't have.
+const directKeep = new Map()
+for (const [fam, weight, style] of DIRECT) {
+  const slug = fam.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const name = `${slug}-${weight}-${style}.otf`
+  try { directKeep.set(name, fs.readFileSync(`public/fonts/${name}`)) } catch { /* not present yet */ }
+}
 fs.rmSync('public/fonts', { recursive: true, force: true })
 fs.mkdirSync('public/fonts', { recursive: true })
 
@@ -60,6 +89,17 @@ while ((m = re.exec(css))) {
   out += '@font-face {' + body.replace(src, `/fonts/${name}`) + '}\n\n'
   if (subset && PRELOAD_SUBSETS.has(subset) && PRELOAD_FAMILIES.has(fam)) preload.push(`/fonts/${name}`)
   i++
+}
+
+// Non-GF certified clones (see DIRECT above) — same self-hosted treatment, OTF format.
+for (const [fam, weight, style, srcUrl] of DIRECT) {
+  const slug = fam.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const name = `${slug}-${weight}-${style}.otf`
+  const buf = directKeep.get(name) ?? Buffer.from(await (await fetch(srcUrl, { headers: { 'User-Agent': UA } })).arrayBuffer())
+  fs.writeFileSync(`public/fonts/${name}`, buf)
+  bytes += buf.length
+  i++
+  out += `@font-face {\n  font-family: '${fam}';\n  font-style: ${style};\n  font-weight: ${weight};\n  font-display: swap;\n  src: url(/fonts/${name}) format('opentype');\n}\n\n`
 }
 
 fs.writeFileSync('public/fonts/inkwave-fonts.css', out.trimEnd() + '\n')
