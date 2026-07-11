@@ -240,12 +240,11 @@ uses background-attachment: scroll (WebKit's fixed-attachment compositing is fla
 must be CANVAS-RASTERED PNGs, never per-instance SVG data-URIs — Chromium builds a full
 IsolatedSVGDocumentHost per unique URI (~4.3s of boot at ~600 URIs; Firefox is cheap = the engine
 asymmetry). The lazy editor chunk is eagerly imported at module scope (browser-only guard) so it
-loads in PARALLEL with storage, not after doc-ready. Starved-boot coast: a first-coast-frame check
-re-freezes from the drift's extrapolated pose when >150ms late (rebaseCoast) — prevents
-full-speed-overlay-then-backward-snap; phone shell drop waits for wave-rest AND paper fade end.
+loads in PARALLEL with storage, not after doc-ready. Phone shell drop waits for wave-rest AND
+paper fade end.
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts). Known residual:
 the editor mounts TWICE per load (duplicate reveal events; Tiptap useEditor recreation) — needs
-its own pass. 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
+its own pass (the coast is now immune to it — see round 4 — but the double mount still wastes work). 2026-07-11 round 3 (open-doc + snapshot white-outs): reveal-chain STATE IS
 PER-LOAD — Edit.tsx's closure vars (revealedAt/restSeen) and its pending force-down/cap timers
 must reset on `inkwave:open-begin`; the FIRST load's 4s phone cap fired ~1.7s into the SECOND
 load's covering shell = the open-document white-out (stale restSeen was a second path to the same
@@ -262,6 +261,44 @@ headless WebKit and ate ~8% of the Chromium open). PROBE GOTCHA: `vite preview` 
 the vercel.json SPA rewrite — it serves the prerendered EDITOR page for /snapshot, hydration
 mismatches (#418/#423), React recreates <html> and iw-water-ready/data-theme die (gradient with
 no waves). Probe /snapshot against a fallback-faithful static server, never vite preview.
+2026-07-11 round 4 — ADDITIVE COAST v3 (the drift→coast "two snaps", desktop Chrome + phone
+refresh + snapshot veil). MEASURED root cause (CDP screencast + in-page transform trace): the
+editor double-mount dispatches reveal-imminent TWICE; each old freezeToCoast re-froze from a
+clock trailing the compositor and REWROTE the shared #iw-coast-kf keyframes under the running
+coast — two ~7-12px backward snaps with frozen frames between, plus per-surface startTime skew
+(a third snap at the shell-fade handoff); the round-2 refreeze (rebaseCoast) was a fourth writer.
+Fix: THE DRIFT IS NEVER STOPPED. `.iw-wave-coast.iw-coast-add` keeps the drift animation
+(name-matched across the class swap — preserved with its startTime on all three engines) and
+ADDS the coast via `animation-composition: replace, add`: injected literal keyframes worth
+(vT−d)·cubic-bezier(1/3,0,2/3,0.5) over T (≡ the exact old v(1−τ)² velocity profile) then a
+LINEAR HOLD at +v that cancels the drift — the TOTAL pose is static after T until the rest
+handoff, however late its commit lands. Zero additive value + zero velocity at start ⇒ the
+handoff is continuous BY CONSTRUCTION on any starvation: healthy path byte-inert, late path
+monotonic; rebaseCoast/refreeze are DELETED. ONE SHARED COAST PER LOAD (`sharedCoast` in
+Scroll.tsx, cleared on open-begin/finish, stale >T self-heals — a veil unmounted mid-coast must
+never donate its clock): every surface (shell + editor + any duplicate) adopts the same clock +
+snapped distance ⇒ pixel-identical copies. The clock resolves at the coast animation's `ready`
+(the first painted frame): snap d so the rest pose is an integer device pixel (≤0.5-device-px
+keyframe rewrite INSIDE that first frame — invisible) and `retimeCoast()` the twinkle fields to
+the same number. finish() = timer at t0+T+80ms (the hold makes slop invisible; animationend
+fires at T+hold, too late) + the 3300ms cap unchanged. Engines without animation-composition
+keep the classic replace path (freeze + backdate, `:not(.iw-coast-add)` rules). Twinkle round 4:
+field ramps get DYNAMIC headroom (K grows with now−epoch — the fixed 600 ramp EXPIRED ~19min
+into a session, freezing dashes against moving water on late-session opens); coasting fields
+also go ADDITIVE (ramp keeps running + WAAPI composite:'add'; 'off' cancels BOTH; the rest-
+rebase constant is unchanged — ramp+additive total ≡ the old formula exactly); mountSet runs
+recycle() immediately (a late-session mount otherwise shows an EMPTY field ≤500ms); the driver
+parks when every host is gone. Respawn boot-gate: re-arms on EVERY anim re-entry (snapshot
+opens + snapshot→editor restores are route navs that never fire open-begin) and re-opens at the
+'off' transition (wave rest), NOT at editor-revealed. While gated, dashes still CYCLE (Peter:
+"short lines repeating themselves"): raster-free 140px-LATTICE relocation — same wave-space
+phase ⇒ the SAME art stays exactly valid, two style writes, no encode — drawn through the
+never-twice memory with the current slot excluded; the dash memory ring scales with band
+population (~3 strikes of history; the fixed 16 held ~1 envelope and allowed A→B→A returns).
+Verified per-engine (Chromium/Firefox/WebKit incl. iPhone emulation, all four choreographies +
+a 2.5s main-thread-saturation stress): tile velocity monotone −72→0 with zero discontinuities,
+dash-field velocity tracks the tile at median |Δv|=0.0 (dashes ride their waves), S-curve blink
+envelopes confirmed per instance, zero same-spot respawn repeats, zero art churn during load.
 
 ## Open pipeline + cloud caching (2026-07-09)
 
