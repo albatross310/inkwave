@@ -1,44 +1,53 @@
-// ARITHMETIC LAYOUT ENGINE (2026-07-14 — the designed follow-up to the math-certified fonts work).
+// ARITHMETIC LAYOUT ENGINE (2026-07-14; generalized for equations/figures 2026-07-15 — the designed
+// follow-up to the math-certified fonts work).
 //
 // A THIRD acquisition path for PaginationExtension.collectLines: instead of forcing a full-document
 // browser reflow and reading each block's line geometry with range.getClientRects (path 1) or
 // replaying a per-node block-relative cache (path 2, the round-6/7 LineCache), this path COMPUTES a
-// paragraph's line wrapping from per-run canvas advance widths and a greedy line-breaker — no DOM
-// read of that block's text layout at all. The output is byte-identical in shape to what
-// collectLines produces (per-line intrinsic tops + block boundaries), so it feeds the SAME
-// computeBreaks page-splitter and the SAME page-break signatures result.
+// block's line wrapping from the boxes of its MEASURABLE ELEMENTS — text via canvas advances, math
+// via a cached one-time measure, figures via their dimensions — with NO per-pagination reflow. The
+// output is byte-identical in shape to what collectLines produces (per-line intrinsic tops + block
+// boundaries), so it feeds the SAME computeBreaks page-splitter and the SAME page-break signatures.
 //
-// WHY THIS IS SOUND (the certification, round-7): canvas `measureText` reproduces the browser's
-// advance widths to Δ≤0.05px, AND a greedy break at a fixed width lands on the SAME word boundaries,
-// but ONLY for the certified font palette (see CERTIFIED_FAMILIES). Uncertified fonts diverge on
-// integer-px advance quantization (hinting/ligature rounding) — a divergence that is fatal here
-// because canonical page breaks must be CROSS-DEVICE IDENTICAL (a wrong break = the same text on a
-// different page on phone/print). So this engine is CONSERVATIVE BY CONSTRUCTION: it refuses any
-// block it cannot prove it can reproduce and hands it back to the DOM path. Correctness over
-// cleverness — it never approximates; it defers.
+// THE MEASURABLE-ELEMENT MODEL (the generalization): every flowing element supplies a stable box —
+// an INLINE advance + line-height demand, or a BLOCK height + margins — from a source needing no
+// full-document reflow (computed, or a one-time measure cached by an immutable key). See the boxes
+// (InlineBox/BlockBox) and the element box-SOURCE registry near figureBlockBox(). "Arithmetic-
+// eligible" = "reflow-free-measurable": a block is eligible when every element in it supplies such a
+// box AND the DOM verifier stays stable over it (the inline-atom fit guard, LINE_STABILITY_EPS).
 //
-// ELIGIBILITY (what this engine handles arithmetically vs what it DEFERS to DOM measure):
-//   ARITHMETIC-ELIGIBLE:  a `paragraph` whose inline content is ONLY text runs (marks: bold,
-//     italic, underline, textStyle{fontFamily,fontSize}) AND every run resolves to a CERTIFIED
-//     font family. Mixed runs (bold/italic/size changes mid-line) ARE handled — the line box takes
-//     the tallest run (ratio × max font-size), and a word that straddles a mark boundary is
-//     measured piece-by-piece in each piece's own font.
+// WHY TEXT IS SOUND (round-7 certification): canvas `measureText` reproduces the browser's advance
+// widths to Δ≤0.05px and a greedy break lands on the SAME word boundaries — but ONLY for the
+// certified font palette (CERTIFIED_FAMILIES); uncertified fonts diverge on integer-px advance
+// quantization, fatal because canonical breaks must be CROSS-DEVICE IDENTICAL. So the engine is
+// CONSERVATIVE BY CONSTRUCTION: it refuses any block it can't prove and hands it back to the DOM
+// path. Correctness over cleverness — it never approximates; it defers.
+//
+// ELIGIBILITY (arithmetic vs DEFERRED to DOM measure):
+//   ARITHMETIC-ELIGIBLE:
+//     • a `paragraph` of text runs (bold/italic/underline/family), UNIFORM text size, CERTIFIED
+//       fonts — mid-word mark straddles handled piece-by-piece;
+//     • …the same paragraph MAY ALSO contain inline MATH atoms that carry a box AND FIT the text
+//       line (LINE_STABILITY_EPS) — the common textstyle formula (x², a/b, √, sub/superscripts);
+//     • a block-atom `mathBlock` (or future `figure`) that carries a reflow-free box.
 //   DOM-ONLY (deferred — never guessed):
-//     • any paragraph containing an inline ATOM NodeView — `citation` labels (React output, shadow
-//       geometry; measure ~9px off even on plain paths) or inline `math` (KaTeX shadow DOM);
-//     • any run in an UNCERTIFIED font (system fonts, failed-calibration families);
-//     • non-paragraph blocks: `orderedList`/`bulletList`/`taskList` (marker + indent + nested-para
-//       box model), `horizontalRule`, `referenceList` (atom NodeView), `mathBlock`, images, tables.
-//   The eligibility test returns the exact reason, so the wire-in can log a per-doc coverage map.
+//     • a `citation` inline atom — no stable reflow-free geometry (React NodeView; reflows on
+//       bibliography hydration / style switch; ~9px off even on plain paths). Documented as a
+//       FUTURE measurable (cached-measure keyed by citekey+style+hydration-epoch);
+//     • a TALL inline formula that exceeds the line (fraction/∑ with limits) — the getClientRects
+//       verifier becomes order-unstable, so it defers;
+//     • MIXED text sizes in one paragraph (same verifier instability);
+//     • uncertified fonts; lists (`orderedList`/`bulletList`/`taskList`), `horizontalRule`,
+//       `referenceList` — no box supplied.
+//   blockEligibility returns the exact reason, so the wire-in logs a per-doc coverage map.
 //
-// GATE: run this path ONLY after `document.fonts.ready` AND when every run in the block is certified
-// AND loaded. Before fonts settle, or on any uncertified run, fall back to the DOM measure. A full
-// DOM measure still runs as the idle VERIFIER (pagCheck compares signatures) — so any divergence
-// this engine ever produced is caught and corrected within the lazy re-verify window.
+// GATE: run this path ONLY after `document.fonts.ready`, text runs in certified+loaded fonts, math
+// boxes present. Else fall back to the DOM measure. A full DOM measure still runs as the idle
+// VERIFIER (pagCheck compares signatures) — any divergence is caught within the re-verify window.
 //
 // Pure module: no DOM, no ProseMirror imports in the core (a canvas 2d context is injected as the
-// measure function). Unit/parity-testable in a browser harness without the app — see the prover
-// scratchpad/r9-arith-prove.mjs.
+// measure function; element boxes are injected by the caller). Unit-tested (arithmeticLayout.test.ts)
+// + browser-proven against the real DOM in scripts/arithmeticLayout.prove.mjs (text + math).
 
 // ─── Certified font palette ───────────────────────────────────────────────────────────────────
 // The PRIMARY family name of each css stack the StyleBar can emit (CLAUDE.md math-certified list).
@@ -75,6 +84,31 @@ export function isCertifiedStack(stack: string): boolean {
   return CERTIFIED_FAMILIES.has(primaryFamily(stack))
 }
 
+// ─── The MEASURABLE-ELEMENT abstraction (2026-07-15 — generalized for equations/figures/…) ──────
+// The engine's unifying idea: every element that flows in the document supplies a STABLE box from a
+// source that needs NO full-document reflow at pagination time. Two shapes:
+//   • an INLINE element occupies a horizontal ADVANCE on its line and DEMANDS a line-box height;
+//   • a BLOCK element occupies a vertical HEIGHT plus collapsible margins.
+// The box's SOURCE is what makes it reflow-free — one of:
+//   (a) COMPUTED — text runs (canvas measureText advance + snapped line height); figure dims from
+//       the node's specified/intrinsic width×height attributes; a horizontal rule's fixed height.
+//   (b) CACHED ONE-TIME MEASURE — content that renders to a stable box per node (KaTeX math): the
+//       box is measured ONCE off its rendered geometry and cached by a stable content key (latex +
+//       font context); math content is immutable per node, so the cache never needs a reflow again.
+//       (This is the same "measure once, cache by stable key" discipline as font certification.)
+// "Arithmetic-eligible" therefore generalizes to "reflow-free-measurable": a block is eligible when
+// EVERY element in it supplies such a box AND the DOM verifier stays stable over it (the inline-atom
+// height guard below). Anything else DEFERS to the DOM measure — never guessed.
+export interface InlineBox {
+  advanceWidth: number     // px advance the element contributes to the line (unbreakable if atomic)
+  lineHeightDemand: number // px line-box height this element forces on its line (its box as it sits)
+}
+export interface BlockBox {
+  height: number           // the block element's content height (px)
+  marginTopPx: number      // resolved margins (collapse with neighbours — see resolveBlocks)
+  marginBottomPx: number
+}
+
 // ─── Run / block model ────────────────────────────────────────────────────────────────────────
 export interface InlineRun {
   text: string        // the run's characters ('\n' is a hard break; see layoutParagraph)
@@ -82,15 +116,25 @@ export interface InlineRun {
   fontSizePx: number  // resolved px (em marks already resolved against the block base font)
   fontWeight: number  // 400 | 700 (synthetic-bold weights collapse to nearest; caller resolves)
   italic: boolean
-  atomic?: boolean    // inline atom (citation/math NodeView) — makes the whole block DOM-only
+  atomic?: boolean    // inline atom (math/citation/inline-image NodeView)
+  // A reflow-free-measurable inline ATOM (e.g. inline math) supplies its box here; the wrap then
+  // treats it as an unbreakable unit of `box.advanceWidth`, contributing `box.lineHeightDemand` to
+  // its line. An atomic run WITHOUT a box (a citation label — no stable reflow-free geometry) makes
+  // the block DOM-only. So: atomic + box ⇒ measurable; atomic + no box ⇒ defer.
+  box?: InlineBox
+  atomType?: string   // 'mathInline' | 'citation' | … — diagnostics / coverage map
 }
 
 export interface ArithBlock {
-  type: string          // 'paragraph' is the only arithmetic-eligible type
-  runs: InlineRun[]     // ordered inline content
+  type: string          // 'paragraph' | block-atom types ('mathBlock', 'figure', …)
+  runs: InlineRun[]     // ordered inline content (paragraph-like blocks)
   baseFontPx: number    // the block element's OWN computed font-size (18 at canonical) — the strut
   marginTopPx: number   // resolved margin-top (0 for paragraphs; used for adjacent-margin collapse)
   marginBottomPx: number// resolved margin-bottom (0.5em → 9px canonical for paragraphs)
+  // A reflow-free-measurable BLOCK ATOM (block math, figure) supplies its box here — the block is
+  // then one unbreakable region of `blockBox.height`. Present ⇒ the block is a measurable block atom
+  // (paginated whole, never split); absent + type≠paragraph ⇒ defer to the DOM measure.
+  blockBox?: BlockBox
   // OPTIONAL first-line baseline LEADING (px). collectLines reads line tops via range.getClientRects,
   // which returns the TEXT rect (baseline-positioned) — offset below the line-box top by a per-(size,
   // base-strut) constant (EB Garamond @18px base: 16px→5, 18px→3, 18.666px→2, 24px→3). This is a
@@ -113,26 +157,48 @@ export interface BlockLayout {
 
 export interface Eligibility { eligible: boolean; reason: string }
 
-// The reason strings double as the coverage-map keys in the prover/wire-in diagnostics.
-export function blockEligibility(block: ArithBlock): Eligibility {
-  if (block.type !== 'paragraph') return { eligible: false, reason: `block:${block.type}` }
+// An inline math pill is an ATOMIC one-line unit: whatever its formula, inline KaTeX renders in
+// TEXTSTYLE, so the pill is a stable box (~34px @18px base — fixed, formula-independent; even a
+// \frac or \sum stays compact) that simply makes ITS line taller. That's fine for the arithmetic
+// path (the line takes the pill's demand). The one catch is the DOM VERIFIER: collectLines reads
+// line tops via range.getClientRects, and KaTeX's internal sub/superscript and fraction spans emit
+// rects BELOW the baseline that the 3px dedup splits into spurious extra lines — so the verifier
+// OVER-counts a math paragraph's lines TODAY (a pre-existing inaccuracy, independent of this engine).
+// COLLECTLINES CO-REQUISITE (documented; the wire-in gate): to make the verifier agree with the
+// (correct) arithmetic count, collectLines must collapse each `[data-math-inline]` pill to its
+// SINGLE bounding rect before the dedup (skip its internal rects). With that one-rect rule the
+// verifier is stable and math paragraphs are byte-identical (proven in the prover, which applies the
+// same rule to its DOM reference). Until it lands, gate inline math OFF (mathEligible=false) and it
+// safely DEFERS. LINE_STABILITY_EPS still guards the MIXED-SIZE TEXT case (a genuine instability with
+// no such fix — differently-sized text rects reorder unfixably).
+export const LINE_STABILITY_EPS = 3
+
+// `mathEligible` reflects whether the collectLines math-pill rect-fix is in place (the wire-in flag).
+// The engine's CAPABILITY is unconditional — it computes math paragraphs correctly either way; the
+// flag only decides whether to trust the DOM verifier over them yet.
+export function blockEligibility(block: ArithBlock, ratio = 1.618, mathEligible = true): Eligibility {
+  // BLOCK ATOMS (block math, figure): eligible iff they carry a reflow-free box.
+  if (block.type !== 'paragraph') {
+    return block.blockBox ? { eligible: true, reason: `block-atom:${block.type}` }
+                          : { eligible: false, reason: `block:${block.type}` }
+  }
   if (!block.runs.length) return { eligible: true, reason: 'paragraph:empty' }
   for (const r of block.runs) {
-    if (r.atomic) return { eligible: false, reason: 'inline-atom' }
+    if (r.atomic) {
+      // Inline atom: needs a reflow-free box. Math pills have one (measured); citation labels do not
+      // (React NodeView, reflows on bibliography hydration/style switch) — those always defer.
+      if (!r.box) return { eligible: false, reason: `inline-atom${r.atomType ? ':' + r.atomType : ''}` }
+      if (!mathEligible) return { eligible: false, reason: `inline-atom-gated${r.atomType ? ':' + r.atomType : ''}` }
+      continue
+    }
     if (!isCertifiedStack(r.fontFamily)) return { eligible: false, reason: `uncertified:${primaryFamily(r.fontFamily)}` }
   }
-  // MIXED FONT-SIZE within a paragraph is DOM-ONLY. Not because the wrap can't be computed — it
-  // can — but because a mixed-size line's per-line geometry is read via range.getClientRects, and
-  // the browser returns a SEPARATE rect per differently-sized inline box at a DIFFERENT top (shared
-  // baseline ⇒ different box tops). collectLines' rect-dedup (skip `r.top - lastTop <= 3`) then
-  // counts a line beginning with a TALL run followed by a short run as TWO lines — an artifact that
-  // depends on run order, so the DOM measure ITSELF is not a stable reference for these paragraphs.
-  // The arithmetic engine cannot prove parity against an unstable reference, so it defers (the whole
-  // system paginates these via that same heuristic — deferring keeps the arith path == the DOM path
-  // by construction). Uniform size (all runs equal, incl. all-base bold/italic/family runs) is fine.
-  const sizes = block.runs.filter((r) => r.text !== '\n').map((r) => r.fontSizePx)
+  // MIXED FONT-SIZE among TEXT runs is DOM-ONLY: a taller text run's rect top diverges >3px, and
+  // unlike a math pill there is NO single-rect fix (the size change is intrinsic to the text run) —
+  // the verifier is unfixably order-dependent, so it defers.
+  const sizes = block.runs.filter((r) => !r.atomic && r.text !== '\n').map((r) => r.fontSizePx)
   if (sizes.length && sizes.some((s) => s !== sizes[0])) return { eligible: false, reason: 'mixed-size' }
-  return { eligible: true, reason: 'paragraph:text' }
+  return { eligible: true, reason: block.runs.some((r) => r.atomic) ? 'paragraph:text+math' : 'paragraph:text' }
 }
 
 // The browser's USED line-box height: the CSS line-height (ratio × font-size) does NOT render at
@@ -183,40 +249,54 @@ export function makeCanvasMeasure(): Measure {
 // tallest-line-box rule (r7 test c).
 const WRAP_EPS = 0.001 // r7's `> W + 0.001` — matches the browser's fractional-advance tolerance
 
-interface Piece { text: string; font: string; sizePx: number }
-interface Token { pieces: Piece[]; fullW: number; bareW: number; maxSizePx: number; len: number }
+// A piece is either TEXT (measured by canvas) or an inline ATOM (a replaced box of fixed width +
+// line-height demand — math, inline image). Atoms GLUE to adjacent non-space text in the same token
+// (CSS offers no break opportunity between an inline-block and neighbouring non-space text), so
+// "x²" (atom) directly followed by "+1" (text) never breaks between them.
+interface Piece { text: string; font: string; demand: number; atom?: InlineBox }
+interface Token { pieces: Piece[]; fullW: number; bareW: number; demand: number; len: number }
 
 // Flatten a paragraph's runs into a per-token stream (tokens split after each whitespace char),
-// each token measured full + bare. '\n' (hard break) is emitted as a sentinel token (len counts it).
-function tokenize(runs: InlineRun[], measure: Measure): Array<Token | 'BR'> {
+// each token measured full + bare + line-height demand. '\n' (hard break) → a 'BR' sentinel.
+function tokenize(runs: InlineRun[], measure: Measure, ratio: number): Array<Token | 'BR'> {
   const out: Array<Token | 'BR'> = []
   let cur: Piece[] = []
   let curLen = 0
   const flush = () => {
     if (!cur.length) return
-    // full width
     let fullW = 0
-    let maxSizePx = 0
-    for (const p of cur) { fullW += measure(p.text, p.font); if (p.sizePx > maxSizePx) maxSizePx = p.sizePx }
-    // bare width: strip trailing whitespace off the END of the token (ws only ever sits at the end)
+    let demand = 0
+    for (const p of cur) {
+      fullW += p.atom ? p.atom.advanceWidth : measure(p.text, p.font)
+      if (p.demand > demand) demand = p.demand
+    }
+    // bare width: strip trailing whitespace off the END of the token (ws only ever sits at the end,
+    // and never on an atom piece — atoms have no trailing space to hang).
     const bare = cur.map((p) => ({ ...p }))
     for (let i = bare.length - 1; i >= 0; i--) {
+      if (bare[i].atom) break // an atom ends the strip — it isn't whitespace
       const stripped = bare[i].text.replace(/\s+$/, '')
-      if (stripped === bare[i].text) break // no trailing ws in this piece → done
+      if (stripped === bare[i].text) break
       bare[i].text = stripped
-      if (stripped.length > 0) break // stripped some ws but content remains → done
-      // piece became empty (was all trailing ws) → continue stripping the previous piece
+      if (stripped.length > 0) break
     }
     let bareW = 0
-    for (const p of bare) if (p.text) bareW += measure(p.text, p.font)
-    out.push({ pieces: cur, fullW, bareW, maxSizePx, len: curLen })
+    for (const p of bare) bareW += p.atom ? p.atom.advanceWidth : (p.text ? measure(p.text, p.font) : 0)
+    out.push({ pieces: cur, fullW, bareW, demand, len: curLen })
     cur = []
     curLen = 0
   }
   for (const run of runs) {
+    if (run.atomic && run.box) {
+      // Inline atom: a single unbreakable piece glued into the current token; occupies 1 doc position.
+      cur.push({ text: '', font: '', demand: run.box.lineHeightDemand, atom: run.box })
+      curLen += 1
+      continue
+    }
     const font = cssFontOf(run)
+    const textDemand = snappedLineHeight(run.fontSizePx, ratio)
     let buf = ''
-    const pushBuf = () => { if (buf) { cur.push({ text: buf, font, sizePx: run.fontSizePx }); curLen += buf.length; buf = '' } }
+    const pushBuf = () => { if (buf) { cur.push({ text: buf, font, demand: textDemand }); curLen += buf.length; buf = '' } }
     for (const ch of run.text) {
       if (ch === '\n') { pushBuf(); flush(); out.push('BR'); continue }
       buf += ch
@@ -233,24 +313,23 @@ function tokenize(runs: InlineRun[], measure: Measure): Array<Token | 'BR'> {
 // blockEligibility(block).eligible — a non-eligible block would produce a WRONG result (that's why
 // the gate defers it). Pure arithmetic: no DOM, no layout read.
 export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio: number, measure: Measure): BlockLayout {
-  const base = block.baseFontPx
+  const strut = snappedLineHeight(block.baseFontPx, ratio) // the paragraph's own font always occupies the line
   const leading = block.firstLineLeadingPx ?? 0 // baseline offset to match getClientRects text-rects
   const relTops: number[] = []
   const lineHeights: number[] = []
   const breakStartChars: number[] = [0]
-  const tokens = tokenize(block.runs, measure)
+  const tokens = tokenize(block.runs, measure, ratio)
 
   let top = 0
   let lineW = 0
-  let lineMax = base            // strut floor: the paragraph's own font always occupies the line box
+  let lineDemand = strut        // max line-box demand over elements on the current line (strut floor)
   let charIdx = 0
   let started = false           // has any token landed on the current line yet?
 
   const closeLine = () => {
-    const lh = snappedLineHeight(lineMax, ratio) // LayoutUnit-floored — byte-matches the DOM measure
     relTops.push(top + leading)   // report at the text-rect position (height/advance stay leading-free)
-    lineHeights.push(lh)
-    top += lh
+    lineHeights.push(lineDemand)
+    top += lineDemand
   }
 
   for (const tk of tokens) {
@@ -258,7 +337,7 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
       // Hard break: end the current line here; the next token starts a fresh line.
       closeLine()
       lineW = 0
-      lineMax = base
+      lineDemand = strut
       started = false
       charIdx += 1 // the '\n' occupies one position in the block text
       breakStartChars.push(charIdx)
@@ -270,10 +349,10 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
       closeLine()
       breakStartChars.push(charIdx)
       lineW = tk.fullW
-      lineMax = Math.max(base, tk.maxSizePx)
+      lineDemand = Math.max(strut, tk.demand)
     } else {
       lineW += tk.fullW
-      lineMax = Math.max(lineMax, tk.maxSizePx)
+      lineDemand = Math.max(lineDemand, tk.demand)
       started = true
     }
     charIdx += tk.len
@@ -300,6 +379,8 @@ export interface ResolvedBlock {
   relTops: number[]     // per-line tops relative to this block's top
   advance: number       // distance from this block's top to the next block's top (height + margin)
   eligible: boolean     // did the arithmetic path own this block? (for diagnostics)
+  atomLike: boolean     // block atom (block math / figure) — one unbreakable region; the paginator
+                        // treats each of its lines as its own pseudo-block (== collectLines' atoms)
   reason: string
 }
 
@@ -307,9 +388,18 @@ export interface DomBlockMeasure {
   (index: number): { relTops: number[]; advance: number } // the DOM fallback for a deferred block
 }
 
-// Resolve every block, arithmetic where eligible + certified, DOM otherwise. `fontLoaded(run)` is
-// the gate check (document.fonts.check) — a run whose face is not yet loaded forces the DOM path
-// even if the family is certified (measureText would use a fallback face pre-load).
+// The collapsed advance below block i (adjacent-sibling margin collapse — max, not sum).
+function collapsedAdvance(blocks: ArithBlock[], i: number, height: number): number {
+  const next = i + 1 < blocks.length ? blocks[i + 1] : null
+  const collapsed = next ? Math.max(blocks[i].marginBottomPx, next.marginTopPx) : blocks[i].marginBottomPx
+  return height + collapsed
+}
+
+// Resolve every block, arithmetic where reflow-free-measurable, DOM otherwise. `fontLoaded(run)` is
+// the gate check (document.fonts.check) — a text run whose face is not yet loaded forces the DOM
+// path even if the family is certified (measureText would use a fallback face pre-load). Handles
+// three arithmetic shapes: paragraphs (wrap), block atoms (one region of blockBox.height), and
+// empty paragraphs; everything else defers.
 export function resolveBlocks(
   blocks: ArithBlock[],
   contentWidthPx: number,
@@ -317,31 +407,86 @@ export function resolveBlocks(
   measure: Measure,
   domMeasure: DomBlockMeasure,
   fontLoaded: (run: InlineRun) => boolean = () => true,
+  mathEligible = true, // wire-in flag: whether the collectLines math-pill rect-fix is in place
 ): ResolvedBlock[] {
   const out: ResolvedBlock[] = []
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
-    const elig = blockEligibility(b)
-    const facesReady = elig.eligible && b.runs.every((r) => fontLoaded(r))
+    const elig = blockEligibility(b, ratio, mathEligible)
+    // Only TEXT runs gate on fonts; atoms carry their own (already-measured) box.
+    const facesReady = elig.eligible && b.runs.every((r) => r.atomic || fontLoaded(r))
     if (elig.eligible && facesReady) {
-      const lay = layoutParagraph(b, contentWidthPx, ratio, measure)
-      // ADJACENT-SIBLING MARGIN COLLAPSE: the top-to-top advance below this block is its content
-      // height plus the COLLAPSED margin with the next block — max(this.marginBottom,
-      // next.marginTop), not their sum. Paragraph→paragraph is max(9,0)=9 (why plain-para docs
-      // never showed this), but paragraph→hr / →list / →refList collapses to the larger leading
-      // margin (e.g. max(9,12)=12). The last block's advance is unused (never breaks below it).
-      const next = i + 1 < blocks.length ? blocks[i + 1] : null
-      const collapsed = next ? Math.max(b.marginBottomPx, next.marginTopPx) : b.marginBottomPx
-      out.push({ relTops: lay.relTops, advance: lay.height + collapsed, eligible: true, reason: elig.reason })
+      if (b.type !== 'paragraph' && b.blockBox) {
+        // BLOCK ATOM (block math / figure): one unbreakable region.
+        out.push({ relTops: [b.firstLineLeadingPx ?? 0], advance: collapsedAdvance(blocks, i, b.blockBox.height), eligible: true, atomLike: true, reason: elig.reason })
+      } else {
+        const lay = layoutParagraph(b, contentWidthPx, ratio, measure)
+        out.push({ relTops: lay.relTops, advance: collapsedAdvance(blocks, i, lay.height), eligible: true, atomLike: false, reason: elig.reason })
+      }
     } else {
       const dm = domMeasure(i)
       // Structural ineligibility keeps its reason (block:hr, inline-atom, mixed-size, uncertified:…);
       // only an ELIGIBLE block whose faces haven't loaded is 'fonts-unloaded'.
       const reason = elig.eligible ? 'fonts-unloaded' : elig.reason
-      out.push({ relTops: dm.relTops, advance: dm.advance, eligible: false, reason })
+      out.push({ relTops: dm.relTops, advance: dm.advance, eligible: false, atomLike: false, reason })
     }
   }
   return out
+}
+
+// ─── Element box SOURCES: how each measurable type produces its reflow-free box ─────────────────
+// The wire-in obtains an element's box from its type. This registry is the extension point — a new
+// measurable atom becomes a one-function plug-in, never a rewrite of the wrap/pagination core.
+//
+// TEXT (inline, computed) — handled inside tokenize(): advance = measureText, demand =
+//   snappedLineHeight(fontSizePx). No provider needed.
+//
+// MATH (inline + block, CACHED ONE-TIME MEASURE) — the wire-in keeps a cache keyed by a STABLE
+//   content key and fills a miss with ONE measure off the node's already-rendered KaTeX geometry
+//   (no reflow of anything else; math renders synchronously and is immutable per node):
+//     inline: key = `${latex}|${fontSizePx}` → InlineBox {
+//       advanceWidth      = the pill's border-box width  (KaTeX box@0.826em + 6+4 padding + 2 border),
+//       lineHeightDemand  = the line-box height the pill produces when set inline with text.
+//     }  A miss measures the live node once (getBoundingClientRect on the pill + a one-line probe for
+//        the demand) and caches it; the box is invalidated only if the latex changes (⇒ a new key).
+//     block:  key = `${latex}|${align}` → BlockBox {
+//       height = the rendered .katex-display height + the block's 0.4em×2 padding (min 1.8em),
+//       marginTop/Bottom = 0.5em (× the block base font).
+//     }
+//   The engine never re-measures on a normal pagination — it reads the cached box. This is the same
+//   "measure once, cache by an immutable key" discipline as the font-certification table.
+//
+// FIGURE / IMAGE (block, COMPUTED from attrs) — see figureBlockBox() below. A figure's box is a
+//   PURE function of its specified/intrinsic dimensions + its caption's wrapped height + margins —
+//   no measure at all. (No figure node exists in the schema yet — StarterKit + Math + Citation +
+//   ReferenceList only — so this is the documented extension point, ready to wire when one lands.)
+//
+// The DISCIPLINE that stays fixed for ANY new type: (1) the box must come from computation or a
+// one-time measure cached by an immutable key — never a per-pagination reflow; (2) an INLINE box
+// must clear the LINE_STABILITY_EPS fit check or the block defers (the DOM verifier would miscount
+// its line); (3) if a type's geometry is NOT stable (a citation label reflows on bibliography
+// hydration / style switch; a mixed-size text line's rects reorder), it DEFERS — the idle DOM
+// measure remains the verifier, and pagCheck catches any divergence within the re-verify window.
+
+// A figure/image BLOCK box from its specified or intrinsic dimensions + an optional caption. Pure —
+// this is exactly what makes figures arithmetic-friendly the moment a figure node exists: no reflow,
+// no measure, just its box model. `captionHeightPx` is the caption paragraph's wrapped height (from
+// layoutParagraph on the caption, if any). Height honours a CSS `max-width:100%` shrink: a figure
+// wider than the column scales down, keeping aspect ratio (the common editor rule).
+export function figureBlockBox(opts: {
+  intrinsicWidthPx: number
+  intrinsicHeightPx: number
+  contentWidthPx: number       // the column content width (figures cap at 100% of it)
+  captionHeightPx?: number     // wrapped caption height (0 / omitted = no caption)
+  captionGapPx?: number        // gap between image and caption (default 0)
+  marginTopPx?: number
+  marginBottomPx?: number
+}): BlockBox {
+  const scale = opts.intrinsicWidthPx > opts.contentWidthPx && opts.intrinsicWidthPx > 0
+    ? opts.contentWidthPx / opts.intrinsicWidthPx : 1
+  const imgH = opts.intrinsicHeightPx * scale
+  const caption = opts.captionHeightPx ? (opts.captionGapPx ?? 0) + opts.captionHeightPx : 0
+  return { height: imgH + caption, marginTopPx: opts.marginTopPx ?? 0, marginBottomPx: opts.marginBottomPx ?? 0 }
 }
 
 // ─── Page splitter (a faithful port of PaginationExtension.computeBreaks) ───────────────────────

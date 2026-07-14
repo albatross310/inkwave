@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   CERTIFIED_FAMILIES, primaryFamily, isCertifiedStack, blockEligibility, snappedLineHeight,
-  cssFontOf, layoutParagraph, resolveBlocks, paginate,
-  type ArithBlock, type InlineRun, type Measure,
+  cssFontOf, layoutParagraph, resolveBlocks, paginate, figureBlockBox,
+  type ArithBlock, type InlineRun, type InlineBox, type Measure,
 } from './arithmeticLayout'
 
 // The canvas measure is browser-only; the pure layout/pagination logic is deterministic under a
@@ -169,5 +169,70 @@ describe('cssFontOf', () => {
   it('builds the canvas/DOM font shorthand', () => {
     expect(cssFontOf({ fontFamily: EB, fontSizePx: 18, fontWeight: 700, italic: true }))
       .toBe(`italic 700 18px ${EB}`)
+  })
+})
+
+// ─── The measurable-element generalization: math + figures ──────────────────────────────────────
+const mathBox = (adv: number, demand: number): InlineBox => ({ advanceWidth: adv, lineHeightDemand: demand })
+const mathRun = (box: InlineBox, atomType = 'mathInline'): InlineRun =>
+  ({ text: '', fontFamily: EB, fontSizePx: 18, fontWeight: 400, italic: false, atomic: true, atomType, box })
+
+describe('inline math eligibility', () => {
+  it('a paragraph with a boxed inline-math atom is eligible (text+math)', () => {
+    const b = para([run('the value '), mathRun(mathBox(30, 34)), run(' is bounded')])
+    expect(blockEligibility(b)).toEqual({ eligible: true, reason: 'paragraph:text+math' })
+  })
+  it('gating math OFF (collectLines fix not yet in place) defers it', () => {
+    const b = para([run('x '), mathRun(mathBox(30, 34))])
+    expect(blockEligibility(b, 1.618, false).reason).toBe('inline-atom-gated:mathInline')
+  })
+  it('a citation atom (no box) always defers', () => {
+    const b = para([run('see '), { text: '(A 2020)', fontFamily: EB, fontSizePx: 18, fontWeight: 400, italic: false, atomic: true, atomType: 'citation' }])
+    expect(blockEligibility(b)).toEqual({ eligible: false, reason: 'inline-atom:citation' })
+  })
+})
+
+describe('inline math layout (unbreakable box, line-height demand)', () => {
+  const measure = stubMeasure(10)
+  it('a tall inline atom raises ITS line to the atom demand; the atom is unbreakable', () => {
+    // "aa " + math(adv 30, demand 34) + " bb" — one line, height = max(strut, 34) = 34.
+    const lay = layoutParagraph(para([run('aa '), mathRun(mathBox(30, 34)), run(' bb')]), 1000, 1.618, measure)
+    expect(lay.lineCount).toBe(1)
+    expect(lay.lineHeights[0]).toBeCloseTo(34, 6)
+  })
+  it('a fitting inline atom (demand ≤ strut) leaves the line at the strut', () => {
+    const lay = layoutParagraph(para([run('aa '), mathRun(mathBox(30, 28)), run(' bb')]), 1000, 1.618, measure)
+    expect(lay.lineHeights[0]).toBeCloseTo(snappedLineHeight(18, 1.618), 6)
+  })
+  it('the atom advance participates in the wrap and never breaks internally', () => {
+    // width 45: "aa "(30) fits; then math(30) overflows (30+30 > 45) → wraps whole to line 2.
+    const lay = layoutParagraph(para([run('aa '), mathRun(mathBox(30, 20))]), 45, 1.618, measure)
+    expect(lay.lineCount).toBe(2)
+  })
+})
+
+describe('block math / figure (block atoms)', () => {
+  const measure = stubMeasure(10)
+  const mathBlock = (h: number): ArithBlock =>
+    ({ type: 'mathBlock', runs: [], baseFontPx: 18, marginTopPx: 9, marginBottomPx: 9, blockBox: { height: h, marginTopPx: 9, marginBottomPx: 9 } })
+  it('a block-atom with a box is eligible', () => {
+    expect(blockEligibility(mathBlock(60)).reason).toBe('block-atom:mathBlock')
+  })
+  it('a block-atom without a box defers', () => {
+    expect(blockEligibility({ ...mathBlock(60), blockBox: undefined }).reason).toBe('block:mathBlock')
+  })
+  it('resolveBlocks lays a block-atom as one unbreakable region (atomLike, collapsed advance)', () => {
+    const p = para([run('x')])
+    const res = resolveBlocks([mathBlock(60), p], 500, 1.618, measure, () => ({ relTops: [0], advance: 40 }))
+    expect(res[0].eligible).toBe(true)
+    expect(res[0].atomLike).toBe(true)
+    expect(res[0].relTops).toEqual([0])
+    expect(res[0].advance).toBeCloseTo(60 + Math.max(9, 0), 6) // height + collapse(mb9, next para mt0)
+  })
+  it('figureBlockBox scales an over-wide figure to the column and adds the caption', () => {
+    // 1200×600 intrinsic in a 600px column → scale 0.5 → 300px image + 20px gap + 40px caption.
+    const box = figureBlockBox({ intrinsicWidthPx: 1200, intrinsicHeightPx: 600, contentWidthPx: 600, captionHeightPx: 40, captionGapPx: 20, marginBottomPx: 9 })
+    expect(box.height).toBeCloseTo(300 + 20 + 40, 6)
+    expect(box.marginBottomPx).toBe(9)
   })
 })

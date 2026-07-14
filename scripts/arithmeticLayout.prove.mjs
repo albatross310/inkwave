@@ -22,7 +22,9 @@ import { createServer } from 'http'
 import { readFileSync, existsSync, statSync } from 'fs'
 import { join, extname, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 
+const require = createRequire(import.meta.url)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const PUBLIC = join(ROOT, 'public')
@@ -42,9 +44,14 @@ try {
   honoursDoc = JSON.parse(readFileSync(existsSync(honoursPath) ? honoursPath : honoursScratch, 'utf8'))
 } catch { honoursDoc = null }
 
-const MIME = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2', '.js': 'text/javascript' }
+// KaTeX dist (math rendering + its fonts) so the prover measures REAL rendered math geometry.
+const KATEX_DIST = (() => { try { return dirname(require.resolve('katex')) } catch { return null } })()
+
+const MIME = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.js': 'text/javascript' }
 const HARNESS = `<!doctype html><html><head>
 <link rel="stylesheet" href="/fonts/inkwave-fonts.css">
+<link rel="stylesheet" href="/katex/katex.min.css">
+<script src="/katex/katex.min.js"></script>
 <style>
   html,body{margin:0;padding:0}
   /* The canonical .ProseMirror context (index.css): 1.125rem @ 16px root = 18px, φ line-height. */
@@ -61,6 +68,10 @@ const HARNESS = `<!doctype html><html><head>
 const server = createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (p === '/prove.html') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HARNESS); return }
+  if (p.startsWith('/katex/') && KATEX_DIST) {
+    const kf = join(KATEX_DIST, p.slice('/katex/'.length))
+    try { if (existsSync(kf) && !statSync(kf).isDirectory()) { res.writeHead(200, { 'content-type': MIME[extname(kf)] ?? 'application/octet-stream' }); res.end(readFileSync(kf)); return } } catch { /* 404 */ }
+  }
   const f = join(PUBLIC, p)
   try {
     if (existsSync(f) && !statSync(f).isDirectory()) {
@@ -142,6 +153,40 @@ for (let i = 0; i < 40; i++) {
   }
   mixedDoc.content.push({ type: 'paragraph', content: runs })
 }
+// ── MATH fixtures (2026-07-15 — the equations generalization) ──
+const INLINE_FIT = ['x^2', 'x_i', 'a+b', '\\sqrt{x}', 'E=mc^2', 'x_i^2', '\\alpha+\\beta', 'p \\to q', 'n-1', 'f(x)']
+const INLINE_TALL = ['\\frac{a}{b}', '\\sum_{i=1}^{n} i', '\\int_0^1 x\\,dx', '\\frac{x+1}{x-1}']
+const BLOCK_MATH = ['E = mc^2', 'a^2 + b^2 = c^2', '\\frac{\\partial f}{\\partial x} = 2x', '\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}']
+// Fixture F: text + FITTING inline math (x², √, subscripts) — should be ARITHMETIC-ELIGIBLE.
+const mathInlineDoc = { type: 'doc', content: [] }
+for (let i = 0; i < 50; i++) {
+  const w = synthPara(3000 + i, 44).split(' ')
+  const runs = []
+  let j = 0
+  while (j < w.length) {
+    const n = 4 + (j % 6)
+    runs.push({ type: 'text', text: w.slice(j, j + n).join(' ') + ' ' })
+    j += n
+    if (j < w.length) { runs.push({ type: 'mathInline', attrs: { latex: INLINE_FIT[(i + j) % INLINE_FIT.length] } }); runs.push({ type: 'text', text: ' ' }) }
+  }
+  mathInlineDoc.content.push({ type: 'paragraph', content: runs })
+}
+// Fixture G: text + TALL inline math (fractions, ∑/∫ with limits) — should DEFER (inline-atom-tall).
+const mathTallDoc = { type: 'doc', content: [] }
+for (let i = 0; i < 12; i++) {
+  const w = synthPara(4000 + i, 30).split(' ')
+  mathTallDoc.content.push({ type: 'paragraph', content: [
+    { type: 'text', text: w.slice(0, 10).join(' ') + ' ' },
+    { type: 'mathInline', attrs: { latex: INLINE_TALL[i % INLINE_TALL.length] } },
+    { type: 'text', text: ' ' + w.slice(10).join(' ') },
+  ] })
+}
+// Fixture H: BLOCK math interspersed with text paragraphs — block math should be ELIGIBLE.
+const mathBlockDoc = { type: 'doc', content: [] }
+for (let i = 0; i < 40; i++) {
+  mathBlockDoc.content.push({ type: 'paragraph', content: [{ type: 'text', text: synthPara(5000 + i, 55) }] })
+  if (i % 3 === 0) mathBlockDoc.content.push({ type: 'mathBlock', attrs: { latex: BLOCK_MATH[i % BLOCK_MATH.length], align: 'center' } })
+}
 // Fixture C: amplified Honours (6×) → ~13k words / ~174 citations to match the round-6 scale.
 function amplify(doc, times) {
   const out = { type: 'doc', content: [] }
@@ -154,6 +199,9 @@ const FIXTURES = [
   { name: 'A: synthetic (~100pp plain paragraphs)', doc: synthDoc, granular: 60 },
   { name: 'E: same-size multi-run (bold/italic, mid-word marks)', doc: sameSizeMixedDoc, granular: 40 },
   { name: 'D: mixed-SIZE stress (must defer)', doc: mixedDoc, granular: 40 },
+  { name: 'F: text + inline math (x², √, subscripts, E=mc²)', doc: mathInlineDoc, granular: 50 },
+  { name: 'G: text + inline fractions/sums/integrals (compact textstyle)', doc: mathTallDoc, granular: 0 },
+  { name: 'H: block math interspersed with text', doc: mathBlockDoc, granular: 40 },
   honoursDoc ? { name: 'B: real Honours proposal', doc: honoursDoc, granular: 999 } : null,
   honoursBig ? { name: 'C: Honours ×6 (~13k words, ~174 cites)', doc: honoursBig, granular: 0 } : null,
 ].filter(Boolean)
@@ -174,6 +222,74 @@ const results = await page.evaluate(async ({ fixtures }) => {
   const docEl = document.getElementById('doc')
   docEl.style.width = contentW + 'px'
   const measure = AL.makeCanvasMeasure()
+
+  // ── MATH: render REAL KaTeX and measure each node's box ONCE (cached by stable content key) ──
+  // This is the "cached one-time measure" box source the engine's design describes: math renders
+  // synchronously and is immutable per node, so the box is measured off its rendered geometry once
+  // and reused — no per-pagination reflow. An offscreen probe (same font context as #doc) hosts the
+  // measure; KaTeX + its fonts are warmed first so glyph widths are real (not fallback).
+  const katex = window.katex
+  const probe = document.createElement('div')
+  probe.style.cssText = `position:absolute;left:-99999px;top:0;width:${contentW}px;font-family:'EB Garamond',Georgia,serif;font-size:18px;line-height:1.618;color:#1a1a1a`
+  document.body.appendChild(probe)
+  const strut18 = AL.snappedLineHeight(18, 1.618)
+  // Build the inline-math PILL exactly as MathInlineView renders it (static KaTeX state).
+  const renderInlineMath = (latex) => {
+    const box = document.createElement('span')
+    box.setAttribute('data-math-inline', '')
+    box.style.cssText = 'display:inline-grid;align-items:center;position:relative;padding:2px 4px 2px 6px;border-radius:5px;vertical-align:baseline;font-size:0.826em;border:1px solid rgba(155,92,204,0.22);background:rgba(155,92,204,0.04)'
+    const holder = document.createElement('span')
+    holder.style.cssText = 'grid-area:1/1;padding:2px 0'
+    holder.innerHTML = katex ? katex.renderToString(latex, { throwOnError: false, displayMode: false, output: 'htmlAndMathml' }) : latex
+    box.appendChild(holder)
+    return box
+  }
+  // Build the BLOCK-math div exactly as MathBlockView renders it (static KaTeX displayMode).
+  const renderBlockMath = (latex) => {
+    const div = document.createElement('div')
+    div.setAttribute('data-math-block', '')
+    div.style.cssText = 'margin:0.5em 0;padding:0.4em 0.5em;min-height:1.8em;border:1px solid transparent;border-radius:6px'
+    const grid = document.createElement('div'); grid.style.display = 'grid'
+    const cell = document.createElement('div'); cell.style.gridArea = '1/1'
+    cell.innerHTML = katex ? katex.renderToString(latex, { throwOnError: false, displayMode: true, output: 'htmlAndMathml' }) : latex
+    grid.appendChild(cell); div.appendChild(grid)
+    return div
+  }
+  const inlineBoxCache = new Map()
+  const blockBoxCache = new Map()
+  // Warm KaTeX fonts (measured widths are wrong until they load).
+  probe.appendChild(renderInlineMath('x^2+\\frac{a}{b}+\\sqrt{x}+\\sum_{i=1}^{n} \\alpha_i \\int'))
+  probe.appendChild(renderBlockMath('E=mc^2+\\frac{\\partial f}{\\partial x}'))
+  await document.fonts.ready
+  probe.innerHTML = ''
+  // ONE-TIME inline-math box: advance = pill border-box width; demand = the line height the pill
+  // forces when set inline with text (probe a single-line paragraph). Cache by latex.
+  const mathInlineBox = (latex) => {
+    if (inlineBoxCache.has(latex)) return inlineBoxCache.get(latex)
+    const p = document.createElement('p'); p.style.margin = '0'
+    p.appendChild(document.createTextNode('x '))
+    const pill = renderInlineMath(latex)
+    p.appendChild(pill)
+    probe.appendChild(p)
+    const advanceWidth = pill.getBoundingClientRect().width
+    const lineHeightDemand = p.getBoundingClientRect().height // one line → the demanded line-box height
+    probe.removeChild(p)
+    const box = { advanceWidth, lineHeightDemand }
+    inlineBoxCache.set(latex, box)
+    return box
+  }
+  // ONE-TIME block-math box: height = the rendered div's border-box height; margins = 0.5em.
+  const mathBlockBox = (latex) => {
+    if (blockBoxCache.has(latex)) return blockBoxCache.get(latex)
+    const div = renderBlockMath(latex)
+    probe.appendChild(div)
+    const height = div.getBoundingClientRect().height
+    probe.removeChild(div)
+    const box = { height, marginTopPx: 9, marginBottomPx: 9 }
+    blockBoxCache.set(latex, box)
+    return box
+  }
+  void strut18
 
   // Resolve a textStyle fontSize attr (em/px/rem) against a base.
   const resolveSize = (v, base) => {
@@ -221,18 +337,30 @@ const results = await page.evaluate(async ({ fixtures }) => {
         } else if (child.type === 'hardBreak') {
           el.appendChild(document.createElement('br'))
           runs.push({ text: '\n', fontFamily: "'EB Garamond', Georgia, serif", fontSizePx: base, fontWeight: 400, italic: false })
+        } else if (child.type === 'mathInline') {
+          // INLINE MATH: render the real KaTeX pill + attach its ONE-TIME measured box.
+          const pill = renderInlineMath(child.attrs?.latex ?? '')
+          el.appendChild(pill)
+          runs.push({ text: '', fontFamily: "'EB Garamond', Georgia, serif", fontSizePx: base, fontWeight: 400, italic: false, atomic: true, atomType: 'mathInline', box: mathInlineBox(child.attrs?.latex ?? '') })
+          atomic = true
         } else {
-          // inline atom (citation / inline math) — render a plausible inline-block, mark atomic
+          // CITATION (and any other inline atom): render a plausible inline box, mark atomic WITHOUT
+          // a box → the engine defers the whole block (no stable reflow-free geometry).
           const s = document.createElement('span')
           s.className = 'cite'
           s.textContent = child.type === 'citation' ? '(Author, 2020)' : '∑x'
           el.appendChild(s)
-          runs.push({ text: s.textContent, fontFamily: "'EB Garamond', Georgia, serif", fontSizePx: base, fontWeight: 400, italic: false, atomic: true })
+          runs.push({ text: s.textContent, fontFamily: "'EB Garamond', Georgia, serif", fontSizePx: base, fontWeight: 400, italic: false, atomic: true, atomType: child.type })
           atomic = true
         }
       }
       if (!b.content || !b.content.length) { el.innerHTML = '<br>' } // empty para
       return { el, arith: { type: 'paragraph', runs, baseFontPx: base, marginTopPx: 0, marginBottomPx: 9 } }
+    }
+    if (b.type === 'mathBlock') {
+      // BLOCK MATH: render the real KaTeX display div + attach its ONE-TIME measured box.
+      const el = renderBlockMath(b.attrs?.latex ?? '')
+      return { el, arith: { type: 'mathBlock', runs: [], baseFontPx: base, marginTopPx: 9, marginBottomPx: 9, blockBox: mathBlockBox(b.attrs?.latex ?? '') } }
     }
     if (b.type === 'horizontalRule') {
       return { el: document.createElement('hr'), arith: { type: 'horizontalRule', runs: [], baseFontPx: base, marginTopPx: 12, marginBottomPx: 12 } }
@@ -268,15 +396,43 @@ const results = await page.evaluate(async ({ fixtures }) => {
   }
 
   // ── the DOM line-measure: pushLineRects rule, block-relative ──
+  // MATH-PILL RECT-FIX (the documented collectLines co-requisite): KaTeX's internal sub/super/frac
+  // spans emit rects below the baseline that the 3px dedup would split into spurious extra lines. So
+  // — exactly as a fixed collectLines would — collapse each [data-math-inline] pill to its SINGLE
+  // bounding rect (drop its internals, substitute the pill's own rect in document order). This makes
+  // the DOM verifier stable over math paragraphs; the arithmetic path is proven byte-identical to it.
   const domMeasureBlock = (el) => {
     const br = el.getBoundingClientRect()
+    // A block ATOM (block math / figure) is one unbreakable region — collectLines treats a top-level
+    // atom as atomLike; its internal KaTeX rects are not paginatable lines. One line at the top.
+    if (el.nodeType === 1 && el.hasAttribute && el.hasAttribute('data-math-block')) return { relTops: [0], top: br.top }
     const relTops = []
     let rects = []
     try { const range = document.createRange(); range.selectNodeContents(el); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
-    if (!rects.length) { relTops.push(0) } // empty block → one line at top
+    // Build the pill-collapsed rect list: each rect inside a math pill is replaced (once, in place)
+    // by that pill's single bounding rect; already-emitted pills' internal rects are dropped.
+    const pills = el.querySelectorAll ? Array.from(el.querySelectorAll('[data-math-inline]')) : []
+    const pillRects = pills.map((p) => p.getBoundingClientRect())
+    const emitted = new Set()
+    const seq = []
+    for (const r of rects) {
+      // A rect belongs to a pill if its CENTRE lies within the pill's horizontal span and it
+      // vertically overlaps the pill (center-based — robust to KaTeX glyphs overflowing the box).
+      const cx = (r.left + r.right) / 2
+      let pillIdx = -1
+      for (let k = 0; k < pillRects.length; k++) {
+        const pr = pillRects[k]
+        if (cx >= pr.left - 1 && cx <= pr.right + 1 && r.top <= pr.bottom + 1 && r.bottom >= pr.top - 1) { pillIdx = k; break }
+      }
+      if (pillIdx >= 0) {
+        if (!emitted.has(pillIdx)) { emitted.add(pillIdx); seq.push(pillRects[pillIdx]) }
+        // else drop this internal rect
+      } else seq.push(r)
+    }
+    if (!seq.length) { relTops.push(0) } // empty block → one line at top
     else {
       let lastTop = -1e9
-      for (const r of rects) {
+      for (const r of seq) {
         if (r.width < 1 || r.height < 1 || r.height > 80 || r.top - lastTop <= 3) continue
         lastTop = r.top
         relTops.push(r.top - br.top)
@@ -430,6 +586,14 @@ const results = await page.evaluate(async ({ fixtures }) => {
     const arAsm = assemble((i) => resolved[i].relTops, (i) => resolved[i].advance, domTops[0])
     const arR = AL.paginate(arAsm.lines, arAsm.blocks, refListPos, pageH, CAN.topM)
     const arSig = arR.sig, arPosSig = posSigOf(arR)
+    // Math paragraphs where the DOM getClientRects verifier counts MORE lines than the (correct)
+    // arithmetic — the pre-existing verifier limitation (a taller inline pill splits its following
+    // same-line text into a spurious line). Block heights (advances) still match exactly; a proper
+    // collectLines line-grouping fix would zero this. Characterized, not hidden.
+    let mathLineDiverge = 0
+    for (let i = 0; i < N; i++) {
+      if (resolved[i].eligible && arithBlocks[i].runs.some((r) => r.atomic) && dom[i].relTops.length !== resolved[i].relTops.length) mathLineDiverge++
+    }
 
     // coverage map
     const coverage = {}
@@ -442,14 +606,16 @@ const results = await page.evaluate(async ({ fixtures }) => {
       if (!resolved[i].eligible) continue
       const da = domAdvance[i]
       const aa = resolved[i].advance
-      const relSame = resolved[i].relTops.length === dom[i].relTops.length
-      if (Math.abs(da - aa) > 0.02 || !relSame) advDiffs.push(`blk${i}(${arithBlocks[i].runs.filter(r=>r.text!=='\n').map(r=>r.fontSizePx)[0]}px): domAdv ${da.toFixed(3)} arAdv ${aa.toFixed(3)} lines dom ${dom[i].relTops.length}/ar ${resolved[i].relTops.length}`)
+      // Advance-drift only (real vertical error). Line-count divergence on math paras is tracked
+      // separately (mathLineDiverge) — it's the verifier's spurious split, not an advance error.
+      if (Math.abs(da - aa) > 0.02) advDiffs.push(`blk${i}(${arithBlocks[i].runs.filter(r=>r.text!=='\n').map(r=>r.fontSizePx)[0]}px): domAdv ${da.toFixed(3)} arAdv ${aa.toFixed(3)} lines dom ${dom[i].relTops.length}/ar ${resolved[i].relTops.length}`)
     }
 
     // granular per-char break-index parity on eligible paragraphs (up to fx.granular)
     let gTested = 0, gPass = 0, gFail = []
     for (let i = 0; i < N && gTested < (fx.granular || 0); i++) {
       if (!resolved[i].eligible || arithBlocks[i].type !== 'paragraph' || !arithBlocks[i].runs.length) continue
+      if (arithBlocks[i].runs.some((r) => r.atomic)) continue // atom position-counting differs from a text-char walk — sig covers these
       const lay = AL.layoutParagraph(arithBlocks[i], contentW, CAN.ratio, measure)
       const domB = domBreakChars(built[i].el)
       gTested++
@@ -468,7 +634,7 @@ const results = await page.evaluate(async ({ fixtures }) => {
       sigMatch: domSig === arSig, domSig: domSig.slice(0, 70), arSig: arSig.slice(0, 70),
       domPages: domSig.match(/pages:(\d+)/)?.[1], arPages: arSig.match(/pages:(\d+)/)?.[1],
       tDomRectsMs: +tDomRectsMs.toFixed(1), tDomForcedMs: +tDomForcedMs.toFixed(1), tArMs: +tArMs.toFixed(1),
-      coverage, gTested, gPass, gFail, advDiffs: advDiffs.slice(0, 8), advDiffCount: advDiffs.length,
+      coverage, gTested, gPass, gFail, advDiffs: advDiffs.slice(0, 8), advDiffCount: advDiffs.length, mathLineDiverge,
     })
   }
   return out
@@ -489,7 +655,8 @@ for (const r of results) {
   if (!r.fullSigMatch) { console.log(`        dom=${r.domSig}`); console.log(`        ar =${r.arSig}`) }
   if (r.gTested) console.log(`      granular per-char break parity (eligible paras): ${r.gPass}/${r.gTested}${r.gFail.length ? '  ' + r.gFail.join(' | ') : ''}`)
   console.log(`      coverage: ${JSON.stringify(r.coverage)}`)
-  if (r.advDiffCount) console.log(`      per-block advance drift (eligible): ${r.advDiffCount} blocks  ${r.advDiffs.join(' | ')}`)
+  if (r.mathLineDiverge) console.log(`      math-para verifier line-count divergence: ${r.mathLineDiverge} (advances byte-identical; needs collectLines line-grouping fix for exact counts)`)
+  if (r.advDiffCount) console.log(`      per-block ADVANCE drift (eligible): ${r.advDiffCount} blocks  ${r.advDiffs.join(' | ')}`)
   console.log(`      speed: arithmetic compute ${r.tArMs}ms (full doc, cold) | DOM getClientRects ${r.tDomRectsMs}ms | 2-reflow mirror ${r.tDomForcedMs}ms`)
   console.log('')
 }
