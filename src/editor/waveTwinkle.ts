@@ -922,16 +922,23 @@ function genList(rnd: () => number, kind: 'sparks' | 'dashes'): Inst[] {
   const rows = Math.ceil(vh / 140) + 1
   const out: Inst[] = []
   for (let r = 0; r < rows; r++) {
-    for (const g of ['a', 'b'] as Group[]) {
-      if (kind === 'sparks') {
+    if (kind === 'sparks') {
+      for (const g of ['a', 'b'] as Group[]) {
         const n = Math.floor(vw / SPARK_ROW_PX + rnd())
         for (let i = 0; i < n; i++) out.push(genSpark(rnd, g, r, stripW))
-      } else {
-        const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // blinking marks (visible-density parity)
-        for (let i = 0; i < nB; i++) out.push(genDash(rnd, g, r, stripW, 'blink'))
-        const nR = Math.floor(stripW / STATIC_ROW_PX + rnd()) // the resting texture, strip-wide
-        for (let i = 0; i < nR; i++) out.push(genDash(rnd, g, r, stripW, 'rest'))
       }
+    } else {
+      // SINGLE BAND (2026-07-15 — Peter's short-line spec: wave marks parallel to the thick line,
+      // on ONE band between the thick and thin line). Generating BOTH crest groups painted marks
+      // in TWO stacked y-bands per 140px row (group 'a' ≈ the thick line, group 'b' ≈ the thin
+      // line — the "two or more layers of short lines built up" Peter reported, root cause B).
+      // Dashes now use group 'a' ONLY — one band, thick-line-parallel. Sparks (glitters) keep both
+      // crests; only the wave-MARK field collapses to one band.
+      const g: Group = 'a'
+      const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // blinking marks (visible-density parity)
+      for (let i = 0; i < nB; i++) out.push(genDash(rnd, g, r, stripW, 'blink'))
+      const nR = Math.floor(stripW / STATIC_ROW_PX + rnd()) // the resting texture, strip-wide
+      for (let i = 0; i < nR; i++) out.push(genDash(rnd, g, r, stripW, 'rest'))
     }
   }
   return out
