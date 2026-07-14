@@ -8,6 +8,18 @@ import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { notePerf } from './perflog'
 import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
+import { makeCanvasMeasure } from './arithmeticLayout'
+import { exactBlockHeightAtZoom, type ArithBlockInfo } from './arithZoom'
+
+// ARITH WINDOWED ZOOM flag (default OFF — staged; Peter GOes on it). When on, the live-zoom
+// content-visibility placeholders are computed EXACT per step via the arithmetic engine instead of
+// the (z/z0)² approximation. Cached once (a per-frame localStorage read is forbidden on the zoom path).
+let _arithZoomFlag: boolean | null = null
+function arithZoomOn(): boolean {
+  if (_arithZoomFlag !== null) return _arithZoomFlag
+  try { _arithZoomFlag = localStorage.getItem('inkwave:arithZoom') === '1' } catch { _arithZoomFlag = false }
+  return _arithZoomFlag
+}
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
 // browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
@@ -579,6 +591,11 @@ export function Scroll({
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       // Skipped-placeholder heights track the committed zoom (see enterZoomLive) — same recalc.
       if (zoomLiveEd) el.style.setProperty('--iw-cis-scale', ((next / zoomLiveZ0) ** 2).toFixed(4))
+      // ARITH: rewrite the placeholder stylesheet with EXACT per-block heights at the committed zoom
+      // (eligible blocks); deferred blocks keep the --iw-cis-scale var just written. Reflow-free
+      // (canvas advances, memoised) — the exact skipped geometry stops the relevancy waves that jump
+      // the anchor. Regenerated once per commit (≈ once per frame).
+      if (zoomLiveEd && arithModel && zoomLiveStyle) zoomLiveStyle.textContent = arithPlaceholderCss(next)
       // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
       // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
       // could bite against the stale height near the document end. One offsetHeight read in a
@@ -744,6 +761,52 @@ export function Scroll({
     let zoomLiveEd: HTMLElement | null = null
     let zoomLiveStyle: HTMLStyleElement | null = null
     let zoomLiveZ0 = 1 // zoom at live-window entry — the placeholder rules' height baseline
+    // ARITH windowed-zoom gesture state (flag on): the per-block model + render context captured at
+    // entry, so every step writes EXACT placeholder heights (eligible blocks) with no reflow.
+    let arithModel: ArithBlockInfo[] | null = null
+    let arithH0: number[] = []          // per-DOM-CHILD offsetHeight at z0 (fallback / gap heights)
+    let arithIsGap: boolean[] = []      // per-DOM-CHILD: is it a .inkwave-page-gap widget (not a doc block)?
+    let arithBase0 = 18                 // render base font px at z0 (getComputedStyle sample)
+    let arithContentW = 0               // text column content width px (fixed under font-reflow zoom)
+    let arithWinLo = 0, arithWinHi = 0  // DOM-child window computed EXACT per step (rest keep (z/z0)²)
+    const ARITH_WIN = 60                // ±children around the pinned anchor = a few screens: exact
+                                        // placeholders only need to be right at the content-visibility
+                                        // RELEVANCY BOUNDARY (near the viewport). The pinned anchor
+                                        // keeps the viewport over this set for the whole gesture, so a
+                                        // fixed window suffices AND bounds per-step cost.
+    const arithMeasure = makeCanvasMeasure()
+    const arithFontLoaded = (stack: string, sizePx: number): boolean => {
+      try { const fam = stack.split(',')[0].replace(/['"]/g, '').trim(); return document.fonts.check(`${sizePx}px "${fam}"`) } catch { return false }
+    }
+    // Build the placeholder stylesheet for a target zoom. Eligible blocks → EXACT arithmetic height
+    // (absolute, no var); deferred blocks → the historic offsetHeight×(z/z0)² via --iw-cis-scale.
+    // Walk the DOM CHILDREN (blocks interleaved with .inkwave-page-gap widget decorations, which are
+    // NOT doc nodes). Doc block j is the j-th NON-gap child. Gap widgets keep their fixed px height
+    // (font-zoom doesn't scale a bottom-margin gap). Eligible blocks get the EXACT arith height;
+    // deferred blocks keep offsetHeight×(z/z0)² via --iw-cis-scale.
+    const arithPlaceholderCss = (zoom: number): string => {
+      if (!arithModel) return ''
+      const ratio = 1.618
+      // Scale for the intrinsic (canonical base-18) runs → render px at editor zoom `zoom`:
+      // render base at z0 is arithBase0, and font ∝ zoom, so render size = 18 · (arithBase0·zoom /
+      // zoomLiveZ0 / 18). Pass that factor as the engine's `zoom` param.
+      const scale = (arithBase0 * zoom) / (zoomLiveZ0 * 18)
+      let css = ''
+      let bi = 0
+      for (let i = 0; i < arithH0.length; i++) {
+        const sel = `.ProseMirror.iw-zoom-live>:nth-child(${i + 1})`
+        if (arithIsGap[i]) { css += `${sel}{contain-intrinsic-size:auto ${arithH0[i] || 24}px}\n`; continue }
+        const info = arithModel[bi++]
+        // Windowed: exact only near the pinned viewport (the relevancy boundary); far blocks stay
+        // (z/z0)² — they can't wave into view while the fingers are down, and this bounds the cost.
+        const h = (info && i >= arithWinLo && i <= arithWinHi)
+          ? exactBlockHeightAtZoom(info, arithContentW, ratio, scale, arithMeasure, arithFontLoaded) : null
+        css += h != null
+          ? `${sel}{contain-intrinsic-size:auto ${h.toFixed(2)}px}\n`
+          : `${sel}{contain-intrinsic-size:auto calc(${arithH0[i] || 24}px*var(--iw-cis-scale,1))}\n`
+      }
+      return css
+    }
     // ── ZOOM GUARD (round-3 flicker, 2026-07-12): the live window's placeholder regime is only
     // piecewise-consistent AT commit instants — the browser re-evaluates content-visibility
     // RELEVANCY asynchronously between frames, and each wave (skipped↔rendered swaps, heights
@@ -806,14 +869,43 @@ export function Scroll({
       // zoom var each commit (same style recalc — zero extra invalidation), so swap deltas drop
       // to line-quantization noise.
       const kids = Array.from(ed.children) as HTMLElement[]
+      zoomLiveZ0 = editorZoomRef.current
       let css = ''
       let sum = 0
+      arithH0 = []
+      arithIsGap = []
       for (let i = 0; i < kids.length; i++) {
         const h = kids[i].offsetHeight
         sum += h
+        arithH0.push(h)
+        arithIsGap.push(kids[i].classList.contains('inkwave-page-gap'))
         css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto calc(${h}px*var(--iw-cis-scale,1))}\n`
       }
-      zoomLiveZ0 = editorZoomRef.current
+      // ARITH (flag on): capture the reflow-free per-block model + render context, and start from
+      // EXACT placeholder heights (eligible blocks) instead of (z/z0)². The model has ONE entry per
+      // DOC BLOCK; the DOM interleaves gap-widget children, so it must match the NON-gap child count
+      // (a mismatch ⇒ stale model ⇒ fall back to the approximate css above).
+      arithModel = null
+      if (arithZoomOn()) {
+        const getModel = (window as unknown as { __iwGetArithModel?: () => ArithBlockInfo[] }).__iwGetArithModel
+        const model = getModel ? getModel() : null
+        const nonGap = arithIsGap.filter((g) => !g).length
+        ;(window as unknown as { __iwArith?: unknown }).__iwArith = { model: model?.length ?? -1, nonGap, eligible: model?.filter((m) => m.eligible).length ?? 0, active: false }
+        if (model && model.length === nonGap) {
+          ;(window as unknown as { __iwArith?: { active: boolean } }).__iwArith!.active = true
+          arithModel = model
+          const cs = getComputedStyle(ed)
+          arithBase0 = parseFloat(cs.fontSize) || 18
+          arithContentW = ed.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+          // Window the exact computation around the pinned anchor (its child index) — a few screens.
+          const ci = anchorEl ? kids.indexOf(anchorEl) : -1
+          const center = ci >= 0 ? ci : Math.floor(kids.length / 2)
+          arithWinLo = Math.max(0, center - ARITH_WIN)
+          arithWinHi = Math.min(kids.length - 1, center + ARITH_WIN)
+          const acss = arithPlaceholderCss(zoomLiveZ0)
+          if (acss) css = acss
+        }
+      }
       // No entry bracket (2026-07-11): the ONLY caller is applyFrame's commit path, immediately
       // before the zoom var write — the (geometry-neutral) switch and the font reflow land in ONE
       // forced layout (the anchor read that follows), and the pin correction against anchorTop0
@@ -834,6 +926,21 @@ export function Scroll({
       const exitT0 = performance.now() // perflog zoom-exit: un-skip relayout + atomic band re-derive
       zoomLiveEd = null
       if (guardRaf) { cancelAnimationFrame(guardRaf); guardRaf = 0 }
+      // ARITH windowed exit (flag on): the placeholders are EXACT, so the visible bands already
+      // match the reflowed text — re-derive them from the CURRENT (still-cv) layout (a VISIBLE
+      // anchor/band read does NOT un-skip the off-screen doc, so it's cheap regardless of doc size),
+      // then DEFER the whole-document un-skip to idle. This removes the doc-size-scaling
+      // synchronous relayout from the gesture-end critical path (the "lag scales with doc size"
+      // report); off-screen blocks stay skipped until the idle un-skip (or until scrolled into view
+      // by content-visibility:auto). The re-pin uses the visible anchor, exact under the arith
+      // placeholders — no jump.
+      // NB: the ARITH exact-placeholder path fixes the DURING-gesture relevancy waves (anchor jump).
+      // Deferring the whole-doc un-skip to idle (to also kill the gesture-END relayout spike) proved
+      // to interact badly with the anchor re-pin under windowed placeholders (a large settle jump) —
+      // held for a follow-up; for now the arith path takes the SAME synchronous exit as the
+      // approximate path (correct, re-pinned), so only the during-gesture win ships. arithModel is
+      // cleared so the exit runs the normal full-regime re-derive.
+      arithModel = null
       // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
       // them out at the committed zoom, displacing everything below — pin the held content anchor
       // back to its gesture-start viewport top in the same task so the anchored text never jumps.
