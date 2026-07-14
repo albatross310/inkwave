@@ -598,10 +598,15 @@ action time — never hold contentJson in state). Autosave failures dispatch `in
   `xvfb-run` (virtual display — headed semantics, zero visible window) as the default, or launch
   args `--window-position=-32000,-32000` as fallback. WSLg GOTCHA: xvfb-run alone does NOT contain
   Firefox — WAYLAND_DISPLAY routes it to the host compositor; use
-  `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0 xvfb-run …`. SHARED-BOX RULE: never `pkill -f
-  "vite preview"` (it kills OTHER agents' servers — caused a phantom 'editor won't mount'); use a
-  dedicated port + kill your own PID only. Headless remains the default where fidelity
-  allows. Agent briefs that ask for headed runs must say this.
+  `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0 xvfb-run …`. The wrapper **`scripts/pw-headed.sh`**
+  bakes this in (unsets WAYLAND_DISPLAY + MOZ_ENABLE_WAYLAND=0 + `xvfb-run -a`) — run any headed
+  browser/Playwright command through it (`scripts/pw-headed.sh <cmd>`) and nothing pops on Peter's
+  screen. Root cause: WSLg exports `DISPLAY=:0` + `WAYLAND_DISPLAY=wayland-0`, so a headed browser
+  forwards its window to Windows; the wrapper contains it. Prefer HEADLESS outright where fidelity
+  allows — WSL has no GPU, so real raster/paint fidelity needs a real device regardless. SHARED-BOX
+  RULE: never `pkill -f "vite preview"` (it kills OTHER agents' servers — caused a phantom 'editor
+  won't mount'); use a dedicated port + kill your own PID only. Headless remains the default where
+  fidelity allows. Agent briefs that ask for headed runs must say this.
 - **Notifier (task #27, pending):** final reports start with the sentinel "📋 REPORT" so Peter's
   PowerShell hook can either FILTER to reports only, or keep all toasts but play a DIFFERENT SOUND
   for report messages (his preferred option) — audibly distinct without looking. RATIONALE (Peter):
