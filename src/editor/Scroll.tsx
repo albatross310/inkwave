@@ -308,9 +308,15 @@ export function Scroll({
     // typing, pagination. offsetHeight is layout px (transform-invariant), × s = visual height.
     const roPaper = paper ? new ResizeObserver(() => {
       const s = getMagnify()
-      // The height write can clamp scrollTop (content shrank while scrolled near the end) — a
-      // layout side-effect, not a user scroll: keep the waves still through it.
-      if (s !== 1 && box && paper) { holdWavesFor(250); box.style.height = `${paper.offsetHeight * s}px` }
+      // NB: NO holdWavesFor here (2026-07-14 sway-freeze fix). This RO fires on EVERY paper resize
+      // (pagination, typing reflow, the box.height write's own relayout) — open-ended, unlike a
+      // bounded zoom gesture. Arming a 250ms wave-hold per fire meant that whenever the paper
+      // resizes more often than every 250ms at s≠1 (fit-cap bound on a narrow window / PDF panel
+      // open / persisted magnify≠1), the hold never lapsed and the scroll sway froze permanently
+      // (Peter's live "waves don't wave when scrolling"). Zoom-induced clamps are ALREADY held by
+      // the gesture path (holdWavesFor 350 per step + 800 at settle); a clamp from an ordinary
+      // reflow is genuine content motion the sway SHOULD follow. Just track the height.
+      if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
     }) : null
     if (paper && roPaper) roPaper.observe(paper)
     // Settings change: recompute the fit cap for the new page width, and re-apply AFTER React's own
