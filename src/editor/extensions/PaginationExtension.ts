@@ -298,7 +298,15 @@ function computeBreaks(
     // Break before the LINE that would overflow the text area.
     if (i > 0 && used + lh > textArea && posOf(lines[i]) > 0) {
       const orphan = used - blockStartUsed             // height of the current block already on this page
-      const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
+      // ≥2 lines of THIS block remain from the overflow line (would land on the next page if we split).
+      const remTwoPlus = !!(lines[i + 1] && lines[i + 1].blockIdx === lines[i].blockIdx)
+      // SNAP (push the whole block to the next page) only when little of the page is used by the block
+      // (≤22% — small waste) AND splitting there would strand a LONE line: a <2-line orphan at this
+      // page's bottom, or a 1-line widow at the next page's top. Otherwise SPLIT mid-block so the page
+      // fills (Peter 2026-07-15: small paragraphs that cross a boundary should split — the flat ≤22%
+      // rule pushed every splittable 2–8-line straddler whole, wasting the page bottom). Large-orphan
+      // straddlers (>22%) still split even into a 1-line widow — pushing them whole would waste more.
+      const snap = orphan <= textArea * 0.22 && blockStart > 0 && (orphan < 2 * lh - 1 || !remTwoPlus)
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
       const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
