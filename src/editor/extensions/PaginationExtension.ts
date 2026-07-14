@@ -691,7 +691,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // the writes batch into the SAME reflow as the font-zoom change (panels move WITH text).
           const applyBands = (geo: BandGeo) => {
             if (!layer) return
-            lastAppliedGeo = geo // the frozen-pages gesture snapshots this as its geometry basis
             const segs: Array<{ top: number; height: number }> = []
             let cursor = 0
             for (let i = 0; i < geo.tops.length; i++) {
@@ -778,105 +777,56 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // and text must land in the SAME frame, cached or not. The settle's verify paint still
           // snaps everything atomically at the end (a no-op when the cache was accurate).
           const stepCache = new Map<number, BandGeo>()
-          const cacheStats = { hits: 0, misses: 0, precomputed: 0, frozen: 0, scaled: 0 } // debug/smoke counters
+          // Per-GESTURE cache: band geometry read under the live-reflow window's placeholder
+          // heights (.iw-zoom-live content-visibility) is a DIFFERENT geometry regime — it must
+          // never leak into stepCache (placeholder-squashed panels replayed at rest) and
+          // stepCache's full-layout geometry must never apply mid-gesture. Routing mid-gesture
+          // steps here keeps a within-gesture step RETRACE pure style writes.
+          const liveCache = new Map<number, BandGeo>()
+          const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
-          const clearStepCache = () => stepCache.clear()
+          const clearStepCache = () => { stepCache.clear(); liveCache.clear() }
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
-          // ── FROZEN PAGES through reflow zoom (round-5, Peter: "can we just enforce that the
-          // pages stay FIXED in reflow zoom? ... the only time they need to be remeasured is if
-          // we're so zoomed out that the whole page is in view") ────────────────────────────────
-          // DURING a gesture the panel/band geometry is NEVER re-derived from the live DOM:
-          //   • FROZEN (default — page taller than the viewport): zero writes per step. The
-          //     panels hold their gesture-start geometry; text reflows within, held by the
-          //     content anchor. A visible edge drifts smoothly with the anchor's scroll
-          //     compensation — no repaint, no flicker, nothing to measure.
-          //   • SCALED CHAIN (zoomed far out — whole page fits the viewport): panels are
-          //     SYNTHESIZED from the frozen geometry by pure math — page regions scale by
-          //     (zoom/z0)², gap bands keep their fixed px, the chain rebuilds from the sheet's
-          //     top padding (which doesn't scale). At the mode boundary the factor is exactly
-          //     the frozen ratio, so the handoff frame is CONTINUOUS — the visible top/bottom
-          //     edges stay anchored where they are and newly-visible pages chain off them
-          //     (Peter's refinement: "anchor the top and bottom of the fixed pages"); no edge
-          //     can teleport mid-gesture. Same (z/z0)² model as the --iw-cis-scale placeholders,
-          //     so the synthetic panels track the approximate text to line-quantization error.
-          // The ONE exact re-derivation happens at the ATOMIC EXIT/settle (class off → the
-          // stepCache path below), where the full layout is real. No per-gesture cache exists —
-          // the frozen case needs none, and the scaled case is arithmetic.
-          interface ZoomGesture {
-            geo0: BandGeo; padTop: number; avgH0: number; liveMode: boolean
-            // The scaled chain's basis: captured at the MODE HANDOFF (not gesture start) — the
-            // frozen positions are correct-at-z0 but the screen shows them NOW, so the chain must
-            // scale from what is APPLIED, anchored at the zoom where the mode flipped: factor
-            // (z/zBase)² keeps the handoff frame byte-identical (factor 1) and every later frame
-            // continuous. The constant frozen drift is preserved (not corrected) mid-gesture —
-            // panels track the text's MOTION exactly; the settle removes the residual.
-            chain: { base: BandGeo; zBase: number } | null
-          }
-          let zoomGesture: ZoomGesture | null = null
-          let lastAppliedGeo: BandGeo | null = null // most recent applyBands input (rest truth at gesture start)
-          const scaleChain = (base: BandGeo, padTop: number, factor: number): BandGeo => {
-            const tops: number[] = []
-            let cursor = padTop // sheet top padding — constant px, not part of any page region
-            for (let i = 0; i < base.tops.length; i++) {
-              const regionTop = i === 0 ? padTop : base.tops[i - 1] + base.heights[i - 1]
-              const region = Math.max(0, base.tops[i] - regionTop)
-              cursor += region * factor
-              tops.push(cursor)
-              cursor += base.heights[i] // the gap band itself — fixed px
-            }
-            const n = base.tops.length
-            const lastRegion = n ? Math.max(0, base.total - (base.tops[n - 1] + base.heights[n - 1])) : Math.max(0, base.total - padTop)
-            return { tops, heights: base.heights, total: cursor + lastRegion * factor }
-          }
+          // ── ATOMIC TEXT+BAND through reflow zoom (round-6, Peter: "Zooming should change text
+          // and page atomically ... the gapped page arbitrarily joining up or the text flowing
+          // over the water") ──────────────────────────────────────────────────────────────────
+          // The round-5 FREEZE (bands held while text reflowed) regressed exactly this: a page's
+          // rendered height changes NON-uniformly with zoom (font-reflow rewraps → discrete
+          // lines-per-page jumps, which no smooth (z/z0)² factor can track), so a frozen band no
+          // longer matched its page — the gap collapsed or text overran the sheet onto the water.
+          // Peter's ruling: ATOMICITY BEATS FREEZE. So the bands are re-derived in the SAME task
+          // as every reflow step — the original round-3/4 contract. Correctness guarantee: the
+          // VISIBLE page bands are read from the live DOM, where content-visibility renders
+          // on-screen blocks EXACTLY (only off-screen — invisible — pages sit at placeholder
+          // heights), so what the eye sees is pixel-matched to the reflowed text every frame. A
+          // cache hit is pure style writes (instant "paint from math"); a miss reads the bands
+          // live in this same task, riding the layout Scroll.tsx's anchor read already forced.
           const onZoomStep = (e: Event) => {
             const d = (e as CustomEvent).detail as { step?: number; surface?: Element; z0?: number; resync?: boolean } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
             const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
-            if (placeholders) {
-              // Mid-gesture step (or the guard's wave resync — irrelevant to frozen/synthetic
-              // panels, which never derive from the live DOM; the guard's re-pin still runs).
-              if (!zoomGesture) {
-                if (!lastAppliedGeo || !lastAppliedGeo.tops.length) { cacheStats.frozen++; return } // nothing applied yet — settle trues
-                const g0 = lastAppliedGeo
-                const padTop = parseFloat(getComputedStyle(sheet).paddingTop) || 0
-                let regions = padTop ? g0.tops[0] - padTop : g0.tops[0]
-                for (let i = 1; i < g0.tops.length; i++) regions += g0.tops[i] - (g0.tops[i - 1] + g0.heights[i - 1])
-                zoomGesture = { geo0: g0, padTop, avgH0: Math.max(1, regions / g0.tops.length), liveMode: false, chain: null }
-              }
-              const z0 = typeof d.z0 === 'number' && d.z0 > 0 ? d.z0 : 1
-              const factor = (stepToZoom(d.step) / z0) ** 2
-              const estH = zoomGesture.avgH0 * factor
-              const vp = phoneLike() ? window.innerHeight : (surfaceOf()?.clientHeight ?? window.innerHeight)
-              // Hysteresis: enter the scaled-chain mode when a whole page fits comfortably,
-              // leave it only when pages are solidly taller again — no oscillation at the edge.
-              if (!zoomGesture.liveMode && estH < vp * 0.95) {
-                zoomGesture.liveMode = true
-                // Handoff: chain from what is APPLIED right now, anchored at THIS zoom — the
-                // handoff frame is factor 1 ≡ no write delta; visible edges cannot teleport.
-                if (lastAppliedGeo) zoomGesture.chain = { base: lastAppliedGeo, zBase: stepToZoom(d.step) }
-              } else if (zoomGesture.liveMode && estH > vp * 1.15) {
-                zoomGesture.liveMode = false
-                zoomGesture.chain = null // re-entry re-chains from the then-applied positions
-              }
-              if (!zoomGesture.liveMode || !zoomGesture.chain) { cacheStats.frozen++; return } // FROZEN: zero band/panel work
-              cacheStats.scaled++
-              const c = zoomGesture.chain
-              applyBands(scaleChain(c.base, zoomGesture.padTop, (stepToZoom(d.step) / c.zBase) ** 2)) // pure style writes — no layout reads
+            const cache = placeholders ? liveCache : stepCache
+            if (d.resync) {
+              // The zoom guard (Scroll.tsx) detected a content-visibility relevancy wave between
+              // commits: the layout shifted, so every placeholder-regime entry is stale — drop
+              // them and re-derive the bands from the CURRENT layout in this same task.
+              liveCache.clear()
+              const geo = readBands()
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
               return
             }
-            // Class off — the ATOMIC EXIT / settle / rest path: apply the step's TRUE geometry.
-            zoomGesture = null
-            const hit = stepCache.get(d.step)
+            const hit = cache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
             else {
               // MISS → measure the bands LIVE, synchronously, in this same task. Scroll.tsx forces
-              // the step's layout (its anchor read) before dispatching, so readBands' rect reads
-              // ride it — visually identical to a hit, one single-pass read dearer.
+              // the step's layout (its anchor read) before dispatching, so readBands' single-pass
+              // rect reads ride it — visually identical to a hit, one layout flush dearer. Bands
+              // and text land in the SAME frame — no join, no overflow.
               cacheStats.misses++
               const geo = readBands()
-              if (geo) { applyBands(geo); stepCache.set(d.step, geo) }
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
             }
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
@@ -1343,8 +1293,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // desktop only — precompute never runs on phone).
           const zoomCb = () => {
             if (destroyed) return
-            zoomGesture = null // gesture over — the next pinch freezes from the fresh rest geometry
-            if (phoneLike()) return // exit already applied bands; nothing settles-time on phone
+            liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next gesture
+            if (phoneLike()) return // exit already applied exact bands; nothing settles-time on phone
             zoomWarmStart = performance.now()
             zoomWarmUntil = zoomWarmStart + 2000
             scheduleIdleFull(600)
