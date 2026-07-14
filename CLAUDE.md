@@ -285,6 +285,24 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     exposes the presenter (stats(), show()). Playwright's Linux WebKit has NO navigator.storage
     — the probe seeds via an init-script OPFS shim (scratchpad scrub-probe), NOT vite preview
     (fallback-faithful static server + prod-like CSP).
+  ROUND 4/5 (2026-07-14, Peter "keep + salvage" after live DPR2 test — the show() 0.4ms was
+  JS-only and hid the real cost): (a) show() now BLITS into ONE persistent per-pane canvas via
+  drawImage(ImageBitmap) instead of ATTACHING a fresh <canvas> element per step — the old attach
+  re-layerized + re-uploaded a full texture every step (the felt lag the JS timer never saw). (b)
+  RASTER DPR IS CAPPED (RASTER_DPR_CAP=1; window.__iwRasterDprCap A/Bs it): the bitmap only shows
+  WHILE flipping fast (the full-DPR live DOM shows at rest), so DPR1 crispness is moot, and it
+  QUARTERS the per-swap texture upload AND ~4×s cache depth. (c) Capture PRIORITY = nearest-to-
+  scrub-position, doc→map→diff. MEASURED (chromium deviceScaleFactor 2, thesis doc, salvage probe):
+  cap=1 holds 36 cache entries / 62MB vs cap=2's 11 — and within a warmed window the doc pane
+  presents REAL intermediate versions at exactRate 0.97 vs cap=2's 0.04. THIS is regression #3's
+  fix ("only some versions seen; lags; catches up on stop"): at DPR2 the shallow cache evicted the
+  window → stale-nearest; DPR1 keeps the versions cached so the scrub flips through real content.
+  Version-fidelity probes: scrub.want (commanded target idx) / scrub.shown (doc idx presented) /
+  scrub.exact (1=real hit, 0=stale nearest) in __iwPerf. RESIDUAL (secondary, DPR-independent):
+  scrubBy rAF-coalescing collapses several inputs/frame into one net goTo, so an EXTREME fling
+  (>1 version/frame) still skips intermediates before show() sees them — at realistic notch
+  cadence (~45ms) it commands 17/24 and presents them; only the fast-fling tail coalesces. Left
+  as-is (touching scrubBy risks the swipe-perf invariants); revisit only if Peter still sees skips.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

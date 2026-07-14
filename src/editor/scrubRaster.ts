@@ -40,8 +40,20 @@ export type ScrubPaneKind = 'doc' | 'diff' | 'map'
 // and the minimap has none, so both raster at plain DPR.
 const ZOOM_IN_SCALE: Record<ScrubPaneKind, boolean> = { doc: false, diff: true, map: false }
 
+// Byte budgets. Round 5 (2026-07-14 — Peter "keep + salvage"): the raster DPR is now CAPPED (see
+// RASTER_DPR_CAP / dprOf), so each doc-pane bitmap is ~¼ its DPR2 size and 60MB again holds ~38
+// entries (~12 snapshots × doc/diff/map — the round-3 measured depth). Deep enough that a fast
+// scrub finds the intermediate versions CACHED instead of falling back to a stale nearest — the
+// regression-#3 fix ("only some versions seen; lags; catches up on stop"). Bitmaps are GPU-backed
+// (ImageBitmap) → bounded native memory, not JS heap.
 const DESKTOP_BUDGET = 60 * 1024 * 1024
 const TOUCH_BUDGET = 24 * 1024 * 1024
+// Cap the RASTER DPR (NOT the display). The felt scrub jank was the per-step compositor texture
+// upload of a full-DPR bitmap (measured DPR2 ≈ 20MB/swap → 28% of burst frames >32ms); capping to
+// 1 quarters that upload AND ~4×s the cache depth (more intermediate versions stay cached → fewer
+// stale-nearest skips). Text at reading size stays crisp at 1. A harness may override via
+// window.__iwRasterDprCap to A/B the cap.
+const RASTER_DPR_CAP = 1
 const REST_MS = 150          // quiet time after the last step before the at-rest swap arms
 const CAPTURE_QUIET_MS = 350 // captures never run this close to a nav input
 const SAFETY_HIDE_MS = 1500  // overlay can never stick past this after the last step
@@ -354,7 +366,12 @@ function resolveBg(el: HTMLElement): string {
   return '#ffffff'
 }
 
-export interface CaptureResult { canvas: HTMLCanvasElement; bytes: number }
+export interface CaptureResult {
+  bitmap: ImageBitmap | null   // GPU-ready; drawImage(bitmap) into a persistent canvas = a cheap blit
+  canvas: HTMLCanvasElement | null // fallback when createImageBitmap is unavailable/throws
+  width: number; height: number
+  bytes: number
+}
 
 /** Rasterise the viewport-region crop of `el` (its own scroll offset) into a canvas at
  *  `scale`× device resolution. Returns null when the engine produced nothing (e.g. a WebKit
@@ -451,8 +468,16 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
   ctx.fillStyle = resolveBg(el)
   ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.globalCompositeOperation = 'source-over'
+  // Prefer a GPU-ready ImageBitmap: at show() time drawImage(bitmap) into ONE persistent per-pane
+  // canvas is a GPU blit (probed max 0.1ms at DPR2), vs attaching a fresh ~12MB canvas element per
+  // step which forced per-step layerization + texture upload the JS timer never saw (Peter's felt
+  // lag — "not as fast as you said"). Backstop is already baked in, so the bitmap is opaque.
+  let bitmap: ImageBitmap | null = null
+  if (typeof createImageBitmap === 'function') {
+    try { bitmap = await createImageBitmap(canvas) } catch { bitmap = null }
+  }
   probePerf('scrub.capture', performance.now() - t0)
-  return { canvas, bytes: canvas.width * canvas.height * 4 }
+  return { bitmap, canvas: bitmap ? null : canvas, width: canvas.width, height: canvas.height, bytes: canvas.width * canvas.height * 4 }
 }
 
 // ── Presenter — overlay surfaces + cache + scrub-mode lifecycle ───────────────────────────────
@@ -461,7 +486,9 @@ interface Entry {
   key: string
   snapId: string
   kind: ScrubPaneKind
-  canvas: HTMLCanvasElement
+  bitmap: ImageBitmap | null   // GPU-ready source (preferred)
+  canvas: HTMLCanvasElement | null // fallback source when createImageBitmap was unavailable
+  width: number; height: number // backing-store dims (device px)
   scrollTop: number
   scrollLeft: number
   bytes: number
@@ -472,6 +499,10 @@ interface Surface {
   host: HTMLElement
   getEl: () => HTMLElement | null
   getZoom: () => number
+  // ONE persistent canvas per pane, attached ONCE = one stable compositor layer; show() blits into
+  // it via drawImage (no per-step element attach / texture re-upload — the round-4 felt-lag fix).
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
 }
 
 interface Job { kind: ScrubPaneKind; snapId: string; getEl: () => HTMLElement | null }
@@ -496,7 +527,8 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
   const budget = opts.touch ? TOUCH_BUDGET : DESKTOP_BUDGET
   const dprOf = () => {
     const d = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
-    return opts.touch ? Math.min(d, 2) : d // Peter: desktop = full screen resolution; phone caps at 2
+    const cap = (typeof window !== 'undefined' && (window as unknown as { __iwRasterDprCap?: number }).__iwRasterDprCap) || RASTER_DPR_CAP
+    return Math.min(d, opts.touch ? Math.min(2, cap) : cap)
   }
 
   const surfaces = new Map<ScrubPaneKind, Surface>()
@@ -520,8 +552,25 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     disposed: false,
 
     registerSurface(kind, host, getEl, getZoom) {
-      if (!host) { surfaces.delete(kind); return }
-      surfaces.set(kind, { host, getEl, getZoom })
+      const existing = surfaces.get(kind)
+      if (!host) {
+        if (existing) { existing.host.replaceChildren(); surfaces.delete(kind) }
+        attached.set(kind, null)
+        return
+      }
+      // Reuse the persistent canvas if the same host re-registers (StrictMode / re-render); else
+      // mint one and attach it ONCE.
+      let canvas = existing && existing.host === host ? existing.canvas : null
+      let ctx = existing && existing.host === host ? existing.ctx : null
+      if (!canvas || !ctx) {
+        canvas = document.createElement('canvas')
+        canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'
+        ctx = canvas.getContext('2d')
+        if (!ctx) { surfaces.delete(kind); return }
+        host.replaceChildren(canvas)
+        attached.set(kind, null) // the fresh canvas holds nothing yet
+      }
+      surfaces.set(kind, { host, getEl, getZoom, canvas, ctx })
     },
 
     setOrder(ids) { order = ids },
@@ -535,6 +584,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       active = true
       const dpr = dprOf()
       let shown = 0
+      probePerf('scrub.want', order.indexOf(snapId)) // version-fidelity: commanded target index
       for (const [kind, s] of surfaces) {
         const el = s.getEl()
         if (!el) { s.host.style.display = 'none'; continue }
@@ -557,9 +607,12 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           entry = near ? cands.get(near) ?? null : null
         }
         if (entry) {
+          // version-fidelity: which doc version actually presented, and was it an EXACT hit (real
+          // content) vs a nearest-fallback (stale — the #3 skip).
+          if (kind === 'doc') { probePerf('scrub.shown', order.indexOf(entry.snapId)); probePerf('scrub.exact', entry === exact ? 1 : 0) }
           entry.lastUsed = ++tick
           if (attached.get(kind) !== entry) {
-            s.host.replaceChildren(entry.canvas)
+            drawEntry(s, entry) // GPU blit into the persistent canvas — no element churn
             attached.set(kind, entry)
           }
           s.host.style.display = 'block'
@@ -599,13 +652,23 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       window.clearTimeout(pumpTimer); window.clearTimeout(restTimer); window.clearTimeout(safetyTimer)
       cancelAnimationFrame(hideRaf)
       queue.clear()
-      for (const e of entries.values()) { e.canvas.width = 0; e.canvas.height = 0 }
+      for (const e of entries.values()) { e.bitmap?.close(); if (e.canvas) { e.canvas.width = 0; e.canvas.height = 0 } }
       entries.clear()
       bytes = 0
       for (const s of surfaces.values()) { s.host.style.display = 'none'; s.host.replaceChildren() }
       surfaces.clear()
       attached.clear()
     },
+  }
+
+  // Blit an entry's source (ImageBitmap preferred; canvas fallback) into the surface's persistent
+  // canvas. Resizing the backing store clears it — only happens across zoom/width buckets, not
+  // step-to-step — so the common path is a single drawImage.
+  function drawEntry(s: Surface, e: Entry) {
+    const cv = s.canvas
+    if (cv.width !== e.width || cv.height !== e.height) { cv.width = e.width; cv.height = e.height }
+    const src = (e.bitmap ?? e.canvas) as CanvasImageSource | null
+    if (src) s.ctx.drawImage(src, 0, 0) // backstop is baked into the source → opaque, no clear needed
   }
 
   function armRest() {
@@ -656,9 +719,9 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       if (queue.size) { pumpTimer = window.setTimeout(() => { pumpTimer = 0; pump() }, 400) }
       return
     }
-    const first = queue.entries().next().value as [string, Job] | undefined
-    if (!first) return
-    const [jobKey, job] = first
+    const picked = pickJob()
+    if (!picked) return
+    const [jobKey, job] = picked
     queue.delete(jobKey)
     const el = job.getEl()
     const s = surfaces.get(job.kind)
@@ -672,17 +735,18 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
         try {
           const scale = dpr * (ZOOM_IN_SCALE[job.kind] ? zoom : 1)
           const res = await captureRegion(el, scale)
-          if (res && !p.disposed) {
+          if (res && (res.bitmap || res.canvas) && !p.disposed) {
             if (existing) evictOne(existing)
             const entry: Entry = {
-              key, snapId: job.snapId, kind: job.kind, canvas: res.canvas,
+              key, snapId: job.snapId, kind: job.kind, bitmap: res.bitmap, canvas: res.canvas,
+              width: res.width, height: res.height,
               scrollTop: el.scrollTop, scrollLeft: el.scrollLeft, bytes: res.bytes, lastUsed: ++tick,
             }
             entries.set(key, entry)
             bytes += res.bytes
             enforceBudget()
             probePerf('scrub.mem', bytes / 1e6)
-          }
+          } else if (res && res.bitmap) { res.bitmap.close() }
         } catch { /* capture failed — stay uncached, the live path still works */ }
         busy = false
       }
@@ -690,11 +754,30 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     if (queue.size) pump()
   }
 
+  // Capture PRIORITY (round 4): nearest-to-the-scrub-position first, and within the same
+  // proximity DOC then MAP then DIFF — the doc pane + minimap are the slow, felt-laggy ones Peter
+  // named ("summaries faster than the minimap and editor"); capturing them ahead of the diff
+  // covers the reachable window fastest.
+  const KIND_RANK: Record<ScrubPaneKind, number> = { doc: 0, map: 1, diff: 2 }
+  function pickJob(): [string, Job] | null {
+    const focus = target ?? opts.getLiveId()
+    const fi = focus ? order.indexOf(focus) : -1
+    let best: [string, Job] | null = null, bestScore = Infinity
+    for (const kv of queue) {
+      const oi = order.indexOf(kv[1].snapId)
+      const prox = oi >= 0 && fi >= 0 ? Math.abs(oi - fi) : 50
+      const score = prox * 10 + KIND_RANK[kv[1].kind]
+      if (score < bestScore) { bestScore = score; best = kv }
+    }
+    return best
+  }
+
   function evictOne(e: Entry) {
     entries.delete(e.key)
     bytes -= e.bytes
-    if (attached.get(e.kind) === e) { attached.set(e.kind, null) }
-    else { e.canvas.width = 0; e.canvas.height = 0 } // release the backing store now
+    e.bitmap?.close(); e.bitmap = null
+    if (e.canvas) { e.canvas.width = 0; e.canvas.height = 0; e.canvas = null } // release now
+    for (const [k, v] of attached) if (v === e) attached.set(k, null)
   }
 
   function enforceBudget() {
@@ -702,9 +785,10 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     const ti = target ? order.indexOf(target) : -1
     const items = [...entries.values()].map((e) => ({
       key: e.key, bytes: e.bytes, lastUsed: e.lastUsed,
-      // Protect the scrub window around the target (and whatever is on screen right now).
+      // Protect the scrub window around the target (±3 — widened for full-res retention) and
+      // whatever is on screen right now.
       protected: (attached.get(e.kind) === e) ||
-        (ti >= 0 && Math.abs(order.indexOf(e.snapId) - ti) <= 2),
+        (ti >= 0 && Math.abs(order.indexOf(e.snapId) - ti) <= 3),
     }))
     for (const key of planEviction(items, bytes - budget)) {
       const e = entries.get(key)
