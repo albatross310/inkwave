@@ -672,13 +672,19 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // the panel layer + cleared minHeight to take sheet.scrollHeight — a SECOND forced
             // full layout on every paint pass, cache miss and atomic exit. Same rule
             // staticPagination already proved (2026-07-12 swipe round): derive the content extent
-            // from the IN-FLOW children's rects in the SAME layout pass as the band reads. The
-            // absolutely-positioned panel layer is skipped explicitly, so its full-final-page
-            // extension can't ratchet the measure, and minHeight never enters a rect read (the
-            // old ratchet fixpoints stay impossible by construction).
+            // from the IN-FLOW children's rects in the SAME layout pass as the band reads.
+            // Every ABSOLUTELY-positioned child must be skipped, not just the sheet layer: they are
+            // inset:0 overlays (the panel layer AND `.iw-page-guides`) that STRETCH to the sheet's
+            // minHeight, so reading their bottom folds our own full-final-page minHeight straight
+            // back into `total` → a per-paint +padB RATCHET (last panel grows every zoom cycle;
+            // bug 2026-07-15). Only the real in-flow content (the .ProseMirror wrapper) may set the
+            // extent, so minHeight can never enter a rect read (the old ratchet fixpoints stay
+            // impossible by construction).
             let bottom = sheetR.top
             for (const c of Array.from(sheet.children) as HTMLElement[]) {
               if (c === layer) continue
+              const pos = getComputedStyle(c).position
+              if (pos === 'absolute' || pos === 'fixed') continue // inset:0 overlay → tracks minHeight
               const r = c.getBoundingClientRect()
               if (r.bottom > bottom) bottom = r.bottom
             }
