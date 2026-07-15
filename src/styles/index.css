@@ -688,6 +688,18 @@
      the page, not the editor's text I-beam. */
   .inkwave-page-gap { display: block; position: relative; user-select: none; cursor: default; }
   .inkwave-page-gap-band { display: block; position: absolute; left: 0; right: 0; z-index: 0; }
+  /* Decision 1 (renderFill): dotted CONTINUATION bracket at a mid-paragraph page split — a small
+     downward-opening bracket (⊓: dotted top + two short side ticks) sitting just below the last
+     line, telling the reader the paragraph continues on the page below. First-pass look — Peter
+     iterates. Theme-aware via --iw-light (purple accent; remapped in the night block). z-index
+     above the band so it reads over the water. Print/export hide it (see @media print below). */
+  .inkwave-continuation-bracket {
+    display: block; position: absolute; left: 0; top: 3px; z-index: 1;
+    width: 26px; height: 6px; box-sizing: border-box;
+    border: 1.5px dotted var(--iw-light, #9b5ccc); border-bottom: none;
+    border-top-left-radius: 2px; border-top-right-radius: 2px;
+    opacity: 0.6; pointer-events: none;
+  }
   /* Ungapped mode's break MARKER (same widget, zero height): a 0-height block that pins the
      measured break position — PageGuides draws the dashed rule at its rect, @media print breaks
      the page at it. Block (not inline): the break sits at a line start, so the forced break is a
@@ -1272,6 +1284,7 @@
   .scas-red[data-scas-old]::after { content: none !important; }
   .scas-red[data-scas-time]::before { content: none !important; }
   .inkwave-page-gap-band { display: none !important; }
+  .inkwave-continuation-bracket { display: none !important; } /* Decision 1: screen-only affordance */
   /* Keep the writing's own font/size/line-height (don't restyle it) — just drop colour + SCAS marks. */
   .ProseMirror, .ProseMirror * { color: #1a1a1a !important; }
   .scas-red { background: none !important; color: #1a1a1a !important; box-shadow: none !important; }
