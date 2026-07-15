@@ -310,6 +310,14 @@ export async function downloadBundleGz(bundle: ExportBundle, filename: string): 
   triggerDownload(await new Response(stream).blob(), filename)
 }
 
+/** gzip a composed .studio string → Blob. null when CompressionStream is unavailable (iOS <16.4),
+ *  so callers can fall back to writing plain text (readStudioFile sniffs, so it still reads back). */
+export async function gzipStudioText(text: string): Promise<Blob | null> {
+  if (typeof CompressionStream === 'undefined') return null
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))
+  return await new Response(stream).blob()
+}
+
 /** Read a possibly-gzipped .studio file: gunzip when it starts with the gzip magic bytes, else UTF-8. */
 export async function readStudioFile(file: File | Blob): Promise<string> {
   const buf = new Uint8Array(await file.arrayBuffer())

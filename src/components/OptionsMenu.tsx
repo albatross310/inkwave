@@ -41,7 +41,9 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
   try {
     ;[handle] = await w.showOpenFilePicker({
       multiple: false,
-      types: [{ description: 'Inkwave record', accept: { 'text/plain': ['.studio', '.inkwave', '.json'] } }],
+      // .gz belongs here: our own "🗜 Zipped" exports are .studio.gz, and parseStudioBuffer
+      // gunzips by sniffing the magic bytes — without this the picker greys out our own exports.
+      types: [{ description: 'Inkwave record', accept: { 'text/plain': ['.studio', '.inkwave', '.json'], 'application/gzip': ['.gz'] } }],
     })
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') return // user cancelled — fine
@@ -262,7 +264,7 @@ export function OptionsMenu({
           have none — every Inkwave file showed GREYED OUT in the iOS picker. Omitting accept makes all
           files selectable; openInkwaveFile validates by CONTENT, so a wrong pick just errors politely.
           Desktop keeps the extension filter for a tidier dialog. */}
-      <input ref={fileInputRef} type="file" accept={isTouchDevice() ? undefined : '.studio,.inkwave,application/json,.json,.trace.json,.insig.json'} className="hidden" onChange={onOpenFile} />
+      <input ref={fileInputRef} type="file" accept={isTouchDevice() ? undefined : '.studio,.inkwave,.gz,application/gzip,application/json,.json,.trace.json,.insig.json'} className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}

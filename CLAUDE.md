@@ -525,12 +525,32 @@ write shim, so metadata can say a PDF exists with no local bytes).
   closest shipped cousin to Aptos, which is licence-locked; Open Sans certified as the nearest
   open face in spirit if ever wanted), Atkinson Hyperlegible (a11y), JetBrains Mono. ALSO
   CERTIFIED but cut for palette budget: Cardo, Noto Sans, Noto Serif, Open Sans, Fira Code,
-  Nimbus Roman. FAILED
-  (integer-px advance quantization — hinting/ligature divergence; also a cross-device canonical-
-  break hazard): Tinos, Arimo, Caladea (×2), Vollkorn (×2), Libre Baskerville, PT Serif,
-  Source Serif 4 (×2), Alegreya (×2), Baskervville, Libre Caslon Text, Quattrocento, STIX Two
-  Text, Inter (700 only) — none shipped. BASKERVILLE GENRE: DEFINITIVELY no passer across four
-  candidates (Peter has let it go). The old
+  Nimbus Roman. ⚠️ **THE "FAILED" LIST BELOW IS RETRACTED — RE-CERTIFIED 2026-07-16, ALL 13 PASS.**
+  r7 measured canvas vs a PLAIN span with ligatures ON **on both sides** — but prosemirror-view's
+  injected sheet sets `font-variant-ligatures:none; font-feature-settings:"liga" 0` on .ProseMirror,
+  so the editor renders liga OFF and canvas measureText applies ligatures BY DEFAULT. Those 13 faces
+  diverge (Δ3–45px) ONLY when ligatures are applied — a divergence that CANNOT OCCUR in production.
+  Re-measured in the real context (real .ProseMirror + `textRendering:'optimizeSpeed'` +
+  `fontKerning:'normal'` on the canvas): **every family Δ0.0000, wrap 8/8**. r7 named the cause
+  ("hinting/ligature divergence") but blamed the wrong half — ligatures, not hinting; kerning was
+  ruled out. What licenses the retraction: a LEGACY A/B re-measures each family in r7's own context
+  and reproduces its verdict set 33/33, so ligature shaping is the only variable. The 15 shipped
+  fonts ALL still pass — nothing to revert; this is purely additive.
+  FORMERLY-"FAILED", NOW CERTIFIED (not yet shipped — palette is Peter's call): Tinos, Arimo,
+  Caladea (the Cambria-warmth slot), Vollkorn, Libre Baskerville, PT Serif, Source Serif 4,
+  Alegreya, Baskervville, Libre Caslon Text, Quattrocento, STIX Two Text, Inter (700).
+  **BASKERVILLE GENRE IS BACK**: all four candidates certify — the genre was abandoned on the
+  flawed grid, not on the fonts. Before shipping any of these: the certification is CHROMIUM-ONLY
+  (as r7's was) and the canonical-break invariant is CROSS-DEVICE ⇒ a WebKit pass first; and
+  Tinos/Arimo/Caladea are Times/Arial/Cambria metric clones (same trademark caveat as TeX Gyre).
+  Re-run: `node scripts/fontCertify.fetch.mjs && node scripts/fontCertify.prove.mjs <port>`.
+  TWO TRAPS THIS EXPOSED, for any future font/measure work: (1) canvas-vs-DOM parity MUST be
+  measured inside a real .ProseMirror (white-space:break-spaces + liga off) — a plain-div harness
+  certifies a fiction the editor never uses; (2) `document.fonts.check()` returns TRUE for a family
+  with NO @font-face (the system fallback counts), so an unfetched font silently measures the
+  fallback against itself and "agrees" at 0.000 — detect real load by comparing against the
+  monospace fallback. Nimbus Roman remains UNTESTED (CTAN 404) — reported NOT-LOADED, never certified.
+  The old
   system-font entries (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) are GONE from the
   StyleBar (device-dependent metrics = uncertifiable + they already broke cross-device canonical
   breaks for marked runs); legacy docs still render — each new css stack keeps the old system

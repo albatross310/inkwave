@@ -9,9 +9,22 @@
 //   • ARITH PATH — resolveBlocks(): eligible paragraphs laid out arithmetically from canvas
 //                  advances; every other block DEFERRED to the same DOM measure; thread tops; run
 //                  the SAME paginate().
-// Assert the two page-break signatures are BYTE-IDENTICAL. Also, per eligible paragraph, compare
-// the arithmetic line-start char indices against the DOM's per-char range tops (the granular r7
-// test). Reports pass rate + arithmetic-vs-DOM speed + the coverage map (arithmetic vs deferred).
+// PASS REQUIRES BOTH (2026-07-15 — the page signature alone was passing by LUCK OF COMPOSITION):
+//   (1) the two page-break signatures are BYTE-IDENTICAL, AND
+//   (2) GRANULAR WRAP PARITY — every eligible paragraph's per-line start index matches the one the
+//       LIVE PATH resolves. Gating on the page signature alone hid a wrap divergence that simply
+//       didn't land on a page boundary in these fixtures; the wrap must be exact underneath or a
+//       future doc will land one on a break (wrong words on a page; phone≠print).
+// The granular reference measures what collectLines ACTUALLY does — line rects + ONE posAtCoords per
+// line — NOT a per-char walk (see domLineStarts for why the old per-char reference reported phantom
+// 1-char divergences on marked-up prose). Reports pass rate + speed + the coverage map.
+//
+// PROVER SENSITIVITY (measured by mutation, so the numbers aren't a guess): breaking the
+// trailing-space-hangs rule → A 35/60, E 27/40, H 26/40, B 20/23 (fails loudly). A 0.5% advance
+// inflation (~3px/line) fails; 0.05% (~0.3px) does not flip a break on this corpus — i.e. the
+// corpus carries >0.3px of slack at its tightest break, ~6× the Δ≤0.05px measureText error round-7
+// certified. So this catches semantic/rule errors definitively and numeric drift down to ~0.3px;
+// it is a real-corpus bound, not an analytic guarantee.
 //
 // Probe rules honoured: headless (xvfb-free chromium), own port + PID, never touches vite.
 // Run:  node scripts/arithmeticLayout.prove.mjs <port>
@@ -19,7 +32,7 @@
 import { chromium } from '@playwright/test'
 import { transformWithEsbuild } from 'vite'
 import { createServer } from 'http'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { readFileSync, existsSync, statSync, readdirSync } from 'fs'
 import { join, extname, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
@@ -46,15 +59,41 @@ try {
 
 // KaTeX dist (math rendering + its fonts) so the prover measures REAL rendered math geometry.
 const KATEX_DIST = (() => { try { return dirname(require.resolve('katex')) } catch { return null } })()
+// The REAL ProseMirror stylesheet (@tiptap/core injects this verbatim). It is what sets
+// .ProseMirror{white-space:break-spaces} AND the per-subtree flips
+// (.ProseMirror [contenteditable=false]{white-space:normal}). Serving the actual file — and
+// rendering inside a real .ProseMirror — is the only way the reference inherits the whole cascade
+// instead of a hand-copied approximation that drifts from production.
+const PM_CSS = (() => {
+  // prosemirror-view isn't a direct dep (it comes via @tiptap/pm) and pnpm's store isn't resolvable
+  // by specifier from here — glob the store. If this ever fails the harness ASSERTS rather than
+  // silently measuring `normal` (which is exactly the fiction this whole round was about).
+  for (const base of ['/root/dev/Inkwave/node_modules/.pnpm', join(ROOT, 'node_modules/.pnpm')]) {
+    try {
+      for (const d of readdirSync(base)) {
+        if (!d.startsWith('prosemirror-view@')) continue
+        const f = join(base, d, 'node_modules/prosemirror-view/style/prosemirror.css')
+        if (existsSync(f)) return readFileSync(f, 'utf8')
+      }
+    } catch { /* next */ }
+  }
+  return ''
+})()
+if (!PM_CSS.includes('break-spaces')) { console.error('FATAL: could not load the real prosemirror.css (white-space:break-spaces) — the reference would measure the wrong white-space mode'); process.exit(2) }
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.js': 'text/javascript' }
 const HARNESS = `<!doctype html><html><head>
 <link rel="stylesheet" href="/fonts/inkwave-fonts.css">
 <link rel="stylesheet" href="/katex/katex.min.css">
 <script src="/katex/katex.min.js"></script>
+<link rel="stylesheet" href="/pm/prosemirror.css">
 <style>
   html,body{margin:0;padding:0}
   /* The canonical .ProseMirror context (index.css): 1.125rem @ 16px root = 18px, φ line-height. */
+  /* white-space MUST match the live editor: prosemirror-view's stylesheet (injected by @tiptap/core)
+     sets .ProseMirror{white-space:pre-wrap; white-space:break-spaces}. break-spaces means a trailing
+     space NEVER hangs - it occupies width and counts toward the fit. A plain div would be 'normal'
+     (hangs), which silently certifies a wrap the editor never produces. Asserted below, not assumed. */
   #doc{ font-family:'EB Garamond', Georgia, serif; font-size:18px; line-height:1.618; color:#1a1a1a; box-sizing:border-box }
   #doc p{ margin:0 0 9px 0 } /* 0.5em @ 18px */
   #doc hr{ border:none; border-top:1px solid #999; margin:12px 0 }
@@ -63,11 +102,12 @@ const HARNESS = `<!doctype html><html><head>
   #doc .reflist{ margin-top:12px }
   #doc .reflist .refentry{ margin:0 0 9px 0; text-indent:-24px; padding-left:24px }
   #doc .cite{ display:inline; white-space:nowrap }
-</style></head><body><div id="doc"></div></body></html>`
+</style></head><body><div id="doc" class="ProseMirror" contenteditable="true"></div></body></html>`
 
 const server = createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (p === '/prove.html') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HARNESS); return }
+  if (p === '/pm/prosemirror.css') { res.writeHead(200, { 'content-type': 'text/css' }); res.end(PM_CSS); return }
   if (p.startsWith('/katex/') && KATEX_DIST) {
     const kf = join(KATEX_DIST, p.slice('/katex/'.length))
     try { if (existsSync(kf) && !statSync(kf).isDirectory()) { res.writeHead(200, { 'content-type': MIME[extname(kf)] ?? 'application/octet-stream' }); res.end(readFileSync(kf)); return } } catch { /* 404 */ }
@@ -217,11 +257,22 @@ const results = await page.evaluate(async ({ fixtures }) => {
   await document.fonts.ready
   const AL = window.AL
   const CAN = { pageW: 793.7007874015748, side: 96, topM: 96, botM: 72, base: 18, ratio: 1.618 }
-  const contentW = CAN.pageW - 2 * CAN.side // 601.70
+  // LAYOUTUNIT SNAP (2026-07-15 — the zoom agent's finding, shipped as 4909016 in the wire-in).
+  // Browsers store used lengths on a 1/64px grid: writing width:601.7008px produces a box that
+  // actually wraps at floor(601.7008*64)/64 = 601.6875. Handing the engine the UNSNAPPED value made
+  // every line 0.0133px too generous — a real (if narrow) chance to take a word the browser drops.
+  // Snap it, and hand the SAME number to the DOM box and the engine so both wrap at one width.
+  const contentWRaw = CAN.pageW - 2 * CAN.side // 601.7007874015748
+  const contentW = Math.floor(contentWRaw * 64) / 64 // 601.6875 — what the browser actually uses
   const pageH = CAN.pageW * (297 / 210)
   const docEl = document.getElementById('doc')
   docEl.style.width = contentW + 'px'
   const measure = AL.makeCanvasMeasure()
+  // CONTEXT ASSERTION — the prover must measure in the context production uses. This is the guard
+  // that would have caught the plain-<div> `normal` fiction: fail loudly rather than certify it.
+  const WS = AL.EDITOR_WHITE_SPACE // 'break-spaces'
+  const wsActual = getComputedStyle(docEl).whiteSpace
+  if (wsActual !== WS) throw new Error(`PROVER CONTEXT MISMATCH: harness white-space=${wsActual} but the editor uses ${WS} — the reference would certify a wrap production never produces`)
 
   // ── MATH: render REAL KaTeX and measure each node's box ONCE (cached by stable content key) ──
   // This is the "cached one-time measure" box source the engine's design describes: math renders
@@ -442,28 +493,44 @@ const results = await page.evaluate(async ({ fixtures }) => {
     return { relTops, top: br.top }
   }
 
-  // ── granular r7 test: DOM per-char line-start indices for an eligible paragraph element ──
-  const domBreakChars = (el) => {
-    // Concatenate text nodes; get per-char range tops; a new line where top jumps.
+  // ── granular WRAP test: the per-line start index THE LIVE PATH RESOLVES ────────────────────────
+  // This must measure what collectLines actually does, or it tests a fiction. collectLines does NOT
+  // walk chars: it takes the block's LINE rects (range.getClientRects + the dedup) and resolves each
+  // line's doc position with ONE posAtCoords at (rect.left + 1, rect.top + height/2). So the granular
+  // reference does exactly that (caretRangeFromPoint is the same browser hit-test PM's posAtCoords
+  // wraps) and maps the caret back to a flat char index.
+  //
+  // WHY NOT the old per-char walk (r7's method): a line's trailing space COLLAPSES to zero width, and
+  // when that space is the FIRST character of a new span (a mark/run boundary) the browser reports its
+  // zero-width rect at the NEXT line's ORIGIN. A per-char walk then calls that space the line start
+  // (e.g. blk6 char 82 " " w=0 at line-2 origin) while the first VISIBLE glyph — and posAtCoords, and
+  // the engine — all say 83 ("p"). r7 never saw this because its corpus was ONE text node (no run
+  // boundary at a break). That made the old reference report a phantom 1-char "wrap divergence" on
+  // marked-up prose. Verified on the real Honours fixture: posAtCoords line starts == the engine's.
+  const domLineStarts = (el) => {
+    el.scrollIntoView({ block: 'center' }) // caretRangeFromPoint is viewport-based — bring it in range
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
     const texts = []
     let node
     while ((node = walker.nextNode())) texts.push(node)
-    const range = document.createRange()
-    const breaks = [0]
+    const flatOf = (n, off) => { let base = 0; for (const t of texts) { if (t === n) return base + off; base += t.textContent.length } return -1 }
+    let rects = []
+    try { const rg = document.createRange(); rg.selectNodeContents(el); rects = Array.from(rg.getClientRects()) } catch { return null }
+    const starts = []
     let lastTop = -1e9
-    let idx = 0
-    for (const t of texts) {
-      const len = t.textContent.length
-      for (let i = 0; i < len; i++) {
-        range.setStart(t, i); range.setEnd(t, i + 1)
-        const rect = range.getBoundingClientRect()
-        if (rect.width === 0 && rect.height === 0) { idx++; continue }
-        if (rect.top - lastTop > 3) { if (idx > 0) breaks.push(idx); lastTop = rect.top }
-        idx++
-      }
+    for (const rc of rects) {
+      if (rc.width < 1 || rc.height < 1 || rc.height > 80 || rc.top - lastTop <= 3) continue
+      lastTop = rc.top
+      const x = rc.left + 1, y = rc.top + rc.height / 2
+      let cr = null
+      if (document.caretRangeFromPoint) cr = document.caretRangeFromPoint(x, y)
+      else if (document.caretPositionFromPoint) { const cp = document.caretPositionFromPoint(x, y); cr = cp ? { startContainer: cp.offsetNode, startOffset: cp.offset } : null }
+      if (!cr || !cr.startContainer) return null // un-hit-testable → skip this block rather than lie
+      const f = flatOf(cr.startContainer, cr.startOffset)
+      if (f < 0) return null
+      starts.push(f)
     }
-    return breaks
+    return starts.length ? starts : null
   }
 
   // Gate check: whether the run's PRIMARY family face is loaded. Must check the primary family
@@ -580,7 +647,7 @@ const results = await page.evaluate(async ({ fixtures }) => {
     const resolved = AL.resolveBlocks(
       arithBlocks, contentW, CAN.ratio, measure,
       (i) => ({ relTops: dom[i].relTops, advance: domAdvance[i] }),
-      fontLoaded,
+      fontLoaded, true, WS,
     )
     const tArMs = performance.now() - tAr0
     const arAsm = assemble((i) => resolved[i].relTops, (i) => resolved[i].advance, domTops[0])
@@ -611,13 +678,16 @@ const results = await page.evaluate(async ({ fixtures }) => {
       if (Math.abs(da - aa) > 0.02) advDiffs.push(`blk${i}(${arithBlocks[i].runs.filter(r=>r.text!=='\n').map(r=>r.fontSizePx)[0]}px): domAdv ${da.toFixed(3)} arAdv ${aa.toFixed(3)} lines dom ${dom[i].relTops.length}/ar ${resolved[i].relTops.length}`)
     }
 
-    // granular per-char break-index parity on eligible paragraphs (up to fx.granular)
-    let gTested = 0, gPass = 0, gFail = []
+    // granular WRAP parity on eligible paragraphs: the engine's per-line start index vs the one the
+    // LIVE PATH resolves (line rects + posAtCoords). A skipped block (un-hit-testable) is NOT counted
+    // as a pass — it is reported so the number never flatters the engine.
+    let gTested = 0, gPass = 0, gSkip = 0, gFail = []
     for (let i = 0; i < N && gTested < (fx.granular || 0); i++) {
       if (!resolved[i].eligible || arithBlocks[i].type !== 'paragraph' || !arithBlocks[i].runs.length) continue
-      if (arithBlocks[i].runs.some((r) => r.atomic)) continue // atom position-counting differs from a text-char walk — sig covers these
-      const lay = AL.layoutParagraph(arithBlocks[i], contentW, CAN.ratio, measure)
-      const domB = domBreakChars(built[i].el)
+      if (arithBlocks[i].runs.some((r) => r.atomic)) continue // atom↔char index mapping differs; the sig covers these
+      const lay = AL.layoutParagraph(arithBlocks[i], contentW, CAN.ratio, measure, WS)
+      const domB = domLineStarts(built[i].el)
+      if (!domB) { gSkip++; continue }
       gTested++
       const same = domB.length === lay.breakStartChars.length && domB.every((v, k) => v === lay.breakStartChars[k])
       if (same) gPass++
@@ -634,7 +704,7 @@ const results = await page.evaluate(async ({ fixtures }) => {
       sigMatch: domSig === arSig, domSig: domSig.slice(0, 70), arSig: arSig.slice(0, 70),
       domPages: domSig.match(/pages:(\d+)/)?.[1], arPages: arSig.match(/pages:(\d+)/)?.[1],
       tDomRectsMs: +tDomRectsMs.toFixed(1), tDomForcedMs: +tDomForcedMs.toFixed(1), tArMs: +tArMs.toFixed(1),
-      coverage, gTested, gPass, gFail, advDiffs: advDiffs.slice(0, 8), advDiffCount: advDiffs.length, mathLineDiverge,
+      coverage, gTested, gPass, gSkip, gFail, advDiffs: advDiffs.slice(0, 8), advDiffCount: advDiffs.length, mathLineDiverge,
     })
   }
   return out
@@ -644,23 +714,27 @@ const results = await page.evaluate(async ({ fixtures }) => {
 console.log('\n=== ARITHMETIC LAYOUT ENGINE — PROVER ===\n')
 let allPass = true
 for (const r of results) {
-  // PASS = break POSITIONS byte-identical (the load-bearing invariant). Full-signature (incl. the
-  // cosmetic botMargin gap-height) and granular per-char wrap parity are reported separately.
-  const pass = r.posSigMatch
+  // PASS requires BOTH: (1) break POSITIONS byte-identical (the load-bearing invariant), AND
+  // (2) granular WRAP parity — every eligible paragraph's line starts match what the live path
+  // resolves. Gating on the page signature ALONE passed by luck of composition: a 1-char wrap
+  // divergence only shows up when it happens to land on a page boundary. The wrap must be exact
+  // underneath, or a future doc WILL land one on a break. A fixture with 0 granular coverage
+  // (all-deferred) can still pass on the signature — that is the deferral working.
+  const pass = r.posSigMatch && (r.gTested === 0 || r.gPass === r.gTested)
   allPass = allPass && pass
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${r.name}`)
   console.log(`      blocks ${r.blocks} (arith-eligible ${r.eligibleCount}) | DOM ${r.domLines} lines → ${r.domPages}pp | ARITH ${r.arLines} lines → ${r.arPages}pp`)
   console.log(`      break-POSITION signature (which text on which page): ${r.posSigMatch ? 'BYTE-IDENTICAL ✓' : 'MISMATCH ✗'}`)
   console.log(`      FULL signature (+ botMargin gap height):            ${r.fullSigMatch ? 'BYTE-IDENTICAL ✓' : 'botMargin drift'}`)
   if (!r.fullSigMatch) { console.log(`        dom=${r.domSig}`); console.log(`        ar =${r.arSig}`) }
-  if (r.gTested) console.log(`      granular per-char break parity (eligible paras): ${r.gPass}/${r.gTested}${r.gFail.length ? '  ' + r.gFail.join(' | ') : ''}`)
+  if (r.gTested || r.gSkip) console.log(`      granular WRAP parity vs live posAtCoords (eligible paras): ${r.gPass}/${r.gTested}${r.gSkip ? ` (+${r.gSkip} un-hit-testable, skipped)` : ''}${r.gFail.length ? '  ' + r.gFail.join(' | ') : ''}`)
   console.log(`      coverage: ${JSON.stringify(r.coverage)}`)
   if (r.mathLineDiverge) console.log(`      math-para verifier line-count divergence: ${r.mathLineDiverge} (advances byte-identical; needs collectLines line-grouping fix for exact counts)`)
   if (r.advDiffCount) console.log(`      per-block ADVANCE drift (eligible): ${r.advDiffCount} blocks  ${r.advDiffs.join(' | ')}`)
   console.log(`      speed: arithmetic compute ${r.tArMs}ms (full doc, cold) | DOM getClientRects ${r.tDomRectsMs}ms | 2-reflow mirror ${r.tDomForcedMs}ms`)
   console.log('')
 }
-console.log(allPass ? 'ALL FIXTURES PASS (break positions byte-identical) ✓' : 'SOME FIXTURES FAILED ✗')
+console.log(allPass ? 'ALL FIXTURES PASS (break positions byte-identical AND wrap exact) ✓' : 'SOME FIXTURES FAILED ✗')
 console.log('\nNOTE: the arithmetic path needs ZERO layout reflow. The "2-reflow mirror" here is a')
 console.log('lower bound on this small offscreen fixture; the LIVE phone forced canonical measure it')
 console.log('eliminates is 400ms (fast) to ~1100ms (4× throttle) per typing pause on a 100pp doc')

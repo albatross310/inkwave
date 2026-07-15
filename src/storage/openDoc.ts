@@ -63,16 +63,21 @@ async function openInkwaveFileInner(
   // Accept an export bundle (content under .document) OR a raw saved document (top-level contentJson).
   const contentJson = (data as { contentJson?: typeof data.document.contentJson }).contentJson ?? data.document?.contentJson
   if (!contentJson) throw new Error('not an Inkwave file')
+  // Strip a trailing .gz FIRST: our own "🗜 Zipped" exports are .studio.gz, and both regexes below
+  // only match an extension at the END — so foo.studio.gz titled as "foo.studio.gz" and normalised
+  // to "foo.studio.studio". The cloud sync target is the canonical plain .studio either way; only a
+  // local writable handle keeps the .gz (folder.ts re-gzips it on write).
+  const baseName = file.name.replace(/\.gz$/i, '')
   const title =
     data.document?.title ??
     (data as { title?: string }).title ??
-    file.name.replace(/\.(studio|inkwave|trace\.json|insig\.json|json)$/i, '')
+    baseName.replace(/\.(studio|inkwave|trace\.json|insig\.json|json)$/i, '')
   const id = (data.document?.id as string | undefined) ?? uuidv4()
 
   // Normalise the filename: always store the .studio extension so the next sync uses it correctly.
-  const studioName = file.name.toLowerCase().match(/\.(studio|inkwave|trace\.json)$/)
-    ? file.name
-    : file.name.replace(/\.[^.]*$/, '') + '.studio'
+  const studioName = baseName.toLowerCase().match(/\.(studio|inkwave|trace\.json)$/)
+    ? baseName
+    : baseName.replace(/\.[^.]*$/, '') + '.studio'
   if (googleFileId) adoptGoogleDriveFile(id, googleFileId)            // resume Google Drive sync
   else if (oneDriveFile) adoptOneDriveFile(id, oneDriveFile.folder, oneDriveFile.name) // resume OneDrive sync
   else setOneDriveFilename(id, studioName)                           // resume OneDrive sync (by name)

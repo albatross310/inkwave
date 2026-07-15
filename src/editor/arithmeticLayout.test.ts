@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CERTIFIED_FAMILIES, primaryFamily, isCertifiedStack, blockEligibility, snappedLineHeight,
   cssFontOf, layoutParagraph, resolveBlocks, paginate, figureBlockBox,
+  hangsTrailingSpace, EDITOR_WHITE_SPACE,
   type ArithBlock, type InlineRun, type InlineBox, type Measure,
 } from './arithmeticLayout'
 
@@ -78,13 +79,27 @@ describe('eligibility boundary', () => {
   })
 })
 
-describe('greedy wrap (trailing-space-hangs, per r7 certification)', () => {
+describe('greedy wrap — the fit test is white-space dependent', () => {
   const measure = stubMeasure(10) // 10px/char @18px → content width 100px = 10 chars/line
-  it('wraps greedily and a trailing space hangs past the edge', () => {
-    // "aaa bbb ccc" at width 70: "aaa "(40) + "bbb "(=70 incl. hanging space) fits; "ccc" wraps.
+  // "aaa bbb ccc" at width 70. bare("aaa bbb")=70, full("aaa bbb ")=80.
+  //   break-spaces (THE EDITOR): the trailing space COUNTS → "bbb " (80) overflows → wraps at 4.
+  //   normal/pre-wrap:           the trailing space HANGS  → bare 70 fits → only "ccc" wraps at 8.
+  // Both are real browser behaviours (1/64px-swept); the editor is break-spaces, hence the default.
+  it('break-spaces (the editor default): the trailing space COUNTS — no hang', () => {
     const lay = layoutParagraph(para([run('aaa bbb ccc')]), 70, 1.618, measure)
     expect(lay.lineCount).toBe(2)
+    expect(lay.breakStartChars).toEqual([0, 4]) // "bbb ccc" pushed to line 2
+  })
+  it('normal: the trailing space HANGS past the edge', () => {
+    const lay = layoutParagraph(para([run('aaa bbb ccc')]), 70, 1.618, measure, 'normal')
+    expect(lay.lineCount).toBe(2)
     expect(lay.breakStartChars).toEqual([0, 8]) // second line starts at "ccc"
+  })
+  it('pre-wrap hangs too; break-spaces is the only no-hang mode', () => {
+    expect(hangsTrailingSpace('normal')).toBe(true)
+    expect(hangsTrailingSpace('pre-wrap')).toBe(true)
+    expect(hangsTrailingSpace('break-spaces')).toBe(false)
+    expect(EDITOR_WHITE_SPACE).toBe('break-spaces')
   })
   it('block height = lineCount × snapped line height', () => {
     const lay = layoutParagraph(para([run('aaa bbb ccc')]), 70, 1.618, measure)
@@ -176,6 +191,24 @@ describe('cssFontOf', () => {
 const mathBox = (adv: number, demand: number): InlineBox => ({ advanceWidth: adv, lineHeightDemand: demand })
 const mathRun = (box: InlineBox, atomType = 'mathInline'): InlineRun =>
   ({ text: '', fontFamily: EB, fontSizePx: 18, fontWeight: 400, italic: false, atomic: true, atomType, box })
+
+describe('white-space eligibility guard', () => {
+  it('a run in a DIFFERENT white-space mode than the block DEFERS (mixed-mode line)', () => {
+    // The editor flips per subtree: .ProseMirror [contenteditable=false] { white-space: normal }.
+    // A citation NodeView is display:inline, so its `normal` label text flows in the parent's
+    // break-spaces line — two wrap rules on one line. Unmodelled ⇒ defer, never guess.
+    const b = para([run('body text '), run('(Author 2020)', { whiteSpace: 'normal' })])
+    expect(blockEligibility(b).reason).toBe('mixed-whitespace:normal')
+  })
+  it('a block in an unproven mode DEFERS (normal also collapses spaces — not modelled)', () => {
+    const b = para([run('hello world')])
+    expect(blockEligibility(b, 1.618, true, 'normal').reason).toBe('whitespace-unproven:normal')
+  })
+  it('uniform break-spaces runs are eligible', () => {
+    const b = para([run('a ', { whiteSpace: 'break-spaces' }), run('b')])
+    expect(blockEligibility(b).eligible).toBe(true)
+  })
+})
 
 describe('inline math eligibility', () => {
   it('a paragraph with a boxed inline-math atom is eligible (text+math)', () => {
