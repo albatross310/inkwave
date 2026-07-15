@@ -35,7 +35,6 @@ import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomSte
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
 import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
-import { extractArithBlocks, type ArithBlockInfo } from '../arithZoom'
 import { notePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
@@ -800,16 +799,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const liveCache = new Map<number, BandGeo>()
           const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
-          // ARITH WINDOWED ZOOM (flagged, default OFF): expose a gesture-time getter of the doc's
-          // per-block arithmetic model (reflow-free, from the PM doc — the view lives here, not in
-          // Scroll.tsx). Scroll.tsx's enterZoomLive calls it ONCE per gesture to compute EXACT
-          // content-visibility placeholder heights at the target zoom (kills the (z/z0)² relevancy
-          // waves that jump the pinch anchor + the whole-doc exit relayout). Extracted at the
-          // CANONICAL base (18px) — zoom-invariant; Scroll scales to the render context. Zero cost
-          // when the flag is off (Scroll never calls it). mathEligible=false: inline-math paras
-          // defer per the engine's wire-in note.
-          ;(window as unknown as { __iwGetArithModel?: () => ArithBlockInfo[] }).__iwGetArithModel =
-            () => extractArithBlocks(view.state.doc, 18, false)
           const clearStepCache = () => { stepCache.clear(); liveCache.clear() }
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
