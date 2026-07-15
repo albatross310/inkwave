@@ -22,7 +22,11 @@ const FAMS = {
   'Libre Caslon Text': ['Libre+Caslon+Text:ital,wght@0,400;0,700;1,400'],
   'Quattrocento': ['Quattrocento:wght@400;700'],
   'STIX Two Text': ['STIX+Two+Text:ital,wght@0,400;0,700;1,400;1,700'],
-  'Inter': ['Inter:ital,opsz,wght@0,14..32,400;0,14..32,700;1,14..32,400;1,14..32,700'],
+  // Fetch Inter EXACTLY as the shipped fetch-fonts.mjs would: `ital,wght@` only, NO opsz axis.
+  // Requesting opsz (as this script originally did) yields a font carrying an optical-size axis,
+  // which is the cross-engine hazard. The shipped pipeline never asks for opsz — so certify the
+  // font we would actually ship, not one this harness invented.
+  'Inter': ['Inter:ital,wght@0,400;0,700;1,400;1,700'],
   // ── GENRE CANDIDATES (2026-07-16): one more quality face for SANS / SLAB / MONO ──
   'Zilla Slab': ['Zilla+Slab:ital,wght@0,400;0,700;1,400;1,700'],
   'Roboto Slab': ['Roboto+Slab:wght@400;700'],           // NB: upstream has NO italic

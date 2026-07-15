@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CERTIFIED_FAMILIES, primaryFamily, isCertifiedStack, blockEligibility, snappedLineHeight,
   cssFontOf, layoutParagraph, resolveBlocks, paginate, figureBlockBox,
-  hangsTrailingSpace, EDITOR_WHITE_SPACE,
+  hangsTrailingSpace, EDITOR_WHITE_SPACE, canvasShapingMatchesEditor,
   type ArithBlock, type InlineRun, type InlineBox, type Measure,
 } from './arithmeticLayout'
 
@@ -24,11 +24,38 @@ const stubMeasure = (w = 10): Measure => (text, cssFont) => {
   return text.length * w * (size / 18)
 }
 
+describe('shaping gate', () => {
+  it('passes when canvas agrees with the editor DOM (stripped/ligature-free faces)', () => {
+    const dom = () => 100
+    const measure = () => 100
+    expect(canvasShapingMatchesEditor("400 18px 'X'", dom, measure)).toBe(true)
+  })
+  it('FAILS when canvas applies ligatures the editor does not (the Safari case)', () => {
+    const dom = () => 100      // editor: liga off
+    const measure = () => 97   // canvas: liga on → 3px narrower
+    expect(canvasShapingMatchesEditor("400 18px 'X'", dom, measure)).toBe(false)
+  })
+})
+
 describe('certification', () => {
-  it('has the 15 certified families', () => {
-    expect(CERTIFIED_FAMILIES.size).toBe(15)
+  it('has the 18 cross-engine-verified families', () => {
+    expect(CERTIFIED_FAMILIES.size).toBe(18)
     expect(CERTIFIED_FAMILIES.has('EB Garamond')).toBe(true)
     expect(CERTIFIED_FAMILIES.has('Times New Roman')).toBe(false)
+  })
+  it('includes Inter — as SHIPPED (no opsz axis) it is cross-engine identical', () => {
+    // It was briefly excluded on a divergence measured against an Inter fetched WITH the optical-
+    // size axis; the shipped fetch never requests opsz. Re-measured: identical in both engines.
+    expect(CERTIFIED_FAMILIES.has('Inter')).toBe(true)
+  })
+  it('excludes Lora/Gelasio — no longer served, so their marks fall back to system fonts', () => {
+    expect(CERTIFIED_FAMILIES.has('Lora')).toBe(false)
+    expect(CERTIFIED_FAMILIES.has('Gelasio')).toBe(false)
+  })
+  it('includes the newly-verified faces', () => {
+    for (const f of ['Libre Baskerville', 'Caladea', 'Zilla Slab', 'Courier Prime']) {
+      expect(CERTIFIED_FAMILIES.has(f), f).toBe(true)
+    }
   })
   it('parses the primary family out of a stack (quoted or bare)', () => {
     expect(primaryFamily(EB)).toBe('EB Garamond')

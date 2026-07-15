@@ -870,6 +870,17 @@
   /* Tiptap editor content styles */
   /* ProseMirror is the contenteditable div — tiptap-editor is a class
      we add to it directly via editorProps, so selectors target it directly. */
+  /* OPTICAL SIZING IS PINNED OFF — CROSS-DEVICE INVARIANT (2026-07-16, measured).
+     A variable font with an `opsz` axis renders DIFFERENT ADVANCES per engine at CSS's default
+     `font-optical-sizing: auto`: Chromium resolves opsz from the font-size, WebKit does not. Inter
+     measured C 662.31 vs W 674.86 (Δ −12.55) at 18px → its Chromium DOM wrap ≠ its WebKit DOM wrap
+     → the SAME document paginates differently on phone vs desktop, with or without the arithmetic
+     engine. `none` makes both engines agree exactly (674.86 / Δ0). This is a POLICY, not an Inter
+     patch: any opsz font is this hazard, so we never let optical sizing vary. Inherited, so it
+     covers the editor, the snapshot panes, print and exportPdf alike. Do not remove without
+     re-running scripts/fontCertify.crossEngine.mjs. */
+  :root { font-optical-sizing: none; }
+
   .ProseMirror {
     outline: none;
     font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;

@@ -55,21 +55,48 @@
 // because EB Garamond loads and is certified; the Georgia/serif tail only matters if the primary
 // fails to load (in which case document.fonts.check is false → gate defers).
 export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
+  // ROUND-10 (2026-07-16) — all 18 verified on BOTH Chromium and WebKit, in the editor's real context,
+  // and (the load-bearing bit) their Chromium DOM wrap == their WebKit DOM wrap byte-for-byte at
+  // the canonical width. Hinting was equalised for that comparison: Chromium's default Linux
+  // fontconfig quantises advances to whole px while WebKit uses fractional, which manufactures
+  // false divergences (--font-render-hinting=none removes it; real devices use subpixel).
   'IM Fell DW Pica',
   'EB Garamond',
-  'TeX Gyre Termes',
-  'TeX Gyre Heros',
+  'TeX Gyre Termes',       // picker: 'Romans'
+  'TeX Gyre Heros',        // picker: 'Swiss'
   'Crimson Pro',
   'Spectral',
-  'Lora',
-  'Gelasio',
   'Gentium Plus',
+  'Libre Baskerville',
+  'Caladea',
   'Cormorant Garamond',
   'Fraunces',
   'Bitter',
+  'Zilla Slab',
   'Carlito',
   'Atkinson Hyperlegible',
   'JetBrains Mono',
+  'Courier Prime',
+  'Inter',
+  // RETIRED 2026-07-16: Lora + Gelasio — dropped from the PICKER, but their faces are STILL SERVED
+  // (fetch-fonts keeps them): deleting the woff2 would drop legacy marks down their own stacks to
+  // Cambria/Georgia SYSTEM fonts, whose metrics vary by device — silently repaginating old docs
+  // phone-vs-print. Unlisted here regardless: nobody new can select them, and they never went
+  // through the round-10 cross-engine pass, so the engine must DEFER rather than compute their wrap.
+  //
+  // INTER + OPTICAL SIZING — the correction (2026-07-16). An earlier pass EXCLUDED Inter for a
+  // cross-engine DOM wrap divergence (Δ −12.55px @18px). That was real for the font THAT HARNESS
+  // FETCHED — which requested Inter's OPTICAL SIZE axis (`Inter:ital,opsz,wght@…`). The shipped
+  // fetch-fonts.mjs never requests opsz (it asks `ital,wght@` only), so the font we actually serve
+  // carries NO opsz axis and was never affected: re-measured, Inter's Chromium DOM wrap == its
+  // WebKit DOM wrap byte-for-byte ([0,61,128,196,263,327]) under BOTH font-optical-sizing values,
+  // and it certifies on both engines. Added.
+  // The `:root { font-optical-sizing: none }` policy (index.css) STAYS regardless: measured a
+  // no-op for all 18 shipped faces, and it is the standing guard against any future opsz font —
+  // the hazard is genuine (Chromium resolves opsz from font-size, WebKit does not), it simply
+  // isn't one our current fetch pipeline can produce. NB canvas has no font-optical-sizing
+  // property, so an opsz font ALSO breaks canvas↔DOM parity once the DOM is pinned — an opsz
+  // face is unusable by this engine from both directions. Don't ship one.
 ])
 
 // Parse the leading family token out of a CSS font-family stack. Handles quoted ('..'/".." ) and
@@ -228,6 +255,57 @@ export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible
 // itself snapped to the grid first (round), matching how the browser stores the computed size.
 export function snappedLineHeight(fontSizePx: number, ratio: number): number {
   return Math.floor(ratio * Math.round(fontSizePx * 64)) / 64
+}
+
+// ─── ENGINE SHAPING GATE (2026-07-16 — rev 2, after the ligature-strip result) ─────────────────
+// The engine may only run where CANVAS SHAPES TEXT THE WAY THE EDITOR RENDERS IT. The editor
+// renders with ligatures OFF (.ProseMirror { font-variant-ligatures: none }); canvas applies them
+// by default and its only lever, ctx.textRendering, is Chromium/Firefox-only — **Safari has never
+// shipped it, on any version, desktop or iOS**. So an API check said "never on any iPhone".
+//
+// THAT IS NO LONGER THE RIGHT QUESTION. The ligature tables in the faces we self-host are dead
+// weight for document text (CSS already disables them), so we strip liga/clig/dlig/hlig/calt out
+// of the served woff2 (scripts/fontStrip.mjs). MEASURED, all 18 families, real .ProseMirror:
+//   • production measure == DOM on BOTH engines: 18/18 (WebKit Δ ≤ 0.0001, controls up to Δ27.5)
+//   • DOM rendering unchanged by the strip: 18/18 at GLYPH level (per-char x positions) + wrap
+//   • cross-engine DOM↔DOM on stripped faces: all 18 identical    • byte cost: +0.7KB (+0.01%)
+// With no ligatures in the file, canvas has nothing to apply and matches the editor WITHOUT the API
+// — i.e. on every iPhone. (The ZWNJ workaround was also measured, and FAILS: WebKit's canvas does
+// not honour U+200C. Stripping the font is the only lever that works there.)
+//
+// So the gate is now EMPIRICAL, not a capability sniff: probe whether canvas actually agrees with
+// the DOM for this font, once, and cache it. It is correct in every combination — API or not,
+// stripped or not — and it self-corrects the moment the pipeline ships stripped faces.
+export const SHAPING_PROBE = 'office affluent finds difficult waffles fi fl ffi ffl AV To Wa'
+const SHAPING_EPS = 0.05 // the same tolerance the font certification uses
+
+/**
+ * THE GATE. True ⇔ canvas measures this font exactly as the editor renders it. `domWidth` must
+ * measure inside the REAL editor context (a span in .ProseMirror), which is where the ligature
+ * state lives; the wire-in should call this ONCE per font and cache the answer.
+ * Where it returns false the arithmetic path MUST NOT RUN for that font — defer to the DOM
+ * measure, which is always correct.
+ */
+export function canvasShapingMatchesEditor(
+  cssFont: string,
+  domWidth: (text: string, cssFont: string) => number,
+  measure: Measure,
+): boolean {
+  try { return Math.abs(measure(SHAPING_PROBE, cssFont) - domWidth(SHAPING_PROBE, cssFont)) <= SHAPING_EPS }
+  catch { return false }
+}
+
+/**
+ * Whether this engine exposes ctx.textRendering (Chromium/Firefox yes; Safari never). NOT the gate
+ * — makeCanvasMeasure uses it opportunistically, and it is worth logging, but a false here no
+ * longer means "cannot run": with stripped faces canvas matches the editor without it.
+ */
+export function canvasCanMatchEditorShaping(): boolean {
+  if (typeof document === 'undefined') return false
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    return !!ctx && 'textRendering' in ctx
+  } catch { return false }
 }
 
 // ─── Canvas measure ───────────────────────────────────────────────────────────────────────────
