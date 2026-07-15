@@ -47,6 +47,79 @@ function runOf(node: PMNode, basePx: number): InlineRun {
   return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic }
 }
 
+// One paragraph's inline content → engine runs. SHARED by the whole-doc path and the scoped
+// per-block path so the two can never drift apart.
+//
+// INLINE ATOMS: a CITATION is a proven opaque box (CitationNodeView pins white-space: nowrap, so
+// its label has no internal break opportunity and its `normal`-mode subtree cannot reach the
+// parent's line breaking) — it supplies the cached canonical box harvested by the DOM measure
+// (citations/citeBox.ts). Anything else (inline MATH) supplies NO box, so blockEligibility's
+// `!r.box` gate defers the whole block — exactly the gate we want until its own rect-fix lands.
+// Marked citations cache under their own FONT KEY: real ones nearly always carry a
+// textStyle{fontFamily} mark, so skipping them would defer ~every citation-bearing block.
+function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bibEpoch: number): InlineRun[] {
+  const runs: InlineRun[] = []
+  node.forEach((child) => {
+    if (child.type.name === 'text') runs.push(runOf(child, basePx))
+    else if (child.type.name === 'hardBreak')
+      runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false })
+    else {
+      const box = child.type.name === 'citation'
+        ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks)) ?? undefined
+        : undefined
+      runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name, box })
+    }
+  })
+  return runs
+}
+
+// ── ONE block, laid out arithmetically (the scoped/per-region seam) ─────────────────────────────
+// computeScoped's whole cost is measuring the CHANGED blocks live — which is what forces the
+// canonical context and pays its two full-document reflows (the 400–1100ms phone pause). When every
+// changed block is arithmetic-eligible we can produce the SAME per-block geometry with no DOM at
+// all, so the scoped measure needs no forced context and no reflow. Unchanged blocks already reuse
+// their cached entries, so a typing pause in ordinary prose becomes pure arithmetic.
+//
+// `relPos` is the payoff: the DOM path leaves each line's doc position LAZY and pays a posAtCoords
+// hit-test for the one line a break lands on. Arithmetically the position is exact and free —
+// relPos = 1 + charIndex (the block's content starts at offset+1) — so nothing is ever hit-tested.
+export interface ArithBlockLayout {
+  relTops: number[]   // per-line top, relative to the block's own top
+  relPos: number[]    // per-line doc position, relative to the block's offset (never lazy)
+  advance: number     // block top → next block top (height + collapsed margin)
+  relEnd: number      // block's doc range end, relative to its offset (= nodeSize)
+}
+
+export function arithBlockLayout(
+  node: PMNode,
+  contentWidthPx: number,
+  ratio: number,
+  paraSpacingEm: number,
+  measure: Measure,
+  fontLoaded: (stack: string, sizePx: number) => boolean,
+  citationStyle: string,
+  bibEpoch: number,
+  basePx = 18,
+): ArithBlockLayout | null {
+  if (node.type.name !== 'paragraph') return null
+  const runs = runsOfParagraph(node, basePx, citationStyle, bibEpoch)
+  const arith: ArithBlock = {
+    type: 'paragraph', runs, baseFontPx: basePx,
+    marginTopPx: 0, marginBottomPx: paraSpacingEm * basePx, firstLineLeadingPx: 0,
+  }
+  if (!blockEligibility(arith, ratio).eligible) return null
+  for (const r of runs) if (r.text !== '\n' && !r.atomic && !fontLoaded(r.fontFamily, r.fontSizePx)) return null
+  const lay = layoutParagraph(arith, contentWidthPx, ratio, measure)
+  return {
+    relTops: lay.relTops,
+    relPos: lay.breakStartChars.map((c) => 1 + c),
+    // The caller's guard requires the block after the region to be a paragraph too (marginTop 0),
+    // so the adjacent-margin collapse is just this block's marginBottom.
+    advance: lay.height + arith.marginBottomPx,
+    relEnd: node.nodeSize,
+  }
+}
+
 export interface ArithLine { top: number; blockIdx: number; pos: number }
 export interface ArithMeasureResult { lines: ArithLine[]; blocks: Array<{ start: number; end: number }> }
 
@@ -74,28 +147,8 @@ export function buildArithMeasure(
   const blocks: Array<{ start: number; end: number }> = []
   let top = 0
   for (const { node, offset } of items) {
-    if (node.type.name !== 'paragraph') return null // first version: text paragraphs only
-    const runs: InlineRun[] = []
-    node.forEach((child) => {
-      if (child.type.name === 'text') runs.push(runOf(child, CANON_BASE))
-      else if (child.type.name === 'hardBreak')
-        runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: CANON_BASE, fontWeight: 400, italic: false })
-      else {
-        // INLINE ATOM. A CITATION is now a proven opaque box (CitationNodeView pins white-space:
-        // nowrap, so its label has no internal break opportunity and its mixed white-space mode
-        // cannot reach the parent's line breaking) — so it supplies the cached canonical box
-        // harvested by the DOM measure. Anything else (inline MATH) supplies NO box and therefore
-        // defers the whole block, which is exactly the gate we want until its own rect-fix lands.
-        // A MARKED citation is skipped by the harvest (it would inherit that mark's font), so its
-        // lookup misses and the block defers — conservative by construction.
-        // Marked citations cache under their own font key — real ones nearly always carry a
-        // textStyle{fontFamily} mark, so skipping them would defer ~every citation-bearing block.
-        const box = child.type.name === 'citation'
-          ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks)) ?? undefined
-          : undefined
-        runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: CANON_BASE, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name, box })
-      }
-    })
+    if (node.type.name !== 'paragraph') return null // whole-doc path: text paragraphs only
+    const runs = runsOfParagraph(node, CANON_BASE, citationStyle, bibEpoch)
     const arith: ArithBlock = {
       type: 'paragraph', runs, baseFontPx: CANON_BASE,
       marginTopPx: 0, marginBottomPx: paraSpacingEm * CANON_BASE, firstLineLeadingPx: 0,
