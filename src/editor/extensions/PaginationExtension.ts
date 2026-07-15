@@ -1102,6 +1102,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               const ratio = lhRaw ? parseFloat(lhRaw) : (phoneLike() ? 1.55 : 1.618)
               const am = buildArithMeasure(view.state.doc, contentW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, 18, getCitationStyle(), bibProvider.getVersion())
               if (am) {
+                ;(window as unknown as { __iwArithDump?: unknown }).__iwArithDump = {
+                  blockStarts: am.blocks.slice(0, 4).map((b) => b.start),
+                  b0lines: am.lines.filter((l) => l.blockIdx === 0).slice(0, 4).map((l) => l.pos),
+                  nBlocks: am.blocks.length, nLines: am.lines.length,
+                }
                 const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
                 measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
                 arithMeasured = true
@@ -1160,6 +1165,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 try { pagCheck = localStorage.getItem('inkwave:pagCheck') === '1' } catch { /* private */ }
                 if (!pagCheck) {
                   incStats.inc++
+                  // Publish the scoped sig too: this path RETURNS early, so without this a probe
+                  // reading __iwPagSig sees the last FULL measure's (pre-edit) sig and compares two
+                  // different doc states. Diagnostic only.
+                  ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = inc.sig
+                  ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = false
                   incState = inc.meta
                   if (inc.sig !== lastLayoutSig) {
                     lastLayoutSig = inc.sig
