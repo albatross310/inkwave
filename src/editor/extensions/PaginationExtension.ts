@@ -300,7 +300,9 @@ function computeBreaks(
   gapped: boolean,
   posOf: (l: MeasuredLine) => number,
 ): { decos: Decoration[]; sig: string } {
-  const bracket = renderFillOn() // Decision 1: dotted continuation bracket at each MID-PARAGRAPH split
+  // Decision 1's dotted continuation bracket is INDEPENDENT of renderFill (2026-07-15): it marks a
+  // MID-PARAGRAPH split — semantically true at canonical breaks too (Decision 5 splits every
+  // straddler mid-block) — and carries zero measure risk, so it renders whatever the measure path.
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
   // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
   // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
@@ -352,7 +354,7 @@ function computeBreaks(
       // MID-PARAGRAPH split? — the line before the break is in the SAME block, so this block spans
       // the boundary (a between-block break has the block starting AT line i). Decision 1's dotted
       // continuation bracket marks these (never a clean between-paragraph break).
-      const midBlock = bracket && i > 0 && lines[i - 1].blockIdx === lines[i].blockIdx
+      const midBlock = i > 0 && lines[i - 1].blockIdx === lines[i].blockIdx
       // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
