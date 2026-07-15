@@ -57,6 +57,20 @@ function arithFaceLoaded(stack: string, sizePx: number): boolean {
   try { const fam = stack.split(',')[0].replace(/['"]/g, '').trim(); return typeof document !== 'undefined' && document.fonts.check(`${sizePx}px "${fam}"`) } catch { return false }
 }
 
+// ── Decision 1: RENDER-FILL phone splits (flag `inkwave:renderFill`, default OFF) ────────────────
+// Peter: "abandon perfect pagination for the better look." On the LIVE PHONE editor ONLY, compute
+// mid-paragraph splits at the RENDER width (via the arithmetic engine) instead of canonical A4, so
+// the last line before a split FILLS (kills the ~50%-empty last line). This DIVERGES from canonical
+// — so it is gated to the live phone editor and NEVER touches print/export/verify/snapshot (those
+// force the canonical measure via measure-now → forceFullOnce, which this path skips). Phone page
+// numbers then differ from print — an accepted consequence.
+let _renderFillFlag: boolean | null = null
+function renderFillOn(): boolean {
+  if (_renderFillFlag !== null) return _renderFillFlag
+  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') === '1' } catch { _renderFillFlag = false }
+  return _renderFillFlag
+}
+
 export interface PaginationOptions {
   enabled: boolean // measure page breaks at all (the live editor; off for headless/snapshot use)
   gapped: boolean  // true: tall gap widgets + sheet panels; false: zero-size break markers
@@ -276,6 +290,7 @@ function computeBreaks(
   gapped: boolean,
   posOf: (l: MeasuredLine) => number,
 ): { decos: Decoration[]; sig: string } {
+  const bracket = renderFillOn() // Decision 1: dotted continuation bracket at each MID-PARAGRAPH split
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
   // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
   // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
@@ -324,11 +339,15 @@ function computeBreaks(
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
       const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
+      // MID-PARAGRAPH split? — the line before the break is in the SAME block, so this block spans
+      // the boundary (a between-block break has the block starting AT line i). Decision 1's dotted
+      // continuation bracket marks these (never a clean between-paragraph break).
+      const midBlock = bracket && i > 0 && lines[i - 1].blockIdx === lines[i].blockIdx
       // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
         // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped, midBlock), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}${midBlock ? 'b' : ''}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
@@ -1048,7 +1067,10 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // (null) falls through to the full measure below (which refreshes the base); a FULL
             // measure is also idle-scheduled after every scoped one and forced before print.
             // 'inkwave:pagCheck=1' runs BOTH and compares signatures.
-            if (!fluid && incState && !forceFullOnce) {
+            // Decision 1: render-fill on phone always takes the FULL path (the render-width arith
+            // measure below) so breaks never flip between the canonical scoped measure and the
+            // render-width full one — the scoped path is a canonical regime, incompatible here.
+            if (!fluid && incState && !forceFullOnce && !(renderFillOn() && phoneLike())) {
               const surfaceEl0 = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
               const editorEl0 = view.dom as HTMLElement
               const scroller0 = surfaceEl0 && surfaceEl0.classList.contains('iw-fill') && !surfaceEl0.classList.contains('is-phone')
@@ -1115,6 +1137,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 incStats.bail++
               }
             }
+            const wasForceFull = forceFullOnce // capture before reset — a print/export/measure-now pass
             forceFullOnce = false
 
             // CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at
@@ -1147,7 +1170,32 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // arith path again).
             let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
             let arithMeasured = false
-            if (arithLayoutOn() && !fluid && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
+            // ── Decision 1: RENDER-FILL phone splits (flag inkwave:renderFill) ──
+            // Live phone editor only, never print/export (forceFullOnce). Measure at the LIVE RENDER
+            // width (not canonical A4) so mid-paragraph splits fill the last line. Zoom-independent
+            // (read at the live content width, font base 18 — like canonical, only the WIDTH differs).
+            // Any ineligible block ⇒ null ⇒ falls through to the canonical paths below.
+            if (renderFillOn() && phoneLike() && !fluid && !wasForceFull) {
+              const edEl = view.dom as HTMLElement
+              const cs = getComputedStyle(edEl)
+              const renderW = edEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+              // Measure at the LIVE RENDER font — phone applies its ×1.25 root scale + its own
+              // line-height, so the base is NOT the canonical 18px (that's the whole point: render,
+              // not canonical). ratio = used line-height / font-size; base = the live font-size.
+              const basePx = parseFloat(cs.fontSize) || 18
+              const lhPx = parseFloat(cs.lineHeight)
+              const ratio = lhPx && basePx ? lhPx / basePx : 1.618
+              const am = renderW > 40
+                ? buildArithMeasure(view.state.doc, renderW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, false, basePx)
+                : null
+              if (am) {
+                const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
+                measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
+                arithMeasured = true
+                notePerf('page-measure-renderfill', performance.now() - measureT0)
+              }
+            }
+            if (!arithMeasured && arithLayoutOn() && !fluid && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
               const contentW = pageWidthPx - 2 * getSideMarginPx()
               const lhRaw = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
               const ratio = lhRaw ? parseFloat(lhRaw) : (phoneLike() ? 1.55 : 1.618)

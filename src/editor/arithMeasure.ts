@@ -60,8 +60,9 @@ export function buildArithMeasure(
   measure: Measure,
   fontLoaded: (stack: string, sizePx: number) => boolean,
   mathEligible = false,
+  basePx = 18, // base font px: 18 = canonical 1.125rem (Decision 6); the LIVE render font for renderFill
 ): ArithMeasureResult | null {
-  const CANON_BASE = 18 // canonical 1.125rem (the forced context's font size)
+  const CANON_BASE = basePx
   const items: Array<{ node: PMNode; offset: number }> = []
   doc.forEach((node, offset) => { items.push({ node, offset }) })
   if (!items.length) return null
