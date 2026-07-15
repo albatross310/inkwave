@@ -5,7 +5,7 @@
 // the last-used option (font + size are HOLD-ONLY — a plain click does nothing).
 // Menu items trigger on pointer-up for immediacy.
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 
@@ -35,6 +35,12 @@ const FONTS = [
   { group: 'Serif', label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
   { group: 'Serif', label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
   { group: 'Serif', label: 'Gentium',  css: "'Gentium Plus', 'Palatino Linotype', serif" },
+  // Added 2026-07-16 after the re-certification retracted r7's FAILED list (see CLAUDE.md): r7
+  // measured with ligatures ON while the editor renders liga OFF, so both of these were rejected
+  // for a divergence that can't occur here. Baskerville = the genre Peter had let go; Caladea =
+  // the Cambria-warmth slot (its own name, not the trademark — the TeX Gyre caveat).
+  { group: 'Serif', label: 'Baskerville', css: "'Libre Baskerville', Baskerville, 'Times New Roman', serif" },
+  { group: 'Serif', label: 'Caladea',     css: "'Caladea', Cambria, 'Palatino Linotype', Georgia, serif" },
   // Display — headings/titles
   { group: 'Display', label: 'Cormorant', css: "'Cormorant Garamond', 'EB Garamond', serif" },
   { group: 'Display', label: 'Fraunces',  css: "'Fraunces', Georgia, serif" },
@@ -370,6 +376,23 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
+  // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 17 families
+  // in one column was a long scroll. Group headers span the full row (gridColumn 1/-1) so they stay
+  // readable separators rather than becoming cells. It's the only popup wider than its button, so
+  // its left edge is clamped to the viewport (above() anchors to the button and would overflow the
+  // right edge on a phone when the S button sits right-of-centre).
+  const FONT_COLS = phone ? 3 : 2
+  const FONT_PANEL_W = phone ? 324 : 272
+  const fontPanelStyle = (): React.CSSProperties => {
+    const pos = above(fontBtnRef)
+    const vw = window.innerWidth
+    const left = Math.min(typeof pos.left === 'number' ? pos.left : 8, Math.max(8, vw - FONT_PANEL_W - 8))
+    return {
+      ...pos, ...box(FONT_PANEL_W), left,
+      display: 'grid', gridTemplateColumns: `repeat(${FONT_COLS}, minmax(0, 1fr))`, alignItems: 'start',
+    }
+  }
+
   // Circular badge buttons everywhere. Phone: same circles as desktop, ~19% bigger (38px — the max
   // nine controls fit a 360px row with the tightened spacing) for comfortable tapping. flex-shrink-0
   // keeps them true circles — without it a tight row squeezes them oval.
@@ -395,22 +418,22 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(fontBtnRef), ...box(136) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={fontPanelStyle()}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
-          {FONTS.map((f, i) => (<div key={f.label}>
+          {FONTS.map((f, i) => (<Fragment key={f.label}>
             {(i === 0 || FONTS[i - 1].group !== f.group) && (
-              <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-widest select-none"
-                style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{f.group}</div>
+              <div className={`${phone ? 'px-2' : 'px-3'} pt-1.5 pb-0.5 text-[10px] uppercase tracking-widest select-none`}
+                style={{ color: 'var(--iw-pill-fg, #a8a29e)', gridColumn: '1 / -1' }}>{f.group}</div>
             )}
             <button type="button"
               onPointerDown={e => e.preventDefault()} onPointerUp={() => setFont(f.css)}
-              className="w-full text-left px-3 py-1.5 text-sm hover:bg-stone-50 truncate"
+              className={`w-full text-left ${phone ? 'px-2' : 'px-3'} py-1.5 text-sm hover:bg-stone-50 truncate`}
               style={{ fontFamily: f.css, color: f.label === curFont ? INK : '#374151',
                 fontWeight: f.label === curFont ? 500 : 400,
                 borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent' }}>
               {f.label}
             </button>
-          </div>))}
+          </Fragment>))}
         </div></>,
         document.body,
       )}
