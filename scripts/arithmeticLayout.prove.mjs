@@ -32,7 +32,7 @@
 import { chromium } from '@playwright/test'
 import { transformWithEsbuild } from 'vite'
 import { createServer } from 'http'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { readFileSync, existsSync, statSync, readdirSync } from 'fs'
 import { join, extname, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
@@ -59,15 +59,41 @@ try {
 
 // KaTeX dist (math rendering + its fonts) so the prover measures REAL rendered math geometry.
 const KATEX_DIST = (() => { try { return dirname(require.resolve('katex')) } catch { return null } })()
+// The REAL ProseMirror stylesheet (@tiptap/core injects this verbatim). It is what sets
+// .ProseMirror{white-space:break-spaces} AND the per-subtree flips
+// (.ProseMirror [contenteditable=false]{white-space:normal}). Serving the actual file — and
+// rendering inside a real .ProseMirror — is the only way the reference inherits the whole cascade
+// instead of a hand-copied approximation that drifts from production.
+const PM_CSS = (() => {
+  // prosemirror-view isn't a direct dep (it comes via @tiptap/pm) and pnpm's store isn't resolvable
+  // by specifier from here — glob the store. If this ever fails the harness ASSERTS rather than
+  // silently measuring `normal` (which is exactly the fiction this whole round was about).
+  for (const base of ['/root/dev/Inkwave/node_modules/.pnpm', join(ROOT, 'node_modules/.pnpm')]) {
+    try {
+      for (const d of readdirSync(base)) {
+        if (!d.startsWith('prosemirror-view@')) continue
+        const f = join(base, d, 'node_modules/prosemirror-view/style/prosemirror.css')
+        if (existsSync(f)) return readFileSync(f, 'utf8')
+      }
+    } catch { /* next */ }
+  }
+  return ''
+})()
+if (!PM_CSS.includes('break-spaces')) { console.error('FATAL: could not load the real prosemirror.css (white-space:break-spaces) — the reference would measure the wrong white-space mode'); process.exit(2) }
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.js': 'text/javascript' }
 const HARNESS = `<!doctype html><html><head>
 <link rel="stylesheet" href="/fonts/inkwave-fonts.css">
 <link rel="stylesheet" href="/katex/katex.min.css">
 <script src="/katex/katex.min.js"></script>
+<link rel="stylesheet" href="/pm/prosemirror.css">
 <style>
   html,body{margin:0;padding:0}
   /* The canonical .ProseMirror context (index.css): 1.125rem @ 16px root = 18px, φ line-height. */
+  /* white-space MUST match the live editor: prosemirror-view's stylesheet (injected by @tiptap/core)
+     sets .ProseMirror{white-space:pre-wrap; white-space:break-spaces}. break-spaces means a trailing
+     space NEVER hangs - it occupies width and counts toward the fit. A plain div would be 'normal'
+     (hangs), which silently certifies a wrap the editor never produces. Asserted below, not assumed. */
   #doc{ font-family:'EB Garamond', Georgia, serif; font-size:18px; line-height:1.618; color:#1a1a1a; box-sizing:border-box }
   #doc p{ margin:0 0 9px 0 } /* 0.5em @ 18px */
   #doc hr{ border:none; border-top:1px solid #999; margin:12px 0 }
@@ -76,11 +102,12 @@ const HARNESS = `<!doctype html><html><head>
   #doc .reflist{ margin-top:12px }
   #doc .reflist .refentry{ margin:0 0 9px 0; text-indent:-24px; padding-left:24px }
   #doc .cite{ display:inline; white-space:nowrap }
-</style></head><body><div id="doc"></div></body></html>`
+</style></head><body><div id="doc" class="ProseMirror" contenteditable="true"></div></body></html>`
 
 const server = createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (p === '/prove.html') { res.writeHead(200, { 'content-type': 'text/html' }); res.end(HARNESS); return }
+  if (p === '/pm/prosemirror.css') { res.writeHead(200, { 'content-type': 'text/css' }); res.end(PM_CSS); return }
   if (p.startsWith('/katex/') && KATEX_DIST) {
     const kf = join(KATEX_DIST, p.slice('/katex/'.length))
     try { if (existsSync(kf) && !statSync(kf).isDirectory()) { res.writeHead(200, { 'content-type': MIME[extname(kf)] ?? 'application/octet-stream' }); res.end(readFileSync(kf)); return } } catch { /* 404 */ }
@@ -241,6 +268,11 @@ const results = await page.evaluate(async ({ fixtures }) => {
   const docEl = document.getElementById('doc')
   docEl.style.width = contentW + 'px'
   const measure = AL.makeCanvasMeasure()
+  // CONTEXT ASSERTION — the prover must measure in the context production uses. This is the guard
+  // that would have caught the plain-<div> `normal` fiction: fail loudly rather than certify it.
+  const WS = AL.EDITOR_WHITE_SPACE // 'break-spaces'
+  const wsActual = getComputedStyle(docEl).whiteSpace
+  if (wsActual !== WS) throw new Error(`PROVER CONTEXT MISMATCH: harness white-space=${wsActual} but the editor uses ${WS} — the reference would certify a wrap production never produces`)
 
   // ── MATH: render REAL KaTeX and measure each node's box ONCE (cached by stable content key) ──
   // This is the "cached one-time measure" box source the engine's design describes: math renders
@@ -615,7 +647,7 @@ const results = await page.evaluate(async ({ fixtures }) => {
     const resolved = AL.resolveBlocks(
       arithBlocks, contentW, CAN.ratio, measure,
       (i) => ({ relTops: dom[i].relTops, advance: domAdvance[i] }),
-      fontLoaded,
+      fontLoaded, true, WS,
     )
     const tArMs = performance.now() - tAr0
     const arAsm = assemble((i) => resolved[i].relTops, (i) => resolved[i].advance, domTops[0])
@@ -653,7 +685,7 @@ const results = await page.evaluate(async ({ fixtures }) => {
     for (let i = 0; i < N && gTested < (fx.granular || 0); i++) {
       if (!resolved[i].eligible || arithBlocks[i].type !== 'paragraph' || !arithBlocks[i].runs.length) continue
       if (arithBlocks[i].runs.some((r) => r.atomic)) continue // atom↔char index mapping differs; the sig covers these
-      const lay = AL.layoutParagraph(arithBlocks[i], contentW, CAN.ratio, measure)
+      const lay = AL.layoutParagraph(arithBlocks[i], contentW, CAN.ratio, measure, WS)
       const domB = domLineStarts(built[i].el)
       if (!domB) { gSkip++; continue }
       gTested++

@@ -117,6 +117,15 @@ export interface InlineRun {
   fontWeight: number  // 400 | 700 (synthetic-bold weights collapse to nearest; caller resolves)
   italic: boolean
   atomic?: boolean    // inline atom (math/citation/inline-image NodeView)
+  // The run's EFFECTIVE COMPUTED white-space. NOT globally break-spaces inside the editor: the same
+  // injected PM sheet flips it per SUBTREE —
+  //     .ProseMirror [contenteditable="false"]                      { white-space: normal; }
+  //     .ProseMirror [contenteditable="false"] [contenteditable="true"] { white-space: pre-wrap; }
+  // — i.e. every NodeView/atom subtree (citations, math, gap widgets) hangs while the body text
+  // around it does not. A citation NodeView is `display:inline`, so its label text FLOWS IN THE
+  // PARENT'S LINE in `normal` mode: a citation-bearing paragraph is genuinely MIXED-mode. The wire-in
+  // must read this per run (getComputedStyle on the run's element); mixed ⇒ DEFER (see eligibility).
+  whiteSpace?: WhiteSpaceMode
   // A reflow-free-measurable inline ATOM (e.g. inline math) supplies its box here; the wrap then
   // treats it as an unbreakable unit of `box.advanceWidth`, contributing `box.lineHeightDemand` to
   // its line. An atomic run WITHOUT a box (a citation label — no stable reflow-free geometry) makes
@@ -176,7 +185,7 @@ export const LINE_STABILITY_EPS = 3
 // `mathEligible` reflects whether the collectLines math-pill rect-fix is in place (the wire-in flag).
 // The engine's CAPABILITY is unconditional — it computes math paragraphs correctly either way; the
 // flag only decides whether to trust the DOM verifier over them yet.
-export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible = true): Eligibility {
+export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible = true, whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE): Eligibility {
   // BLOCK ATOMS (block math, figure): eligible iff they carry a reflow-free box.
   if (block.type !== 'paragraph') {
     return block.blockBox ? { eligible: true, reason: `block-atom:${block.type}` }
@@ -192,7 +201,17 @@ export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible
       continue
     }
     if (!isCertifiedStack(r.fontFamily)) return { eligible: false, reason: `uncertified:${primaryFamily(r.fontFamily)}` }
+    // MIXED WHITE-SPACE: a text run in a different mode than the block wraps by a DIFFERENT rule
+    // (hang vs no-hang) on the SAME line — and `normal` additionally COLLAPSES runs of spaces, which
+    // this engine does not model. Both are unmodelled ⇒ DEFER. (This is the guard that keeps a
+    // future citation-eligible paragraph honest: a `normal` citation subtree inside break-spaces
+    // body text can only go arithmetic once the atom is a proven opaque box, never by guessing.)
+    const rws = r.whiteSpace ?? whiteSpace
+    if (rws !== whiteSpace) return { eligible: false, reason: `mixed-whitespace:${rws}` }
   }
+  // Only the editor's own mode is proven end-to-end (break-spaces). Anything else defers rather than
+  // trust an unproven rule — `normal` in particular needs space-collapsing the engine doesn't model.
+  if (whiteSpace !== EDITOR_WHITE_SPACE) return { eligible: false, reason: `whitespace-unproven:${whiteSpace}` }
   // MIXED FONT-SIZE among TEXT runs is DOM-ONLY: a taller text run's rect top diverges >3px, and
   // unlike a math pill there is NO single-rect fix (the size change is intrinsic to the text run) —
   // the verifier is unfixably order-dependent, so it defers.
@@ -225,6 +244,24 @@ export function cssFontOf(run: Pick<InlineRun, 'fontFamily' | 'fontSizePx' | 'fo
 export function makeCanvasMeasure(): Measure {
   const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null
   const ctx = canvas ? canvas.getContext('2d') : null
+  if (ctx) {
+    // MATCH THE EDITOR'S SHAPING, or every ligature is a wrap error (2026-07-15). ProseMirror's
+    // injected sheet sets `.ProseMirror { font-variant-ligatures: none; font-feature-settings:
+    // "liga" 0 }` — the editor renders f+i SEPARATELY. Canvas measureText applies ligatures by
+    // DEFAULT, so it measured "first"/"office"/"affluent" 2-5px NARROWER than the editor renders
+    // them: the engine took a word the browser dropped, on any line with an fi/fl/ffi.
+    // MEASURED (delta canvas − DOM-inside-.ProseMirror, EB Garamond 18px):
+    //   default / optimizeLegibility → −2 … −5 on every ligature string (0 on ligature-free text)
+    //   textRendering 'optimizeSpeed' + fontKerning 'normal' → 0.000 on ALL strings
+    //   geometricPrecision → fractional drift; ZWNJ-injection also 0.000 but mangles the text
+    // optimizeSpeed disables ligatures; fontKerning:'normal' pins KERNING ON explicitly (the editor
+    // keeps kerning — its sheet only disables liga), so we never rely on optimizeSpeed's implied
+    // kerning behaviour. NB this is also a GAP IN THE ROUND-7 FONT CERTIFICATION: r7/r8 measured
+    // canvas vs a PLAIN span (ligatures on BOTH sides), so their Δ≤0.05px parity did not cover the
+    // editor's liga-off shaping. Re-run that grid with this config.
+    try { (ctx as unknown as { textRendering: string }).textRendering = 'optimizeSpeed' } catch { /* older engine */ }
+    try { (ctx as unknown as { fontKerning: string }).fontKerning = 'normal' } catch { /* older engine */ }
+  }
   const cache = new Map<string, number>()
   return (text: string, cssFont: string): number => {
     if (!ctx) return 0
@@ -237,6 +274,26 @@ export function makeCanvasMeasure(): Measure {
     return w
   }
 }
+
+// ─── WHITE-SPACE MODE: whether a line's trailing space HANGS ────────────────────────────────────
+// This is not a detail — it decides the fit test, and it bit hard (2026-07-15). ProseMirror's own
+// stylesheet (prosemirror-view/style/prosemirror.css, injected by @tiptap/core) sets:
+//     .ProseMirror { white-space: pre-wrap; white-space: break-spaces; }
+// so the live editor computes `break-spaces`. Per CSS Text 3, break-spaces is pre-wrap EXCEPT that
+// "any preserved white space that would otherwise hang instead takes up space and can be broken
+// after" — i.e. THE TRAILING SPACE NEVER HANGS; it occupies width and counts toward the fit.
+// MEASURED (1/64px sweep, "AAA BBB CCC", EB Garamond 18px, bare=73.0 full=77.0):
+//     normal        → BBB first fits at w=72.98  (≈bare)  → HANGS
+//     pre-wrap      → BBB first fits at w=72.98  (≈bare)  → HANGS
+//     break-spaces  → BBB first fits at w=76.98  (≈full)  → NO HANG
+// Consequence: the PRODUCTION fit test is the FULL token width (space included). A `normal`-mode
+// harness silently takes a word the real editor drops — which is exactly how a plain-<div> prover
+// certified a wrap the editor never produces.
+export type WhiteSpaceMode = 'normal' | 'pre-wrap' | 'break-spaces'
+/** The editor's real mode — ProseMirror sets break-spaces on .ProseMirror. The engine's default. */
+export const EDITOR_WHITE_SPACE: WhiteSpaceMode = 'break-spaces'
+/** Does a line's trailing space hang (excluded from the fit test)? Only when NOT break-spaces. */
+export function hangsTrailingSpace(mode: WhiteSpaceMode): boolean { return mode !== 'break-spaces' }
 
 // ─── The greedy line-breaker (multi-run, mixed-size) ────────────────────────────────────────────
 // Reproduces CSS `white-space: normal` breaking with the TRAILING-SPACE-HANGS rule that round-7
@@ -312,7 +369,8 @@ function tokenize(runs: InlineRun[], measure: Measure, ratio: number): Array<Tok
 // --inkwave-lh line-height (φ = 1.618 default). Assumes the caller has already confirmed
 // blockEligibility(block).eligible — a non-eligible block would produce a WRONG result (that's why
 // the gate defers it). Pure arithmetic: no DOM, no layout read.
-export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio: number, measure: Measure): BlockLayout {
+export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio: number, measure: Measure, whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE): BlockLayout {
+  const hang = hangsTrailingSpace(whiteSpace) // break-spaces (the editor) ⇒ false ⇒ the space counts
   const strut = snappedLineHeight(block.baseFontPx, ratio) // the paragraph's own font always occupies the line
   const leading = block.firstLineLeadingPx ?? 0 // baseline offset to match getClientRects text-rects
   const relTops: number[] = []
@@ -344,7 +402,11 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
       continue
     }
     if (tk.len === 0) continue
-    if (started && lineW > 0 && lineW + tk.bareW > contentWidthPx + WRAP_EPS) {
+    // THE FIT TEST. hang (normal/pre-wrap): the token's trailing space hangs past the edge, so test
+    // the BARE width. no-hang (break-spaces — the editor): the space occupies width and counts, so
+    // test the FULL width. Measured, not assumed — see the sweep in the WhiteSpaceMode note above.
+    const fitW = hang ? tk.bareW : tk.fullW
+    if (started && lineW > 0 && lineW + fitW > contentWidthPx + WRAP_EPS) {
       // This token overflows → break BEFORE it. Close the line; the token opens the next one.
       closeLine()
       breakStartChars.push(charIdx)
@@ -408,11 +470,12 @@ export function resolveBlocks(
   domMeasure: DomBlockMeasure,
   fontLoaded: (run: InlineRun) => boolean = () => true,
   mathEligible = true, // wire-in flag: whether the collectLines math-pill rect-fix is in place
+  whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE, // the editor computes break-spaces (no hang)
 ): ResolvedBlock[] {
   const out: ResolvedBlock[] = []
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
-    const elig = blockEligibility(b, ratio, mathEligible)
+    const elig = blockEligibility(b, ratio, mathEligible, whiteSpace)
     // Only TEXT runs gate on fonts; atoms carry their own (already-measured) box.
     const facesReady = elig.eligible && b.runs.every((r) => r.atomic || fontLoaded(r))
     if (elig.eligible && facesReady) {
@@ -420,7 +483,7 @@ export function resolveBlocks(
         // BLOCK ATOM (block math / figure): one unbreakable region.
         out.push({ relTops: [b.firstLineLeadingPx ?? 0], advance: collapsedAdvance(blocks, i, b.blockBox.height), eligible: true, atomLike: true, reason: elig.reason })
       } else {
-        const lay = layoutParagraph(b, contentWidthPx, ratio, measure)
+        const lay = layoutParagraph(b, contentWidthPx, ratio, measure, whiteSpace)
         out.push({ relTops: lay.relTops, advance: collapsedAdvance(blocks, i, lay.height), eligible: true, atomLike: false, reason: elig.reason })
       }
     } else {
