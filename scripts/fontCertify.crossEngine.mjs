@@ -58,7 +58,12 @@ const HARNESS = `<!doctype html><html><head>
 <link rel="stylesheet" href="/fonts/inkwave-fonts.css">
 <style>${CALIB_CSS}</style>
 <style>${PM_CSS}</style>
-<style>body{margin:0} #pm{font-size:18px;line-height:1.618}</style>
+<style>
+/* THE SHIPPED POLICY (index.css:882, 2026-07-16): optical sizing pinned OFF at :root so no opsz
+   font's advances can vary per engine. Replicated here so the harness measures what production
+   renders — the A/B below toggles it to prove both that it FIXES Inter and that it DISTURBS NOTHING. */
+:root { font-optical-sizing: none; }
+body{margin:0} #pm{font-size:18px;line-height:1.618}</style>
 </head><body><div id="pm" class="ProseMirror" contenteditable="true"></div></body></html>`
 
 const server = createServer((req, res) => {
@@ -206,16 +211,28 @@ async function runEngine(engine, name, args) {
           }
         }
       }
-      // ── JOB 2 fixture: the DOM's OWN wrap at the canonical width, 400/18px. Cross-engine compare.
-      {
+      // ── JOB 2 fixture + the opsz A/B: the DOM's OWN wrap at the canonical width, 400/18px.
+      // Measured under BOTH font-optical-sizing values so the re-verify answers two questions at
+      // once: (1) does `none` make Inter's Chromium wrap == its WebKit wrap; (2) does pinning
+      // `none` DISTURB any family that already agreed (it must be a no-op for non-opsz faces).
+      const wrapUnder = (opsz) => {
+        document.documentElement.style.fontOpticalSizing = opsz
         const p = document.createElement('p')
         p.style.cssText = `width:${CONTENT_W}px;margin:0;font-family:'${fam}', serif;font-size:18px;font-weight:400`
         p.textContent = WRAP
         pm.appendChild(p)
-        r.domWrap = lineStarts(p)
-        r.domHeight = +p.getBoundingClientRect().height.toFixed(3)
+        void p.getBoundingClientRect()
+        const ls = lineStarts(p)
+        const w = +p.getBoundingClientRect().height.toFixed(3)
         p.remove()
+        return { ls, h: w }
       }
+      const A = wrapUnder('auto')
+      const N = wrapUnder('none')
+      document.documentElement.style.fontOpticalSizing = 'none' // leave the shipped policy in force
+      r.domWrapAuto = A.ls
+      r.domWrap = N.ls           // `none` IS production — the cross-engine compare uses it
+      r.opszSensitive = !(A.ls.length === N.ls.length && A.ls.every((x, i) => x === N.ls[i]))
       r.verdict = (r.cells > 0 && r.advFails.length === 0 && r.wrapFails.length === 0) ? 'CERTIFIED' : (r.cells === 0 ? 'NO-FACES' : 'FAIL')
       r.zwnjOk = (r.maxAdvZwnj || 0) <= 0.05
       res.push(r)
@@ -239,7 +256,9 @@ for (const e of [chrome, wk]) {
 const wsMismatch = chrome.support.whiteSpace !== wk.support.whiteSpace
 if (wsMismatch) console.log(`\n🚨 WHITE-SPACE MODE DIFFERS ACROSS ENGINES (${chrome.support.whiteSpace} vs ${wk.support.whiteSpace}) — the wrap RULE itself differs cross-device, independent of any font.`)
 
-console.log('\n' + pad('FAMILY', 22) + pad('CHROMIUM', 12) + pad('maxΔ', 9) + pad('WEBKIT', 12) + pad('maxΔ', 9) + pad('WK-zwnj', 7) + pad('DOM↔DOM', 10) + 'NOTE')
+const disturbedList = []
+console.log('\n' + pad('FAMILY', 22) + pad('CHROMIUM', 12) + pad('WEBKIT', 12) + pad('DOM↔DOM auto', 11) + pad('DOM↔DOM none', 11) + pad('pin effect', 11) + 'NOTE')
+console.log(pad('', 22) + pad('(cert)', 12) + pad('(cert)', 12) + pad('(pre-fix)', 11) + pad('(SHIPPED)', 11) + pad('auto→none', 11))
 console.log('-'.repeat(110))
 const byFam = (arr) => Object.fromEntries(arr.map((r) => [r.fam, r]))
 const C = byFam(chrome.res), W = byFam(wk.res)
@@ -248,6 +267,11 @@ for (const fam of FAMILIES) {
   const c = C[fam], w = W[fam]
   const cw = c.domWrap || [], ww = w.domWrap || []
   const domSame = cw.length > 0 && cw.length === ww.length && cw.every((x, i) => x === ww[i])
+  // did the SHIPPED pin change this family's wrap at all (in either engine)?
+  const disturbed = c.opszSensitive || w.opszSensitive
+  // and was it BROKEN before the pin?
+  const ca = c.domWrapAuto || [], wa = w.domWrapAuto || []
+  const domSameAuto = ca.length > 0 && ca.length === wa.length && ca.every((x, i) => x === wa[i])
   let note = ''
   if (!domSame) {
     let k = 0; while (k < cw.length && k < ww.length && cw[k] === ww[k]) k++
@@ -256,9 +280,20 @@ for (const fam of FAMILIES) {
   } else if (c.synth.length || w.synth.length) note = `⚠ synth ${[...new Set([...c.synth, ...w.synth])].join(',')}`
   const ok = c.verdict === 'CERTIFIED' && w.verdict === 'CERTIFIED' && domSame
   if (ok) both.push(fam)
-  console.log(pad(fam, 22) + pad(c.verdict, 12) + pad((c.maxAdv ?? 0).toFixed(4), 9) + pad(w.verdict, 12) + pad((w.maxAdv ?? 0).toFixed(4), 9) + pad(w.zwnjOk ? 'zwnj✓' : 'zwnj✗', 7) + pad(domSame ? 'IDENTICAL' : '✗ DIFFER', 10) + note.slice(0, 34))
+  console.log(pad(fam, 22) + pad(c.verdict, 12) + pad(w.verdict, 12) + pad(domSameAuto ? 'same' : '✗ DIFFER', 11) + pad(domSame ? 'IDENTICAL' : '✗ DIFFER', 11) + pad(disturbed ? '⚠ CHANGED' : 'no-op', 11) + note.slice(0, 30))
+  if (disturbed) disturbedList.push(fam)
 }
-console.log('\n── JOB 2: CROSS-ENGINE DOM↔DOM PARITY (the load-bearing invariant) ──')
+console.log(`\n── OPSZ PIN RE-VERIFY (:root{font-optical-sizing:none}) ──`)
+console.log(`  families whose wrap CHANGED when pinned: ${disturbedList.length ? disturbedList.join(', ') : 'NONE — the pin is a no-op for every non-opsz face ✓'}`)
+{
+  const i = C['Inter'], j = W['Inter']
+  if (i && j) {
+    const same = (a, b) => a.length === b.length && a.every((x, k) => x === b[k])
+    console.log(`  INTER  auto: C ${JSON.stringify((i.domWrapAuto||[]).slice(0,6))} vs W ${JSON.stringify((j.domWrapAuto||[]).slice(0,6))} → ${same(i.domWrapAuto||[], j.domWrapAuto||[]) ? 'same' : '✗ DIFFER'}`)
+    console.log(`  INTER  none: C ${JSON.stringify((i.domWrap||[]).slice(0,6))} vs W ${JSON.stringify((j.domWrap||[]).slice(0,6))} → ${same(i.domWrap||[], j.domWrap||[]) ? '✓ IDENTICAL — Inter is cross-device with the pin' : '✗ STILL DIFFERS'}`)
+  }
+}
+console.log('\n── JOB 2: CROSS-ENGINE DOM↔DOM PARITY (the load-bearing invariant, WITH the pin) ──')
 if (crossFails.length === 0) console.log(`  ALL ${FAMILIES.length} families: Chromium DOM wrap == WebKit DOM wrap, byte-identical line starts ✓`)
 else {
   console.log(`  🚨 ${crossFails.length}/${FAMILIES.length} FAMILIES WRAP DIFFERENTLY ACROSS ENGINES — canonical pagination is NOT cross-device for these:`)

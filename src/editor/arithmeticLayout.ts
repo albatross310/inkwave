@@ -55,7 +55,7 @@
 // because EB Garamond loads and is certified; the Georgia/serif tail only matters if the primary
 // fails to load (in which case document.fonts.check is false → gate defers).
 export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
-  // ROUND-10 (2026-07-16) — verified on BOTH Chromium and WebKit, in the editor's real context,
+  // ROUND-10 (2026-07-16) — all 18 verified on BOTH Chromium and WebKit, in the editor's real context,
   // and (the load-bearing bit) their Chromium DOM wrap == their WebKit DOM wrap byte-for-byte at
   // the canonical width. Hinting was equalised for that comparison: Chromium's default Linux
   // fontconfig quantises advances to whole px while WebKit uses fractional, which manufactures
@@ -77,22 +77,26 @@ export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
   'Atkinson Hyperlegible',
   'JetBrains Mono',
   'Courier Prime',
-  // RETIRED 2026-07-16: Lora + Gelasio — dropped from the PICKER but their faces are STILL SERVED
+  'Inter',
+  // RETIRED 2026-07-16: Lora + Gelasio — dropped from the PICKER, but their faces are STILL SERVED
   // (fetch-fonts keeps them): deleting the woff2 would drop legacy marks down their own stacks to
   // Cambria/Georgia SYSTEM fonts, whose metrics vary by device — silently repaginating old docs
-  // phone-vs-print. Unlisted here regardless: nobody new can select them, and they weren't put
+  // phone-vs-print. Unlisted here regardless: nobody new can select them, and they never went
   // through the round-10 cross-engine pass, so the engine must DEFER rather than compute their wrap.
-  // EXCLUDED — Inter: it CERTIFIES on both engines (canvas↔DOM Δ0.0002 WebKit / 0.0151 Chromium)
-  // yet its Chromium DOM wrap ≠ its WebKit DOM wrap — the one font of 18 that breaks the
-  // cross-device invariant. Cause (measured, not guessed): Inter carries an OPTICAL SIZE (opsz)
-  // axis and CSS defaults to `font-optical-sizing: auto`; Chromium resolves opsz from the
-  // font-size, WebKit does not → different advances → different wrap (Δ −12.5px @18px).
-  //   font-optical-sizing:auto → C 662.31 vs W 674.86   ✗
-  //   font-optical-sizing:none → C 674.86 vs W 674.86   ✓ (Δ 0)
-  //   font-variation-settings:"opsz" 14 → both 674.86   ✓ (Δ 0)
-  // So Inter is shippable ONLY if its StyleBar css stack pins `font-optical-sizing: none` (or a
-  // fixed opsz); then it can be added here. THE GENERAL RULE: any variable font with an opsz axis
-  // is a cross-device hazard at CSS defaults — pin it or don't ship it.
+  //
+  // INTER + OPTICAL SIZING — the correction (2026-07-16). An earlier pass EXCLUDED Inter for a
+  // cross-engine DOM wrap divergence (Δ −12.55px @18px). That was real for the font THAT HARNESS
+  // FETCHED — which requested Inter's OPTICAL SIZE axis (`Inter:ital,opsz,wght@…`). The shipped
+  // fetch-fonts.mjs never requests opsz (it asks `ital,wght@` only), so the font we actually serve
+  // carries NO opsz axis and was never affected: re-measured, Inter's Chromium DOM wrap == its
+  // WebKit DOM wrap byte-for-byte ([0,61,128,196,263,327]) under BOTH font-optical-sizing values,
+  // and it certifies on both engines. Added.
+  // The `:root { font-optical-sizing: none }` policy (index.css) STAYS regardless: measured a
+  // no-op for all 18 shipped faces, and it is the standing guard against any future opsz font —
+  // the hazard is genuine (Chromium resolves opsz from font-size, WebKit does not), it simply
+  // isn't one our current fetch pipeline can produce. NB canvas has no font-optical-sizing
+  // property, so an opsz font ALSO breaks canvas↔DOM parity once the DOM is pinned — an opsz
+  // face is unusable by this engine from both directions. Don't ship one.
 ])
 
 // Parse the leading family token out of a CSS font-family stack. Handles quoted ('..'/".." ) and

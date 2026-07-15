@@ -25,13 +25,15 @@ const stubMeasure = (w = 10): Measure => (text, cssFont) => {
 }
 
 describe('certification', () => {
-  it('has the 17 cross-engine-verified families', () => {
-    expect(CERTIFIED_FAMILIES.size).toBe(17)
+  it('has the 18 cross-engine-verified families', () => {
+    expect(CERTIFIED_FAMILIES.size).toBe(18)
     expect(CERTIFIED_FAMILIES.has('EB Garamond')).toBe(true)
     expect(CERTIFIED_FAMILIES.has('Times New Roman')).toBe(false)
   })
-  it('excludes Inter — it certifies on both engines but its DOM wrap differs across them (opsz)', () => {
-    expect(CERTIFIED_FAMILIES.has('Inter')).toBe(false)
+  it('includes Inter — as SHIPPED (no opsz axis) it is cross-engine identical', () => {
+    // It was briefly excluded on a divergence measured against an Inter fetched WITH the optical-
+    // size axis; the shipped fetch never requests opsz. Re-measured: identical in both engines.
+    expect(CERTIFIED_FAMILIES.has('Inter')).toBe(true)
   })
   it('excludes Lora/Gelasio — no longer served, so their marks fall back to system fonts', () => {
     expect(CERTIFIED_FAMILIES.has('Lora')).toBe(false)
