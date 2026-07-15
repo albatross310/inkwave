@@ -10,6 +10,7 @@
 // automatically, no hand-edited <link> tags.
 
 import fs from 'node:fs'
+import { stripLigaturesInDir, verifyStripped, requireFontTools, DROPPED_FEATURES } from './lib/stripLigatures.mjs'
 
 // Google Fonts css2 `family=` specifiers. Add new families here.
 const FAMILIES = [
@@ -74,6 +75,9 @@ const PRELOAD_SUBSETS = new Set(['latin', 'latin-ext'])
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
 const url = `https://fonts.googleapis.com/css2?${FAMILIES.map((f) => `family=${f}`).join('&')}&display=swap`
 
+// PREFLIGHT — the strip pass below is NOT optional (see lib/stripLigatures.mjs). Fail before we
+// download 6 MB rather than after, and never fall through to shipping un-stripped faces.
+requireFontTools() // toolchain only — the real verify runs on the OUTPUT, after the strip
 const css = await (await fetch(url, { headers: { 'User-Agent': UA } })).text()
 // DIRECT assets survive regeneration (CTAN mirrors are flaky; the bytes are pinned releases) —
 // carry any existing copies across the wipe and only fetch the ones we don't have.
@@ -120,6 +124,19 @@ for (const [fam, weight, style, srcUrl] of DIRECT) {
   i++
   out += `@font-face {\n  font-family: '${fam}';\n  font-style: ${style};\n  font-weight: ${weight};\n  font-display: swap;\n  src: url(/fonts/${name}) format('opentype');\n}\n\n`
 }
+
+// ── STRIP LIGATURES (2026-07-16) — MUST run over the finished directory, not the download list ──
+// Doing it as a final pass over public/fonts is what makes it total: it covers the Google woff2, the
+// DIRECT CTAN OTFs, AND any DIRECT copy carried across the wipe by directKeep (written above, so it
+// is on disk by now — a kept copy would otherwise survive UN-STRIPPED), and it will cover whatever
+// family a future edit adds without anyone remembering to. Idempotent, so re-running is safe.
+// The engine's correctness on Safari/iOS depends on this: see lib/stripLigatures.mjs.
+const strip = stripLigaturesInDir('public/fonts')
+const check = verifyStripped('public/fonts') // throws if ANY face can still ligate
+const stripDelta = strip.bytesAfter - strip.bytesBefore
+console.log(`stripped ${DROPPED_FEATURES.join('/')} from ${strip.stripped}/${strip.files} faces `
+  + `(${(stripDelta / 1024).toFixed(1)} KB, ${(100 * stripDelta / strip.bytesBefore).toFixed(2)}%); `
+  + `verified ${check.checked} faces carry no live ligature feature; ${check.withRlig} keep rlig`)
 
 fs.writeFileSync('public/fonts/inkwave-fonts.css', out.trimEnd() + '\n')
 fs.writeFileSync(
