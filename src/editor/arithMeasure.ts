@@ -20,6 +20,7 @@ import {
   type ArithBlock, type InlineRun, type Measure,
   blockEligibility, layoutParagraph, isCertifiedStack,
 } from './arithmeticLayout'
+import { citeBox, citeFontKey } from '../citations/citeBox'
 
 const DEFAULT_STACK = "'EB Garamond', Georgia, serif"
 
@@ -61,6 +62,8 @@ export function buildArithMeasure(
   fontLoaded: (stack: string, sizePx: number) => boolean,
   mathEligible = false,
   basePx = 18, // base font px: 18 = canonical 1.125rem (Decision 6); the LIVE render font for renderFill
+  citationStyle = '',  // CSL style + bib epoch: the citation box cache key (see citations/citeBox.ts)
+  bibEpoch = -1,
 ): ArithMeasureResult | null {
   const CANON_BASE = basePx
   const items: Array<{ node: PMNode; offset: number }> = []
@@ -77,8 +80,21 @@ export function buildArithMeasure(
       if (child.type.name === 'text') runs.push(runOf(child, CANON_BASE))
       else if (child.type.name === 'hardBreak')
         runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: CANON_BASE, fontWeight: 400, italic: false })
-      else // inline atom (citation / inline math) with no box → makes the block ineligible below
-        runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: CANON_BASE, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name })
+      else {
+        // INLINE ATOM. A CITATION is now a proven opaque box (CitationNodeView pins white-space:
+        // nowrap, so its label has no internal break opportunity and its mixed white-space mode
+        // cannot reach the parent's line breaking) — so it supplies the cached canonical box
+        // harvested by the DOM measure. Anything else (inline MATH) supplies NO box and therefore
+        // defers the whole block, which is exactly the gate we want until its own rect-fix lands.
+        // A MARKED citation is skipped by the harvest (it would inherit that mark's font), so its
+        // lookup misses and the block defers — conservative by construction.
+        // Marked citations cache under their own font key — real ones nearly always carry a
+        // textStyle{fontFamily} mark, so skipping them would defer ~every citation-bearing block.
+        const box = child.type.name === 'citation'
+          ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks)) ?? undefined
+          : undefined
+        runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: CANON_BASE, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name, box })
+      }
     })
     const arith: ArithBlock = {
       type: 'paragraph', runs, baseFontPx: CANON_BASE,
