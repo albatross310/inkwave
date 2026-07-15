@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CERTIFIED_FAMILIES, primaryFamily, isCertifiedStack, blockEligibility, snappedLineHeight,
   cssFontOf, layoutParagraph, resolveBlocks, paginate, figureBlockBox,
-  hangsTrailingSpace, EDITOR_WHITE_SPACE,
+  hangsTrailingSpace, EDITOR_WHITE_SPACE, canvasShapingMatchesEditor,
   type ArithBlock, type InlineRun, type InlineBox, type Measure,
 } from './arithmeticLayout'
 
@@ -23,6 +23,19 @@ const stubMeasure = (w = 10): Measure => (text, cssFont) => {
   const size = m ? parseFloat(m[1]) : 18
   return text.length * w * (size / 18)
 }
+
+describe('shaping gate', () => {
+  it('passes when canvas agrees with the editor DOM (stripped/ligature-free faces)', () => {
+    const dom = () => 100
+    const measure = () => 100
+    expect(canvasShapingMatchesEditor("400 18px 'X'", dom, measure)).toBe(true)
+  })
+  it('FAILS when canvas applies ligatures the editor does not (the Safari case)', () => {
+    const dom = () => 100      // editor: liga off
+    const measure = () => 97   // canvas: liga on → 3px narrower
+    expect(canvasShapingMatchesEditor("400 18px 'X'", dom, measure)).toBe(false)
+  })
+})
 
 describe('certification', () => {
   it('has the 18 cross-engine-verified families', () => {

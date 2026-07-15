@@ -257,23 +257,49 @@ export function snappedLineHeight(fontSizePx: number, ratio: number): number {
   return Math.floor(ratio * Math.round(fontSizePx * 64)) / 64
 }
 
-// ─── ENGINE CAPABILITY GATE (2026-07-16 — the WebKit finding) ──────────────────────────────────
-// The editor renders with ligatures OFF (.ProseMirror { font-variant-ligatures: none }); canvas
-// measureText applies them by DEFAULT, and the ONLY lever is ctx.textRendering = 'optimizeSpeed'.
-// Chromium exposes it. Playwright's WebKit build does NOT ('textRendering' in ctx === false), and
-// the obvious substitute was MEASURED AND FAILS: injecting U+200C (ZWNJ) between ligature pairs
-// does not reproduce the editor's advances on any tested family. With no lever, canvas measures
-// "first"/"office"/"affluent" 2-5px NARROWER than the editor renders them (measured Δ up to 41px
-// across the corpus) and the engine would take words the browser drops — a wrong wrap, i.e. wrong
-// words on a page. So where this returns FALSE the arithmetic path MUST NOT RUN; defer to the DOM
-// measure, which is always correct.
+// ─── ENGINE SHAPING GATE (2026-07-16 — rev 2, after the ligature-strip result) ─────────────────
+// The engine may only run where CANVAS SHAPES TEXT THE WAY THE EDITOR RENDERS IT. The editor
+// renders with ligatures OFF (.ProseMirror { font-variant-ligatures: none }); canvas applies them
+// by default and its only lever, ctx.textRendering, is Chromium/Firefox-only — **Safari has never
+// shipped it, on any version, desktop or iOS**. So an API check said "never on any iPhone".
 //
-// ⚠ OPEN QUESTION, do not assume either way: Playwright's WebKit is the GTK/WPE port (FreeType +
-// HarfBuzz) with a spoofed "Version/26.4 Safari" UA. Apple's iOS/macOS Safari is a different build
-// on CoreText and MAY expose ctx.textRendering. This gate is capability-detected, not UA-sniffed,
-// so it self-corrects: on a Safari that has the API the engine simply turns on. Whether that is
-// today's iOS needs a REAL-DEVICE check — and it matters, because the phone is exactly where the
-// engine's win lives (it eliminates the 400-1100ms forced canonical reflow).
+// THAT IS NO LONGER THE RIGHT QUESTION. The ligature tables in the faces we self-host are dead
+// weight for document text (CSS already disables them), so we strip liga/clig/dlig/hlig/calt out
+// of the served woff2 (scripts/fontStrip.mjs). MEASURED, all 18 families, real .ProseMirror:
+//   • production measure == DOM on BOTH engines: 18/18 (WebKit Δ ≤ 0.0001, controls up to Δ27.5)
+//   • DOM rendering unchanged by the strip: 18/18 at GLYPH level (per-char x positions) + wrap
+//   • cross-engine DOM↔DOM on stripped faces: all 18 identical    • byte cost: +0.7KB (+0.01%)
+// With no ligatures in the file, canvas has nothing to apply and matches the editor WITHOUT the API
+// — i.e. on every iPhone. (The ZWNJ workaround was also measured, and FAILS: WebKit's canvas does
+// not honour U+200C. Stripping the font is the only lever that works there.)
+//
+// So the gate is now EMPIRICAL, not a capability sniff: probe whether canvas actually agrees with
+// the DOM for this font, once, and cache it. It is correct in every combination — API or not,
+// stripped or not — and it self-corrects the moment the pipeline ships stripped faces.
+export const SHAPING_PROBE = 'office affluent finds difficult waffles fi fl ffi ffl AV To Wa'
+const SHAPING_EPS = 0.05 // the same tolerance the font certification uses
+
+/**
+ * THE GATE. True ⇔ canvas measures this font exactly as the editor renders it. `domWidth` must
+ * measure inside the REAL editor context (a span in .ProseMirror), which is where the ligature
+ * state lives; the wire-in should call this ONCE per font and cache the answer.
+ * Where it returns false the arithmetic path MUST NOT RUN for that font — defer to the DOM
+ * measure, which is always correct.
+ */
+export function canvasShapingMatchesEditor(
+  cssFont: string,
+  domWidth: (text: string, cssFont: string) => number,
+  measure: Measure,
+): boolean {
+  try { return Math.abs(measure(SHAPING_PROBE, cssFont) - domWidth(SHAPING_PROBE, cssFont)) <= SHAPING_EPS }
+  catch { return false }
+}
+
+/**
+ * Whether this engine exposes ctx.textRendering (Chromium/Firefox yes; Safari never). NOT the gate
+ * — makeCanvasMeasure uses it opportunistically, and it is worth logging, but a false here no
+ * longer means "cannot run": with stripped faces canvas matches the editor without it.
+ */
 export function canvasCanMatchEditorShaping(): boolean {
   if (typeof document === 'undefined') return false
   try {
