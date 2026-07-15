@@ -29,12 +29,21 @@ const FONTS = [
   { group: 'Identity', label: 'Garamond',  css: "'EB Garamond', Georgia, serif" },
   // Serif — 'Times' and 'Arial' are certified CLONES (TeX Gyre Termes/Heros, GUST licence);
   // labels are display-only and decoupled from the css stack (Peter: "call it Times").
-  { group: 'Serif', label: 'Times',    css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
+  // 'Romans', not 'Times' (Peter, 2026-07-16): "Times"/"Times New Roman" are Monotype trademarks and
+  // ubiquity STRENGTHENS a mark rather than weakening it. "Roman" is the generic typographic term for
+  // upright type — nobody owns it — and it's honest: TeX Gyre Termes descends from Nimbus Roman.
+  // ('Arial' below is the same exposure, and arguably worse: a coined word is inherently the stronger
+  // mark. Left as-is on Peter's call; the safe labels there are Heros / Grotesque / Swiss.)
+  { group: 'Serif', label: 'Romans',   css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
   { group: 'Serif', label: 'Crimson',  css: "'Crimson Pro', 'Times New Roman', serif" },
   { group: 'Serif', label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
-  { group: 'Serif', label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
-  { group: 'Serif', label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
   { group: 'Serif', label: 'Gentium',  css: "'Gentium Plus', 'Palatino Linotype', serif" },
+  // DROPPED 2026-07-16 (Peter): Lora — its only justification was being the "Cambria-warmth
+  // stand-in" while Caladea kept failing the (flawed) certification; Caladea now ships, so Lora was
+  // a stand-in for a font we have. Gelasio — a Georgia metric clone, the least refined face here.
+  // Both faces are also removed from fetch-fonts, so legacy marks fall back down their own stacks
+  // (Lora → Cambria/Palatino/Georgia, Gelasio → Georgia) — the documented fallback-tail convention.
+  // Gentium stays despite being specialised: philosophy users need its Greek/Latin coverage.
   // Added 2026-07-16 after the re-certification retracted r7's FAILED list (see CLAUDE.md): r7
   // measured with ligatures ON while the editor renders liga OFF, so both of these were rejected
   // for a divergence that can't occur here. Baskerville = the genre Peter had let go; Caladea =
@@ -46,12 +55,29 @@ const FONTS = [
   { group: 'Display', label: 'Fraunces',  css: "'Fraunces', Georgia, serif" },
   // Slab
   { group: 'Slab', label: 'Bitter', css: "'Bitter', 'Roboto Slab', Georgia, serif" },
+  // Zilla Slab over Roboto Slab/Aleo/Arvo (2026-07-16): furthest from Bitter (x/cap 0.682 vs 0.771)
+  // AND it has real italics — Roboto Slab synthesises both obliques and is literally Bitter's own
+  // fallback tail (maximum overlap); Arvo genuinely FAILS certification (Δ12px at 96px).
+  { group: 'Slab', label: 'Zilla',  css: "'Zilla Slab', 'Roboto Slab', Georgia, serif" },
   // Sans
-  { group: 'Sans', label: 'Arial',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
+  // 'Swiss', not 'Arial' (Peter, 2026-07-16). Arial was the worse trademark exposure of the two: a
+  // coined word is inherently the stronger mark. 'Swiss' names the genre/movement (the International
+  // Typographic Style) — geographic-descriptive, so a weak mark nobody meaningfully owns — and it's
+  // honest: TeX Gyre Heros is a neo-grotesque descending from Nimbus Sans, the Helvetica clone.
+  { group: 'Sans', label: 'Swiss',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
   { group: 'Sans', label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  // Inter (2026-07-16) — shipped for QUALITY, not contrast: measured x/cap 0.712 is IDENTICAL to
+  // Heros, i.e. the same neo-grotesque voice, just better drawn and screen-optimised with far wider
+  // coverage. Carlito (0.738) + Atkinson (0.735) are the humanists already covering the other voice.
+  { group: 'Sans', label: 'Inter',    css: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" },
   { group: 'Sans', label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
   // Mono — code / logic notation
   { group: 'Mono', label: 'JetBrains', css: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace" },
+  // Courier Prime (2026-07-16, Peter's pick — and it earns it): x/cap 0.776, the highest of the four
+  // monos, which is precisely Courier's weakness (thin, small-bodied) redesigned away. Real 400/700/
+  // italic/bold-italic. Its own name, so no "Courier New" trademark exposure. All monos share a
+  // 0.6em advance, so swapping mono can't change line lengths — the contrast here is voice.
+  { group: 'Mono', label: 'Courier',   css: "'Courier Prime', 'Courier New', Courier, monospace" },
 ]
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]

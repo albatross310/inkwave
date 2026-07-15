@@ -758,11 +758,83 @@
 }
 
 @font-face {
+  font-family: 'Courier Prime';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/courier-prime-400-italic-84.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/courier-prime-400-italic-85.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/courier-prime-700-italic-86.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/courier-prime-700-italic-87.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/courier-prime-400-normal-88.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/courier-prime-400-normal-89.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/courier-prime-700-normal-90.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/courier-prime-700-normal-91.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
   font-family: 'Crimson Pro';
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-italic-84.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-italic-92.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -771,7 +843,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-italic-85.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-italic-93.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -780,7 +852,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-italic-86.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-italic-94.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -789,7 +861,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-italic-87.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-italic-95.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -798,7 +870,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-italic-88.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-italic-96.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -807,7 +879,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-italic-89.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-italic-97.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -816,7 +888,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-normal-90.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-normal-98.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -825,7 +897,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-normal-91.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-normal-99.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -834,7 +906,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/crimson-pro-400-normal-92.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-400-normal-100.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -843,7 +915,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-normal-93.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-normal-101.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -852,7 +924,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-normal-94.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-normal-102.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -861,7 +933,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/crimson-pro-700-normal-95.woff2) format('woff2');
+  src: url(/fonts/crimson-pro-700-normal-103.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -870,7 +942,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-96.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-104.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -879,7 +951,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-97.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-105.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -888,7 +960,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-98.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-106.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -897,7 +969,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-99.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-107.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -906,7 +978,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-100.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-108.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -915,7 +987,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-101.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-109.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -924,7 +996,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-italic-102.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-italic-110.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -933,7 +1005,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-103.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-111.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -942,7 +1014,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-104.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-112.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -951,7 +1023,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-105.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-113.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -960,7 +1032,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-106.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-114.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -969,7 +1041,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-107.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-115.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -978,7 +1050,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-108.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-116.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -987,7 +1059,7 @@
   font-style: italic;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-italic-109.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-italic-117.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -996,7 +1068,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-110.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-118.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1005,7 +1077,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-111.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-119.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1014,7 +1086,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-112.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-120.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1023,7 +1095,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-113.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-121.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1032,7 +1104,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-114.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-122.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1041,7 +1113,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-115.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-123.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1050,7 +1122,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-italic-116.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-italic-124.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1059,7 +1131,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-117.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-125.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1068,7 +1140,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-118.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-126.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1077,7 +1149,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-119.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-127.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1086,7 +1158,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-120.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-128.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1095,7 +1167,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-121.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-129.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1104,7 +1176,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-122.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-130.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1113,7 +1185,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/eb-garamond-400-normal-123.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-400-normal-131.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1122,7 +1194,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-124.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-132.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1131,7 +1203,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-125.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-133.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1140,7 +1212,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-126.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-134.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1149,7 +1221,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-127.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-135.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1158,7 +1230,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-128.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-136.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1167,7 +1239,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-129.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-137.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1176,7 +1248,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url(/fonts/eb-garamond-500-normal-130.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-500-normal-138.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1185,7 +1257,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-131.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-139.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1194,7 +1266,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-132.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-140.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1203,7 +1275,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-133.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-141.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1212,7 +1284,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-134.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-142.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1221,7 +1293,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-135.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-143.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1230,7 +1302,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-136.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-144.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1239,7 +1311,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/eb-garamond-700-normal-137.woff2) format('woff2');
+  src: url(/fonts/eb-garamond-700-normal-145.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1248,7 +1320,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-italic-138.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-italic-146.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1257,7 +1329,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-italic-139.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-italic-147.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1266,7 +1338,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-italic-140.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-italic-148.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1275,7 +1347,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-italic-141.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-italic-149.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1284,7 +1356,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-italic-142.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-italic-150.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1293,7 +1365,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-italic-143.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-italic-151.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1302,7 +1374,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-normal-144.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-normal-152.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1311,7 +1383,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-normal-145.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-normal-153.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1320,7 +1392,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/fraunces-400-normal-146.woff2) format('woff2');
+  src: url(/fonts/fraunces-400-normal-154.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1329,7 +1401,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-normal-147.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-normal-155.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1338,7 +1410,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-normal-148.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-normal-156.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1347,7 +1419,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/fraunces-700-normal-149.woff2) format('woff2');
+  src: url(/fonts/fraunces-700-normal-157.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1356,7 +1428,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-italic-150.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-italic-158.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1365,7 +1437,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-italic-151.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-italic-159.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1374,7 +1446,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-italic-152.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-italic-160.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1383,7 +1455,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-italic-153.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-italic-161.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1392,7 +1464,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-italic-154.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-italic-162.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1401,7 +1473,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-italic-155.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-italic-163.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1410,7 +1482,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-normal-156.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-normal-164.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1419,7 +1491,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-normal-157.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-normal-165.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1428,7 +1500,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gelasio-400-normal-158.woff2) format('woff2');
+  src: url(/fonts/gelasio-400-normal-166.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1437,7 +1509,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-normal-159.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-normal-167.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1446,7 +1518,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-normal-160.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-normal-168.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1455,7 +1527,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gelasio-700-normal-161.woff2) format('woff2');
+  src: url(/fonts/gelasio-700-normal-169.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1464,7 +1536,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-162.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-170.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1473,7 +1545,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-163.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-171.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1482,7 +1554,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-164.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-172.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1491,7 +1563,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-165.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-173.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1500,7 +1572,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-166.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-174.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1509,7 +1581,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-167.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-175.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1518,7 +1590,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-italic-168.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-italic-176.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1527,7 +1599,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-169.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-177.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1536,7 +1608,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-170.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-178.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1545,7 +1617,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-171.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-179.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1554,7 +1626,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-172.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-180.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1563,7 +1635,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-173.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-181.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1572,7 +1644,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-174.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-182.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1581,7 +1653,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-italic-175.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-italic-183.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1590,7 +1662,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-176.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-184.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1599,7 +1671,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-177.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-185.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1608,7 +1680,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-178.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-186.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1617,7 +1689,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-179.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-187.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1626,7 +1698,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-180.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-188.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1635,7 +1707,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-181.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-189.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1644,7 +1716,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/gentium-plus-400-normal-182.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-400-normal-190.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1653,7 +1725,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-183.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-191.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1662,7 +1734,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-184.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-192.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1671,7 +1743,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-185.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-193.woff2) format('woff2');
   unicode-range: U+1F00-1FFF;
 }
 
@@ -1680,7 +1752,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-186.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-194.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1689,7 +1761,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-187.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-195.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1698,7 +1770,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-188.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-196.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1707,7 +1779,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/gentium-plus-700-normal-189.woff2) format('woff2');
+  src: url(/fonts/gentium-plus-700-normal-197.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1716,7 +1788,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/im-fell-dw-pica-400-italic-190.woff2) format('woff2');
+  src: url(/fonts/im-fell-dw-pica-400-italic-198.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1725,7 +1797,259 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/im-fell-dw-pica-400-normal-191.woff2) format('woff2');
+  src: url(/fonts/im-fell-dw-pica-400-normal-199.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-200.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-201.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-202.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-203.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-204.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-205.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-italic-206.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-207.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-208.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-209.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-210.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-211.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-212.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-italic-213.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-214.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-215.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-216.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-217.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-218.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-219.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/inter-400-normal-220.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-221.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-222.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-223.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-224.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-225.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-226.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/inter-700-normal-227.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1734,7 +2058,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-192.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-228.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1743,7 +2067,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-193.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-229.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1752,7 +2076,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-194.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-230.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1761,7 +2085,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-195.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-231.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1770,7 +2094,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-196.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-232.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1779,7 +2103,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-italic-197.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-italic-233.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1788,7 +2112,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-198.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-234.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1797,7 +2121,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-199.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-235.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1806,7 +2130,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-200.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-236.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1815,7 +2139,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-201.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-237.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1824,7 +2148,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-202.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-238.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1833,7 +2157,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-italic-203.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-italic-239.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1842,7 +2166,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-204.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-240.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1851,7 +2175,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-205.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-241.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1860,7 +2184,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-206.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-242.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1869,7 +2193,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-207.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-243.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1878,7 +2202,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-208.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-244.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1887,7 +2211,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-400-normal-209.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-400-normal-245.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1896,7 +2220,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-210.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-246.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -1905,7 +2229,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-211.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-247.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -1914,7 +2238,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-212.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-248.woff2) format('woff2');
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
 }
 
@@ -1923,7 +2247,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-213.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-249.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -1932,7 +2256,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-214.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-250.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1941,7 +2265,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-normal-215.woff2) format('woff2');
+  src: url(/fonts/jetbrains-mono-700-normal-251.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1950,7 +2274,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-400-italic-216.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-400-italic-252.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1959,7 +2283,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-400-italic-217.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-400-italic-253.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1968,7 +2292,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-400-normal-218.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-400-normal-254.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1977,7 +2301,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-400-normal-219.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-400-normal-255.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -1986,7 +2310,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-700-normal-220.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-700-normal-256.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -1995,7 +2319,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/libre-baskerville-700-normal-221.woff2) format('woff2');
+  src: url(/fonts/libre-baskerville-700-normal-257.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2004,7 +2328,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-222.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-258.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2013,7 +2337,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-223.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-259.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2022,7 +2346,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-224.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-260.woff2) format('woff2');
   unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF;
 }
 
@@ -2031,7 +2355,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-225.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-261.woff2) format('woff2');
   unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF;
 }
 
@@ -2040,7 +2364,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-226.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-262.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2049,7 +2373,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-227.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-263.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2058,7 +2382,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-italic-228.woff2) format('woff2');
+  src: url(/fonts/lora-400-italic-264.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2067,7 +2391,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-229.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-265.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2076,7 +2400,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-230.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-266.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2085,7 +2409,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-231.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-267.woff2) format('woff2');
   unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF;
 }
 
@@ -2094,7 +2418,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-232.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-268.woff2) format('woff2');
   unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF;
 }
 
@@ -2103,7 +2427,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-233.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-269.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2112,7 +2436,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-234.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-270.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2121,7 +2445,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-italic-235.woff2) format('woff2');
+  src: url(/fonts/lora-700-italic-271.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2130,7 +2454,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-236.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-272.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2139,7 +2463,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-237.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-273.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2148,7 +2472,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-238.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-274.woff2) format('woff2');
   unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF;
 }
 
@@ -2157,7 +2481,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-239.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-275.woff2) format('woff2');
   unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF;
 }
 
@@ -2166,7 +2490,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-240.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-276.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2175,7 +2499,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-241.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-277.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2184,7 +2508,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/lora-400-normal-242.woff2) format('woff2');
+  src: url(/fonts/lora-400-normal-278.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2193,7 +2517,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-243.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-279.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2202,7 +2526,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-244.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-280.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2211,7 +2535,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-245.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-281.woff2) format('woff2');
   unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF;
 }
 
@@ -2220,7 +2544,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-246.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-282.woff2) format('woff2');
   unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF;
 }
 
@@ -2229,7 +2553,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-247.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-283.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2238,7 +2562,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-248.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-284.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2247,7 +2571,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/lora-700-normal-249.woff2) format('woff2');
+  src: url(/fonts/lora-700-normal-285.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2256,7 +2580,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-italic-250.woff2) format('woff2');
+  src: url(/fonts/spectral-400-italic-286.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2265,7 +2589,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-italic-251.woff2) format('woff2');
+  src: url(/fonts/spectral-400-italic-287.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2274,7 +2598,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-italic-252.woff2) format('woff2');
+  src: url(/fonts/spectral-400-italic-288.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2283,7 +2607,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-italic-253.woff2) format('woff2');
+  src: url(/fonts/spectral-400-italic-289.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2292,7 +2616,7 @@
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-italic-254.woff2) format('woff2');
+  src: url(/fonts/spectral-400-italic-290.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2301,7 +2625,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-italic-255.woff2) format('woff2');
+  src: url(/fonts/spectral-700-italic-291.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2310,7 +2634,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-italic-256.woff2) format('woff2');
+  src: url(/fonts/spectral-700-italic-292.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2319,7 +2643,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-italic-257.woff2) format('woff2');
+  src: url(/fonts/spectral-700-italic-293.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2328,7 +2652,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-italic-258.woff2) format('woff2');
+  src: url(/fonts/spectral-700-italic-294.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2337,7 +2661,7 @@
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-italic-259.woff2) format('woff2');
+  src: url(/fonts/spectral-700-italic-295.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2346,7 +2670,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-normal-260.woff2) format('woff2');
+  src: url(/fonts/spectral-400-normal-296.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2355,7 +2679,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-normal-261.woff2) format('woff2');
+  src: url(/fonts/spectral-400-normal-297.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2364,7 +2688,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-normal-262.woff2) format('woff2');
+  src: url(/fonts/spectral-400-normal-298.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2373,7 +2697,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-normal-263.woff2) format('woff2');
+  src: url(/fonts/spectral-400-normal-299.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2382,7 +2706,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url(/fonts/spectral-400-normal-264.woff2) format('woff2');
+  src: url(/fonts/spectral-400-normal-300.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -2391,7 +2715,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-normal-265.woff2) format('woff2');
+  src: url(/fonts/spectral-700-normal-301.woff2) format('woff2');
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 
@@ -2400,7 +2724,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-normal-266.woff2) format('woff2');
+  src: url(/fonts/spectral-700-normal-302.woff2) format('woff2');
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
@@ -2409,7 +2733,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-normal-267.woff2) format('woff2');
+  src: url(/fonts/spectral-700-normal-303.woff2) format('woff2');
   unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
@@ -2418,7 +2742,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-normal-268.woff2) format('woff2');
+  src: url(/fonts/spectral-700-normal-304.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
@@ -2427,7 +2751,79 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url(/fonts/spectral-700-normal-269.woff2) format('woff2');
+  src: url(/fonts/spectral-700-normal-305.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-400-italic-306.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-400-italic-307.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-700-italic-308.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-700-italic-309.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-400-normal-310.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-400-normal-311.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-700-normal-312.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Zilla Slab';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/fonts/zilla-slab-700-normal-313.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 

@@ -25,11 +25,24 @@ const FAMILIES = [
   // Cardo, Noto Sans, Noto Serif, Open Sans, Fira Code.
   // NB Libre Baskerville has NO 700-italic face upstream (400/700/400i only) — the browser
   // synthesises bold-italic for it; Caladea ships all four.
-  'Gelasio:ital,wght@0,400;0,700;1,400;1,700',
-  'Lora:ital,wght@0,400;0,700;1,400;1,700',
   'Libre+Baskerville:ital,wght@0,400;0,700;1,400',
   'Caladea:ital,wght@0,400;0,700;1,400;1,700',
   'Spectral:ital,wght@0,400;0,700;1,400;1,700',
+  // Genre additions (2026-07-16, Peter: another quality sans/slab/mono). Certified in the real
+  // context: Inter Δ0.0000, Zilla Slab Δ0.0000 (real italics, x/cap 0.682 = furthest from Bitter),
+  // Courier Prime Δ0.0000 (x/cap 0.776 — fixes Courier's thin, small-bodied look). Rejected:
+  // Arvo (genuinely FAILS, Δ12 @96px — real integer-px quantization, not a ligature artefact),
+  // Roboto Slab + Fira Code (no upstream italic — synthesised obliques), Prata (ships 400 only).
+  'Inter:ital,wght@0,400;0,700;1,400;1,700',
+  'Zilla+Slab:ital,wght@0,400;0,700;1,400;1,700',
+  'Courier+Prime:ital,wght@0,400;0,700;1,400;1,700',
+  // RETIRED FROM THE PICKER, STILL HOSTED (2026-07-16). Lora + Gelasio are gone from StyleBar, but
+  // their faces MUST keep shipping: an existing mark falls back down its own stack to Cambria /
+  // Georgia — SYSTEM fonts, which are uncertifiable and (CLAUDE.md) "already broke cross-device
+  // canonical breaks for marked runs". Deleting the woff2 would silently repaginate old documents
+  // phone-vs-print. They load on demand and nobody new can select them, so hosting costs nothing.
+  'Gelasio:ital,wght@0,400;0,700;1,400;1,700',
+  'Lora:ital,wght@0,400;0,700;1,400;1,700',
   'Carlito:ital,wght@0,400;0,700;1,400;1,700',
   'Crimson+Pro:ital,wght@0,400;0,700;1,400;1,700',
   'Gentium+Plus:ital,wght@0,400;0,700;1,400;1,700',
