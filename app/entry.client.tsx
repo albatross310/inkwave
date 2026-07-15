@@ -18,7 +18,12 @@ applyTheme()
   try {
     const params = new URLSearchParams(location.search)
     for (const f of ['arithLayout', 'renderFill', 'waveVideo']) {
-      if (params.get(f) === 'off') localStorage.setItem(`inkwave:${f}`, '0')
+      const v = params.get(f)
+      if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
+      // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
+      // Peter tests on an iPhone 8 with no Mac/Web Inspector, and our AV1→H.264→CSS fallback chain
+      // is otherwise SILENT and looks identical to the CSS water he's judging).
+      else if (v === 'debug') localStorage.setItem(`inkwave:${f}`, 'debug')
       else if (params.has(f)) localStorage.setItem(`inkwave:${f}`, '1')
     }
   } catch { /* private mode / no localStorage */ }
@@ -126,18 +131,16 @@ void bootstrap()
       const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
         ? Promise.resolve()
         : new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
-      // Condition 3 (opt-in) — the WAVE VIDEO (flag `inkwave:waveVideo`). Fold the loop's first
-      // decoded frame into the SAME atomic gate so a warm/cached load paints the video AS the water
-      // (no cross-fade). Bounded by the gate's own timeout below — a slow/failed/undecodable video
-      // never holds the page hostage; the CSS water simply opens the gate and the video joins late
-      // (or never, on iOS Low Power / no codec). See src/editor/waveVideo.ts.
+      // The WAVE VIDEO (flag `inkwave:waveVideo`) starts its fetch+decode NOW so the clip is ready
+      // the moment the gate opens — but it is NOT a gate condition and must NOT be awaited here:
+      // it inserts its <video> into the React-rendered `.iw-wave-twinkles` host and therefore waits
+      // for this gate itself (post-gate = post-hydration, or React reconciles the element away).
+      // Awaiting it here would deadlock. See src/editor/waveVideo.ts.
       let videoFlag = false
-      try { videoFlag = localStorage.getItem('inkwave:waveVideo') === '1' } catch { /* private mode */ }
-      const video = videoFlag
-        ? import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {})
-        : Promise.resolve()
+      try { const v = localStorage.getItem('inkwave:waveVideo'); videoFlag = v === '1' || v === 'debug' } catch { /* private mode */ }
+      if (videoFlag) void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {})
       const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
-      void Promise.all([tiles, twinkles, video]).then(() => { clearTimeout(t); ready() })
+      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
     }
   }
 }
@@ -147,8 +150,8 @@ void bootstrap()
 // (already stamped), so start it here too — prepareWaveVideo is idempotent (started guard) and
 // attaches post-gate. See src/editor/waveVideo.ts.
 try {
-  if (localStorage.getItem('inkwave:waveVideo') === '1'
-      && document.documentElement.classList.contains('iw-water-ready'))
+  const wv = localStorage.getItem('inkwave:waveVideo')
+  if ((wv === '1' || wv === 'debug') && document.documentElement.classList.contains('iw-water-ready'))
     void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo())
 } catch { /* private mode */ }
 

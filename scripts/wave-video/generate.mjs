@@ -60,6 +60,10 @@ const LOOP_FRAMES = Number(process.env.LOOP_FRAMES || 120)
 const CRF_AV1 = process.env.CRF_AV1 || '58'
 const CRF_H264 = process.env.CRF_H264 || '30'
 const PORT = Number(process.env.PORT || 4319)
+// FIXED pool seed — the loop and brake clips are captured in separate browser sessions and MUST
+// bake the identical marks/glitters, or the phase-0 loop→brake swap teleports them. Any constant
+// works; change it only to reroll the baked geography (then regenerate the whole matrix).
+const POOL_SEED = Number(process.env.POOL_SEED || 20260715)
 
 const themeArg = (() => { const i = process.argv.indexOf('--theme'); return i >= 0 ? process.argv[i + 1] : 'both' })()
 const THEMES = themeArg === 'both' ? ['day', 'night'] : [themeArg]
@@ -97,12 +101,18 @@ async function capture(rung, theme, mode /* 'loop' | 'brake' */, dir) {
     ...(rung.mobile ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' } : {}),
   })
   const page = await ctx.newPage()
-  await page.addInitScript((th) => {
-    try { if (th === 'night') localStorage.setItem('inkwave:theme', 'night'); else localStorage.removeItem('inkwave:theme') } catch { /* private */ }
+  await page.addInitScript((cfg) => {
+    try { if (cfg.th === 'night') localStorage.setItem('inkwave:theme', 'night'); else localStorage.removeItem('inkwave:theme') } catch { /* private */ }
+    // FIXED POOL SEED + cleared strike memory: the LOOP and BRAKE clips are captured in separate
+    // browser sessions, so without this they'd bake DIFFERENT marks/glitters and the phase-0
+    // loop→brake swap would teleport them (measured 5.8% of pixels). Same seed ⇒ same pool ⇒ the
+    // join is pixel-exact. (waveTwinkle reads __iwTwkSeed only when set — test seam.)
+    window.__iwTwkSeed = cfg.seed
+    try { localStorage.removeItem('inkwave:twkMem:v2') } catch { /* private */ }
     window.__iwRest = 0; window.addEventListener('inkwave:wave-rest', () => window.__iwRest++)
     for (const n of ['inkwave:reveal-imminent', 'inkwave:load-watchdog']) window.addEventListener(n, (e) => { if (window.__iwBlock) e.stopImmediatePropagation() })
     try { localStorage.removeItem('inkwave:waveVideo') } catch { /* private */ }
-  }, theme)
+  }, { th: theme, seed: POOL_SEED })
   await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'commit' })
   await page.waitForFunction(() => window.__iwRest > 0, null, { timeout: 30000 })
   await page.waitForTimeout(700)
