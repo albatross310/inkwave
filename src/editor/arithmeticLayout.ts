@@ -55,21 +55,43 @@
 // because EB Garamond loads and is certified; the Georgia/serif tail only matters if the primary
 // fails to load (in which case document.fonts.check is false → gate defers).
 export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
+  // ROUND-10 (2026-07-16) — verified on BOTH Chromium and WebKit, in the editor's real context,
+  // and (the load-bearing bit) their Chromium DOM wrap == their WebKit DOM wrap byte-for-byte at
+  // the canonical width. Hinting was equalised for that comparison: Chromium's default Linux
+  // fontconfig quantises advances to whole px while WebKit uses fractional, which manufactures
+  // false divergences (--font-render-hinting=none removes it; real devices use subpixel).
   'IM Fell DW Pica',
   'EB Garamond',
-  'TeX Gyre Termes',
-  'TeX Gyre Heros',
+  'TeX Gyre Termes',       // picker: 'Romans'
+  'TeX Gyre Heros',        // picker: 'Swiss'
   'Crimson Pro',
   'Spectral',
-  'Lora',
-  'Gelasio',
   'Gentium Plus',
+  'Libre Baskerville',
+  'Caladea',
   'Cormorant Garamond',
   'Fraunces',
   'Bitter',
+  'Zilla Slab',
   'Carlito',
   'Atkinson Hyperlegible',
   'JetBrains Mono',
+  'Courier Prime',
+  // REMOVED 2026-07-16: Lora + Gelasio — dropped from the picker AND from fetch-fonts, so their
+  // faces are no longer served; legacy marks fall down their own stacks to system fonts, which are
+  // uncertifiable by definition. Listing them here would let the engine compute a wrap for a face
+  // that isn't loaded.
+  // EXCLUDED — Inter: it CERTIFIES on both engines (canvas↔DOM Δ0.0002 WebKit / 0.0151 Chromium)
+  // yet its Chromium DOM wrap ≠ its WebKit DOM wrap — the one font of 18 that breaks the
+  // cross-device invariant. Cause (measured, not guessed): Inter carries an OPTICAL SIZE (opsz)
+  // axis and CSS defaults to `font-optical-sizing: auto`; Chromium resolves opsz from the
+  // font-size, WebKit does not → different advances → different wrap (Δ −12.5px @18px).
+  //   font-optical-sizing:auto → C 662.31 vs W 674.86   ✗
+  //   font-optical-sizing:none → C 674.86 vs W 674.86   ✓ (Δ 0)
+  //   font-variation-settings:"opsz" 14 → both 674.86   ✓ (Δ 0)
+  // So Inter is shippable ONLY if its StyleBar css stack pins `font-optical-sizing: none` (or a
+  // fixed opsz); then it can be added here. THE GENERAL RULE: any variable font with an opsz axis
+  // is a cross-device hazard at CSS defaults — pin it or don't ship it.
 ])
 
 // Parse the leading family token out of a CSS font-family stack. Handles quoted ('..'/".." ) and
@@ -228,6 +250,31 @@ export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible
 // itself snapped to the grid first (round), matching how the browser stores the computed size.
 export function snappedLineHeight(fontSizePx: number, ratio: number): number {
   return Math.floor(ratio * Math.round(fontSizePx * 64)) / 64
+}
+
+// ─── ENGINE CAPABILITY GATE (2026-07-16 — the WebKit finding) ──────────────────────────────────
+// The editor renders with ligatures OFF (.ProseMirror { font-variant-ligatures: none }); canvas
+// measureText applies them by DEFAULT, and the ONLY lever is ctx.textRendering = 'optimizeSpeed'.
+// Chromium exposes it. Playwright's WebKit build does NOT ('textRendering' in ctx === false), and
+// the obvious substitute was MEASURED AND FAILS: injecting U+200C (ZWNJ) between ligature pairs
+// does not reproduce the editor's advances on any tested family. With no lever, canvas measures
+// "first"/"office"/"affluent" 2-5px NARROWER than the editor renders them (measured Δ up to 41px
+// across the corpus) and the engine would take words the browser drops — a wrong wrap, i.e. wrong
+// words on a page. So where this returns FALSE the arithmetic path MUST NOT RUN; defer to the DOM
+// measure, which is always correct.
+//
+// ⚠ OPEN QUESTION, do not assume either way: Playwright's WebKit is the GTK/WPE port (FreeType +
+// HarfBuzz) with a spoofed "Version/26.4 Safari" UA. Apple's iOS/macOS Safari is a different build
+// on CoreText and MAY expose ctx.textRendering. This gate is capability-detected, not UA-sniffed,
+// so it self-corrects: on a Safari that has the API the engine simply turns on. Whether that is
+// today's iOS needs a REAL-DEVICE check — and it matters, because the phone is exactly where the
+// engine's win lives (it eliminates the 400-1100ms forced canonical reflow).
+export function canvasCanMatchEditorShaping(): boolean {
+  if (typeof document === 'undefined') return false
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    return !!ctx && 'textRendering' in ctx
+  } catch { return false }
 }
 
 // ─── Canvas measure ───────────────────────────────────────────────────────────────────────────

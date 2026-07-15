@@ -25,10 +25,22 @@ const stubMeasure = (w = 10): Measure => (text, cssFont) => {
 }
 
 describe('certification', () => {
-  it('has the 15 certified families', () => {
-    expect(CERTIFIED_FAMILIES.size).toBe(15)
+  it('has the 17 cross-engine-verified families', () => {
+    expect(CERTIFIED_FAMILIES.size).toBe(17)
     expect(CERTIFIED_FAMILIES.has('EB Garamond')).toBe(true)
     expect(CERTIFIED_FAMILIES.has('Times New Roman')).toBe(false)
+  })
+  it('excludes Inter — it certifies on both engines but its DOM wrap differs across them (opsz)', () => {
+    expect(CERTIFIED_FAMILIES.has('Inter')).toBe(false)
+  })
+  it('excludes Lora/Gelasio — no longer served, so their marks fall back to system fonts', () => {
+    expect(CERTIFIED_FAMILIES.has('Lora')).toBe(false)
+    expect(CERTIFIED_FAMILIES.has('Gelasio')).toBe(false)
+  })
+  it('includes the newly-verified faces', () => {
+    for (const f of ['Libre Baskerville', 'Caladea', 'Zilla Slab', 'Courier Prime']) {
+      expect(CERTIFIED_FAMILIES.has(f), f).toBe(true)
+    }
   })
   it('parses the primary family out of a stack (quoted or bare)', () => {
     expect(primaryFamily(EB)).toBe('EB Garamond')
