@@ -1,6 +1,7 @@
 // Fetch the NON-SHIPPED families (the r7/r8 FAILED list + the certified-but-cut list) into a temp
 // dir so the corrected certification can re-test them. Shipped families come from public/fonts.
-import { mkdirSync, writeFileSync, existsSync } from 'fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { join } from 'path'
 const OUT = '/tmp/iw-calib-fonts'
 mkdirSync(OUT, { recursive: true })
@@ -22,6 +23,17 @@ const FAMS = {
   'Quattrocento': ['Quattrocento:wght@400;700'],
   'STIX Two Text': ['STIX+Two+Text:ital,wght@0,400;0,700;1,400;1,700'],
   'Inter': ['Inter:ital,opsz,wght@0,14..32,400;0,14..32,700;1,14..32,400;1,14..32,700'],
+  // ── GENRE CANDIDATES (2026-07-16): one more quality face for SANS / SLAB / MONO ──
+  'Zilla Slab': ['Zilla+Slab:ital,wght@0,400;0,700;1,400;1,700'],
+  'Roboto Slab': ['Roboto+Slab:wght@400;700'],           // NB: upstream has NO italic
+  'Arvo': ['Arvo:ital,wght@0,400;0,700;1,400;1,700'],
+  'Aleo': ['Aleo:ital,wght@0,400;0,700;1,400;1,700'],
+  'Courier Prime': ['Courier+Prime:ital,wght@0,400;0,700;1,400;1,700'],
+  'TeX Gyre Cursor': [],                                  // GUST Courier clone — DIRECT from CTAN
+  // DISPLAY candidates (2026-07-16)
+  'Playfair Display': ['Playfair+Display:ital,wght@0,400;0,700;1,400;1,700'],
+  'Bodoni Moda': ['Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,700;1,6..96,400;1,6..96,700'],
+  'Prata': ['Prata:wght@400'],                            // NB: upstream is 400 ONLY
   // ── CERTIFIED but cut for palette budget ──
   'Cardo': ['Cardo:ital,wght@0,400;0,700;1,400'],
   'Noto Sans': ['Noto+Sans:ital,wght@0,400;0,700;1,400;1,700'],
@@ -31,12 +43,18 @@ const FAMS = {
   'Nimbus Roman': [], // URW base35 — not on Google Fonts; direct below
 }
 const DIRECT = {
-  // Nimbus Roman No9 L (URW, the ancestor of TeX Gyre Termes) — from CTAN's urw base35 mirror.
+  // TeX Gyre Cursor — GUST's Courier clone, metric-compatible with Courier New (GUST Font Licence).
+  // Same CTAN path pattern that already ships Termes ('Times') and Heros ('Arial') in fetch-fonts.mjs.
+  'TeX Gyre Cursor': [
+    [400, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyrecursor-regular.otf'],
+    [700, 'normal', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyrecursor-bold.otf'],
+    [400, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyrecursor-italic.otf'],
+    [700, 'italic', 'https://mirrors.ctan.org/fonts/tex-gyre/opentype/texgyrecursor-bolditalic.otf'],
+  ],
+  // Nimbus Roman No9 L (URW, TeX Gyre Termes' ancestor). The base35 path 404s; left here documented
+  // as still-unfetched rather than silently dropped.
   'Nimbus Roman': [
     [400, 'normal', 'https://mirrors.ctan.org/fonts/urw/base35/NimbusRoman-Regular.otf'],
-    [700, 'normal', 'https://mirrors.ctan.org/fonts/urw/base35/NimbusRoman-Bold.otf'],
-    [400, 'italic', 'https://mirrors.ctan.org/fonts/urw/base35/NimbusRoman-Italic.otf'],
-    [700, 'italic', 'https://mirrors.ctan.org/fonts/urw/base35/NimbusRoman-BoldItalic.otf'],
   ],
 }
 
@@ -55,11 +73,15 @@ for (const [fam, specs] of Object.entries(FAMS)) {
     let ok = 0
     for (const [wt, st, url] of DIRECT[fam]) {
       try {
-        const rr = await fetch(url, { headers: { 'User-Agent': UA } })
-        if (!rr.ok) continue
-        const buf = Buffer.from(await rr.arrayBuffer())
+        // CTAN 307-redirects to a regional mirror and node's fetch fails on that hop
+        // ("fetch failed") while curl -L handles it — so shell out. Same URLs fetch-fonts.mjs
+        // already ships Termes/Heros from.
         const f = `calib-${fam.replace(/\W+/g, '-').toLowerCase()}-${wt}-${st}.otf`
-        writeFileSync(join(OUT, f), buf)
+        execFileSync('curl', ['-sL', '--max-time', '60', '-o', join(OUT, f), url])
+        const buf = readFileSync(join(OUT, f))
+        // sanity: a real OTF/TTF starts with OTTO / 0x00010000 / true — never an HTML error page
+        const magic = buf.slice(0, 4).toString('hex')
+        if (buf.length < 5000 || !['4f54544f', '00010000', '74727565'].includes(magic)) continue
         css.push(`@font-face{font-family:'${fam}';font-style:${st};font-weight:${wt};src:url(/calib/${f}) format('opentype');font-display:block}`)
         ok++; n++
       } catch { /* skip */ }

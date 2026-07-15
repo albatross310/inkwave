@@ -83,20 +83,31 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(port, r))
 
 // family → its verdict in the round-7/8 grid (CLAUDE.md), for the old-vs-new table.
-const OLD = {
-  'IM Fell DW Pica': 'CERTIFIED+SHIPPED', 'EB Garamond': 'CERTIFIED+SHIPPED', 'TeX Gyre Termes': 'CERTIFIED+SHIPPED',
-  'TeX Gyre Heros': 'CERTIFIED+SHIPPED', 'Crimson Pro': 'CERTIFIED+SHIPPED', 'Spectral': 'CERTIFIED+SHIPPED',
-  'Lora': 'CERTIFIED+SHIPPED', 'Gelasio': 'CERTIFIED+SHIPPED', 'Gentium Plus': 'CERTIFIED+SHIPPED',
-  'Cormorant Garamond': 'CERTIFIED+SHIPPED', 'Fraunces': 'CERTIFIED+SHIPPED', 'Bitter': 'CERTIFIED+SHIPPED',
-  'Carlito': 'CERTIFIED+SHIPPED', 'Atkinson Hyperlegible': 'CERTIFIED+SHIPPED', 'JetBrains Mono': 'CERTIFIED+SHIPPED',
-  'Tinos': 'FAILED', 'Arimo': 'FAILED', 'Caladea': 'FAILED', 'Vollkorn': 'FAILED', 'Libre Baskerville': 'FAILED',
-  'PT Serif': 'FAILED', 'Source Serif 4': 'FAILED', 'Alegreya': 'FAILED', 'Baskervville': 'FAILED',
-  'Libre Caslon Text': 'FAILED', 'Quattrocento': 'FAILED', 'STIX Two Text': 'FAILED', 'Inter': 'FAILED(700)',
-  'Cardo': 'CERTIFIED-cut', 'Noto Sans': 'CERTIFIED-cut', 'Noto Serif': 'CERTIFIED-cut', 'Open Sans': 'CERTIFIED-cut',
-  'Fira Code': 'CERTIFIED-cut', 'Nimbus Roman': 'CERTIFIED-cut',
+// GENRE CANDIDATE RUN (2026-07-16): one more quality face for SANS / SLAB / MONO / DISPLAY.
+// fam → [genre, prior verdict, role]. Incumbents are included so distinctness is MEASURED, not asserted.
+const FAM = {
+  'Inter':                 ['SANS',    'r9 CERTIFIED (r7 said FAILED-700)', 'candidate'],
+  'TeX Gyre Heros':        ['SANS',    'shipped',   'incumbent'],
+  'Carlito':               ['SANS',    'shipped',   'incumbent'],
+  'Atkinson Hyperlegible': ['SANS',    'shipped',   'incumbent'],
+  'Zilla Slab':            ['SLAB',    'untested',  'candidate'],
+  'Roboto Slab':           ['SLAB',    'untested',  'candidate'],
+  'Arvo':                  ['SLAB',    'untested',  'candidate'],
+  'Aleo':                  ['SLAB',    'untested',  'candidate'],
+  'Bitter':                ['SLAB',    'shipped',   'incumbent'],
+  'Courier Prime':         ['MONO',    'untested',  'candidate'],
+  'TeX Gyre Cursor':       ['MONO',    'untested',  'candidate'],
+  'Fira Code':             ['MONO',    'r7 CERTIFIED-cut', 'candidate'],
+  'JetBrains Mono':        ['MONO',    'shipped',   'incumbent'],
+  'Playfair Display':      ['DISPLAY', 'untested',  'candidate'],
+  'Bodoni Moda':           ['DISPLAY', 'untested',  'candidate'],
+  'Prata':                 ['DISPLAY', 'untested',  'candidate'],
+  'Alegreya':              ['DISPLAY', 'r9 CERTIFIED (r7 said FAILED)', 'candidate'],
+  'Cormorant Garamond':    ['DISPLAY', 'shipped',   'incumbent'],
+  'Fraunces':              ['DISPLAY', 'shipped',   'incumbent'],
 }
-const BASKERVILLE = new Set(['Libre Baskerville', 'Baskervville', 'Libre Caslon Text', 'Quattrocento'])
-const FAMILIES = Object.keys(OLD)
+const OLD = Object.fromEntries(Object.entries(FAM).map(([k, v]) => [k, v[1]]))
+const FAMILIES = Object.keys(FAM)
 
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1400, height: 2400 } })
@@ -149,11 +160,42 @@ const results = await page.evaluate(async (families) => {
     + 'must eventually straddle a boundary somewhere in its many wrapped lines and every break must land identically ').repeat(3)
   const SIZES = [10.6667, 14.6667, 18, 24, 32, 48, 96]
   const VARIANTS = [{ w: 400, st: 'normal' }, { w: 700, st: 'normal' }, { w: 400, st: 'italic' }, { w: 700, st: 'italic' }]
+  // DECLARED faces: enumerate the real @font-face rules. document.fonts.check() is useless here
+  // (true for absent families AND for missing weights the browser will SYNTHESISE). A variable font
+  // declares a weight RANGE ("100 900"), so cover-test against the range.
+  const declaredFor = (fam) => {
+    const list = []
+    document.fonts.forEach((f) => { if (f.family.replace(/['"]/g, '') === fam) list.push({ w: String(f.weight), st: f.style }) })
+    return list
+  }
+  const covers = (faces, w, st) => faces.some((f) => {
+    if (f.st !== st) return false
+    const m = f.w.match(/(\d+)(?:\s+(\d+))?/)
+    if (!m) return false
+    const lo = +m[1], hi = m[2] ? +m[2] : lo
+    return w >= lo && w <= hi
+  })
+  // Typographic character, measured (for the distinctness/quality call, not just parity).
+  const metrics = (fam) => {
+    const c = document.createElement('canvas').getContext('2d')
+    c.font = `400 100px '${fam}', serif`
+    const setW = c.measureText('Handgloves quartz jumps').width
+    const x = c.measureText('x'), H = c.measureText('H'), p = c.measureText('p')
+    const xh = x.actualBoundingBoxAscent, cap = H.actualBoundingBoxAscent, desc = p.actualBoundingBoxDescent
+    return { setW: +setW.toFixed(1), xh: +xh.toFixed(1), cap: +cap.toFixed(1), xcap: +(xh / cap).toFixed(3), desc: +desc.toFixed(1) }
+  }
   const out = []
 
   for (const fam of families) {
     const res = { fam, cells: 0, maxAdv: 0, maxAdvLegacy: 0, advFails: [], legacyAdvFails: [], wrapFails: [], missing: [], boxFail: null, notes: [] }
     if (!(await reallyLoaded(fam))) { res.verdict = 'NOT-LOADED'; out.push(res); continue } // never certify a fallback
+    const faces = declaredFor(fam)
+    res.declared = faces.map((f) => `${f.w}/${f.st}`).join(' ')
+    res.synth = [] // variants with NO upstream face → the browser SYNTHESISES (fake bold / oblique)
+    for (const v of [{ w: 400, st: 'normal' }, { w: 700, st: 'normal' }, { w: 400, st: 'italic' }, { w: 700, st: 'italic' }]) {
+      if (!covers(faces, v.w, v.st)) res.synth.push(`${v.w}${v.st[0]}`)
+    }
+    res.metrics = metrics(fam)
     for (const v of VARIANTS) {
       const spec = `${v.st === 'italic' ? 'italic ' : ''}${v.w} 18px '${fam}'`
       let loaded = false
@@ -238,45 +280,36 @@ const results = await page.evaluate(async (families) => {
 
 // ── report ──
 const pad = (s, n) => String(s).padEnd(n)
-console.log('\n=== ROUND-9 FONT CERTIFICATION — re-run in the EDITOR\'S REAL CONTEXT ===')
+console.log('\n=== GENRE CANDIDATE CERTIFICATION — editor\'s real context ===')
 console.log('    (.ProseMirror + real prosemirror.css: break-spaces + font-variant-ligatures:none;')
-console.log('     canvas = the shipped makeCanvasMeasure(); breaks = the shipped layoutParagraph())\n')
-console.log(pad('FAMILY', 22) + pad('r7/r8 SAID', 14) + pad('LEGACY-CTX A/B', 16) + pad('NEW (real ctx)', 20) + pad('maxΔ', 9) + 'NOTE')
-console.log(pad('', 22) + pad('(CLAUDE.md)', 14) + pad('(liga ON, r7 ctx)', 16) + pad('(liga OFF, editor)', 20))
-console.log('-'.repeat(120))
-const changed = []
-for (const r of results) {
-  const old = OLD[r.fam]
-  const oldPass = old.startsWith('CERTIFIED')
-  const newPass = r.verdict === 'CERTIFIED'
-  let note = ''
-  if (r.verdict === 'NO-FACES') note = 'no faces loaded — NOT re-tested'
-  else if (r.advFails.length) note = 'advance: ' + r.advFails.join('; ')
-  else if (r.wrapFails.length) note = 'wrap: ' + r.wrapFails.join('; ')
-  else if (r.boxFail) note = 'line-box: ' + r.boxFail
-  else note = 'all cells pass'
-  if (r.missing.length) note += `  [faces missing: ${r.missing.join(',')}]`
-  if (r.wrapSkipped) note += `  [wrap cells ${r.wrapRun || 0} run / ${r.wrapSkipped} skipped]`
-  else if (r.wrapRun) note += `  [wrap ${r.wrapRun}/${r.wrapRun}]`
-  const flip = (r.verdict !== 'NO-FACES' && r.verdict !== 'NOT-LOADED') && oldPass !== newPass ? (newPass ? ' ⬆PASSES' : ' ⬇FAILS') : ''
-  if (flip) changed.push({ fam: r.fam, old, now: r.verdict, note })
-  const legacy = r.legacyVerdict ? `${r.legacyVerdict}(Δ${(r.maxAdvLegacy ?? 0).toFixed(3)})` : '-'
-  console.log(pad(r.fam, 22) + pad(old.replace('CERTIFIED', 'CERT'), 14) + pad(legacy, 16) + pad(r.verdict + flip, 20) + pad(r.maxAdv.toFixed(4), 9) + note.slice(0, 44))
+console.log('     canvas = shipped makeCanvasMeasure(); breaks = shipped layoutParagraph(); Δ in px)\n')
+const byGenre = {}
+for (const r of results) { const g = FAM[r.fam][0]; (byGenre[g] ||= []).push(r) }
+for (const [genre, rows] of Object.entries(byGenre)) {
+  console.log(`── ${genre} ──`)
+  console.log('  ' + pad('FAMILY', 22) + pad('ROLE', 11) + pad('VERDICT', 12) + pad('maxΔ', 9) + pad('wrap', 7) + pad('x/cap', 7) + pad('setW', 7) + 'UPSTREAM FACES / NOTE')
+  for (const r of rows) {
+    const [, , role] = FAM[r.fam]
+    const wrap = r.wrapSkipped ? `${r.wrapRun || 0}/${(r.wrapRun || 0) + r.wrapSkipped}` : `${r.wrapRun || 0}/${r.wrapRun || 0}`
+    let note = r.verdict === 'NOT-LOADED' ? 'font never loaded — NOT tested'
+      : r.advFails.length ? 'adv: ' + r.advFails[0]
+      : r.wrapFails.length ? 'wrap: ' + r.wrapFails[0]
+      : r.boxFail ? 'line-box: ' + r.boxFail : 'all cells pass'
+    if (r.synth && r.synth.length) note += `  ⚠ SYNTHESISED: ${r.synth.join(',')} (no upstream face)`
+    const m = r.metrics || {}
+    console.log('  ' + pad(r.fam, 22) + pad(role, 11) + pad(r.verdict, 12) + pad((r.maxAdv ?? 0).toFixed(4), 9) + pad(wrap, 7) + pad(m.xcap ?? '-', 7) + pad(m.setW ?? '-', 7) + note.slice(0, 52))
+  }
+  console.log('')
 }
-console.log('\n── HEADLINES ──')
-const shipped = results.filter((r) => OLD[r.fam] === 'CERTIFIED+SHIPPED')
-const shipFail = shipped.filter((r) => r.verdict !== 'CERTIFIED')
-const notLoaded = results.filter((r) => r.verdict === 'NOT-LOADED')
-console.log(`(a) all 15 SHIPPED fonts still pass?  ${shipFail.length === 0 ? 'YES — all 15 CERTIFIED' : 'NO ⚠️  → ' + shipFail.map((r) => r.fam + ':' + r.verdict).join(', ')}`)
-const nowPass = results.filter((r) => OLD[r.fam].startsWith('FAILED') && r.verdict === 'CERTIFIED')
-console.log(`(b) previously-FAILED fonts that now PASS: ${nowPass.length ? nowPass.map((r) => r.fam).join(', ') : 'none'}`)
-const bask = results.filter((r) => BASKERVILLE.has(r.fam))
-const baskPass = bask.filter((r) => r.verdict === 'CERTIFIED')
-console.log(`(c) Baskerville genre back on the table?  ${baskPass.length ? 'YES → ' + baskPass.map((r) => r.fam).join(', ') : 'no — ' + bask.map((r) => `${r.fam}:${r.verdict}`).join(', ')}`)
-const cut = results.filter((r) => OLD[r.fam] === 'CERTIFIED-cut')
-console.log(`(d) certified-but-cut re-confirmed: ${cut.map((r) => `${r.fam}:${r.verdict}`).join(', ')}`)
-if (notLoaded.length) console.log(`(!) NOT RE-TESTED (font never loaded — would have certified the FALLBACK): ${notLoaded.map((r) => r.fam).join(', ')}`)
-console.log('\nLEGACY-CTX A/B = the same grid in r7/r8\'s context (plain host + canvas defaults, ligatures ON on both sides).')
-console.log('It reproduces r7\'s verdict, so a family that is FAIL there and CERTIFIED in the real context moved on the LIGATURE axis.')
+const cands = results.filter((r) => FAM[r.fam][2] === 'candidate')
+const pass = cands.filter((r) => r.verdict === 'CERTIFIED')
+console.log('── SUMMARY ──')
+console.log(`candidates CERTIFIED: ${pass.map((r) => r.fam).join(', ') || 'none'}`)
+const fail = cands.filter((r) => r.verdict !== 'CERTIFIED')
+console.log(`candidates NOT certified: ${fail.map((r) => `${r.fam}(${r.verdict})`).join(', ') || 'none'}`)
+const synth = results.filter((r) => r.synth && r.synth.length)
+console.log(`⚠ synthesised variants (no upstream face): ${synth.map((r) => `${r.fam}[${r.synth.join(',')}]`).join(', ') || 'none'}`)
+console.log('\nx/cap = x-height ÷ cap-height (higher = larger on the body / more contemporary).')
+console.log('setW  = width of "Handgloves quartz jumps" @100px (lower = more economical).')
 await browser.close()
 server.close()
