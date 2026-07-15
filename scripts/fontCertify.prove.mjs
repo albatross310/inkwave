@@ -99,13 +99,11 @@ const FAM = {
   'TeX Gyre Cursor':       ['MONO',    'untested',  'candidate'],
   'Fira Code':             ['MONO',    'r7 CERTIFIED-cut', 'candidate'],
   'JetBrains Mono':        ['MONO',    'shipped',   'incumbent'],
-  'Playfair Display':      ['DISPLAY', 'untested',  'candidate'],
-  'Bodoni Moda':           ['DISPLAY', 'untested',  'candidate'],
-  'Prata':                 ['DISPLAY', 'untested',  'candidate'],
-  'Alegreya':              ['DISPLAY', 'r9 CERTIFIED (r7 said FAILED)', 'candidate'],
-  'Cormorant Garamond':    ['DISPLAY', 'shipped',   'incumbent'],
-  'Fraunces':              ['DISPLAY', 'shipped',   'incumbent'],
 }
+// DISPLAY was dropped from this run (2026-07-16): Peter was asking what "display font" MEANS, not
+// asking for another one. Cormorant + Fraunces stay as-is. (Playfair Display / Bodoni Moda / Prata /
+// Alegreya were measured in an earlier pass and all certified except for Prata's synthesised
+// bold+italics — recorded here only so nobody re-runs them by accident.)
 const OLD = Object.fromEntries(Object.entries(FAM).map(([k, v]) => [k, v[1]]))
 const FAMILIES = Object.keys(FAM)
 
