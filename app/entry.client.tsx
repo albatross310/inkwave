@@ -9,6 +9,20 @@ console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:
 import { applyTheme } from '../src/editor/theme'
 applyTheme()
 
+// Experimental flags are togglable via URL so they can be flipped ON A PHONE without a console
+// (mirrors the ?auth sticky pattern in auth/config): `?<flag>` sets it sticky in localStorage,
+// `?<flag>=off` clears it. Runs before the app reads any flag. e.g. visit `/?arithZoom` to try
+// windowed-zoom on device, `/?arithZoom=off` to disable.
+;(() => {
+  try {
+    const params = new URLSearchParams(location.search)
+    for (const f of ['arithZoom', 'arithLayout', 'renderFill', 'waveVideo']) {
+      if (params.get(f) === 'off') localStorage.removeItem(`inkwave:${f}`)
+      else if (params.has(f)) localStorage.setItem(`inkwave:${f}`, '1')
+    }
+  } catch { /* private mode / no localStorage */ }
+})()
+
 // Wrap the app in Clerk ONLY when configured (paid-tier auth, M6). Dynamic import keeps Clerk out
 // of the bundle entirely when unconfigured, and entry.client is client-only so it never touches
 // the prerender/SSR build. The publishable key is public (safe in the client).
