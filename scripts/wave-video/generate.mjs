@@ -49,7 +49,14 @@ const LADDER = [
 ]
 const DT_CONTENT = 16.2 // ms of animation time per video frame (120 per 1944ms tile loop)
 const FPS = 60
-const LOOP_FRAMES = 120 // one tile loop (k=1 — the smallest; the lines close seamlessly)
+// LOOP LENGTH. 120 = ONE tile loop (k=1, 2.0s): the wave LINES close exactly (the tile is
+// 140px-periodic), but the glitters/marks are mid-schedule at the wrap → a sparse seam pop
+// (measured 0.27% of px, a few instances). 1440 = the FULL POOL CYCLE (k=12, 23.328s): every
+// animation period divides the span, so the seam is EXACT (frame 1440 ≡ frame 0, byte-identical)
+// and there is no pop at all — at ~8-12× the bytes. k=1 is the shipped default; set
+// LOOP_FRAMES=1440 for the seam-exact clip once the capture harness is stable for long runs
+// (2026-07-15: the headless renderer dies silently past ~100-400 frames — see the report).
+const LOOP_FRAMES = Number(process.env.LOOP_FRAMES || 120)
 const CRF_AV1 = process.env.CRF_AV1 || '58'
 const CRF_H264 = process.env.CRF_H264 || '30'
 const PORT = Number(process.env.PORT || 4319)
@@ -102,15 +109,16 @@ async function capture(rung, theme, mode /* 'loop' | 'brake' */, dir) {
   await page.evaluate(() => { window.__iwBlock = true; window.dispatchEvent(new Event('inkwave:open-begin')) })
   await page.waitForFunction(() => document.getAnimations().some((a) => a.animationName === 'iw-wave-drift-l'), null, { timeout: 20000 })
   await page.waitForTimeout(2500)
-  // STATIC single-band marks: show the rest layer (static texture, no blink) + drift it with the
-  // wave (same tile-drift keyframes) so the marks ride the wave and the lines still loop seamlessly.
-  await page.addStyleTag({ content: `
-    .iw-twk-dashes .iw-twk-blink { display: none !important; }
-    .iw-twk-dashes .iw-twk-rest { opacity: 1 !important; }
-    .iw-twk-dashes .iw-twk-dash-i { opacity: 1 !important; }
-    .iw-twk-dashes .iw-twk-field.iw-twk-fa { animation: iw-wave-drift-l 1.944s linear infinite !important; }
-    .iw-twk-dashes .iw-twk-field.iw-twk-fb { animation: iw-wave-drift-r 1.944s linear infinite !important; }
-  ` })
+  // NB: NO "static marks" injection (2026-07-15 — measured, geometrically impossible). Baking the
+  // marks STATIC and drifting them with the wave needs the mark field to be 140px-PERIODIC, or the
+  // 140px drift loop teleports every mark at each wrap. It is not: of 117 marks, ZERO have a
+  // partner at x+140 and x-mod-140 spreads over 81 distinct values across the ~1783px strip — a
+  // static field on the tile drift would snap ~139px every 1.944s (a whole-field jump, far worse
+  // than any seam). The BLINK design is exactly what makes marks work against a drifting wave:
+  // each rides a wave-locked slot ~1s then relocates in its dark window, and the whole schedule is
+  // CYCLE-periodic — so the video simply bakes the water AS IT IS and loops at the FULL CYCLE
+  // (LOOP_FRAMES 1440 = 23.328s), where every animation period divides the span and the seam is
+  // EXACT (verified below by a byte-compare of frame N against frame 0).
   await page.evaluate(() => {
     const anims = document.getAnimations()
     const drift = anims.find((a) => a.animationName === 'iw-wave-drift-l')
