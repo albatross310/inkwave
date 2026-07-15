@@ -223,6 +223,19 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
       <span
         contentEditable={false}
         style={{
+          // OPAQUE BOX (2026-07-16, Peter — the citation-eligibility unlock): the injected PM sheet
+          // gives every [contenteditable=false] subtree `white-space: normal`, so a citation's label
+          // used to FLOW IN THE PARENT'S LINE under a DIFFERENT wrap rule (normal HANGS its trailing
+          // space + collapses space runs; the surrounding body text is break-spaces, which does
+          // neither). That made a citation-bearing paragraph genuinely mixed-mode — unmodellable by
+          // the arithmetic layout engine, so every one of them deferred to the full DOM reflow.
+          // `nowrap` removes every break opportunity INSIDE the label, so the parent line can only
+          // break BEFORE or AFTER it: the citation becomes one unbreakable inline box whose width is
+          // measurable once and cached (see citeBox.ts). The mixed mode can no longer leak into the
+          // parent's line breaking because there is nothing inside left to break.
+          // TRADEOFF (Peter approved): a long citation now moves to the next line WHOLE rather than
+          // splitting mid-label — which is what you usually want typographically anyway.
+          whiteSpace: 'nowrap',
           // via a CSS var so night mode can recolour citations (light blue) without an inline override.
           color: hasMissing ? '#b91c1c' : 'var(--iw-cite-color, #5c2d8a)',
           background: selected ? `${INK}18` : undefined,
