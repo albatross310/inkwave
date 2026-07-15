@@ -49,8 +49,13 @@ export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chun
 let _arithLayoutFlag: boolean | null = null
 function arithLayoutOn(): boolean {
   if (_arithLayoutFlag !== null) return _arithLayoutFlag
-  // DEFAULT ON (2026-07-15, Peter: "make all the changes live") — opt OUT with ?arithLayout=off.
-  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') !== '0' } catch { _arithLayoutFlag = false }
+  // DEFAULT OFF (2026-07-15): reverted from default-on. The arith greedy wrap DIVERGES from the DOM
+  // canonical measure on REAL eligible prose — deterministic, ~1 break in 20 (arith fits ~2 more
+  // words on a borderline line; measured on the real Honours prose fixture). Docs that are FULLY
+  // eligible (plain prose, no citations/lists/rules) would get wrong breaks vs canonical/print.
+  // Root-cause the wrap first (engine measureText-vs-browser edge, or wire-in param mismatch);
+  // until it's byte-identical on real prose this stays opt-in via ?arithLayout.
+  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
   return _arithLayoutFlag
 }
 const arithMeasureFn = makeCanvasMeasure() // one cached canvas 2d measure, shared across measures
@@ -68,8 +73,11 @@ function arithFaceLoaded(stack: string, sizePx: number): boolean {
 let _renderFillFlag: boolean | null = null
 function renderFillOn(): boolean {
   if (_renderFillFlag !== null) return _renderFillFlag
-  // DEFAULT ON (2026-07-15, Peter: "make all the changes live") — opt OUT with ?renderFill=off.
-  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') !== '0' } catch { _renderFillFlag = false }
+  // DEFAULT OFF (2026-07-15): reverted from default-on. The fill rides the SAME arith greedy wrap
+  // that diverges from the browser's real wrap on eligible prose — a split 2 words off the render
+  // would spill the "filled" last line, so the fill must wait on the wrap root-cause too. (It also
+  // shares the whole-doc eligibility gate, so it never engaged on a citation-heavy doc anyway.)
+  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') === '1' } catch { _renderFillFlag = false }
   return _renderFillFlag
 }
 
