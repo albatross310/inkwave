@@ -230,7 +230,13 @@ const results = await page.evaluate(async ({ fixtures }) => {
   await document.fonts.ready
   const AL = window.AL
   const CAN = { pageW: 793.7007874015748, side: 96, topM: 96, botM: 72, base: 18, ratio: 1.618 }
-  const contentW = CAN.pageW - 2 * CAN.side // 601.70
+  // LAYOUTUNIT SNAP (2026-07-15 — the zoom agent's finding, shipped as 4909016 in the wire-in).
+  // Browsers store used lengths on a 1/64px grid: writing width:601.7008px produces a box that
+  // actually wraps at floor(601.7008*64)/64 = 601.6875. Handing the engine the UNSNAPPED value made
+  // every line 0.0133px too generous — a real (if narrow) chance to take a word the browser drops.
+  // Snap it, and hand the SAME number to the DOM box and the engine so both wrap at one width.
+  const contentWRaw = CAN.pageW - 2 * CAN.side // 601.7007874015748
+  const contentW = Math.floor(contentWRaw * 64) / 64 // 601.6875 — what the browser actually uses
   const pageH = CAN.pageW * (297 / 210)
   const docEl = document.getElementById('doc')
   docEl.style.width = contentW + 'px'
