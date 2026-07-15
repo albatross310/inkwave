@@ -26,11 +26,12 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, getParaSpacingEm, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
-import { buildArithMeasure } from '../arithMeasure'
-import { makeCanvasMeasure } from '../arithmeticLayout'
+import { buildArithMeasure, arithBlockLayout } from '../arithMeasure'
+import { makeCanvasMeasure, type Measure } from '../arithmeticLayout'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
@@ -458,6 +459,15 @@ function computeScoped(
   gapped: boolean,
   ctx: ScopedCtx,
   why: (reason: string) => void = () => {},
+  // ARITH SCOPED (2026-07-16): when supplied, the CHANGED blocks are laid out ARITHMETICALLY
+  // instead of measured live. That removes the only reason this path needs a forced canonical
+  // context — so the caller runs it with NO force and NO reflow at all. Any changed block that
+  // isn't arithmetic-eligible ⇒ null ⇒ the caller falls back to the DOM scoped measure.
+  arithOpts?: {
+    contentW: number; ratio: number; paraSpacingEm: number
+    measure: Measure; fontLoaded: (stack: string, sizePx: number) => boolean
+    citationStyle: string; bibEpoch: number
+  },
 ): { set: DecorationSet; sig: string; meta: IncMeta } | null {
   const doc = view.state.doc
   const newNodes: object[] = []
@@ -478,7 +488,7 @@ function computeScoped(
 
   // Natural wrapping around the edit: clear gap widgets inside/adjacent to the changed region
   // (the full measure clears the WHOLE set for exactly this; the final dispatch replaces it all).
-  if (changedNew.length) {
+  if (changedNew.length && !arithOpts) {
     const clearTo = (en + 1 < newNodes.length ? newOffsets[en + 1] : doc.content.size) + 1
     ctx.clearGapsIn(newOffsets[s], clearTo)
   }
@@ -503,10 +513,30 @@ function computeScoped(
     try { const range = document.createRange(); range.selectNodeContents(el); return Array.from(range.getClientRects()) } catch { return [] }
   }
 
-  // ── measure the changed blocks LIVE in the canonical window ──
+  // ── the changed blocks: ARITHMETIC when eligible (no DOM), else measured LIVE ──
   const changedEntries: BlockLines[] = []
   const changedAdvances: number[] = []
-  if (changedNew.length) {
+  if (arithOpts && changedNew.length) {
+    for (let i = 0; i < changedNew.length; i++) {
+      const lay = arithBlockLayout(
+        changedNew[i] as PMNode, arithOpts.contentW, arithOpts.ratio, arithOpts.paraSpacingEm,
+        arithOpts.measure, arithOpts.fontLoaded, arithOpts.citationStyle, arithOpts.bibEpoch,
+      )
+      if (!lay) { why('arith-ineligible'); return null }
+      changedEntries.push({
+        atomLike: false,
+        relStart: 0,                    // a paragraph's own start IS its offset ($p.before(1))
+        relEnd: lay.relEnd,
+        relTops: lay.relTops,
+        // Never read: relPos is BAKED (arithmetic positions are exact), so posOf never hit-tests.
+        relCx: lay.relTops.map(() => 0),
+        relCy: lay.relTops.map(() => 0),
+        relPos: lay.relPos,
+      })
+      changedAdvances.push(lay.advance)
+    }
+    for (let i = 0; i < changedNew.length; i++) cache.set(changedNew[i], changedEntries[i])
+  } else if (changedNew.length) {
     const els: HTMLElement[] = []
     for (let i = 0; i < changedNew.length; i++) {
       const el = renderBlock(newOffsets[s + i])
@@ -1095,6 +1125,53 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // scoped delta on a base the arith era never maintained.
             let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
             let arithMeasured = false
+
+            // ── 1. SCOPED ARITH — the cheapest acquisition there is ──
+            // Only the CHANGED blocks are laid out (arithmetically, ~0.1ms each); everything else
+            // reuses its cached entry at telescoped tops. No forced context, no reflow, no DOM read
+            // at all — which is the whole point: the DOM scoped path's cost IS its forced canonical
+            // context (two full-document reflows on phone, 400–1100ms). Whole-doc arith below still
+            // re-lays every block each pause; this re-lays only what the writer just touched.
+            //
+            // It runs BEFORE whole-doc arith, and unlike that path it PRESERVES incState (it
+            // maintains the incremental base exactly as the DOM scoped path does), so consecutive
+            // typing pauses keep hitting it instead of collapsing back to a full measure.
+            if (arithLayoutOn() && !fluid && incState && !forceFullOnce && !(renderFillOn() && phoneLike())) {
+              const surfaceA = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+              const lhA = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
+              const incA = computeScoped(
+                view, incState, lineCache, pageH, topM, gapped,
+                {
+                  surfaceEl: surfaceA,
+                  scroller: null,
+                  clearGapsIn: () => { /* arith reads no DOM — nothing to clear */ },
+                },
+                (r) => { incStats.reasons[`arith:${r}`] = (incStats.reasons[`arith:${r}`] ?? 0) + 1 },
+                {
+                  contentW: Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64,
+                  ratio: lhA ? parseFloat(lhA) : (phoneLike() ? 1.55 : 1.618),
+                  paraSpacingEm: getParaSpacingEm(),
+                  measure: arithMeasureFn,
+                  fontLoaded: arithFaceLoaded,
+                  citationStyle: getCitationStyle(),
+                  bibEpoch: bibProvider.getVersion(),
+                },
+              )
+              if (incA) {
+                incStats.inc++
+                incState = incA.meta
+                if (incA.sig !== lastLayoutSig) { lastLayoutSig = incA.sig; lastSet = incA.set }
+                ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = incA.sig
+                ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = true
+                view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
+                if (gapped) schedulePaint()
+                announceMeasured()
+                notePerf('page-measure-scoped-arith', performance.now() - measureT0)
+                return
+              }
+            }
+
+            // ── 2. WHOLE-DOC ARITH ──
             if (arithLayoutOn() && !fluid && !forceFullOnce
                 && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
               const contentW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
