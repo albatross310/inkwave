@@ -1342,7 +1342,19 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                               const br = b.getBoundingClientRect()
                               const inner = br.width - (parseFloat(bs.paddingLeft) || 0) - (parseFloat(bs.paddingRight) || 0)
                                 - (parseFloat(bs.borderLeftWidth) || 0) - (parseFloat(bs.borderRightWidth) || 0)
-                              out.push(`   BLOCK BOX: rect.width=${br.width.toFixed(4)} pad=${bs.paddingLeft}/${bs.paddingRight} margin=${bs.marginLeft}/${bs.marginRight} border=${bs.borderLeftWidth}/${bs.borderRightWidth} textIndent=${bs.textIndent} => content=${inner.toFixed(4)} | arith used ${contentW.toFixed(4)}`)
+                              out.push(`   BLOCK BOX: rect.width=${br.width.toFixed(4)} computedWidth=${bs.width} pad=${bs.paddingLeft}/${bs.paddingRight} margin=${bs.marginLeft}/${bs.marginRight} border=${bs.borderLeftWidth}/${bs.borderRightWidth} textIndent=${bs.textIndent} => content=${inner.toFixed(4)} | arith used ${contentW.toFixed(4)}`)
+                              out.push(`   BLOCK CSS: textAlign=${bs.textAlign} textWrap=${(bs as unknown as { textWrap?: string }).textWrap} whiteSpace=${bs.whiteSpace} hyphens=${(bs as unknown as { hyphens?: string }).hyphens} wordBreak=${bs.wordBreak} overflowWrap=${(bs as unknown as { overflowWrap?: string }).overflowWrap} display=${bs.display} boxSizing=${bs.boxSizing}`)
+                              // ⚠️ flagged: a FOCUSED word-cycle turns .scas-red into inline-block+min-width
+                              // → genuinely wider words → narrower effective wrap. Scan for ANY
+                              // descendant that is not flow-neutral.
+                              const bad: string[] = []
+                              b.querySelectorAll('*').forEach((d) => {
+                                const ds = getComputedStyle(d as HTMLElement)
+                                if (ds.display !== 'inline' || (ds.minWidth && ds.minWidth !== '0px' && ds.minWidth !== 'auto') || ds.letterSpacing !== 'normal' || (ds.position !== 'static'))
+                                  bad.push(`<${d.tagName.toLowerCase()} class="${(d.className || '').toString().slice(0, 30)}" display=${ds.display} minW=${ds.minWidth} ls=${ds.letterSpacing} pos=${ds.position}>`)
+                              })
+                              out.push(`   NON-FLOW-NEUTRAL descendants: ${bad.length ? bad.slice(0, 4).join(' | ') : 'NONE'}`)
+                              out.push(`   FULL HTML: ${JSON.stringify((b.innerHTML || '').slice(0, 700))}`)
                             }
                             // Measure the REAL rendered advance of the block's chars 77..163 by
                             // range rects (in situ, with every decoration/mark applied) vs the
