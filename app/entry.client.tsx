@@ -125,11 +125,31 @@ void bootstrap()
       const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
         ? Promise.resolve()
         : new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
+      // Condition 3 (opt-in) — the WAVE VIDEO (flag `inkwave:waveVideo`). Fold the loop's first
+      // decoded frame into the SAME atomic gate so a warm/cached load paints the video AS the water
+      // (no cross-fade). Bounded by the gate's own timeout below — a slow/failed/undecodable video
+      // never holds the page hostage; the CSS water simply opens the gate and the video joins late
+      // (or never, on iOS Low Power / no codec). See src/editor/waveVideo.ts.
+      let videoFlag = false
+      try { videoFlag = localStorage.getItem('inkwave:waveVideo') === '1' } catch { /* private mode */ }
+      const video = videoFlag
+        ? import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {})
+        : Promise.resolve()
       const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
-      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
+      void Promise.all([tiles, twinkles, video]).then(() => { clearTimeout(t); ready() })
     }
   }
 }
+
+// ─── Wave video (EXPERIMENTAL — localStorage `inkwave:waveVideo` = '1') ───
+// Fresh loads fold the video INTO the gate above (atomic). The WARM/bfcache path skips that gate
+// (already stamped), so start it here too — prepareWaveVideo is idempotent (started guard) and
+// attaches post-gate. See src/editor/waveVideo.ts.
+try {
+  if (localStorage.getItem('inkwave:waveVideo') === '1'
+      && document.documentElement.classList.contains('iw-water-ready'))
+    void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo())
+} catch { /* private mode */ }
 
 // Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are
 // the only reliable hook (Safari ignores user-scalable=no in-browser). Our own pinch handlers use

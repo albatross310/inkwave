@@ -48,6 +48,13 @@ self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET' || !req.url.startsWith(self.location.origin)) return
 
+  // Wave videos (/wave/*): CACHE-FIRST (2026-07-15). waveVideo.ts fetches the ONE matched
+  // rung+codec+theme clip via fetch() (a full GET, 200 — NOT a media Range request; the <video>
+  // element plays from an in-memory BLOB, so no 206/Range ever hits the SW), caches it here, and
+  // reuses the blob across editor / new-file / SnapshotView mounts → zero network after first load.
+  // The cache is VERSION-named, so a deploy that regenerates the clips serves the fresh ones (the
+  // old Range-bypass is gone; the clips are tiny — ~32-232KB — and immutable within a build).
+  // Falls through to the cache-first asset path below.
   const accept = req.headers.get('accept') || ''
   const isNavigation = req.mode === 'navigate' || accept.includes('text/html')
 
