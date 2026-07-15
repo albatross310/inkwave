@@ -176,7 +176,7 @@ export const LINE_STABILITY_EPS = 3
 // `mathEligible` reflects whether the collectLines math-pill rect-fix is in place (the wire-in flag).
 // The engine's CAPABILITY is unconditional — it computes math paragraphs correctly either way; the
 // flag only decides whether to trust the DOM verifier over them yet.
-export function blockEligibility(block: ArithBlock, ratio = 1.618, mathEligible = true): Eligibility {
+export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible = true): Eligibility {
   // BLOCK ATOMS (block math, figure): eligible iff they carry a reflow-free box.
   if (block.type !== 'paragraph') {
     return block.blockBox ? { eligible: true, reason: `block-atom:${block.type}` }
