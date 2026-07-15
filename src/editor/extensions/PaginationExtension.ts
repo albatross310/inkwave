@@ -26,9 +26,11 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
+import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, getParaSpacingEm, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
+import { buildArithMeasure } from '../arithMeasure'
+import { makeCanvasMeasure } from '../arithmeticLayout'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
@@ -40,6 +42,20 @@ import { notePerf } from '../perflog'
 const KEY = new PluginKey<DecorationSet>('pagination')
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
+
+// ── Decision 6: ARITHMETIC canonical measure (flag `inkwave:arithLayout`, default OFF) ──────────
+// The third acquisition path — see arithMeasure.ts. Flag cached (a measure-time localStorage read
+// is fine — measures are debounced — but cache it anyway; toggling needs a reload, as usual).
+let _arithLayoutFlag: boolean | null = null
+function arithLayoutOn(): boolean {
+  if (_arithLayoutFlag !== null) return _arithLayoutFlag
+  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
+  return _arithLayoutFlag
+}
+const arithMeasureFn = makeCanvasMeasure() // one cached canvas 2d measure, shared across measures
+function arithFaceLoaded(stack: string, sizePx: number): boolean {
+  try { const fam = stack.split(',')[0].replace(/['"]/g, '').trim(); return typeof document !== 'undefined' && document.fonts.check(`${sizePx}px "${fam}"`) } catch { return false }
+}
 
 export interface PaginationOptions {
   enabled: boolean // measure page breaks at all (the live editor; off for headless/snapshot use)
@@ -1120,6 +1136,32 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // per page changed with the editor zoom at measure time — the "different amount of
             // text per page depending on how zoomed in you are" regression (2026-07-09). Passing
             // no paper/sheet keeps width + margins live; zoom/magnify/font are still pinned.
+            // ── Decision 6: ARITHMETIC canonical acquisition (flag inkwave:arithLayout) ──
+            // When the whole doc is arithmetic-eligible text, compute lines+blocks reflow-free and
+            // SKIP forceCanonicalContext (+ both its full-document reflows) — the phone per-pause
+            // reflow win. Gated to !canonicalIsLive (phone / zoomed): desktop-at-defaults already
+            // skips the reflow, so there's nothing to win and the DOM path stays authoritative.
+            // ANY ineligible block (heading/citation/inline-math/list/rule/refList) ⇒ buildArithMeasure
+            // returns null ⇒ the DOM path below runs. The lazy full DOM re-verify + pagCheck are the
+            // safety net; meta stays null (the next scoped measure bails to full, which is this cheap
+            // arith path again).
+            let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
+            let arithMeasured = false
+            if (arithLayoutOn() && !fluid && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
+              const contentW = pageWidthPx - 2 * getSideMarginPx()
+              const lhRaw = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
+              const ratio = lhRaw ? parseFloat(lhRaw) : (phoneLike() ? 1.55 : 1.618)
+              const am = buildArithMeasure(view.state.doc, contentW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, false)
+              if (am) {
+                const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
+                measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
+                arithMeasured = true
+                notePerf('page-measure-arith', performance.now() - measureT0)
+              }
+            }
+            let tClear = 0, tCompute = 0, tRestore = 0, tDispatch = 0 // perflog phase attribution (DOM path)
+            let tPhase = performance.now()
+            if (!arithMeasured) {
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
             const editorEl = view.dom as HTMLElement
             const restore = !fluid && canonicalIsLive(surfaceEl)
@@ -1138,9 +1180,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               ? surfaceEl : null
             const savedTop = scroller ? scroller.scrollTop : window.scrollY
             const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
-            let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
-            let tClear = 0, tCompute = 0, tRestore = 0, tDispatch = 0 // perflog phase attribution
-            let tPhase = performance.now()
+            tPhase = performance.now()
             try {
               // The gap widgets are display:block, so they FORCE line breaks — which means a word
               // can't wrap back across a page boundary, and measuring the line layout with them
@@ -1167,7 +1207,10 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               else window.scrollTo(savedLeft, savedTop)
               tRestore = performance.now() - tPhase; tPhase = performance.now()
             }
+            } // end DOM-measure path (skipped when arithMeasured)
             const { set, sig } = measured
+            ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = sig
+            ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = arithMeasured
             incStats.full++
             if (!fluid) incState = measured.meta // base for the next incremental (null when poisoned)
             {
