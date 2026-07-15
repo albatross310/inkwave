@@ -215,7 +215,7 @@ export function VerifyModal({
           >
             <input
               type="file"
-              accept={isTouchDevice() ? undefined : '.studio,.inkwave,application/json,.json,.trace.json,.insig.json'}
+              accept={isTouchDevice() ? undefined : '.studio,.inkwave,.gz,application/gzip,application/json,.json,.trace.json,.insig.json'}
               className="hidden"
               onChange={onFile}
             />
