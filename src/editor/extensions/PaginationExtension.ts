@@ -58,6 +58,11 @@ function arithLayoutOn(): boolean {
   try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
   return _arithLayoutFlag
 }
+// `inkwave:arithAssert` — debug: run the DOM collectLines + posAtCoords reference alongside the
+// arith path in the SAME forced canonical context and assert the char-index → docPos convention.
+function arithAssertOn(): boolean {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithAssert') === '1' } catch { return false }
+}
 const arithMeasureFn = makeCanvasMeasure() // one cached canvas 2d measure, shared across measures
 function arithFaceLoaded(stack: string, sizePx: number): boolean {
   try { const fam = stack.split(',')[0].replace(/['"]/g, '').trim(); return typeof document !== 'undefined' && document.fonts.check(`${sizePx}px "${fam}"`) } catch { return false }
@@ -1208,11 +1213,175 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               }
             }
             if (!arithMeasured && arithLayoutOn() && !fluid && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
-              const contentW = pageWidthPx - 2 * getSideMarginPx()
+              // LAYOUTUNIT SNAP (2026-07-15 — the real-prose divergence): the browser stores used
+              // lengths on a 1/64px grid, so a fractional CSS width is FLOORED before any text is
+              // wrapped in it. forceCanonicalContext writes pageWidthPx−2·side (e.g. 601.7008) and
+              // the box that actually wraps is 601.6875 (= 38508/64). Feeding the engine the
+              // unsnapped value makes every line 0.0133px too generous — one borderline word flips,
+              // and the rest of that block re-wraps behind it (probed: Δ cascading 5→32 chars from
+              // the first flip). Snap it exactly as the engine already snaps line heights.
+              const contentW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
               const lhRaw = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
               const ratio = lhRaw ? parseFloat(lhRaw) : (phoneLike() ? 1.55 : 1.618)
               const am = buildArithMeasure(view.state.doc, contentW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, false)
               if (am) {
+                // ── SEAM ASSERTION (debug flag `inkwave:arithAssert`) ──
+                // The convention this wire-in must satisfy: the engine's line-start CHAR INDEX maps
+                // to docPos = paraOffset + 1 + charIndex, and that MUST equal what
+                // posAtCoords(lineRect.left + 1, mid) returns for that line — the live rule
+                // collectLines uses (and the arith prover's verified reference). Run both here, in
+                // the SAME forced canonical context, and compare line-for-line.
+                if (arithAssertOn()) {
+                  const surfaceA = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+                  const restoreA = forceCanonicalContext(
+                    { paper: sheet?.parentElement ?? null, sheet, surface: surfaceA, editor: view.dom as HTMLElement },
+                    { pageWidthPx, sideMarginPx: getSideMarginPx() },
+                  )
+                  const out: string[] = []
+                  try {
+                    const curA = KEY.getState(view.state)
+                    if (curA && curA !== DecorationSet.empty) view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
+                    const edTopA = (view.dom as HTMLElement).getBoundingClientRect().top
+                    const dom = collectLines(view, edTopA, 1, undefined)
+                    if (dom.lines.length !== am.lines.length) out.push(`LINE-COUNT dom=${dom.lines.length} arith=${am.lines.length}`)
+                    const n = Math.min(dom.lines.length, am.lines.length)
+                    let firstBadBlk = -1
+                    for (let k = 0; k < n && out.length < 8; k++) {
+                      const dPos = view.posAtCoords({ left: dom.lines[k].cx, top: dom.lines[k].cy })?.pos ?? 0
+                      const aPos = am.lines[k].pos
+                      if (dPos !== aPos) {
+                        if (firstBadBlk < 0) firstBadBlk = dom.lines[k].blockIdx
+                        out.push(`line${k} blk(dom=${dom.lines[k].blockIdx},ar=${am.lines[k].blockIdx}) posAtCoords=${dPos} arith=${aPos} Δ=${aPos - dPos} domTop=${Math.round(dom.lines[k].top)} arTop=${Math.round(am.lines[k].top)}`)
+                      }
+                    }
+                    // What does the BROWSER actually compute for the diverging block's text, vs what
+                    // our extractor computed arithmetically from the em mark? And is our content
+                    // width the same box the DOM wraps in?
+                    if (firstBadBlk >= 0) {
+                      const bs = am.blocks[firstBadBlk]?.start
+                      const el = bs != null ? (view.nodeDOM(bs) as HTMLElement | null) : null
+                      const span = el?.querySelector('span') ?? el
+                      if (span && span.nodeType === 1) {
+                        const scs = getComputedStyle(span as HTMLElement)
+                        const pcs = getComputedStyle(view.dom as HTMLElement)
+                        // TRUE fractional content box (clientWidth is integer-rounded — useless here),
+                        // plus the widest rendered line: the real wrap width the browser used.
+                        const edRect = (view.dom as HTMLElement).getBoundingClientRect()
+                        const trueContentW = edRect.width - (parseFloat(pcs.paddingLeft) || 0) - (parseFloat(pcs.paddingRight) || 0)
+                        let widest = 0
+                        const rng = document.createRange(); rng.selectNodeContents(el as HTMLElement)
+                        for (const rc of Array.from(rng.getClientRects())) if (rc.width > 1 && rc.height > 1 && rc.height < 80) widest = Math.max(widest, rc.width)
+                        out.push(`BLK${firstBadBlk} font="${scs.fontSize}" fam=${scs.fontFamily.slice(0, 18)} | editorFont="${pcs.fontSize}" pad=${pcs.paddingLeft}/${pcs.paddingRight}`)
+                        out.push(`  WIDTH: arith contentW=${contentW.toFixed(4)} | DOM true contentW=${trueContentW.toFixed(4)} | edRect.width=${edRect.width.toFixed(4)} | widest rendered line=${widest.toFixed(4)}`)
+                        // Per-block line comparison: same COUNT? same line starts (doc positions)?
+                        const dLines = dom.lines.filter((l) => l.blockIdx === firstBadBlk)
+                        const aLines = am.lines.filter((l) => l.blockIdx === firstBadBlk)
+                        const dStarts = dLines.map((l) => view.posAtCoords({ left: l.cx, top: l.cy })?.pos ?? -1)
+                        const aStarts = aLines.map((l) => l.pos)
+                        const bStart = am.blocks[firstBadBlk]?.start ?? 0
+                        out.push(`  BLK${firstBadBlk} lines dom=${dLines.length} arith=${aLines.length} | blockStart=${bStart}`)
+                        out.push(`   dom starts  : ${dStarts.map((v) => v - bStart - 1).join(',')}`)
+                        out.push(`   arith starts: ${aStarts.map((v) => v - bStart - 1).join(',')}`)
+                        out.push(`   text: ${JSON.stringify(((el as HTMLElement).textContent || '').slice(70, 130))}`)
+                        // Canvas measureText knows ONLY the font shorthand. Anything else the real
+                        // editor CSS applies to text advance is invisible to it → arith mis-measures.
+                        const tgt = (span && span.nodeType === 1 ? span : el) as HTMLElement
+                        const t = getComputedStyle(tgt)
+                        out.push(`   TEXT-CSS: letterSpacing=${t.letterSpacing} wordSpacing=${t.wordSpacing} fontKerning=${t.fontKerning} fontFeature=${t.fontFeatureSettings} fontVariant=${t.fontVariantLigatures}/${t.fontVariant} textRendering=${(t as unknown as { textRendering?: string }).textRendering} fontStretch=${t.fontStretch} fontOpticalSizing=${(t as unknown as { fontOpticalSizing?: string }).fontOpticalSizing} weight=${t.fontWeight} style=${t.fontStyle}`)
+                        // Ground truth: what does the canvas say vs the DOM for ONE identical string?
+                        const probeStr = ((el as HTMLElement).textContent || '').slice(0, 60)
+                        const cv = document.createElement('canvas').getContext('2d')
+                        if (cv) {
+                          cv.font = `${t.fontStyle === 'italic' ? 'italic ' : ''}${t.fontWeight} ${parseFloat(t.fontSize)}px ${t.fontFamily}`
+                          const canvasW = cv.measureText(probeStr).width
+                          const meas = document.createElement('span')
+                          meas.style.cssText = 'position:absolute;left:-99999px;top:0;white-space:pre'
+                          meas.style.font = cv.font
+                          meas.textContent = probeStr
+                          ;(el as HTMLElement).appendChild(meas)
+                          const domW = meas.getBoundingClientRect().width
+                          meas.remove()
+                          out.push(`   ADVANCE(60 chars): canvas=${canvasW.toFixed(3)} domSpan=${domW.toFixed(3)} Δ=${(domW - canvasW).toFixed(3)} font="${cv.font}"`)
+                          // LIGATURE probe: the editor sets font-feature-settings:"liga" 0, canvas
+                          // defaults to ligatures ON. Compare a ligature-bearing string, and the
+                          // ACTUAL diverging line's text (block chars 77..163).
+                          const full = (el as HTMLElement).textContent || ''
+                          // GROUND TRUTH: the browser's ACTUAL rendered line boxes for this block —
+                          // width of each, and the char offset each line's first VISIBLE glyph is
+                          // at (found by walking the text and taking the first char whose own rect
+                          // sits on that line). This is independent of posAtCoords.
+                          {
+                            const rects = Array.from((() => { const r = document.createRange(); r.selectNodeContents(el as HTMLElement); return r.getClientRects() })())
+                              .filter((rc) => rc.width > 1 && rc.height > 1 && rc.height < 80)
+                            out.push(`   RENDERED line rects: ${rects.map((rc) => rc.width.toFixed(0)).join(',')}`)
+                            // first visible char offset per line, via per-char rects
+                            const tn: Text[] = []
+                            const walk = (n: Node) => { if (n.nodeType === 3) tn.push(n as Text); else n.childNodes.forEach(walk) }
+                            walk(el as HTMLElement)
+                            const tops: number[] = []; const firstAt: number[] = []
+                            let idx = 0
+                            for (const t of tn) {
+                              for (let i = 0; i < t.length; i++, idx++) {
+                                const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 1)
+                                const rc = r.getBoundingClientRect()
+                                if (rc.width < 0.01) continue // collapsed trailing space — not a line start
+                                const top = Math.round(rc.top)
+                                if (!tops.includes(top)) { tops.push(top); firstAt.push(idx) }
+                              }
+                            }
+                            out.push(`   TRUE line starts (first VISIBLE glyph): ${firstAt.join(',')}`)
+                            // What is the real DOM made of? Decorations/NodeViews the PM doc model
+                            // (and therefore the arith extractor) cannot see would widen the text.
+                            out.push(`   HTML: ${JSON.stringify(((el as HTMLElement).innerHTML || '').slice(0, 120))}`)
+                            // THE BOX THAT ACTUALLY WRAPS: the paragraph's own content box, not the
+                            // editor's. Any padding/margin/border on the block (or a narrower
+                            // container) makes the engine's contentWidthPx too generous.
+                            {
+                              const b = el as HTMLElement
+                              const bs = getComputedStyle(b)
+                              const br = b.getBoundingClientRect()
+                              const inner = br.width - (parseFloat(bs.paddingLeft) || 0) - (parseFloat(bs.paddingRight) || 0)
+                                - (parseFloat(bs.borderLeftWidth) || 0) - (parseFloat(bs.borderRightWidth) || 0)
+                              out.push(`   BLOCK BOX: rect.width=${br.width.toFixed(4)} pad=${bs.paddingLeft}/${bs.paddingRight} margin=${bs.marginLeft}/${bs.marginRight} border=${bs.borderLeftWidth}/${bs.borderRightWidth} textIndent=${bs.textIndent} => content=${inner.toFixed(4)} | arith used ${contentW.toFixed(4)}`)
+                            }
+                            // Measure the REAL rendered advance of the block's chars 77..163 by
+                            // range rects (in situ, with every decoration/mark applied) vs the
+                            // plain-string measure the engine uses.
+                            let a = 0, bnode: Text | null = null, boff = 0, enode: Text | null = null, eoff = 0
+                            for (const t of tn) { if (!bnode && a + t.length > 77) { bnode = t; boff = 77 - a } if (!enode && a + t.length >= 163) { enode = t; eoff = 163 - a } a += t.length }
+                            if (bnode && enode) {
+                              const rr = document.createRange(); rr.setStart(bnode, boff); rr.setEnd(enode, eoff)
+                              const rcs = Array.from(rr.getClientRects()).filter((x) => x.width > 0.5)
+                              out.push(`   IN-SITU 77..163 rect widths: ${rcs.map((x) => x.width.toFixed(1)).join(' + ')} = ${rcs.reduce((s, x) => s + x.width, 0).toFixed(2)} (plain-string measure said 602.000)`)
+                            }
+                          }
+                          const probes: Array<[string, string]> = [
+                            ['dom-line1  77..158', full.slice(77, 158)],
+                            ['dom-line1 bare', full.slice(77, 158).replace(/\s+$/, '')],
+                            ['ar-line1  77..163', full.slice(77, 163)],
+                            ['ar-line1 BARE', full.slice(77, 163).replace(/\s+$/, '')],
+                            ['tail 155..168', full.slice(155, 168)],
+                          ]
+                          for (const [label, s] of probes) {
+                            const cw = cv.measureText(s).width
+                            const m2 = document.createElement('span')
+                            m2.style.cssText = 'position:absolute;left:-99999px;top:0;white-space:pre'
+                            m2.style.font = cv.font
+                            m2.textContent = s
+                            ;(el as HTMLElement).appendChild(m2)
+                            const dw = m2.getBoundingClientRect().width
+                            m2.remove()
+                            out.push(`   ${label}: canvas=${cw.toFixed(3)} dom=${dw.toFixed(3)} Δ=${(dw - cw).toFixed(3)} ${JSON.stringify(s.slice(0, 34))}`)
+                          }
+                        }
+                      }
+                    }
+                  } finally { restoreA() }
+                  ;(window as unknown as { __iwArithAssert?: unknown }).__iwArithAssert =
+                    { domLines: 0, arithLines: am.lines.length, mismatches: out }
+                  if (out.length) console.error('[inkwave:arithAssert] MAPPING MISMATCH\n  ' + out.join('\n  '))
+                  else console.info('[inkwave:arithAssert] mapping OK — every arith line pos === posAtCoords')
+                }
                 const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
                 measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
                 arithMeasured = true
