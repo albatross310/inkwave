@@ -77,10 +77,11 @@ export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
   'Atkinson Hyperlegible',
   'JetBrains Mono',
   'Courier Prime',
-  // REMOVED 2026-07-16: Lora + Gelasio — dropped from the picker AND from fetch-fonts, so their
-  // faces are no longer served; legacy marks fall down their own stacks to system fonts, which are
-  // uncertifiable by definition. Listing them here would let the engine compute a wrap for a face
-  // that isn't loaded.
+  // RETIRED 2026-07-16: Lora + Gelasio — dropped from the PICKER but their faces are STILL SERVED
+  // (fetch-fonts keeps them): deleting the woff2 would drop legacy marks down their own stacks to
+  // Cambria/Georgia SYSTEM fonts, whose metrics vary by device — silently repaginating old docs
+  // phone-vs-print. Unlisted here regardless: nobody new can select them, and they weren't put
+  // through the round-10 cross-engine pass, so the engine must DEFER rather than compute their wrap.
   // EXCLUDED — Inter: it CERTIFIES on both engines (canvas↔DOM Δ0.0002 WebKit / 0.0151 Chromium)
   // yet its Chromium DOM wrap ≠ its WebKit DOM wrap — the one font of 18 that breaks the
   // cross-device invariant. Cause (measured, not guessed): Inter carries an OPTICAL SIZE (opsz)
