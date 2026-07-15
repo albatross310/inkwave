@@ -9,15 +9,16 @@ console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:
 import { applyTheme } from '../src/editor/theme'
 applyTheme()
 
-// Experimental flags are togglable via URL so they can be flipped ON A PHONE without a console
-// (mirrors the ?auth sticky pattern in auth/config): `?<flag>` sets it sticky in localStorage,
-// `?<flag>=off` clears it. Runs before the app reads any flag. e.g. visit `/?arithZoom` to try
-// windowed-zoom on device, `/?arithZoom=off` to disable.
+// Flags are togglable via URL so they can be flipped ON A PHONE without a console (mirrors the
+// ?auth sticky pattern in auth/config): `?<flag>` sets it sticky ON ('1'), `?<flag>=off` sets it
+// OFF ('0'). Runs before the app reads any flag. `=off` must WRITE '0' (not remove the key) —
+// arithLayout/renderFill now default ON (they read `!== '0'`), so clearing would re-enable them.
+// e.g. `/?renderFill=off` to opt out of phone render-fill, `/?waveVideo` to try the water video.
 ;(() => {
   try {
     const params = new URLSearchParams(location.search)
-    for (const f of ['arithZoom', 'arithLayout', 'renderFill', 'waveVideo']) {
-      if (params.get(f) === 'off') localStorage.removeItem(`inkwave:${f}`)
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo']) {
+      if (params.get(f) === 'off') localStorage.setItem(`inkwave:${f}`, '0')
       else if (params.has(f)) localStorage.setItem(`inkwave:${f}`, '1')
     }
   } catch { /* private mode / no localStorage */ }
