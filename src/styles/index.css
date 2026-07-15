@@ -488,6 +488,41 @@
     height: 100lvh;
   }
 
+  /* ─── WAVE VIDEO VEIL (EXPERIMENTAL — waveVideo.ts, flag `inkwave:waveVideo`) ────────────────
+     A pregenerated loop video of this exact water, played over the LOAD on the hardware media
+     pipeline. It lives INSIDE the visible surface's .iw-wave-twinkles host (the sanctioned
+     imperative container — inserted only after the atomic gate, so hydration never sees it):
+     the host is z:-1 like the wave pseudos, so the video paints above ::before + the gradient +
+     the twinkle sets, below all content. ::after (tree order after children) still paints OVER
+     it, so while the veil is master the html class hides the DOM water wholesale — it keeps
+     RUNNING unpainted underneath (visibility, not display: the drift/coast clocks and the freeze
+     state machine are untouched — the covered-editor precedent), which is what makes it the
+     instant fallback and the SETTLE handoff target. Sized inline by waveVideo.ts to the rung's
+     exact CSS dims (object-fit fill = 1:1 device px at the rung's design scale) so wave tiles
+     stay exactly 140 CSS px — cover-cropped top-left. */
+  .iw-wave-video-el {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100lvh;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s linear;
+    /* COVER (2026-07-15): one clip fills any viewport — the water is a low-frequency gradient +
+       drifting lines, so cover-scaling a smaller rung up is imperceptible (SSIM ≈ 0.98 measured).
+       This is what lets the ladder be just 2 rungs (phone 540×1170 + desk 1280×800). */
+    object-fit: cover;
+    /* Survives the veil-on host hide below AND the covered-editor twinkle hide — visibility
+       (unlike display) lets a child re-assert itself under a hidden ancestor. */
+    visibility: visible;
+  }
+  html.iw-wave-video-on .inkwave-editor-surface.iw-fill::before,
+  html.iw-wave-video-on .inkwave-editor-surface.iw-fill::after,
+  html.iw-wave-video-on .inkwave-editor-surface.iw-fill .iw-wave-twinkles {
+    visibility: hidden;
+  }
+
   /* ─── STOCHASTIC TWINKLES — the PRECOMPUTED pool (see the waveTwinkle.ts header) ────────────
      Sparks (glitters) + dashes (wave marks) as discrete divs, populated post-hydration from the
      precalculated pool (positions never-twice sampled, canvas-rastered art, whole-load blink
