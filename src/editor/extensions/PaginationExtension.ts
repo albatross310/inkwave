@@ -49,7 +49,8 @@ export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chun
 let _arithLayoutFlag: boolean | null = null
 function arithLayoutOn(): boolean {
   if (_arithLayoutFlag !== null) return _arithLayoutFlag
-  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
+  // DEFAULT ON (2026-07-15, Peter: "make all the changes live") — opt OUT with ?arithLayout=off.
+  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') !== '0' } catch { _arithLayoutFlag = false }
   return _arithLayoutFlag
 }
 const arithMeasureFn = makeCanvasMeasure() // one cached canvas 2d measure, shared across measures
@@ -67,7 +68,8 @@ function arithFaceLoaded(stack: string, sizePx: number): boolean {
 let _renderFillFlag: boolean | null = null
 function renderFillOn(): boolean {
   if (_renderFillFlag !== null) return _renderFillFlag
-  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') === '1' } catch { _renderFillFlag = false }
+  // DEFAULT ON (2026-07-15, Peter: "make all the changes live") — opt OUT with ?renderFill=off.
+  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') !== '0' } catch { _renderFillFlag = false }
   return _renderFillFlag
 }
 
