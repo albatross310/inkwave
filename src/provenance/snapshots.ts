@@ -8,7 +8,7 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt, TiptapJSON } from '../types/document'
-import { contentHash, bundleHash, bibliographyHash, emailHeadersHash } from './hash'
+import { contentHash, bundleHash, bibliographyHash, emailHeadersHash, musicAttachmentsHash } from './hash'
 import { normaliseHeaders } from '../email/headers'
 import { stampBundle, upgradeProof } from './ots'
 import { gunzipJsonOffThread } from '../workers/parseClient'
@@ -289,9 +289,21 @@ export async function createSnapshotIfChanged(
   const frozenEmail = isEmail ? normaliseHeaders(doc.email!) : undefined
   const eHash = frozenEmail ? await emailHeadersHash(frozenEmail) : undefined
 
-  // bundleHash commits to content, the DISPLAYED bibliography (v:2), the EMAIL HEADERS (v:3), AND
-  // the live-composition receipt chain, so the OTS proof (M2) anchors the whole signed record to
-  // Bitcoin. For an email that is exactly the §B2.2 claim: headers + body existed by time T.
+  // Freeze the ATTACHED MUSIC (music spec §B5) the same way, and only on a document that carries a
+  // score — so the bundle keeps its v:1/v:2/v:3 form for every other document and every existing
+  // anchor verifies unchanged. The MusicXML BYTES are not frozen here (a master lives in OPFS, like
+  // a PDF sidecar); its sha256 is, which is what actually pins the notation: correct the score under
+  // an anchored analysis and this stops matching. For a music essay the claim is exactly §B5's —
+  // this analysis, of these bars of this notation, existed by time T.
+  const music = doc.music
+  const hasMusic = !!music && (music.masters.length > 0 || music.excerpts.length > 0)
+  const frozenMusic = hasMusic ? music : undefined
+  const mHash = frozenMusic ? await musicAttachmentsHash(frozenMusic) : undefined
+
+  // bundleHash commits to content, the DISPLAYED bibliography (v:2), the EMAIL HEADERS (v:3), the
+  // ATTACHED MUSIC (v:4), AND the live-composition receipt chain, so the OTS proof (M2) anchors the
+  // whole signed record to Bitcoin. For an email that is exactly the §B2.2 claim: headers + body
+  // existed by time T.
   const snapshot: Snapshot = {
     id: uuidv4(),
     documentId: doc.id,
@@ -301,10 +313,11 @@ export async function createSnapshotIfChanged(
     contentHash: cHash,
     contentJson: doc.contentJson,
     receipts,
-    bundleHash: await bundleHash(cHash, receipts, bHash, eHash),
+    bundleHash: await bundleHash(cHash, receipts, bHash, eHash, mHash),
     ots: { status: 'unstamped' },
     ...(frozenBib ? { bibliography: frozenBib, bibHash: bHash } : {}),
     ...(frozenEmail ? { email: frozenEmail, emailHash: eHash } : {}),
+    ...(frozenMusic ? { music: frozenMusic, musicHash: mHash } : {}),
     ...(summary ? { summary } : {}),
     ...(nudgeWord ? { nudgeWord } : {}),
   }

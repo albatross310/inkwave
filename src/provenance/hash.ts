@@ -82,7 +82,23 @@ export function bundleHash(
   receipts: readonly unknown[] = [],
   bibHash?: string,
   emailHash?: string,
+  musicHash?: string,
 ): Promise<string> {
+  // v:4 — a document carrying attached music (music spec §B5). Commits to the ANALYSIS
+  // (contentHash) and the SCORE it is about (musicHash) in one anchored hash, which is the whole
+  // §B5 claim: this analysis, of exactly these bars of exactly this notation, existed by time T.
+  // bibHash and emailHash are carried explicitly as null when absent so a v:4 bundle has ONE shape
+  // regardless — a music essay usually cites, and could in principle be an email. Same rule as v:3.
+  if (musicHash) {
+    return hashCanonical({
+      v: 4,
+      contentHash: content,
+      bibHash: bibHash ?? null,
+      emailHash: emailHash ?? null,
+      musicHash,
+      receipts,
+    })
+  }
   // v:3 — an email document. Commits to the BODY (contentHash) and the HEADERS (emailHash) in one
   // anchored hash, which is what §B2.2's draft-provenance claim is over. `bibHash` is carried
   // explicitly as null when absent so a v:3 bundle has ONE shape regardless (an email may cite).
@@ -92,6 +108,41 @@ export function bundleHash(
   return bibHash
     ? hashCanonical({ v: 2, contentHash: content, bibHash, receipts })
     : hashCanonical({ v: 1, contentHash: content, receipts })
+}
+
+/**
+ * Deterministic hash of a document's ATTACHED MUSIC (music spec §B5: "MusicXML source +
+ * annotations + the written analysis are hashed and OTS-anchored, same as everything else").
+ *
+ * WHAT IT COMMITS TO, and why that is the honest claim:
+ *  - `masters` — each attached score's stable id AND the sha256 of its MusicXML. The BYTES are not
+ *    here (a score lives in OPFS, like a PDF sidecar) but the hash pins them exactly: swap the
+ *    notation under an anchored analysis and this stops matching. That is the §B5 claim, and it is
+ *    strictly stronger than the PDF precedent, where only the citation metadata is anchored.
+ *  - `excerpts` — the (master_id, bar_start, bar_end) references (§B6). Anchoring these is what
+ *    makes "bars 12-16 of THIS score" a timestamped claim rather than a rendering detail.
+ *  - `annotations` — EMPTY today (§B4 is not built). The field is hashed NOW, exactly as `receipts`
+ *    was fixed at `[]` before M3 wired the signing service: an empty array canonicalises to `[]`
+ *    whatever its element type turns out to be, so §B4 can land — and settle its contested anchor
+ *    shape — WITHOUT a new bundle version and without changing any hash computed today.
+ *
+ * Deliberately NOT included: the rendered SVG (a function of the XML + engine version — anchoring a
+ * rendering would make an OSMD upgrade look like tampering), and any per-master `addedAt` (a local
+ * clock, not evidence).
+ */
+export function musicAttachmentsHash(music: {
+  masters: readonly { id: string; contentHash: string }[]
+  excerpts: readonly unknown[]
+  annotations?: readonly unknown[]
+}): Promise<string> {
+  return hashCanonical({
+    v: 1,
+    // Only the two fields that carry the claim — a master's title/attribution are display metadata
+    // and must not make an anchored hash depend on how a corpus happens to name a piece today.
+    masters: music.masters.map(m => ({ id: m.id, contentHash: m.contentHash })),
+    excerpts: music.excerpts,
+    annotations: music.annotations ?? [],
+  })
 }
 
 /**

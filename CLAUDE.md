@@ -1495,6 +1495,39 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
   mismatch to reproduce and threw nothing, which read as "these errors are yours". Non-prerendered
   routes are served the prerendered EDITOR page through the SPA fallback and hydrate against it — the
   same artefact CLAUDE.md records for /snapshot. Compare like with like.
+### §B5 provenance — `bundleHash` gained a v:4 form (2026-07-17)
+
+v:1 `{contentHash,receipts}` / v:2 adds `bibHash` / v:3 adds `emailHash` / **v:4** `{v:4,contentHash,
+bibHash:…|null,emailHash:…|null,musicHash,receipts}` when the document carries an attached score.
+Snapshots freeze `music` + `musicHash` exactly as they freeze `email` + `emailHash`; verify recomputes
+both and folds them into the bundleHash recompute, so OTS genuinely BINDS the notation. Music WINS
+over email (a doc with both is v:4) or the musicHash would be silently dropped from what Bitcoin
+commits to. Non-music docs keep v:1/v:2/v:3 BYTE-IDENTICALLY — asserted against LITERAL canonical
+strings computed by hand (`provenance/musicHash.test.ts`), never against bundleHash's own output,
+which would agree with itself however the function changed.
+
+- **WHAT IS ANCHORED IS THE HASH, NOT THE BYTES.** A master's MusicXML lives in OPFS like a PDF
+  sidecar; `musicAttachmentsHash` commits to `{id, contentHash}` per master + the §B6 excerpt
+  addresses. So correcting the score under an anchored analysis makes the bundle stop verifying —
+  strictly stronger than the PDF precedent, where only citation metadata is anchored. Deliberately
+  EXCLUDED: the rendered SVG (a function of engine version — anchoring it would make an OSMD upgrade
+  look like tampering) and per-master titles/`addedAt` (display metadata and a local clock are not
+  evidence; a corpus renaming a piece must not read as a tamper).
+- **`annotations` IS HASHED NOW, AT `[]`** — the `receipts`-before-M3 precedent. An empty array
+  canonicalises to `[]` whatever its element type turns out to be, so §B4 can land — and settle the
+  contested `MusicXmlAnchor.measure: number` question (bar numbers are STRINGS by spec: '0' pickups,
+  '8a' endings) — without a new bundle version and without moving any hash computed today.
+- **PROVED, not assumed** (`music/provenance.roundtrip.test.ts`): drives the REAL
+  createSnapshotIfChanged → gzip archive → stampSnapshot → buildExportBundle → verifyBundle. Asserts
+  the digest submitted to the calendar IS the v:4 bundleHash (not contentHash), and that swapping a
+  master's notation, editing an excerpt's bar range, tampering-and-recomputing musicHash, or
+  STRIPPING the music all FAIL verify. Both halves mutation-proved: dropping mHash from the snapshot's
+  bundleHash ⇒ 3 fail; making the verifier ignore frozen music ⇒ 2 fail.
+- **A SHARED MUTABLE FIXTURE IS A TEST MEASURING THE TESTS BEFORE IT.** The music fixture was a
+  module-level const passed BY REFERENCE into every document; the first tamper test mutated it, so
+  the tamper-and-recompute case later "tampered" with an already-tampered value, changed nothing, and
+  VERIFIED — reading exactly like the anchor failing to bind. It is a function now.
+
 - NOT BUILT (later steps, other lanes): OMR (never), lesson STT §A3, MusicXML/OSMD §B, the heatmap
   §A2 (step 5 — contract declared in types.ts), reference tracks/tap-sync §A4 (step 3), practice
   tools §A5 (step 4). `Practice.sessions` REFERENCES productivity ledger rows rather than copying
