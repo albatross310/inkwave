@@ -627,8 +627,9 @@ account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) a
 - **The payload is an ALLOW-LIST** (compile.ts names every field that leaves), so a field the ledger
   gains later cannot leak by riding along — it is simply not emitted until someone picks a tier for
   it. A deny-list would fail the other way, silently. Tested.
-- **Seams, not forks:** `types.ts` type-mirrors §A3.2/§A3.3 and `source.ts` is the one function
-  `feat/prod-ledger`/`feat/prod-graphs` fill in; `?prodReport=demo` installs labelled synthetic
+- **Seams, not forks:** `types.ts` WAS a type-mirror of §A3.2/§A3.3 — the mirrors are GONE (see the
+  integration section below); it is now the real schema, and `source.ts` is the one function
+  `feat/prod-ledger` fills in (via `installSource.ts`); `?prodReport=demo` installs labelled synthetic
   fixtures so the path is drivable meanwhile. The measured CHART is prod-graphs' — the bars here are
   an interim read of the same rollups; the judged overlay stays whatever replaces them.
 - `/privacy` has a "Your work report" section naming all three tiers — keep it in sync with the code.
@@ -637,9 +638,10 @@ account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) a
 ## Productivity layer — P1a-viz: aggregates + graphs (2026-07-17, `feat/prod-graphs`)
 
 The read half of the productivity layer (build-spec §A3.3/§A8, the private Productivity-Email spec —
-read it, never copy it into the repo). `src/productivity/`: `ledger.ts` (the §A3.2 row CONTRACT —
-owned by the `feat/prod-ledger` lane; replace with its import when it lands, do NOT fork the schema),
-`aggregate.ts` (pure day/week/month rollups), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
+read it, never copy it into the repo). `src/productivity/`: ~~`ledger.ts` (the §A3.2 row CONTRACT)~~ — **that mirror is RETIRED; the schema
+is `types.ts` and `ledger.ts` is now the real attested per-month ledger (see the integration section
+below)**, `aggregate.ts` (pure day/week/month rollups, now sharing one module with the ledger's
+window builder), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
 AI seam + the honesty gate), `summary.ts` (the copy), `charts/` (hand-rolled SVG — NO chart
 dependency; follows `src/verify/ActivityGraph.tsx`), `ProductivityPanel.tsx`, `fixtures.ts`.
 Route `/productivity`, flag `inkwave:prodGraphs` DEFAULT OFF (`?prodGraphs=1` / `=demo` / `=off`,
@@ -842,6 +844,65 @@ cold gunzip. (2) That cold read exposed a REAL latent bug in `workers/parseClien
 both promises were `void`ed, so it HUNG forever instead of throwing, defeating the caller's
 try/catch. The no-Worker fallback (node/vitest/prerender) had never once been exercised. Fixed
 (write a Uint8Array view).
+
+## Productivity + email INTEGRATION (2026-07-17, `feat/prod-integrate` — the four lanes merged)
+
+P1a-core (ledger), P1a-viz (graphs), P1b (email) and P1c (AI report) were built in parallel and are
+now ONE layer. What was decided on the merge, and what the merge FOUND. **All flags stay default OFF**
+(`prodGraphs`, `prodReport`, `prodLedger`, `email`) — verified, not assumed.
+
+- **ONE SCHEMA: `productivity/types.ts`.** prod-graphs' `ledger.ts` was an explicit placeholder mirror
+  of §A3.2 ("THE LEDGER SEAM: a one-line import swap when feat/prod-ledger lands") — retired exactly
+  as it anticipated. `LedgerSession` → the real `SessionRow` everywhere. `ledger.ts` is now the real
+  per-month ATTESTED ledger; the mirror's five time functions moved to `sessionLogic.ts`, which
+  already owned `localDayOf` — one rule for one question. Its tests live on verbatim in
+  `dayKeys.test.ts` (imports re-pointed, not one assertion changed).
+- **`DocType` is declared ONCE, in `types/document.ts`** — a document's own property; the ledger READS
+  it (`capture.ts` resolveDocType owns the absent→default rule). `productivity/types.ts` re-exports.
+  Two identical unions are not harmless: they drift the first time one side gains a member.
+- **ONE `aggregate.ts`, TWO output shapes — and that is NOT a fork.** `DayAggregate` (types.ts,
+  snake_case) is the §A3.3 WIRE contract the report emits; `ChartDayAggregate` (camelCase) is the
+  charts' view model (prod-graphs' `DayAggregate`, renamed — the wire name belongs to the schema
+  owner; two exported types sharing one name in one module is how a caller silently gets the wrong
+  contract). `busiest_hours` (start-hour) and `hourHistogram` (apportioned across the span) BOTH
+  conserve total active minutes, so they cannot contradict each other on any total — they differ only
+  in distribution WITHIN a day and each documents its own limitation. Collapsing them would have
+  silently rewritten a lane's measured behaviour to make a merge look tidy.
+- **The deep-vs-shallow heuristic is RATIO ONLY — no duration.** Do not let a future merge quietly
+  reintroduce it; the measurement (39% coverage / 84%-called-drafting vs a 48% truth) is in phase.ts.
+  Three provenance tags stay: `measured` / `estimated` / `judged`.
+- **THE SILENT BREAK THIS MERGE FOUND (the house disease, live).** `report/compile.ts` read tier-2
+  notes off `agg.sessions` at EVERY window — an assumption written BEFORE prod-ledger answered the
+  contract question. The ledger's answer: `sessions: []` at weekly/monthly, notes travel as
+  `note_digest` per local day (§A6.4 — rows at monthly would put a SECOND copy of every measured
+  number beside the day rollups, and two copies is how a narrative ends up contradicting the bars).
+  Result: a writer who ticked "include my notes" on a weekly or monthly report got NO notes,
+  `notesIncluded: false`, and no error anywhere. **Both lanes' suites were green** — the `?prodReport
+  =demo` fixtures still carried the pre-answer shape, so the path a developer eyeballs worked while
+  the real ledger's did not. compile.ts now reads `note_digest` first (session fallback kept for daily
+  + demo); the fixtures now mirror the decided contract. A demo whose shape the real source never
+  produces is a fiction to build against.
+
+**THE JOINT PROBE — `productivity/emailLedger.integration.test.ts`.** §B1's primary goal ("2h10m
+writing, of which 40m on email") had never been verified by anything: the email lane owns
+`docType: 'email'` but had no ledger to tag; the ledger lane owns the row but nothing in its tree ever
+set `docType: 'email'`. It drives the REAL chain — `newEmailDocument` → `SessionCapture` (real PM
+steps) → the real debounced `ledgerStore` on a real OPFS shim → the real §A3.3 `aggregate` → the real
+`compilePayload` — and asserts 130 active minutes of which 40 are email, with no message text or
+address anywhere in the ledger or payload. **PROVED TO FIRE, both directions:** mutate
+`resolveDocType` to ignore the document (the real silent bug — every email minute filed as 'essay')
+⇒ 4 §B1 tests fail; hard-wire it to 'email' ⇒ the known-negative fails. No constant passes both.
+
+**TEST-HARNESS TRAP, and it cost a real detour.** `storage/opfsWrite.ts` decides ONCE AT MODULE LOAD
+whether OPFS writes use createWritable or the parse worker (`hasCreateWritable`), and node has
+neither. Under STATIC imports that constant is already false before any `beforeEach` can install the
+OPFS shim, so every ledger write routes to a worker that does not exist, throws, and is SWALLOWED by
+`writeAppJson`'s catch — the probe then reads an empty ledger and concludes "the email row never
+arrives", which is exactly the fiction it exists to detect. Install the shim, THEN `await import()`
+the modules under test (`vi.resetModules()` first) — `feat/email-compose`'s `roundtrip.test.ts` does
+this for the same reason, and its comment about `_snapCache` is the other half of the same discipline.
+`testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
+arrayBuffer, and its absence surfaced only as an empty ledger.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
