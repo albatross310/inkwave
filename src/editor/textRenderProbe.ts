@@ -14,14 +14,12 @@ import type { Editor } from '@tiptap/react'
 // against the LIVE editor's rather than against another copy of itself. `schemaSpec` is shared with
 // the gate-kept unit test so both compare schemas by the SAME definition of "same".
 import { getEditorSchema, nodeFromContentJson, schemaSpec } from './editorSchema'
-import { makeCanvasMeasure, type Measure } from './arithmeticLayout'
+import { makeCanvasMeasure, makeFontLoaded, type Measure } from './arithmeticLayout'
 import {
-  buildRenderModel, paintPage, paintMapStrip, canonicalGeom,
+  buildRenderModel, paintPage, paintMapStrip, canonicalGeomFromSettings,
   pageContainingPos, anchorPosOfPage,
   type RenderGeom, type RenderModel,
 } from './textRender'
-import { pageBoxPx } from './pageModel'
-import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
 // The citeBox cache key MUST be the same one PaginationExtension's DOM canonical measure harvested
 // under (it calls harvestCiteBoxes(doc, …, getCitationStyle(), bibProvider.getVersion(), 18)) — a
 // different style/epoch/base misses every lookup and every citation block placeholders out. Read the
@@ -46,18 +44,9 @@ import { captureRegion } from './scrubRaster'
 
 // The REAL geometry the live document is paginated in — read from the same settings the live
 // PaginationExtension reads, never a harness constant.
-function liveGeom(): RenderGeom {
-  const paper = getPaperSize()
-  const { pageWidthPx, pageHeightPx } = pageBoxPx({
-    paperSize: paper === 'scroll' ? 'a4' : paper,
-    orientation: getOrientation(),
-    topMarginPx: getTopMarginPx(),
-    bottomMarginPx: 72,
-  })
-  const g = canonicalGeom(pageWidthPx, pageHeightPx, getSideMarginPx(), getTopMarginPx())
-  g.paraSpacingEm = getParaSpacingEm()
-  return g
-}
+// liveGeom now lives in textRender.ts as canonicalGeomFromSettings() — /snapshot needs the same
+// rule and two copies is how two routes start paginating to different page sizes.
+const liveGeom = canonicalGeomFromSettings
 
 // The citeBox lookup key, read from the SAME sources the DOM canonical measure harvests under.
 // If these drift, every citation misses ⇒ every citation-bearing block placeholders out ⇒ coverage
@@ -91,33 +80,6 @@ function harvestNow(): { ok: boolean; reason: string } {
   // version whose bibliography it has never rendered.
   harvestRefChromeStyles(pm, 18)
   return { ok: true, reason: 'canonical' }
-}
-
-// REAL font-loaded check. `document.fonts.check()` returns TRUE for a family with NO @font-face (the
-// system fallback counts) — that trap silently measures a fallback against itself and "agrees" at
-// 0.000. So compare the family's advance against the monospace fallback's: a family that measures
-// IDENTICALLY to `monospace` for a proportional probe string is not really loaded.
-function makeFontLoaded(measure: Measure): (stack: string, sizePx: number) => boolean {
-  const cache = new Map<string, boolean>()
-  const PROBE = 'iiiiiiiiiiWWWWWWWWWW'
-  return (stack: string, sizePx: number): boolean => {
-    const key = `${stack}|${sizePx}`
-    const hit = cache.get(key)
-    if (hit !== undefined) return hit
-    let ok = false
-    try {
-      ok = document.fonts.check(`${sizePx}px ${stack}`)
-      if (ok) {
-        const w = measure(PROBE, `400 ${sizePx}px ${stack}`)
-        const mono = measure(PROBE, `400 ${sizePx}px monospace`)
-        // A proportional face cannot have the same advance as monospace for this probe. Equal ⇒ we
-        // are measuring the fallback, i.e. the face never loaded.
-        if (Math.abs(w - mono) < 0.01) ok = false
-      }
-    } catch { ok = false }
-    cache.set(key, ok)
-    return ok
-  }
 }
 
 export interface PaintResult {

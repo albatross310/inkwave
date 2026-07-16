@@ -782,3 +782,35 @@ export function paginate(
   sig.push(`pages:${pageNo}`)
   return { sig: sig.join('|'), breaks, pages: pageNo }
 }
+
+// REAL font-loaded check. `document.fonts.check()` returns TRUE for a family with NO @font-face (the
+// system fallback counts) — that trap silently measures a fallback against itself and "agrees" at
+// 0.000. So compare the family's advance against the monospace fallback's: a family that measures
+// IDENTICALLY to `monospace` for a proportional probe string is not really loaded.
+//
+// LIVES HERE, NOT IN A CALLER (2026-07-17). It was private to textRenderProbe.ts, and /snapshot's
+// break-table build needs the same check — an editor-less route cannot borrow the editor's. Copying
+// it would put two definitions of "is this font loaded" in the tree, and the SECOND one is always
+// the one that quietly stops agreeing (the pmToText/textMap lesson). One implementation, two callers.
+export function makeFontLoaded(measure: Measure): (stack: string, sizePx: number) => boolean {
+  const cache = new Map<string, boolean>()
+  const PROBE = 'iiiiiiiiiiWWWWWWWWWW'
+  return (stack: string, sizePx: number): boolean => {
+    const key = `${stack}|${sizePx}`
+    const hit = cache.get(key)
+    if (hit !== undefined) return hit
+    let ok = false
+    try {
+      ok = document.fonts.check(`${sizePx}px ${stack}`)
+      if (ok) {
+        const w = measure(PROBE, `400 ${sizePx}px ${stack}`)
+        const mono = measure(PROBE, `400 ${sizePx}px monospace`)
+        // A proportional face cannot have the same advance as monospace for this probe. Equal ⇒ we
+        // are measuring the fallback, i.e. the face never loaded.
+        if (Math.abs(w - mono) < 0.01) ok = false
+      }
+    } catch { ok = false }
+    cache.set(key, ok)
+    return ok
+  }
+}
