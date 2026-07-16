@@ -65,6 +65,9 @@ import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clear
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
+import { ProductivityReportModal } from '../components/ProductivityReportModal'
+import { prodReportEnabled } from '../productivity/flag'
+import { installProdReportDemo } from '../productivity/demo'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
@@ -316,6 +319,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [reviewOpen, setReviewOpen] = useState(false)   // review layer: sticky-note comments + track changes
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
+  // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1, Path 1).
+  const [reportOpen, setReportOpen] = useState(false)
+  const reportFlag = prodReportEnabled()
+  useEffect(() => { if (reportFlag) installProdReportDemo() }, [reportFlag])
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
   // PageMenu sets line height; listen for the settings-changed event to sync the CSS var.
   useEffect(() => {
@@ -2909,6 +2916,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
+                onWorkReport={reportFlag ? () => setReportOpen(true) : undefined}
                 onFileOpenError={reportOpenError}
               />
               <InstallPromptBanner installPrompt={installPrompt} />
@@ -2923,6 +2931,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onClose={() => setVerifyOpen(false)}
           />
         )}
+        {reportOpen && <ProductivityReportModal onClose={() => setReportOpen(false)} />}
         {editor && <CiteAutocomplete editor={editor} />}
         <PdfSidePanel />
         <Toast />
