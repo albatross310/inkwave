@@ -24,10 +24,6 @@ const RUNGS = [
   { name: 'desk', w: 1280, h: 800 },
 ] as const
 
-// Reused across mounts (editor / new file / SnapshotView) — one fetch + one blob per clip per
-// session; the SW's cache-first (versioned) keeps it across sessions until a deploy.
-const blobUrls = new Map<string, string>()
-
 // ── On-device diagnostic state (rendered by the overlay under ?waveVideo=debug) ──
 type Diag = {
   flag: string; codec: string; rung: string; theme: string; clip: string
@@ -49,20 +45,6 @@ function pickCodec(): 'av1' | 'h264' | null {
   return null
 }
 
-// Fetch a clip ONCE (the SW serves it cache-first), hand back a blob URL reused across mounts.
-// The <video> plays from the blob, so no Range request ever reaches /wave/.
-async function cachedURL(url: string): Promise<string | null> {
-  if (blobUrls.has(url)) { diag.fetch = 'blob-cache (already fetched)'; return blobUrls.get(url)! }
-  try {
-    const resp = await fetch(url)
-    diag.fetch = `${resp.status}${resp.ok ? '' : ' NOT-OK'}`
-    if (!resp.ok) return null
-    // Force the MIME (a host serving octet-stream would leave the <video> unplayable).
-    const obj = URL.createObjectURL(new Blob([await resp.arrayBuffer()], { type: 'video/mp4' }))
-    blobUrls.set(url, obj)
-    return obj
-  } catch (e) { diag.fetch = `FAILED (${String(e).slice(0, 40)})`; return null }
-}
 
 function pickRung(): typeof RUNGS[number] {
   // Cover-fit means either rung fills any viewport; pick by device class.
@@ -93,79 +75,77 @@ async function run(): Promise<void> {
   const theme = document.documentElement.dataset.theme === 'night' ? 'night' : 'day'
   diag.rung = rung.name; diag.theme = theme
   const base = `/wave/${rung.name}.${theme}.${codec}`
-  diag.clip = `${base}.mp4`
-  const [loopSrc, brakeSrc] = await Promise.all([cachedURL(`${base}.mp4`), cachedURL(`${base}.brake.mp4`)])
-  if (!loopSrc) { bail(`clip fetch failed (${diag.fetch}) → CSS water`); return }
+  const loopUrl = `${base}.mp4`
+  const brakeUrl = `${base}.brake.mp4`
+  diag.clip = loopUrl
 
+  // DIRECT same-origin src, NOT a blob (2026-07-16 — THE iPhone-8 fix). iOS decodes a <video> only
+  // when it can Range-request the moov atom; a blob URL cannot be ranged → readyState stuck at 0
+  // (Peter's overlay: fetch 200, readyState 0, decode timeout). The SW serves /wave/ cache-first
+  // WITH 206 Range, so a direct URL is still one fetch + cached, and iOS can seek the metadata.
   const video = mkVideo()
   video.loop = true
-  video.src = loopSrc
+  video.src = loopUrl
+
+  // iOS loads a <video> only while it is IN THE DOM (a detached element never fetches on WebKit),
+  // so attach NOW — invisible (opacity 0) — and keep it attached via the self-heal guard (React
+  // reconciles the prerendered `.iw-wave-twinkles` host during hydration). We become MASTER (hide
+  // the CSS water) only once play() RESOLVES, so a decode/autoplay failure always leaves the CSS
+  // water visible. `diag.fetch` is filled by the SW response path; keep the overlay honest.
+  diag.fetch = 'requested (direct URL via SW)'
+  guardAttached(video)
+  video.load()
 
   const playable = new Promise<void>((res) => {
     if (video.readyState >= 2) res()
     else video.addEventListener('loadeddata', () => res(), { once: true })
   })
-  video.load()
-  await Promise.race([playable, new Promise<void>((r) => setTimeout(r, 1400))])
+  await Promise.race([playable, new Promise<void>((r) => setTimeout(r, 2500))]) // iOS metadata is slower
   diag.ready = video.readyState
-  if (video.readyState < 2) { video.remove(); bail('decode timeout (readyState<2 after 1.4s) → CSS water'); return }
+  if (video.readyState < 2) { teardown(video); bail(`decode timeout (readyState ${video.readyState} after 2.5s) → CSS water`); return }
+  diag.fetch = '200 / decoded'
 
-  // ATTACH ONLY POST-GATE (2026-07-16 — a real bug). `.iw-wave-twinkles` is React-rendered and
-  // present in the PRERENDERED html, so a video appended BEFORE hydration is reconciled away by
-  // React: the element vanished while `iw-wave-video-on` stayed set ⇒ DOM water hidden + no video
-  // = a BLANK surface (reproduced on the desktop/AV1 path). The gate opens only after
-  // twinkles-ready, which fires from a mounted-app effect ⇒ post-gate is post-hydration. We decode
-  // BEFORE the gate (so the clip is ready the instant it opens) but insert strictly after.
+  // Don't become master before the atomic water has painted, and never veil a load that already
+  // reached its coast/rest (a slow decode on a fast open) — that would show drift over settled text.
   await new Promise<void>((res) => {
     if (document.documentElement.classList.contains('iw-water-ready')) res()
     else window.addEventListener('inkwave:water-ready', () => res(), { once: true })
   })
-  await new Promise<void>((r) => requestAnimationFrame(() => r())) // let hydration's commit flush
+  if (!document.querySelector('.inkwave-editor-surface.iw-fill.iw-wave-anim')) {
+    teardown(video); bail('load already past drift → CSS water'); return
+  }
 
-  // Attach into the VISIBLE water host, then PLAY. We only hide the CSS water once play() actually
-  // RESOLVES — a rejected play() (iOS Low Power Mode) previously left `iw-wave-video-on` set with
-  // no video: DOM water hidden + nothing playing = NO WATER AT ALL. Never hide before we're master.
-  const attach = (): boolean => {
+  video.play().then(() => {
+    video.style.opacity = '1' // THE loop was invisible: CSS defaults .iw-wave-video-el to opacity 0
+    document.documentElement.classList.add('iw-wave-video-on')
+    diag.master = true
+    diag.reason = 'VIDEO is master'
+    wireSettle(video, brakeUrl)
+  }).catch((e) => {
+    bail(`autoplay-blocked (${String(e).slice(0, 50)}) → CSS water`)
+    teardown(video)
+  })
+}
+
+// SELF-HEALING ATTACH. Does the FIRST attach (as soon as the host exists) AND re-attaches if React
+// ever reconciles our <video> away while it's still ours. `.iw-wave-twinkles` is React-rendered and
+// present in the prerendered html, so a video appended before that subtree hydrates gets wiped —
+// which (with the class set) would blank the surface. Belt-and-braces: the guard keeps it in the DOM
+// so iOS can decode it AND so it stays visible once master. Stops at teardown (data-going).
+function guardAttached(video: HTMLVideoElement): void {
+  const tryAttach = () => {
+    if (video.hasAttribute('data-going')) return true
+    if (video.isConnected) return false
     const host = document.querySelector<HTMLElement>(
       '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
     )
     if (!host) return false
     host.appendChild(video)
-    video.play().then(() => {
-      document.documentElement.classList.add('iw-wave-video-on')
-      diag.master = true
-      diag.reason = 'VIDEO is master'
-      guardAttached(video)
-      wireSettle(video, brakeSrc)
-    }).catch((e) => {
-      bail(`autoplay-blocked (${String(e).slice(0, 50)}) → CSS water`)
-      teardown(video)
-    })
-    return true
+    if (diag.master) void video.play().catch(() => { /* re-play denied — finish restores CSS water */ })
+    return false
   }
-  if (!attach()) {
-    let tries = 0
-    const t = setInterval(() => { if (attach() || tries++ > 20) { clearInterval(t); if (tries > 20) bail('no visible water host → CSS water') } }, 50)
-  }
-}
-
-// SELF-HEALING ATTACH (2026-07-16 — the desktop blank-water bug). `.iw-wave-twinkles` is
-// React-rendered and exists in the PRERENDERED html, so if our <video> lands before that subtree
-// hydrates, React reconciles it AWAY — leaving `iw-wave-video-on` set with no video: DOM water
-// hidden + nothing playing = a BLANK surface. The gate is not a reliable "hydrated" signal (it
-// resolves immediately on pages whose twinkle host isn't mounted yet), so instead of racing the
-// timing we simply re-attach if we're ever detached while still master. Stops at teardown.
-function guardAttached(video: HTMLVideoElement): void {
-  const t = setInterval(() => {
-    if (video.hasAttribute('data-going')) { clearInterval(t); return }
-    if (video.isConnected) return
-    const host = document.querySelector<HTMLElement>(
-      '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
-    )
-    if (!host) return
-    host.appendChild(video) // React wiped us — put it back and keep playing
-    void video.play().catch(() => { /* re-play denied — the finish path restores CSS water */ })
-  }, 200)
+  tryAttach()
+  const t = setInterval(() => { if (tryAttach() || video.hasAttribute('data-going')) clearInterval(t) }, 150)
 }
 
 function mkVideo(): HTMLVideoElement {
@@ -200,8 +180,19 @@ function teardown(v: HTMLVideoElement | null, delay = 0): void {
 }
 
 // ── SETTLE: phase-0 loop→brake swap on the media pipeline, then hand to the CSS water at rest ──
-function wireSettle(loop: HTMLVideoElement, brakeSrc: string | null): void {
+function wireSettle(loop: HTMLVideoElement, brakeUrl: string): void {
   let done = false
+  // PRELOAD the brake now (direct URL, in-DOM, invisible, guarded) so it's decoded before SETTLE —
+  // on iOS a brake created at swap-time would stall exactly like the loop did. Attaching it as a
+  // sibling of the loop in the same host means the guard/host logic covers it too.
+  const brake = mkVideo()
+  brake.loop = false
+  brake.src = brakeUrl
+  brake.style.opacity = '0'
+  const host = loop.parentElement
+  if (host) host.appendChild(brake)
+  brake.load()
+
   const finish = (fadeMs: number) => {
     if (done) return
     done = true
@@ -213,20 +204,14 @@ function wireSettle(loop: HTMLVideoElement, brakeSrc: string | null): void {
     diag.master = false; diag.reason = 'handed back to CSS water (rest)'
     loop.style.opacity = '0'
     teardown(loop, fadeMs + 40)
+    teardown(brake, fadeMs + 40)
   }
   const onImminent = () => {
     if (done) return
-    if (!brakeSrc) { finish(300); return }
-    // Swap to the BRAKE clip at the loop's phase-0 boundary: the brake is baked from that same
-    // boundary with the SAME pool seed, so its first frame ≡ the loop's frame 0 (pixel-exact join).
-    const brake = mkVideo()
-    brake.loop = false
-    brake.src = brakeSrc
-    brake.style.opacity = '0'
-    const host = loop.parentElement
-    if (!host) { finish(0); return }
-    host.appendChild(brake)
+    // Swap to the BRAKE at the loop's phase-0 boundary: the brake is baked from that same boundary
+    // with the SAME pool seed, so its first frame ≡ the loop's frame 0 (pixel-exact join).
     const swap = () => {
+      if (done) return
       brake.style.opacity = '1'
       loop.style.opacity = '0'
       void brake.play().catch(() => finish(0))
@@ -282,16 +267,17 @@ readyState ${diag.ready} ${diag.ready >= 2 ? '(decoded)' : '(NOT decoded)'}
 advancing ${diag.advancing ? 'YES (real decode)' : 'NO (frozen/none)'}
 reason    ${diag.reason}`
   }
-  const attachWhenReady = () => {
-    if (document.body) { document.body.appendChild(box); return true }
-    return false
+  // KEEP IT ATTACHED. hydrateRoot(document) makes React own <body>, so a plain appended overlay is
+  // reconciled AWAY during hydration (why it vanished, 2026-07-16). Re-append whenever it's gone —
+  // this is Peter's only on-device instrument, it must survive hydration + every re-render.
+  const keepAttached = () => {
+    if (!box.isConnected && document.body) document.body.appendChild(box)
   }
-  if (!attachWhenReady()) {
-    const t = setInterval(() => { if (attachWhenReady()) clearInterval(t) }, 50)
-  }
+  keepAttached()
   // currentTime advancing = a REAL decode (not a frozen first frame — the iOS silent-failure tell).
   let last = -1
   setInterval(() => {
+    keepAttached()
     const v = document.querySelector<HTMLVideoElement>('video.iw-wave-video-el')
     const now = v ? v.currentTime : -1
     diag.advancing = v ? now > last + 0.001 : false

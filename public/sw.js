@@ -44,17 +44,55 @@ self.addEventListener('activate', (event) => {
   })())
 })
 
+// Serve a /wave/ clip cache-first, honouring Range with a real 206 sliced from the cached body.
+// The clip is fetched ONCE (full, 200) and cached; every later request — including the iOS Range
+// probes — is answered from that cached buffer. No network after first load.
+async function handleWave(req) {
+  const cache = await caches.open(CACHE)
+  let full = await cache.match(req.url)
+  if (!full) {
+    try {
+      const net = await fetch(req.url) // full GET (no Range) → a cacheable 200
+      if (net && net.ok) { await cache.put(req.url, net.clone()); full = net }
+      else return net // 404/500 — pass the origin's answer through (waveVideo falls back to CSS)
+    } catch (e) { return new Response('offline', { status: 504 }) } // offline → CSS water
+  }
+  const range = req.headers.get('range')
+  if (!range) return full // non-Range GET (our warm fetch, or a non-iOS full load)
+  const buf = await full.arrayBuffer()
+  const total = buf.byteLength
+  const m = /bytes=(\d*)-(\d*)/.exec(range)
+  let start = m && m[1] ? parseInt(m[1], 10) : 0
+  let end = m && m[2] ? parseInt(m[2], 10) : total - 1
+  if (isNaN(start) || start < 0) start = 0
+  if (isNaN(end) || end >= total) end = total - 1
+  if (start > end) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } })
+  const body = buf.slice(start, end + 1)
+  return new Response(body, {
+    status: 206,
+    headers: {
+      'Content-Type': full.headers.get('Content-Type') || 'video/mp4',
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': String(body.byteLength),
+      'Cache-Control': 'public, max-age=31536000',
+    },
+  })
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET' || !req.url.startsWith(self.location.origin)) return
 
-  // Wave videos (/wave/*): CACHE-FIRST (2026-07-15). waveVideo.ts fetches the ONE matched
-  // rung+codec+theme clip via fetch() (a full GET, 200 — NOT a media Range request; the <video>
-  // element plays from an in-memory BLOB, so no 206/Range ever hits the SW), caches it here, and
-  // reuses the blob across editor / new-file / SnapshotView mounts → zero network after first load.
-  // The cache is VERSION-named, so a deploy that regenerates the clips serves the fresh ones (the
-  // old Range-bypass is gone; the clips are tiny — ~32-232KB — and immutable within a build).
-  // Falls through to the cache-first asset path below.
+  // Wave videos (/wave/*): CACHE-FIRST **with Range/206 support** (2026-07-16). waveVideo.ts now
+  // sets the <video src> to the DIRECT same-origin URL (NOT a blob) — because iOS Safari canNOT
+  // decode a blob-URL <video>: it Range-requests into the media to read the moov atom, and a blob
+  // has no Range → readyState stuck at 0 (Peter's iPhone 8: fetch 200, readyState 0, decode
+  // timeout — reproduced via the ?waveVideo=debug overlay). iOS WILL send `Range: bytes=…`, and a
+  // 200-only answer ALSO breaks it, so we cache the full clip once and SERVE 206 slices from cache.
+  // Zero network after the first fetch; the cache is version-named so a deploy refreshes the clips.
+  if (new URL(req.url).pathname.startsWith('/wave/')) { event.respondWith(handleWave(req)); return }
+
   const accept = req.headers.get('accept') || ''
   const isNavigation = req.mode === 'navigate' || accept.includes('text/html')
 
