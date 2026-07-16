@@ -748,6 +748,7 @@ export function Scroll({
     // paying the O(doc) un-skip — see exitZoomLive. Tracked so the next entry re-arms the guard and
     // replaces the stylesheet, and so the unmount teardown still hard-clears the class.
     let zoomLiveResting = false
+    let restUnskipTimer: ReturnType<typeof setTimeout> | undefined
     const arithBandsOn = (): boolean => {
       try { return typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithBands') === '1' } catch { return false }
     }
@@ -798,6 +799,7 @@ export function Scroll({
       // below reads a placeholder (no content layout) and the doc is never un-skipped. The old
       // exact stylesheet is replaced by the fresh baseline the rules below generate.
       zoomLiveResting = false
+      if (restUnskipTimer) { clearTimeout(restUnskipTimer); restUnskipTimer = undefined } // a new gesture owns the window
       zoomLiveStyle?.remove()
       zoomLiveStyle = null
       // EXACT per-block placeholder heights, via ONE generated stylesheet — :nth-child rules,
@@ -841,6 +843,46 @@ export function Scroll({
       guardScrollTop = getScrollTop()
       if (!guardRaf) guardRaf = requestAnimationFrame(guardTick)
     }
+    // ── THE DEFERRED EXACT UN-SKIP ──────────────────────────────────────────────────────────
+    // The fast exit leaves the content-visibility window ON, so off-screen blocks still reserve
+    // their (approximate) placeholder heights: the SCROLL RANGE is off by up to ~5% (measured
+    // 20,931px on a 20k-word doc) until each block is scrolled into view and `auto` remembers its
+    // real size. Visible bands are exact regardless (they are read from the same regime the text
+    // lays out in), so nothing on screen is ever wrong — but the scrollbar would lie. So we still
+    // pay the un-skip; we just pay it when the writer is IDLE, never in the gesture's own frame.
+    // Anchored on the first block crossing the viewport top so the exact relayout can't jump the page.
+    const restUnskip = () => {
+      const ed = el.querySelector('.ProseMirror') as HTMLElement | null
+      if (!ed || !zoomLiveResting) return
+      let anchorEl: HTMLElement | null = null
+      let before = 0
+      for (const k of Array.from(ed.children) as HTMLElement[]) {
+        const r = k.getBoundingClientRect()
+        if (r.bottom > 0) { anchorEl = k; before = r.top; break }
+      }
+      zoomLiveResting = false
+      ed.classList.remove('iw-zoom-live')
+      ed.style.removeProperty('--iw-cis')
+      el.style.removeProperty('--iw-cis-scale')
+      zoomLiveStyle?.remove()
+      zoomLiveStyle = null
+      const after = anchorEl ? anchorEl.getBoundingClientRect().top : null // forces the exact relayout
+      // Same-task band re-derive off the now-full layout (the atomicity contract: bands and text
+      // must land in ONE frame — the class is off, so onZoomStep routes to the full-regime cache).
+      window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
+      if (after != null) setScrollTop(getScrollTop() + (after - before))
+      probePerf('zoom-rest-unskip', 0)
+    }
+    // Genuinely idle only: any input pushes it back, so it never lands in a gesture or a scroll.
+    const scheduleRestUnskip = () => {
+      if (restUnskipTimer) clearTimeout(restUnskipTimer)
+      restUnskipTimer = setTimeout(() => {
+        restUnskipTimer = undefined
+        const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
+        if (ric) ric(() => restUnskip(), { timeout: 1000 })
+        else restUnskip()
+      }, 900)
+    }
     const exitZoomLive = () => {
       const ed = zoomLiveEd
       if (!ed) return
@@ -855,31 +897,17 @@ export function Scroll({
       // reservations — only the on-screen blocks lay out — and the exit is O(visible). The bands
       // are applied inside the dispatch, so they still land in THIS task, atomic with the pin.
       if (arithBandsOn()) {
-        const ax: { surface: Element; ok?: boolean; blockHeights?: number[]; why?: string } = { surface: el }
-        window.dispatchEvent(new CustomEvent('inkwave:arith-exit', { detail: ax }))
-        ;(window as unknown as { __iwArithExit?: unknown }).__iwArithExit = { ok: !!ax.ok, why: ax.why, n: ax.blockHeights?.length }
-        if (ax.ok && ax.blockHeights) {
-          // Exact per-block reservations ⇒ the uniform gesture-scale approximation retires. Blocks
-          // already rendered keep their remembered size (the rules' `auto` leg); gap widgets carry
-          // their own fixed inline height, read from the style attribute (no layout).
-          const heights = ax.blockHeights
-          const kids = Array.from(ed.children) as HTMLElement[]
-          let bi = 0
-          let css = ''
-          for (let i = 0; i < kids.length; i++) {
-            const isGap = kids[i].classList.contains('inkwave-page-gap')
-            const h = isGap ? parseFloat(kids[i].style.height) || 0 : heights[bi++]
-            if (h > 0) css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto ${h}px}\n`
-          }
-          if (zoomLiveStyle) zoomLiveStyle.textContent = css
-          el.style.removeProperty('--iw-cis-scale')
-          zoomLiveResting = true // window stays on — the REST regime, exactly sized (zoomLiveEd null
-                                 // so the next gesture's enterZoomLive re-arms guard + baseline)
-          const after = anchorTop() // O(visible): skipped blocks answer from the exact reservations
-          if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
-          notePerf('zoom-exit-arith', performance.now() - exitT0); probePerf('zoom-exit-arith', performance.now() - exitT0)
-          return
-        }
+        // EXPERIMENT A: the un-skip IS the cost. Keep the window on and re-derive the bands in the
+        // PLACEHOLDER regime — exactly what every mid-gesture step already does (onZoomStep routes
+        // to liveCache/readBands when .iw-zoom-live is on), and those frames are fine. No arith.
+        zoomLiveResting = true
+        window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
+        const after = anchorTop()
+        if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
+        notePerf('zoom-exit-arith', performance.now() - exitT0); probePerf('zoom-exit-arith', performance.now() - exitT0)
+        ;(window as unknown as { __iwArithExit?: unknown }).__iwArithExit = { ok: true, why: 'noUnskip' }
+        scheduleRestUnskip() // the exact layout returns at idle — off the gesture's frame
+        return
       }
       // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
       // them out at the committed zoom, displacing everything below — pin the held content anchor
@@ -1002,7 +1030,8 @@ export function Scroll({
       if (raf) cancelAnimationFrame(raf)
       if (settle) clearTimeout(settle)
       exitZoomLive() // never leave the live-reflow window (content-visibility) on the editor
-      if (zoomLiveResting) { // the arith exit rests the window ON — tear it down for real here
+      if (restUnskipTimer) { clearTimeout(restUnskipTimer); restUnskipTimer = undefined }
+      if (zoomLiveResting) { // the fast exit rests the window ON — tear it down for real here
         zoomLiveResting = false
         ;(el.querySelector('.ProseMirror') as HTMLElement | null)?.classList.remove('iw-zoom-live')
         zoomLiveStyle?.remove(); zoomLiveStyle = null
