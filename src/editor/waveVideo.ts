@@ -18,6 +18,18 @@
 // iOS AUTOPLAY: inline autoplay requires BOTH `muted` and `playsinline` (as attributes AND
 // properties — older WebKit reads the attribute) and fails SILENTLY otherwise. Low Power Mode
 // blocks autoplay outright; that surfaces as reason 'autoplay-blocked'.
+//
+// ⛔ NOTHING HERE MAY TOUCH THE DOM BEFORE HYDRATION (2026-07-17 — Peter's "the video works but it
+// never loads", PROBED). `hydrateRoot(document)` makes React own EVERY node, so appending our
+// <video> (or the overlay) into the PRERENDERED `.iw-wave-twinkles` before hydration is a
+// hydration MISMATCH: React throws #418, discards the server HTML and client-renders the whole
+// document (#423) — which REPLACES the <html> element with a new node. The new <html> carries no
+// `.iw-water-ready` and no `data-theme`, so `:root:not(.iw-water-ready)` puts every wave layer
+// (and the twinkle host our own <video> lives in) at display:none FOR THE SESSION: the CSS water
+// dies, the video paints nothing, and on phone the surface is left a flat aqua gradient with no
+// waves — the 2026-07-10 "gradient without waves" catastrophe, re-triggered by this flag.
+// entry.client's MutationObserver stamp-guard cannot save it: it watches the ORIGINAL <html>,
+// which React detached. Hence `hydrated()` below — every DOM write waits behind it.
 
 const RUNGS = [
   { name: 'phone', w: 540, h: 1170 },
@@ -31,6 +43,19 @@ type Diag = {
 }
 const diag: Diag = { flag: '?', codec: '?', rung: '?', theme: '?', clip: '—', fetch: '—', ready: -1, advancing: false, master: false, reason: 'starting…' }
 const bail = (reason: string) => { diag.reason = reason; diag.master = false }
+// PROBE SEAM (same contract as `window.__iwTwkPool`): probes must read this object, never scrape
+// the overlay's rendered HTML — the overlay is a formatted STRING for Peter's phone camera, and a
+// probe that parses it measures the formatting. `masterEver` is the durable fact a 12s sample can
+// otherwise miss entirely: the video can become master and hand back before any single read lands,
+// which reads identically to "the video never ran" — the exact ambiguity that makes a green
+// meaningless.
+let masterEver = false
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__iwWaveVideo', {
+    configurable: true,
+    get: () => ({ ...diag, masterEver }),
+  })
+}
 
 function flagValue(): string {
   try { return localStorage.getItem('inkwave:waveVideo') ?? '(unset)' } catch { return '(no-storage)' }
@@ -54,15 +79,38 @@ function pickRung(): typeof RUNGS[number] {
 
 let started = false
 
+// THE HYDRATION BARRIER (see the ⛔ note in the header). `inkwave:twinkles-ready` is the app's
+// existing post-hydration signal: waveTwinkle announces it once the pool is mounted from a LAYOUT
+// EFFECT, which React can only run after the hydration commit. Deliberately NOT `.iw-water-ready`
+// — that gate has a 1500ms timeout path (entry.client) that can open it BEFORE hydration on a slow
+// device (an iPhone 8 is exactly that device), which would put us right back in the mismatch.
+// `__iwTwinklesReady` covers the fired-before-we-listened race, as it does for the gate itself.
+// If the twinkles never announce, this never resolves and the video simply never runs — the CSS
+// water is the intended fallback at every step, and entry.client only ever `void`s us.
+function hydrated(): Promise<void> {
+  const w = window as unknown as { __iwTwinklesReady?: boolean }
+  if (w.__iwTwinklesReady) return Promise.resolve()
+  return new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
+}
+
 // Called from entry.client's gate (flag-gated). Resolves when the loop's first frame is decoded
-// (or we give up → CSS water); entry.client folds it into `.iw-water-ready` (bounded by its timeout).
+// (or we give up → CSS water). NOT a gate condition — entry.client `void`s this (awaiting it would
+// deadlock: we wait for hydration, which the gate's own conditions precede).
 export function prepareWaveVideo(): Promise<void> {
   if (started) return Promise.resolve()
   started = true
   diag.flag = flagValue()
-  if (diag.flag === 'debug') mountOverlay()
+  diag.reason = 'waiting for hydration…'
   return new Promise<void>((resolve) => {
-    void run().then(() => resolve()).catch((e) => { bail(`crashed: ${String(e).slice(0, 60)}`); resolve() })
+    void hydrated()
+      .then(() => {
+        // The overlay appends to <body> — a DOM write, so it waits behind the barrier too. It was
+        // the second offender: with `=debug` it broke hydration all by itself.
+        if (diag.flag === 'debug') mountOverlay()
+        return run()
+      })
+      .then(() => resolve())
+      .catch((e) => { bail(`crashed: ${String(e).slice(0, 60)}`); resolve() })
   })
 }
 export function initWaveVideo(): void { void prepareWaveVideo() }
@@ -88,12 +136,19 @@ async function run(): Promise<void> {
   video.src = loopUrl
 
   // iOS loads a <video> only while it is IN THE DOM (a detached element never fetches on WebKit),
-  // so attach NOW — invisible (opacity 0) — and keep it attached via the self-heal guard (React
-  // reconciles the prerendered `.iw-wave-twinkles` host during hydration). We become MASTER (hide
-  // the CSS water) only once play() RESOLVES, so a decode/autoplay failure always leaves the CSS
-  // water visible. `diag.fetch` is filled by the SW response path; keep the overlay honest.
+  // so attach — invisible (opacity 0) — before load(). We are POST-HYDRATION here, so ONE plain
+  // append is enough: React rendered `.iw-wave-twinkles` as a stable EMPTY container and never
+  // touches its children again (waveTwinkle owns them imperatively and only ever removes its OWN
+  // `.iw-twk-set` nodes — it never clears the host). The old 150ms re-attach interval existed
+  // solely to heal the wipe caused by attaching PRE-hydration; with the barrier there is no wipe,
+  // so the interval is gone rather than re-tuned. We become MASTER (hide the CSS water) only once
+  // play() RESOLVES, so a decode/autoplay failure always leaves the CSS water visible.
+  const host = document.querySelector<HTMLElement>(
+    '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
+  )
+  if (!host) { bail('no water host on this page → CSS water'); return }
   diag.fetch = 'requested (direct URL via SW)'
-  guardAttached(video)
+  host.appendChild(video)
   video.load()
 
   const playable = new Promise<void>((res) => {
@@ -118,34 +173,13 @@ async function run(): Promise<void> {
   video.play().then(() => {
     video.style.opacity = '1' // THE loop was invisible: CSS defaults .iw-wave-video-el to opacity 0
     document.documentElement.classList.add('iw-wave-video-on')
-    diag.master = true
+    diag.master = true; masterEver = true
     diag.reason = 'VIDEO is master'
     wireSettle(video, brakeUrl)
   }).catch((e) => {
     bail(`autoplay-blocked (${String(e).slice(0, 50)}) → CSS water`)
     teardown(video)
   })
-}
-
-// SELF-HEALING ATTACH. Does the FIRST attach (as soon as the host exists) AND re-attaches if React
-// ever reconciles our <video> away while it's still ours. `.iw-wave-twinkles` is React-rendered and
-// present in the prerendered html, so a video appended before that subtree hydrates gets wiped —
-// which (with the class set) would blank the surface. Belt-and-braces: the guard keeps it in the DOM
-// so iOS can decode it AND so it stays visible once master. Stops at teardown (data-going).
-function guardAttached(video: HTMLVideoElement): void {
-  const tryAttach = () => {
-    if (video.hasAttribute('data-going')) return true
-    if (video.isConnected) return false
-    const host = document.querySelector<HTMLElement>(
-      '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
-    )
-    if (!host) return false
-    host.appendChild(video)
-    if (diag.master) void video.play().catch(() => { /* re-play denied — finish restores CSS water */ })
-    return false
-  }
-  tryAttach()
-  const t = setInterval(() => { if (tryAttach() || video.hasAttribute('data-going')) clearInterval(t) }, 150)
 }
 
 function mkVideo(): HTMLVideoElement {
@@ -252,12 +286,37 @@ function mountOverlay(): void {
     'background:rgba(0,0,0,0.82)', 'padding:6px 8px', 'max-width:92vw',
     'border-bottom-right-radius:8px', 'white-space:pre-wrap', 'word-break:break-word',
   ].join(';')
+  // "ON SCREEN" MUST MEAN ON SCREEN (2026-07-17). This said VIDEO ON SCREEN whenever play()
+  // resolved — a claim about the DECODER, not about pixels. It read green on Peter's iPhone while
+  // the element sat inside a display:none host painting absolutely nothing, which is precisely how
+  // a broken build talked us out of a real bug. Ask the layout engine instead: a display:none
+  // ancestor gives a zero box (and null offsetParent for a non-fixed chain), and visibility/opacity
+  // are resolved values, so this sees every way the video can be silently unpainted.
+  const painted = (v: HTMLVideoElement): { ok: boolean; why: string } => {
+    if (!v.isConnected) return { ok: false, why: 'DETACHED from the DOM' }
+    const r = v.getBoundingClientRect()
+    if (r.width < 1 || r.height < 1) return { ok: false, why: 'ZERO BOX (a display:none ancestor?)' }
+    const cs = getComputedStyle(v)
+    if (cs.display === 'none') return { ok: false, why: 'display:none' }
+    if (cs.visibility !== 'visible') return { ok: false, why: `visibility:${cs.visibility}` }
+    if (+cs.opacity < 0.9) return { ok: false, why: `opacity:${cs.opacity}` }
+    return { ok: true, why: `${Math.round(r.width)}x${Math.round(r.height)}` }
+  }
   const paint = () => {
     const v = document.querySelector<HTMLVideoElement>('video.iw-wave-video-el')
     if (v) { diag.ready = v.readyState }
-    const head = diag.master
+    // NO ANGLE BRACKETS IN ANY OF THESE STRINGS: this box is written with innerHTML, so a literal
+    // "<video>" is parsed as a TAG — it swallowed the water-gate and reason lines whole the first
+    // time this ran. The instrument must not be able to blank itself.
+    const p = v ? painted(v) : { ok: false, why: 'no video element' }
+    // THREE states, not two: master+painted, master+INVISIBLE (the trap), and CSS water.
+    const head = diag.master && p.ok
       ? '<b style="color:#4ade80">● VIDEO ON SCREEN</b>'
-      : '<b style="color:#f87171">● CSS WATER (no video)</b>'
+      : diag.master
+        ? `<b style="color:#fbbf24">▲ VIDEO IS MASTER BUT NOT PAINTED — ${p.why}</b>`
+        : '<b style="color:#f87171">● CSS WATER (no video)</b>'
+    // The water gate itself: if this ever reads NO, hydration was lost and BOTH waters are dead.
+    const gate = document.documentElement.classList.contains('iw-water-ready')
     box.innerHTML = `${head}
 flag      ${diag.flag}
 codec     ${diag.codec}   rung ${diag.rung}/${diag.theme}
@@ -265,6 +324,8 @@ clip      ${diag.clip}
 fetch     ${diag.fetch}
 readyState ${diag.ready} ${diag.ready >= 2 ? '(decoded)' : '(NOT decoded)'}
 advancing ${diag.advancing ? 'YES (real decode)' : 'NO (frozen/none)'}
+painted   ${p.ok ? `YES (${p.why})` : `NO — ${p.why}`}
+water-gate ${gate ? 'OPEN' : '*** CLOSED — water is dead ***'}
 reason    ${diag.reason}`
   }
   // KEEP IT ATTACHED. hydrateRoot(document) makes React own <body>, so a plain appended overlay is

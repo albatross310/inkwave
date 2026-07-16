@@ -93,28 +93,44 @@ void bootstrap()
 // load gates identically now (the tiles are data URIs, so "warm" never made decoding faster
 // anyway — the wait is hydration-bound either way, and atomicity wins per Peter's directive).
 {
-  const root = document.documentElement
   let stamped = false
   const ready = () => {
     if (stamped) return
     stamped = true
-    root.classList.add('iw-water-ready')
+    document.documentElement.classList.add('iw-water-ready')
     window.dispatchEvent(new Event('inkwave:water-ready'))
   }
   // GUARD (2026-07-10, the iOS "gradient without waves"): if hydration ever fails, React 18's
-  // recovery client-renders <html> from scratch and STRIPS attributes it doesn't render —
-  // .iw-water-ready and data-theme both vanished, the wave pseudos went display:none for the whole
-  // session (this block had already taken the pre-stamped branch, so nothing re-stamped), and a
-  // night client fell back to day. The structural mismatch that triggered it is fixed in
-  // Scroll.tsx, but the stamps must survive ANY future recovery: re-assert them the moment they
-  // vanish. MutationObserver callbacks are microtasks — they run before the wiped frame can paint,
-  // so recovery can never flash parchment or kill the water. A legitimate theme toggle always
-  // SETS data-theme (never removes it), so re-applying only when it's absent can't fight Settings.
-  new MutationObserver(() => {
+  // recovery client-renders <html> from scratch and STRIPS the stamps it doesn't render —
+  // .iw-water-ready and data-theme both vanish, the wave pseudos go display:none for the whole
+  // session, and a night client falls back to day. Re-assert both the moment they vanish;
+  // MutationObserver callbacks are microtasks, so they run before the wiped frame can paint. A
+  // legitimate theme toggle always SETS data-theme (never removes it), so re-applying only when
+  // it's absent can't fight Settings.
+  //
+  // ⚠️ THIS GUARD WAS A FICTION UNTIL 2026-07-17, and it failed the ONE case it was written for.
+  // React's recovery does not strip attributes off <html> — it REPLACES the <html> ELEMENT. The
+  // old code captured `const root = document.documentElement` once and observed THAT node, so
+  // after a recovery the guard was watching a DETACHED element and re-stamping it forever while
+  // the live <html> stayed bare. PROBED: with the wave-video flag on, the original node fails an
+  // identity check and both stamps are gone for the session. So: never hold the node — resolve
+  // `document.documentElement` at every use, and watch `document` itself (which is never
+  // replaced) for the swap, re-stamping and re-arming on the new element.
+  const restamp = () => {
+    const root = document.documentElement
     if (stamped && !root.classList.contains('iw-water-ready')) root.classList.add('iw-water-ready')
     if (!root.dataset.theme) applyTheme()
-  }).observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] })
-  if (root.classList.contains('iw-water-ready')) {
+  }
+  const attrObserver = new MutationObserver(restamp)
+  const armAttrs = () => attrObserver.observe(document.documentElement, {
+    attributes: true, attributeFilter: ['class', 'data-theme'],
+  })
+  armAttrs()
+  // <html> swapped out entirely: re-stamp the NEW element and re-point the attribute observer at
+  // it (observing a detached node is exactly how the stamps were lost).
+  new MutationObserver(() => { restamp(); attrObserver.disconnect(); armAttrs() })
+    .observe(document, { childList: true })
+  if (document.documentElement.classList.contains('iw-water-ready')) {
     stamped = true // already stamped (bfcache restore / re-eval) — nothing to gate, guard armed
   } else {
     const surface = document.querySelector('.inkwave-editor-surface')
