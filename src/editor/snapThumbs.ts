@@ -27,12 +27,36 @@ const FLAG = 'inkwave:snapThumbs'
 export function thumbScale(pane: ThumbPane): number { return pane === 'map' ? 1 : 0.5 }
 const QUALITY = 0.7
 
-export function snapThumbsEnabled(): boolean {
+// STICKY URL FLAGS (the `?auth` pattern). /snapshot's local-first nav rewrites the URL on every
+// step (goTo → navigate without our params), so a flag READ FRESH FROM THE URL dies on the first
+// scrub — which silently disabled the whole feature (and the debug overlay) exactly when you
+// started using it. Resolve ONCE per load, persist to localStorage, then read from there.
+// `?snapThumbs=1` on · `?snapThumbs=debug` on + overlay · `?snapThumbs=off` clears both.
+const DEBUG_FLAG = 'inkwave:snapThumbsDebug'
+let _flags: { on: boolean; debug: boolean } | null = null
+function flags(): { on: boolean; debug: boolean } {
+  if (_flags) return _flags
+  let on = false, debug = false
   try {
-    const w = window as unknown as { __iwSnapThumbs?: boolean }
-    if (typeof w.__iwSnapThumbs === 'boolean') return w.__iwSnapThumbs
-    return window.localStorage.getItem(FLAG) === '1'
-  } catch { return false }
+    const p = new URLSearchParams(window.location.search).get('snapThumbs')
+    if (p === 'off') { window.localStorage.removeItem(FLAG); window.localStorage.removeItem(DEBUG_FLAG) }
+    else if (p === 'debug') { window.localStorage.setItem(FLAG, '1'); window.localStorage.setItem(DEBUG_FLAG, '1') }
+    else if (p === '1') window.localStorage.setItem(FLAG, '1')
+    on = window.localStorage.getItem(FLAG) === '1'
+    debug = window.localStorage.getItem(DEBUG_FLAG) === '1'
+  } catch { /* no storage → stays off */ }
+  _flags = { on, debug }
+  return _flags
+}
+
+/** `?snapThumbs=debug` — the on-device diagnostic overlay (the wave-video lesson: SHOW the state,
+ *  don't guess it). Implies the feature is on, so one URL turns the whole thing on + visible. */
+export function snapThumbsDebug(): boolean { return flags().debug }
+
+export function snapThumbsEnabled(): boolean {
+  const w = typeof window !== 'undefined' ? (window as unknown as { __iwSnapThumbs?: boolean }) : null
+  if (w && typeof w.__iwSnapThumbs === 'boolean') return w.__iwSnapThumbs
+  return flags().on
 }
 
 // ── Pure helpers (unit-tested) ────────────────────────────────────────────────────────────────

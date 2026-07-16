@@ -494,6 +494,7 @@ interface Entry {
   scrollLeft: number
   bytes: number
   lastUsed: number
+  src: 'capture' | 'thumb' // where the pixels came from — the debug overlay separates these
 }
 
 interface Surface {
@@ -520,8 +521,31 @@ export interface ScrubPresenter {
   isActive(): boolean
   queueCapture(kind: ScrubPaneKind, snapId: string, getEl?: () => HTMLElement | null): void
   stats(): { entries: number; bytes: number }
+  /** Does a baked thumbnail already exist for this pane+snapshot at the CURRENT signature? (sweep) */
+  isThumbBaked(kind: ScrubPaneKind, snapId: string): boolean
+  /** Live diagnostic state for the `?snapThumbs=debug` overlay. */
+  debugInfo(): ScrubDebugInfo
+  resetBurst(): void
   dispose(): void
   disposed: boolean
+}
+
+export interface ScrubPaneDebug {
+  kind: ScrubPaneKind
+  hitCapture: number   // exact, from a live render capture
+  hitThumb: number     // exact, HYDRATED from the OPFS thumbnail store
+  nearest: number      // stale fallback — a DIFFERENT version's pixels
+  none: number         // nothing to show → overlay hidden, the frozen live pane shows
+  // Is the overlay actually PAINTED? (the wave-video bug class: "playing" into an invisible node)
+  visible: boolean
+  display: string; opacity: string; visibility: string; zIndex: string
+  rectW: number; rectH: number      // on-screen box
+  canvasW: number; canvasH: number  // canvas BACKING STORE (0 = nothing ever drawn)
+}
+export interface ScrubDebugInfo {
+  entries: number; bytes: number
+  shows: number           // show() calls this burst
+  panes: ScrubPaneDebug[]
 }
 
 export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => string | null; getDocId?: () => string | null }): ScrubPresenter {
@@ -548,6 +572,16 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
   let hideRaf = 0
 
   const attached = new Map<ScrubPaneKind, Entry | null>()
+
+  // Per-burst diagnostic counters (the `?snapThumbs=debug` overlay). Zero cost when unread.
+  type Cnt = { hitCapture: number; hitThumb: number; nearest: number; none: number }
+  const dbg = new Map<ScrubPaneKind, Cnt>()
+  let dbgShows = 0
+  const cntOf = (k: ScrubPaneKind): Cnt => {
+    let c = dbg.get(k)
+    if (!c) { c = { hitCapture: 0, hitThumb: 0, nearest: 0, none: 0 }; dbg.set(k, c) }
+    return c
+  }
 
   const p: ScrubPresenter = {
     disposed: false,
@@ -585,6 +619,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       active = true
       const dpr = dprOf()
       let shown = 0
+      dbgShows++
       probePerf('scrub.want', order.indexOf(snapId)) // version-fidelity: commanded target index
       preloadThumbs(snapId) // hydrate this + a small direction window from the OPFS thumbnail cache
       for (const [kind, s] of surfaces) {
@@ -614,6 +649,8 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           // the doc-pane series; scrub.exact.<kind> reports each pane separately.
           probePerf('scrub.exact.' + kind, entry === exact ? 1 : 0)
           if (kind === 'doc') { probePerf('scrub.shown', order.indexOf(entry.snapId)); probePerf('scrub.exact', entry === exact ? 1 : 0) }
+          const c = cntOf(kind)
+          if (entry === exact) { if (entry.src === 'thumb') c.hitThumb++; else c.hitCapture++ } else c.nearest++
           entry.lastUsed = ++tick
           if (attached.get(kind) !== entry) {
             drawEntry(s, entry) // GPU blit into the persistent canvas — no element churn
@@ -622,6 +659,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           s.host.style.display = 'block'
           shown++
         } else {
+          cntOf(kind).none++ // nothing cached for this bucket at all — the frozen live pane shows
           s.host.style.display = 'none' // no bitmap → the frozen live pane shows (not blank)
           attached.set(kind, null)
         }
@@ -650,6 +688,37 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     },
 
     stats() { return { entries: entries.size, bytes } },
+
+    isThumbBaked(kind, snapId) {
+      const docId = opts.getDocId?.(); if (!docId) return false
+      const s = surfaces.get(kind); const el = s?.getEl(); if (!s || !el) return false
+      const zoom = s.getZoom(), dpr = dprOf()
+      return hasThumb(docId, snapId, kind as ThumbPane, thumbSig(kind, el.clientWidth, el.clientHeight, zoom, dpr))
+    },
+
+    resetBurst() { dbg.clear(); dbgShows = 0 },
+
+    debugInfo() {
+      const panes: ScrubPaneDebug[] = []
+      for (const [kind, s] of surfaces) {
+        const c = cntOf(kind)
+        const cs = typeof getComputedStyle === 'function' ? getComputedStyle(s.host) : null
+        const r = s.host.getBoundingClientRect()
+        const display = cs?.display ?? '?', opacity = cs?.opacity ?? '?', visibility = cs?.visibility ?? '?'
+        panes.push({
+          kind, hitCapture: c.hitCapture, hitThumb: c.hitThumb, nearest: c.nearest, none: c.none,
+          // "Painted" = the overlay box is displayed, non-transparent, on-screen, AND its canvas has
+          // a real backing store. A 0×0 canvas or display:none = swapping into nothing (the bug class
+          // the wave-video overlay caught: perfect state, zero pixels).
+          visible: display !== 'none' && visibility !== 'hidden' && parseFloat(opacity || '0') > 0.01
+            && r.width > 1 && r.height > 1 && s.canvas.width > 1 && s.canvas.height > 1,
+          display, opacity, visibility, zIndex: cs?.zIndex ?? '?',
+          rectW: Math.round(r.width), rectH: Math.round(r.height),
+          canvasW: s.canvas.width, canvasH: s.canvas.height,
+        })
+      }
+      return { entries: entries.size, bytes, shows: dbgShows, panes }
+    },
 
     dispose() {
       p.disposed = true
@@ -731,7 +800,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
         if (!blob || p.disposed || entries.has(key)) return
         const bmp = await createImageBitmap(blob)
         const b = bmp.width * bmp.height * 4
-        entries.set(key, { key, snapId, kind, bitmap: bmp, canvas: null, width: bmp.width, height: bmp.height, scrollTop: 0, scrollLeft: 0, bytes: b, lastUsed: ++tick })
+        entries.set(key, { key, snapId, kind, bitmap: bmp, canvas: null, width: bmp.width, height: bmp.height, scrollTop: 0, scrollLeft: 0, bytes: b, lastUsed: ++tick, src: 'thumb' })
         bytes += b; enforceBudget()
       } catch { /* decode failed — the live path still renders */ } finally { hydrating.delete(key) }
     })()
@@ -820,6 +889,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
               key, snapId: job.snapId, kind: job.kind, bitmap: res.bitmap, canvas: res.canvas,
               width: res.width, height: res.height,
               scrollTop: el.scrollTop, scrollLeft: el.scrollLeft, bytes: res.bytes, lastUsed: ++tick,
+              src: 'capture',
             }
             entries.set(key, entry)
             bytes += res.bytes
