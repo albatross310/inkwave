@@ -8,7 +8,8 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt, TiptapJSON } from '../types/document'
-import { contentHash, bundleHash, bibliographyHash } from './hash'
+import { contentHash, bundleHash, bibliographyHash, emailHeadersHash } from './hash'
+import { normaliseHeaders } from '../email/headers'
 import { stampBundle, upgradeProof } from './ots'
 import { gunzipJsonOffThread } from '../workers/parseClient'
 import { writeOpfsFile } from '../storage/opfsWrite'
@@ -280,8 +281,17 @@ export async function createSnapshotIfChanged(
     ? { ...bib!, style: doc.citationStyle, bibHash: bHash }
     : undefined
 
-  // bundleHash commits to content, the DISPLAYED bibliography (v:2), AND the live-composition receipt
-  // chain, so the OTS proof (M2) anchors the whole signed record to Bitcoin.
+  // Freeze the EMAIL HEADERS (§B2.2) the same way, and only on an email document — so the bundle
+  // keeps its v:1/v:2 form for every other document and all existing anchors verify unchanged.
+  // The body needs no special handling: it IS contentJson, already committed via contentHash. The
+  // headers are canonicalised before hashing so one header set has exactly one anchored hash.
+  const isEmail = doc.docType === 'email' && !!doc.email
+  const frozenEmail = isEmail ? normaliseHeaders(doc.email!) : undefined
+  const eHash = frozenEmail ? await emailHeadersHash(frozenEmail) : undefined
+
+  // bundleHash commits to content, the DISPLAYED bibliography (v:2), the EMAIL HEADERS (v:3), AND
+  // the live-composition receipt chain, so the OTS proof (M2) anchors the whole signed record to
+  // Bitcoin. For an email that is exactly the §B2.2 claim: headers + body existed by time T.
   const snapshot: Snapshot = {
     id: uuidv4(),
     documentId: doc.id,
@@ -291,9 +301,10 @@ export async function createSnapshotIfChanged(
     contentHash: cHash,
     contentJson: doc.contentJson,
     receipts,
-    bundleHash: await bundleHash(cHash, receipts, bHash),
+    bundleHash: await bundleHash(cHash, receipts, bHash, eHash),
     ots: { status: 'unstamped' },
     ...(frozenBib ? { bibliography: frozenBib, bibHash: bHash } : {}),
+    ...(frozenEmail ? { email: frozenEmail, emailHash: eHash } : {}),
     ...(summary ? { summary } : {}),
     ...(nudgeWord ? { nudgeWord } : {}),
   }

@@ -47,7 +47,13 @@ function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrac
 async function inlineGunzipJson(buf: ArrayBuffer): Promise<unknown> {
   const ds = new DecompressionStream('gzip')
   const w = ds.writable.getWriter()
-  void w.write(buf)
+  // MUST be a view, not the raw ArrayBuffer: a stream chunk has to be a TypedArray/DataView. Writing
+  // the ArrayBuffer REJECTS the write — and because both promises were `void`ed the rejection
+  // surfaced nowhere and `Response(...).text()` simply never settled. A HANG, not a throw, so the
+  // caller's try/catch could never catch it (readSnapshotsFromDisk returns [] on error — it would
+  // have waited forever instead). Found 2026-07-17 by the first test that ever read a cold archive:
+  // this fallback (the no-Worker path — node/vitest/prerender) had never once been exercised.
+  void w.write(new Uint8Array(buf))
   void w.close()
   return JSON.parse(await new Response(ds.readable).text())
 }
