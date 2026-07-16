@@ -5,6 +5,52 @@ import { describe, expect, it } from 'vitest'
 import { compileData, compilePayload } from './compile'
 import { fixedPrompt, headerLine } from './prompt'
 import { DEMO_TEXT, fixtureWindow } from '../fixtures'
+import type { SessionRow } from '../types'
+
+// ─── THE ALLOW-LIST PROPERTY (§A7.3) ─────────────────────────────────────────────────────────────
+// These replace `ledger.test.ts`'s `stripPrivateFields` suite, deleted 2026-07-17 with the
+// deny-list it tested: that mechanism had ZERO non-test callers, so its green suite proved only
+// that a function nobody called did what it said. The property it GESTURED at is real and is
+// enforced by this module's allow-list — so it is pinned HERE, against the live mechanism, and
+// pinned STRONGER: the deny-list could only ever protect the two fields someone remembered to name.
+describe('the payload is an ALLOW-LIST — a field nobody foresaw cannot ride out', () => {
+  const NOTE = 'Finally got the third step of the argument down.'
+
+  /** A row carrying BOTH the known prose fields and an unforeseen one. */
+  function rowWithSurprise(): SessionRow {
+    return {
+      ...fixtureWindow('daily').sessions[0],
+      note: NOTE,
+      place: 'library',
+      // The field the ledger "gains tomorrow". Typed as the schema does not know it, which is
+      // exactly the point: no deny-list can name it, and the allow-list does not have to.
+      mood_journal: 'anxious about the deadline, wrote anyway',
+      device_name: "Peter's MacBook",
+    } as unknown as SessionRow
+  }
+
+  it('omits an unforeseen prose field at every window, even with tier 2 ON', () => {
+    for (const window of ['daily', 'weekly', 'monthly'] as const) {
+      const agg = { ...fixtureWindow(window), sessions: [rowWithSurprise()] }
+      // includeNotes: true is the MOST permissive tier-2 state — if anything leaks, it leaks here.
+      const { data } = compileData({ agg, includeNotes: true })
+      expect(data).not.toContain('anxious about the deadline')
+      expect(data).not.toContain("Peter's MacBook")
+      expect(data).not.toContain('mood_journal')
+      expect(data).not.toContain('device_name')
+    }
+  })
+
+  it('KNOWN-POSITIVE: the same payload DOES carry what the writer opted into', () => {
+    // Without this, the assertions above would pass on an empty payload — i.e. on a broken
+    // compileData — and prove nothing at all.
+    const agg = { ...fixtureWindow('daily'), sessions: [rowWithSurprise()] }
+    const { data, notesIncluded } = compileData({ agg, includeNotes: true })
+    expect(notesIncluded).toBe(true)
+    expect(data).toContain(NOTE)      // the opted-in note arrives...
+    expect(data).toContain('library') // ...and the opted-in place
+  })
+})
 
 describe('§A7.3 — the content tick-box', () => {
   const weekly = fixtureWindow('weekly')

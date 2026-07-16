@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { attestLedger, buildAttestations, ledgerNameFor, mergeLedgerRows, verifyLedger } from './ledger'
-import { LEDGER_PRIVATE_FIELDS, stripPrivateFields } from './types'
 import type { MonthLedger, SessionRow } from './types'
 
 function row(id: string, start: string, over: Partial<SessionRow> = {}): SessionRow {
@@ -100,30 +99,6 @@ describe('mergeLedgerRows — GROW-ONLY (§A9; the 2026-07-05 truncation inciden
     const annotated = { ...A, note: 'a note' }
     const extended = { ...A, end: '2026-07-17T09:45:00.000+10:00', edit_events: 99 }
     expect(mergeLedgerRows([annotated], [extended])[0].end).toBe(extended.end)
-  })
-})
-
-describe('stripPrivateFields (§A7.3 — the AI-export seam)', () => {
-  it('removes the user-authored fields entirely, leaving no trace', () => {
-    const r: SessionRow = { ...A, note: 'felt scattered today', place: 'home' }
-    const pub = stripPrivateFields(r)
-    expect('note' in pub).toBe(false)
-    expect('place' in pub).toBe(false)
-    const blob = JSON.stringify(pub)
-    expect(blob).not.toContain('scattered')
-    expect(blob).not.toContain('home')
-    // ...while every MEASURED field survives — this is a filter, not a redaction of the work.
-    expect(pub.session_id).toBe('a')
-    expect(pub.active_minutes).toBe(10)
-    expect(pub.words_added).toBe(100)
-  })
-
-  it('is a no-op on a row that never had them', () => {
-    expect(stripPrivateFields(A)).toEqual(A)
-  })
-
-  it('names exactly the fields it strips (the contract the AI-report path reads)', () => {
-    expect([...LEDGER_PRIVATE_FIELDS]).toEqual(['note', 'place'])
   })
 })
 

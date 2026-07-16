@@ -92,27 +92,27 @@ export interface SessionRow {
   place?: string
 }
 
-/**
- * The fields that are USER PROSE rather than measured telemetry, and therefore must never reach an
- * AI (or any export) without their own explicit, off-by-default opt-in (§A7.3).
- *
- * This is the integration seam for the AI-report path: `stripPrivateFields(row)` is the DEFAULT
- * payload shape; including them requires the writer ticking the box that names them.
- */
-export const LEDGER_PRIVATE_FIELDS = ['note', 'place'] as const
-
-/** A row with the user-authored fields removed — the default AI-export shape (§A7.3). */
-export type PublicSessionRow = Omit<SessionRow, 'note' | 'place'>
-
-/**
- * Drop the user-authored fields. Use this on ANY path that leaves the device unless the writer has
- * ticked the notes/place opt-in. Deletes the keys entirely (never blanks them), so an omitted note
- * leaves no trace in the payload at all.
- */
-export function stripPrivateFields(row: SessionRow): PublicSessionRow {
-  const { note: _n, place: _p, ...rest } = row
-  return rest
-}
+// ─── WHAT ACTUALLY KEEPS `note`/`place` OUT OF AN EXPORT (§A7.3) ─────────────────────────────────
+//
+// THE ALLOW-LIST IN `report/compile.ts`, and nothing else. Every field that leaves is NAMED there
+// (`sessionRows()` lists its 12 columns literally); nothing iterates a row and emits what it finds.
+// So a prose field the ledger gains tomorrow cannot leak by default — it is simply not emitted
+// until someone adds it there, which forces them to choose a consent tier. The writer's opt-in
+// (`includeNotes`, default false) gates the one section that may carry prose.
+//
+// A DENY-LIST USED TO SIT HERE — `LEDGER_PRIVATE_FIELDS = ['note','place']`, `stripPrivateFields()`,
+// `PublicSessionRow` — described as "the DEFAULT payload shape". It was REMOVED on 2026-07-17
+// because it was never the default, or anything else: it had ZERO non-test callers on every branch
+// including master, and `/privacy`'s own header cited it as the enforcing mechanism. The privacy
+// property held the whole time (the allow-list is real), so this was not a leak — it was worse in a
+// quieter way: **editing `LEDGER_PRIVATE_FIELDS` to protect a new field would have done nothing at
+// all, silently**, while reading like the guard that mattered. Two rules for one question, only one
+// live, and the docs pointed at the dead one.
+//
+// DO NOT REINTRODUCE A DENY-LIST HERE. compile.ts's own banner has the argument: a deny-list fails
+// the opposite way, and that failure is silent. If a future path must export rows, name its columns
+// there. `report/compile.test.ts` pins the allow-list property directly — including that an
+// unforeseen prose field cannot ride out even with tier 2 ON.
 
 // ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
 // The ledger doubles as a signed provenance ledger: rows hash into a chain so the ledger is

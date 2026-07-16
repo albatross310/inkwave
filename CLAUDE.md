@@ -856,9 +856,16 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
 - **Location: there is NO location collection and no `navigator.geolocation` anywhere.** `place` is a word the
   writer TYPES ("library"), same class as their `note`. Peter overruled §A3.2 to want location, then chose
   user-labelled (2026-07-17). Do not "upgrade" it to real location without re-reading §A3.2 and asking him.
-- **`note`/`place` are USER PROSE, not telemetry:** `LEDGER_PRIVATE_FIELDS` + `stripPrivateFields(row)` are
-  the AI-export seam — they are OFF by default and need their own opt-in (§A7.3). `/privacy` documents all of
-  this and MUST stay in sync (it currently claims exactly: no location, notes/place are typed, opt-in only).
+- **`note`/`place` are USER PROSE, not telemetry** — OFF by default, their own opt-in (§A7.3). WHAT ENFORCES
+  IT: `report/compile.ts`'s ALLOW-LIST (it NAMES every field that leaves; note/place are not among them) +
+  the `includeNotes` gate, default false. **`LEDGER_PRIVATE_FIELDS`/`stripPrivateFields`/`PublicSessionRow`
+  are GONE (2026-07-17)** — that deny-list had ZERO non-test callers on every branch incl. master while
+  types.ts called it "the DEFAULT payload shape" and `/privacy`'s header cited it as the enforcing mechanism.
+  The property held (the allow-list is real, so this was never a leak) — the danger was quieter: editing
+  `LEDGER_PRIVATE_FIELDS` to protect a new field would have done NOTHING, silently. Two rules for one
+  question, only one live, docs pointing at the dead one. **Do not reintroduce a deny-list** (compile.ts's
+  banner has the argument: it fails the opposite way, and that failure is silent); name new columns in
+  compile.ts instead. `/privacy` MUST stay in sync and MUST name the guard that is real.
 - **§A5 is a hard constraint:** kind, non-shaming, no scoring. The day summary leads with TIME and SESSIONS;
   a cutting day reads "editing is writing too". Nothing here may grow a red number.
 - NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo

@@ -18,7 +18,15 @@
 //     (no document text), lives in the writer's own storage, and never reaches our servers. It
 //     collects NO location — there is no navigator.geolocation call anywhere; `place` is a label
 //     the writer types, like their diary `note`. Both are excluded from any AI export unless the
-//     writer opts in (types.ts: LEDGER_PRIVATE_FIELDS / stripPrivateFields).
+//     writer opts in. WHAT ENFORCES THAT, exactly: report/compile.ts is an ALLOW-LIST — it NAMES
+//     every field that leaves (sessionRows() lists its columns literally; `note`/`place` are not
+//     among them) — plus the `includeNotes` opt-in, default false, gating the one section that may
+//     carry prose. Pinned by report/compile.test.ts.
+//     This line used to cite `types.ts: LEDGER_PRIVATE_FIELDS / stripPrivateFields`. That deny-list
+//     had ZERO non-test callers and was deleted on 2026-07-17: the property was true, but the
+//     mechanism named here was dead, so a developer "protecting" a new field by adding it to that
+//     list would have changed nothing, silently. A privacy page must name the guard that is REAL —
+//     citing a dead one is the same class of lie as a probe that only logs its successes.
 // If a feature changes any of this, change this page in the same PR.
 
 import { Link } from 'react-router'
