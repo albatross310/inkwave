@@ -1428,8 +1428,73 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
   §A3) build against it. snake_case is deliberate (a document/wire contract written as the spec
   writes it, so three lanes reading one spec converge); don't "tidy" it. ADD to it; never redefine a
   field in place. `Anchor` is a discriminated union (`region` for photo | `musicxml` for notation)
-  with `bar` as the optional JOIN KEY on both — that is what links a lesson note, a heatmap range and
-  a recording to the same music whichever path the Piece came in through.
+  with `bar_index`/`bar_label` as the JOIN KEY on both (see the BarRef ruling below) — that is what
+  links a lesson note, a heatmap range and a recording to the same music whichever path the Piece
+  came in through.
+- **⚠️ `bar: number` IS GONE — IT MEANT THREE DIFFERENT THINGS AT ONCE (2026-07-17, the Piece owner's
+  ruling, raised by the MusicXML lane which refused to fork).** One field name was being read as: the
+  MusicXML lane's `Measure.index` (a 0-based ORDINAL), the lesson lane's `{bar: 24}` (a number a
+  TEACHER TYPED, i.e. a printed label), and the heatmap's `bars: [a,b]` (an ordinal RANGE). The facts
+  that decide it come from `parse.ts`, not from taste: **a printed bar number is a STRING by MusicXML
+  spec** ('0' pickups, '8a'/'8b' repeat endings) **and is NOT UNIQUE** (`indicesOfPrintedBar` returns
+  an ARRAY; multi-movement files restart at 1; `onlyIndexOf` REFUSES ambiguity). A value that can
+  match two different bars cannot be a key. So:
+  · **`bar_index`** — 0-based ORDINAL, identical to `parse.ts` `Measure.index` (no conversion for that
+    lane, and nobody misreads `bar_index: 23` as "bar 23"). Sortable, rangeable. THE JOIN KEY.
+  · **`bar_label`** — the bar as PRINTED or SPOKEN. Display + citation. Ambiguous. NEVER a key.
+  BOTH OPTIONAL, and that is the point: they are known at different times. A teacher saying "bar 24"
+  mid-lesson on a PHOTO piece gives a label and nothing else — that Piece has no bar model until
+  barlines are tapped (§A4) or pre-detected, so there is no ordinal and inventing one is a guess.
+  Carry what you know; resolve later; never fabricate the key. FOUND ON THE WAY: `LessonPanel` did
+  `Number(bar) > 0` on the teacher's typed value, so **'8a' → NaN and '0' → false BOTH silently
+  dropped the anchor** — the note attached to nothing, no error. It stores the label verbatim now.
+  **Carry what you know; resolve later; never fabricate the key.**
+  `LessonNote`/`Assignment` are declared ONCE — in `types.ts`, the CONTRACT — and IMPORTED by
+  `lesson/types.ts`. The direction was WRONG on this branch first (types.ts imported them FROM the
+  lesson lane), which went circular the moment that lane unforked: §1 itself declares
+  `lesson_notes: [LessonNote]` and spells the type out, so it is a contract type the lesson lane
+  FILLS, not a lesson type the Piece borrows. Both lanes reached "declare once" independently; only
+  the arrow needed settling.
+- **`Anchor` HAS A THIRD VARIANT — `BarAnchor` `{kind:'bar', bar_index?, bar_label?, page?}` (2026-07-17),
+  answering the lesson lane's `BarOnlyAnchor` ask.** That lane found §1's union could not express
+  **"bar 24" alone** — which is ALL a student has mid-lesson, typing while their teacher talks on a
+  photograph whose barlines may never be marked — and REFUSED all three dishonest ways round it
+  (fabricate a `region` rect the student never drew; misuse `MusicXmlAnchor` on a photo Piece; fork
+  its own anchor). It was right on every count. The variant is not a special case bolted on: it is
+  what BarRef's "both optional" MEANS, made reachable. It carries NO region and **must not grow
+  one** — the moment it can hold coordinates, the temptation returns to fill them with a guess,
+  which is the exact lie that lane refused. `page` is a HINT for later resolution, never an address.
+  Consequence: `PinnedLessonNote` is GONE (the bar rides inside `LessonNote.anchor`, where §1 always
+  said it belonged) and a bar-pinned lesson note round-trips into `Piece.lesson_notes[].anchor` for
+  real. NB the ask proposed `bar: number`; the answer is `bar_label` (a teacher SAYS a label), with
+  `bar_index` left absent until there is a bar model to resolve against.
+- **THE HEATMAP (§A2, step 5 — `heatmap.ts` pure + 21 tests, `HeatmapScreen.tsx`).** Sweep a Pencil
+  across bars, pick a colour. **MANUAL ANNOTATION, NEVER AN AI JUDGEMENT** ("nothing opaque to
+  defend") — nothing computes, scores or suggests a colour, and the palette carries NO severity
+  ordering precisely because a numeric level is the field a later change would start averaging
+  (asserted structurally). Rules that are load-bearing: a recolour **KEEPS what it covered** (§A2's
+  record is "over TIME", so `colourAt` = latest-by-ts and `historyAt` shows the layers — deleting
+  would let the anchored record attest a history that had been rewritten); `erase` **refuses across
+  the author boundary** and SAYS so (a student's stray tap must not delete what the teacher marked
+  mid-lesson); a backwards sweep is NORMALISED (right-to-left is as natural, and unnormalised
+  `colourAt` finds nothing between 4 and 2 — a stroke that silently does nothing); `heatmapHash`
+  reuses `provenance/hash`'s JCS+SHA-256 and sorts by (ts,id) so **array order cannot move it** (two
+  devices legitimately differ; a hash that moved with order would cry tamper on a mere sync).
+- **BARLINE PRE-DETECTION EXISTS AND REFUSES SINGLE STAVES — the refusal IS the feature.** §A2 allows
+  optional bar pre-detection "to make selection easier". On a GRAND STAVE it is decisive and
+  structural: barlines cross between the staves, a stem is trapped in one, so the populations are
+  ~1.0 vs <0.7 — measured, threshold-independent. On a SINGLE stave it is **not solvable by geometry**:
+  a stem on a note sitting on the bottom line reaches the top line (real engraving, not a fixture
+  artifact). MEASURED on `cleanThreeSystems`: real barlines coverage 1.000 / stems 0.848–**0.939**,
+  and longest-run does NOT separate them either (stems reach 1.000 by bridging their gaps) — system 2
+  hallucinated FOUR extra bars. The only separator is a cut in (0.939, 1.000), **a margin that exists
+  only because a synthetic barline is geometrically perfect**; a photographed one fades and breaks, so
+  the cut would reject real barlines on real paper. Calibrating it here would be `phase.variants`' F1
+  circularity exactly (a synthetic fixture can prove a rule INSENSITIVE; it cannot CALIBRATE a
+  cut-point). So it is not calibrated — it refuses, and §A4's MVP (the student taps) takes over. A
+  hallucinated bar mis-anchors every heatmap range, lesson note and recording pinned to it AND looks
+  like a correct answer. `{singleStave:true}` exists ONLY as the test's known-negative. Resolving a
+  single stave needs to know a line is attached to a NOTEHEAD — that is note recognition. Never.
 - **⚠️ THERE IS NO AT-REST ENCRYPTION — the spec says there is, and it is WRONG.** §0 lists
   "encryption at rest" as reused from the engine and §1 repeats it. Verified in the code (again,
   2026-07-17): `storage/opfs.ts` writes `JSON.stringify` in PLAINTEXT, no `crypto.subtle.encrypt`/
@@ -1495,6 +1560,31 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
   mismatch to reproduce and threw nothing, which read as "these errors are yours". Non-prerendered
   routes are served the prerendered EDITOR page through the SPA fallback and hydrate against it — the
   same artefact CLAUDE.md records for /snapshot. Compare like with like.
+  ROUND 2 (2026-07-17) — 21/21, now also: **the EDITOR's load path** (opening `/` fetches no music
+  chunk, with a void-guard so a blind listener can't pass it — "off costs nothing" is a claim about
+  `/`, not about /music, and `Edit.tsx`'s module-scope `import()` proves a dynamic import can still
+  be eager-in-effect); the heatmap sweep → teacher attribution → provenance hash → reload.
+  - **A SEPARATE CHUNK FILE IS NOT EVIDENCE OF LAZINESS — caught here, live.** `demo.ts` statically
+    imported `fixtures.ts` (the whole synthetic score GENERATOR, for tests + `?music=demo`) and
+    MusicStudio statically imported demo — so the generator's strings were measured INSIDE
+    `MusicStudio-*.js`, shipping to every REAL music user. Now `await import('./demo')`: 3.8KB splits
+    out, fetched only for `?music=demo`. Grep a surviving STRING LITERAL to locate code in a chunk;
+    minified identifiers don't grep.
+  - **`chunk.test.ts` READS REAL BUILD OUTPUT — it fails against a STALE `build/`.** It failed the
+    full gate here purely because the build predated another lane's merge; `pnpm build` → 12/12. It
+    is not flaky; it is telling you the truth about a directory you forgot to refresh.
+  - **A PROBE THAT PASSED BY LUCK.** The stroke-persistence check reloaded the instant the pointer
+    lifted, racing the async `savePiece`. It passed for a round, then failed when unrelated rendering
+    shifted the timing a few ms — i.e. it would have reported "persistence is broken" about a
+    persistence layer that works. It waits for the write now.
+- NOT BUILT: **OMR (never)**; reference tracks/tap-sync §A4 (step 3 — and the barline refusal above
+  makes it load-bearing: the tap is what gives a PHOTO Piece its bar model at all); practice tools
+  §A5 (step 4 — and §A5 CANNOT SHIP without editing `vercel.json`'s `Permissions-Policy:
+  microphone=()`, which is the lesson lane's deliberate firebreak; coordinate before touching it).
+  `Practice.sessions` REFERENCES productivity ledger rows rather than copying minutes — §A6.4's
+  "one representation of measurement, always". LANDED SEPARATELY: lesson capture §A3
+  (`music/lesson/`), the MusicXML path §B, the heatmap §A2 (step 5, above).
+
 ### §B5 provenance — `bundleHash` gained a v:4 form (2026-07-17)
 
 v:1 `{contentHash,receipts}` / v:2 adds `bibHash` / v:3 adds `emailHash` / **v:4** `{v:4,contentHash,
@@ -1527,11 +1617,6 @@ which would agree with itself however the function changed.
   module-level const passed BY REFERENCE into every document; the first tamper test mutated it, so
   the tamper-and-recompute case later "tampered" with an already-tampered value, changed nothing, and
   VERIFIED — reading exactly like the anchor failing to bind. It is a function now.
-
-- NOT BUILT (later steps, other lanes): OMR (never), lesson STT §A3, MusicXML/OSMD §B, the heatmap
-  §A2 (step 5 — contract declared in types.ts), reference tracks/tap-sync §A4 (step 3), practice
-  tools §A5 (step 4). `Practice.sessions` REFERENCES productivity ledger rows rather than copying
-  minutes — §A6.4's "one representation of measurement, always".
 
 ## Music lesson capture (§A3/§A3b, 2026-07-17 — `src/music/lesson/`, flag `?lesson`, DEFAULT OFF)
 
@@ -2102,7 +2187,8 @@ ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
 MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path), the music studio
 (`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
-`music/ScorePage.tsx` gap bands + sticky notes). When you add a panel, add it here too.
+`music/ScorePage.tsx` gap bands + sticky notes, `music/HeatmapScreen.tsx` bar rows + its palette
+drop-up). When you add a panel, add it here too.
 
 **RENDERED NOTATION CANNOT USE var() — which is why it needs MORE care, not less (2026-07-17).**
 `src/music/theme.ts` + `ScoreView.tsx`: OpenSheetMusicDisplay GENERATES the notation SVG and its

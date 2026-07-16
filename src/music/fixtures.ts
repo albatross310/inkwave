@@ -73,6 +73,10 @@ export interface SystemTruth {
   bottom: number
   staves: number
   isGrandStave: boolean
+  /** x of every barline drawn in this system, before rotation. Ground truth for `detectBarlines`. */
+  barlines: number[]
+  /** Bars enclosed by those barlines (= barlines.length − 1). */
+  bars: number
 }
 
 export interface ScoreTruth {
@@ -152,18 +156,23 @@ export function renderScore(spec: ScoreSpec): { img: GrayImage; truth: ScoreTrut
     }
     const top = staveTops[0]
     const bottom = y
-    truth.push({ top, bottom, staves: sys.staves, isGrandStave: sys.staves > 1 })
 
     // Barlines. For a multi-stave system they run the system's FULL height (crossing the inter-stave
     // gaps) — that is the connector. For a single-stave system they span only that stave, so nothing
     // ever crosses a system boundary.
     const connected = sys.connected ?? true
     const nBars = 4
+    const barXs: number[] = []
     for (let b = 0; b <= nBars; b++) {
       const bx = x0 + ((x1 - x0) * b) / nBars
+      barXs.push(bx)
       if (connected) vLine(img, bx, top, bottom, 2)
       else for (const st of staveTops) vLine(img, bx, st, st + 4 * lineGap, 2)
     }
+    truth.push({
+      top, bottom, staves: sys.staves, isGrandStave: sys.staves > 1,
+      barlines: barXs, bars: nBars,
+    })
     // The brace at the left edge of a grand stave — a real connector, drawn for realism. The detector
     // deliberately does NOT rely on it (it excludes the left margin): a curve smears across columns.
     if (sys.staves > 1) {

@@ -68,7 +68,8 @@ export interface RegionAnchor {
   page: number              // index into Piece.pages
   region: Region            // normalised to the SOURCE page image (see above)
   system?: number           // index into PiecePage.systems, once systems are detected (§A1)
-  bar?: number              // once barlines are marked (§A5) — the join key
+  bar_index?: number        // THE JOIN KEY — 0-based ordinal. See BarRef below.
+  bar_label?: string        // what a human says/reads. NEVER a key. See BarRef below.
   /**
    * Present iff this annotation lives in INSERTED (reflow) space rather than on the image.
    * `region.y` is then meaningless for placement and is kept only as a fallback; the pair
@@ -86,16 +87,83 @@ export interface GapOffset {
 /**
  * MusicXML addressing (§B4): "anchor comments to specific notes/measures (addressable in MusicXML —
  * even cleaner than the photo path's region anchors)". Owned by the MusicXML lane; declared here so
- * one Annotation type serves both paths and `bar` means the same thing on both.
+ * one Annotation type serves both paths and a bar means the same thing on both.
  */
 export interface MusicXmlAnchor {
   kind: 'musicxml'
-  measure: number           // MusicXML measure number
+  part_index?: number       // which part; absent ⇒ 0 (bar indices are per-part)
+  bar_index?: number        // THE JOIN KEY — 0-based ordinal. See BarRef below.
+  bar_label?: string        // the printed <measure number>, verbatim. NEVER a key. See BarRef below.
   note_id?: string          // MusicXML element id, when the anchor is note-level
-  bar?: number              // the join key (usually === measure; kept explicit, never inferred)
 }
 
-export type Anchor = RegionAnchor | MusicXmlAnchor
+/**
+ * "Bar 24" — AND NOTHING ELSE. The third variant, and the one a real lesson actually produces.
+ *
+ * ADDED 2026-07-17, answering the lesson lane's `BarOnlyAnchor` ask. That lane found the gap and
+ * REFUSED all three dishonest ways round it — fabricating a `region` rect the student never drew,
+ * misusing `MusicXmlAnchor` on a photo Piece, or re-forking its own anchor type — and reported it
+ * instead. It was right on every count, and the gap was real: `RegionAnchor` demands a page and a
+ * rect, `MusicXmlAnchor` demands notation, and **mid-lesson the student has neither**. They are
+ * typing while their teacher talks, on a photograph whose barlines may never be marked.
+ *
+ * This is not a special case bolted on — it is what BarRef's "both optional" MEANS, made reachable.
+ * A bar-only anchor is the join key when the join key is all that is known:
+ *
+ *     { kind: 'bar', bar_label: '24' }              ← mid-lesson: a teacher SAID "bar 24"
+ *     { kind: 'bar', bar_label: '24', bar_index: 23 } ← later, once barlines exist to resolve against
+ *
+ * `page` is optional and is a HINT, not an address: on a multi-page photo Piece a student may know
+ * which page they are looking at, and that narrows a later resolution. It never makes this a region.
+ *
+ * ⚠️ It carries NO region and MUST NOT GROW ONE. The moment this variant can hold coordinates, the
+ * temptation returns to fill them in with a guess — which is the exact lie the lesson lane refused.
+ * If coordinates are genuinely known, that is a `RegionAnchor` and the caller should build one.
+ */
+export interface BarAnchor {
+  kind: 'bar'
+  bar_index?: number        // THE JOIN KEY — 0-based ordinal. See BarRef below.
+  bar_label?: string        // what a human said. NEVER a key. See BarRef below.
+  page?: number             // a hint for later resolution, never an address
+}
+
+export type Anchor = RegionAnchor | MusicXmlAnchor | BarAnchor
+
+// ─── BarRef: how a bar is named, and why it takes TWO fields ─────────────────
+//
+// ⚠️ THIS REPLACED `bar: number` / `measure: number` (2026-07-17), and the reason is not tidiness —
+// the single name `bar` was being read three different ways by three lanes at once:
+//   · the MusicXML lane's `Measure.index`  — a 0-based ORDINAL
+//   · the lesson lane's `{ bar: 24 }`      — a number a TEACHER TYPED, i.e. a printed label
+//   · this lane's heatmap `bars: [a, b]`   — an ordinal RANGE to sweep a Pencil across
+// Those are not the same quantity, and a join key that means three things joins nothing.
+//
+// THE FACTS THAT DECIDE IT, and they come from the MusicXML lane's own parser (`parse.ts`), not
+// from taste:
+//  1. **A printed bar number is a STRING by MusicXML spec** — `'0'` pickups, `'8a'`/`'8b'` repeat
+//     endings. `parse.ts` keeps it verbatim and is right to.
+//  2. **A printed bar number is NOT UNIQUE.** `indicesOfPrintedBar` returns an ARRAY because repeat
+//     endings reuse numbers and multi-movement files restart at 1; `onlyIndexOf` REFUSES an
+//     ambiguous reference rather than resolve it to the first hit. So a printed number is
+//     structurally incapable of being a key — it can match two different bars in one score.
+//  3. Only the ordinal can be sorted, ranged, or joined. A heatmap sweep, a recording's span and an
+//     excerpt's extent are all ordinal facts.
+//
+// SO: two fields, and the NAMES carry the semantics because the old name is exactly what failed.
+//  · `bar_index`  — 0-based ORDINAL, identical to `parse.ts` `Measure.index` (no conversion for that
+//                   lane, and nobody can misread `bar_index: 23` as "bar 23"). THE JOIN KEY.
+//  · `bar_label`  — the bar number as PRINTED or as SPOKEN ('0', '8a', '24'). Display + citation.
+//                   Ambiguous by spec. NEVER a key, never sorted, never ranged.
+//
+// BOTH ARE OPTIONAL, and that is deliberate rather than lax: they are populated at different times.
+// A teacher saying "bar 24" during a lesson on a PHOTO piece gives a LABEL and nothing else — that
+// Piece has no bar model until the student taps barlines (§A4) or the CV pre-detects them, so there
+// is no ordinal to record and inventing one would be a guess. `bar_index` fills in when the piece
+// gains a bar model. Carry what you actually know; resolve later; never fabricate the key.
+export interface BarRef {
+  bar_index?: number
+  bar_label?: string
+}
 
 // ─── Assets — image/audio bytes live OUTSIDE the JSON ────────────────────────
 
@@ -139,9 +207,12 @@ export interface System {
   confidence: number
 }
 
+/** One bar's box on a photographed page. `bar_index` is its ORDINAL down the page (see BarRef). */
 export interface BarRegion {
-  bar: number               // bar/measure number
+  bar_index: number         // 0-based ordinal — THE key
+  bar_label?: string        // the printed number, if the student typed/tapped one. Never a key.
   region: Region            // source-normalised
+  system: number            // which system it sits in — a bar never spans two
 }
 
 export interface PiecePage {
@@ -274,9 +345,16 @@ export type Author = 'student' | 'teacher'
 // `score`/`difficulty` field the app computes — the colours are always the user's call.
 
 export interface HeatmapEntry {
-  bars: [number, number]    // [start, end] inclusive
+  id: string
+  /**
+   * [start, end] INCLUSIVE, as 0-based bar ORDINALS (`bar_index`, never a printed label — a label
+   * cannot be ranged; see BarRef). This is a sweep across bars, and a sweep is an ordinal fact.
+   */
+  bars: [number, number]
   colour: string
   label?: string
+  /** §A2: the teacher recolours mid-lesson and it is captured AS the teacher's, with a timestamp.
+   *  That attribution is what makes the heatmap a shared lesson artifact rather than a solo one. */
   author: Author
   ts: string                // ISO-8601 with offset
 }
@@ -289,11 +367,23 @@ export interface HeatmapEntry {
  * the session-scoped, non-storable transcript is the entire reassurance that makes a teacher
  * comfortable being recorded. If a lane needs the live transcript it lives in session memory and
  * dies with the session — it does not reach this type.
+ *
+ * DECLARED ONCE — HERE, IN THE CONTRACT — AND IMPORTED BY `lesson/types.ts`.
+ *
+ * The direction matters and I had it BACKWARDS on this branch: I imported these FROM the lesson
+ * lane, which (a) was circular the moment that lane unforked and imported the contract, and (b) had
+ * the ownership wrong. §1 itself declares `lesson_notes: [LessonNote]` and spells out
+ * `LessonNote { id, snippet, anchor(optional → bar), created_at }` — so it is a CONTRACT type that
+ * the lesson lane fills, not a lesson type the Piece borrows. That lane reached the same conclusion
+ * independently on its rebase and deleted its copies; this is the other half. Two identical shapes
+ * are not harmless — they drift the first time one side gains a member (CLAUDE.md: `DocType`).
  */
 export interface LessonNote {
   id: string
-  snippet: string           // the STUDENT's own selection/paraphrase, never verbatim capture
-  anchor?: Anchor           // optional → bar
+  /** The STUDENT's own selection/paraphrase — never a verbatim capture. See the warning above. */
+  snippet: string
+  /** §1: "anchor(optional → bar)" — usually a `BarAnchor`, which is why that variant exists. */
+  anchor?: Anchor
   created_at: string
 }
 
@@ -303,6 +393,8 @@ export interface Assignment {
   kind: 'youtube' | 'note'
   ref: string               // URL for youtube; the text itself for a note
   due: 'next_week'          // §1 names exactly this one value; widen only with Peter's call
+  /** Where on the score it belongs, when the teacher pinned it to one. */
+  anchor?: Anchor
 }
 
 // ─── Reference tracks + sync (§1, §A4 — LATER, step 3) ───────────────────────
@@ -334,6 +426,8 @@ export interface ReferenceTrack {
 
 // ─── Recordings + practice (§1, §A5 — LATER, step 4) ─────────────────────────
 
+/** §1's field names, kept verbatim. `start_bar`/`end_bar` are 0-based bar ORDINALS (see BarRef) —
+ *  a span is an ordinal fact, same as the heatmap's. Step 4; nothing consumes this yet. */
 export interface Recording {
   id: string
   start_bar: number

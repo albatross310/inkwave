@@ -12,40 +12,30 @@
 // So: this file imports the contract and declares ONLY what is genuinely the lesson's own — the
 // consent record, the recap, and the record a finished lesson leaves.
 //
-// ⚠️ ONE FIELD IS MISSING FROM THE CONTRACT AND I HAVE NOT ADDED IT — see `BarOnlyAnchor` below.
+// ─── THE ANCHOR GAP IS CLOSED (2026-07-17) ───────────────────────────────────────────────────
+//
+// This file used to carry a `BarOnlyAnchor` workaround and an ask: §1's `Anchor` union could not
+// express **"bar 24" alone**, which is ALL a student has mid-lesson — typing while their teacher
+// talks, on a photograph whose barlines may never be marked. It refused all three dishonest ways
+// round it (fabricate a `region` rect; misuse `MusicXmlAnchor` on a photo Piece; re-fork an anchor)
+// and reported instead. It was right on every count.
+//
+// The contract's owner answered with a third variant, `BarAnchor` in `../types`:
+//     { kind: 'bar', bar_label: '24' }     ← mid-lesson: the teacher SAID "bar 24"
+//     …+ bar_index: 23                     ← later, once barlines exist to resolve against
+// which is what that contract's `bar_index`/`bar_label` ruling already implied: carry what you know,
+// resolve later, never fabricate the key. So `BarOnlyAnchor` is GONE, and with it `PinnedLessonNote`
+// — the bar now rides INSIDE `LessonNote.anchor` where §1 always said it should, and a bar-pinned
+// lesson note round-trips into `Piece.lesson_notes[].anchor` for real.
+//
+// NOTE THE FIELD CHANGE: the ask proposed `bar: number`. The contract says `bar_index` (0-based
+// ordinal, the key) + `bar_label` (what a human says, never a key) — because a printed bar number
+// is a STRING by MusicXML spec ('0' pickups, '8a' repeat endings) and is NOT UNIQUE, so it cannot
+// be a key. A lesson note gets `bar_label`.
 
-import type { Anchor, Assignment, LessonNote } from '../types'
+import type { Anchor, Assignment, BarAnchor, LessonNote } from '../types'
 
-export type { Anchor, Assignment, LessonNote }
-
-/**
- * ⚠️ THE ANCHOR GAP — reported to the coordinator, NOT forked.
- *
- * §1 says `LessonNote { …, anchor(optional → bar), … }` and §A3's differentiator is literally
- * "bar 24 — watch the dynamics" → a note anchored to bar 24. But the contract's `Anchor` union is
- * `RegionAnchor` (needs `page` + a normalised `region` rect) | `MusicXmlAnchor` (needs `measure`).
- * **Neither can express "bar 24" alone**, and during a lesson that is ALL the student has: they are
- * typing while their teacher talks, on a Piece whose barlines may not be marked yet (§A5) and whose
- * pages may be photographs with no measure numbers.
- *
- * The dishonest fixes, and why each is refused:
- *   · Fabricate a `region` rect — invents coordinates the student never gave. A lie in the schema.
- *   · Use `MusicXmlAnchor.measure` on a photo Piece — the wrong path's addressing.
- *   · Declare my own `BarAnchor` — the fork this file's header exists to refuse.
- *
- * So the note carries NO anchor and the bar rides in `bar` on the lesson's own side (below) until
- * the contract's owner decides. The honest cost is stated rather than hidden: a bar-pinned lesson
- * note does not yet round-trip into `Piece.lesson_notes[].anchor`, so §A3's pin-to-bars is complete
- * WITHIN a lesson and not yet joined to the score. **The ask: a third `Anchor` variant**
- * `{ kind: 'bar'; bar: number; page?: number }` — `bar` is already the union's documented JOIN KEY
- * ("that is what links a lesson note, a heatmap range and a recording to the same music whichever
- * path the Piece came in through"), so a bar-only variant is what the join key implies when it is
- * the only thing known.
- */
-export interface BarOnlyAnchor {
-  bar: number
-  page?: number
-}
+export type { Anchor, Assignment, BarAnchor, LessonNote }
 
 /**
  * §A3: "Consent first. Recording a teacher is socially — and often legally — sensitive. The teacher
@@ -80,13 +70,6 @@ export interface LessonRecap {
   created_at: string
 }
 
-/** A lesson note plus the bar it was pinned to, pending the `Anchor` variant above. */
-export interface PinnedLessonNote {
-  note: LessonNote
-  /** Absent = a note about the lesson, not about a bar. */
-  bar?: BarOnlyAnchor
-}
-
 /**
  * Everything one lesson leaves behind, attached to a Piece (§A3 "organise by piece").
  *
@@ -105,8 +88,9 @@ export interface LessonRecord {
   piece_id: string
   started_at: string
   ended_at: string
-  /** §A3: "The only thing that persists is the student's own curated notes." */
-  lesson_notes: PinnedLessonNote[]
+  /** §A3: "The only thing that persists is the student's own curated notes." The bar (if any) rides
+   *  in each note's own `anchor` — §1's shape, reachable now that `BarAnchor` exists. */
+  lesson_notes: LessonNote[]
   /** §A3b: absent when the lesson ended without one. */
   recap?: LessonRecap
   /**

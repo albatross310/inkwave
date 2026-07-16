@@ -379,9 +379,11 @@ export interface System {
   isGrandStave: boolean
   /** Confidence that the boundary BELOW this system is a real system break, [0,1]. */
   confidence: number
+  /** x of each detected barline across this system, left→right (`detectBarlines`). */
+  barlines: number[]
 }
 
-export interface GroupOptions extends ConnectorOptions {
+export interface GroupOptions extends ConnectorOptions, BarlineOptions {
   /**
    * Use the vertical-connector test. Default TRUE.
    *
@@ -444,6 +446,12 @@ export function groupStavesIntoSystems(
     bottom: g[g.length - 1].bottom,
     isGrandStave: g.length > 1,
     confidence: i < breakConf.length ? breakConf[i] : 1,
+    // MULTI-STAVE ONLY unless explicitly overridden — see detectBarlines' banner. A single stave
+    // cannot separate a barline from a note stem by geometry, and a hallucinated bar mis-anchors
+    // everything pinned to it. Empty means "the student taps them" (§A4's MVP), not "no bars".
+    barlines: (g.length > 1 || opts.singleStave)
+      ? detectBarlines(bin, g[0].top, g[g.length - 1].bottom, opts)
+      : [],
   }))
 }
 
@@ -465,6 +473,118 @@ function confidenceFor(gap: number, gaps: number[], connected: boolean): number 
   if (connected) return 0.1
   const mx = Math.max(...gaps, 1)
   return Math.max(0.4, Math.min(1, gap / mx))
+}
+
+// ─── Barline detection (§A2's optional bar pre-detection) ────────────────────
+//
+// §A2 sanctions this explicitly and bounds it precisely: "CV may *optionally* pre-detect bar regions
+// (barline/staff detection — the easy CV, no note recognition) to make selection easier, but the
+// colours/heat are always the user's call."
+//
+// STILL NO OMR. This asks one question per column: does ink run the FULL height of the system here?
+// That is the same vertical-run measurement `countVerticalConnectors` already makes — it does not
+// know or care what any mark depicts.
+//
+// ⚠️⚠️ THIS RUNS ON MULTI-STAVE SYSTEMS ONLY, AND THE REFUSAL IS THE DESIGN. READ BEFORE "FIXING".
+//
+// A NOTE STEM IS A LONG VERTICAL LINE INSIDE THE STAVE, and on a single stave it is not reliably
+// distinguishable from a barline by geometry alone. A stem on a note sitting on the bottom line
+// reaches ~3.5 stave-spaces up — i.e. to the top line. That is not a fixture artifact; that is what
+// real engraving does. MEASURED on `cleanThreeSystems` (single staves, with notes):
+//     real barlines   coverage 1.000   longest-run 1.000
+//     stems           coverage 0.848–0.939   longest-run 0.879–**1.000**
+// System 2 hallucinated FOUR extra barlines. Longest-run does not separate them either — a stem
+// bridging its 1px gaps to the staff lines runs the full height.
+//
+// So the ONLY separator on a single stave is a coverage cut somewhere in (0.939, 1.000) — and that
+// margin exists **only because a synthetic barline is geometrically perfect**. A photographed
+// barline fades, breaks and blurs; a cut at 0.97 would reject real barlines on real paper. Tuning
+// it here would be calibrating a threshold on data invented by the same author who chose it —
+// precisely the circularity CLAUDE.md records for `phase.variants` (F1): a synthetic fixture can
+// prove a rule INSENSITIVE; it cannot CALIBRATE a cut-point. So it is not calibrated. It refuses.
+//
+// A MULTI-STAVE SYSTEM IS DIFFERENT IN KIND, not in degree: its barlines cross the gap BETWEEN the
+// staves and a stem is trapped inside one of them, so a stem scores ~0.35 against a barline's ~1.0.
+// That is a structural margin — the same signal `hasVerticalConnector` already relies on — and it
+// holds on cramped and spacious pages alike. Measured exact (5/5) on `crampedGrandStaves`.
+//
+// The single-stave case is therefore left to the student, which is where §A4 already put it: bar
+// pre-detection is "OPTIONAL … to make selection easier", and the MVP is that "the student marks
+// barlines by tapping their positions on the photo (robust on any image)". Inventing four bars that
+// aren't there would mis-anchor every heatmap range, lesson note and recording pinned to them —
+// and it would look exactly like a correct answer. Refusing is the honest half of the feature.
+//
+// (Resolving a single stave properly needs to know that a line is attached to a NOTEHEAD. That is
+// note recognition. It is an explicit, repeated non-goal. Do not add it.)
+
+export interface BarlineOptions {
+  /** Ink must cover ≥ this fraction of the system's height. Default 0.9. */
+  minCoverage?: number
+  /** Merge detected columns closer than this fraction of the page width. Default 0.008. */
+  mergeWithin?: number
+  /**
+   * Run detection on SINGLE-stave systems too. Default FALSE, and the default is load-bearing —
+   * see the banner above. Exposed ONLY so `reflow.test.ts` can turn it on and watch the detector
+   * hallucinate bars, which is what proves the refusal is earning its place rather than being
+   * timidity. Do not turn this on in the app.
+   */
+  singleStave?: boolean
+}
+
+/**
+ * Find the barlines across one system. Returns x positions (px, left→right), including the opening
+ * and closing lines, so consecutive pairs are the bars.
+ *
+ * Callers should prefer `System.barlines` (populated by `groupStavesIntoSystems`), which applies the
+ * multi-stave-only rule. This is the raw measurement.
+ */
+export function detectBarlines(
+  bin: BinaryImage, top: number, bottom: number, opts: BarlineOptions = {},
+): number[] {
+  const cover = opts.minCoverage ?? 0.9
+  const { width: w, ink } = bin
+  const y0 = Math.max(0, Math.round(top)), y1 = Math.min(bin.height - 1, Math.round(bottom))
+  const span = y1 - y0 + 1
+  if (span < 4) return []
+  const need = Math.ceil(span * cover)
+
+  // Columns whose ink runs the system's height. Note this counts TOTAL ink in the column, not the
+  // longest unbroken run: a barline crossing a grand stave's inter-stave gap is continuous anyway,
+  // and tolerating breaks is what survives a photographed line that fades.
+  const hits: number[] = []
+  for (let x = 0; x < w; x++) {
+    let n = 0
+    for (let y = y0; y <= y1; y++) if (ink[y * w + x]) n++
+    if (n >= need) hits.push(x)
+  }
+  if (!hits.length) return []
+
+  // A barline is 1–3px wide (more when the photo is soft), so adjacent hits are ONE line.
+  const merge = Math.max(2, Math.round(w * (opts.mergeWithin ?? 0.008)))
+  const out: number[] = []
+  let run = [hits[0]]
+  for (let i = 1; i < hits.length; i++) {
+    if (hits[i] - hits[i - 1] <= merge) run.push(hits[i])
+    else { out.push(centre(run)); run = [hits[i]] }
+  }
+  out.push(centre(run))
+  return out
+
+  function centre(r: number[]): number { return Math.round(r.reduce((a, b) => a + b, 0) / r.length) }
+}
+
+/**
+ * The bars of a system, as [xStart, xEnd] spans between consecutive barlines.
+ *
+ * Fewer than two barlines ⇒ NO bars, deliberately. A system whose barlines were not found has an
+ * unknown bar structure, and the honest answer is to say so — the student then taps them (§A4's MVP
+ * is manual anyway) rather than being handed one bogus bar spanning the whole system, which would
+ * look exactly like a correct answer and quietly mis-anchor everything pinned to it.
+ */
+export function barsOf(barlines: number[]): Array<[number, number]> {
+  const bars: Array<[number, number]> = []
+  for (let i = 1; i < barlines.length; i++) bars.push([barlines[i - 1], barlines[i]])
+  return bars
 }
 
 // ─── The page analysis ───────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  analysePage, binarise, buildLayout, countVerticalConnectors, deskew, detectStaves, estimateSkew,
+  analysePage, barsOf, binarise, buildLayout, countVerticalConnectors, deskew, detectStaves, estimateSkew,
   gapAt, gapOffsetToLayout, groupStavesIntoSystems, layoutToSource, rowDarkness, rowLongestRun,
   sourceToLayout,
 } from './reflow'
@@ -246,6 +246,121 @@ describe('mixed layouts', () => {
     expect(a.systems).toHaveLength(3)
     expect(a.systems.map(s => s.staves.length)).toEqual([2, 1, 1])
     expect(a.systems.map(s => s.isGrandStave)).toEqual([true, false, false])
+  })
+})
+
+// ─── Barline pre-detection (§A2's optional CV, for the heatmap's bar selection) ──
+
+describe('barline detection — on grand staves, where the geometry is decisive', () => {
+  it('finds every barline of every grand stave, and not one more', () => {
+    const { img, truth } = crampedGrandStaves()
+    const a = analysePage(binarise(img))
+    expect(a.systems).toHaveLength(3)
+    a.systems.forEach((s, i) => {
+      expect(s.barlines).toHaveLength(truth.systems[i].barlines.length)   // 5 → 4 bars
+      s.barlines.forEach((x, j) => expect(Math.abs(x - truth.systems[i].barlines[j])).toBeLessThanOrEqual(3))
+      expect(barsOf(s.barlines)).toHaveLength(truth.systems[i].bars)
+    })
+  })
+
+  it('the margin is STRUCTURAL, not a tuned threshold: a stem cannot cross between staves', () => {
+    // This is what licenses detection here at all, so it is measured rather than asserted. A barline
+    // spans treble+gap+bass; a stem is trapped in one stave. The two populations are not close.
+    const { img, truth } = crampedGrandStaves()
+    const bin = binarise(img)
+    const s = analysePage(bin).systems[0]
+    const coverage = (x: number) => {
+      let n = 0
+      for (let y = s.top; y <= s.bottom; y++) if (bin.ink[y * bin.width + x]) n++
+      return n / (s.bottom - s.top + 1)
+    }
+    const real = truth.systems[0].barlines.map(x => coverage(Math.round(x) + 1))
+    expect(Math.min(...real)).toBeGreaterThan(0.95)
+    // Every OTHER column — every stem among them — falls far below.
+    let worstOther = 0
+    for (let x = 0; x < bin.width; x++) {
+      if (truth.systems[0].barlines.some(b => Math.abs(b - x) <= 3)) continue
+      worstOther = Math.max(worstOther, coverage(x))
+    }
+    expect(worstOther).toBeLessThan(0.7)   // a wide, threshold-independent gap
+  })
+})
+
+// ─── The refusal, and why it is the honest half of the feature ───────────────
+
+describe('barline detection REFUSES a single stave (§A4 leaves it to the student)', () => {
+  it('reports no barlines on single-stave systems rather than guessing', () => {
+    const { img } = cleanThreeSystems()
+    const a = analysePage(binarise(img))
+    expect(a.systems).toHaveLength(3)
+    for (const s of a.systems) {
+      expect(s.isGrandStave).toBe(false)
+      expect(s.barlines).toEqual([])   // "the student taps them", not "there are no bars"
+    }
+  })
+
+  // ─── THE KNOWN-NEGATIVE for the refusal ────────────────────────────────────
+  // The refusal only earns its place if detection would REALLY go wrong here. It does: a stem on a
+  // note sitting on the bottom line reaches the top line, which is what real engraving does — so on
+  // a single stave a stem is not distinguishable from a barline by geometry alone.
+  it('KNOWN-NEGATIVE: forced onto a single stave, it hallucinates barlines that are not there', () => {
+    const { img, truth } = cleanThreeSystems()
+    const bin = binarise(img)
+    const forced = analysePage(bin, { singleStave: true })
+
+    const spurious = forced.systems.flatMap((s, i) =>
+      s.barlines.filter(x => !truth.systems[i].barlines.some(t => Math.abs(t - x) <= 3)))
+    expect(spurious.length).toBeGreaterThan(0)   // the bug the refusal exists to prevent
+    // …and they are stems, so `barsOf` would hand the heatmap bars that do not exist.
+    const realBars = truth.systems.reduce((n, s) => n + s.bars, 0)
+    const forcedBars = forced.systems.reduce((n, s) => n + barsOf(s.barlines).length, 0)
+    expect(forcedBars).toBeGreaterThan(realBars)
+  })
+
+  it('and NO threshold in the fixture can separate them without being tuned to it', () => {
+    // The measurement that decided the refusal, pinned so it cannot be quietly re-litigated: real
+    // barlines and stems are separated only by a margin that exists because a SYNTHETIC barline is
+    // geometrically perfect (coverage exactly 1.0). A photographed one is not, so a cut inside that
+    // margin would reject real barlines on real paper. If this ever fails, the fixture changed —
+    // re-read the banner in reflow.ts before touching the default.
+    const { img, truth } = cleanThreeSystems()
+    const bin = binarise(img)
+    const s = analysePage(bin, { singleStave: true }).systems[2]
+    const coverage = (x: number) => {
+      let n = 0
+      for (let y = s.top; y <= s.bottom; y++) if (bin.ink[y * bin.width + x]) n++
+      return n / (s.bottom - s.top + 1)
+    }
+    const isReal = (x: number) => truth.systems[2].barlines.some(t => Math.abs(t - x) <= 3)
+    const realCov = s.barlines.filter(isReal).map(coverage)
+    const stemCov = s.barlines.filter(x => !isReal(x)).map(coverage)
+
+    expect(stemCov.length).toBeGreaterThan(0)
+    expect(Math.min(...realCov)).toBe(1)                  // perfect ONLY because it is synthetic
+    expect(Math.max(...stemCov)).toBeGreaterThan(0.9)     // a stem gets within a hair of it
+  })
+
+  it('the stems are really there — the fixture is not passing by drawing nothing', () => {
+    // Guards the negatives above. If `notes:false` ever crept into the fixture they would stop
+    // firing for a reason that has nothing to do with barlines, and the case would go untested.
+    const { img } = renderScore({
+      width: 600, height: 300, margin: 40, lineGap: 8, systemGap: 70,
+      systems: [{ staves: 1, interStaveGap: 0 }], notes: true, seed: 11,
+    })
+    const bare = renderScore({
+      width: 600, height: 300, margin: 40, lineGap: 8, systemGap: 70,
+      systems: [{ staves: 1, interStaveGap: 0 }], notes: false, seed: 11,
+    })
+    const inkOf = (g: typeof img) => binarise(g).ink.reduce((a: number, v: number) => a + v, 0)
+    expect(inkOf(img)).toBeGreaterThan(inkOf(bare.img) * 1.2)
+  })
+
+  it('refuses to invent a bar when it found fewer than two barlines', () => {
+    // One barline (or none) means the structure is unknown. Returning a single bar spanning the whole
+    // system would look exactly like a correct answer and mis-anchor everything pinned to it.
+    expect(barsOf([])).toEqual([])
+    expect(barsOf([100])).toEqual([])
+    expect(barsOf([100, 200, 300])).toEqual([[100, 200], [200, 300]])
   })
 })
 

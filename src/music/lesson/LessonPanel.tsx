@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LessonSession, startSession, type TranscriptLine } from './session'
-import type { Assignment, LessonRecord, PinnedLessonNote } from './types'
+import type { Assignment, LessonNote, LessonRecord } from './types'
 import * as copy from './copy'
 
 interface Props {
@@ -32,7 +32,7 @@ type Screen = 'consent' | 'notes' | 'recap'
 export function LessonPanel({ pieceId, onRecord, onClose }: Props) {
   const [screen, setScreen] = useState<Screen>('consent')
   const sessionRef = useRef<LessonSession | null>(null)
-  const [notes, setNotes] = useState<readonly PinnedLessonNote[]>([])
+  const [notes, setNotes] = useState<readonly LessonNote[]>([])
   const [lines, setLines] = useState<readonly TranscriptLine[]>([])
 
   // The session is a ref, not state. A live session is not a value to render — it is an object with
@@ -148,9 +148,9 @@ function NotesScreen({
   onEnd,
 }: {
   session: LessonSession
-  notes: readonly PinnedLessonNote[]
+  notes: readonly LessonNote[]
   lines: readonly TranscriptLine[]
-  onNotes: (n: readonly PinnedLessonNote[]) => void
+  onNotes: (n: readonly LessonNote[]) => void
   onRecap: () => void
   onEnd: () => void
 }) {
@@ -159,9 +159,20 @@ function NotesScreen({
 
   const add = () => {
     if (!text.trim()) return
-    const barNum = Number(bar)
     // §A3's differentiator: "bar 24 — watch the dynamics" → a LessonNote anchored to bar 24.
-    session.note(text, Number.isFinite(barNum) && barNum > 0 ? { bar: barNum } : undefined)
+    //
+    // THE TYPED VALUE IS A LABEL, STORED VERBATIM — not coerced through Number(). What a teacher
+    // says in a lesson IS a printed bar number, and printed bar numbers are STRINGS by MusicXML
+    // spec ('0' pickup, '8a' repeat ending) — see music/types.ts BarRef. The old
+    // `Number.isFinite(barNum) && barNum > 0` gate SILENTLY DROPPED the anchor for exactly those:
+    // '8a' → NaN → no anchor; '0' → not > 0 → no anchor. The note attached to nothing, with no
+    // error anywhere, on the two bar numbers a real score is most likely to have.
+    //
+    // `bar_index` (the ordinal join key) stays ABSENT: a photo Piece mid-lesson has no bar model to
+    // resolve the label against, and fabricating the key is the one thing BarRef forbids. It fills
+    // in later, when barlines are tapped (§A4) or pre-detected.
+    const label = bar.trim()
+    session.note(text, label ? { kind: 'bar', bar_label: label } : undefined)
     onNotes(session.notes())
     setText('')
   }
@@ -236,13 +247,16 @@ function NotesScreen({
 
       <ul className="text-sm mb-3">
         {notes.map((n) => (
-          <li key={n.note.id} className="py-0.5">
-            {n.bar && (
+          <li key={n.id} className="py-0.5">
+            {/* The bar rides INSIDE the note's own anchor now (§1's shape), so `PinnedLessonNote`
+                is gone. Show the LABEL the teacher gave — never `bar_index`, which is a 0-based
+                machine key and would read as the wrong bar number to a human. */}
+            {n.anchor?.kind === 'bar' && n.anchor.bar_label && (
               <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #9b5ccc)' }}>
-                bar {n.bar.bar}
+                bar {n.anchor.bar_label}
               </span>
             )}
-            {n.note.snippet}
+            {n.snippet}
           </li>
         ))}
       </ul>

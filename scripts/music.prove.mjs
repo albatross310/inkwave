@@ -44,6 +44,28 @@ await new Promise(r => server.listen(PORT, r))
 const browser = await chromium.launch()
 
 try {
+  // ─── 0. THE EDITOR'S LOAD PATH — the claim that actually matters ─────────────────────────────
+  //
+  // "Off costs nothing" is about the WRITER opening `/`, not about /music. And a separate chunk FILE
+  // is not evidence of laziness: `routes/Edit.tsx` fires `import('../editor/TiptapEditor')` at MODULE
+  // SCOPE, so a dynamic import can still be eager-in-effect. So this measures what the browser
+  // ACTUALLY DOWNLOADS to open the editor, and asserts no music byte is among it.
+  console.log('\n▸ the editor’s load path')
+  {
+    const ctx = await browser.newContext()
+    const page = await ctx.newPage()
+    const fetched = []
+    page.on('request', r => { if (/\.js(\?|$)/.test(r.url())) fetched.push(r.url().split('/').pop()) })
+    await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1500)   // let the eager editor import and any idle work settle
+
+    const musicish = fetched.filter(f => /Music|Heatmap|reflow|fixtures|demo/i.test(f))
+    check('opening / fetches NO music chunk', musicish, [])
+    // VOID GUARD: if the listener saw nothing at all, "no music chunk" is a pass that means nothing.
+    check('…and the listener really saw the editor load (not a blind pass)', fetched.length > 3, true)
+    await ctx.close()
+  }
+
   // ─── 1. FLAG OFF costs nothing — and the negative proves the check can see a fetch ────────────
   console.log('\n▸ flag gating (default OFF)')
   {
@@ -132,10 +154,72 @@ try {
   check('a stroke was drawn onto the score', strokes > 0, true)
 
   // Persistence: reload and the mark is still there. This is the OPFS write path, for real.
+  //
+  // THE WAIT IS NOT PADDING — it is the probe admitting what it is testing. `savePiece` is async
+  // (fire-and-forget from the pointerup handler), so reloading the instant the pointer lifts races
+  // the write. The first version of this check had no wait and PASSED, then began failing when
+  // unrelated rendering shifted the timing by a few ms — i.e. it had been passing by luck and would
+  // have reported "persistence is broken" for a persistence layer that works. Wait for the write,
+  // then ask about the reload. (Sub-400ms durability is a different question, and not one this
+  // check was ever measuring.)
+  await page.waitForTimeout(400)
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForSelector('section svg', { timeout: 30000 })
   const after = await page.$$eval('section svg path', els => els.length)
   check('the stroke survived a reload (OPFS)', after > 0, true)
+
+  // ─── 4. The heatmap (§A2) ────────────────────────────────────────────────────────────────────
+  console.log('\n▸ the practice heatmap')
+  await page.click('[role="tab"]:has-text("What needs work")')
+  await page.waitForSelector('[aria-label^="History for bar"]', { timeout: 15000 })
+
+  // The demo's grand staves give 4 bars/system × 3 systems on page 1 + 4×2 on page 2 = 20.
+  const barCount = await page.$$eval('[aria-label^="History for bar"]', e => e.length)
+  check('the CV pre-detected bars to colour (grand staves only)', barCount > 0, true)
+
+  // SWEEP: press on bar 1, drag across bars 2-3, release. The gesture §A2 specifies.
+  const rows = await page.$$('[aria-label^="History for bar"]')
+  const boxes = []
+  for (const r of rows.slice(0, 3)) boxes.push(await r.boundingBox())
+  await page.mouse.move(boxes[0].x - 60, boxes[0].y + 10)
+  await page.mouse.down()
+  for (const b of boxes) await page.mouse.move(b.x - 60, b.y + 10)
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+
+  const painted = await page.$$eval('.iw-nightable[style*="min-height: 44px"], .iw-nightable',
+    els => els.filter(e => /rgba?\(/.test(e.style.background) && e.style.background !== '').length)
+  check('a Pencil sweep painted a range of bars', painted > 0, true)
+
+  // The teacher takes the iPad and recolours — attributed, per §A2.
+  await page.click('button[aria-label="ask my teacher"]')
+  await page.click('button:has-text("I’m marking")')
+  const t = await rows[0].boundingBox()
+  await page.mouse.move(t.x - 60, t.y + 10)
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.waitForTimeout(400)
+
+  const teacherBadges = await page.$$eval('span[title^="Marked by your teacher"]', e => e.length)
+  check('the teacher’s mid-lesson mark is attributed AS the teacher’s', teacherBadges > 0, true)
+
+  // Provenance: §A2 says the heatmap is stored in the .studio provenance record.
+  const hash = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle('music')
+    const pd = await dir.getDirectoryHandle('demo-synthetic')
+    const f = await (await pd.getFileHandle('piece.json')).getFile()
+    const p = JSON.parse(await f.text())
+    return { heatmapHash: p.provenance?.hashes?.heatmap ?? null, entries: p.heatmap?.length ?? 0 }
+  })
+  check('the heatmap is hashed into the provenance record', /^[0-9a-f]{64}$/.test(hash.heatmapHash || ''), true)
+  check('…and both marks are KEPT (a record over time, not a current state)', hash.entries >= 2, true)
+
+  // Persistence across a reload — the OPFS path, for real.
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.click('[role="tab"]:has-text("What needs work")')
+  await page.waitForSelector('span[title^="Marked by your teacher"]', { timeout: 15000 })
+  check('the heatmap survived a reload (OPFS)', true, true)
 
   await ctx.close()
 } finally {

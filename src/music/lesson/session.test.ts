@@ -98,7 +98,7 @@ function recordedSession(): LessonSession {
   s.append(SENTINEL_B)
   // The student distils ONE line, in their own words — the §A3 workflow, and the reason the
   // "nothing survives" verdicts below are about a session that genuinely HAD a transcript.
-  s.distil(a.id, { text: SENTINEL_KEPT, bar: { bar: 24 } })
+  s.distil(a.id, { text: SENTINEL_KEPT, anchor: { kind: 'bar', bar_label: '24' } })
   return s
 }
 
@@ -253,8 +253,12 @@ describe('only the student’s curated notes persist (§A3)', () => {
     s.end()
     const rec = s.toRecord()
     expect(rec.lesson_notes).toHaveLength(1)
-    expect(rec.lesson_notes[0].note.snippet).toBe(SENTINEL_KEPT)
-    expect(rec.lesson_notes[0].bar).toEqual({ bar: 24 })
+    expect(rec.lesson_notes[0].snippet).toBe(SENTINEL_KEPT)
+    // The bar rides INSIDE the note's own anchor now — §1's `LessonNote { …, anchor(optional → bar) }`
+    // shape, reachable since the contract gained its `BarAnchor` variant. `bar_label` is what the
+    // teacher SAID; `bar_index` (the ordinal key) is absent because this Piece has no bar model to
+    // resolve it against, and BarRef forbids fabricating a key.
+    expect(rec.lesson_notes[0].anchor).toEqual({ kind: 'bar', bar_label: '24' })
     expect(rec.piece_id).toBe('piece-1')
   })
 

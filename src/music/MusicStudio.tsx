@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { capturePage, capturePdf } from './capture'
-import { buildDemoPiece } from './demo'
+import { HeatmapScreen } from './HeatmapScreen'
 import { ScorePage, SYMBOL_GLYPHS, SYMBOL_ORDER, type Tool } from './ScorePage'
 import { assetUrl, listPieceIds, loadPiece, putAsset, savePiece } from './store'
 import { newPiece, type Annotation, type Piece, type PiecePage } from './types'
@@ -28,6 +28,11 @@ export function MusicStudio({ demo }: { demo: boolean }) {
   const [colour, setColour] = useState(INK_COLOURS[0])
   const [symbol, setSymbol] = useState(SYMBOL_ORDER[4])
   const [busy, setBusy] = useState<string | null>(null)
+  // §A2: the heatmap is a DEDICATED SCREEN, and it is layered "in addition to" the sticky-note
+  // markup — not a markup tool. Different gesture (sweep across bars vs draw on the page), different
+  // subject (a range of music vs a point on an image), different author model (the teacher takes the
+  // iPad). Folding it into the markup toolbar would collapse two interactions into one confused one.
+  const [screen, setScreen] = useState<'score' | 'heatmap'>('score')
   const revokers = useRef<Array<() => void>>([])
 
   // ─── Load / create ─────────────────────────────────────────────────────────
@@ -45,6 +50,12 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         const existing = await loadPiece(DEMO_ID)
         if (existing?.pages.length) { if (!dead) setPiece(existing); return }
         setBusy('Drawing a synthetic score…')
+        // DYNAMIC, and the reason is the trap this project keeps hitting: a separate chunk FILE is
+        // not evidence of laziness. `demo.ts` pulls in `fixtures.ts` — the whole synthetic score
+        // GENERATOR, which exists only to test the detector and to draw `?music=demo` — and a static
+        // import would bundle it into the studio chunk that every REAL music user downloads.
+        // MEASURED before this change: the generator's strings were inside MusicStudio-*.js.
+        const { buildDemoPiece } = await import('./demo')
         const { piece: p, captured } = await buildDemoPiece(DEMO_ID)
         const pages: PiecePage[] = []
         for (const c of captured) {
@@ -158,13 +169,37 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         </p>
       )}
 
+      {!!piece.pages.length && (
+        <nav className="mb-4 flex gap-1" role="tablist">
+          {(['score', 'heatmap'] as const).map(s => (
+            <button
+              key={s}
+              role="tab"
+              aria-selected={screen === s}
+              onClick={() => setScreen(s)}
+              className="rounded-full px-3 py-1 font-serif"
+              style={{
+                fontSize: 13,
+                background: screen === s ? 'var(--iw-light, #9b5ccc)' : 'transparent',
+                color: screen === s ? '#fff' : 'var(--iw-ink, #5c2d8a)',
+                border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
+              }}
+            >
+              {s === 'score' ? 'Score' : 'What needs work'}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {!piece.pages.length && !busy && (
         <ImportPrompt onFiles={importFiles} />
       )}
 
       {busy && <Centered>{busy}</Centered>}
 
-      {piece.pages.map((pg, i) => (
+      {screen === 'heatmap' && <HeatmapScreen piece={piece} onChange={update} />}
+
+      {screen === 'score' && piece.pages.map((pg, i) => (
         <section key={i} className="mb-8">
           <h2 className="mb-1 font-serif" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
             Page {i + 1} · {pg.systems.length} system{pg.systems.length === 1 ? '' : 's'}
@@ -198,7 +233,8 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         </section>
       ))}
 
-      {!!piece.pages.length && <Toolbar {...{ tool, setTool, colour, setColour, symbol, setSymbol, onFiles: importFiles }} />}
+      {!!piece.pages.length && screen === 'score' &&
+        <Toolbar {...{ tool, setTool, colour, setColour, symbol, setSymbol, onFiles: importFiles }} />}
     </div>
   )
 }

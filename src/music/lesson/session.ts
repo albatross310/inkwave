@@ -43,7 +43,7 @@
 
 import { v4 as uuid } from 'uuid'
 import type {
-  Assignment, BarOnlyAnchor, LessonConsent, LessonRecap, LessonRecord, PinnedLessonNote,
+  Assignment, BarAnchor, LessonConsent, LessonNote, LessonRecap, LessonRecord,
 } from './types'
 import { DEFAULT_SOURCE_ID, sourceById } from './stt'
 
@@ -99,7 +99,7 @@ export class LessonSession {
   readonly started_at: string
 
   #ended_at: string | null = null
-  #notes: PinnedLessonNote[] = []
+  #notes: LessonNote[] = []
   #recap: LessonRecap | null = null
 
   constructor(opts: StartSessionOptions) {
@@ -187,39 +187,41 @@ export class LessonSession {
    * it is their act, their selection, and it is what §1 means by "distilled + curated by the
    * student only".
    */
-  distil(lineId: string, opts?: { text?: string; bar?: BarOnlyAnchor }): PinnedLessonNote {
+  distil(lineId: string, opts?: { text?: string; anchor?: BarAnchor }): LessonNote {
     if (!this.#lines) throw new LessonSessionEndedError('the transcript')
     const line = this.#lines.find((l) => l.id === lineId)
     if (!line) throw new Error(`No such transcript line: ${lineId}`)
-    return this.#keep(opts?.text ?? line.text, opts?.bar)
+    return this.#keep(opts?.text ?? line.text, opts?.anchor)
   }
 
   /**
    * A note the student writes themselves, with no transcript line behind it — the ordinary case on
    * the 'no-audio' source, where the panel IS their own notes. Same shape, same destination.
    */
-  note(text: string, bar?: BarOnlyAnchor): PinnedLessonNote {
+  note(text: string, anchor?: BarAnchor): LessonNote {
     if (this.ended) throw new LessonSessionEndedError('note-taking')
-    return this.#keep(text, bar)
+    return this.#keep(text, anchor)
   }
 
   /**
-   * The one place a note is made. §1's `LessonNote` carries no bar-only anchor yet (types.ts
-   * BarOnlyAnchor explains the gap and the ask), so the bar rides alongside rather than inside —
-   * and when the contract gains its variant this is the ONE function that changes.
+   * The one place a note is made — and, as this file predicted, the ONE function that changed when
+   * the contract gained its bar variant. The bar now rides INSIDE `LessonNote.anchor`, which is
+   * where §1 ("anchor(optional → bar)") always said it belonged; `PinnedLessonNote` is gone.
    */
-  #keep(text: string, bar?: BarOnlyAnchor): PinnedLessonNote {
+  #keep(text: string, anchor?: BarAnchor): LessonNote {
     const snippet = text.trim()
     if (!snippet) throw new Error('A lesson note cannot be empty.')
-    const pinned: PinnedLessonNote = {
-      note: { id: uuid(), snippet, created_at: new Date().toISOString() },
-      ...(bar ? { bar } : {}),
+    const note: LessonNote = {
+      id: uuid(),
+      snippet,
+      ...(anchor ? { anchor } : {}),
+      created_at: new Date().toISOString(),
     }
-    this.#notes.push(pinned)
-    return pinned
+    this.#notes.push(note)
+    return note
   }
 
-  notes(): readonly PinnedLessonNote[] {
+  notes(): readonly LessonNote[] {
     return [...this.#notes]
   }
 

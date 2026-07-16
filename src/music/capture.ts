@@ -11,8 +11,8 @@
 // anywhere else claiming there is.
 
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
-import { analysePage, binarise, deskew, estimateSkew, type GrayImage } from './reflow'
-import type { PiecePage, Region, System } from './types'
+import { analysePage, barsOf, binarise, deskew, estimateSkew, type GrayImage } from './reflow'
+import type { BarRegion, PiecePage, Region, System } from './types'
 
 // ─── Decoding ────────────────────────────────────────────────────────────────
 
@@ -164,14 +164,42 @@ function toRegion(top: number, bottom: number, h: number): Region {
   return { x: 0, y: top / h, w: 1, h: (bottom - top) / h }
 }
 
-function toPieceSystems(systems: System[] | ReturnType<typeof analysePage>['systems'], h: number): System[] {
-  return (systems as ReturnType<typeof analysePage>['systems']).map((s, index) => ({
+type Detected = ReturnType<typeof analysePage>['systems']
+
+function toPieceSystems(systems: Detected, h: number): System[] {
+  return systems.map((s, index) => ({
     index,
     region: toRegion(s.top, s.bottom, h),
     staves: s.staves.map(st => ({ region: toRegion(st.top, st.bottom, h) })),
     is_grand_stave: s.isGrandStave,
     confidence: s.confidence,
   }))
+}
+
+/**
+ * The bars the CV was able to find (§A2's optional pre-detection, to make heatmap selection easier).
+ *
+ * OFTEN EMPTY, AND THAT IS CORRECT — `reflow.ts` reports barlines only on multi-stave systems, where
+ * a stem cannot masquerade as a barline. An empty list means "the student taps them" (§A4's MVP),
+ * NOT "this music has no bars". Nothing downstream may read absence as zero: `barsOfPiece` returns
+ * no bars, and the heatmap screen asks for taps rather than showing an empty map.
+ *
+ * `bar_label` is deliberately NOT set. The CV knows WHERE a bar is; it has no idea what number is
+ * printed on it, and inventing "1, 2, 3…" would be a guess presented as a reading (see types.ts,
+ * BarRef — a printed bar number is a string, and '0' pickups and '8a' endings are ordinary).
+ */
+function toPieceBars(systems: Detected, w: number, h: number): BarRegion[] {
+  const bars: BarRegion[] = []
+  systems.forEach((s, systemIndex) => {
+    for (const [x0, x1] of barsOf(s.barlines)) {
+      bars.push({
+        bar_index: bars.length,           // page-local; barsOfPiece re-indexes across the piece
+        system: systemIndex,
+        region: { x: x0 / w, y: s.top / h, w: (x1 - x0) / w, h: (s.bottom - s.top) / h },
+      })
+    }
+  })
+  return bars
 }
 
 /**
@@ -210,7 +238,7 @@ export async function capturePage(
       source_width: first.naturalWidth,
       source_height: first.naturalHeight,
       systems: toPieceSystems(analysis.systems, h),
-      bars: [],                         // §A4: the student taps barlines; CV auto-detect is later
+      bars: toPieceBars(analysis.systems, straight.width, h),
       reflow: {
         enabled: analysis.systems.length > 1,
         default_gap: defaultGap,
