@@ -14,6 +14,11 @@
 //     page changes first.
 //   • Our functions log nothing and store nothing; Vercel keeps standard platform logs.
 //   • The extension's capture history expires after 5 minutes (extension-src/utils/constants.ts).
+//   • The productivity ledger (src/productivity/) is OFF by default, stores session METADATA only
+//     (no document text), lives in the writer's own storage, and never reaches our servers. It
+//     collects NO location — there is no navigator.geolocation call anywhere; `place` is a label
+//     the writer types, like their diary `note`. Both are excluded from any AI export unless the
+//     writer opts in (types.ts: LEDGER_PRIVATE_FIELDS / stripPrivateFields).
 // If a feature changes any of this, change this page in the same PR.
 
 import { Link } from 'react-router'
@@ -72,6 +77,34 @@ export function Privacy() {
               Google Drive uses the narrower per-file permission (<code>drive.file</code>). PDFs you
               attach to sources are stored the same way — on your device and in your own drives —
               and reading or annotating them happens entirely in your browser.
+            </p>
+          </Section>
+
+          <Section title="Your ledger (session tracking)">
+            <p>
+              Inkwave can keep a <strong>ledger</strong> of how you work: when a writing session
+              started and ended, how many minutes you were actively editing, word counts before and
+              after, how many edits you made, the breaks between sessions, and whether the session
+              was a Pomodoro block. It is <strong>off by default</strong> — you turn it on yourself,
+              and can turn it off again, on the ledger page.
+            </p>
+            <p className="mt-3">
+              The ledger is a file kept in your own storage, exactly like your documents, and it is
+              never sent to us. It records <em>how</em> you worked, not <em>what</em> you wrote: it
+              contains no text from your documents.
+            </p>
+            <p className="mt-3">
+              <strong style={{ color: INK }}>We do not collect your location.</strong> Inkwave never
+              asks for, reads, or stores your device's location, and asks for no location
+              permission. You may optionally <em>type</em> a place label for yourself — "library",
+              "home" — and, at the end of a session, a note about what you did. Those are words you
+              choose to write, stored in your ledger on your device.
+            </p>
+            <p className="mt-3">
+              If you later use an AI report on your ledger, the times, word counts and edit counts
+              are what it sees. <strong>Your session notes and place labels are not included unless
+              you explicitly opt in</strong>, and the text of your documents is only included if you
+              tick it on, per document.
             </p>
           </Section>
 

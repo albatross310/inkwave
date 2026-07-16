@@ -58,6 +58,9 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
+import { prodLedgerEnabled } from '../productivity/ledgerFlag'
+import { getCapture } from '../productivity/capture'
+import { installLedgerSource } from '../productivity/installSource'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
@@ -894,6 +897,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         cadenceTapRef.current.record(transaction.steps)
       }
 
+      // ── Productivity ledger: session capture (spec §A4) ──────────────────────
+      // Rides the SAME stream, derives counts from the SAME countSteps primitive — no new content
+      // instrumentation. O(steps): it compares two numbers and increments three fields. Every
+      // O(doc) number the ledger needs is computed at session CLOSE, off this path. Flag default
+      // OFF and cached in a module variable, so the disabled cost is one boolean test.
+      if (prodLedgerEnabled()) getCapture().record(transaction.steps)
+
       // ── SCAS tick (deferred): CONSOLE-SNAPPY RULE — a keystroke does no O(doc) work. ──────────
       // The engine scan (processDoc walks every committed word) and the decoration rebuild both
       // move to ONE debounced tick ~120ms after the last input; the decoration plugin meanwhile
@@ -1103,6 +1113,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  // ── Productivity ledger: bind the doc + close sessions at real boundaries (§A4) ──
+  // Binding takes the document's word baseline ONCE per open (an O(doc) count, off the keystroke
+  // path) — that baseline is what makes a session's words_start free. A doc switch closes the
+  // outgoing session; `visibilitychange → hidden` closes and flushes while the page is still alive
+  // (pagehide is too late to do async work reliably, and a backgrounded tab throttles timers).
+  useEffect(() => {
+    if (!editor || !prodLedgerEnabled()) return
+    const cap = getCapture()
+    installLedgerSource() // the report/graphs read measured aggregates from the real ledger
+    void cap.bindDoc({ docId: doc.id, getDoc: () => ensureDocFresh() })
+    cap.startIdleWatch()
+
+    const onHide = () => { if (document.visibilityState === 'hidden') void cap.closeAndFlush('exit') }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      cap.stopIdleWatch()
+      void cap.closeAndFlush('doc-switch')
+    }
+  }, [editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // DEV-ONLY: expose SCAS internals for manual/automated inspection. Stripped from prod builds.
   useEffect(() => {
