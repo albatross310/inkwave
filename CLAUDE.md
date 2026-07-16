@@ -327,6 +327,30 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   (presentedDistinct collapses to 1 on a cold range); captures need a mounted DocLayer (≤5) so we
   can't warm-ahead unvisited versions cheaply. Resident window ≈ the DPR1 cache (~12 versions)
   around visited positions — Photos-like (a warm window, not the whole library).
+  ROUND 7 (2026-07-16 — PRE-BAKED THUMBNAILS, the cold-scrub fix; Peter "build it, LOCAL cache, no
+  file bloat", all three panes). MEASURED cold-warm first: scrubbing INTO a cold range presents ~0
+  real intermediates (exactRate 0.09; captures pause during scrub + only source from ≤5 mounted
+  DocLayers + each is a 360-1400ms SVG-foreignObject render), and warming a 12-version span
+  on-demand is ~tens of seconds. FIX (`editor/snapThumbs.ts`): a LOCAL OPFS cache of pre-rasterised
+  pane thumbnails. When the presenter captures a pane (idle, off the input path) it also encodes a
+  downscaled WebP (doc/diff 0.5×, minimap natural; q0.7) and persists it to OPFS keyed by
+  snapshot-id + PANE + a per-pane RENDER-SIGNATURE (doc/diff = box+zoom+theme+loaded-fonts; map =
+  box+theme only — no body-font/zoom dep). On a cold miss show() HYDRATES the ~KB WebP (~5-20ms
+  decode) instead of rendering; preloadThumbs hydrates a ±5 direction window ahead. LRU
+  byte-budgeted (80MB, regenerable). NEVER travels with the .studio (Peter's hard-minimise: the
+  emailed file is byte-unchanged; a fresh device warms as used). Flag `inkwave:snapThumbs` /
+  window.__iwSnapThumbs, DEFAULT OFF. KEY DESIGN CHOICE: baking lives ENTIRELY in the /snapshot
+  presenter's idle capture path — the editor snapshot-create/persist path gets ZERO added code, so
+  save latency is unchanged BY CONSTRUCTION (not merely measured-equal); a snapshot's thumbnails
+  bake the first time it's warmed in review. PROVED (chromium dSF 2, real in-memory OPFS shim):
+  combined 33KB/snapshot (doc 18KB, map 14KB, diff 3.4KB); after disposing the presenter (cold
+  in-memory cache = 3 entries) a fast fling into the baked range presents REAL versions per pane at
+  exactRate doc 0.83 / diff 1.0 / map 0.5 first pass (async hydration racing the fling), doc 1.0 /
+  diff 0.86 / map 0.86 second pass — vs the 0.09 baseline; the in-memory cache grew 3→40 by
+  hydrating from OPFS. Probes: scrub.exact.<kind> (1=exact incl. hydrated, 0=nearest). COVERAGE:
+  still the visited set (a version must be warmed once in review to bake) — but now it PERSISTS
+  across reload/eviction, so the second-ever scrub of any range is instant. A never-visited range
+  is cold once; the (unbuilt) next lever is a background idle sweep to bake ahead.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
