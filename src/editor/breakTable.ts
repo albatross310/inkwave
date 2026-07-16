@@ -20,6 +20,7 @@
 // SIGNATURE and a mismatch is a MISS (rebuild), never a silent reuse.
 
 import { writeOpfsFile } from '../storage/opfsWrite'
+import { bibProvider } from '../citations/bibProvider'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { Measure } from './arithmeticLayout'
 import { buildRenderModel, type RenderGeom, type BuildOpts } from './textRender'
@@ -38,25 +39,73 @@ export interface BreakTable {
 }
 
 /**
+ * THE BIBLIOGRAPHY'S CONTRIBUTION TO WRAP, AS A CONTENT SIGNATURE (2026-07-17).
+ *
+ * WHY THIS EXISTS — and it is the single thing that made persistence possible at all. contextSig
+ * used to embed `opts.bibEpoch` = `bibProvider.getVersion()`, which is a **monotonic session event
+ * counter** (`notify()` does `this._version++`). It counts how many bibliography notifications have
+ * fired THIS SESSION. It is not derived from content, so it does not reproduce across a reload:
+ * measured 15 on the writing session and 2 after reload, on a byte-identical document. Every
+ * hydrated table therefore stale-missed, ALWAYS. The layer was structurally incapable of ever
+ * scoring a hit — it would have shipped reporting "116 tables persisted" and served ZERO lookups,
+ * forever, while looking like a working cache. That is exactly the disease: the feature's absence
+ * looks identical to the feature being unnecessary.
+ *
+ * The ORIGINAL INTENT was right — a citation's box changes its wrap, so the bibliography genuinely
+ * belongs in the signature. The INSTRUMENT was wrong: an epoch is a proxy for "something changed",
+ * not a description of WHAT THE STATE IS, and only the latter survives a process boundary.
+ *
+ * So: hash the entries themselves. If the CSL data and the style are byte-identical, every citation
+ * resolves to the same in-text string, so every citation box is the same width, so the wrap is the
+ * same. OVER-invalidation is safe here (a miss rebuilds and is counted); UNDER-invalidation is the
+ * direction that paints wrong words — so this hashes the WHOLE entry rather than guessing which
+ * fields a given CSL style reads.
+ *
+ * The epoch keeps its ONE legitimate job: an in-session memo key. Hashing the library is O(entries)
+ * and the epoch tells us for free when that work can be skipped.
+ */
+let _bibSigCache: { epoch: number; sig: string } | null = null
+export function bibSignature(): string {
+  const epoch = bibProvider.getVersion()
+  if (_bibSigCache && _bibSigCache.epoch === epoch) return _bibSigCache.sig
+  // FNV-1a over the serialized entries. Not cryptographic — this guards a regenerable cache, and a
+  // collision costs a stale-looking hit on byte-identical-but-for-a-collision data. Cheap and stable
+  // is what matters; the entries are sorted so Map iteration order can never move the signature.
+  const items = bibProvider.getAll().slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const s = JSON.stringify(items)
+  let h = 0x811c9dc5
+  for (let k = 0; k < s.length; k++) {
+    h ^= s.charCodeAt(k)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  const sig = `${items.length}:${h.toString(36)}`
+  _bibSigCache = { epoch, sig }
+  return sig
+}
+
+/** Test seam: forget the memo (the epoch is a session counter, so tests must be able to reset it). */
+export function _resetBibSig(): void { _bibSigCache = null }
+
+/**
  * THE CONTEXT SIGNATURE. Everything the break positions are a function of, and nothing they aren't.
  *
  * ZOOM AND DPR ARE DELIBERATELY ABSENT — canonical pagination's whole point is that breaks are
  * measured in a forced canonical context and are therefore device- and zoom-independent ("same text
  * on page N at every zoom, on phone, and in print"). That makes a table PORTABLE: baked once, valid
  * at any zoom, on any device, across reloads. This is a claim the codebase makes, so it is VERIFIED
- * by probe (zoomPortability) rather than trusted — if a table ever proved zoom-dependent, zoom would
- * have to join this signature and the portability win would be gone.
+ * by probe (zoomPortability, and panezoom.prove.mjs on BOTH engines) rather than trusted.
  *
- * The citation epoch DOES belong here: a citation's box changes its wrap, so a bibliography
- * hydration or CSL style switch genuinely moves the breaks.
+ * EVERY COMPONENT MUST BE CONTENT-DERIVED, NOT SESSION-DERIVED. A signature that embeds anything
+ * counted since page load cannot survive the reload it exists to survive. `bibSig` replaced the
+ * session epoch for exactly that reason — see bibSignature() above.
  */
-export function contextSig(geom: RenderGeom, opts: BuildOpts, fontsKey: string): string {
+export function contextSig(geom: RenderGeom, citationStyle: string, bibSig: string, fontsKey: string): string {
   return [
     'v1',
     `p${geom.pageWidthPx.toFixed(2)}x${geom.pageHeightPx.toFixed(2)}`,
     `m${geom.topMarginPx}/${geom.sideMarginPx}`,
     `b${geom.basePx}`, `r${geom.ratio}`, `s${geom.paraSpacingEm}`,
-    `c${opts.citationStyle ?? ''}@${opts.bibEpoch ?? -1}`,
+    `c${citationStyle}@${bibSig}`,
     `f${fontsKey}`,
   ].join('|')
 }
@@ -109,16 +158,67 @@ export function pageOfPos(t: BreakTable, pos: number): number {
 // inventing a second scheme. It NEVER travels with the .studio: regenerable, local, Peter's
 // hard-minimise rule.
 
-interface TableIndex { loaded: boolean; loading?: Promise<void>; tables: Record<string, BreakTable> }
+// BUDGET + EVICTION (2026-07-17). A table is ~1.4KB, so 116 versions is ~158KB and eviction should
+// NEVER fire at Peter's scale — which is exactly why the budget must exist and must be REPORTED
+// rather than assumed: a store with no bound is one long session away from being the thing that
+// fills the origin's quota, and "it's only 1.4KB" is a claim about today's document. Every drop is
+// NAMED (`dropped`), because bounded coverage that reports as total is how "we covered everything"
+// becomes false without anyone noticing — the grow-only snapshot truncation, same lesson.
+const BYTES_BUDGET = 2 * 1024 * 1024 // ~1,400 versions of a thesis-scale doc
+
+/** Cheap, allocation-free size estimate. starts[] is the payload; the rest is bookkeeping. */
+function tableBytes(t: BreakTable): number {
+  return t.starts.length * 8 + t.sig.length * 2 + 64
+}
+
+// Counters are PER-DOC because that is the scope tableStats() is asked about. A global counter
+// answering a per-doc question is how the signature-blind bake counter reported 116/116 while every
+// lookup correctly missed.
+interface TableCounters {
+  hits: number      // served from cache, signature matched
+  misses: number    // nothing cached for this snapId (or the index isn't loaded yet)
+  stale: number     // cached BUT the signature moved ⇒ REBUILD. Never a silent reuse.
+  builds: number    // putTable calls — a rebuild landing in the cache
+  persisted: number // tables in the last successful OPFS write
+  loadedFromDisk: number // tables hydrated by loadTables() on this session's cold start
+  dropped: string[] // snapIds evicted, BY NAME
+}
+interface TableIndex {
+  loaded: boolean
+  loading?: Promise<void>
+  tables: Record<string, BreakTable>
+  used: Map<string, number> // snapId → LRU clock
+  clock: number
+  c: TableCounters
+}
 const _idx = new Map<string, TableIndex>()
 const _timer = new Map<string, ReturnType<typeof setTimeout>>()
-const dbg = { hits: 0, misses: 0, stale: 0, builds: 0, persisted: 0, loaded: 0 }
-if (typeof window !== 'undefined') (window as unknown as { __iwBreakTables?: unknown }).__iwBreakTables = dbg
 
 function idxFor(docId: string): TableIndex {
   let i = _idx.get(docId)
-  if (!i) { i = { loaded: false, tables: {} }; _idx.set(docId, i) }
+  if (!i) {
+    i = {
+      loaded: false, tables: {}, used: new Map(), clock: 0,
+      c: { hits: 0, misses: 0, stale: 0, builds: 0, persisted: 0, loadedFromDisk: 0, dropped: [] },
+    }
+    _idx.set(docId, i)
+  }
   return i
+}
+
+/** LRU to budget. Named drops only — silent truncation is the failure this store exists to avoid. */
+function evict(i: TableIndex): void {
+  let bytes = 0
+  for (const k of Object.keys(i.tables)) bytes += tableBytes(i.tables[k])
+  if (bytes <= BYTES_BUDGET) return
+  const byAge = Object.keys(i.tables).sort((a, b) => (i.used.get(a) ?? 0) - (i.used.get(b) ?? 0))
+  for (const k of byAge) {
+    if (bytes <= BYTES_BUDGET) break
+    bytes -= tableBytes(i.tables[k])
+    delete i.tables[k]
+    i.used.delete(k)
+    i.c.dropped.push(k)
+  }
 }
 
 async function readOpfs(path: string[]): Promise<Uint8Array | null> {
@@ -140,7 +240,10 @@ export async function loadTables(docId: string): Promise<void> {
       try {
         const j = JSON.parse(new TextDecoder().decode(buf)) as { tables?: Record<string, BreakTable> }
         i.tables = j.tables ?? {}
-        dbg.loaded = Object.keys(i.tables).length
+        i.c.loadedFromDisk = Object.keys(i.tables).length
+        // A hydrated table has no LRU history — seed it so the first evict() can't prefer a
+        // just-loaded table over one this session built.
+        for (const k of Object.keys(i.tables)) i.used.set(k, ++i.clock)
       } catch { /* corrupt ⇒ start fresh; a table is regenerable */ }
     }
     i.loaded = true
@@ -156,18 +259,29 @@ export async function loadTables(docId: string): Promise<void> {
  */
 export function getTable(docId: string, snapId: string, sig: string): BreakTable | null {
   const i = _idx.get(docId)
-  if (!i || !i.loaded) { dbg.misses++; return null }
+  if (!i) { idxFor(docId).c.misses++; return null }
+  // MEMORY IS AUTHORITATIVE FOR WHAT IT HOLDS (fixed 2026-07-17 — the layer's first execution
+  // caught this). This used to early-return a MISS whenever `!i.loaded`, i.e. before loadTables()
+  // had run. But putTable() populates `tables` WITHOUT setting `loaded`, so a session that built
+  // its own tables and then looked one up MISSED EVERY TIME — a cache that reports a full index
+  // and never serves a single hit, silently rebuilding forever. `loaded` only ever meant "ABSENCE
+  // is authoritative"; absence already returns null → rebuild, which is correct either way. So the
+  // flag has no business gating a PRESENT table. Same family as the signature-blind bake counter
+  // reporting 116/116 while every lookup missed.
   const t = i.tables[snapId]
-  if (!t) { dbg.misses++; return null }
-  if (t.sig !== sig) { dbg.stale++; return null } // loud by construction: counted, and rebuilt
-  dbg.hits++
+  if (!t) { i.c.misses++; return null }
+  if (t.sig !== sig) { i.c.stale++; return null } // loud by construction: counted, and rebuilt
+  i.c.hits++
+  i.used.set(snapId, ++i.clock)
   return t
 }
 
 export function putTable(docId: string, snapId: string, t: BreakTable): void {
   const i = idxFor(docId)
   i.tables[snapId] = t
-  dbg.builds++
+  i.used.set(snapId, ++i.clock)
+  i.c.builds++
+  evict(i)
   schedulePersist(docId)
 }
 
@@ -176,19 +290,49 @@ function schedulePersist(docId: string): void {
   _timer.set(docId, setTimeout(() => { void persist(docId) }, 1500))
 }
 
-async function persist(docId: string): Promise<void> {
+/**
+ * Write the index to OPFS. EXPORTED (2026-07-17) so a caller — or a probe — can flush
+ * deterministically instead of racing the 1500ms debounce. Goes through `storage/opfsWrite.ts`,
+ * which is the ONLY sanctioned OPFS write path: WebKit has no createWritable, so iOS writes via a
+ * worker createSyncAccessHandle, serialized, ONE open handle per file. Never bypass it.
+ */
+export async function persist(docId: string): Promise<void> {
   const i = idxFor(docId)
+  clearTimeout(_timer.get(docId)) // a pending debounce would re-write what we just wrote
+  _timer.delete(docId)
   try {
     await writeOpfsFile(['documents', docId, 'breaks', 'index.json'], JSON.stringify({ v: 1, tables: i.tables }))
-    dbg.persisted = Object.keys(i.tables).length
+    i.c.persisted = Object.keys(i.tables).length
   } catch { /* best-effort — regenerable */ }
 }
 
-export function tableStats(docId: string): { tables: number; bytes: number; loaded: boolean } {
-  const i = _idx.get(docId)
-  const tables = i ? Object.keys(i.tables).length : 0
-  const bytes = i ? JSON.stringify({ tables: i.tables }).length : 0
-  return { tables, bytes, loaded: !!i?.loaded }
+export interface TableStats {
+  tables: number
+  bytes: number
+  loaded: boolean
+  hits: number
+  misses: number
+  stale: number
+  builds: number
+  persisted: number
+  loadedFromDisk: number
+  dropped: string[]
+  budget: number
 }
 
-export function _resetTables(): void { _idx.clear() }
+/** The honest picture for one doc: hit/miss/stale/rebuild, bytes, and what was evicted BY NAME. */
+export function tableStats(docId: string): TableStats {
+  const i = _idx.get(docId)
+  const tables = i ? Object.keys(i.tables).length : 0
+  let bytes = 0
+  if (i) for (const k of Object.keys(i.tables)) bytes += tableBytes(i.tables[k])
+  return {
+    tables, bytes, loaded: !!i?.loaded, budget: BYTES_BUDGET,
+    hits: i?.c.hits ?? 0, misses: i?.c.misses ?? 0, stale: i?.c.stale ?? 0,
+    builds: i?.c.builds ?? 0, persisted: i?.c.persisted ?? 0,
+    loadedFromDisk: i?.c.loadedFromDisk ?? 0,
+    dropped: i ? [...i.c.dropped] : [],
+  }
+}
+
+export function _resetTables(): void { _idx.clear(); _timer.clear() }
