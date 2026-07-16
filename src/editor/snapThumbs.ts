@@ -221,6 +221,22 @@ async function writeIndex(docId: string): Promise<void> {
   } catch { /* best-effort — reconstructable */ }
 }
 
+/** Distinct snapshots baked PER PANE (the `?snapThumbs=debug` sweep readout). Round 10: the sweep
+ *  bakes doc + diff + map, so "21 thumbs" no longer says whether all three panes are covered —
+ *  three separate counts do, and a lagging one is exactly the pane that will show a stale nearest. */
+export function thumbPaneCounts(docId: string): Record<ThumbPane, number> {
+  const idx = _index.get(docId)
+  const out: Record<ThumbPane, number> = { doc: 0, diff: 0, map: 0 }
+  if (!idx) return out
+  const seen: Record<string, Set<string>> = { doc: new Set(), diff: new Set(), map: new Set() }
+  for (const key of Object.keys(idx.entries)) {
+    const [snapId, pane] = key.split('|')
+    if (seen[pane]) seen[pane].add(snapId)
+  }
+  for (const k of ['doc', 'diff', 'map'] as ThumbPane[]) out[k] = seen[k].size
+  return out
+}
+
 /** Test/diagnostic: current byte total + entry count for a doc. */
 export function thumbStats(docId: string): { entries: number; bytes: number; loaded: boolean } {
   const idx = _index.get(docId)

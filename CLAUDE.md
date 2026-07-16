@@ -393,6 +393,62 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   why round-3 made rapid-detection read e.timeStamp), so this shouldn't happen on device — BUT if
   Peter's overlay shows "legacy goTo (live)" counting up per notch, that IS this failure and it is
   the same felt bug (a live render per notch). The overlay diagnoses it directly.
+  ROUND 10 (2026-07-16 — sweep ALL THREE panes; and the instrument that could not see a burst).
+  - SWEEP PANES: the sweep only ever baked the DOC pane (diff/map render from the ACTIVE
+    snapshot's state), so a cold fling flickered ONE pane and lagged two. Both are bakeable
+    WITHOUT activating a version: `opsBetween(prev,target)` is pure + diffCache-backed and
+    InlineDiffView is a pure render of those ops; MinimapPanel is already parameterised by
+    (leftRef, ops, pageGeo) and never reads the active snapshot. So the sweep now renders BOTH
+    into offscreen replicas (opacity 0.001, sized from the live panes so the captures land in the
+    real surfaces' cache buckets) and captures those. CONTRACT CHANGE — exactly one line, and
+    ADDITIVE: DocLayer's WARM-ONLY branch hands its own pages to `onWarmReady(id, scroller,
+    pages)`; the ACTIVE path (onActivate/onGeo, the leftScrollRef+pagRef+pageGeo binding, the
+    child-layout-effect ordering) is BYTE-UNCHANGED. Proved unregressed: 11 shows / 11 commanded
+    = 1.00×, zero drops, showJs p50 0.3ms, capturesDuringBurst 0.
+  - THE BLANK-CAPTURE TRAP (cost hours; keep): a captured element's OWN inline `position` rides
+    into the clone, and captureRegion drops the clone at the foreignObject's ORIGIN — so a host
+    laid out with `position:absolute; left:456px` rastered outside the crop, came back blank, was
+    silently dropped by blank-detect, and STALLED the sweep on that version forever (map baked
+    1/36). Lay replica hosts out IN FLOW and mirror the real host's `position`. New probe
+    `scrub.capture.fail.<kind>` / `.throw.<kind>` makes this class visible — every other probe
+    reported only successes, which is why it was invisible.
+  - The sweep now advances only when EVERY REGISTERED pane is baked (`pendingThumbs`, not
+    `isThumbBaked('doc')` — asking about an unregistered surface stalls forever), with a
+    give-up set so one unbakeable version can't park the library. MEASURED: doc/diff/map
+    19/19/19 in 45s idle, 32.1KB/version (vs the round-7 33KB estimate).
+  - THE INSTRUMENT COULD NOT SEE THE BURST. Peter's MID-scrub overlay capture came back
+    byte-identical to his idle one: the overlay is a DOM node repainting on the same main thread
+    the scrub saturates, so every number ever read off it — including a scary "thumb=0 on every
+    pane" — was an AT-REST sample. Same family as canvasShapingMatchesEditor returning false
+    forever. FIX: the burst is RECORDED, not watched — a preallocated ring buffer in the
+    presenter (typed arrays; no allocation, no strings, no DOM, no console in the hot path),
+    serialised only after settle (`presenter.record()`/`resetRecord()`, `window.__iwSummarise`,
+    pure `summariseRecord`, unit-tested). The overlay now prints the RECORDED burst and marks its
+    live section "AT REST ONLY — stale mid-burst". PROVE IT BEFORE TRUSTING IT: probe-recorder.mjs
+    asserts a known-POSITIVE (17 show()s → exactly 17 presents/pane) and a known-NEGATIVE (reset
+    → 0) before reading a single real number.
+  - thumb=0 IS NOT A BUG, and the key contract is FINE (traced verbatim via
+    `window.__iwThumbTrace` — bake and lookup signatures match byte-for-byte). `hydrate()` returns
+    EARLY when `entries.has(key)`, so hydration is structurally unreachable whenever the
+    in-memory cache is a superset of the disk cache — which is exactly the state of any session
+    that did its own baking (Peter: 59 thumbs on disk, 57 bitmaps in mem = the same versions).
+    thumb>0 only when memory LACKS what disk has: measured thumb=1 on a cold burst here, and
+    round 7's 3→40 hydration came from disposing the presenter first. Read `hit+thumb` (exact),
+    never `thumb` alone.
+  - REGISTRATION (Peter: "nothing happens except the version number"): versions differ in LENGTH,
+    so preserving the SCROLL OFFSET does not preserve the CONTENT. The recorder carries the
+    content under the reading line (hashed at CAPTURE time via `paneCentreSig`, interned to an
+    int — the hot path writes a number). MEASURED, and it is decisive: anchor drift 0px (every
+    doc bitmap is captured at the SAME scrollTop — warm layers are primed to `getAnchorTop()`)
+    while the doc pane's centre content HELD only 33% of steps; diff and map hold 100%. So the
+    doc pane is misregistered by construction: identical offsets, sliding content. Speed cannot
+    fix that — the fix has the shape of the zoom focal anchor (99bf8a0): anchor on CONTENT
+    IDENTITY via the provenance spine, not on scrollTop. NOT YET BUILT.
+  - Note for the on-demand-text-renderer proposal: the MINIMAP still needs baked thumbnails
+    regardless — it shows every page at once, so per-page on-demand rendering does not serve it.
+  - `paneCentreSig` binary-SEARCHES text by char offset (~17 Range rect reads): /snapshot's doc
+    flow is a handful of giant `[data-opidx]` spans (measured 4 over a 151,000px pane), so
+    block-granularity anchoring would call every frame registered.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
