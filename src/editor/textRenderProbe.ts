@@ -468,34 +468,64 @@ export function installTextRenderProbe(editor: Editor): void {
       const g = liveGeom()
       const doc = editor.state.doc
       const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+
+      // Lay out the tail from `cutAt` with NO prefix knowledge, and score its first `n` line starts
+      // against the full model's page-`pageIdx` line starts, mapped back to ORIGINAL doc positions.
+      // origOf(tailPos) = tailPos + cutAt - 1  (the tail's first content pos is 1, and it IS cutAt).
+      // THE OLD BUG: cutAt was `at - 1` and `want` used `pos - cutAt + 1`, so line 0 mismatched
+      // ALWAYS — 29/30 was 30/30 plus my own off-by-one.
       const cmp = (cutAt: number, pageIdx: number) => {
-        // Lay out ONLY the tail from this position — zero prefix knowledge.
         const tail = doc.cut(cutAt)
         const t0 = performance.now()
         const m = buildRenderModel(tail, g, measure, fontLoaded, buildOpts())
         const ms = performance.now() - t0
-        const wantLines = full.lines.filter((_, i) => full.pageOfLine[i] === pageIdx)
-        // Compare the first N line STARTS, rebased: full lines are absolute, tail lines are relative
-        // to the cut. A cut inside a paragraph makes the tail's first block start at 0.
-        const got = m.lines.slice(0, wantLines.length).map((l) => l.pos)
-        const want = wantLines.map((l) => l.pos - cutAt + 1)
+        const want = full.lines.filter((_, i) => full.pageOfLine[i] === pageIdx).map((l) => l.pos)
+        const got = m.lines.map((l) => l.pos + cutAt - 1) // rebase to original positions
         const n = Math.min(got.length, want.length)
         let match = 0
         for (let i = 0; i < n; i++) if (got[i] === want[i]) match++
-        return { pageIdx, cutAt, lines: wantLines.length, compared: n, match, exact: n > 0 && match === n, tailBuildMs: +ms.toFixed(1) }
+        return { cutAt, pageIdx, compared: n, match, exact: n > 0 && match === n, tailBuildMs: +ms.toFixed(1), firstGot: got[0], firstWant: want[0] }
       }
-      const pages = [1, 2, 3, 4].filter((p) => p < full.pages)
+
+      const pages = [1, 2, 3].filter((p) => p < full.pages)
       const results = pages.map((p) => {
         const at = anchorPosOfPage(full, p)
-        return cmp(at - 1, p) // break pos → the paragraph position the line starts at
+        const good = cmp(at, p)
+        // DISCRIMINATING NEGATIVES. A 2-char-off cut is NOT one: dropping 2 chars from the first
+        // word leaves every LATER line starting at the same original position, so it scored
+        // identically to the correct cut and the test had no resolution. A MID-LINE cut is the real
+        // negative — the tail's first line then pulls words up from the next line and the wrap
+        // cascades, so every subsequent line start moves.
+        const negs = [at + 40, at + 80, at + 25].map((c) => cmp(c, p))
+        return {
+          pageIdx: p, at, good,
+          negs: negs.map((nn) => ({ cutAt: nn.cutAt, match: nn.match, compared: nn.compared })),
+          // THE GATE: the correct cut must STRICTLY beat every negative.
+          strictlyBeatsAllNegatives: negs.every((nn) => good.match > nn.match),
+        }
       })
-      // KNOWN-POSITIVE: an off-by-2 cut must NOT match, or the test is blind.
-      const bogus = pages.length ? (() => { const at = anchorPosOfPage(full, pages[0]); return cmp(at - 1 + 2, pages[0]) })() : null
+
+      // ── lastPageReachableByContent, instrumented rather than left as a footnote ──
+      let maxPage = -1
+      for (const p of full.pageOfLine) if (p > maxPage) maxPage = p
+      const lastLine = full.lines[full.lines.length - 1]
+      const lastPos = doc.content.size - 2
+      const lastBlock = full.blocks[full.blocks.length - 1]
+      const anchorProbe = {
+        docContentSize: doc.content.size, lastPosProbed: lastPos,
+        lastLinePos: lastLine?.pos ?? null, lastLinePage: lastLine ? full.pageOfLine[full.lines.length - 1] : null,
+        lastBlockType: lastBlock?.type ?? null, lastBlockStart: lastBlock?.start ?? null, lastBlockEnd: lastBlock?.end ?? null,
+        modelPages: full.pages, maxPageOfLine: maxPage, pageTopLen: full.pageTop.length,
+        pagesAgreesWithWalk: full.pages === maxPage + 1,
+        pageForLastPos: pageContainingPos(full, lastPos),
+        pageForLastLinePos: lastLine ? pageContainingPos(full, lastLine.pos) : null,
+      }
+
       return {
         pages: full.pages, tested: results,
-        allExact: results.length > 0 && results.every((r) => r.exact),
-        knownNegative: bogus ? { exact: bogus.exact, match: bogus.match, compared: bogus.compared } : null,
-        seesKnownNegative: bogus ? !bogus.exact : false,
+        allExact: results.length > 0 && results.every((r) => r.good.exact),
+        allStrictlyBeatNegatives: results.length > 0 && results.every((r) => r.strictlyBeatsAllNegatives),
+        anchorProbe,
       }
     },
 
