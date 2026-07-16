@@ -19,7 +19,12 @@ import { collectViewSettings } from '../editor/viewSettings'
 // library, and a resolved "(Author, Year)" there would diverge from the exporter's. The bare citekeys
 // are stable across both. This still fixes the real bug — a dropped citation used to leave an orphaned
 // ". " in the prose/diff. (DocView, which is not verified, resolves the pretty author-year form.)
-function citationText(attrs: Record<string, unknown> | undefined, resolve = false): string {
+// EXPORTED (2026-07-17) so provenance/textMap.ts can emit the SAME bytes rather than duplicate this
+// formatter. `export` alone changes no output byte and pmToText's behaviour is untouched — and the
+// alternative (a second copy of the resolve/locator/prefix/suffix rules, with its own bibProvider
+// dependency) is precisely how two implementations drift apart. textMap's byte-identity test against
+// the real pmToText is the guard; see textMap.ts.
+export function citationText(attrs: Record<string, unknown> | undefined, resolve = false): string {
   const keys = (attrs?.citekeys as string[] | undefined) ?? []
   if (!keys.length) return ''
   // Display mode (snapshot diff): resolve to "(Author, Year)" like the reader sees it. NEVER do this

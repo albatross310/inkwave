@@ -562,15 +562,48 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   never read as zero. (2) The `ops` probe reads ~0ms and that is NOT "the diff is free" — it is a
   diffCache HIT, because DocLayer's own UNPROBED useMemo computed it first. The diff's real price is
   unattributed and sits inside the longtask total. Never quote it as the diff's cost.
-  STILL TO BUILD (nothing below is done): map `opsBetween(prev,cur)` back onto the PM tree so every
-  version renders rich WITH its diff marks — the hard part is DELETIONS, which exist in prev and have
-  no home in cur's tree, so they must be spliced at a mapped anchor (walk ops keeping a cur-offset
-  cursor; a del anchors at the current offset). `pmToText` `.trim()`s each block and joins with
-  '\n\n', so a flat-offset→PM-position map must mirror that exactly — and pmToText MUST stay
-  byte-identical at resolveCitations=false (verify/bundle hash it). Then: both halves move together
-  (canvas frames and the DOM landing must agree — offsets IDENTICAL, not similar, or it is round 11
-  inverted); the show() miss path; idle-pumped cancellable table builds; the COLD far-from-origin
-  burst; and OPFS persistence, which still has zero callers.
+  **THE PROJECTION IS BUILT** (`provenance/textMap.ts`, pure, 36 tests) — the crux of rich rendering,
+  and the part that had to be right before any pixel moves:
+  - `buildFlatMap(doc, resolveCitations)` → `{ text, blocks[] }`, each block carrying `flatStart/
+    flatEnd` and per-leaf `segs` ({path, nodeStart, flatStart, len}). It MIRRORS pmToText's three
+    structural rules — BLOCK types {paragraph,heading,listItem,blockquote,codeBlock} whose content is
+    FLATTENED by `inline` (a listItem is matched BEFORE recursion, so a paragraph nested in one is
+    never walked as its own block); each block `.trim()`ed and DROPPED if empty; join '\n\n' + a
+    trailing '\n'. Segs are clipped to the surviving [lead, keepEnd) window, so a trim-clipped leaf
+    carries a non-zero `nodeStart`.
+  - **THE PROVENANCE GUARD.** pmToText is hashed into the bundle, recomputed by verify, and anchored
+    to Bitcoin (M2/M5) — a drifting mirror would render subtly wrong text while every hash still
+    verified. So pmToText IS NOT TOUCHED, and `textMap.test.ts` ASSERTS
+    `buildFlatMap(d, r).text === pmToText(d, r)` byte-for-byte at BOTH resolve settings over 10
+    fixtures (trim, empty blocks, nested lists, hardBreaks, citations, marks, empty doc). The one
+    shared leaf, `citationText`, is now EXPORTED from bundle.ts and IMPORTED here rather than copied
+    — `export` alone changes no output byte, and a second copy of the resolve/locator/prefix/suffix
+    rules is exactly how two implementations drift. The identity negative is a real drifted mirror
+    (wrong join / missing trailing newline), proven CAUGHT, with a correct variant proven to match so
+    the assertion is not always-false.
+  - `anchorOps(ops)` → the DELETION rule: one cursor over CUR, advanced by `same` and `add` and NOT
+    by `del`; a del's `curStart === curEnd` — it is a POINT, not a range. `opsInRange(a, from, to)`
+    splits a node into marked runs and EXCLUDES a del anchored at `to` (included at `from`) so two
+    adjacent segments cannot render the same deletion twice.
+  TWO TEST TRAPS CAUGHT HERE, both the house speciality: (1) the deletion known-negative was BLIND on
+  first writing — with a SINGLE del that is also the FIRST change, the correct and buggy cursor rules
+  BOTH answer 5; they cannot diverge until a del has been passed over. TWO deletions are the minimum
+  that can see the bug. (2) The resolve=true tests were exercising the resolve=FALSE path: with an
+  empty bibProvider, citationText never takes its `simpleInText` branch and falls through to the bare
+  "(key)" form — so the suite looked like it covered the display path (`displayTextOf` → pmToText(doc,
+  true), the one the diff is computed under) and did not. bibProvider is now seeded, guarded by a test
+  asserting resolve actually changes the bytes.
+  STILL TO BUILD: the `RichDiffView` component itself (walk contentJson like DocView, but split each
+  text leaf by `opsInRange` over its seg's flat range, and splice each `del` in at its anchor as a
+  strikethrough run) → swap it into `FullDiffView`'s `ops !== null` branch behind the flag → then:
+  both halves move together (canvas frames and the DOM landing must produce IDENTICAL offsets, not
+  similar, or it is round 11 inverted); **measure the diff-mark increment** (rich WITH marks vs the
+  DocView floor, same conditions — if marks erase the 2× saving Peter must be told); the show() miss
+  path; idle-pumped cancellable table builds; the COLD far-from-origin burst; and OPFS persistence,
+  which still has zero callers. WATCH: rich rendering may bring the refList into the pane FOR THE
+  FIRST TIME (today `pmToText` skips the atom, so the pane has never shown a bibliography) — at which
+  point the 120px-vs-880px guess goes LIVE and silently moves every break below it. Its real height
+  must come with it, or `reliablePages` must stop there honestly.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
