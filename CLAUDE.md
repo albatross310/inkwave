@@ -749,6 +749,31 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     ("which page holds this doc position?") can, which is exactly the seam RichDiffView and the
     content anchor use. **THE SHAPE TO REMEMBER: when a bug survives every self-consistency check,
     stop adding checks derived from the same structure and ask it from outside.**
+    **THE GATE COULD NOT SEE THIS FIX AT ALL — F6, found by the test auditor, now CLOSED.** Reverting
+    `blockFirstLinePos` to the legacy rule left `pnpm test` at **exit 0, all 79 files green**: the
+    only guard was `tail.prove.mjs`, which is in no CI and no package.json script, needs a browser +
+    a thesis-shape doc, and is run BY HAND. A fix for a bug MEASURED in the real app was one careless
+    edit from silently returning. `src/editor/textRender.test.ts` now carries it in the gate —
+    4-node schema (doc/paragraph/referenceList/horizontalRule/text), `measure = t => t.length * 8`,
+    **~90ms, no browser, no canvas, no fixture** (harness adapted from the auditor's own
+    reproduction, `/root/dev/iw-audit-tests/audit/probe-atompos.test.ts.txt`, rather than
+    reinvented). PROVED: applying the auditor's exact mutation takes the FULL gate to **exit 1, 4
+    failures**. `tail.prove.mjs` remains the in-browser truth; the unit test is what stops a silent
+    revert six weeks from now.
+    **AND THE NEGATIVE HAD TO SWEEP PLACEMENTS TO WORK.** The two rules can only differ where the
+    atom STARTS a page — an atom mid-page resolves identically either way. The first cut tested a
+    `horizontalRule` at index 25, it landed mid-page, and that test PASSED AGAINST THE MUTATED BUILD
+    while its neighbours failed: a true invariant discriminating nothing. The negative now sweeps
+    every placement per atom type and asserts `discriminating > 0`, so it cannot silently become a
+    coin toss again.
+    **THE GENERAL LESSON (the auditor's, and it is the sharpest one this project has produced):**
+    *"This codebase's probe culture is genuinely excellent at ESTABLISHING truth. It has no mechanism
+    for KEEPING it. A proof that ran once and convinced everyone is indistinguishable, six weeks
+    later, from a proof that never ran — and the gate says green either way. The measured facts in
+    these file headers read as guarantees; they're archaeology."* So: **of every claim you prove, ask
+    whether there is a cheap unit-level version that KEEPS it true.** If it is 90ms and needs no
+    browser, there is no excuse. The `.prove.mjs` probes stay as the in-browser truth — they are not
+    redundant — but a browser-only proof is not a guard.
     LIVE KNOWN-NEGATIVE: `window.__iwAtomPos='legacy'` restores the bug; `tail.prove.mjs` reproduces
     it (legacy 56/UNREACHABLE → fixed 57/REACHABLE) before reading any verdict, and VOIDS where the
     fixture's tail is not a leaf atom so the rules structurally cannot differ. It caught a real
@@ -1400,6 +1425,19 @@ checkout) with the full gate: typecheck (ignore pre-existing TS7016/TS2550 in te
 build (gate on real exit codes — `| tail` swallows failures), then push (= production deploy).
 Snapshot React state is METADATA-ONLY (`SnapshotMeta`; fetch full snapshots via `listSnapshots` at
 action time — never hold contentJson in state). Autosave failures dispatch `inkwave:save-failed`.
+
+**A GREEN GATE IS NOT A GUARD (2026-07-17, the test auditor's headline — read this before trusting
+one).** The probe culture here ESTABLISHES truth superbly and has no mechanism for KEEPING it: a
+`.prove.mjs` that ran once and convinced everyone is indistinguishable, six weeks later, from one
+that never ran — and `pnpm test` says green either way. The measured facts in these file headers read
+as guarantees; they are archaeology. Demonstrated on a real fix: reverting `textRender.ts`'s
+leaf-atom rule (a bug MEASURED in the real app) left the full gate at exit 0 / 79 files green,
+because its only guard was a hand-run browser probe. **So: for every claim you prove, ask whether a
+cheap unit-level version can KEEP it true — if it is ~90ms and needs no browser, there is no
+excuse.** The browser probes stay (they are the in-browser truth, and they catch what unit tests
+structurally cannot); they are simply not guards. Corollary for reviewers: `git diff master..<branch>`
+on a branch that is BEHIND renders enormous fictional deletions (one lane showed 18,393 deletions for
+a real change of 3 files, +196/−11) — always diff `$(git merge-base HEAD origin/master)..HEAD`.
 
 **Standing preferences (Peter, 2026-07-10):**
 - **No browser windows over Peter's screen.** Agents running HEADED browsers (Playwright probes
