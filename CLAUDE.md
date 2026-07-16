@@ -805,6 +805,86 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     asserted `tailProof` existed (it did, from the older build). **Assert the served chunk carries the
     thing you just changed, not merely that the probe surface exists.**
 
+  ROUND 14 (2026-07-17 — THE SCHEMA LEAVES THE EDITOR; /snapshot can build a PM Node at last).
+  THE BLOCKER, closed: `buildBreakTable` needs a real PM `Node`; SnapshotView has no `useEditor`, and
+  the extension list was an inline array literal INSIDE it — so a version's contentJson had no schema
+  to parse against and the store had ZERO production callers. `extensions/editorExtensions.ts` holds
+  THE list (moved verbatim: 27 entries, same order, same configure args — audited by mechanical
+  extraction, not by trusting the report); `editorSchema.ts` = `getSchema(buildEditorExtensions())` +
+  `nodeFromContentJson`. ONE list, so the editor and /snapshot agree BY CONSTRUCTION — a schema-only
+  copy is the pmToText/textMap drift trap wearing a different hat.
+  - **THE THREE CLOSURES REACH ONLY THE PLUGINS, NEVER THE SCHEMA** — the load-bearing claim.
+    `getDoc`/`getHintState`/`getScasLookup` are destructured only inside RedHighlight's
+    `addProseMirrorPlugins`; it declares no nodes, no marks, no `addGlobalAttributes`; and `getSchema`
+    never installs plugins. So a deps-less list is safe FOR A SCHEMA — and **`getDoc`'s default
+    THROWS**, so it is fatal for an EDITOR (proved: a real Editor built without deps throws). Do not
+    "tidy" that throw into something forgiving; it is what makes a silent omission loud.
+  - **PROVED FROM OUTSIDE** (`schemaIdentity.prove.mjs`): the standalone schema is spec-identical to
+    the LIVE editor's (17 nodes / 11 marks / 0 divergences) and the live doc — 40 citations, 44 math,
+    refList, marks — round-trips structurally identical. Strongest arm: run against a build whose
+    editor still used the ORIGINAL INLINE LITERAL, it PASSED — the extraction is faithful measured
+    against the original, not against itself. `breaks.prove.mjs` byte-identical pre/post
+    ([2403,4856,7205,9476,…], 16 pages, 601.7007874015749). Editor mounts ONCE ([1,1,1,1,1]).
+  - **⚠ `Node.eq` CANNOT COMPARE ACROSS SCHEMAS — it is REFERENCE equality on NodeType** (`hasMarkup`
+    does `this.type == type`). The first identity check used it and reported `false` for the UNTOUCHED
+    live document: a check structurally incapable of passing, which would have condemned a correct
+    schema. It was caught ONLY because the known-negative reads its POSITIVE arm too (clean must still
+    say yes). Cross-schema comparison must be STRUCTURAL (type NAMES + attrs + marks). `schemaSpec()`
+    is that comparison, shared by the probe and the gate — one definition of "same".
+  - **THE GATE NOW KEEPS IT** (the audit's headline: this codebase establishes truth superbly and has
+    no mechanism for keeping it). `editorSchema.test.ts` builds a REAL `Editor` in jsdom (17/11,
+    matching the browser) and compares — ~515ms, no browser. Its negative is mutation-proved. NB the
+    drift must be VALID-BUT-DIFFERENT: deleting `taskItem` merely makes the schema unconstructable
+    ("No node type taskItem found in content expression taskItem+") — an exception, not a divergence.
+  - **AUDIT FINDINGS, all three real:** (F7) mutating `RedHighlightExtension.configure({})` strips
+    every closure from the live editor and the FULL gate stayed exit 0 — the /edit half, the half this
+    lane promises is unchanged, had NO assertion. `editorExtensions.test.ts` pins it BY IDENTITY, and
+    identity is required: both sides are functions named `getDoc`, so typeof/truthiness passes on the
+    stripped list. (F8) RICH's taskItem held only a paragraph — valid under BOTH `paragraph block*`
+    and `paragraph+` — so dropping `.configure({nested:true})` survived the whole suite; and
+    `fromJSON` calls `type.create`, which does NOT validate content, so a round-trip is blind to it.
+    It takes `check()` or the content expression. (F9) a comment true for the wrong reason.
+  - **THE COST, PROBED, AND IT IS NOT UNDER 1s.** `parsecost.prove.mjs`: contentJson → PM Node is
+    **9.10ms p50/version** (thesis scale, JIT-warmed). ROUND 13's 62-82ms/version was
+    `buildRenderModel` fed `editor.state.doc` — ALREADY PARSED — so the parse is this seam's OWN
+    increment and no prior number covered it. Peter's 116: ~9.1s build + ~1.06s parse ≈ **10.2s** vs
+    his <1s target. The incremental lane owns closing that; do not quote 62-82ms as the wired cost.
+  - **THE WIRING** (`editor/snapshotBreaks.ts`, flag `inkwave:snapBreaks` DEFAULT OFF, sticky):
+    hydrate → build only what is missing → persist, on /snapshot open, keyed [docId, snaps.length]
+    (never snapId — a scrub step must not restart it). Imported by SnapshotView and NOTHING else, and
+    /snapshot has no editor, so it cannot touch typing BY CONSTRUCTION, not by measurement (the
+    snapThumbs round-7 pattern, taken deliberately). **PROBED it costs the editor +77 BYTES**: chunk
+    sizes are meaningless here (rollup re-split the graph — master's 949KB TiptapEditor is not the
+    branch's file of the same name), so `editorbytes.prove.mjs` measures what the browser ACTUALLY
+    downloads to open `/`: 2,115,262 → 2,115,339, 32 files both. No paint path, no sweep, no font
+    probe in any editor chunk.
+  - **HONEST GAP — RELIABILITY, NOT COVERAGE.** `blockStyle()` returns null for unharvested kinds and
+    there is no canonical `.ProseMirror` on /snapshot, so headings/lists DEFER to `estimated`
+    placeholders and `reliablePages` stops at the first one. That is the renderer's own design working
+    ("Never guess a heading's height: it moves every break below it") — plain-paragraph docs table
+    exactly; a heading-bearing doc tables reliably only to its first heading. The sweep REPORTS this
+    rather than implying coverage, and deliberately does NOT harvest from the pane's DocView DOM
+    (ROUND 12: that feeds the editor's model a number measured off a different element — "A fiction.").
+    Closing it is the paint lane's business. **ALSO UNMEASURED (STATED, not probed): the end-to-end
+    sweep on a real /snapshot route with 116 seeded versions** — the wiring is chunk-proven present
+    and the per-version arithmetic is probed, but the route-level run has not been driven.
+  - HARNESS FIXES: `breaks.prove.mjs` ALWAYS EXITED 0 — it printed "IDENTICAL BREAKS: false" and
+    reported success to its caller; a gate that could not fail (now exits on the verdict, forced-
+    divergence confirms exit 1). `serve.mjs`: probes take an EPHEMERAL port and boot their own server,
+    so tonight's port-collision fiction cannot happen by construction; it never kills a server it did
+    not start. `pnpm prove:schema|mount|breaks|editor`.
+  - TWO INSTRUMENT TRAPS worth the next agent's time: (1) **`.ProseMirror` IS NOT THE EDITOR** — a
+    load transiently carries TWO, the real editor (`contenteditable=true`) and an aria-hidden
+    anti-flash SHELL that is removed by ~3s. Counting the class alone reports 2 and cries "double
+    mount" on a healthy load; and waiting on `.tiptap-editor` with `state:'attached'` matches the
+    SHELL, so a probe can call a surface before the editor exists (it made parsecost's staleness guard
+    fire on a FRESH bundle). An editor is `.ProseMirror[contenteditable=true]`. (2) A childList
+    MutationObserver counting inserted `.ProseMirror` nodes reports **0 on a page that has one** —
+    @tiptap/react passes `{mount: element}`, so PM REUSES React's attached div and sets the class as an
+    ATTRIBUTE mutation; nothing is ever inserted. Its known-negative fired anyway (it injected a div
+    that already carried the class — a path the editor never takes): a blind counter with a green
+    negative. Observe attributes; drive negatives through the real mechanism.
+
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
 
 `src/productivity/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in their own
