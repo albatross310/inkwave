@@ -200,18 +200,28 @@ export interface Eligibility { eligible: boolean; reason: string }
 // line tops via range.getClientRects, and KaTeX's internal sub/superscript and fraction spans emit
 // rects BELOW the baseline that the 3px dedup splits into spurious extra lines — so the verifier
 // OVER-counts a math paragraph's lines TODAY (a pre-existing inaccuracy, independent of this engine).
-// COLLECTLINES CO-REQUISITE (documented; the wire-in gate): to make the verifier agree with the
-// (correct) arithmetic count, collectLines must collapse each `[data-math-inline]` pill to its
-// SINGLE bounding rect before the dedup (skip its internal rects). With that one-rect rule the
-// verifier is stable and math paragraphs are byte-identical (proven in the prover, which applies the
-// same rule to its DOM reference). Until it lands, gate inline math OFF (mathEligible=false) and it
-// safely DEFERS. LINE_STABILITY_EPS still guards the MIXED-SIZE TEXT case (a genuine instability with
-// no such fix — differently-sized text rects reorder unfixably).
+// COLLECTLINES CO-REQUISITE — ✅ LANDED 2026-07-17 (fix/collectlines-nodeview). collectLines now
+// collapses every inline ATOM NodeView to its SINGLE bounding rect before the dedup, keyed off
+// ProseMirror's own `isInline && isAtom` (so citations AND `[data-math-inline]` pills are covered by
+// one rule, not a per-CSS-class list). MEASURED, not assumed — scripts/textrender-probe/
+// linecount.prove.mjs counts every block's lines three ways (truth / old rect path / collapsed path)
+// on the REAL app: math pills over-counted 23 blocks (+30 phantom lines, e.g. a 7-line paragraph
+// read as 9) and citations 24 blocks (+29); both go to ZERO with the collapse, while the no-NodeView
+// controls were exact on both paths. The same artifact was ALSO putting real page breaks mid-line
+// (6 of 55 on thesis-shaped citation prose → 0; midline.prove.mjs).
+// STILL GATED, DELIBERATELY: `mathEligible` remains FALSE at its call site (arithMeasure.ts). This
+// co-requisite is satisfied, so flipping it is now unblocked — but that hands math paragraphs to the
+// arithmetic engine, which is a separate behaviour change and needs its own end-to-end proof
+// (isolate.prove.mjs has no math case yet). Do not flip it as a side effect of something else.
+// LINE_STABILITY_EPS still guards the MIXED-SIZE TEXT case (a genuine instability with no such fix —
+// differently-sized text rects reorder unfixably).
 export const LINE_STABILITY_EPS = 3
 
 // `mathEligible` reflects whether the collectLines math-pill rect-fix is in place (the wire-in flag).
 // The engine's CAPABILITY is unconditional — it computes math paragraphs correctly either way; the
 // flag only decides whether to trust the DOM verifier over them yet.
+// The rect-fix LANDED 2026-07-17 (see above), so the reason this is still passed FALSE at the call
+// site is caution, not a missing prerequisite: flipping it needs its own proof, not just this note.
 export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible = true, whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE): Eligibility {
   // BLOCK ATOMS (block math, figure): eligible iff they carry a reflow-free box.
   if (block.type !== 'paragraph') {

@@ -36,9 +36,11 @@ function rng(seed = 20260717) {
  * @param opts.marked  fraction of citations carrying a textStyle{fontFamily} mark (his: ~all)
  * @param opts.lists   include bullet/ordered lists
  * @param opts.refList include a reference list block
+ * @param opts.maths  number of INLINE MATH pills to place mid-paragraph (the other NodeView whose
+ *                    interior rects the line collector used to mistake for extra lines)
  */
 export function buildCitationDoc(opts = {}) {
-  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true } = opts
+  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true, maths = 0 } = opts
   const rnd = rng()
   const keys = AUTHORS.map(([fam], i) => `${fam.toLowerCase()}${1990 + (i % 25)}`)
   const usedKeys = keys.slice(0, Math.max(1, Math.min(keys.length, Math.ceil(cites / 2))))
@@ -53,9 +55,17 @@ export function buildCitationDoc(opts = {}) {
   const content = []
   let wordsSoFar = 0
   let citesPlaced = 0
+  let mathsPlaced = 0
   let para = 0
 
   const CITE_FONT = "'EB Garamond', Georgia, serif"
+  // Inline math pills: the SECOND inline-atom NodeView. KaTeX's internal sub/superscript and
+  // fraction spans emit rects BELOW the baseline, which the 3px dedup used to split into spurious
+  // extra lines — the same artifact as the citation's ⤵ button, documented in arithmeticLayout.ts.
+  // Formulas are deliberately sub/superscript- and fraction-heavy: a plain `x+1` pill has no
+  // off-baseline interior and would make the fixture blind to exactly the bug it exists to catch.
+  const MATH = ['x^2 + y_1', '\\frac{a}{b}', '\\sum_{i=0}^{n} x_i', 'e^{i\\pi} + 1 = 0', '\\sqrt{x_j^2}']
+  const mkMath = () => ({ type: 'mathInline', attrs: { latex: MATH[Math.floor(rnd() * MATH.length)] } })
   const mkCite = () => {
     const k = usedKeys[Math.floor(rnd() * usedKeys.length)]
     const node = { type: 'citation', attrs: { citekeys: [k], prefix: '', suffix: '', locator: '', suppressAuthor: false } }
@@ -85,6 +95,12 @@ export function buildCitationDoc(opts = {}) {
         citesPlaced++
       }
       inline.push({ type: 'text', text: ' ' + sentence(chunk).toLowerCase() + '.' })
+    }
+    // Drop a math pill MID-paragraph (never at the start/end): the artifact only shows when the
+    // pill's interior sits inside a real line's run of rects.
+    if (mathsPlaced < maths && inline.length && para % 2 === 0) {
+      inline.splice(1, 0, { type: 'text', text: ' ' }, mkMath(), { type: 'text', text: ' as shown. ' })
+      mathsPlaced++
     }
     content.push({ type: 'paragraph', content: inline })
     wordsSoFar += n

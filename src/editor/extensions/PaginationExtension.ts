@@ -139,6 +139,86 @@ export interface PaginationOptions {
 // settings, bibliography label hydration) or the paper is fluid ('scroll' — its canonical width
 // is the live width, so no cache is passed). Cache entries are only written/read on the gap-free
 // measure (compute clears the widgets first), so gap subtraction can never bake into a cached top.
+// INLINE-ATOM NODEVIEWS COLLAPSE TO ONE RECT (2026-07-17 — the mid-line break fix).
+// `range.selectNodeContents(block).getClientRects()` DESCENDS INTO NodeView subtrees, so an inline
+// atom's internal boxes each contribute their own rect. The citation NodeView's ⤵ biblink button is
+// `display:inline-flex` at a ~6px offset from the text line — MORE than the 3px same-line dedup
+// tolerance — so it survived the filter as a PHANTOM LINE. Its sample point sits MID-LINE, and a
+// break attributed to it opens a page gap in the middle of a rendered line: measured 6 of 55 live
+// breaks (~11%) on thesis-shaped citation prose → 0 (scripts/textrender-probe/midline.prove.mjs),
+// and this is what Peter reported as "space left on the last line" when paragraphs split. Inline
+// math has the identical artifact (KaTeX sub/superscript + fraction spans): per-block phantom lines
+// measured citations +29 / math +30 → 0 (linecount.prove.mjs — the mid-line RATE cannot see math,
+// which is rare enough that no break happened to land on one).
+// THE PRINCIPLE: an inline ATOM has no internal break opportunity — the parent line can only break
+// AROUND it (CitationNodeView pins white-space:nowrap; MathInlineView is an inline-grid) — so it
+// must contribute EXACTLY ONE rect: its own bounding box. PM decides what an atom is
+// (isInline && isAtom); never a CSS class, which would silently miss a future NodeView.
+// A block with NO inline atoms takes the byte-identical old path by construction — that is what
+// keeps plain/headings/lists breaks bit-for-bit unchanged (they were already exact).
+// SCOPE: inline atoms only. A TOP-LEVEL atom (refList, block math) is `atomLike` below and keeps
+// its deliberate pseudo-block-per-line treatment — a different rule, unchanged here.
+function inlineAtomRoots(view: EditorView, child: PMNode, offset: number): Element[] {
+  const roots: Element[] = []
+  child.descendants((node, pos) => {
+    if (!node.isInline || !node.isAtom) return true
+    const el = view.nodeDOM(offset + 1 + pos)
+    if (el && (el as Node).nodeType === 1) roots.push(el as Element)
+    return false // an atom's interior is opaque to the line collector by definition
+  })
+  return roots
+}
+
+// The block's line rects, with each inline-atom subtree contributing its single bounding rect.
+// Text between atoms is measured by ranges exactly as before, so rects stay in document order and
+// the 3px same-line dedup downstream is untouched.
+export function blockLineRects(el: HTMLElement, atoms: Element[]): DOMRect[] {
+  const range = document.createRange()
+  if (!atoms.length) { // no NodeViews ⇒ EXACTLY the original call
+    range.selectNodeContents(el)
+    return Array.from(range.getClientRects())
+  }
+  // Outermost atoms only, in document order (a nested atom is already inside its parent's box).
+  const roots = atoms
+    .filter((a) => el.contains(a) && !atoms.some((o) => o !== a && o.contains(a)))
+    .sort((x, y) => (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const out: DOMRect[] = []
+  let curNode: Node = el, curOff = 0
+  const flushTo = (endNode: Node, endOff: number) => {
+    try {
+      range.setStart(curNode, curOff)
+      range.setEnd(endNode, endOff)
+      if (!range.collapsed) for (const r of Array.from(range.getClientRects())) out.push(r)
+    } catch { /* an unmappable boundary — skip the segment rather than fabricate a line */ }
+  }
+  for (const a of roots) {
+    const parent = a.parentNode
+    if (!parent) continue
+    const idx = Array.prototype.indexOf.call(parent.childNodes, a)
+    if (idx < 0) continue
+    flushTo(parent, idx)                    // the text before this atom
+    out.push(a.getBoundingClientRect())     // THE ATOM: one rect, never its interior
+    curNode = parent; curOff = idx + 1
+  }
+  flushTo(el, el.childNodes.length)         // the tail
+  return out
+}
+
+// ONE RECT PER LINE: dedup inline rects on the same line; skip tall boxes (a nested gap widget, not
+// a text line). Height thresholds are in SCREEN px, so they scale by `s` to match the magnified
+// rendering. Extracted verbatim from collectLines so a test can exercise the REAL filter rather than
+// a copy of it (a comparison where both sides run through the same stale copy cancels its own error).
+export function keepLineRects(rects: DOMRect[], s: number): DOMRect[] {
+  const out: DOMRect[] = []
+  let lastTop = -1e9
+  for (const r of rects) {
+    if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
+    lastTop = r.top
+    out.push(r)
+  }
+  return out
+}
+
 const POS_LAZY = -2
 interface MeasuredLine {
   top: number      // intrinsic top (unscaled, editor-relative)
@@ -254,18 +334,13 @@ function collectLines(view: EditorView, editorTop: number, scale: number, cache?
       lines.push({ top, blockIdx, cx, cy, pos: POS_LAZY, bake: usable ? entry : undefined, bakeIdx: entry.relTops.length - 1, bakeOffset: offset })
     }
     let rects: DOMRect[] = []
-    try { const range = document.createRange(); range.selectNodeContents(el); rects = Array.from(range.getClientRects()) } catch { /* ignore */ }
+    // Inline-atom NodeViews collapse to ONE rect each (see blockLineRects): their interiors are not
+    // line starts, and letting them in put page breaks mid-line.
+    try { rects = blockLineRects(el, inlineAtomRoots(view, child, offset)) } catch { /* ignore */ }
     if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
       push((br.top - editorTop - accumAbove(br.top)) / s, br.left + 1, br.top + Math.min(8, br.height / 2))
     } else {
-      let lastTop = -1e9
-      for (const r of rects) {
-        // dedup inline rects on the same line; skip tall boxes (a nested gap widget, not a text line).
-        // Height thresholds are in SCREEN px, so scale them by `s` to match the magnified rendering.
-        if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
-        lastTop = r.top
-        push((r.top - editorTop - accumAbove(r.top)) / s, r.left + 1, r.top + r.height / 2)
-      }
+      for (const r of keepLineRects(rects, s)) push((r.top - editorTop - accumAbove(r.top)) / s, r.left + 1, r.top + r.height / 2)
     }
     if (usable) cache.set(child, entry)
   })
