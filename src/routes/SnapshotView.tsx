@@ -2275,6 +2275,7 @@ export function SnapshotView() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const docId = params.get('doc')
+  const docIdRef = useRef(docId); docIdRef.current = docId // stable read for the scrub-thumbnail store
   const urlSnapId = params.get('snap')
   // In-view navigation is LOCAL-FIRST (2026-07-11): goTo flips this state immediately (one cheap
   // render) and syncs the URL 200ms after the last input — react-router's per-navigation work was
@@ -2475,7 +2476,7 @@ export function SnapshotView() {
   // the landing snapshot's real render has painted underneath it.
   const presenterRef = useRef<ScrubPresenter | null>(null)
   if (presenterRef.current === null || presenterRef.current.disposed) {
-    presenterRef.current = createScrubPresenter({ touch: isTouchDevice(), getLiveId: () => heavySnapIdRef.current })
+    presenterRef.current = createScrubPresenter({ touch: isTouchDevice(), getLiveId: () => heavySnapIdRef.current, getDocId: () => docIdRef.current })
   }
   const presenter = presenterRef.current
   useEffect(() => () => presenterRef.current?.dispose(), [])

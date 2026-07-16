@@ -31,6 +31,7 @@
 // 350ms of any nav input.
 
 import { probePerf } from './perflog'
+import { snapThumbsEnabled, thumbScale, putThumb, getThumb, hasThumb, loadThumbIndex, thumbHash, type ThumbPane } from './snapThumbs'
 
 export type ScrubPaneKind = 'doc' | 'diff' | 'map'
 
@@ -523,7 +524,7 @@ export interface ScrubPresenter {
   disposed: boolean
 }
 
-export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => string | null }): ScrubPresenter {
+export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => string | null; getDocId?: () => string | null }): ScrubPresenter {
   const budget = opts.touch ? TOUCH_BUDGET : DESKTOP_BUDGET
   const dprOf = () => {
     const d = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
@@ -585,6 +586,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       const dpr = dprOf()
       let shown = 0
       probePerf('scrub.want', order.indexOf(snapId)) // version-fidelity: commanded target index
+      preloadThumbs(snapId) // hydrate this + a small direction window from the OPFS thumbnail cache
       for (const [kind, s] of surfaces) {
         const el = s.getEl()
         if (!el) { s.host.style.display = 'none'; continue }
@@ -607,8 +609,10 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           entry = near ? cands.get(near) ?? null : null
         }
         if (entry) {
-          // version-fidelity: which doc version actually presented, and was it an EXACT hit (real
-          // content) vs a nearest-fallback (stale — the #3 skip).
+          // version-fidelity, PER PANE: was this pane an EXACT hit (real content — a live capture
+          // or a hydrated thumbnail) vs a nearest-fallback (stale). scrub.shown/scrub.exact keep
+          // the doc-pane series; scrub.exact.<kind> reports each pane separately.
+          probePerf('scrub.exact.' + kind, entry === exact ? 1 : 0)
           if (kind === 'doc') { probePerf('scrub.shown', order.indexOf(entry.snapId)); probePerf('scrub.exact', entry === exact ? 1 : 0) }
           entry.lastUsed = ++tick
           if (attached.get(kind) !== entry) {
@@ -669,6 +673,81 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     if (cv.width !== e.width || cv.height !== e.height) { cv.width = e.width; cv.height = e.height }
     const src = (e.bitmap ?? e.canvas) as CanvasImageSource | null
     if (src) s.ctx.drawImage(src, 0, 0) // backstop is baked into the source → opaque, no clear needed
+  }
+
+  // ── OPFS thumbnail cache (snapThumbs) — bake on capture, hydrate on a cold miss ───────────────
+  // Per-pane RENDER-SIGNATURE: a pane only re-bakes / matches when an input that changes ITS pixels
+  // changes. doc/diff depend on body font + theme + their pane box + zoom; the minimap depends only
+  // on its box + theme (its diff ticks come from immutable snapshot geometry, not the body font).
+  const HYDRATE_AHEAD = 5
+  const hydrating = new Set<string>()
+  let fontsSigCache = ''
+  let fontsSigAt = 0
+  function fontsSig(): string {
+    const now = performance.now()
+    if (now - fontsSigAt < 2000 && fontsSigCache) return fontsSigCache
+    let s = '0'
+    try {
+      const fams = new Set<string>()
+      document.fonts.forEach((f) => { if (f.status === 'loaded') fams.add(f.family) })
+      s = thumbHash([...fams].sort().join(','))
+    } catch { /* system fonts only */ }
+    fontsSigCache = s; fontsSigAt = now
+    return s
+  }
+  function thumbSig(kind: ScrubPaneKind, w: number, h: number, zoom: number, dpr: number): string {
+    const theme = (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme')) || 'day'
+    const box = `${Math.round(w)}x${Math.round(h)}|d${dpr.toFixed(2)}`
+    if (kind === 'map') return `${box}|${theme}` // minimap: box + theme only (no body-font/zoom dep)
+    return `${box}|z${zoom.toFixed(3)}|${theme}|f${fontsSig()}`
+  }
+  function bakeThumb(kind: ScrubPaneKind, snapId: string, w: number, h: number, zoom: number, dpr: number, src: CanvasImageSource | null, srcW: number, srcH: number) {
+    if (!src || !snapThumbsEnabled()) return
+    const docId = opts.getDocId?.(); if (!docId) return
+    // Draw the downscaled thumb SYNCHRONOUSLY (the source bitmap is alive now) into a detached
+    // canvas, so the async WebP encode can't race the entry's eviction/close.
+    const scale = thumbScale(kind as ThumbPane)
+    const tw = Math.max(1, Math.round(srcW * scale)), th = Math.max(1, Math.round(srcH * scale))
+    try {
+      const tc = document.createElement('canvas'); tc.width = tw; tc.height = th
+      const tctx = tc.getContext('2d'); if (!tctx) return
+      tctx.drawImage(src, 0, 0, tw, th)
+      void putThumb(docId, snapId, kind as ThumbPane, thumbSig(kind, w, h, zoom, dpr), tc, tw, th, 1)
+    } catch { /* thumbnail is best-effort */ }
+  }
+  function hydrate(kind: ScrubPaneKind, snapId: string) {
+    const docId = opts.getDocId?.(); if (!docId) return
+    const s = surfaces.get(kind); const el = s?.getEl(); if (!s || !el) return
+    const zoom = s.getZoom(), dpr = dprOf()
+    const w = el.clientWidth, h = el.clientHeight
+    const key = rasterKey(kind, snapId, w, h, zoom, dpr)
+    if (entries.has(key) || hydrating.has(key)) return
+    const sig = thumbSig(kind, w, h, zoom, dpr)
+    if (!hasThumb(docId, snapId, kind as ThumbPane, sig)) return
+    hydrating.add(key)
+    void (async () => {
+      try {
+        const blob = await getThumb(docId, snapId, kind as ThumbPane, sig)
+        if (!blob || p.disposed || entries.has(key)) return
+        const bmp = await createImageBitmap(blob)
+        const b = bmp.width * bmp.height * 4
+        entries.set(key, { key, snapId, kind, bitmap: bmp, canvas: null, width: bmp.width, height: bmp.height, scrollTop: 0, scrollLeft: 0, bytes: b, lastUsed: ++tick })
+        bytes += b; enforceBudget()
+      } catch { /* decode failed — the live path still renders */ } finally { hydrating.delete(key) }
+    })()
+  }
+  function preloadThumbs(center: string) {
+    if (!snapThumbsEnabled()) return
+    const docId = opts.getDocId?.(); if (!docId) return
+    void loadThumbIndex(docId) // idempotent; until it resolves hasThumb() is false (safe)
+    const ci = order.indexOf(center); if (ci < 0) { for (const k of surfaces.keys()) hydrate(k, center); return }
+    for (let d = 0; d <= HYDRATE_AHEAD; d++) {
+      for (const dir of d === 0 ? [0] : [1, -1]) {
+        const i = ci + d * dir
+        if (i < 0 || i >= order.length) continue
+        for (const k of surfaces.keys()) hydrate(k, order[i])
+      }
+    }
   }
 
   function armRest() {
@@ -746,6 +825,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
             bytes += res.bytes
             enforceBudget()
             probePerf('scrub.mem', bytes / 1e6)
+            bakeThumb(job.kind, job.snapId, el.clientWidth, el.clientHeight, zoom, dpr, res.bitmap ?? res.canvas, res.width, res.height)
           } else if (res && res.bitmap) { res.bitmap.close() }
         } catch { /* capture failed — stay uncached, the live path still works */ }
         busy = false
