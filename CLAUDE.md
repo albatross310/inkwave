@@ -622,7 +622,17 @@ write shim, so metadata can say a PDF exists with no local bytes).
   Re-run: `node scripts/fontCertify.fetch.mjs && node scripts/fontCertify.prove.mjs <port>`.
   TWO TRAPS THIS EXPOSED, for any future font/measure work: (1) canvas-vs-DOM parity MUST be
   measured inside a real .ProseMirror (white-space:break-spaces + liga off) — a plain-div harness
-  certifies a fiction the editor never uses; (2) `document.fonts.check()` returns TRUE for a family
+  certifies a fiction the editor never uses; **AND THE SAME TRAP KILLS THE RUNTIME GATE, SILENTLY**
+  (2026-07-16): `canvasShapingMatchesEditor`'s own probe span had BOTH halves wrong — it set the CSS
+  `font:` SHORTHAND (which RESETS font-variant-ligatures to normal, so the probe shaped WITH
+  ligatures inside a liga-off editor), and being a direct child of .ProseMirror it inherited the
+  zoom-window's `content-visibility:auto` and, parked off-screen, was SKIPPED — measuring 177px
+  against a true 1186px. The gate therefore returned FALSE always, so `inkwave:arithLayout` did
+  NOTHING in production from the ligature-strip round (f75eef5) until it was fixed. THE GENERAL
+  LESSON — a self-check that measures in a fiction does not fail loudly, it silently DISABLES the
+  feature it guards, and the feature's absence looks exactly like the feature being unnecessary. Any
+  gate of the form "measure X, compare to Y, disable if they differ" must be probed for its OWN
+  correctness (assert the gate PASSES on a known-good input) before its verdict is trusted; (2) `document.fonts.check()` returns TRUE for a family
   with NO @font-face (the system fallback counts), so an unfetched font silently measures the
   fallback against itself and "agrees" at 0.000 — detect real load by comparing against the
   monospace fallback. Nimbus Roman remains UNTESTED (CTAN 404) — reported NOT-LOADED, never certified.
