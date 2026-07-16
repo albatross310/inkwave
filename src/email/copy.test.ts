@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as copy from './copy'
+import { FORBIDDEN, affirmativeOnly, violates } from '../copy/claimMatchers'
 
 // §B6 makes the in-product wording an ACCEPTANCE CRITERION: it must state what the provenance
 // proves and must not claim proof of sending. §C1.4: "Overclaiming on a trust brand is existential."
@@ -16,84 +17,11 @@ import * as copy from './copy'
 // sentence §B2.2 requires. Hence the two matcher classes below.
 
 // ─── The pipeline ────────────────────────────────────────────────────────────
-
-const NEGATOR = /\b(not|never|n't|cannot|no)\b/i
-
-/**
- * Drop clauses that DENY something. An affirmative-claim matcher must only see affirmative text, or
- * it reads a disclaimer as the claim it disclaims. Clauses split on sentence/list punctuation and
- * em-dashes, which is where English hangs its "…, not …" contrasts.
- */
-function affirmativeOnly(text: string): string {
-  return text
-    .split(/[.;:,]|\s—\s/)
-    .filter((clause) => !NEGATOR.test(clause))
-    .join('. ')
-}
-
-type Scope = 'affirmative' | 'literal'
-
-interface Matcher { name: string; re: RegExp; scope: Scope; knownBad: string }
-
-const FORBIDDEN: Matcher[] = [
-  // ── Claims the MVP crypto cannot support. OTS timestamps a hash; it cannot witness an SMTP
-  // transaction. Only DKIM (Phase 3, NOT in this build) could speak to origin or sending.
-  {
-    name: 'proof of sending',
-    scope: 'affirmative',
-    re: /\bprov(e|es|en|ing|able)?\b[^.]{0,40}\bsent\b|\bproof (of|that)[^.]{0,20}\bsen[dt]\b/i,
-    knownBad: 'Cryptographic proof that you sent this email.',
-  },
-  {
-    name: 'proof of delivery',
-    scope: 'affirmative',
-    re: /\bprov(e|es|en|ing|able)?\b[^.]{0,40}\b(deliver(ed|y)|arrived|received)\b|\bproof of deliver/i,
-    knownBad: 'A permanent proof of delivery, anchored to Bitcoin.',
-  },
-  {
-    name: 'proof of origin',
-    scope: 'affirmative',
-    re: /\bprov(e|es|en|ing|able)?\b[^.]{0,40}\b(it came from you|who sent|origin)\b/i,
-    knownBad: 'This proves the origin of the message.',
-  },
-  {
-    name: 'end-to-end encryption',
-    scope: 'affirmative',
-    re: /\bend[- ]to[- ]end\b|\be2ee?\b|\bfully encrypted\b/i,
-    knownBad: 'Your email is end-to-end encrypted.',
-  },
-  {
-    name: 'tamper-proof / unforgeable absolutes',
-    scope: 'affirmative',
-    re: /\btamper[- ]proof\b|\bunforgeable\b|\bimpossible to (fake|forge)\b/i,
-    knownBad: 'A tamper-proof record of your correspondence.',
-  },
-  {
-    // VERIFIED IN THE CODE 2026-07-17: storage/opfs.ts writes JSON.stringify(data) in PLAINTEXT,
-    // there is no crypto.subtle.encrypt/AES-GCM in src, and no crypto library in package.json. Spec
-    // §C2's at-rest encryption is design intent, not this build. So ANY at-rest encryption claim is
-    // an overclaim on the exact axis §C1.4 calls existential — including the innocent-looking
-    // "stored encrypted on your device", which this file shipped until the code was checked.
-    name: 'at-rest encryption (NOT implemented in this build)',
-    scope: 'affirmative',
-    re: /\b(stored|store|storage|saved|kept|held|encrypted)\b[^.]{0,30}\bencrypt/i,
-    knownBad: 'Your draft is stored encrypted on your device.',
-  },
-  // ── A forbidden claim that is ITSELF phrased as a negation, so it must be matched literally:
-  // stripping negated clauses would hide it. §C2: encryption is recoverable by default, so "we
-  // cannot read it" is a zero-knowledge claim this build does not get to make.
-  {
-    name: 'we-cannot-read-it (a zero-knowledge claim this build does not make)',
-    scope: 'literal',
-    re: /\bwe (can(no|')t|cannot|are unable to) read\b/i,
-    knownBad: 'We cannot read your drafts.',
-  },
-]
-
-/** The one function both the known-bads and the real copy are judged by. */
-function violates(m: Matcher, text: string): boolean {
-  return m.re.test(m.scope === 'affirmative' ? affirmativeOnly(text) : text)
-}
+// MOVED 2026-07-17 to `src/copy/claimMatchers.ts`, byte-for-byte, and imported here. §C1.4 is a
+// PRODUCT rule, but ALL_COPY below can only ever see this ONE file — so the same matchers now also
+// drive a repo-wide sweep (`copy/claims.test.ts`). Extracted, never copied: two copies of these
+// regexes is how one guard silently stops matching what the other catches.
+// Everything below is unchanged; this suite remains the EMAIL lane's verdict.
 
 const ALL_COPY: [string, string][] = Object.entries(copy).filter(
   ([, v]) => typeof v === 'string',
@@ -137,7 +65,7 @@ describe('the forbidden-claim matchers actually fire (prove the negative FIRST)'
 
 // ─── The verdict on the real strings ─────────────────────────────────────────
 
-describe('the real in-product copy makes no forbidden claim', () => {
+describe('the EMAIL lane\'s in-product copy (src/email/copy.ts) makes no forbidden claim', () => {
   for (const m of FORBIDDEN) {
     it(`makes no claim of: ${m.name}`, () => {
       for (const [key, text] of ALL_COPY) {

@@ -41,7 +41,28 @@ export interface SessionRow {
   session_id: string
   /** Stable document id — never the title, so a title can't leak into the ledger unbidden. */
   doc_id: string
-  /** User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed. */
+  /**
+   * User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed.
+   *
+   * ⚠ THE SUPPRESSION IS NOT REACHABLE BY A WRITER (probed 2026-07-17). `isLabelSuppressed` IS wired
+   * into the capture path (capture.ts closeDraft), so the mechanism works — but `setLabelSuppressed`
+   * has ZERO non-test callers: no UI anywhere turns it on. §A3.2 promises "suppressible per-doc" and
+   * the writer currently has no way to exercise it, so in practice every title travels.
+   *
+   * THIS IS TIER 1 (always included) WHILE `note`/`place` ARE TIER 2, and a title is writer-authored
+   * prose too — compile.ts's own tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
+   * prose ride out inside 'metadata'") applies to it verbatim. The deliberate distinction: a label is
+   * the IDENTIFIER of the thing being measured, not an extra disclosure about it. Drop a note and you
+   * lose a diary line; drop the label and §B1's primary goal — "2h10m writing, of which 40m on email"
+   * — cannot be read at all, because every row becomes `doc-a1b2f3`. It is also the one prose field
+   * already on screen at the moment of consent: §A7.3's tick-box lists documents BY LABEL so the
+   * writer can choose which to include.
+   *
+   * That reasoning covers the ordinary case, NOT the sharp one: a title can be far more revealing
+   * than a note ("Chapter 3 — my mother's illness"). Which is precisely why §A3.2 asks for
+   * per-doc suppression — and why the missing control is a real gap, not a nicety. RAISED WITH PETER
+   * 2026-07-17; the placement of a consent control is his call, not an agent's guess.
+   */
   doc_label?: string
   /** ISO-8601 with local offset. */
   start: string
