@@ -46,8 +46,19 @@ export function citeFontKey(marks: readonly { type: { name: string }; attrs?: Re
   return `${fam}/${size}/${weight}${ital}`
 }
 
-function keyOf(citekeys: readonly string[], style: string, epoch: number, fontKey: string): string {
-  return `${citekeys.join(';')}|${style}|${epoch}|${fontKey}`
+// …and the MEASUREMENT BASE. The label sets in `font: inherit`, so its advance depends on the base
+// font of the context it was measured in: the same citation is 117px at the canonical 18px and 143px
+// at the phone's 22.5px render base (measured, 2026-07-16). The harvest only ever runs in the forced
+// CANONICAL context (the one place a rendered rect IS the canonical width), so a canonical box is
+// all we can hold — and serving it to a RENDER-base measure under-measured every citation by ~26px,
+// fitting extra words and losing a render line (bands below drifted −109px on a citation-dense doc).
+// Scaling by base/18 does NOT rescue it: the ratio is 1.2222, not the font's 1.25, because the
+// label's fixed-px parts (the 2px margins, the biblink) don't scale. So the base joins the key: a
+// render-base measure simply MISSES ⇒ that block defers to the DOM ⇒ correct by construction, the
+// same self-healing contract as an unmeasured font. Canonical measures (basePx 18) still hit, so the
+// citation-eligibility win on the canonical path is untouched.
+function keyOf(citekeys: readonly string[], style: string, epoch: number, fontKey: string, basePx: number): string {
+  return `${citekeys.join(';')}|${style}|${epoch}|${fontKey}|${basePx}`
 }
 
 const cache = new Map<string, CiteInlineBox>()
@@ -58,9 +69,12 @@ if (typeof window !== 'undefined') (window as unknown as { __iwCiteBox?: unknown
 /** Drop everything — the canonical CONTEXT changed (fonts loaded, page settings, paper). */
 export function clearCiteBoxes(): void { cache.clear() }
 
-/** Cached box for this citation, or null ⇒ the caller MUST defer the block to the DOM measure. */
-export function citeBox(citekeys: readonly string[], style: string, epoch: number, fontKey: string): CiteInlineBox | null {
-  const r = cache.get(keyOf(citekeys, style, epoch, fontKey)) ?? null
+/**
+ * Cached box for this citation AT `basePx`, or null ⇒ the caller MUST defer the block to the DOM
+ * measure. A box harvested at another base is NOT a match (see keyOf): it is the wrong advance.
+ */
+export function citeBox(citekeys: readonly string[], style: string, epoch: number, fontKey: string, basePx: number): CiteInlineBox | null {
+  const r = cache.get(keyOf(citekeys, style, epoch, fontKey, basePx)) ?? null
   if (r) dbg.hits++; else dbg.misses++
   return r
 }
@@ -74,8 +88,8 @@ export function citeBox(citekeys: readonly string[], style: string, epoch: numbe
  * hit box so a click beside a citation lands the caret — see CitationNodeView), and inline margins
  * contribute to the line's advance while getBoundingClientRect returns only the border box.
  */
-export function harvestCiteBox(dom: HTMLElement, citekeys: readonly string[], style: string, epoch: number, fontKey: string): void {
-  const key = keyOf(citekeys, style, epoch, fontKey)
+export function harvestCiteBox(dom: HTMLElement, citekeys: readonly string[], style: string, epoch: number, fontKey: string, basePx: number): void {
+  const key = keyOf(citekeys, style, epoch, fontKey, basePx)
   if (cache.has(key)) return
   // The NodeViewWrapper is a bare display:inline span; the label (and its margins) live on the
   // contentEditable=false child.
@@ -101,11 +115,12 @@ export function harvestCiteBoxes(
   nodeDOM: (pos: number) => Node | null,
   style: string,
   epoch: number,
+  basePx: number,
 ): void {
   doc.descendants((node, pos) => {
     if (node.type.name !== 'citation') return true
     const el = nodeDOM(pos)
-    if (el && el.nodeType === 1) harvestCiteBox(el as HTMLElement, (node.attrs.citekeys as string[]) ?? [], style, epoch, citeFontKey(node.marks))
+    if (el && el.nodeType === 1) harvestCiteBox(el as HTMLElement, (node.attrs.citekeys as string[]) ?? [], style, epoch, citeFontKey(node.marks), basePx)
     return false
   })
 }

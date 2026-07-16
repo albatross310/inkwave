@@ -31,7 +31,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColum
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
 import { buildArithMeasure, arithBlockLayout } from '../arithMeasure'
-import { makeCanvasMeasure, type Measure } from '../arithmeticLayout'
+import { makeCanvasMeasure, canvasShapingMatchesEditor, type Measure } from '../arithmeticLayout'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
@@ -82,6 +82,21 @@ function renderFillOn(): boolean {
   // shares the whole-doc eligibility gate, so it never engaged on a citation-heavy doc anyway.)
   try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') === '1' } catch { _renderFillFlag = false }
   return _renderFillFlag
+}
+
+// ── Job 2: ARITH ZOOM-EXIT (flag `inkwave:arithBands`, default OFF) ──────────────────────────────
+// The pinch exit un-skips the whole document (drops .iw-zoom-live) and forces ONE full-document
+// relayout to re-pin the anchor — O(doc), measured 240/722/2688ms at 5k/20k/40k words. With the
+// arithmetic engine the band geometry AND every block's render height are computable with NO layout
+// read, so the exit can keep the content-visibility window ON (with EXACT per-block reservations)
+// and lay out only what's on screen. Gated: the whole doc must be arith-eligible AND canvas shaping
+// must empirically match the editor — otherwise computeArithBands returns null and the caller falls
+// back to the un-skip, which is always correct.
+let _arithBandsFlag: boolean | null = null
+function arithBandsOn(): boolean {
+  if (_arithBandsFlag !== null) return _arithBandsFlag
+  try { _arithBandsFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithBands') === '1' } catch { _arithBandsFlag = false }
+  return _arithBandsFlag
 }
 
 export interface PaginationOptions {
@@ -270,7 +285,10 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
   // line collection, so each box costs one getBoundingClientRect and no reflow. The arith path can
   // never measure this itself (it skips the force by design), so it reads these cached boxes; an
   // un-harvested key defers that block back here, which harvests it. See citations/citeBox.ts.
-  try { harvestCiteBoxes(doc, (pos) => view.nodeDOM(pos), getCitationStyle(), bibProvider.getVersion()) } catch { /* never break a measure */ }
+  // basePx 18 = the canonical base we are forced to here (CANONICAL_FONT_SIZE 1.125rem), and the
+  // base these boxes are keyed under. A RENDER-base measure asks for its own base, misses, and
+  // defers — never wraps on a canonical-width citation (117px vs 143px at the phone's 22.5px).
+  try { harvestCiteBoxes(doc, (pos) => view.nodeDOM(pos), getCitationStyle(), bibProvider.getVersion(), 18) } catch { /* never break a measure */ }
   // Resolve a line's doc position on demand — the exact posAtCoords sample the old eager path made.
   // Must run before any DOM mutation (compute never mutates; the caller dispatches after).
   // The resolution is baked back into the line cache BLOCK-RELATIVE, so the next measure rebuilds
@@ -863,37 +881,76 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // measure — botMargin+GAP+topM), so they don't scale: the rendered top of break k is its
           // render line top + the fixed gap heights ABOVE it. Returns null (⇒ caller falls back to
           // the DOM readBands/un-skip) when any block defers or the faces aren't loaded.
-          const computeArithBands = (): BandGeo | null => {
-            if (!sheet || !gapped) return null
+          // The LIVE RENDER wrap context — the box the browser actually wraps text in, exactly.
+          // Wrap in the PARAGRAPH's own content box, NOT the editor's clientWidth: clientWidth is
+          // INTEGER-rounded and disagrees with the true floored fractional content box ~6/88 times at
+          // 22.5px (box 316.578 → clientWidth 317, +0.42px too generous → fits one word too many, one
+          // line short, the per-page error compounds). Floor to the 1/64px LayoutUnit grid the browser
+          // stores used lengths on. ONE helper feeds both the arith band geometry AND the render-fill
+          // measure so they can never drift (the bug the arith agent found in the live renderFill path).
+          const renderWrapCtx = (): { w: number; base: number; ratio: number } | null => {
             const edEl = view.dom as HTMLElement
-            // Wrap in the PARAGRAPH's own content box, not the editor's clientWidth (they can differ
-            // by a fraction under phone rounding / block box-sizing — an off-by-fraction flips one
-            // line on the odd block and the per-page error compounds). Sample the first in-flow
-            // paragraph; fall back to the editor content box.
             const firstBlk = Array.from(edEl.children).find((c) => !(c as HTMLElement).classList.contains('inkwave-page-gap')) as HTMLElement | undefined
             const cs = getComputedStyle(firstBlk ?? edEl)
             const boxEl = firstBlk ?? edEl
-            const renderW = boxEl.getBoundingClientRect().width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+            const w = boxEl.getBoundingClientRect().width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
               - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0)
-            if (renderW <= 40) return null
-            const renderBase = parseFloat(cs.fontSize) || 18
+            if (!(w > 40)) return null
+            const base = parseFloat(cs.fontSize) || 18
             const lhPx = parseFloat(cs.lineHeight)
-            const renderRatio = lhPx && renderBase ? lhPx / renderBase : (phoneLike() ? 1.55 : 1.618)
-            const style = getCitationStyle(); const epoch = bibProvider.getVersion(); const paraSp = getParaSpacingEm()
-            // (1) CANONICAL breaks + botMargins (base 18, canonical A4 width).
+            const ratio = lhPx && base ? lhPx / base : (phoneLike() ? 1.55 : 1.618)
+            return { w: Math.floor(w * 64) / 64, base, ratio } // floored to the LayoutUnit grid
+          }
+          // The CANONICAL page-break positions (base 18, canonical A4 width) — where the paginator
+          // splits pages. Each `at` is a DOCUMENT position; the ones falling INSIDE a block are the
+          // mid-paragraph gaps the render pass must honour as forced line-ends. Shared by
+          // computeArithBands and the __iwCmpBlockLines debug probe so both model gaps identically.
+          const canonicalArithBreaks = (): Array<{ at: number; brokeUsed: number; botMargin: number }> | null => {
             const paper = getPaperSize(); const topM = getTopMarginPx()
             const { pageWidthPx, pageHeightPx: pageH } = pageBoxPx({
               paperSize: paper === 'letter' ? 'letter' : 'a4', orientation: getOrientation(),
               topMarginPx: topM, bottomMarginPx: MARGIN_BOTTOM,
             })
             const canonW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
-            const canon = buildArithMeasure(view.state.doc, canonW, 1.618, paraSp, arithMeasureFn, arithFaceLoaded, true, 18, style, epoch)
+            const canon = buildArithMeasure(view.state.doc, canonW, 1.618, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, 18, getCitationStyle(), bibProvider.getVersion())
             if (!canon) return null
             const bandOut = { breaks: [] as Array<{ at: number; brokeUsed: number; botMargin: number }>, lastUsed: 0 }
             computeBreaks(canon.lines as unknown as MeasuredLine[], canon.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos, bandOut)
-            // (2) RENDER pixel tops of every break line (render width + render font).
-            const render = buildArithMeasure(view.state.doc, Math.floor(renderW * 64) / 64, renderRatio, paraSp, arithMeasureFn, arithFaceLoaded, true, renderBase, style, epoch)
+            return bandOut.breaks
+          }
+          // `out.blockHeights` (optional) = each top-level block's RENDER border-box height, in the
+          // SAME order as the doc's paragraphs — the exact content-visibility reservation, so the
+          // exit can keep the window on without the un-skip's full relayout.
+          const computeArithBands = (out?: { blockHeights?: number[] }): BandGeo | null => {
+            if (!sheet || !gapped) return null
+            const rc = renderWrapCtx()
+            if (!rc) return null
+            const renderW = rc.w, renderBase = rc.base, renderRatio = rc.ratio
+            const style = getCitationStyle(); const epoch = bibProvider.getVersion(); const paraSp = getParaSpacingEm()
+            // (1) CANONICAL breaks + botMargins.
+            const breaks = canonicalArithBreaks()
+            if (!breaks) return null
+            const topM = getTopMarginPx()
+            // (2) RENDER pixel tops of every break line (render width + render font). The canonical
+            // break positions are fed back as FORCED line-ends: a mid-paragraph page gap is a
+            // display:block widget that ends the pre-gap line partial, so the render wrap MUST break
+            // there too — else it fills the slack and loses a render line, drifting every band below.
+            const render = buildArithMeasure(view.state.doc, renderW, renderRatio, paraSp, arithMeasureFn, arithFaceLoaded, true, renderBase, style, epoch, breaks.map((b) => b.at))
             if (!render) return null
+            if (out) {
+              // Block advance = the gap between consecutive blocks' FIRST line tops (the render pass
+              // accumulates height + marginBottom per block); the border-box height the placeholder
+              // must reserve is that advance minus the (collapsed) bottom margin.
+              const firstTop: number[] = []
+              for (const l of render.lines) if (firstTop[l.blockIdx] === undefined) firstTop[l.blockIdx] = l.top
+              const mb = paraSp * renderBase
+              const hs: number[] = []
+              for (let i = 0; i < render.blocks.length; i++) {
+                const next = i + 1 < render.blocks.length ? firstTop[i + 1] : render.contentHeight
+                hs.push(Math.max(1, (next ?? render.contentHeight) - (firstTop[i] ?? 0) - mb))
+              }
+              out.blockHeights = hs
+            }
             // Render lines sorted by top, each with its own height (top→next top). A canonical break
             // at doc position `at` sits at the render BOTTOM of the line CONTAINING at (the gap forces
             // a line end there) — unless `at` is itself a render line start, when it's that line's top.
@@ -914,7 +971,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             const nextTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
             const tops: number[] = []; const heights: number[] = []
             let gapAccum = 0
-            for (const b of bandOut.breaks) {
+            for (const b of breaks) {
               const gt = gapTopOf(b.at)
               if (gt === null) return null
               tops.push(padTop + gt + gapAccum + b.botMargin - bleed)
@@ -923,6 +980,95 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             }
             const total = padTop + render.contentHeight + gapAccum + (parseFloat(getComputedStyle(sheet).paddingBottom) || 0)
             return { tops, heights, total }
+          }
+          // THE EMPIRICAL SHAPING GATE (once per editor, cached). canvasShapingMatchesEditor must
+          // measure its probe inside the REAL .ProseMirror — that is where the ligature state lives
+          // (the injected PM sheet sets `font-variant-ligatures:none`), and a plain-div harness
+          // certifies a fiction the editor never uses. NOT canvasCanMatchEditorShaping(): that only
+          // sniffs for ctx.textRendering, which Safari never exposes even though the stripped faces
+          // make canvas match there anyway.
+          let _shapeOk: boolean | null = null
+          const shapingMatchesEditor = (): boolean => {
+            if (_shapeOk !== null) return _shapeOk
+            try {
+              const ed = view.dom as HTMLElement
+              const cs = getComputedStyle(ed)
+              const font = `${cs.fontStyle} ${cs.fontWeight} ${parseFloat(cs.fontSize)}px ${cs.fontFamily}`
+              const domWidth = (text: string, cssFont: string): number => {
+                const s = document.createElement('span')
+                // The `font:` SHORTHAND resets font-variant-ligatures to `normal` — so a probe span
+                // set from it renders WITH ligatures even inside .ProseMirror, whose injected sheet
+                // sets them off. That measured the editor's own shaping context as a fiction and the
+                // gate always failed. Re-assert the editor's real shaping longhands AFTER the
+                // shorthand (later declarations win) so the span shapes exactly as the body text.
+                // content-visibility:visible is LOAD-BEARING: the probe is a direct child of
+                // .ProseMirror, so during the zoom-live window the `> *` rule gives it
+                // content-visibility:auto — and parked off-screen it is SKIPPED, so its contents
+                // never lay out and the rect comes back a fraction of the true width (measured:
+                // 177px vs the real 1186px). The gate then always failed and the exit fell back.
+                s.style.cssText = `position:absolute;left:-99999px;top:0;white-space:pre;content-visibility:visible;contain:none;font:${cssFont}`
+                  + `;font-variant-ligatures:${cs.fontVariantLigatures};font-feature-settings:${cs.fontFeatureSettings}`
+                  + `;font-kerning:${cs.fontKerning};font-optical-sizing:${cs.fontOpticalSizing};text-rendering:${cs.textRendering}`
+                s.textContent = text
+                ed.appendChild(s)
+                const w = s.getBoundingClientRect().width
+                s.remove() // synchronous: PM never sees a transaction, so its observer never rebuilds
+                return w
+              }
+              _shapeOk = canvasShapingMatchesEditor(font, domWidth, arithMeasureFn)
+              ;(window as unknown as { __iwShape?: unknown }).__iwShape = { font, ok: _shapeOk,
+                canvas: arithMeasureFn('The quick brown fox jumps over the lazy dog 0123456789', font),
+                dom: domWidth('The quick brown fox jumps over the lazy dog 0123456789', font) }
+            } catch { _shapeOk = false }
+            return _shapeOk
+          }
+          // ── THE ZOOM-EXIT (Job 2) ───────────────────────────────────────────────────────────────
+          // Scroll.tsx's gesture exit asks US for the geometry before it decides how to land. If we
+          // answer, the bands are applied in THIS task (atomic with the caller's anchor re-pin) and
+          // the caller keeps content-visibility ON using our exact per-block heights — so it never
+          // un-skips, and the exit costs O(visible) instead of O(doc). No answer ⇒ it falls back to
+          // the un-skip + readBands, which is always correct.
+          const onArithExit = (e: Event) => {
+            const d = (e as CustomEvent).detail as { surface?: Element; ok?: boolean; blockHeights?: number[]; why?: string } | undefined
+            if (!d) return
+            if (!arithBandsOn()) { d.why = 'flag-off'; return }
+            if (!gapped || !sheet || !layer) { d.why = 'not-gapped'; return }
+            if (d.surface !== surfaceOf()) { d.why = 'other-surface'; return } // SnapshotView's zoom
+            if (!shapingMatchesEditor()) { d.why = 'shaping'; return }
+            const out: { blockHeights?: number[] } = {}
+            const geo = computeArithBands(out)
+            if (!geo || !out.blockHeights) { d.why = 'arith-null'; return } // deferred block ⇒ fall back
+            applyBands(geo)
+            d.blockHeights = out.blockHeights
+            d.ok = true
+          }
+          window.addEventListener('inkwave:arith-exit', onArithExit)
+          // Debug: per-block render line-count parity (arith render measure vs the DOM's rendered
+          // line rects). Pins whether a band drift is an engine wrap divergence (line count) or the
+          // band assembly, and at what font SIZE it happens.
+          ;(window as unknown as { __iwCmpBlockLines?: () => unknown }).__iwCmpBlockLines = () => {
+            const rc = renderWrapCtx(); if (!rc) return { rc: false }
+            const fb = canonicalArithBreaks() // mid-paragraph gap positions forced as render line-ends
+            const am = buildArithMeasure(view.state.doc, rc.w, rc.ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, rc.base, getCitationStyle(), bibProvider.getVersion(), (fb ?? []).map((b) => b.at))
+            if (!am) return { am: false }
+            const arLines = new Map<number, number>()
+            for (const l of am.lines) arLines.set(l.blockIdx, (arLines.get(l.blockIdx) ?? 0) + 1)
+            const edEl = view.dom as HTMLElement
+            const kids = Array.from(edEl.children).filter((c) => !(c as HTMLElement).classList.contains('inkwave-page-gap')) as HTMLElement[]
+            const out: string[] = []
+            for (let i = 0; i < kids.length && out.length < 6; i++) {
+              const rng = document.createRange(); rng.selectNodeContents(kids[i])
+              let domN = 0, lastTop = -1e9
+              for (const r of Array.from(rng.getClientRects())) { if (r.width > 1 && r.height > 1 && r.height < 90 && r.top - lastTop > 3) { domN++; lastTop = r.top } }
+              const ar = arLines.get(i) ?? 0
+              if (ar !== domN) {
+                const bcs = getComputedStyle(kids[i])
+                const ownW = kids[i].getBoundingClientRect().width - (parseFloat(bcs.paddingLeft) || 0) - (parseFloat(bcs.paddingRight) || 0) - (parseFloat(bcs.borderLeftWidth) || 0) - (parseFloat(bcs.borderRightWidth) || 0)
+                const fs = getComputedStyle(kids[i].querySelector('span') ?? kids[i]).fontSize
+                out.push(`blk${i} DOM ${domN}L arith ${ar}L font=${fs} ownW=${(Math.floor(ownW * 64) / 64).toFixed(3)} ti=${bcs.textIndent} ml=${bcs.marginLeft} pl=${bcs.paddingLeft} "${(kids[i].textContent || '').slice(0, 32)}"`)
+              }
+            }
+            return { blocks: kids.length, mismatches: out.length ? out : 'NONE — all blocks line-count parity', renderW: rc.w, base: rc.base, ratio: +rc.ratio.toFixed(4) }
           }
           // Debug: compare arith bands vs the DOM readBands at the CURRENT zoom (must match ~0px).
           ;(window as unknown as { __iwCmpArithBands?: () => unknown }).__iwCmpArithBands = () => {
@@ -1398,19 +1544,16 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // (read at the live content width, font base 18 — like canonical, only the WIDTH differs).
             // Any ineligible block ⇒ null ⇒ falls through to the canonical paths below.
             if (renderFillOn() && phoneLike() && !fluid && !wasForceFull) {
-              const edEl = view.dom as HTMLElement
-              const cs = getComputedStyle(edEl)
-              const renderW = edEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
-              // Measure at the LIVE RENDER font — phone applies its ×1.25 root scale + its own
-              // line-height, so the base is NOT the canonical 18px (that's the whole point: render,
-              // not canonical). ratio = used line-height / font-size; base = the live font-size.
-              const basePx = parseFloat(cs.fontSize) || 18
-              const lhPx = parseFloat(cs.lineHeight)
-              const ratio = lhPx && basePx ? lhPx / basePx : 1.618
-              const am = renderW > 40
+              // Measure at the LIVE RENDER width + font via the shared renderWrapCtx (the FLOORED
+              // fractional content box — clientWidth's integer rounding fed the engine +0.42px too
+              // generous ~6/88 times at 22.5px, fitting one word too many: the latent bug the arith
+              // agent found). Phone applies its ×1.25 root scale, so base ≠ canonical 18px — that IS
+              // the point of render-fill: last line fills at the RENDER width, not canonical A4.
+              const rc = renderWrapCtx()
+              const am = rc
                 // atomBoxes=true: an atom is eligible iff it SUPPLIES a box. Citations now do (the
                 // opaque-box cache); inline math still supplies none, so it defers on !box.
-                ? buildArithMeasure(view.state.doc, renderW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, basePx, getCitationStyle(), bibProvider.getVersion())
+                ? buildArithMeasure(view.state.doc, rc.w, rc.ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, rc.base, getCitationStyle(), bibProvider.getVersion())
                 : null
               if (am) {
                 const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
@@ -1671,6 +1814,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.removeEventListener('beforeprint', measureNowCb)
               window.removeEventListener('inkwave:measure-now', measureNowCb)
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
+              window.removeEventListener('inkwave:arith-exit', onArithExit)
               PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)
