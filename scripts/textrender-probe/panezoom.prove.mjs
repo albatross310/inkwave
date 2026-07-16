@@ -29,8 +29,19 @@
 // contaminated by the citation-NodeView artifact under repair on fix/collectlines-nodeview).
 //
 // GATE: the known-negative MUST move the offsets or NO VERDICT IS READ (exit 1).
-import { chromium } from '@playwright/test'
+//
+// ENGINE (2026-07-17). `PROBE_ENGINE=webkit` re-runs this EXACT probe on WebKit — Peter's device is
+// an iPhone 8, and the free-zoom verdict below was Chromium-only. WebKit's CSS-`zoom` LayoutUnit
+// quantisation is a different implementation: if its rounding differs, a borderline wrap could shift
+// and "zoom is a pure paint scale" would be false on the one device that must work. The engine is a
+// PARAMETER, not a fork — a second copy of this file is how two probes drift and one of them starts
+// certifying a fiction (the textMap/pmToText lesson). Same fixture, same metric, same gate, both
+// engines. The known-negative must fire ON THE ENGINE UNDER TEST before any verdict is read: a gate
+// proved on Chromium proves nothing about WebKit's own instrument.
+import { chromium, webkit } from '@playwright/test'
 
+const ENGINE = process.env.PROBE_ENGINE === 'webkit' ? 'webkit' : 'chromium'
+const BROWSER = ENGINE === 'webkit' ? webkit : chromium
 const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
 
 function buildSnapshots() {
@@ -143,7 +154,13 @@ const GAP_SIG = () => {
 const json = buildSnapshots()
 // One wide viewport for EVERY condition (paneFit = (paneW - water) / 794px must clear 1.5 or the
 // zoom-in conditions get fit-capped): only the zoom differs between runs.
-const browser = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
+// The font flags are CHROMIUM-ONLY (WebKit rejects unknown args). They exist to stop hinting/LCD
+// filtering from perturbing advance widths — WebKit has no equivalent switch, which is precisely why
+// the negative must re-prove the metric on WebKit's own text stack rather than inherit Chromium's.
+const browser = await BROWSER.launch({
+  headless: true,
+  ...(ENGINE === 'chromium' ? { args: ['--font-render-hinting=none', '--disable-lcd-text'] } : {}),
+})
 
 async function run(label, prefs) {
   const ctx = await browser.newContext({ deviceScaleFactor: 2, viewport: { width: 2600, height: 1000 } })
@@ -167,6 +184,7 @@ async function run(label, prefs) {
 
 const eq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 
+console.log(`ENGINE: ${ENGINE}${ENGINE === 'webkit' ? '  (Peter\'s device is an iPhone 8 — the Chromium verdict does not transfer)' : ''}`)
 console.log('PREDICTION: breaks do NOT move — paginateStaticDoc pins every inline zoom to 1 inside')
 console.log('its canonical window. Testing to FALSIFY.\n')
 
@@ -200,6 +218,7 @@ for (const z of [0.5, 0.75, 1.5, 2.0]) {
 }
 
 console.log('\n──────────────────────────────────────────────────────────────')
+console.log('engine              :', ENGINE)
 console.log('negative fired      :', fired, '(verdict readable)')
 console.log('known-positive      :', stable, '(offsets deterministic across fresh loads)')
 console.log('conditions          :', JSON.stringify(results))
