@@ -3,40 +3,19 @@ import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
-import StarterKit from '@tiptap/starter-kit'
-import TextStyle from '@tiptap/extension-text-style'
-import FontFamily from '@tiptap/extension-font-family'
-import TextAlign from '@tiptap/extension-text-align'
-import Highlight from '@tiptap/extension-highlight'
-import Underline from '@tiptap/extension-underline'
-import { FontSize } from './extensions/FontSize'
-import { TextColor } from './extensions/TextColor'
-import { ParagraphStyle } from './extensions/ParagraphStyle'
+import { buildEditorExtensions } from './extensions/editorExtensions'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
-import { RedHighlightExtension, SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
-import { PaginationExtension } from './extensions/PaginationExtension'
-import { ListStyle } from './extensions/ListStyle'
-import { gappedPagesEnabled, paginationEnabled } from './pageView'
+import { SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
 import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
-import { ScasSlotMark } from './extensions/ScasSlotMark'
-import { CommentMark } from './extensions/CommentMark'
-import { InsertionMark, DeletionMark, TrackChanges } from './extensions/TrackChanges'
 import { syncReviewVisibilityStyles } from './review/reviewState'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
-import { MathInline } from './extensions/MathInline'
-import { MathBlock } from './extensions/MathBlock'
-import { MathPasteHandler } from './extensions/MathPasteHandler'
-import { TabIndent } from './extensions/TabIndent'
-import { LineNumbers } from './extensions/LineNumbers'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
 import { Scroll, isTouchDevice } from './Scroll'
 import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
@@ -86,9 +65,6 @@ import { SettingsMenu } from '../components/SettingsMenu'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
-import { CitationNode } from './extensions/CitationNode'
-import { CiteSuggestion } from './extensions/CiteSuggestion'
-import { ReferenceListNode } from './extensions/ReferenceListNode'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
 import { CitationPanel } from '../components/CitationPanel'
 import { PdfSidePanel } from '../components/PdfSidePanel'
@@ -830,44 +806,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     // body used to read live off editor.state is mirrored into state by the selection-tracking
     // effect below (selectionEmpty + selIsAtomNode); StyleBar/ReviewBar self-subscribe.
     shouldRerenderOnTransaction: false,
-    extensions: [
-      StarterKit,
-      Highlight.configure({ multicolor: true }),
-      Underline,
-      ListStyle,
-      // Always measure page breaks (shared canonical model — see pageModel.ts): gapped mode gets
-      // the tall gap widgets + sheet panels, ungapped gets zero-size break markers the PageGuides
-      // rules + the print stylesheet break at. Same breaks either way, so toggling the switch
-      // never moves content across pages.
-      PaginationExtension.configure({ enabled: paginationEnabled(), gapped: gappedPagesEnabled() }),
-      ScasSlotMark,
-      CommentMark,
-      InsertionMark,
-      DeletionMark,
-      TrackChanges,
-      TextStyle,
-      FontFamily,
-      FontSize,
-      TextColor,
-      TextAlign.configure({ types: ['paragraph'] }),
-      ParagraphStyle,
-      // Standard Enter = new paragraph; Shift+Enter = hard break (via StarterKit's HardBreak).
-      RedHighlightExtension.configure({
-        getDoc: () => docRef.current,
-        getHintState: () => hintStateRef.current,
-        getScasLookup: () => scasRef.current!.lookup(),
-      }),
-      MathInline,
-      MathBlock,
-      MathPasteHandler,
-      TabIndent,
-      LineNumbers,
-      CitationNode,
-      CiteSuggestion,
-      ReferenceListNode,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-    ],
+    // THE ONE EXTENSION LIST — moved verbatim to extensions/editorExtensions.ts so /snapshot, which
+    // has no editor, can build the SAME schema and turn a version's contentJson into a real PM Node
+    // (the plaintext renderer's blocker). Same entries, same order, same configure() args; this call
+    // returns a fresh array per render exactly as the inline literal did. A schema-only COPY of the
+    // list was rejected — two lists is how the model drifts from what the editor paginates.
+    extensions: buildEditorExtensions({
+      getDoc: () => docRef.current,
+      getHintState: () => hintStateRef.current,
+      getScasLookup: () => scasRef.current!.lookup(),
+    }),
     content: doc.contentJson,
     // DOUBLE-MOUNT NOTE (2026-07-11): this component must mount in a default-lane render — NOT a
     // time-sliced one (lazy/Suspense retry). useEditor's in-render creation + its 1ms

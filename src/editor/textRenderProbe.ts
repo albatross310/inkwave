@@ -10,6 +10,10 @@
 // Loaded by a flag-gated dynamic import from TiptapEditor, so it costs nothing when off.
 
 import type { Editor } from '@tiptap/react'
+import type { Schema } from '@tiptap/pm/model'
+// The /snapshot seam under test — the standalone schema, imported here so the probe compares it
+// against the LIVE editor's rather than against another copy of itself.
+import { getEditorSchema, nodeFromContentJson } from './editorSchema'
 import { makeCanvasMeasure, type Measure } from './arithmeticLayout'
 import {
   buildRenderModel, paintPage, paintMapStrip, canonicalGeom,
@@ -140,6 +144,18 @@ export interface ProbeApi {
   /** The LIVE editor's own page-break doc positions, read off its rendered gap widgets. The ground
    *  truth the arithmetic model must agree with — if it doesn't, pages show the wrong words. */
   liveBreaks(): number[]
+  /** THE /snapshot SCHEMA SEAM (2026-07-17). Compares the standalone `getEditorSchema()` — the one
+   *  /snapshot parses contentJson with, built WITHOUT the editor's plugin closures and WITHOUT an
+   *  Editor instance — against the LIVE editor's OWN `editor.schema`. This is the from-outside
+   *  query: everything else about the seam is derived from the same list and would agree with
+   *  itself. Also re-parses the live doc through the standalone schema and asserts PM-level
+   *  equality, so the answer covers this document's real citations/math, not just type names. */
+  schemaIdentity(): Record<string, unknown>
+  /** Parse `json` with the STANDALONE schema and compare it to the LIVE editor's doc — the same
+   *  path `schemaIdentity().docEq` takes. Exists so the known-negative can drive that identical
+   *  comparison to the OPPOSITE answer (a negative that runs through a different path proves
+   *  nothing about this one). Returns null if the standalone schema refused the json. */
+  docEqOf(json: unknown): boolean | null
   /** Do the LIVE editor's breaks all land at true line starts? Line starts are derived from real
    *  text rects, skipping inline-atom NodeView interiors — independent of collectLines. */
   midlineAudit(debugNear?: number): Record<string, unknown>
@@ -1097,6 +1113,127 @@ export function installTextRenderProbe(editor: Editor): void {
         inflatedPages: mutated.pages,
         coverage: base.coverage,
       }
+    },
+    schemaIdentity() {
+      // Serialise a Schema to a comparable shape. NOT a hand-rolled subset of "fields we think
+      // matter" — that is how a check certifies its own blind spot. Everything PM itself uses to
+      // define a type: the attr names + their DEFAULTS, content/marks/group expressions, and the
+      // structural flags the paginator depends on (atom/inline).
+      const specOf = (s: Schema) => {
+        const nodes: Record<string, unknown> = {}
+        for (const name of Object.keys(s.nodes)) {
+          const t = s.nodes[name]
+          nodes[name] = {
+            attrs: Object.keys(t.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(t.spec.attrs?.[a]?.default ?? null)}`),
+            content: t.spec.content ?? null,
+            marks: t.spec.marks ?? null,
+            group: t.spec.group ?? null,
+            atom: t.isAtom, inline: t.isInline,
+          }
+        }
+        const marks: Record<string, unknown> = {}
+        for (const name of Object.keys(s.marks)) {
+          const m = s.marks[name]
+          marks[name] = {
+            attrs: Object.keys(m.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(m.spec.attrs?.[a]?.default ?? null)}`),
+            excludes: m.spec.excludes ?? null,
+            group: m.spec.group ?? null,
+            inclusive: m.spec.inclusive ?? null,
+          }
+        }
+        return { topNode: s.topNodeType.name, nodes, marks }
+      }
+
+      const mine = getEditorSchema()
+      const live = editor.schema
+      const mineSpec = JSON.stringify(specOf(mine))
+      const liveSpec = JSON.stringify(specOf(live))
+
+      // Name the first divergence rather than reporting a bare false — a boolean cannot be acted on.
+      const diffs: string[] = []
+      const a = specOf(mine) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      const b = specOf(live) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      for (const kind of ['nodes', 'marks'] as const) {
+        const keys = new Set([...Object.keys(a[kind]), ...Object.keys(b[kind])])
+        for (const k of keys) {
+          const x = JSON.stringify(a[kind][k]), y = JSON.stringify(b[kind][k])
+          if (x !== y) diffs.push(`${kind}.${k}: mine=${x ?? 'MISSING'} live=${y ?? 'MISSING'}`)
+        }
+      }
+
+      // THE DOCUMENT-LEVEL CHECK — and the trap it walked into first (2026-07-17).
+      //
+      // The obvious instrument is `Node.fromJSON(mine, liveDoc.toJSON()).eq(liveDoc)`. IT CAN NEVER
+      // RETURN TRUE. PM's `hasMarkup` is `this.type == type` — REFERENCE equality on NodeType — so
+      // two Schema instances (which is the entire premise here) always compare unequal, whatever the
+      // content. It reported `false` for the UNTOUCHED live document: a check structurally incapable
+      // of passing, i.e. one that would have condemned a perfectly correct schema. It was caught
+      // ONLY because the known-negative reads its positive arm too (clean must still say yes).
+      // Same family as canvasShapingMatchesEditor, the gate that always returned false and silently
+      // disabled arithLayout for months.
+      //
+      // The correct cross-schema comparison is STRUCTURAL: type NAMES, attrs, marks and text — i.e.
+      // the serialised form, which is schema-independent by construction and is also exactly what a
+      // snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
+      // can never masquerade as a difference.
+      const liveDoc = editor.state.doc
+      const liveJson0 = liveDoc.toJSON()
+      const reparsed = nodeFromContentJson(liveJson0)
+      const stable = (v: unknown): string => {
+        if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+        if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+        const o = v as Record<string, unknown>
+        return `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`
+      }
+      const sameDoc = (a: unknown, b: unknown) => stable(a) === stable(b)
+      const census = { citation: 0, mathInline: 0, mathBlock: 0, referenceList: 0, heading: 0, marks: 0 }
+      liveDoc.descendants((n) => {
+        if (n.type.name in census) (census as Record<string, number>)[n.type.name]++
+        census.marks += n.marks.length
+        return true
+      })
+
+      // Material for the known-negative, built HERE so it mutates a REAL attribute of a REAL node
+      // of THIS document (an invented attr would be silently dropped and the negative would not
+      // fire — the trap pinned in editorSchema.test.ts).
+      const liveJson = liveJson0
+      const mutatedJson = JSON.parse(JSON.stringify(liveJson)) as { content?: unknown[] }
+      let mutationApplied = false
+      const walk = (n: { type?: string; attrs?: Record<string, unknown>; content?: unknown[] }) => {
+        if (n.type === 'citation' && !mutationApplied) {
+          n.attrs = { ...n.attrs, citekeys: ['MUTATED-BY-THE-NEGATIVE'] }
+          mutationApplied = true
+        }
+        if (Array.isArray(n.content)) n.content.forEach(c => walk(c as typeof n))
+      }
+      walk(mutatedJson as Parameters<typeof walk>[0])
+
+      return {
+        identical: mineSpec === liveSpec,
+        diffs,
+        nodeCount: Object.keys(mine.nodes).length,
+        markCount: Object.keys(mine.marks).length,
+        // Does the standalone schema round-trip the LIVE document? (Structural — see above.)
+        reparsed: !!reparsed,
+        docEq: reparsed ? sameDoc(reparsed.toJSON(), liveJson0) : false,
+        // TRACE THE PASS: a doc with no citations/math would make docEq vacuous. Report what was
+        // actually exercised so a green result on an empty document is visibly worthless.
+        census,
+        liveJson, mutatedJson, mutationApplied,
+      }
+    },
+    docEqOf(json) {
+      // STRUCTURAL, not `Node.eq` — see schemaIdentity(): PM's eq is reference equality on NodeType
+      // and can never be true across two schemas, which is precisely the comparison being made here.
+      const n = nodeFromContentJson(json)
+      if (!n) return null
+      const stable = (v: unknown): string => {
+        if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+        if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+        const o = v as Record<string, unknown>
+        return `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`
+      }
+      return stable(n.toJSON()) === stable(editor.state.doc.toJSON())
     },
     chromeBox(kind, arg) {
       harvestNow()
