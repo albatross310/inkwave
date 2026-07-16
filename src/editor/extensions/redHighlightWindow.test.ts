@@ -102,3 +102,37 @@ describe('windowed decoration splice ≡ full rebuild', () => {
     expect(wb.list).toEqual([]) // nothing in-S → empty list; splice removes nothing, adds nothing
   })
 })
+
+// ── SCAS WINDOWED RENDERING (2026-07-16): the render window filters which verdicts get a live
+// Decoration object; the verdict SCAN (and the returned green-anchor `flagged` state) stays
+// doc-wide + byte-identical. A focused/revealing word outside the window is still realised. ──
+describe('render-window filters decorations, never verdict state', () => {
+  const docA = docOf([`the ${HOT} word.`, 'calm filler here.', `and ${OTHER} waits.`])
+  const p1end = docA.child(0).nodeSize
+
+  it('windowing to paragraph 1 drops the far decoration; flagged stays doc-wide identical', () => {
+    const full = buildDecorations(docA, inkDoc, 1, hint, lookup, NO_REVEALS, new Map())
+    const win = buildDecorations(docA, inkDoc, 1, hint, lookup, NO_REVEALS, new Map(), undefined, { from: 0, to: p1end })
+    expect(shape(full.decorations).length).toBe(2)          // HOT + OTHER, doc-wide
+    const w = shape(win.decorations) as Array<{ from: number }>
+    expect(w.length).toBe(1)                                 // only HOT (in the window)
+    expect(w[0].from).toBeLessThan(p1end)
+    // The scan is doc-wide regardless of the render window — verdict/green state is untouched.
+    expect([...full.flagged.entries()]).toEqual([...win.flagged.entries()])
+  })
+
+  it('a FOCUSED word outside the window is still realised', () => {
+    const full = shape(buildDecorations(docA, inkDoc, 1, hint, lookup, NO_REVEALS, new Map()).decorations) as Array<{ from: number }>
+    const otherFrom = Math.max(...full.map((d) => d.from)) // OTHER is the later decoration
+    const focusHint: HintState = { ...hint, focusedPos: otherFrom }
+    const win = shape(buildDecorations(docA, inkDoc, 1, focusHint, lookup, NO_REVEALS, new Map(), undefined, { from: 0, to: p1end }).decorations) as Array<{ from: number }>
+    expect(win.map((d) => d.from).sort((a, b) => a - b)).toEqual([full[0].from, otherFrom].sort((a, b) => a - b))
+  })
+
+  it('a REVEALING word outside the window is still realised', () => {
+    const full = shape(buildDecorations(docA, inkDoc, 1, hint, lookup, NO_REVEALS, new Map()).decorations) as Array<{ from: number }>
+    const otherFrom = Math.max(...full.map((d) => d.from))
+    const win = shape(buildDecorations(docA, inkDoc, 1, hint, lookup, new Set([otherFrom]), new Map(), undefined, { from: 0, to: p1end }).decorations) as Array<{ from: number }>
+    expect(win.length).toBe(2) // HOT (windowed) + OTHER (revealing, kept)
+  })
+})
