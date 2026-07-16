@@ -26,20 +26,63 @@
 import { Extension } from '@tiptap/react'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from '../pageSettings'
+import type { Node as PMNode } from '@tiptap/pm/model'
+import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, getParaSpacingEm, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
 import { forceCanonicalContext } from '../canonicalMeasure'
+import { buildArithMeasure, arithBlockLayout } from '../arithMeasure'
+import { makeCanvasMeasure, type Measure } from '../arithmeticLayout'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
 import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
+import { harvestCiteBoxes, clearCiteBoxes } from '../../citations/citeBox'
+import { getCitationStyle } from '../../citations/citationsBus'
 import { notePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
+
+// ── Decision 6: ARITHMETIC canonical measure (flag `inkwave:arithLayout`, default OFF) ──────────
+// The third acquisition path — see arithMeasure.ts. Flag cached (a measure-time localStorage read
+// is fine — measures are debounced — but cache it anyway; toggling needs a reload, as usual).
+let _arithLayoutFlag: boolean | null = null
+function arithLayoutOn(): boolean {
+  if (_arithLayoutFlag !== null) return _arithLayoutFlag
+  // DEFAULT OFF (2026-07-15): reverted from default-on. The arith greedy wrap DIVERGES from the DOM
+  // canonical measure on REAL eligible prose — deterministic, ~1 break in 20 (arith fits ~2 more
+  // words on a borderline line; measured on the real Honours prose fixture). Docs that are FULLY
+  // eligible (plain prose, no citations/lists/rules) would get wrong breaks vs canonical/print.
+  // Root-cause the wrap first (engine measureText-vs-browser edge, or wire-in param mismatch);
+  // until it's byte-identical on real prose this stays opt-in via ?arithLayout.
+  try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
+  return _arithLayoutFlag
+}
+const arithMeasureFn = makeCanvasMeasure() // one cached canvas 2d measure, shared across measures
+function arithFaceLoaded(stack: string, sizePx: number): boolean {
+  try { const fam = stack.split(',')[0].replace(/['"]/g, '').trim(); return typeof document !== 'undefined' && document.fonts.check(`${sizePx}px "${fam}"`) } catch { return false }
+}
+
+// ── Decision 1: RENDER-FILL phone splits (flag `inkwave:renderFill`, default OFF) ────────────────
+// Peter: "abandon perfect pagination for the better look." On the LIVE PHONE editor ONLY, compute
+// mid-paragraph splits at the RENDER width (via the arithmetic engine) instead of canonical A4, so
+// the last line before a split FILLS (kills the ~50%-empty last line). This DIVERGES from canonical
+// — so it is gated to the live phone editor and NEVER touches print/export/verify/snapshot (those
+// force the canonical measure via measure-now → forceFullOnce, which this path skips). Phone page
+// numbers then differ from print — an accepted consequence.
+let _renderFillFlag: boolean | null = null
+function renderFillOn(): boolean {
+  if (_renderFillFlag !== null) return _renderFillFlag
+  // DEFAULT OFF (2026-07-15): reverted from default-on. The fill rides the SAME arith greedy wrap
+  // that diverges from the browser's real wrap on eligible prose — a split 2 words off the render
+  // would spill the "filled" last line, so the fill must wait on the wrap root-cause too. (It also
+  // shares the whole-doc eligibility gate, so it never engaged on a citation-heavy doc anyway.)
+  try { _renderFillFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:renderFill') === '1' } catch { _renderFillFlag = false }
+  return _renderFillFlag
+}
 
 export interface PaginationOptions {
   enabled: boolean // measure page breaks at all (the live editor; off for headless/snapshot use)
@@ -222,6 +265,12 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
 
   const { lines, blocks, meta } = collectLines(view, editorTop, scale, cache)
   if (!lines.length) return { set: DecorationSet.empty, sig: 'empty', meta: null }
+  // CITATION OPAQUE-BOX HARVEST (2026-07-16): this is the ONE place a citation's CANONICAL rendered
+  // width exists — we are inside the forced canonical context, the layout is already flushed for the
+  // line collection, so each box costs one getBoundingClientRect and no reflow. The arith path can
+  // never measure this itself (it skips the force by design), so it reads these cached boxes; an
+  // un-harvested key defers that block back here, which harvests it. See citations/citeBox.ts.
+  try { harvestCiteBoxes(doc, (pos) => view.nodeDOM(pos), getCitationStyle(), bibProvider.getVersion()) } catch { /* never break a measure */ }
   // Resolve a line's doc position on demand — the exact posAtCoords sample the old eager path made.
   // Must run before any DOM mutation (compute never mutates; the caller dispatches after).
   // The resolution is baked back into the line cache BLOCK-RELATIVE, so the next measure rebuilds
@@ -260,6 +309,9 @@ function computeBreaks(
   gapped: boolean,
   posOf: (l: MeasuredLine) => number,
 ): { decos: Decoration[]; sig: string } {
+  // Decision 1's dotted continuation bracket is INDEPENDENT of renderFill (2026-07-15): it marks a
+  // MID-PARAGRAPH split — semantically true at canonical breaks too (Decision 5 splits every
+  // straddler mid-block) — and carries zero measure risk, so it renders whatever the measure path.
   // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
   // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
   // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
@@ -298,15 +350,25 @@ function computeBreaks(
     // Break before the LINE that would overflow the text area.
     if (i > 0 && used + lh > textArea && posOf(lines[i]) > 0) {
       const orphan = used - blockStartUsed             // height of the current block already on this page
-      const snap = orphan <= textArea * 0.22 && blockStart > 0 // few orphan lines → keep them together
+      // ALWAYS SPLIT mid-block so the page fills (Decision 5, Peter 2026-07-15: "probably split").
+      // The widow/orphan snap is gone: a straddling paragraph is broken at the overflow line wherever
+      // it falls, accepting the occasional lone 1-line orphan/widow (softened by the render-fill +
+      // the dotted continuation bracket). `orphan` is still tracked for the sig/used accounting.
+      // (History: flat ≤22% pushed every straddler whole → wasted page bottoms; fa11bf0 split only
+      // when both sides kept ≥2 lines; Peter now wants the fuller look outright.)
+      const snap = false
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
       const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
+      // MID-PARAGRAPH split? — the line before the break is in the SAME block, so this block spans
+      // the boundary (a between-block break has the block starting AT line i). Decision 1's dotted
+      // continuation bracket marks these (never a clean between-paragraph break).
+      const midBlock = i > 0 && lines[i - 1].blockIdx === lines[i].blockIdx
       // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
       if (at > 0 && !(refBroken && at === refListPos)) {
         // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
         // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}` }))
+        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped, midBlock), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}${midBlock ? 'b' : ''}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
@@ -397,6 +459,15 @@ function computeScoped(
   gapped: boolean,
   ctx: ScopedCtx,
   why: (reason: string) => void = () => {},
+  // ARITH SCOPED (2026-07-16): when supplied, the CHANGED blocks are laid out ARITHMETICALLY
+  // instead of measured live. That removes the only reason this path needs a forced canonical
+  // context — so the caller runs it with NO force and NO reflow at all. Any changed block that
+  // isn't arithmetic-eligible ⇒ null ⇒ the caller falls back to the DOM scoped measure.
+  arithOpts?: {
+    contentW: number; ratio: number; paraSpacingEm: number
+    measure: Measure; fontLoaded: (stack: string, sizePx: number) => boolean
+    citationStyle: string; bibEpoch: number
+  },
 ): { set: DecorationSet; sig: string; meta: IncMeta } | null {
   const doc = view.state.doc
   const newNodes: object[] = []
@@ -417,7 +488,7 @@ function computeScoped(
 
   // Natural wrapping around the edit: clear gap widgets inside/adjacent to the changed region
   // (the full measure clears the WHOLE set for exactly this; the final dispatch replaces it all).
-  if (changedNew.length) {
+  if (changedNew.length && !arithOpts) {
     const clearTo = (en + 1 < newNodes.length ? newOffsets[en + 1] : doc.content.size) + 1
     ctx.clearGapsIn(newOffsets[s], clearTo)
   }
@@ -442,10 +513,30 @@ function computeScoped(
     try { const range = document.createRange(); range.selectNodeContents(el); return Array.from(range.getClientRects()) } catch { return [] }
   }
 
-  // ── measure the changed blocks LIVE in the canonical window ──
+  // ── the changed blocks: ARITHMETIC when eligible (no DOM), else measured LIVE ──
   const changedEntries: BlockLines[] = []
   const changedAdvances: number[] = []
-  if (changedNew.length) {
+  if (arithOpts && changedNew.length) {
+    for (let i = 0; i < changedNew.length; i++) {
+      const lay = arithBlockLayout(
+        changedNew[i] as PMNode, arithOpts.contentW, arithOpts.ratio, arithOpts.paraSpacingEm,
+        arithOpts.measure, arithOpts.fontLoaded, arithOpts.citationStyle, arithOpts.bibEpoch,
+      )
+      if (!lay) { why('arith-ineligible'); return null }
+      changedEntries.push({
+        atomLike: false,
+        relStart: 0,                    // a paragraph's own start IS its offset ($p.before(1))
+        relEnd: lay.relEnd,
+        relTops: lay.relTops,
+        // Never read: relPos is BAKED (arithmetic positions are exact), so posOf never hit-tests.
+        relCx: lay.relTops.map(() => 0),
+        relCy: lay.relTops.map(() => 0),
+        relPos: lay.relPos,
+      })
+      changedAdvances.push(lay.advance)
+    }
+    for (let i = 0; i < changedNew.length; i++) cache.set(changedNew[i], changedEntries[i])
+  } else if (changedNew.length) {
     const els: HTMLElement[] = []
     for (let i = 0; i < changedNew.length; i++) {
       const el = renderBlock(newOffsets[s + i])
@@ -672,13 +763,19 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // the panel layer + cleared minHeight to take sheet.scrollHeight — a SECOND forced
             // full layout on every paint pass, cache miss and atomic exit. Same rule
             // staticPagination already proved (2026-07-12 swipe round): derive the content extent
-            // from the IN-FLOW children's rects in the SAME layout pass as the band reads. The
-            // absolutely-positioned panel layer is skipped explicitly, so its full-final-page
-            // extension can't ratchet the measure, and minHeight never enters a rect read (the
-            // old ratchet fixpoints stay impossible by construction).
+            // from the IN-FLOW children's rects in the SAME layout pass as the band reads.
+            // Every ABSOLUTELY-positioned child must be skipped, not just the sheet layer: they are
+            // inset:0 overlays (the panel layer AND `.iw-page-guides`) that STRETCH to the sheet's
+            // minHeight, so reading their bottom folds our own full-final-page minHeight straight
+            // back into `total` → a per-paint +padB RATCHET (last panel grows every zoom cycle;
+            // bug 2026-07-15). Only the real in-flow content (the .ProseMirror wrapper) may set the
+            // extent, so minHeight can never enter a rect read (the old ratchet fixpoints stay
+            // impossible by construction).
             let bottom = sheetR.top
             for (const c of Array.from(sheet.children) as HTMLElement[]) {
               if (c === layer) continue
+              const pos = getComputedStyle(c).position
+              if (pos === 'absolute' || pos === 'fixed') continue // inset:0 overlay → tracks minHeight
               const r = c.getBoundingClientRect()
               if (r.bottom > bottom) bottom = r.bottom
             }
@@ -691,7 +788,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // the writes batch into the SAME reflow as the font-zoom change (panels move WITH text).
           const applyBands = (geo: BandGeo) => {
             if (!layer) return
-            lastAppliedGeo = geo // the frozen-pages gesture snapshots this as its geometry basis
             const segs: Array<{ top: number; height: number }> = []
             let cursor = 0
             for (let i = 0; i < geo.tops.length; i++) {
@@ -778,105 +874,56 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // and text must land in the SAME frame, cached or not. The settle's verify paint still
           // snaps everything atomically at the end (a no-op when the cache was accurate).
           const stepCache = new Map<number, BandGeo>()
-          const cacheStats = { hits: 0, misses: 0, precomputed: 0, frozen: 0, scaled: 0 } // debug/smoke counters
+          // Per-GESTURE cache: band geometry read under the live-reflow window's placeholder
+          // heights (.iw-zoom-live content-visibility) is a DIFFERENT geometry regime — it must
+          // never leak into stepCache (placeholder-squashed panels replayed at rest) and
+          // stepCache's full-layout geometry must never apply mid-gesture. Routing mid-gesture
+          // steps here keeps a within-gesture step RETRACE pure style writes.
+          const liveCache = new Map<number, BandGeo>()
+          const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
-          const clearStepCache = () => stepCache.clear()
+          const clearStepCache = () => { stepCache.clear(); liveCache.clear() }
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
-          // ── FROZEN PAGES through reflow zoom (round-5, Peter: "can we just enforce that the
-          // pages stay FIXED in reflow zoom? ... the only time they need to be remeasured is if
-          // we're so zoomed out that the whole page is in view") ────────────────────────────────
-          // DURING a gesture the panel/band geometry is NEVER re-derived from the live DOM:
-          //   • FROZEN (default — page taller than the viewport): zero writes per step. The
-          //     panels hold their gesture-start geometry; text reflows within, held by the
-          //     content anchor. A visible edge drifts smoothly with the anchor's scroll
-          //     compensation — no repaint, no flicker, nothing to measure.
-          //   • SCALED CHAIN (zoomed far out — whole page fits the viewport): panels are
-          //     SYNTHESIZED from the frozen geometry by pure math — page regions scale by
-          //     (zoom/z0)², gap bands keep their fixed px, the chain rebuilds from the sheet's
-          //     top padding (which doesn't scale). At the mode boundary the factor is exactly
-          //     the frozen ratio, so the handoff frame is CONTINUOUS — the visible top/bottom
-          //     edges stay anchored where they are and newly-visible pages chain off them
-          //     (Peter's refinement: "anchor the top and bottom of the fixed pages"); no edge
-          //     can teleport mid-gesture. Same (z/z0)² model as the --iw-cis-scale placeholders,
-          //     so the synthetic panels track the approximate text to line-quantization error.
-          // The ONE exact re-derivation happens at the ATOMIC EXIT/settle (class off → the
-          // stepCache path below), where the full layout is real. No per-gesture cache exists —
-          // the frozen case needs none, and the scaled case is arithmetic.
-          interface ZoomGesture {
-            geo0: BandGeo; padTop: number; avgH0: number; liveMode: boolean
-            // The scaled chain's basis: captured at the MODE HANDOFF (not gesture start) — the
-            // frozen positions are correct-at-z0 but the screen shows them NOW, so the chain must
-            // scale from what is APPLIED, anchored at the zoom where the mode flipped: factor
-            // (z/zBase)² keeps the handoff frame byte-identical (factor 1) and every later frame
-            // continuous. The constant frozen drift is preserved (not corrected) mid-gesture —
-            // panels track the text's MOTION exactly; the settle removes the residual.
-            chain: { base: BandGeo; zBase: number } | null
-          }
-          let zoomGesture: ZoomGesture | null = null
-          let lastAppliedGeo: BandGeo | null = null // most recent applyBands input (rest truth at gesture start)
-          const scaleChain = (base: BandGeo, padTop: number, factor: number): BandGeo => {
-            const tops: number[] = []
-            let cursor = padTop // sheet top padding — constant px, not part of any page region
-            for (let i = 0; i < base.tops.length; i++) {
-              const regionTop = i === 0 ? padTop : base.tops[i - 1] + base.heights[i - 1]
-              const region = Math.max(0, base.tops[i] - regionTop)
-              cursor += region * factor
-              tops.push(cursor)
-              cursor += base.heights[i] // the gap band itself — fixed px
-            }
-            const n = base.tops.length
-            const lastRegion = n ? Math.max(0, base.total - (base.tops[n - 1] + base.heights[n - 1])) : Math.max(0, base.total - padTop)
-            return { tops, heights: base.heights, total: cursor + lastRegion * factor }
-          }
+          // ── ATOMIC TEXT+BAND through reflow zoom (round-6, Peter: "Zooming should change text
+          // and page atomically ... the gapped page arbitrarily joining up or the text flowing
+          // over the water") ──────────────────────────────────────────────────────────────────
+          // The round-5 FREEZE (bands held while text reflowed) regressed exactly this: a page's
+          // rendered height changes NON-uniformly with zoom (font-reflow rewraps → discrete
+          // lines-per-page jumps, which no smooth (z/z0)² factor can track), so a frozen band no
+          // longer matched its page — the gap collapsed or text overran the sheet onto the water.
+          // Peter's ruling: ATOMICITY BEATS FREEZE. So the bands are re-derived in the SAME task
+          // as every reflow step — the original round-3/4 contract. Correctness guarantee: the
+          // VISIBLE page bands are read from the live DOM, where content-visibility renders
+          // on-screen blocks EXACTLY (only off-screen — invisible — pages sit at placeholder
+          // heights), so what the eye sees is pixel-matched to the reflowed text every frame. A
+          // cache hit is pure style writes (instant "paint from math"); a miss reads the bands
+          // live in this same task, riding the layout Scroll.tsx's anchor read already forced.
           const onZoomStep = (e: Event) => {
             const d = (e as CustomEvent).detail as { step?: number; surface?: Element; z0?: number; resync?: boolean } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
             const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
-            if (placeholders) {
-              // Mid-gesture step (or the guard's wave resync — irrelevant to frozen/synthetic
-              // panels, which never derive from the live DOM; the guard's re-pin still runs).
-              if (!zoomGesture) {
-                if (!lastAppliedGeo || !lastAppliedGeo.tops.length) { cacheStats.frozen++; return } // nothing applied yet — settle trues
-                const g0 = lastAppliedGeo
-                const padTop = parseFloat(getComputedStyle(sheet).paddingTop) || 0
-                let regions = padTop ? g0.tops[0] - padTop : g0.tops[0]
-                for (let i = 1; i < g0.tops.length; i++) regions += g0.tops[i] - (g0.tops[i - 1] + g0.heights[i - 1])
-                zoomGesture = { geo0: g0, padTop, avgH0: Math.max(1, regions / g0.tops.length), liveMode: false, chain: null }
-              }
-              const z0 = typeof d.z0 === 'number' && d.z0 > 0 ? d.z0 : 1
-              const factor = (stepToZoom(d.step) / z0) ** 2
-              const estH = zoomGesture.avgH0 * factor
-              const vp = phoneLike() ? window.innerHeight : (surfaceOf()?.clientHeight ?? window.innerHeight)
-              // Hysteresis: enter the scaled-chain mode when a whole page fits comfortably,
-              // leave it only when pages are solidly taller again — no oscillation at the edge.
-              if (!zoomGesture.liveMode && estH < vp * 0.95) {
-                zoomGesture.liveMode = true
-                // Handoff: chain from what is APPLIED right now, anchored at THIS zoom — the
-                // handoff frame is factor 1 ≡ no write delta; visible edges cannot teleport.
-                if (lastAppliedGeo) zoomGesture.chain = { base: lastAppliedGeo, zBase: stepToZoom(d.step) }
-              } else if (zoomGesture.liveMode && estH > vp * 1.15) {
-                zoomGesture.liveMode = false
-                zoomGesture.chain = null // re-entry re-chains from the then-applied positions
-              }
-              if (!zoomGesture.liveMode || !zoomGesture.chain) { cacheStats.frozen++; return } // FROZEN: zero band/panel work
-              cacheStats.scaled++
-              const c = zoomGesture.chain
-              applyBands(scaleChain(c.base, zoomGesture.padTop, (stepToZoom(d.step) / c.zBase) ** 2)) // pure style writes — no layout reads
+            const cache = placeholders ? liveCache : stepCache
+            if (d.resync) {
+              // The zoom guard (Scroll.tsx) detected a content-visibility relevancy wave between
+              // commits: the layout shifted, so every placeholder-regime entry is stale — drop
+              // them and re-derive the bands from the CURRENT layout in this same task.
+              liveCache.clear()
+              const geo = readBands()
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
               return
             }
-            // Class off — the ATOMIC EXIT / settle / rest path: apply the step's TRUE geometry.
-            zoomGesture = null
-            const hit = stepCache.get(d.step)
+            const hit = cache.get(d.step)
             if (hit) { cacheStats.hits++; applyBands(hit) }
             else {
               // MISS → measure the bands LIVE, synchronously, in this same task. Scroll.tsx forces
-              // the step's layout (its anchor read) before dispatching, so readBands' rect reads
-              // ride it — visually identical to a hit, one single-pass read dearer.
+              // the step's layout (its anchor read) before dispatching, so readBands' single-pass
+              // rect reads ride it — visually identical to a hit, one layout flush dearer. Bands
+              // and text land in the SAME frame — no join, no overflow.
               cacheStats.misses++
               const geo = readBands()
-              if (geo) { applyBands(geo); stepCache.set(d.step, geo) }
+              if (geo) { applyBands(geo); cache.set(d.step, geo) }
             }
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
@@ -1064,13 +1111,95 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             lastInputSig = inputSig
             const measureT0 = performance.now() // perflog: the full canonical-measure cost (phone lag hunt)
 
+            // ── ARITH FIRST (2026-07-16) ──
+            // The arithmetic path is the CHEAPEST acquisition (no reflow at all), so it must be
+            // tried BEFORE the scoped measure — not after. It used to live in the FULL path only,
+            // which meant it ran on the FIRST measure and never again: the first DOM measure sets
+            // incState, every later measure then took the SCOPED branch, and the arith branch was
+            // unreachable. That is fatal now that citation boxes WARM UP (they are harvested BY a
+            // DOM measure), because the one measure arith ever got was the one before any box
+            // existed — it deferred, and nothing ever re-tried. Trying arith first makes the
+            // warm-up self-healing: measure 1 defers + harvests, measure 2 is arithmetic.
+            // On success incState is cleared: the incremental base belongs to the DOM regime, and a
+            // later arith FAILURE should re-establish it with one full measure rather than build a
+            // scoped delta on a base the arith era never maintained.
+            let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
+            let arithMeasured = false
+
+            // ── 1. SCOPED ARITH — the cheapest acquisition there is ──
+            // Only the CHANGED blocks are laid out (arithmetically, ~0.1ms each); everything else
+            // reuses its cached entry at telescoped tops. No forced context, no reflow, no DOM read
+            // at all — which is the whole point: the DOM scoped path's cost IS its forced canonical
+            // context (two full-document reflows on phone, 400–1100ms). Whole-doc arith below still
+            // re-lays every block each pause; this re-lays only what the writer just touched.
+            //
+            // It runs BEFORE whole-doc arith, and unlike that path it PRESERVES incState (it
+            // maintains the incremental base exactly as the DOM scoped path does), so consecutive
+            // typing pauses keep hitting it instead of collapsing back to a full measure.
+            if (arithLayoutOn() && !fluid && incState && !forceFullOnce && !(renderFillOn() && phoneLike())) {
+              const surfaceA = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
+              const lhA = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
+              const incA = computeScoped(
+                view, incState, lineCache, pageH, topM, gapped,
+                {
+                  surfaceEl: surfaceA,
+                  scroller: null,
+                  clearGapsIn: () => { /* arith reads no DOM — nothing to clear */ },
+                },
+                (r) => { incStats.reasons[`arith:${r}`] = (incStats.reasons[`arith:${r}`] ?? 0) + 1 },
+                {
+                  contentW: Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64,
+                  ratio: lhA ? parseFloat(lhA) : (phoneLike() ? 1.55 : 1.618),
+                  paraSpacingEm: getParaSpacingEm(),
+                  measure: arithMeasureFn,
+                  fontLoaded: arithFaceLoaded,
+                  citationStyle: getCitationStyle(),
+                  bibEpoch: bibProvider.getVersion(),
+                },
+              )
+              if (incA) {
+                incStats.inc++
+                incState = incA.meta
+                if (incA.sig !== lastLayoutSig) { lastLayoutSig = incA.sig; lastSet = incA.set }
+                ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = incA.sig
+                ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = true
+                view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
+                if (gapped) schedulePaint()
+                announceMeasured()
+                notePerf('page-measure-scoped-arith', performance.now() - measureT0)
+                return
+              }
+            }
+
+            // ── 2. WHOLE-DOC ARITH ──
+            if (arithLayoutOn() && !fluid && !forceFullOnce
+                && !canonicalIsLive((view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null)) {
+              const contentW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
+              const lhRaw = getComputedStyle(view.dom as HTMLElement).getPropertyValue('--inkwave-lh').trim()
+              const ratio = lhRaw ? parseFloat(lhRaw) : (phoneLike() ? 1.55 : 1.618)
+              const am = buildArithMeasure(view.state.doc, contentW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, 18, getCitationStyle(), bibProvider.getVersion())
+              if (am) {
+                ;(window as unknown as { __iwArithDump?: unknown }).__iwArithDump = {
+                  blockStarts: am.blocks.slice(0, 4).map((b) => b.start),
+                  b0lines: am.lines.filter((l) => l.blockIdx === 0).slice(0, 4).map((l) => l.pos),
+                  nBlocks: am.blocks.length, nLines: am.lines.length,
+                }
+                const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
+                measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
+                arithMeasured = true
+                notePerf('page-measure-arith', performance.now() - measureT0)
+              }
+            }
             // ── SCOPED FIRST (round-6, Peter's spec): the REAL forced canonical context with the
             // live-reflow window (.iw-zoom-live content-visibility) — exact local measurement,
             // ~one-screenful layout cost, cached geometry + one delta for the distance. A bail
             // (null) falls through to the full measure below (which refreshes the base); a FULL
             // measure is also idle-scheduled after every scoped one and forced before print.
             // 'inkwave:pagCheck=1' runs BOTH and compares signatures.
-            if (!fluid && incState && !forceFullOnce) {
+            // Decision 1: render-fill on phone always takes the FULL path (the render-width arith
+            // measure below) so breaks never flip between the canonical scoped measure and the
+            // render-width full one — the scoped path is a canonical regime, incompatible here.
+            if (!arithMeasured && !fluid && incState && !forceFullOnce && !(renderFillOn() && phoneLike())) {
               const surfaceEl0 = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
               const editorEl0 = view.dom as HTMLElement
               const scroller0 = surfaceEl0 && surfaceEl0.classList.contains('iw-fill') && !surfaceEl0.classList.contains('is-phone')
@@ -1113,6 +1242,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 try { pagCheck = localStorage.getItem('inkwave:pagCheck') === '1' } catch { /* private */ }
                 if (!pagCheck) {
                   incStats.inc++
+                  // Publish the scoped sig too: this path RETURNS early, so without this a probe
+                  // reading __iwPagSig sees the last FULL measure's (pre-edit) sig and compares two
+                  // different doc states. Diagnostic only.
+                  ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = inc.sig
+                  ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = false
                   incState = inc.meta
                   if (inc.sig !== lastLayoutSig) {
                     lastLayoutSig = inc.sig
@@ -1137,6 +1271,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
                 incStats.bail++
               }
             }
+            const wasForceFull = forceFullOnce // capture before reset — a print/export/measure-now pass
             forceFullOnce = false
 
             // CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at
@@ -1158,6 +1293,45 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             // per page changed with the editor zoom at measure time — the "different amount of
             // text per page depending on how zoomed in you are" regression (2026-07-09). Passing
             // no paper/sheet keeps width + margins live; zoom/magnify/font are still pinned.
+            // ── Decision 6: ARITHMETIC canonical acquisition (flag inkwave:arithLayout) ──
+            // When the whole doc is arithmetic-eligible text, compute lines+blocks reflow-free and
+            // SKIP forceCanonicalContext (+ both its full-document reflows) — the phone per-pause
+            // reflow win. Gated to !canonicalIsLive (phone / zoomed): desktop-at-defaults already
+            // skips the reflow, so there's nothing to win and the DOM path stays authoritative.
+            // ANY ineligible block (heading/citation/inline-math/list/rule/refList) ⇒ buildArithMeasure
+            // returns null ⇒ the DOM path below runs. The lazy full DOM re-verify + pagCheck are the
+            // safety net; meta stays null (the next scoped measure bails to full, which is this cheap
+            // arith path again).
+            // ── Decision 1: RENDER-FILL phone splits (flag inkwave:renderFill) ──
+            // Live phone editor only, never print/export (forceFullOnce). Measure at the LIVE RENDER
+            // width (not canonical A4) so mid-paragraph splits fill the last line. Zoom-independent
+            // (read at the live content width, font base 18 — like canonical, only the WIDTH differs).
+            // Any ineligible block ⇒ null ⇒ falls through to the canonical paths below.
+            if (renderFillOn() && phoneLike() && !fluid && !wasForceFull) {
+              const edEl = view.dom as HTMLElement
+              const cs = getComputedStyle(edEl)
+              const renderW = edEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+              // Measure at the LIVE RENDER font — phone applies its ×1.25 root scale + its own
+              // line-height, so the base is NOT the canonical 18px (that's the whole point: render,
+              // not canonical). ratio = used line-height / font-size; base = the live font-size.
+              const basePx = parseFloat(cs.fontSize) || 18
+              const lhPx = parseFloat(cs.lineHeight)
+              const ratio = lhPx && basePx ? lhPx / basePx : 1.618
+              const am = renderW > 40
+                // atomBoxes=true: an atom is eligible iff it SUPPLIES a box. Citations now do (the
+                // opaque-box cache); inline math still supplies none, so it defers on !box.
+                ? buildArithMeasure(view.state.doc, renderW, ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, basePx, getCitationStyle(), bibProvider.getVersion())
+                : null
+              if (am) {
+                const { decos, sig } = computeBreaks(am.lines as unknown as MeasuredLine[], am.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos)
+                measured = { set: DecorationSet.create(view.state.doc, decos), sig, meta: null }
+                arithMeasured = true
+                notePerf('page-measure-renderfill', performance.now() - measureT0)
+              }
+            }
+            let tClear = 0, tCompute = 0, tRestore = 0, tDispatch = 0 // perflog phase attribution (DOM path)
+            let tPhase = performance.now()
+            if (!arithMeasured) {
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
             const editorEl = view.dom as HTMLElement
             const restore = !fluid && canonicalIsLive(surfaceEl)
@@ -1176,9 +1350,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               ? surfaceEl : null
             const savedTop = scroller ? scroller.scrollTop : window.scrollY
             const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
-            let measured: { set: DecorationSet; sig: string; meta: IncMeta | null } = { set: DecorationSet.empty, sig: 'empty', meta: null }
-            let tClear = 0, tCompute = 0, tRestore = 0, tDispatch = 0 // perflog phase attribution
-            let tPhase = performance.now()
+            tPhase = performance.now()
             try {
               // The gap widgets are display:block, so they FORCE line breaks — which means a word
               // can't wrap back across a page boundary, and measuring the line layout with them
@@ -1205,7 +1377,10 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               else window.scrollTo(savedLeft, savedTop)
               tRestore = performance.now() - tPhase; tPhase = performance.now()
             }
+            } // end DOM-measure path (skipped when arithMeasured)
             const { set, sig } = measured
+            ;(window as unknown as { __iwPagSig?: string; __iwPagArith?: boolean }).__iwPagSig = sig
+            ;(window as unknown as { __iwPagArith?: boolean }).__iwPagArith = arithMeasured
             incStats.full++
             if (!fluid) incState = measured.meta // base for the next incremental (null when poisoned)
             {
@@ -1302,7 +1477,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           }
           const incStats = { inc: 0, full: 0, bail: 0, reasons: {} as Record<string, number> } // probe counters
           ;(window as unknown as { __iwPagInc?: typeof incStats }).__iwPagInc = incStats
-          const clearLineCache = () => { lineCache = new WeakMap(); incState = null }
+          // Citation boxes are keyed by citekeys+style+bib-epoch — which covers a hydration or a
+          // style switch — but NOT a change to the canonical CONTEXT itself (fonts finish loading,
+          // page settings/paper change): the same label then renders at a different width under the
+          // same key. So the boxes die exactly where the line cache does.
+          const clearLineCache = () => { lineCache = new WeakMap(); incState = null; clearCiteBoxes() }
           const fontCb = () => { if (!destroyed) { clearLineCache(); clearStepCache(); forceRecompute() } }
           if (typeof document !== 'undefined' && document.fonts) {
             document.fonts.ready.then(fontCb).catch(() => {})
@@ -1343,8 +1522,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // desktop only — precompute never runs on phone).
           const zoomCb = () => {
             if (destroyed) return
-            zoomGesture = null // gesture over — the next pinch freezes from the fresh rest geometry
-            if (phoneLike()) return // exit already applied bands; nothing settles-time on phone
+            liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next gesture
+            if (phoneLike()) return // exit already applied exact bands; nothing settles-time on phone
             zoomWarmStart = performance.now()
             zoomWarmUntil = zoomWarmStart + 2000
             scheduleIdleFull(600)

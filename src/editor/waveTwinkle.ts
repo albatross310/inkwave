@@ -922,32 +922,49 @@ function genList(rnd: () => number, kind: 'sparks' | 'dashes'): Inst[] {
   const rows = Math.ceil(vh / 140) + 1
   const out: Inst[] = []
   for (let r = 0; r < rows; r++) {
-    for (const g of ['a', 'b'] as Group[]) {
-      if (kind === 'sparks') {
+    if (kind === 'sparks') {
+      for (const g of ['a', 'b'] as Group[]) {
         const n = Math.floor(vw / SPARK_ROW_PX + rnd())
         for (let i = 0; i < n; i++) out.push(genSpark(rnd, g, r, stripW))
-      } else {
-        const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // blinking marks (visible-density parity)
-        for (let i = 0; i < nB; i++) out.push(genDash(rnd, g, r, stripW, 'blink'))
-        const nR = Math.floor(stripW / STATIC_ROW_PX + rnd()) // the resting texture, strip-wide
-        for (let i = 0; i < nR; i++) out.push(genDash(rnd, g, r, stripW, 'rest'))
       }
+    } else {
+      // SINGLE BAND (2026-07-15 — Peter's short-line spec: wave marks parallel to the thick line,
+      // on ONE band between the thick and thin line). Generating BOTH crest groups painted marks
+      // in TWO stacked y-bands per 140px row (group 'a' ≈ the thick line, group 'b' ≈ the thin
+      // line — the "two or more layers of short lines built up" Peter reported, root cause B).
+      // Dashes now use group 'a' ONLY — one band, thick-line-parallel. Sparks (glitters) keep both
+      // crests; only the wave-MARK field collapses to one band.
+      const g: Group = 'a'
+      const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // blinking marks (visible-density parity)
+      for (let i = 0; i < nB; i++) out.push(genDash(rnd, g, r, stripW, 'blink'))
+      const nR = Math.floor(stripW / STATIC_ROW_PX + rnd()) // the resting texture, strip-wide
+      for (let i = 0; i < nR; i++) out.push(genDash(rnd, g, r, stripW, 'rest'))
     }
   }
   return out
 }
 
+// POOL SEED. Normally Date.now() — every load gets a fresh geography. The wave-video GENERATOR
+// (scripts/wave-video/generate.mjs) overrides it via `window.__iwTwkSeed` so the LOOP clip and the
+// BRAKE clip — captured in separate browser sessions — bake the IDENTICAL pool; otherwise the
+// phase-0 loop→brake swap teleports every mark/glitter (measured 5.8% of pixels). Test seam only:
+// unset in the app, so production behaviour is byte-identical to Date.now() seeding.
+const poolSeed = (salt: number): number => {
+  const s = (window as unknown as { __iwTwkSeed?: number }).__iwTwkSeed
+  return ((s ?? Date.now()) ^ salt) >>> 0
+}
+
 function ensureSchedules(): void {
   if (!defs) return
   const vw = window.innerWidth
-  const rnd = mulberry32((Date.now() ^ 0x51ed270b) >>> 0)
+  const rnd = mulberry32(poolSeed(0x51ed270b))
   for (const list of [defs.sparks, defs.dashes])
     for (const d of list) if (d.role === 'blink' && !d.slots) buildSchedule(rnd, d, vw)
 }
 
 function generate(): void {
   stripW = Math.ceil((window.innerWidth + 2 * PAD) / 140) * 140 // ≡ 0 (mod 140) — the recycle invariant
-  const rnd = mulberry32(Date.now() >>> 0)
+  const rnd = mulberry32(poolSeed(0))
   defs = { sparks: genList(rnd, 'sparks'), dashes: genList(rnd, 'dashes') }
   ensureSchedules()
   ;(window as unknown as { __iwTwkPool?: unknown }).__iwTwkPool = defs // read-only debug/probe hook

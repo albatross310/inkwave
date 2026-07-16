@@ -18,7 +18,7 @@ import { upsertMeta } from '../storage/indexeddb'
 import { RedHighlightExtension, SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
 import { PaginationExtension } from './extensions/PaginationExtension'
 import { ListStyle } from './extensions/ListStyle'
-import { gappedPagesEnabled } from './pageView'
+import { gappedPagesEnabled, paginationEnabled } from './pageView'
 import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
@@ -274,8 +274,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // deferred-tick + lazy-doc-build machinery.
   const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
   const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const scasOffRef = useRef(false)
-  useEffect(() => { try { scasOffRef.current = localStorage.getItem('inkwave:scasOff') === '1' } catch { /* private */ } }, [])
+  // ENGINE kill-switch (diagnostic/benchmark), DISTINCT from the user's display toggle. `inkwave:
+  // scasOff` (Settings "SCAS suggestions") only hides the red words — the engine keeps running so the
+  // flagged words are STILL REMEMBERED (Peter's intent). Disabling the whole tick is a separate
+  // opt-out, `inkwave:scasEngineOff`, so "hide the highlights" can never stop the provenance memory.
+  const scasEngineOffRef = useRef(false)
+  useEffect(() => { try { scasEngineOffRef.current = localStorage.getItem('inkwave:scasEngineOff') === '1' } catch { /* private */ } }, [])
   const scasHadDeletionRef = useRef(false)    // deletions accumulate across the tick debounce window
   // Phone windowed SCAS tick: the debounce window's accumulated edit range (current-doc coords,
   // remapped through each transaction) + the caret position at the LAST tick (a word commits when
@@ -807,7 +811,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // the tall gap widgets + sheet panels, ungapped gets zero-size break markers the PageGuides
       // rules + the print stylesheet break at. Same breaks either way, so toggling the switch
       // never moves content across pages.
-      PaginationExtension.configure({ enabled: true, gapped: gappedPagesEnabled() }),
+      PaginationExtension.configure({ enabled: paginationEnabled(), gapped: gappedPagesEnabled() }),
       ScasSlotMark,
       CommentMark,
       InsertionMark,
@@ -912,9 +916,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (wt >= wf) scasWinRef.current = { from: wf, to: wt }
         }
         if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
-        // A/B KILL SWITCH (Peter, 2026-07-10, diagnosing wave-like typing lag): localStorage
-        // inkwave:scasOff = '1' disables the whole SCAS tick (scan + decorations). Diagnostic only.
-        if (scasOffRef.current) return
+        // ENGINE KILL SWITCH (diagnostic/benchmark only): inkwave:scasEngineOff='1' disables the whole
+        // SCAS tick (scan + decorations). NB the USER's "SCAS suggestions" toggle (inkwave:scasOff) is
+        // a separate DISPLAY-only flag and must NOT stop the tick — the words stay remembered.
+        if (scasEngineOffRef.current) return
         // PHONE: the tick's engine scan + decoration rebuild is O(doc) — ~7ms/10k words in Node,
         // several × slower on a phone CPU (tens of ms on a thesis-length doc), and at 120ms it
         // landed between keystrokes during normal typing. 250ms keeps it in genuine gaps; verdicts

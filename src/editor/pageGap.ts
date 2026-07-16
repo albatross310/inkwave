@@ -22,7 +22,7 @@ export const phoneLike = () => typeof matchMedia !== 'undefined' && matchMedia('
 // an (empty) band marker at the gap offset so the paint() pass can measure exactly where the
 // transparent gap is and lay the parchment sheet panels around it. No visible parts of its own —
 // the panels paint the parchment, the page number is a footer inside each panel.
-export function gapEl(botMargin: number, topMargin: number, gapped: boolean): HTMLElement {
+export function gapEl(botMargin: number, topMargin: number, gapped: boolean, continuation = false): HTMLElement {
   // SPAN, not div: a page break can land mid-paragraph, and a block-level <div> is invalid as a
   // child of <p> — the browser then reparents/splits the paragraph in the rendered DOM, scrambling
   // caret placement (the caret jumps across the gap, edits land on the wrong page). A <span> is valid
@@ -55,5 +55,14 @@ export function gapEl(botMargin: number, topMargin: number, gapped: boolean): HT
   band.style.top = `${Math.round(botMargin) - bleed}px`
   band.style.height = `${gap + 2 * bleed}px`
   el.appendChild(band)
+  // Decision 1: dotted CONTINUATION bracket at a mid-paragraph split — a small downward-opening
+  // dotted bracket (⊓) just below the last line, indicating the paragraph continues on the page
+  // below. Styled + theme-aware in index.css (.inkwave-continuation-bracket); hidden in print.
+  if (continuation) {
+    const brk = document.createElement('span')
+    brk.className = 'inkwave-continuation-bracket'
+    brk.setAttribute('aria-hidden', 'true')
+    el.appendChild(brk)
+  }
   return el
 }

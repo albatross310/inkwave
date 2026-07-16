@@ -11,3 +11,10 @@ export function gappedPagesEnabled(): boolean {
 export function setGappedPages(on: boolean): void {
   try { localStorage.setItem(KEY, on ? '1' : '0') } catch { /* private mode */ }
 }
+
+// ABLATION FLAG (mirrors inkwave:scasOff) — disable the whole PaginationExtension to measure what
+// pagination costs per keystroke. `inkwave:pagOff=1` turns it off; default ON. It's an opt-out for
+// benchmarking/diagnosis, NOT a user feature: with it off there are no page breaks or gap widgets.
+export function paginationEnabled(): boolean {
+  try { return localStorage.getItem('inkwave:pagOff') !== '1' } catch { return true }
+}

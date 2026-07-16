@@ -293,7 +293,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       ) : usingCsl ? (
         <div className="csl-bib-body" style={{ fontSize: '0.92em', lineHeight: 1.38 }} onClick={onBodyClick}>
           {entries.map(e => (
-            <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.1em' }}>
+            <div key={e.id} className="iw-bib-entry" style={{ marginBottom: '0.6em' }}>
               <div ref={styleEntry} dangerouslySetInnerHTML={{ __html: e.html }} />
               {openNotes.has(e.id) && <NotePanel value={draft[e.id] ?? e.note} onChange={v => onNoteChange(e.id, v)} onDelete={() => onDeleteNote(e.id)} />}
             </div>
@@ -302,7 +302,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
       ) : (
         <div style={{ fontSize: '0.92em', lineHeight: 1.5 }} onClick={onBodyClick}>
           {plain.map(p => (
-            <div key={p.id} className="iw-bib-entry" style={{ marginBottom: '0.1em' }}>
+            <div key={p.id} className="iw-bib-entry" style={{ marginBottom: '0.6em' }}>
               <p id={bibAnchorId(p.id)} style={{ margin: 0, paddingLeft: '1.5em', textIndent: '-1.5em' }}>
                 {p.text}
                 {p.occ > 0 && (

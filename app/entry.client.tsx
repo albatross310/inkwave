@@ -9,6 +9,26 @@ console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:
 import { applyTheme } from '../src/editor/theme'
 applyTheme()
 
+// Flags are togglable via URL so they can be flipped ON A PHONE without a console (mirrors the
+// ?auth sticky pattern in auth/config): `?<flag>` sets it sticky ON ('1'), `?<flag>=off` sets it
+// OFF ('0'). Runs before the app reads any flag. `=off` must WRITE '0' (not remove the key) —
+// arithLayout/renderFill now default ON (they read `!== '0'`), so clearing would re-enable them.
+// e.g. `/?renderFill=off` to opt out of phone render-fill, `/?waveVideo` to try the water video.
+;(() => {
+  try {
+    const params = new URLSearchParams(location.search)
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo']) {
+      const v = params.get(f)
+      if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
+      // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
+      // Peter tests on an iPhone 8 with no Mac/Web Inspector, and our AV1→H.264→CSS fallback chain
+      // is otherwise SILENT and looks identical to the CSS water he's judging).
+      else if (v === 'debug') localStorage.setItem(`inkwave:${f}`, 'debug')
+      else if (params.has(f)) localStorage.setItem(`inkwave:${f}`, '1')
+    }
+  } catch { /* private mode / no localStorage */ }
+})()
+
 // Wrap the app in Clerk ONLY when configured (paid-tier auth, M6). Dynamic import keeps Clerk out
 // of the bundle entirely when unconfigured, and entry.client is client-only so it never touches
 // the prerender/SSR build. The publishable key is public (safe in the client).
@@ -111,11 +131,29 @@ void bootstrap()
       const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
         ? Promise.resolve()
         : new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
+      // The WAVE VIDEO (flag `inkwave:waveVideo`) starts its fetch+decode NOW so the clip is ready
+      // the moment the gate opens — but it is NOT a gate condition and must NOT be awaited here:
+      // it inserts its <video> into the React-rendered `.iw-wave-twinkles` host and therefore waits
+      // for this gate itself (post-gate = post-hydration, or React reconciles the element away).
+      // Awaiting it here would deadlock. See src/editor/waveVideo.ts.
+      let videoFlag = false
+      try { const v = localStorage.getItem('inkwave:waveVideo'); videoFlag = v === '1' || v === 'debug' } catch { /* private mode */ }
+      if (videoFlag) void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {})
       const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
       void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
     }
   }
 }
+
+// ─── Wave video (EXPERIMENTAL — localStorage `inkwave:waveVideo` = '1') ───
+// Fresh loads fold the video INTO the gate above (atomic). The WARM/bfcache path skips that gate
+// (already stamped), so start it here too — prepareWaveVideo is idempotent (started guard) and
+// attaches post-gate. See src/editor/waveVideo.ts.
+try {
+  const wv = localStorage.getItem('inkwave:waveVideo')
+  if ((wv === '1' || wv === 'debug') && document.documentElement.classList.contains('iw-water-ready'))
+    void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo())
+} catch { /* private mode */ }
 
 // Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are
 // the only reliable hook (Safari ignores user-scalable=no in-browser). Our own pinch handlers use

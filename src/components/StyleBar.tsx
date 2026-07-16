@@ -5,7 +5,7 @@
 // the last-used option (font + size are HOLD-ONLY — a plain click does nothing).
 // Menu items trigger on pointer-up for immediacy.
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 
@@ -29,23 +29,55 @@ const FONTS = [
   { group: 'Identity', label: 'Garamond',  css: "'EB Garamond', Georgia, serif" },
   // Serif — 'Times' and 'Arial' are certified CLONES (TeX Gyre Termes/Heros, GUST licence);
   // labels are display-only and decoupled from the css stack (Peter: "call it Times").
-  { group: 'Serif', label: 'Times',    css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
+  // 'Romans', not 'Times' (Peter, 2026-07-16): "Times"/"Times New Roman" are Monotype trademarks and
+  // ubiquity STRENGTHENS a mark rather than weakening it. "Roman" is the generic typographic term for
+  // upright type — nobody owns it — and it's honest: TeX Gyre Termes descends from Nimbus Roman.
+  // ('Arial' below is the same exposure, and arguably worse: a coined word is inherently the stronger
+  // mark. Left as-is on Peter's call; the safe labels there are Heros / Grotesque / Swiss.)
+  { group: 'Serif', label: 'Romans',   css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
   { group: 'Serif', label: 'Crimson',  css: "'Crimson Pro', 'Times New Roman', serif" },
   { group: 'Serif', label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
-  { group: 'Serif', label: 'Lora',     css: "'Lora', Cambria, 'Palatino Linotype', Georgia, serif" },
-  { group: 'Serif', label: 'Gelasio',  css: "'Gelasio', Georgia, serif" },
   { group: 'Serif', label: 'Gentium',  css: "'Gentium Plus', 'Palatino Linotype', serif" },
+  // DROPPED 2026-07-16 (Peter): Lora — its only justification was being the "Cambria-warmth
+  // stand-in" while Caladea kept failing the (flawed) certification; Caladea now ships, so Lora was
+  // a stand-in for a font we have. Gelasio — a Georgia metric clone, the least refined face here.
+  // Both faces are also removed from fetch-fonts, so legacy marks fall back down their own stacks
+  // (Lora → Cambria/Palatino/Georgia, Gelasio → Georgia) — the documented fallback-tail convention.
+  // Gentium stays despite being specialised: philosophy users need its Greek/Latin coverage.
+  // Added 2026-07-16 after the re-certification retracted r7's FAILED list (see CLAUDE.md): r7
+  // measured with ligatures ON while the editor renders liga OFF, so both of these were rejected
+  // for a divergence that can't occur here. Baskerville = the genre Peter had let go; Caladea =
+  // the Cambria-warmth slot (its own name, not the trademark — the TeX Gyre caveat).
+  { group: 'Serif', label: 'Baskerville', css: "'Libre Baskerville', Baskerville, 'Times New Roman', serif" },
+  { group: 'Serif', label: 'Caladea',     css: "'Caladea', Cambria, 'Palatino Linotype', Georgia, serif" },
   // Display — headings/titles
   { group: 'Display', label: 'Cormorant', css: "'Cormorant Garamond', 'EB Garamond', serif" },
   { group: 'Display', label: 'Fraunces',  css: "'Fraunces', Georgia, serif" },
   // Slab
   { group: 'Slab', label: 'Bitter', css: "'Bitter', 'Roboto Slab', Georgia, serif" },
+  // Zilla Slab over Roboto Slab/Aleo/Arvo (2026-07-16): furthest from Bitter (x/cap 0.682 vs 0.771)
+  // AND it has real italics — Roboto Slab synthesises both obliques and is literally Bitter's own
+  // fallback tail (maximum overlap); Arvo genuinely FAILS certification (Δ12px at 96px).
+  { group: 'Slab', label: 'Zilla',  css: "'Zilla Slab', 'Roboto Slab', Georgia, serif" },
   // Sans
-  { group: 'Sans', label: 'Arial',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
+  // 'Swiss', not 'Arial' (Peter, 2026-07-16). Arial was the worse trademark exposure of the two: a
+  // coined word is inherently the stronger mark. 'Swiss' names the genre/movement (the International
+  // Typographic Style) — geographic-descriptive, so a weak mark nobody meaningfully owns — and it's
+  // honest: TeX Gyre Heros is a neo-grotesque descending from Nimbus Sans, the Helvetica clone.
+  { group: 'Sans', label: 'Swiss',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
   { group: 'Sans', label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  // Inter (2026-07-16) — shipped for QUALITY, not contrast: measured x/cap 0.712 is IDENTICAL to
+  // Heros, i.e. the same neo-grotesque voice, just better drawn and screen-optimised with far wider
+  // coverage. Carlito (0.738) + Atkinson (0.735) are the humanists already covering the other voice.
+  { group: 'Sans', label: 'Inter',    css: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" },
   { group: 'Sans', label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
   // Mono — code / logic notation
   { group: 'Mono', label: 'JetBrains', css: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace" },
+  // Courier Prime (2026-07-16, Peter's pick — and it earns it): x/cap 0.776, the highest of the four
+  // monos, which is precisely Courier's weakness (thin, small-bodied) redesigned away. Real 400/700/
+  // italic/bold-italic. Its own name, so no "Courier New" trademark exposure. All monos share a
+  // 0.6em advance, so swapping mono can't change line lengths — the contrast here is voice.
+  { group: 'Mono', label: 'Courier',   css: "'Courier Prime', 'Courier New', Courier, monospace" },
 ]
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
@@ -370,6 +402,23 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
+  // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 17 families
+  // in one column was a long scroll. Group headers span the full row (gridColumn 1/-1) so they stay
+  // readable separators rather than becoming cells. It's the only popup wider than its button, so
+  // its left edge is clamped to the viewport (above() anchors to the button and would overflow the
+  // right edge on a phone when the S button sits right-of-centre).
+  const FONT_COLS = phone ? 3 : 2
+  const FONT_PANEL_W = phone ? 324 : 272
+  const fontPanelStyle = (): React.CSSProperties => {
+    const pos = above(fontBtnRef)
+    const vw = window.innerWidth
+    const left = Math.min(typeof pos.left === 'number' ? pos.left : 8, Math.max(8, vw - FONT_PANEL_W - 8))
+    return {
+      ...pos, ...box(FONT_PANEL_W), left,
+      display: 'grid', gridTemplateColumns: `repeat(${FONT_COLS}, minmax(0, 1fr))`, alignItems: 'start',
+    }
+  }
+
   // Circular badge buttons everywhere. Phone: same circles as desktop, ~19% bigger (38px — the max
   // nine controls fit a 360px row with the tightened spacing) for comfortable tapping. flex-shrink-0
   // keeps them true circles — without it a tight row squeezes them oval.
@@ -395,22 +444,22 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(fontBtnRef), ...box(136) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={fontPanelStyle()}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
-          {FONTS.map((f, i) => (<div key={f.label}>
+          {FONTS.map((f, i) => (<Fragment key={f.label}>
             {(i === 0 || FONTS[i - 1].group !== f.group) && (
-              <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-widest select-none"
-                style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{f.group}</div>
+              <div className={`${phone ? 'px-2' : 'px-3'} pt-1.5 pb-0.5 text-[10px] uppercase tracking-widest select-none`}
+                style={{ color: 'var(--iw-pill-fg, #a8a29e)', gridColumn: '1 / -1' }}>{f.group}</div>
             )}
             <button type="button"
               onPointerDown={e => e.preventDefault()} onPointerUp={() => setFont(f.css)}
-              className="w-full text-left px-3 py-1.5 text-sm hover:bg-stone-50 truncate"
+              className={`w-full text-left ${phone ? 'px-2' : 'px-3'} py-1.5 text-sm hover:bg-stone-50 truncate`}
               style={{ fontFamily: f.css, color: f.label === curFont ? INK : '#374151',
                 fontWeight: f.label === curFont ? 500 : 400,
                 borderLeft: f.label === curFont ? `2px solid ${INK}` : '2px solid transparent' }}>
               {f.label}
             </button>
-          </div>))}
+          </Fragment>))}
         </div></>,
         document.body,
       )}

@@ -5,7 +5,7 @@
 // download (and/or OneDrive).
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
-import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile } from '../provenance/bundle'
+import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, readStudioFile, gzipStudioText } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
 import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 
@@ -158,7 +158,11 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
     const key = `folder:${doc.id}`
     if (needsWritebackMerge(key)) {
       try {
-        const existing = await parseTraceOffThread(await (await handle.getFile()).text())
+        // readStudioFile, NOT .text(): a gzipped target (.studio.gz) decoded as UTF-8 is binary
+        // garbage → parseTrace throws → the catch below silently skips the merge and writes the
+        // LOCAL set as-is. On a short local set that TRUNCATES the archive — the grow-only
+        // invariant's exact data-loss case (2026-07-05). Sniff-and-gunzip so the union really runs.
+        const existing = await parseTraceOffThread(await readStudioFile(await handle.getFile()))
         if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
         markWritebackMerged(key)
       } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }
@@ -166,8 +170,13 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
     // Self-contained write (PDFs embedded) — buildExportBundleWithPdfs reuses a per-PDF base64 cache so
     // it doesn't re-encode unchanged PDFs on every save (the ~20 MB re-encode was the lag). The initial
     // save-on-load is also skipped upstream, so nothing encodes until the doc actually changes.
+    // Preserve the target's own format: a .gz handle must be written back GZIPPED, or editing a
+    // "🗜 Zipped" export would silently balloon it into plain text under a .gz name. Falls back to
+    // plain when CompressionStream is missing (readStudioFile sniffs, so it still reads back).
+    const text = composeTraceFile(await buildExportBundleWithPdfs(doc, merged))
+    const gz = /\.gz$/i.test(handle.name) ? await gzipStudioText(text) : null
     const writable = await handle.createWritable()
-    await writable.write(composeTraceFile(await buildExportBundleWithPdfs(doc, merged)))
+    await writable.write(gz ?? text)
     await writable.close()
     try { localStorage.setItem(WRITE_AT_KEY(doc.id), String(Date.now())) } catch { /* private mode */ } // heartbeat baseline
     if (merged.length > snapshots.length) await restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
