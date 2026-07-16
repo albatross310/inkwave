@@ -64,8 +64,12 @@ function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bi
     else if (child.type.name === 'hardBreak')
       runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false })
     else {
+      // basePx joins the box lookup: the label sets in `font: inherit`, so its advance is base-
+      // dependent (117px at canonical 18, 143px at the phone's 22.5 render base). A box harvested at
+      // a different base MISSES ⇒ this block defers to the DOM measure rather than wrap on a width
+      // that is ~26px wrong per citation. See citations/citeBox.ts keyOf.
       const box = child.type.name === 'citation'
-        ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks)) ?? undefined
+        ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks), basePx) ?? undefined
         : undefined
       runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name, box })
     }

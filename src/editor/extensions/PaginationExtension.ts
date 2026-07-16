@@ -270,7 +270,10 @@ function compute(view: EditorView, pageH: number, topM: number, scale: number, g
   // line collection, so each box costs one getBoundingClientRect and no reflow. The arith path can
   // never measure this itself (it skips the force by design), so it reads these cached boxes; an
   // un-harvested key defers that block back here, which harvests it. See citations/citeBox.ts.
-  try { harvestCiteBoxes(doc, (pos) => view.nodeDOM(pos), getCitationStyle(), bibProvider.getVersion()) } catch { /* never break a measure */ }
+  // basePx 18 = the canonical base we are forced to here (CANONICAL_FONT_SIZE 1.125rem), and the
+  // base these boxes are keyed under. A RENDER-base measure asks for its own base, misses, and
+  // defers — never wraps on a canonical-width citation (117px vs 143px at the phone's 22.5px).
+  try { harvestCiteBoxes(doc, (pos) => view.nodeDOM(pos), getCitationStyle(), bibProvider.getVersion(), 18) } catch { /* never break a measure */ }
   // Resolve a line's doc position on demand — the exact posAtCoords sample the old eager path made.
   // Must run before any DOM mutation (compute never mutates; the caller dispatches after).
   // The resolution is baked back into the line cache BLOCK-RELATIVE, so the next measure rebuilds
@@ -883,25 +886,38 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             const ratio = lhPx && base ? lhPx / base : (phoneLike() ? 1.55 : 1.618)
             return { w: Math.floor(w * 64) / 64, base, ratio } // floored to the LayoutUnit grid
           }
-          const computeArithBands = (): BandGeo | null => {
-            if (!sheet || !gapped) return null
-            const rc = renderWrapCtx()
-            if (!rc) return null
-            const renderW = rc.w, renderBase = rc.base, renderRatio = rc.ratio
-            const style = getCitationStyle(); const epoch = bibProvider.getVersion(); const paraSp = getParaSpacingEm()
-            // (1) CANONICAL breaks + botMargins (base 18, canonical A4 width).
+          // The CANONICAL page-break positions (base 18, canonical A4 width) — where the paginator
+          // splits pages. Each `at` is a DOCUMENT position; the ones falling INSIDE a block are the
+          // mid-paragraph gaps the render pass must honour as forced line-ends. Shared by
+          // computeArithBands and the __iwCmpBlockLines debug probe so both model gaps identically.
+          const canonicalArithBreaks = (): Array<{ at: number; brokeUsed: number; botMargin: number }> | null => {
             const paper = getPaperSize(); const topM = getTopMarginPx()
             const { pageWidthPx, pageHeightPx: pageH } = pageBoxPx({
               paperSize: paper === 'letter' ? 'letter' : 'a4', orientation: getOrientation(),
               topMarginPx: topM, bottomMarginPx: MARGIN_BOTTOM,
             })
             const canonW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
-            const canon = buildArithMeasure(view.state.doc, canonW, 1.618, paraSp, arithMeasureFn, arithFaceLoaded, true, 18, style, epoch)
+            const canon = buildArithMeasure(view.state.doc, canonW, 1.618, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, 18, getCitationStyle(), bibProvider.getVersion())
             if (!canon) return null
             const bandOut = { breaks: [] as Array<{ at: number; brokeUsed: number; botMargin: number }>, lastUsed: 0 }
             computeBreaks(canon.lines as unknown as MeasuredLine[], canon.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos, bandOut)
-            // (2) RENDER pixel tops of every break line (render width + render font).
-            const render = buildArithMeasure(view.state.doc, renderW, renderRatio, paraSp, arithMeasureFn, arithFaceLoaded, true, renderBase, style, epoch)
+            return bandOut.breaks
+          }
+          const computeArithBands = (): BandGeo | null => {
+            if (!sheet || !gapped) return null
+            const rc = renderWrapCtx()
+            if (!rc) return null
+            const renderW = rc.w, renderBase = rc.base, renderRatio = rc.ratio
+            const style = getCitationStyle(); const epoch = bibProvider.getVersion(); const paraSp = getParaSpacingEm()
+            // (1) CANONICAL breaks + botMargins.
+            const breaks = canonicalArithBreaks()
+            if (!breaks) return null
+            const topM = getTopMarginPx()
+            // (2) RENDER pixel tops of every break line (render width + render font). The canonical
+            // break positions are fed back as FORCED line-ends: a mid-paragraph page gap is a
+            // display:block widget that ends the pre-gap line partial, so the render wrap MUST break
+            // there too — else it fills the slack and loses a render line, drifting every band below.
+            const render = buildArithMeasure(view.state.doc, renderW, renderRatio, paraSp, arithMeasureFn, arithFaceLoaded, true, renderBase, style, epoch, breaks.map((b) => b.at))
             if (!render) return null
             // Render lines sorted by top, each with its own height (top→next top). A canonical break
             // at doc position `at` sits at the render BOTTOM of the line CONTAINING at (the gap forces
@@ -923,7 +939,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             const nextTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
             const tops: number[] = []; const heights: number[] = []
             let gapAccum = 0
-            for (const b of bandOut.breaks) {
+            for (const b of breaks) {
               const gt = gapTopOf(b.at)
               if (gt === null) return null
               tops.push(padTop + gt + gapAccum + b.botMargin - bleed)
@@ -938,7 +954,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // band assembly, and at what font SIZE it happens.
           ;(window as unknown as { __iwCmpBlockLines?: () => unknown }).__iwCmpBlockLines = () => {
             const rc = renderWrapCtx(); if (!rc) return { rc: false }
-            const am = buildArithMeasure(view.state.doc, rc.w, rc.ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, rc.base, getCitationStyle(), bibProvider.getVersion())
+            const fb = canonicalArithBreaks() // mid-paragraph gap positions forced as render line-ends
+            const am = buildArithMeasure(view.state.doc, rc.w, rc.ratio, getParaSpacingEm(), arithMeasureFn, arithFaceLoaded, true, rc.base, getCitationStyle(), bibProvider.getVersion(), (fb ?? []).map((b) => b.at))
             if (!am) return { am: false }
             const arLines = new Map<number, number>()
             for (const l of am.lines) arLines.set(l.blockIdx, (arLines.get(l.blockIdx) ?? 0) + 1)
