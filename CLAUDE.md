@@ -531,14 +531,46 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   - breakTable.ts's whole OPFS layer — `loadTables`/`putTable`/`getTable`/`persist`/`tableStats` —
     has **ZERO callers** in src, scripts or tests. "OPFS across a reload" is not merely unproven; it
     has never been called. It needs the wiring first, and the wiring needs the decision below.
-  THE OPEN DECISION (Peter's — do not guess it): the /snapshot doc pane is a word-level DIFF, which
-  is WHY it is flat. Either (A) model the pane — build the model from `opsBetween(prev,cur)`, which
-  is PURE and diffCache-backed and needs no DOM, no editor, no warm layer and no citeBox, so it
-  serves an unvisited version directly and the whole blocker dissolves (the rich model then simply
-  is not this pane's tool); or (B) make the pane rich, which means mapping diff ops back onto the PM
-  tree — a real feature, not a wiring. (A) is cheaper and registers by construction; (B) is what you
-  want only if the answer to "should the scrub show formatted pages?" is yes. Nothing below the
-  decision is safe to build: the wiring, the idle build cadence and the cold burst all inherit it.
+  THE DECISION — **PETER CHOSE (B) RICH** (2026-07-17): "I'm thinking rich text." The pane must
+  render formatted pages for every version, not just the first. Rationale: he had asked that the
+  renderer "look pretty similar to an actual page", and the census showed it doesn't — v1 rich,
+  v2-116 a flat transcript, an inconsistency he'd been living with. Note the perf case runs the same
+  way: every number we hold IS a rich-model number (buildRenderModel is fed editor.state.doc), so
+  the canvas half is already built and proved; the FLAT model would have been the unmeasured one.
+  Rejected: (A) model the flat pane from `opsBetween` — cheaper and registers by construction, but
+  it locks in the transcript.
+  THE PRICE OF RICH — MEASURED FIRST, before building (`landingcost.prove.mjs`, thesis scale 13k
+  words/174 citations, n=12 fresh loads/condition, byte-identical content, real app/fonts/DPR).
+  **RICH IS CHEAPER THAN FLAT, ~2×, on both devices** — the risk everyone expected is inverted:
+    desktop   paginateStaticDoc  RICH p50 68.5 / max 90.9   vs  FLAT p50 144.2 / max 292   (0.5×)
+    phone-emu paginateStaticDoc  RICH p50 96.1 / max 153    vs  FLAT p50 182.6 / max 311.6 (0.5×)
+    desktop   longtask worst     RICH p50 178 / max 214     vs  FLAT p50 249 / max 420     (0.7×)
+  MECHANISM (traced, because a passing result that favours what you want to build must be): the flat
+  pane is ONE block of ~124k chars and `collectStaticLines` dedupes GLOBALLY because "inline diff
+  spans share lines across elements" — every span boundary fragments a line into another rect to
+  sort. The pagination stage genuinely prefers 385 small blocks to one giant one. Flat is also 1051px
+  TALLER (11532 vs 10481) ⇒ more lines to measure.
+  BOTH NUMBERS ARE FLOORS, and both caveats favour FLAT, so they cannot manufacture rich's win:
+  (a) flat is at its CHEAPEST here — identical content ⇒ diffWords returns one 'same' op ⇒ 1 span /
+  129 nodes; a real diff pane has hundreds of spans and is slower. (b) rich is a floor too — DocView
+  carries NO diff marks; RichDiffView must, which is strictly more nodes. **That increment is THE
+  unmeasured number** and only the built feature can give it. p99 is NOT reported: n=12 cannot
+  support one — it needs the 116-version walk, which needs the feature. p50 + max only.
+  TWO INSTRUMENT NOTES from this probe: (1) `__iwPerf` entries are ARRAYS `[label, ms, endTime]`,
+  NOT `{label, ms}` — the first cut read `e.label`/`e.ms` and would have reported every timing as an
+  empty list, i.e. a blind instrument reporting "no cost"; a metric that collects nothing must VOID,
+  never read as zero. (2) The `ops` probe reads ~0ms and that is NOT "the diff is free" — it is a
+  diffCache HIT, because DocLayer's own UNPROBED useMemo computed it first. The diff's real price is
+  unattributed and sits inside the longtask total. Never quote it as the diff's cost.
+  STILL TO BUILD (nothing below is done): map `opsBetween(prev,cur)` back onto the PM tree so every
+  version renders rich WITH its diff marks — the hard part is DELETIONS, which exist in prev and have
+  no home in cur's tree, so they must be spliced at a mapped anchor (walk ops keeping a cur-offset
+  cursor; a del anchors at the current offset). `pmToText` `.trim()`s each block and joins with
+  '\n\n', so a flat-offset→PM-position map must mirror that exactly — and pmToText MUST stay
+  byte-identical at resolveCitations=false (verify/bundle hash it). Then: both halves move together
+  (canvas frames and the DOM landing must agree — offsets IDENTICAL, not similar, or it is round 11
+  inverted); the show() miss path; idle-pumped cancellable table builds; the COLD far-from-origin
+  burst; and OPFS persistence, which still has zero callers.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

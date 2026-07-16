@@ -32,6 +32,11 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
   against the LIVE editor's own gap widgets. This is what caught the orphan-snap drift.
 - `fidelity.mjs` — screenshot diff vs the real ProseMirror, with an offset sweep + ink denominator.
 - `mapcompare.mjs` — the minimap question, shown: real editor pixels downscaled vs text vs line-rect.
+- `landingcost.prove.mjs` — what a RICH pane costs at rest, measured against the rich landing that
+  already exists (`ops === null` → DocView) vs the flat one, byte-identical content, thesis scale,
+  desktop + phone-emu. Answer: rich paginates ~2× CHEAPER than flat. Both numbers are floors and both
+  caveats favour flat; the unmeasured number is RichDiffView's diff-mark increment.
+  `TRIALS=12 PROBE_PORT=… node scripts/textrender-probe/landingcost.prove.mjs`
 - `panecontent.prove.mjs` — **read this before wiring anything into `show()`.** Asks the /snapshot
   doc pane what it is actually made of. Every other probe here drives the LIVE EDITOR; this one drives
   the pane the renderer is meant to PAINT, and they are not the same document (round 12). Its control
@@ -83,7 +88,13 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
     with no typography plugin and no `.ProseMirror h*` rule, so a heading really does compute 18px/400,
     the same as body. The census could see headings perfectly (6/6/18). Read WHY a gate refused before
     assuming it caught something; here it caught the gate.
-12. **Structurally blind fixtures.** A one-line-block fixture makes the buggy branch a no-op. The
+12. **A metric's silence is not a zero (2026-07-17).** `probePerf` pushes `[label, ms, endTime]` — an
+    ARRAY. `landingcost.prove.mjs` first read `e.label`/`e.ms`, which matches nothing, and would have
+    reported every timing as an empty list — a blind instrument saying "no cost". Any metric that can
+    return nothing must VOID the run explicitly. Related, same probe: the `ops` timing reads ~0ms and
+    means "diffCache hit", not "the diff is free" — DocLayer's own UNPROBED useMemo computed it first.
+    A probe placed downstream of a cache measures the cache.
+13. **Structurally blind fixtures.** A one-line-block fixture makes the buggy branch a no-op. The
     fixture puts NodeViews MID-paragraph in MULTI-line paragraphs, and the math formulas are
     deliberately sub/superscript- and fraction-heavy — a plain `x+1` pill has no off-baseline
     interior and reproduces nothing.
