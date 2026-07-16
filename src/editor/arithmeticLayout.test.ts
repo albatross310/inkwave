@@ -148,6 +148,26 @@ describe('greedy wrap — the fit test is white-space dependent', () => {
     expect(lay.lineCount).toBe(2) // "hello " then "world"
     expect(lay.breakStartChars).toEqual([0, 6])
   })
+  // ── RENDER-FONT (22.5px) fixes (2026-07-16): LayoutUnit fit-quantisation + hyphen breaks ──
+  it('quantises the fit test to the 1/64 LayoutUnit grid (the browser floors the line width)', () => {
+    // A word whose FULL width lands 0.01px past the container but on the SAME 1/64 gridline FITS —
+    // the browser lays out on the grid and floor(width·64)/64 == container. Stub: 10px/char.
+    // "aa bb" at width 49.99: full "aa bb"=50 → floor(50·64)/64=50 > 49.99 → but the grid rounds…
+    // Simpler: at width exactly 50 (a gridline), "aa bb" (full 50) must FIT (floor(50)=50, not >50).
+    const lay = layoutParagraph(para([run('aa bb')]), 50, 1.618, measure)
+    expect(lay.lineCount).toBe(1) // 50 ≤ 50 fits; a naive `>50-EPS` would wrap
+  })
+  it('breaks after an intra-word HYPHEN (constructed-language → constructed- / language)', () => {
+    // width 120 = 12 chars. "constructed-language" is 20 chars = 200px as one token → would need
+    // its own line. With the hyphen break: "constructed-"(12=120) fits line 1, "language" line 2.
+    const lay = layoutParagraph(para([run('constructed-language here')]), 120, 1.618, measure)
+    expect(lay.breakStartChars).toEqual([0, 12, 21]) // after "constructed-", then after "language "
+  })
+  it('does NOT break a numeric range or a leading/trailing dash', () => {
+    // "3-4" (digits both sides) — CSS does not offer a break there in prose; keep it one token.
+    const lay = layoutParagraph(para([run('aaaa 3-4 bbbb')]), 1000, 1.618, measure)
+    expect(lay.lineCount).toBe(1) // no spurious split of "3-4"
+  })
 })
 
 describe('resolveBlocks — arithmetic where eligible, DOM otherwise, margin collapse', () => {
