@@ -35,6 +35,8 @@ export interface BlockStyle {
   marginBottomPx: number
   lineHeightRatio: number // computed line-height ÷ font-size — headings often differ from body φ
   indentPx: number        // list padding-inline-start (0 for headings)
+  paddingTopPx: number    // the refList wrapper's paddingTop (its rule above the entries)
+  borderTopPx: number     // ditto its 1px rule — small, but it is real height
 }
 
 const cache = new Map<string, BlockStyle>()
@@ -69,6 +71,8 @@ function readStyle(el: HTMLElement): BlockStyle | null {
     // A `normal` line-height has no number — fall back to the body ratio rather than invent one.
     lineHeightRatio: Number.isFinite(lh) && fontSizePx > 0 ? lh / fontSizePx : 1.618,
     indentPx: parseFloat(cs.paddingInlineStart) || 0,
+    paddingTopPx: parseFloat(cs.paddingTop) || 0,
+    borderTopPx: parseFloat(cs.borderTopWidth) || 0,
   }
 }
 
@@ -87,6 +91,16 @@ export function harvestBlockStyles(root: HTMLElement, basePx: number): void {
     ['bulletList', 'ul:not([data-type="taskList"])'], ['orderedList', 'ol'],
     ['listItemPara', 'li > p'],
     ['blockquote', 'blockquote'],
+    // ── referenceList sub-styles (2026-07-17) ────────────────────────────────────────────────
+    // Harvested from the REAL rendered bibliography rather than re-deriving its ems by hand: the
+    // wrapper is 2.5em/1em/1px-border, the header row 0.6em, the body 0.92em/1.38, each entry
+    // 0.6em — nested ems that resolve against DIFFERENT bases (an entry's 0.6em is 0.6 x 16.56,
+    // the header's is 0.6 x 18). Hand-computing that chain is exactly how a height becomes a guess.
+    ['refList:wrap', '.node-referenceList'],
+    ['refList:h2', '.node-referenceList h2'],
+    ['refList:headerRow', '.node-referenceList h2'],
+    ['refList:body', '.node-referenceList .csl-bib-body'],
+    ['refList:entry', '.node-referenceList .iw-bib-entry'],
   ]
   for (const [kind, sel] of want) {
     const key = keyOf(kind, basePx)
