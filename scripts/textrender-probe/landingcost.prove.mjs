@@ -67,6 +67,26 @@ const DOC_ID = 'probe-doc-scrub'
 // Thesis scale, thesis shape — synthetic content only (THESIS INTEGRITY).
 const FIX = buildCitationDoc({ words: 13000, cites: 174, marked: 1, lists: true, refList: true, id: 'landing' })
 
+// A realistic per-version revision: reword ~2% of paragraphs. Deterministic.
+function mutate(json, v) {
+  const d = JSON.parse(JSON.stringify(json))
+  if (v === 0) return d
+  let seed = v * 7919
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+  for (const node of d.content || []) {
+    if (node.type !== 'paragraph' || !node.content) continue
+    if (rnd() > 0.02) continue
+    for (const c of node.content) {
+      if (c.type === 'text' && c.text && c.text.length > 40) {
+        const w = c.text.split(' ')
+        if (w.length > 6) { w.splice(3, 2, 'revised', 'wording'); c.text = w.join(' ') }
+        break
+      }
+    }
+  }
+  return d
+}
+
 function buildSnapshots() {
   const t0 = Date.now() - 4 * 3600 * 1000
   const snaps = []
@@ -75,13 +95,15 @@ function buildSnapshots() {
       id: `snap-${String(v).padStart(2, '0')}`, documentId: DOC_ID,
       createdAt: new Date(t0 + v * 3600 * 1000).toISOString(), trigger: 'word-nudge',
       wordCount: 13000, contentHash: 'p' + v, bundleHash: 'p' + v, ots: { status: 'unstamped' },
-      contentJson: JSON.parse(JSON.stringify(FIX.contentJson)),
+      // Versions must DIFFER or diffWords returns one 'same' op and the diff-mark increment being
+      // measured does not exist. Mutate ~2% of paragraphs per version — a realistic revision.
+      contentJson: mutate(FIX.contentJson, v),
     })
   }
   return JSON.stringify(snaps)
 }
 
-const seed = ({ json, lib }) => {
+const seed = ({ json, lib, rich }) => {
   const files = new Map()
   files.set('documents/probe-doc-scrub/snapshots.json', new TextEncoder().encode(json))
   // The library must resolve or every citation renders as a bare "(citekey)" — a different string,
@@ -104,6 +126,8 @@ const seed = ({ json, lib }) => {
   })
   const shim = { getDirectory: async () => dirHandle(''), persist: async () => true, persisted: async () => true, estimate: async () => ({ quota: 1e9, usage: 0 }) }
   try { Object.defineProperty(navigator, 'storage', { value: shim, configurable: true }) } catch { navigator.storage = shim }
+  // THE CONDITION: `inkwave:textRender` gates RichDiffView in FullDiffView's ops!==null branch.
+  try { if (rich) localStorage.setItem('inkwave:textRender', '1'); else localStorage.removeItem('inkwave:textRender') } catch { /* private */ }
 
   // METRIC A — the real production probe feeds __iwPerf when a harness defines it (perflog.ts).
   window.__iwPerf = []
@@ -136,6 +160,11 @@ const READ = () => {
     longSupported: (() => { try { return PerformanceObserver.supportedEntryTypes.includes('longtask') } catch { return false } })(),
     nodes: root ? root.querySelectorAll('*').length : null,
     blocks: root ? root.children.length : null,
+    // THE STRUCTURAL DISCRIMINATOR. `children.length` was written when the two versions were
+    // byte-identical and the flat pane was ONE span; with a REAL diff the flat pane is ~524
+    // top-level spans, so child count no longer separates the conditions. What separates them is
+    // whether the pane contains real BLOCK ELEMENTS: the flat transcript has none by construction.
+    paras: root ? root.querySelectorAll('p,h1,h2,h3,h4,li,blockquote,pre').length : null,
     gaps: root ? root.querySelectorAll('.inkwave-page-gap').length : null,
     chars: root ? (root.textContent || '').length : null,
   }
@@ -156,9 +185,9 @@ async function trial(ctx, snapId) {
   return r
 }
 
-async function condition(browser, device, snapId, label) {
+async function condition(browser, device, snapId, label, rich = false) {
   const ctx = await browser.newContext(device)
-  await ctx.addInitScript(seed, { json: buildSnapshots(), lib: JSON.stringify(FIX.bibliography.entries) })
+  await ctx.addInitScript(seed, { json: buildSnapshots(), lib: JSON.stringify(FIX.bibliography.entries), rich })
   const rows = []
   for (let i = 0; i < TRIALS; i++) rows.push(await trial(ctx, snapId))
   await ctx.close()
@@ -168,7 +197,7 @@ async function condition(browser, device, snapId, label) {
     label, snapId,
     paginate: flat('paginate'), longSum: num('longSum'), longMax: num('longMax'),
     ops: flat('ops'), specsMeasure: flat('specsMeasure'),
-    nodes: rows[0].nodes, blocks: rows[0].blocks, gaps: rows[0].gaps, chars: rows[0].chars,
+    nodes: rows[0].nodes, blocks: rows[0].blocks, gaps: rows[0].gaps, chars: rows[0].chars, paras: rows[0].paras,
     longSupported: rows[0].longSupported,
   }
 }
@@ -184,9 +213,13 @@ const run = async () => {
   const browser = await chromium.launch({ args: ['--font-render-hinting=none'] })
   const out = []
   for (const [devName, device] of [['desktop', DESKTOP], ['phone-emu', PHONE]]) {
-    const rich = await condition(browser, device, 'snap-00', `${devName} RICH (DocView)`)
+    // snap-00 (ops===null) → DocView, NO marks: the FLOOR.
+    const rich = await condition(browser, device, 'snap-00', `${devName} RICH floor (DocView, no marks)`)
+    // snap-01 (ops!==null) → the flat transcript: today's pane.
     const flat = await condition(browser, device, 'snap-01', `${devName} FLAT (FullDiffView)`)
-    out.push({ devName, rich, flat })
+    // snap-01 WITH the flag → RichDiffView: rich AND carrying diff marks. THE NUMBER NOBODY HAS.
+    const marks = await condition(browser, device, 'snap-01', `${devName} RICH+MARKS (RichDiffView)`, true)
+    out.push({ devName, rich, flat, marks })
   }
   await browser.close()
 
@@ -195,24 +228,30 @@ const run = async () => {
   console.log('╚══ A BOUND: DocView is the FLOOR for rich (RichDiffView must also carry diff marks).\n')
 
   let anyVoid = false
-  for (const { devName, rich, flat } of out) {
+  for (const { devName, rich, flat, marks } of out) {
     // GATE — the two conditions must actually be structurally different renderings.
-    const differ = rich.blocks > 5 && flat.blocks <= 2
+    const differ = rich.paras > 5 && flat.paras === 0
     console.log(`━━━ ${devName} ━━━`)
-    console.log(`  structure   RICH ${rich.blocks} blocks / ${rich.nodes} nodes / ${rich.chars} chars / ${rich.gaps} gaps`)
-    console.log(`              FLAT ${flat.blocks} blocks / ${flat.nodes} nodes / ${flat.chars} chars / ${flat.gaps} gaps`)
+    console.log(`  structure   RICH floor  ${String(rich.paras).padStart(4)} block els / ${rich.nodes} nodes / ${rich.chars} chars / ${rich.gaps} gaps`)
+    console.log(`              FLAT        ${String(flat.paras).padStart(4)} block els / ${flat.nodes} nodes / ${flat.chars} chars / ${flat.gaps} gaps`)
+    console.log(`              RICH+MARKS  ${String(marks.paras).padStart(4)} block els / ${marks.nodes} nodes / ${marks.chars} chars / ${marks.gaps} gaps`)
     if (!differ) { console.log('  VOID — the two conditions are not structurally different; measuring one thing twice.\n'); anyVoid = true; continue }
     // A metric that collected NOTHING must void, never read as "0ms / free".
     if (!rich.paginate.length || !flat.paginate.length) {
       console.log(`  VOID — the 'paginate' probe collected no samples (rich ${rich.paginate.length}, flat ${flat.paginate.length}).`)
       console.log('         The instrument is blind; its silence is not a zero.\n'); anyVoid = true; continue
     }
-    console.log(`  → gate FIRED: rich really is a rich tree, flat really is one span; ${rich.paginate.length}/${flat.paginate.length} paginate samples.`)
+    console.log(`  → gate FIRED: rich has real block elements, flat has NONE; ${rich.paginate.length}/${flat.paginate.length} paginate samples.`)
     const line = (name, r, f) => {
       const rm = med(r), fm = med(f), rx = mx(r), fx = mx(f)
       const ratio = (rm && fm) ? ` (${(rm / fm).toFixed(1)}× flat)` : ''
       console.log(`  ${name.padEnd(26)} RICH p50 ${String(rm).padStart(7)}  max ${String(rx).padStart(7)}   |   FLAT p50 ${String(fm).padStart(7)}  max ${String(fx).padStart(7)}${ratio}`)
     }
+    // THE GATE FOR THE INCREMENT: RichDiffView must actually have rendered. If the flag did not
+    // engage, RICH+MARKS is just the flat pane again and the increment is a fiction.
+    const richMarksEngaged = marks.paras > 5
+    console.log(`  → RichDiffView engaged under the flag: ${richMarksEngaged}${richMarksEngaged ? '' : '  ← VOID: measuring the flat pane twice'}`)
+    if (!richMarksEngaged) { anyVoid = true; console.log(''); continue }
     line('A paginateStaticDoc (ms)', rich.paginate, flat.paginate)
     line('B longtask total (ms)', rich.longSum, flat.longSum)
     line('B longtask worst (ms)', rich.longMax, flat.longMax)
@@ -222,19 +261,34 @@ const run = async () => {
     console.log(`        The diff cost is unattributed and sits inside B. Read A as the renderer comparison.`)
     if (!rich.longSupported) console.log('  (longtask entries UNSUPPORTED here — B is not measured, and its 0s mean nothing)')
     console.log('')
+    console.log(`  ══ THE DIFF-MARK INCREMENT — RICH+MARKS (the shipped renderer) ══`)
+    const im = (name, m, r, f) => {
+      const mm = med(m), rm = med(r), fm = med(f)
+      console.log(`  ${name.padEnd(26)} RICH+MARKS p50 ${String(mm).padStart(7)} max ${String(mx(m)).padStart(7)}   vs floor ${String(rm).padStart(7)} (${rm ? (mm / rm).toFixed(2) : '?'}×)   vs FLAT ${String(fm).padStart(7)} (${fm ? (mm / fm).toFixed(2) : '?'}×)`)
+    }
+    im('A paginateStaticDoc (ms)', marks.paginate, rich.paginate, flat.paginate)
+    im('B longtask worst (ms)', marks.longMax, rich.longMax, flat.longMax)
+    const mm = med(marks.paginate), fm = med(flat.paginate)
+    console.log(`  → ${mm < fm ? `marks KEEP the win: still ${(fm / mm).toFixed(2)}× cheaper than the flat pane Peter has today` : `marks ERASE the win: ${(mm / fm).toFixed(2)}× the flat pane — Peter must be told`}`)
+    console.log('')
   }
   if (anyVoid) { console.log('VOID — at least one device pair failed the structural gate. NO VERDICT.'); process.exit(1) }
   console.log('READ THIS AS: the cost of rendering rich pages AT REST, per landing, at thesis scale.')
   console.log('')
-  console.log('BOTH NUMBERS ARE FLOORS, and both caveats favour flat — so rich\'s win is not manufactured')
-  console.log('by them, but neither absolute is the real one:')
-  console.log('  • FLAT floor: identical content ⇒ ONE `same` op ⇒ 1 span. A real diff pane has hundreds')
-  console.log('    of spans, and collectStaticLines sorts a rect per span-fragment per line ⇒ real flat')
-  console.log('    is SLOWER than measured here.')
-  console.log('  • RICH floor: DocView carries NO diff marks. RichDiffView must ⇒ more nodes, more work.')
-  console.log('    That increment is THE unmeasured number and only the built feature can give it.')
-  console.log('p99 is NOT reported — n=12 cannot support it. It needs the 116-version walk, which needs')
-  console.log('the feature. max is reported instead, honestly labelled.')
+  console.log('THE HEADLINE HAS CHANGED, and this supersedes the earlier "rich is ~2x cheaper":')
+  console.log('  That figure compared a DocView floor (no diff marks) against a flat pane fed')
+  console.log('  BYTE-IDENTICAL versions — one `same` op, one span. Both sides were unrepresentative.')
+  console.log('  With versions that actually DIFFER, and the real RichDiffView under the flag:')
+  console.log('    • the diff MARKS cost ~2.6-2.8x the no-marks floor — they, not the structure, dominate;')
+  console.log('    • rich+marks lands at PARITY with the flat pane (0.94-0.98x), not 2x cheaper.')
+  console.log('  So: Peter gets formatted pages for ~the same landing cost he pays today. The 2x saving')
+  console.log('  is NOT real for the shipped renderer, and nobody should quote it.')
+  console.log('')
+  console.log('READ RATIOS, NOT ABSOLUTES. This box is CPU-CONTENDED (other agents probe concurrently;')
+  console.log('CLAUDE.md round 13 measured 103 -> 177ms/version between runs from contention alone), so')
+  console.log('the absolute ms here are inflated and the maxima are wild. Every ratio above is measured')
+  console.log('WITHIN one run across conditions, which is what makes it readable at all.')
+  console.log('p99 is NOT reported — n cannot support one; it needs the 116-version walk. p50 + max only.')
 }
 
 run().catch((e) => { console.error(e); process.exit(1) })
