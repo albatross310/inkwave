@@ -32,6 +32,12 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
   against the LIVE editor's own gap widgets. This is what caught the orphan-snap drift.
 - `fidelity.mjs` — screenshot diff vs the real ProseMirror, with an offset sweep + ink denominator.
 - `mapcompare.mjs` — the minimap question, shown: real editor pixels downscaled vs text vs line-rect.
+- `panecontent.prove.mjs` — **read this before wiring anything into `show()`.** Asks the /snapshot
+  doc pane what it is actually made of. Every other probe here drives the LIVE EDITOR; this one drives
+  the pane the renderer is meant to PAINT, and they are not the same document (round 12). Its control
+  is snap-00 (`ops === null` → rich DocView) vs snap-01 (`ops !== null` → flat FullDiffView) on
+  BYTE-IDENTICAL content: one census, one route, one pane, so a blind census reports "no headings" on
+  the rich path too and the probe exits 1 rather than return a verdict.
 
 ## Traps this harness had to survive (each produced a confident WRONG number first)
 
@@ -65,7 +71,19 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
    "no phantom", just "no break happened to land on one" (24 pills, 9 breaks). Measuring the ARTIFACT
    per block instead (`lineCountAudit`) showed math over-counting 23 blocks by +30 lines. If an
    instrument depends on a coincidence, build the one that measures the thing itself.
-10. **Structurally blind fixtures.** A one-line-block fixture makes the buggy branch a no-op. The
+10. **A PROBE SUITE THAT NEVER ASKED THE TARGET (2026-07-17 — round 12, the biggest one yet).** Every
+    probe in this harness drives the live editor, because that is where the model can be built. So the
+    whole suite measured the EDITOR's rich canonical layout — honestly, and with real numbers — while
+    the surface the renderer exists to paint (the /snapshot doc pane) renders flat `pmToText` under
+    `pre-wrap` for 115 of 116 versions. Nothing was wrong with any measurement; they were about a
+    different document. When a feature's proofs all live on the convenient side of a seam, probe the
+    seam itself before building across it. `panecontent.prove.mjs` is that probe.
+11. **A gate clause can be wrong without the instrument being wrong.** `panecontent.prove.mjs` first
+    gated its control on `distinctFontSizes > 1` and VOIDED — because this app ships Tailwind preflight
+    with no typography plugin and no `.ProseMirror h*` rule, so a heading really does compute 18px/400,
+    the same as body. The census could see headings perfectly (6/6/18). Read WHY a gate refused before
+    assuming it caught something; here it caught the gate.
+12. **Structurally blind fixtures.** A one-line-block fixture makes the buggy branch a no-op. The
     fixture puts NodeViews MID-paragraph in MULTI-line paragraphs, and the math formulas are
     deliberately sub/superscript- and fraction-heavy — a plain `x+1` pill has no off-baseline
     interior and reproduces nothing.

@@ -491,6 +491,54 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   - `paneCentreSig` binary-SEARCHES text by char offset (~17 Range rect reads): /snapshot's doc
     flow is a handful of giant `[data-opidx]` spans (measured 4 over a 151,000px pane), so
     block-granularity anchoring would call every frame registered.
+  ROUND 12 (2026-07-17 — THE TEXT RENDERER MODELS THE WRONG DOCUMENT. Read this BEFORE wiring
+  textRender into show()). The plaintext page renderer is real and its numbers are real — O(window)
+  layout (p50 0.9/0.9/0.6ms at 2k/10k/40k), prefix-independence (30/30, 31/31, 31/31), zoom
+  invariance, ~1.4KB/version break tables vs the 62.9MB bitmap pool, coverage 99.7%, citeBox 667/0.
+  EVERY ONE of those was measured against `editor.state.doc`: all 14 `buildRenderModel`/
+  `buildBreakTable` call sites live in textRenderProbe.ts and all are fed the LIVE EDITOR's rich
+  document. The model has NEVER been run against a snapshot, and nothing on the /snapshot route
+  imports textRender or breakTable at all. The pane it is meant to paint renders something else:
+  - PROVED (`panecontent.prove.mjs`, real app/fonts/DPR, byte-identical content on both sides):
+    DocLayer renders `<FullDiffView ops>`, and FullDiffView returns the rich `<DocView>` ONLY when
+    `ops === null` — i.e. `prev === null` — i.e. the FIRST snapshot. `prev={li>0 ? allSnaps[li-1]
+    : null}`, so **1 version in 116 renders rich and 115 render FLAT**: one `[data-opidx]` span of
+    `pmToText(contentJson, true)` under `white-space: pre-wrap`. Census rich→flat: headings 6→0,
+    lists/items 6/18→0/0, paragraphs 48→0, top-level children 50→1, white-space normal→pre-wrap.
+  - THE CONSEQUENCE, measured through the pane's OWN staticPagination on the SAME BYTES: rich = 8
+    gaps/9 pages/10481px flow, flat = 9 gaps/10 pages/11532px. The gap offsets diverge PROGRESSIVELY
+    — 63 chars apart at the first break, **1247 chars (over half a page) by the eighth**. So a rich
+    model's page N is not the flat pane's page N: scrub frames painted from it would not register
+    against the live pane they settle onto. That is round 11's disease exactly — two rules, one pane.
+  - THE citeBox BLOCKER IS MOOT FOR THIS PANE, and (a)/(b) were both wrong. `pmToText(…, true)`
+    resolves a citation to the plain STRING `simpleInText()` = "(Family, Year)" BEFORE the pane sees
+    it; measured citation NodeViews in the /snapshot doc pane = **0 on both paths**. There is no box
+    to harvest because there is no CitationNodeView — in the pane a citation is ordinary text under
+    ordinary wrapping. Harvesting from a warm DocLayer (option (a)) would have measured DocView's
+    bare `<span>` — no `nowrap`, no `margin:0 2px`, no `⤵` biblink, `simpleInText` instead of real
+    CSL — and fed the EDITOR's opaque-box model a number from a different element. A fiction.
+  - THE refList GAP IS NOT THIS PANE'S GAP. `referenceList` is `atom:true` with no content, so
+    pmToText's walk SKIPS it and DocView's `block()` has no case for it: measured refList nodes and
+    "References" text = **0 on BOTH paths**. The bibliography does not reach the /snapshot doc pane
+    at all. The 120px-vs-880px guess still caps `reliablePages` in the EDITOR's model — it just
+    cannot be what stops the pane.
+  - HEADINGS ARE NOT STYLED ANYWHERE. Tailwind preflight resets h1-h6 to `font-size/font-weight:
+    inherit`, there is no typography plugin and no `.ProseMirror h*` rule in the repo: measured, a
+    DocView `h2` computes 18px/400/margin-0 — identical to a `<p>` but for 9px margin-bottom. The
+    first cut of this probe gated on `distinctFontSizes > 1` and correctly VOIDED ITSELF against the
+    rich path. Font size is not a structural signal in this app; the ELEMENTS are. (blockStyles.ts's
+    "real ~40px" is a heading's ADVANCE incl. margins, not its font size.)
+  - breakTable.ts's whole OPFS layer — `loadTables`/`putTable`/`getTable`/`persist`/`tableStats` —
+    has **ZERO callers** in src, scripts or tests. "OPFS across a reload" is not merely unproven; it
+    has never been called. It needs the wiring first, and the wiring needs the decision below.
+  THE OPEN DECISION (Peter's — do not guess it): the /snapshot doc pane is a word-level DIFF, which
+  is WHY it is flat. Either (A) model the pane — build the model from `opsBetween(prev,cur)`, which
+  is PURE and diffCache-backed and needs no DOM, no editor, no warm layer and no citeBox, so it
+  serves an unvisited version directly and the whole blocker dissolves (the rich model then simply
+  is not this pane's tool); or (B) make the pane rich, which means mapping diff ops back onto the PM
+  tree — a real feature, not a wiring. (A) is cheaper and registers by construction; (B) is what you
+  want only if the answer to "should the scrub show formatted pages?" is yes. Nothing below the
+  decision is safe to build: the wiring, the idle build cadence and the cold burst all inherit it.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
