@@ -1239,10 +1239,43 @@ as the water slows.
   will-change:auto + transform:none; hidden .iw-snap-layer surfaces paint NO water at all
   (content:none — only the active pane pays); SnapshotView writes NO --wave-x sway (a sway write
   invalidates the whole content-tall pseudo's paint per scroll event).
+- **NOTHING MAY WRITE TO THE DOM BEFORE HYDRATION (2026-07-17 — Peter's "the video works but it
+  never loads"; the wave video re-triggered the 2026-07-10 catastrophe).** `hydrateRoot(document)`
+  makes React own EVERY node, so there is NO DOM anywhere for an imperative pre-hydration append.
+  waveVideo appended its `<video>` into the PRERENDERED `.iw-wave-twinkles` before `bootstrap()`
+  reached hydrateRoot (it `await`s a dynamic import first, so the video always won) ⇒ React #418 ⇒
+  it discarded the server HTML and client-rendered the whole document (#423). THE DAMAGE, PROBED:
+  React's recovery **REPLACES the `<html>` ELEMENT** — it does not strip attributes off it. So the
+  new `<html>` had no `.iw-water-ready` and no `data-theme`, `:root:not(.iw-water-ready)` put every
+  wave layer AND the twinkle host at display:none for the session, and the video — which lives
+  inside that host — painted nothing while `play()` resolved happily. On PHONE the reset is
+  `.inkwave-editor-surface:not(.is-phone)`, so the aqua GRADIENT still painted: a flat aqua screen,
+  no waves, no document. Fix = a `hydrated()` barrier on `inkwave:twinkles-ready` (the app's only
+  timeout-free post-hydration signal — NOT `.iw-water-ready`, whose 1500ms timeout can open it
+  pre-hydration on a slow phone). The 150ms re-attach interval is GONE: it existed only to heal the
+  wipe, and post-hydration React never touches the host's children (waveTwinkle removes only its
+  own `.iw-twk-set` nodes). Probe: `scripts/wave-video/reveal.prove.mjs` (+ `--expect-broken`).
+- **entry.client's stamp-guard WAS A FICTION until 2026-07-17** — and it failed the one case it was
+  written for. It captured `const root = document.documentElement` and observed THAT node, so after
+  a recovery it re-stamped a DETACHED element forever while the live `<html>` stayed bare. Never
+  hold the node: resolve `document.documentElement` at every use, and watch `document` itself
+  (never replaced) with a childList observer to catch the swap + re-arm. Same family as
+  canvasShapingMatchesEditor: a guard that cannot see its own failure.
+- **THE OVERLAY MEASURED THE DECODER AND REPORTED IT AS PIXELS.** `?waveVideo=debug` printed
+  "● VIDEO ON SCREEN / advancing YES / VIDEO is master" — all TRUE, all about the decode — while
+  the element sat in a display:none subtree painting nothing. Every field was green on a build that
+  never rendered a frame, which is exactly how a broken build talks you out of a real bug. It now
+  asks the LAYOUT ENGINE (`painted`: box/display/visibility/opacity) and prints the water gate,
+  with a distinct third state "▲ VIDEO IS MASTER BUT NOT PAINTED". NB the box is written with
+  innerHTML — no angle brackets in any diag string (a literal "&lt;video&gt;" parsed as a TAG and
+  swallowed the reason line). Probes read `window.__iwWaveVideo` (masterEver included — the video
+  can run and hand back between samples), NEVER the overlay's rendered text.
 - PROBE RULES: /snapshot needs a fallback-faithful static server (vite preview serves the
   prerendered editor page → hydration mismatch kills the water); never pkill vite preview; no
   windows over Peter's screen (xvfb; Firefox needs `env -u WAYLAND_DISPLAY MOZ_ENABLE_WAYLAND=0`).
-  `window.__iwTwkPool` exposes the pool for probes.
+  `window.__iwTwkPool` exposes the pool for probes. The wave-video probes need
+  `scripts/wave-video/server.mjs` — the scrub-probe server has no `.mp4` MIME and no Range/206, so
+  it would test a transport iOS never uses.
 
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
 
