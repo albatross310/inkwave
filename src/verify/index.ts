@@ -23,7 +23,7 @@
 
 import type { ExportBundle } from '../provenance/bundle'
 import type { SignedReceipt, TiptapJSON } from '../types/document'
-import { canonicalize, sha256Hex, bundleHash, bibliographyHash, emailHeadersHash } from '../provenance/hash'
+import { canonicalize, sha256Hex, bundleHash, bibliographyHash, emailHeadersHash, musicAttachmentsHash } from '../provenance/hash'
 import { normaliseHeaders } from '../email/headers'
 import { verifyChain, bitmaskToLemmas, PUBLISHED_SIGNING_PK } from '../provenance/receipts'
 import { cadenceDigest, BIN_MS } from '../provenance/cadence'
@@ -124,7 +124,19 @@ async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport
       if (recomputed !== s.emailHash) return { ok: false, checked, reason: `snapshot ${s.id}: emailHash mismatch` }
       emailHashForBundle = recomputed
     }
-    const bh = await bundleHash(s.contentHash, s.receipts ?? [], bibHashForBundle, emailHashForBundle)
+    // Same treatment for FROZEN ATTACHED MUSIC (v:4, music spec §B5): recompute its hash from the
+    // stored master refs + excerpts + annotations, so tampering with a master's contentHash — i.e.
+    // swapping which notation the analysis claims to be about — or with an excerpt's bar range is
+    // caught here, and fold it into the bundleHash recompute so the OTS anchor actually BINDS the
+    // score rather than merely sitting beside it. Non-music snapshots (no musicHash) verify exactly
+    // as before.
+    let musicHashForBundle = s.musicHash
+    if (s.music && (s.music.masters.length > 0 || s.music.excerpts.length > 0)) {
+      const recomputed = await musicAttachmentsHash(s.music)
+      if (recomputed !== s.musicHash) return { ok: false, checked, reason: `snapshot ${s.id}: musicHash mismatch` }
+      musicHashForBundle = recomputed
+    }
+    const bh = await bundleHash(s.contentHash, s.receipts ?? [], bibHashForBundle, emailHashForBundle, musicHashForBundle)
     if (bh !== s.bundleHash) return { ok: false, checked, reason: `snapshot ${s.id}: bundleHash mismatch` }
     for (const r of s.receipts ?? []) {
       if (genuine.get(r.signature) !== canonicalize(r)) {

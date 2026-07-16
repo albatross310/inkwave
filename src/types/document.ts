@@ -98,6 +98,64 @@ export interface EmailHeaders {
   subject: string
 }
 
+// ─── Attached music (music spec §B5/§B6) ─────────────────────────────────────
+// What a document carrying score excerpts holds. NOT the notation itself: a master's MusicXML lives
+// in OPFS (`music/master.ts`), exactly as an embedded PDF's bytes do — so a multi-MB score never
+// bloats the document JSON or any provenance hash. What lives here is the REFERENCE, and that is
+// the point of §B6: an excerpt stores an address, never a copy.
+
+/** One attached master score, by reference. */
+export interface MusicMasterRef {
+  /** The master's STABLE id — never derived from content. `music/master.ts` explains why: a
+   *  content-addressed id would satisfy dedup and silently orphan every excerpt the moment the
+   *  student corrected the score. */
+  id: string
+  /** sha256 of the master's CURRENT MusicXML. This is what an OTS anchor actually pins (§B5) —
+   *  swap the notation under an anchored analysis and the bundle stops verifying. */
+  contentHash: string
+  title?: string
+  composer?: string
+  /** Where a public-domain library score came from (§B7) — the licence requires attribution, and a
+   *  student citing it in a graded essay needs the provenance. Display metadata: deliberately NOT
+   *  part of musicAttachmentsHash. */
+  attribution?: { corpus: string; licence: string; sourceUrl: string }
+}
+
+/** One inserted excerpt: a TRANSCLUSION (§B6) — an address into a master, never a copy of it. */
+export interface MusicExcerptRef {
+  id: string
+  masterId: string
+  /** PRINTED bar numbers, as the writer cited them. Strings by MusicXML spec ('0' pickups,
+   *  '8a'/'8b' repeat endings) — see `music/score.ts`. */
+  barStart: string
+  barEnd: string
+  partIndex: number
+  createdAt: string
+}
+
+/**
+ * One annotation anchored to a note or measure (§B4).
+ *
+ * ⚠️ §B4 IS NOT BUILT AND THIS SHAPE IS NOT SETTLED. The `Piece` contract's `MusicXmlAnchor`
+ * (`music/types.ts`, owned by the photo lane) declares `measure: number`, but MusicXML bar numbers
+ * are STRINGS by spec — a numeric anchor cannot express a '0' pickup or an '8a' repeat ending. That
+ * question is with the Piece's owner. Until it resolves, this stays deliberately open: the ARRAY is
+ * hashed today (see musicAttachmentsHash) so that populating it later needs no new bundle version,
+ * and it is empty today so no anchored hash can be affected by whichever way the anchor lands.
+ */
+export interface MusicAnnotationRecord {
+  id: string
+  createdAt: string
+  [k: string]: unknown
+}
+
+export interface MusicAttachments {
+  masters: MusicMasterRef[]
+  excerpts: MusicExcerptRef[]
+  /** [] until §B4 lands — the field is hashed now so its arrival is not a protocol change. */
+  annotations: MusicAnnotationRecord[]
+}
+
 // ─── Schema versioning ────────────────────────────────────────────────────────
 
 export type SchemaVersion = '0.1.0'
@@ -136,6 +194,11 @@ export interface InkwaveDocument {
   // ─── Email layer (§B2.1) ─────────────────────────────────────────────────
   docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
   email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
+
+  // ─── Attached music (§B5/§B6) ────────────────────────────────────────────
+  // Present only once the writer attaches a score. Absent ⇒ the bundle keeps its v:1/v:2/v:3 form,
+  // so every document anchored before this feature existed hashes BYTE-IDENTICALLY to before.
+  music?: MusicAttachments
 }
 
 // ─── SCAS engine state (M0) ───────────────────────────────────────────────────
@@ -200,7 +263,12 @@ export interface Snapshot {
   // document anchored before this feature existed) hashes byte-identically to before. §B2.2.
   email?: EmailHeaders              // frozen copy of To/Cc/Bcc/Subject
   emailHash?: string                // sha256Hex(JCS({ v:1, to, cc, bcc, subject })) — canonicalised
-  bundleHash: string                // v:1 {contentHash,receipts}; v:2 adds bibHash; v:3 adds emailHash
+  // The attached music frozen at snapshot time, and its hash (§B5). Present only on a document that
+  // carries a score — absent ⇒ the bundle keeps its v:1/v:2/v:3 form, so every non-music document
+  // (i.e. every document anchored before this feature existed) hashes byte-identically to before.
+  music?: MusicAttachments          // frozen copy of the master refs + excerpts + annotations
+  musicHash?: string                // sha256Hex(JCS({ v:1, masters, excerpts, annotations }))
+  bundleHash: string                // v:1 {contentHash,receipts}; v:2 adds bibHash; v:3 adds emailHash; v:4 adds musicHash
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
   summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
   nudgeWord?: { from: string; to: string }  // old→new word for 'word-nudge' trigger snapshots
