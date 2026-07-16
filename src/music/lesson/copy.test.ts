@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import * as copy from './copy'
 import { classifyBrowserSpeech, DEFAULT_SOURCE_ID, SOURCES } from './stt'
+import { MIC_PATTERN, PATTERN_CARRIER } from './micBoundary'
 
 // §A3 makes the wording an ACCEPTANCE CRITERION rather than a nicety, and more sharply than
 // anywhere else in this app: the feature's value IS the truth of a sentence said to a teacher who
@@ -172,10 +173,13 @@ describe('the real in-product copy makes no forbidden claim', () => {
 // ─── The copy and the code must agree ────────────────────────────────────────
 
 describe('the copy tracks the CODE, not the spec', () => {
-  it('the consent copy states the fact the code makes true: no audio is recorded', () => {
-    // The sentence that replaces the spec's on-device promise. If the module ever gains a real mic,
-    // this assertion is the thing that should stop the copy staying as it is.
-    expect(copy.CONSENT_EXPLAINER).toMatch(/does not record audio/i)
+  it('the consent copy states the fact the code makes true: this screen cannot record', () => {
+    // The sentence that replaces the spec's on-device promise. Note it is SCOPED to the screen —
+    // an app-wide "Inkwave does not record audio" expires the moment §A5's practice recordings
+    // ship, and an expired sentence goes on being read. micBoundary.test.ts binds this claim to
+    // the real Permissions-Policy header.
+    expect(copy.CONSENT_EXPLAINER).toMatch(/not recording this lesson/i)
+    expect(copy.CONSENT_EXPLAINER).toMatch(/cannot reach a microphone|can reach a microphone/i)
   })
 
   it('every registered source is one whose promise the copy can keep', () => {
@@ -188,7 +192,7 @@ describe('the copy tracks the CODE, not the spec', () => {
     expect(DEFAULT_SOURCE_ID).toBe('no-audio')
   })
 
-  it('“Inkwave does not record audio” is TRUE OF THE CODE — no mic API in this module', () => {
+  it('“nothing on this screen can reach a microphone” is TRUE OF THE CODE', () => {
     // THE COPY'S CENTRAL CLAIM, ASSERTED AGAINST THE SOURCE RATHER THAN TRUSTED.
     //
     // `CONSENT_EXPLAINER` tells a teacher, in the room, that Inkwave does not record audio. That is
@@ -199,14 +203,20 @@ describe('the copy tracks the CODE, not the spec', () => {
     //
     // A comment saying "there is no getUserMedia here" is a claim. This is a property.
     const dir = __dirname
-    const sources = readdirSync(dir).filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith('.test.ts'))
+    const sources = readdirSync(dir)
+      .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith('.test.ts'))
+      // micBoundary.ts names every capture API as data in order to forbid them — the pattern
+      // carrier, excluded here and proved inert (tests-only) in micBoundary.test.ts.
+      .filter((f) => `src/music/lesson/${f}` !== PATTERN_CARRIER)
     expect(sources.length, 'no source files found — a scan over an empty set proves nothing')
       .toBeGreaterThanOrEqual(5)
 
     // Strip line comments before scanning: this very file's neighbours DISCUSS these APIs at length
     // (that is the finding), and a scanner that cannot tell a mention from a call would force the
     // documentation to be deleted to stay green.
-    const CAPTURE = /\b(getUserMedia|MediaRecorder|AudioContext|createMediaStreamSource|new\s+(webkit)?SpeechRecognition)\b/
+    // The SAME pattern the firebreak judges by — a second copy of these rules is how one guard
+    // silently stops catching what the other does (the §C1.4 matchers' lesson, applied here).
+    const CAPTURE = MIC_PATTERN
 
     const stripComments = (src: string) =>
       src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')

@@ -42,7 +42,9 @@
 // and not on the student being prevented from taking notes, which is the point of the lesson.
 
 import { v4 as uuid } from 'uuid'
-import type { Assignment, BarAnchor, LessonConsent, LessonNote, LessonRecap, LessonRecord } from './types'
+import type {
+  Assignment, BarOnlyAnchor, LessonConsent, LessonRecap, LessonRecord, PinnedLessonNote,
+} from './types'
 import { DEFAULT_SOURCE_ID, sourceById } from './stt'
 
 /**
@@ -97,7 +99,7 @@ export class LessonSession {
   readonly started_at: string
 
   #ended_at: string | null = null
-  #notes: LessonNote[] = []
+  #notes: PinnedLessonNote[] = []
   #recap: LessonRecap | null = null
 
   constructor(opts: StartSessionOptions) {
@@ -185,41 +187,39 @@ export class LessonSession {
    * it is their act, their selection, and it is what §1 means by "distilled + curated by the
    * student only".
    */
-  distil(lineId: string, opts?: { text?: string; anchor?: BarAnchor }): LessonNote {
+  distil(lineId: string, opts?: { text?: string; bar?: BarOnlyAnchor }): PinnedLessonNote {
     if (!this.#lines) throw new LessonSessionEndedError('the transcript')
     const line = this.#lines.find((l) => l.id === lineId)
     if (!line) throw new Error(`No such transcript line: ${lineId}`)
-    const snippet = (opts?.text ?? line.text).trim()
-    if (!snippet) throw new Error('A lesson note cannot be empty.')
-    const note: LessonNote = {
-      id: uuid(),
-      snippet,
-      ...(opts?.anchor ? { anchor: opts.anchor } : {}),
-      created_at: new Date().toISOString(),
-    }
-    this.#notes.push(note)
-    return note
+    return this.#keep(opts?.text ?? line.text, opts?.bar)
   }
 
   /**
    * A note the student writes themselves, with no transcript line behind it — the ordinary case on
    * the 'no-audio' source, where the panel IS their own notes. Same shape, same destination.
    */
-  note(text: string, anchor?: BarAnchor): LessonNote {
+  note(text: string, bar?: BarOnlyAnchor): PinnedLessonNote {
     if (this.ended) throw new LessonSessionEndedError('note-taking')
-    const snippet = text.trim()
-    if (!snippet) throw new Error('A lesson note cannot be empty.')
-    const note: LessonNote = {
-      id: uuid(),
-      snippet,
-      ...(anchor ? { anchor } : {}),
-      created_at: new Date().toISOString(),
-    }
-    this.#notes.push(note)
-    return note
+    return this.#keep(text, bar)
   }
 
-  notes(): readonly LessonNote[] {
+  /**
+   * The one place a note is made. §1's `LessonNote` carries no bar-only anchor yet (types.ts
+   * BarOnlyAnchor explains the gap and the ask), so the bar rides alongside rather than inside —
+   * and when the contract gains its variant this is the ONE function that changes.
+   */
+  #keep(text: string, bar?: BarOnlyAnchor): PinnedLessonNote {
+    const snippet = text.trim()
+    if (!snippet) throw new Error('A lesson note cannot be empty.')
+    const pinned: PinnedLessonNote = {
+      note: { id: uuid(), snippet, created_at: new Date().toISOString() },
+      ...(bar ? { bar } : {}),
+    }
+    this.#notes.push(pinned)
+    return pinned
+  }
+
+  notes(): readonly PinnedLessonNote[] {
     return [...this.#notes]
   }
 
@@ -254,18 +254,14 @@ export class LessonSession {
   }
 
   /** §A3b's "+" button: attach a YouTube link or a written note as a "for next week" item. */
-  addAssignment(kind: 'youtube' | 'note', ref: string, anchor?: BarAnchor): Assignment {
+  addAssignment(kind: 'youtube' | 'note', ref: string): Assignment {
     if (this.ended) throw new LessonSessionEndedError('assignments')
     const value = ref.trim()
     if (!value) throw new Error('An assignment needs a link or some text.')
-    const a: Assignment = {
-      id: uuid(),
-      kind,
-      ref: value,
-      due: 'next_week',
-      ...(anchor ? { anchor } : {}),
-      created_at: new Date().toISOString(),
-    }
+    // §1's Assignment is exactly { kind, ref, due } — no id, no anchor, no created_at. Those are
+    // fields I wanted and did NOT add: adding them here would fork the contract silently. The ask
+    // is in the report; until then an assignment is identified by its position in the recap.
+    const a: Assignment = { kind, ref: value, due: 'next_week' }
     if (!this.#recap) {
       // A teacher may attach "for next week" items before writing the summary. The recap is created
       // empty-summaried here and setRecap fills it — but `toRecord` REFUSES a summary-less recap

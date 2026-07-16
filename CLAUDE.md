@@ -1442,6 +1442,79 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
   tools §A5 (step 4). `Practice.sessions` REFERENCES productivity ledger rows rather than copying
   minutes — §A6.4's "one representation of measurement, always".
 
+## Music lesson capture (§A3/§A3b, 2026-07-17 — `src/music/lesson/`, flag `?lesson`, DEFAULT OFF)
+
+**THE SPEC'S PREMISE DOES NOT HOLD IN A PWA, AND NO COPY CLAIMS IT DOES.** §0/§A3/§C1 promise
+on-device STT ("audio never leaves the device… there is provably no keepable recording of them").
+PROBED, primary sources:
+- Inkwave cannot reach the Apple Speech framework. It is not a native app.
+- WebKit DOES ask for on-device, but only opportunistically. Verbatim, `WebCore/Modules/speech/
+  cocoa/WebSpeechRecognizerTask.mm` (on every shipping `safari-*-branch` checked):
+  `if ([_recognizer supportsOnDeviceRecognition]) [_request setRequiresOnDeviceRecognition:YES];`
+  **Read the condition, not the wish** — when it is false the audio goes to APPLE'S SERVERS and the
+  fallback is SILENT.
+- **Apple's own docs settle it** (`supportsOnDeviceRecognition`): *"If `supportsOnDeviceRecognition`
+  is `false`, the `SFSpeechRecognizer` requires a network in order to recognize speech."* And
+  `requiresOnDeviceRecognition`: *"The request only honors this setting if the
+  `supportsOnDeviceRecognition` property is also `true`"* — plus *"on-device requests won't be as
+  accurate"*, so the quality argument does not favour it either. Apple documents **no device
+  guarantee**: it is a runtime property, so an iPhone-12/A14 floor does NOT buy the on-device branch.
+- **The page cannot require, query, or observe it.** `processLocally`/`available()`/`install()` are
+  Chrome 139+ only (MDN BCD: safari `false`) and WebKit's `SpeechRecognition.idl` declares none of
+  them. Safari's prompt ("Allow X to capture your audio and use it for speech recognition?") does not
+  mention Apple either.
+⇒ `webkitSpeechRecognition` is **'unverifiable'** — not on-device, not cloud, but *unknowable from
+here*, per utterance. **A promise whose entire value is that it is provable cannot rest on it.** It is
+classified in `stt.ts` and NOT REGISTERED; only a `no-audio` source exists. whisper-WASM is the only
+provable ambient path (`local-model` seam) and is NOT built — its latency on an A14 is **unmeasured**.
+**Correction to an earlier objection: there is NO YouTube IFrame anywhere in this repo** (§A4's player
+is unbuilt), so "cross-origin isolation would break the embed" is currently moot — probed by grep.
+Note for anyone reviving it: **COOP/COEP and Permissions-Policy are per-DOCUMENT, and this app is an
+SPA (`ssr:false`) where a route is NOT a document** — client-side navigation to `/lesson` keeps the
+entry document's headers, so isolation would apply only on a hard load. Check `crossOriginIsolated`
+at runtime; never assume it from the route.
+
+**THE MICROPHONE FIREBREAK (`micBoundary.ts`) — three layers, and layer 1 already existed.**
+§A5's practice recordings (student records themselves: consensual, theirs, storable) and §A3's lesson
+(the teacher's voice, where "no keepable recording" IS the product) want the SAME API and keep
+DIFFERENT promises. The separation is structural:
+1. **`Permissions-Policy: microphone=()` in `vercel.json`, DEPLOYED** — the mic is off for the whole
+   origin at the HTTP header, so `getUserMedia` cannot succeed anywhere no matter what any module
+   calls. **This is the real line: §A5 cannot ship without editing that header** — which is exactly
+   the single place the decision must be made, and `micBoundary.test.ts` **binds the lesson copy to
+   it** (flip it to `microphone=(self)` and the copy test FIRES with instructions).
+2. A source allow-list (`MIC_CAPABLE`, **empty today**) — naming a capture API is a decision.
+3. An **import-graph** firebreak — nothing REACHABLE from `src/music/lesson/` may be mic-capable.
+   Layer 3 is the one that survives the API moving behind a helper: a grep of `lesson/`'s own files
+   would pass forever once §A5 lands `recording/recorder.ts` and `lesson/` imports it. The walk is
+   proved to CROSS a real boundary (`lesson/session.ts` → `../types.ts`) before any "found nothing"
+   verdict is read — otherwise it is the empty-list probe.
+**Mention vs use is load-bearing**: `stt.ts` must NAME `webkitSpeechRecognition` to feature-detect it
+(that is the finding), and reading a property captures no audio — only `new` does. The first cut
+matched names broadly and flagged `stt.ts`, i.e. it would have forced the module documenting the
+microphone problem onto the microphone allow-list. `micBoundary.ts` is itself the PATTERN CARRIER
+(it names every API as data), excluded from its own scan and **proved inert** — a test asserts only
+test files import it, the same guard `claims.test.ts` puts on `claimMatchers.ts`.
+**The copy is SCOPED to the screen, deliberately**: "nothing on this screen can reach a microphone",
+never "Inkwave does not record audio" — the app-wide claim EXPIRES when §A5 ships, and an expired
+sentence goes on being read.
+
+**⚠️ NO ENCRYPTION (§0 and §1 are both WRONG about this)** — verified independently again here.
+The transcript is non-storable STRUCTURALLY: `#private` field (invisible to `stringify`), `toJSON()`
+redacts, `LessonRecord` has no field to hold one, `end()` drops the reference. Also refused:
+*"unrecoverable"/"securely erased"* — `end()` drops a JS reference; it does not wipe a heap.
+**TWO INSTRUMENT TRAPS caught here, both the house speciality:** (1) the first deletion test scanned
+an ENDED session, found nothing and went green — but the same scan finds nothing on a RUNNING one,
+because `#lines` is genuinely private. It scored both states **identically BY CONSTRUCTION** and could
+not tell deletion from encapsulation. Claims are now split: the serialisation firebreak is proved by
+the scanner (positive control = a `LeakySession`), the deletion by the session's own API (proved to
+show the lines BEFORE `end()`). (2) The `audio never leaves your device` matcher **could never fire** —
+an affirmative promise phrased as a DENIAL, so `affirmativeOnly()` stripped it and the matcher read an
+empty string, passing vacuously. Now `scope: 'literal'`. **Only the prove-it-first rule caught either.**
+NOT WIRED to a route (no Piece surface consumed yet); `BarOnlyAnchor` in `lesson/types.ts` records the
+one contract ask — §1's `Anchor` union cannot express "bar 24" alone, which is all a student has
+mid-lesson.
+
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
 Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
@@ -1924,8 +1997,9 @@ VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PD
 ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
 `/ledger`), EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
-MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path). When you
-add a panel, add it here too.
+MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path), the music studio
+(`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
+`music/ScorePage.tsx` gap bands + sticky notes). When you add a panel, add it here too.
 
 **RENDERED NOTATION CANNOT USE var() — which is why it needs MORE care, not less (2026-07-17).**
 `src/music/theme.ts` + `ScoreView.tsx`: OpenSheetMusicDisplay GENERATES the notation SVG and its
@@ -1954,9 +2028,6 @@ still-mounted components (it inflated a re-render count from 2 to 4 here and rea
 bug); and in a `.tsx` file `vi.mock`'s factory is hoisted above vitest's OWN import, so `vi.hoisted`
 and `await import('vitest')` both fail — build the recorder inside the factory out of plain
 functions (see `ScoreView.test.tsx`).
-`/ledger`), EmailComposePanel (+ its provider drop-up), the music studio (`music/MusicStudio.tsx` —
-its footer toolbar + symbol drop-up carry `iw-touch-guard`, `music/ScorePage.tsx` gap bands +
-sticky notes). When you add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the
