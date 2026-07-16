@@ -6,7 +6,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { listSnapshotMeta } from '../provenance/snapshots'
-import { flushPendingSave } from '../storage/opfs'
 import { useNavigate } from 'react-router'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMeta, InkwaveDocument } from '../types/document'
@@ -24,8 +23,9 @@ import { armHeadless } from '../auth/clerkHeadless'
 import { getSaveFileName } from '../storage/folder'
 import { getDocSource } from '../storage/docSource'
 import { inkwaveFileName } from '../provenance/bundle'
+import { switchTabToDocument, tabDocId } from '../storage/tabDoc'
+import { OpfsInspector } from './OpfsInspector'
 
-const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
 const INK = '#5c2d8a'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
 const PANEL_GAP = 14
@@ -58,17 +58,10 @@ async function openViaPicker(fileInput: HTMLInputElement | null): Promise<void> 
 
 // Switch the active document by id and reload so the editor loads it cleanly (reliable for New /
 // Open Recent). The writable-handle "Open…" path switches in place instead (see openInkwaveFile).
-function openDocument(id: string) {
-  try { localStorage.setItem(ACTIVE_DOC_KEY, id) } catch { /* private mode */ }
-  // Flush any pending save before the reload — abort if it fails (data-loss guard, 2026-07-10).
-  void (async () => {
-    try { await flushPendingSave() } catch (err) {
-      alert(`Your latest changes could not be saved, so the switch was cancelled.\n\n${String(err)}`)
-      return
-    }
-    window.location.reload()
-  })()
-}
+//
+// The claim-for-this-tab + flush-first-and-ABORT-on-failure guard (2026-07-10) now lives in
+// switchTabToDocument (tabDoc.ts), so this path and the OPFS inspector's "Open" cannot drift apart.
+const openDocument = switchTabToDocument
 
 async function createDocument(
   title: string,
@@ -146,6 +139,9 @@ export function OptionsMenu({
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const [modal, setModal] = useState<ModalKey | null>(null)
+  // The OPFS inspector is NOT a ModalKey: it is a full recovery panel with its own portal +
+  // sizing, not one of the little drop-ups anchored over the kebab.
+  const [inspector, setInspector] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -234,13 +230,17 @@ export function OptionsMenu({
     { label: 'About', run: () => navigate('/about') },
     { label: 'Privacy', run: () => navigate('/privacy') },
     { label: 'Print', run: () => onPrint?.() },
+    // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
+    // API. Every document this device is actually holding, including any the Recent list can't
+    // see, with Open + Download on each. See OpfsInspector.tsx.
+    { label: 'Storage', run: () => setInspector(true) },
     {
       label: 'Provenance',
       run: () => {
         // Open the snapshot view at the MOST RECENT snapshot of the active doc.
         void (async () => {
           try {
-            const docId = localStorage.getItem('inkwave:activeDocumentId')
+            const docId = tabDocId() // THIS tab's document — never whatever another tab last opened
             if (!docId) return
             const snaps = await listSnapshotMeta(docId)
             const last = snaps[snaps.length - 1]
@@ -335,6 +335,8 @@ export function OptionsMenu({
         </>,
         document.body,
       )}
+
+      {inspector && <OpfsInspector onClose={() => setInspector(false)} />}
 
       {modal && (
         <Modal title={MODAL_TITLES[modal]} anchorStyle={panelAnchor()} onClose={() => setModal(null)}>

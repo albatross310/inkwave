@@ -134,6 +134,69 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   existing snapshots first (`mergeSnapshots` in `provenance/snapshots.ts`) so a short local set
   (fresh login / cleared data / a save racing ahead of restore) can never TRUNCATE the archive.
   This was a real data-loss incident (2026-07-05). `restoreSnapshotsFromBundle` also unions.
+- **THE DOCUMENT BODY IS NOW GUARDED TOO (2026-07-17) — the 07-15 incident, and it destroyed real
+  thesis work.** The grow-only rule above protected the snapshot ARCHIVE and *nothing protected
+  `current.json`*. That asymmetry ate a day of Peter's honours-proposal annotations. TWO silent
+  failures in sequence, both now fixed, both with live known-negatives:
+  - **The swallowed READ (11:19:40).** `opfs.ts readJson` ended `catch { return null }`, so a
+    transient failure was **indistinguishable from "no such file"** — and Edit.tsx answers null by
+    falling through to `newDocument()` **and repointing the active-doc pointer at the blank**
+    (measured: doc `978e0772`, createdAt == updatedAt, 0 chars). **The defect was not the missing
+    log — the TYPE erased the difference.** Now `readJson` returns null ONLY on `NotFoundError` and
+    throws **`StorageReadError`** otherwise (a corrupt JSON parse counts as a failure, not an
+    absence); `newDocument()` is **reachable only from absence, never from an error** — and if any
+    read failed while walking the index, init throws rather than concluding "you have nothing".
+    A failure renders **`StorageUnavailable`** (never a blank page — the blank page is what sent him
+    to a backup file) with Reload + the Storage inspector inline. NB the same file already insisted
+    **writes** stay loud; the read path was the silent half.
+  - **The blind OVERWRITE on open (11:30:18).** `openDoc.ts` takes the id FROM THE FILE, stamps
+    `updatedAt: now`, and called `saveDocument(doc)` — an unconditional whole-file replace. He
+    opened a stale `.studio` (07-10 file carrying 07-08 content) to recover from the blank and it
+    replaced Wednesday's work (proved: stale export and the `current.json` written that instant hash
+    identically, `ce421bc5…`). **The read bug CAUSED the open that triggered the write bug.**
+    Now `storage/openConflict.ts` `classifyOpen` decides by **ANCESTRY, never `updatedAt`** (this
+    path stamps `updatedAt` to now, so a stale file arrives looking brand new): if the incoming
+    contentHash is in the LOCAL snapshot archive the file is a PAST STATE ⇒ `incoming-stale` ⇒ keep
+    the local body untouched (its snapshots still merge in — pure gain). Local in the incoming
+    archive ⇒ `incoming-newer` ⇒ a legitimate sync-down, adopt. Neither, ambiguous, **or the local
+    read failed** ⇒ `diverged` ⇒ open as a SEPARATE document, nothing overwritten, no cloud binding
+    for the copy. **The two bugs compose**: a null-on-failure read makes `localHash` null ⇒
+    `incoming-newer` ⇒ blind overwrite, so the read fix is load-bearing for this guard.
+  - PROVED, both engines incl. Firefox (Peter's), control-vs-fixed in ONE build:
+    `scripts/openguard-probe/repro.mjs` (`__iwOpenGuard='off'` ⇒ destroys the later work;
+    on ⇒ `verdict=incoming-stale`, 1 doc, work survives) and `blankdoc.mjs`
+    (`__iwReadGuard='off'` ⇒ blank doc minted + pointer moved; on ⇒ pointer untouched, nothing
+    minted). Unit keepers `openConflict.test.ts` — **mutation-tested** (drop the stale clause / move
+    the ambiguous clause after the directional tests ⇒ named tests fail).
+- **Per-tab document identity (2026-07-17).** `storage/tabDoc.ts`. `inkwave:activeDocumentId` was
+  ONE localStorage slot **for the whole origin**: every tab wrote it, every tab read it on boot, so
+  one tab's document switch silently re-pointed another, which adopted it on its next reload —
+  leaving the first tab's work orphaned on disk (intact, unreachable). **sessionStorage is the
+  carrier, NOT the URL**: OneDrive sign-in is `msal.loginRedirect` with
+  `redirectUri: window.location.origin` — it returns to a BARE `/` and any `?doc=` is gone (the
+  hard case Peter named: "even if you leave to go to microsofts page"). Precedence
+  `?doc=` ?? sessionStorage ?? last-doc hint (new tabs only); the URL is a reflection, never
+  load-bearing (round-8 bug 2 is the precedent). **ONE LIVE TAB PER DOCUMENT** via Web Locks
+  (`claimDocLock`, name = `DOC_LOCK_PREFIX + id` — **one exported constant**, because OpfsInspector
+  badges "open in another tab" from `navigator.locks.query()` and a private copy of that string
+  would let a rename put the badge silently to sleep): two tabs on one file blind-autosave over each
+  other (`saveDocument` has no union/generation check), so a tab that finds its document held takes
+  one of its own. `claimDocLock` RETRIES past the reload unload-race — without it a plain refresh
+  intermittently looks like "another tab has this" and hands the writer a blank page. No Web Locks
+  (older WebKit) ⇒ never block the writer. PROVED both engines, control `__iwTabDocRule='shared'`
+  loses data in all 3 cells (identity / two-tab clobber / OAuth round-trip), fixed loses none:
+  `scripts/tabdoc-probe/repro.mjs`. **NB this is NOT what caused the 07-15 loss** (forensics refuted
+  it: an opened file, not a pointer race) — it is a separate, real, reproduced class.
+- **Unsynced-work notice (2026-07-17, Peter's ask).** `editor/unsyncedWatch.ts` — PURE rule
+  (`shouldWarnUnsynced` + reducer), `components/UnsyncedNotice.tsx` is only its face. Fires after 5
+  minutes of unsynced WORK; never while sync is active; never again once waved away (the anti-nag
+  clause). Every input is **read, not awaited** (linked folder / OneDrive account / Drive flag), so
+  it is correct from cold. **THE CLOCK STARTS AT A DOC CHANGE THE WRITER CAUSED** — user input
+  (`keydown`/`paste`) ARMS it, the next real change starts it: a docChanged transaction alone began
+  the clock at PAGE LOAD (would nag someone who typed nothing), and `beforeinput` alone never fires
+  at all under ProseMirror (measured 0 events at document capture — a signal that never arrives
+  silently disables the feature). Both caught by `scripts/tabdoc-probe/unsynced.mjs` (5/5, threshold
+  shortened via `__iwUnsyncedWarnMs`); rule mutation-tested in `unsyncedWatch.test.ts`.
 - **Native citations** (replacing Zotero/BBT). `citations/` — `bibProvider` (reactive store),
   real CSL formatting, `CitationNodeView` (in-text purple hooks; reactive via editor.on('update')
   + queueMicrotask), `ReferenceListNodeView` (bibliography). Citation nav (click hook ↔ reference
@@ -2183,7 +2246,9 @@ Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, f
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
-`/ledger`), EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
+`/ledger`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
+document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
+EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
 MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path), the music studio
 (`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,

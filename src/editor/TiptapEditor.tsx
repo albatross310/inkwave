@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -48,6 +48,8 @@ import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignI
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, getGDriveFileTag, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
+import { UnsyncedNotice } from '../components/UnsyncedNotice'
+import { shouldWarnUnsynced, unsyncedReducer, initialUnsyncedState } from './unsyncedWatch'
 import { VerifyModal } from '../components/VerifyModal'
 // LAZY, AND IT MUST STAY LAZY (2026-07-17). A static import here put the whole report lane —
 // the modal, report/compile.ts and its prompt strings — inside THIS chunk, which every writer
@@ -301,6 +303,42 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setTimeout(attempt, quietMs)
   }
   const [needsReconnect, setNeedsReconnect] = useState(false) // linked file exists but write permission lapsed
+
+  // ── UNSYNCED-WORK NOTICE (Peter, 2026-07-17: "a warning that comes up if working for more than
+  //    5 minutes without syncing activated"). The rule is pure + unit-pinned in editor/
+  //    unsyncedWatch.ts; this is just its wiring. Every input is STATE WE ALREADY HOLD — read, not
+  //    awaited — so the answer is correct from cold and there is no one-shot event to miss.
+  const syncActive = (!!fileName && !needsReconnect) || !!oneDriveAcct || gdriveActive
+  // The editor's onUpdate closure is long-lived; read sync state through a ref so the first
+  // unsynced edit is judged against the CURRENT destination, not whatever was live at mount.
+  const sawUserInputRef = useRef(false) // the writer has typed/pasted into THIS editor instance
+  const syncActiveRef = useRef(syncActive)
+  useEffect(() => { syncActiveRef.current = syncActive }, [syncActive])
+  const [unsynced, dispatchUnsynced] = useReducer(unsyncedReducer, initialUnsyncedState)
+  const [unsyncedNow, setUnsyncedNow] = useState(() => Date.now())
+  useEffect(() => { if (syncActive) dispatchUnsynced({ type: 'sync-active' }) }, [syncActive])
+  useEffect(() => { dispatchUnsynced({ type: 'doc-switch' }) }, [doc.id])
+  // A slow tick, and ONLY while a warning is actually pending: nothing to re-render once sync is
+  // live, dismissed, or before the first unsynced edit. (The reducer returns its input unchanged on
+  // a no-op edit, so useReducer bails out and typing never re-renders the shell — the
+  // console-snappy rule.)
+  // PROBE SEAM (the `__iwRasterDprCap` / `__iwAnchorRule` pattern): shorten the threshold so the
+  // wiring can be DRIVEN and observed in a live browser instead of waiting five real minutes — a
+  // feature whose only proof is "the rule is unit-tested" is a feature nobody has ever seen fire.
+  // Undefined in every real session ⇒ the constant in unsyncedWatch.ts applies.
+  const warnAfterMs = (window as unknown as { __iwUnsyncedWarnMs?: number }).__iwUnsyncedWarnMs
+  useEffect(() => {
+    if (syncActive || unsynced.dismissed || unsynced.firstUnsyncedEditAt === null) return
+    const t = setInterval(() => setUnsyncedNow(Date.now()), Math.min(20_000, (warnAfterMs ?? 20_000) / 3))
+    return () => clearInterval(t)
+  }, [syncActive, unsynced.dismissed, unsynced.firstUnsyncedEditAt, warnAfterMs])
+  const warnUnsynced = shouldWarnUnsynced({
+    syncActive,
+    firstUnsyncedEditAt: unsynced.firstUnsyncedEditAt,
+    dismissed: unsynced.dismissed,
+    now: unsyncedNow,
+    warnAfterMs,
+  })
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [paperRight, setPaperRight] = useState(0)
@@ -978,6 +1016,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // actually needs it — the 200ms save beat, any snapshot/signing work, or a mirror. The beat
       // stays data-only; the shell re-renders only when the title changed.
       docStaleRef.current = true
+      // Peter's 5-minute unsynced clock: only a change the WRITER caused counts (see the arming
+      // effect below). The reducer returns its input unchanged once started or while sync is live,
+      // so useReducer bails and this costs nothing per keystroke.
+      if (sawUserInputRef.current) {
+        dispatchUnsynced({ type: 'edit', now: Date.now(), syncActive: syncActiveRef.current })
+      }
       scheduleSave(() => {
         const t0 = performance.now() // perflog: the save beat's O(doc) doc build (desktop lag hunt)
         const d = ensureDocFresh()
@@ -1698,6 +1742,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       .then(async () => { ensureDocFresh(); await work() })
       .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
   }
+  // THE CLOCK STARTS AT REAL WORK — a document change the WRITER caused.
+  //
+  // Both halves are needed, and each was PROBED (scripts/tabdoc-probe/unsynced.mjs):
+  //  · A docChanged transaction ALONE is wrong: the editor fires them during LOAD, so the clock
+  //    started at page load and the notice would nag someone who opened Inkwave, typed nothing and
+  //    walked away (cells 1+3 caught exactly that).
+  //  · `beforeinput` alone is wrong too: it never fires here — ProseMirror's input pipeline means
+  //    the event is simply absent (measured: 0 events at document capture while typing). A signal
+  //    that never arrives silently disables the feature, which is this codebase's signature bug.
+  // So: user input ARMS the clock, and the next real document change starts it. Caret moves and
+  // load-time transactions do neither.
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const arm = () => { sawUserInputRef.current = true }
+    dom.addEventListener('keydown', arm)
+    dom.addEventListener('paste', arm)
+    return () => { dom.removeEventListener('keydown', arm); dom.removeEventListener('paste', arm) }
+  }, [editor])
+
   const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshotMeta(docId)) }
 
   // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid snapshot
@@ -2682,6 +2746,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1.5"><span className="iw-subtle-flash" style={{ fontSize: '1.5em', lineHeight: 1, position: 'relative', top: '-0.14em' }}>…</span><span style={{ fontSize: '1.4em', lineHeight: 1 }}>☁</span></span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
           )
         })()}
+
+        {/* Peter's 5-minute unsynced-work warning. Sits by the sync pill (where the writer already
+            looks for this) and never over the text. Hidden while the keyboard is up, like the pill
+            itself — a phone writer mid-sentence is the one person who must not be interrupted. */}
+        {!keyboardUp && (
+          <UnsyncedNotice
+            show={warnUnsynced}
+            minutes={Math.max(5, Math.round((unsyncedNow - (unsynced.firstUnsyncedEditAt ?? unsyncedNow)) / 60_000))}
+            onSetUpSync={() => window.dispatchEvent(new Event('inkwave:open-save'))}
+            onDismiss={() => dispatchUnsynced({ type: 'dismiss' })}
+          />
+        )}
 
         {gdrivePickerOpen && (
           <GoogleDriveFolderPicker

@@ -25,13 +25,11 @@ import { v4 as uuidv4 } from 'uuid'
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
-import { loadDocument, emptyTiptapDoc } from '../storage/opfs'
+import { loadDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
 import { listMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
-
-// The active document ID is persisted in localStorage so the same document
-// reopens on refresh. (Content itself is in OPFS — this is just the pointer.)
-const ACTIVE_DOC_KEY = 'inkwave:activeDocumentId'
+import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock } from '../storage/tabDoc'
+import { StorageUnavailable } from '../components/StorageUnavailable'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -53,6 +51,8 @@ function migrateDocument(doc: InkwaveDocument): InkwaveDocument {
 
 export function Edit() {
   const [doc, setDoc] = useState<InkwaveDocument | null>(null)
+  // A read FAILED (not "there is nothing here"). Never null-and-blank: see the catch in init().
+  const [loadError, setLoadError] = useState<StorageReadError | null>(null)
   // The editor component, held in state once its chunk resolves (see the double-mount note at
   // the top of the file). null until then — the loading shell covers either way.
   const [EditorComp, setEditorComp] = useState<typeof import('../editor/TiptapEditor').TiptapEditor | null>(null)
@@ -153,39 +153,84 @@ export function Edit() {
   useEffect(() => {
     async function init() {
       try {
-        // 1. Try to restore the last active document from OPFS.
-        const storedId = localStorage.getItem(ACTIVE_DOC_KEY)
+        // 1. THIS TAB's own document — `?doc=`, else the per-tab sessionStorage identity, else
+        //    (brand-new tab only) the last-doc hint. See storage/tabDoc.ts for why the per-tab
+        //    identity is authoritative and the URL is not: OneDrive's sign-in redirect returns to a
+        //    bare `/`, so a tab must be able to remember its document with no help from the URL.
+        //    This is what stops another tab's document switch from re-pointing this tab on reload.
+        const { id: storedId } = resolveTabDocId()
         if (storedId) {
-          const loaded = await loadDocument(storedId)
-          if (loaded) {
-            setDoc(migrateDocument(loaded))
-            return
+          // ONE LIVE TAB PER DOCUMENT (tabDoc.ts): two tabs on one file blind-autosave over each
+          // other and one tab's words are destroyed — `saveDocument` writes the whole file with no
+          // union and no generation check. So if another LIVE tab is already editing this document,
+          // this tab does NOT open it; it starts a document of its own below and says so. A plain
+          // reload re-claims normally (the lock follows the page, and claimDocLock retries past the
+          // unload race), so this only ever fires for a genuinely concurrent second tab.
+          const mine = await claimDocLock(storedId)
+          if (!mine) {
+            const busy = await loadDocument(storedId).catch(() => null)
+            window.dispatchEvent(new CustomEvent('inkwave:doc-busy', {
+              detail: { id: storedId, title: busy?.title ?? 'That document' },
+            }))
+          } else {
+            // A THROW HERE IS NOT AN ABSENCE. loadDocument now returns null only when the document
+            // genuinely is not on disk, and throws StorageReadError when the read FAILED. Letting a
+            // failure fall through to step 3 is what handed Peter a blank page where his thesis had
+            // been (2026-07-15 11:19:40) and repointed the pointer at the blank — so it propagates
+            // to the catch below, which never creates anything.
+            const loaded = await loadDocument(storedId)
+            if (loaded) {
+              claimTabDoc(loaded.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
+              setDoc(migrateDocument(loaded))
+              return
+            }
           }
         }
 
-        // 2. Fall back to the most recently updated document in IndexedDB.
-        const metas = await listMeta()
-        if (metas.length > 0) {
-          const loaded = await loadDocument(metas[0].id)
+        // 2. Fall back to the most recently updated document in IndexedDB that no live tab holds —
+        //    walking past the busy ones rather than stopping at the newest (a second tab should
+        //    land on the writer's next-most-recent document, not a blank page, when it can).
+        let sawReadFailure = false
+        for (const meta of await listMeta()) {
+          if (!(await claimDocLock(meta.id))) continue // open in another tab — keep looking
+          // One unreadable document must not end the search — the NEXT one may be perfectly
+          // readable, and opening the writer's real work beats any error screen. But we remember
+          // that a read FAILED, because that changes what step 3 is allowed to conclude.
+          let loaded
+          try {
+            loaded = await loadDocument(meta.id)
+          } catch (err) {
+            sawReadFailure = true
+            console.error('[inkwave] init: could not read an indexed document:', meta.id, err)
+            releaseDocLock(meta.id)
+            continue
+          }
           if (loaded) {
-            localStorage.setItem(ACTIVE_DOC_KEY, loaded.id)
+            claimTabDoc(loaded.id)
             setDoc(migrateDocument(loaded))
             return
           }
+          releaseDocLock(meta.id) // indexed but not in OPFS — don't sit on a claim we can't use
         }
 
-        // 3. Create a fresh document.
+        // 3. Create a fresh document. REACHABLE ONLY FROM ABSENCE — every step above either opened
+        //    a document or established that there is genuinely nothing there to open.
+        //    If ANY read failed along the way we do not get to conclude "this writer has nothing":
+        //    that inference, drawn from a failure, is the whole 2026-07-15 bug. Fail loudly instead.
+        if (sawReadFailure) throw new StorageReadError('documents', new Error('one or more documents could not be read'))
         const fresh = newDocument()
-        localStorage.setItem(ACTIVE_DOC_KEY, fresh.id)
+        claimTabDoc(fresh.id)
         setDoc(fresh)
       } catch (err) {
-        console.error('[inkwave] init failed:', err)
-        // Never strand the writer on the blank placeholder. Fall back to a fresh
-        // in-memory document under a NEW id, so no existing file is ever overwritten.
-        // localStorage can throw (private mode), so guard it on its own.
-        const fresh = newDocument()
-        try { localStorage.setItem(ACTIVE_DOC_KEY, fresh.id) } catch { /* private mode */ }
-        setDoc(fresh)
+        // A READ FAILED. We do NOT know that the writer has no work — we know the opposite is
+        // possible, and their document may be sitting on disk perfectly intact. So:
+        //   · never mint a document (a blank page IS the bug: it tells them, wordlessly, that their
+        //     thesis is gone),
+        //   · never touch the active-doc pointer (repointing it at a blank is how the real one gets
+        //     lost from view),
+        //   · say so, and put the recovery surface one click away.
+        console.error('[inkwave] init: could not read this device\'s storage:', err)
+        setLoadError(err instanceof StorageReadError ? err : new StorageReadError('storage', err))
       }
     }
 
@@ -229,6 +274,11 @@ export function Edit() {
       void loadDocument(id).then((loaded) => {
         if (loaded) setDoc(migrateDocument(loaded))
         else console.warn('[inkwave] open-doc: document not found in OPFS after import:', id)
+      }).catch((err) => {
+        // loadDocument now THROWS on a read failure rather than answering null (that null was the
+        // 2026-07-15 bug). Nothing to recover here — the dispatcher already holds the parsed doc —
+        // but it must not surface as an unhandled rejection.
+        console.error('[inkwave] open-doc: could not read the imported document:', id, err)
       })
     }
     window.addEventListener('inkwave:open-doc', onOpen as EventListener)
@@ -243,6 +293,21 @@ export function Edit() {
   // sync reconnect all re-run for the new doc). No Suspense here — the shell on top provides the
   // loading visuals, and the editor must mount in a default-lane render (see the double-mount
   // note at the top of the file).
+  // A READ FAILED. The writer's document may be perfectly intact on disk — we simply could not get
+  // at it this time. The one thing we must not do is show a blank page and let them conclude their
+  // work is gone (that conclusion is what sent Peter to a backup file, which then overwrote the
+  // real thing). Say what happened, offer the retry that usually works, and put Storage — the
+  // recovery surface that can SEE and export every document on the device — right here rather than
+  // buried in a menu they have no reason to trust right now.
+  if (loadError) {
+    return (
+      <StorageUnavailable
+        error={loadError}
+        onRetry={() => window.location.reload()}
+      />
+    )
+  }
+
   return (
     <>
       {doc && EditorComp && (
