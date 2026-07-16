@@ -969,9 +969,25 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
 - **Location: there is NO location collection and no `navigator.geolocation` anywhere.** `place` is a word the
   writer TYPES ("library"), same class as their `note`. Peter overruled §A3.2 to want location, then chose
   user-labelled (2026-07-17). Do not "upgrade" it to real location without re-reading §A3.2 and asking him.
-- **`note`/`place` are USER PROSE, not telemetry:** `LEDGER_PRIVATE_FIELDS` + `stripPrivateFields(row)` are
-  the AI-export seam — they are OFF by default and need their own opt-in (§A7.3). `/privacy` documents all of
-  this and MUST stay in sync (it currently claims exactly: no location, notes/place are typed, opt-in only).
+- **`note`/`place` are USER PROSE, not telemetry** — OFF by default, their own opt-in (§A7.3). WHAT ENFORCES
+  IT: `report/compile.ts`'s ALLOW-LIST (it NAMES every field that leaves; note/place are not among them) +
+  the `includeNotes` gate, default false. **`LEDGER_PRIVATE_FIELDS`/`stripPrivateFields`/`PublicSessionRow`
+  are GONE (2026-07-17)** — that deny-list had ZERO non-test callers on every branch incl. master while
+  types.ts called it "the DEFAULT payload shape" and `/privacy`'s header cited it as the enforcing mechanism.
+  The property held (the allow-list is real, so this was never a leak) — the danger was quieter: editing
+  `LEDGER_PRIVATE_FIELDS` to protect a new field would have done NOTHING, silently. Two rules for one
+  question, only one live, docs pointing at the dead one. **Do not reintroduce a deny-list** (compile.ts's
+  banner has the argument: it fails the opposite way, and that failure is silent); name new columns in
+  compile.ts instead. `/privacy` MUST stay in sync and MUST name the guard that is real.
+- **`doc_label` IS TIER 1 (ungated) AND ITS §A3.2 SUPPRESSION IS UNREACHABLE — Peter's call, raised 2026-07-17.**
+  `isLabelSuppressed` is wired into capture.ts's close path, but `setLabelSuppressed` has ZERO non-test
+  callers: no UI turns it on, so in practice EVERY title travels to the AI in tier 1. A title is
+  writer-authored prose, so compile.ts's tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
+  prose ride out inside 'metadata'") applies verbatim. Why tier 1 is nonetheless right for it: a label is the
+  IDENTIFIER of the measured thing, not an extra disclosure — drop it and §B1's "40m on email" cannot be read
+  (every row becomes `doc-a1b2f3`), and §A7.3's tick-box lists documents BY LABEL at the moment of consent.
+  That covers the ordinary case, not the sharp one ("Chapter 3 — my mother's illness") — which is exactly why
+  §A3.2 asks for per-doc suppression. **The missing control is a real gap; placement is a consent decision.**
 - **§A5 is a hard constraint:** kind, non-shaming, no scoring. The day summary leads with TIME and SESSIONS;
   a cutting day reads "editing is writing too". Nothing here may grow a red number.
 - NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo
@@ -1005,7 +1021,7 @@ guards this with a matcher. **Copy tracks the CODE, not the spec** — the spec 
 is not a property. When §C2's encryption ships, the word can come back. NOT E2E either, ever, unless
 the recipient runs PGP/S-MIME.
 
-ALL in-product copy lives in `src/email/copy.ts` (one source
+ALL of the EMAIL lane's in-product copy lives in `src/email/copy.ts` (one source
 of truth) and `copy.test.ts` asserts the forbidden claims are absent — each matcher proved to fire on
 known-bad copy AND not to fire on an honest control FIRST, because "assert the bad phrase is absent"
 passes trivially on empty or broken matchers. The control earned its keep immediately: the naive
@@ -1067,6 +1083,33 @@ cold gunzip. (2) That cold read exposed a REAL latent bug in `workers/parseClien
 both promises were `void`ed, so it HUNG forever instead of throwing, defeating the caller's
 try/catch. The no-Worker fallback (node/vitest/prerender) had never once been exercised. Fixed
 (write a Uint8Array view).
+
+## §C1.4 copy guard — PRODUCT-WIDE (2026-07-17)
+
+The matchers live in **`src/copy/claimMatchers.ts`** (extracted from `email/copy.test.ts`, byte-for-byte,
+NOT copied — two copies of these regexes is how one guard silently stops catching what the other does).
+Two consumers: the email suite (semantics unchanged, still its own verdict) and **`src/copy/claims.test.ts`**,
+a REPO-WIDE sweep of string literals + JSX text across `src/` + `extension-src/`.
+
+- **Why:** `ALL_COPY = Object.entries(copy)` only ever saw ONE file while its describe block read "the real
+  in-product copy makes no forbidden claim". §C1.4 is a PRODUCT rule — nothing stopped another lane shipping
+  "stored encrypted on your device" with that suite green, and the music lanes are being built against a spec
+  whose §0 asserts encryption at rest **which this build does not have**. PROPHYLACTIC: 0 violations today.
+- **Scope is deliberate, and both exclusions are asserted, not assumed:** comments are STRIPPED (this repo's
+  comments must NAME the forbidden claims in order to forbid them — a guard that can't survive its own
+  documentation gets disabled); test files + `claimMatchers.ts` are skipped because they carry `knownBad`
+  BY DESIGN. A test asserts the fixture carrier is imported by tests ONLY, so the exclusion can't become a
+  hole. VOID conditions fail the suite if the sweep sees <50 files or extracts <200 strings — an empty sweep
+  must fail, never pass.
+- **PROVED IN SITU:** planting overclaims in REAL production files (`email/copy.ts` AND `routes/Privacy.tsx`
+  JSX — a non-email lane) fails the sweep; restoring them greens it.
+- **A REAL HOLE WAS FOUND AND CLOSED in `affirmativeOnly`.** The split was punctuation-only, so a negator
+  anywhere in an unpunctuated clause deleted the WHOLE clause — overclaim included. Measured:
+  "Every note is tamper-proof." → caught; "…, and we cannot read it." → caught; **"…and we cannot read it."
+  → MISSED**. One absent comma hid a forbidden claim. Now splits on and/but/though/although/while/yet,
+  proved both ways (every knownBad still fires; the honest control still fires nothing).
+  **KEEP NEW AFFIRMATIVE MATCHERS CONJUNCTIVE** — the finer split exposes short clauses standalone
+  ("that it arrived"), which is safe only because each matcher needs its "prov…" stem in the SAME clause.
 
 ## Productivity + email INTEGRATION (2026-07-17, `feat/prod-integrate` — the four lanes merged)
 

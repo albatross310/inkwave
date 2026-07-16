@@ -41,7 +41,28 @@ export interface SessionRow {
   session_id: string
   /** Stable document id — never the title, so a title can't leak into the ledger unbidden. */
   doc_id: string
-  /** User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed. */
+  /**
+   * User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed.
+   *
+   * ⚠ THE SUPPRESSION IS NOT REACHABLE BY A WRITER (probed 2026-07-17). `isLabelSuppressed` IS wired
+   * into the capture path (capture.ts closeDraft), so the mechanism works — but `setLabelSuppressed`
+   * has ZERO non-test callers: no UI anywhere turns it on. §A3.2 promises "suppressible per-doc" and
+   * the writer currently has no way to exercise it, so in practice every title travels.
+   *
+   * THIS IS TIER 1 (always included) WHILE `note`/`place` ARE TIER 2, and a title is writer-authored
+   * prose too — compile.ts's own tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
+   * prose ride out inside 'metadata'") applies to it verbatim. The deliberate distinction: a label is
+   * the IDENTIFIER of the thing being measured, not an extra disclosure about it. Drop a note and you
+   * lose a diary line; drop the label and §B1's primary goal — "2h10m writing, of which 40m on email"
+   * — cannot be read at all, because every row becomes `doc-a1b2f3`. It is also the one prose field
+   * already on screen at the moment of consent: §A7.3's tick-box lists documents BY LABEL so the
+   * writer can choose which to include.
+   *
+   * That reasoning covers the ordinary case, NOT the sharp one: a title can be far more revealing
+   * than a note ("Chapter 3 — my mother's illness"). Which is precisely why §A3.2 asks for
+   * per-doc suppression — and why the missing control is a real gap, not a nicety. RAISED WITH PETER
+   * 2026-07-17; the placement of a consent control is his call, not an agent's guess.
+   */
   doc_label?: string
   /** ISO-8601 with local offset. */
   start: string
@@ -92,27 +113,27 @@ export interface SessionRow {
   place?: string
 }
 
-/**
- * The fields that are USER PROSE rather than measured telemetry, and therefore must never reach an
- * AI (or any export) without their own explicit, off-by-default opt-in (§A7.3).
- *
- * This is the integration seam for the AI-report path: `stripPrivateFields(row)` is the DEFAULT
- * payload shape; including them requires the writer ticking the box that names them.
- */
-export const LEDGER_PRIVATE_FIELDS = ['note', 'place'] as const
-
-/** A row with the user-authored fields removed — the default AI-export shape (§A7.3). */
-export type PublicSessionRow = Omit<SessionRow, 'note' | 'place'>
-
-/**
- * Drop the user-authored fields. Use this on ANY path that leaves the device unless the writer has
- * ticked the notes/place opt-in. Deletes the keys entirely (never blanks them), so an omitted note
- * leaves no trace in the payload at all.
- */
-export function stripPrivateFields(row: SessionRow): PublicSessionRow {
-  const { note: _n, place: _p, ...rest } = row
-  return rest
-}
+// ─── WHAT ACTUALLY KEEPS `note`/`place` OUT OF AN EXPORT (§A7.3) ─────────────────────────────────
+//
+// THE ALLOW-LIST IN `report/compile.ts`, and nothing else. Every field that leaves is NAMED there
+// (`sessionRows()` lists its 12 columns literally); nothing iterates a row and emits what it finds.
+// So a prose field the ledger gains tomorrow cannot leak by default — it is simply not emitted
+// until someone adds it there, which forces them to choose a consent tier. The writer's opt-in
+// (`includeNotes`, default false) gates the one section that may carry prose.
+//
+// A DENY-LIST USED TO SIT HERE — `LEDGER_PRIVATE_FIELDS = ['note','place']`, `stripPrivateFields()`,
+// `PublicSessionRow` — described as "the DEFAULT payload shape". It was REMOVED on 2026-07-17
+// because it was never the default, or anything else: it had ZERO non-test callers on every branch
+// including master, and `/privacy`'s own header cited it as the enforcing mechanism. The privacy
+// property held the whole time (the allow-list is real), so this was not a leak — it was worse in a
+// quieter way: **editing `LEDGER_PRIVATE_FIELDS` to protect a new field would have done nothing at
+// all, silently**, while reading like the guard that mattered. Two rules for one question, only one
+// live, and the docs pointed at the dead one.
+//
+// DO NOT REINTRODUCE A DENY-LIST HERE. compile.ts's own banner has the argument: a deny-list fails
+// the opposite way, and that failure is silent. If a future path must export rows, name its columns
+// there. `report/compile.test.ts` pins the allow-list property directly — including that an
+// unforeseen prose field cannot ride out even with tier 2 ON.
 
 // ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
 // The ledger doubles as a signed provenance ledger: rows hash into a chain so the ledger is
