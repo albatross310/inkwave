@@ -261,6 +261,35 @@ export interface BuildOpts {
    *  lookup misses and every citation-bearing block placeholders out. */
   citationStyle?: string
   bibEpoch?: number
+  // ── WINDOW MODE (2026-07-17) ─────────────────────────────────────────────────────────────────
+  // PROVED first, then built: a page laid out from its own break position reproduces the full
+  // model's line starts EXACTLY, with zero prefix (30/30, 31/31, 31/31 at 2k/10k/40k; mid-line
+  // negatives collapse to 0/31). Because a break `at` IS a line start and greedy wrap restarts
+  // deterministically there. So the prefix is needed ONLY to FIND the break — never to lay out
+  // the page.
+  /** Lay out starting at this doc position (must be a LINE START — a break table entry). */
+  from?: number
+  /** Stop once this much height is laid out. THE WHOLE POINT: cost becomes O(window), not O(doc).
+   *  Without it the walk lays out the entire tail (measured 57-60ms at 40k) — which is what the
+   *  crux test did, and why its timings must not be quoted as the renderer's cost. */
+  maxHeight?: number
+}
+
+// Slice a block's runs to start at a block-relative char offset. Only ever called with a proven
+// LINE START, so the remainder wraps exactly as it does in the full layout.
+function sliceRuns(runs: InlineRun[], fromChar: number): InlineRun[] {
+  if (fromChar <= 0) return runs
+  const out: InlineRun[] = []
+  let c = 0
+  for (const r of runs) {
+    const len = r.atomic ? 1 : r.text.length
+    const end = c + len
+    if (end <= fromChar) { c = end; continue }
+    if (c >= fromChar || r.atomic) out.push(r)
+    else out.push({ ...r, text: r.text.slice(fromChar - c) })
+    c = end
+  }
+  return out
 }
 
 export function buildRenderModel(
@@ -272,6 +301,10 @@ export function buildRenderModel(
 ): RenderModel {
   const citationStyle = opts.citationStyle ?? ''
   const bibEpoch = opts.bibEpoch ?? -1
+  const from = opts.from ?? 0
+  const maxHeight = opts.maxHeight ?? Infinity
+  const windowMode = from > 0 || maxHeight !== Infinity
+  let done = false
   const lines: RenderLine[] = []
   const blocks: RenderBlock[] = []
   const coverage: Record<string, number> = {}
@@ -322,17 +355,24 @@ export function buildRenderModel(
   }
 
   doc.forEach((node, offset) => {
+    if (done) return
+    // WINDOW MODE: skip every block that ends before the window starts — node iteration is cheap,
+    // LAYOUT is what costs, and this is where O(window) actually comes from.
+    if (from > 0 && offset + node.nodeSize <= from) return
+    if (top >= maxHeight) { done = true; return }
     const bi = blocks.length
     const marginBottom = geom.paraSpacingEm * geom.basePx
+    // The first block of the window may start mid-block, at a line start.
+    const fromChar = from > 0 && from > offset + 1 && from < offset + node.nodeSize ? from - offset - 1 : 0
 
     // ── HEADING: a text block in its own harvested font ──
     if (node.type.name === 'heading') {
       const lvl = (node.attrs?.level as number) ?? 1
       const s = blockStyle(`heading:${lvl}`, geom.basePx)
       if (s) {
-        const runs = styledRuns(node, s)
+        const runs = sliceRuns(styledRuns(node, s), fromChar)
         const r = emitTextBlock(runs, s.fontSizePx, s.lineHeightRatio, geom.contentWidthPx,
-          s.marginTopPx, s.marginBottomPx, bi, offset + 1)
+          s.marginTopPx, s.marginBottomPx, bi, offset + 1 + fromChar)
         if (r.ok) {
           blocks.push({ kind: 'text', type: 'heading', start: offset, end: offset + node.nodeSize, top, height: r.height })
           top += r.height + s.marginBottomPx
@@ -361,18 +401,26 @@ export function buildRenderModel(
         let idx = 0
         // listItem → its paragraph. Doc positions: list@offset, item@+1, para@+2, text@+3.
         node.forEach((item, itemOff) => {
-          if (!ok) return
+          if (!ok || done) return
           const itemBase = offset + 1 + itemOff
+          idx++ // ordered-list numbering must count SKIPPED items too, or a windowed list mis-numbers
+          // WINDOW: an item entirely above the window contributes nothing. This is the fix for the
+          // page-4 failure — the list branch used to ignore `from` and re-lay the whole list from
+          // item 0, so a window opening mid-list silently rendered the WRONG lines (0/30, at every
+          // doc size). Lists straddle page boundaries constantly in real prose.
+          if (from > 0 && itemBase + item.nodeSize <= from) return
           item.forEach((child, childOff) => {
             if (!ok || child.type.name !== 'paragraph') return
-            const runs = runsOfParagraph(child, ip.fontSizePx, citationStyle, bibEpoch)
-            idx++
+            const paraStart = itemBase + 1 + childOff + 1
+            const fc = from > paraStart && from < paraStart + child.content.size ? from - paraStart : 0
+            const runs = sliceRuns(runsOfParagraph(child, ip.fontSizePx, citationStyle, bibEpoch), fc)
             const marker = node.type.name === 'orderedList' ? `${idx}.` : '•'
             const r = emitTextBlock(runs, ip.fontSizePx, ip.lineHeightRatio,
               geom.contentWidthPx - ls.indentPx, 0, ip.marginBottomPx, bi,
-              itemBase + 1 + childOff + 1, ls.indentPx, marker)
+              paraStart + fc, ls.indentPx, fc === 0 ? marker : undefined) // a continued item has no marker
             if (!r.ok) { ok = false; return }
             top += r.height + ip.marginBottomPx
+            if (top >= maxHeight) done = true
           })
         })
         if (ok) {
@@ -393,7 +441,7 @@ export function buildRenderModel(
     }
 
     if (node.type.name === 'paragraph') {
-      const runs = runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch)
+      const runs = sliceRuns(runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch), fromChar)
       const arith: ArithBlock = {
         type: 'paragraph', runs, baseFontPx: geom.basePx,
         marginTopPx: 0, marginBottomPx: marginBottom, firstLineLeadingPx: 0,
@@ -409,7 +457,7 @@ export function buildRenderModel(
           const ec = k + 1 < lay.lineCount ? lay.breakStartChars[k + 1] : chars.text.length
           lines.push({
             top: top + lay.relTops[k], height: lay.lineHeights[k], blockIdx: bi,
-            pos: offset + 1 + sc, startChar: sc, endChar: ec,
+            pos: offset + 1 + fromChar + sc, startChar: sc, endChar: ec,
             segs: segsOfLine(runs, chars, sc, ec, measure),
           })
         }
@@ -438,6 +486,17 @@ export function buildRenderModel(
     top += h + marginBottom
     bump(`placeholder:${node.type.name}`)
   })
+
+  // A WINDOW is one page by construction: it was cut at a break and stops when the page fills, so
+  // there is nothing to paginate. paintPage(model, 0) draws it unchanged.
+  if (windowMode) {
+    const est = blocks.filter((b) => b.estimated).length
+    return {
+      lines, blocks, pageOfLine: new Array(lines.length).fill(0), pageTop: [lines[0]?.top ?? 0],
+      pages: 1, contentHeight: top, coverage, breaks: [], sig: '',
+      breaksReliable: est === 0, estimatedBlocks: est,
+    }
+  }
 
   // ── Page the lines through the SAME splitter the live path uses ──
   const splitLines: SplitLine[] = lines.map((l) => ({ top: l.top, blockIdx: l.blockIdx, pos: l.pos }))

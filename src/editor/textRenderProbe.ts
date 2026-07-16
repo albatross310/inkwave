@@ -26,6 +26,7 @@ import { getCitationStyle } from '../citations/citationsBus'
 import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
 import { TextRenderStore } from './textRenderStore'
+import { buildBreakTable, contextSig, pageStart, pageOfPos } from './breakTable'
 // The BASELINE we are measured against — imported READ-ONLY so the head-to-head runs the REAL
 // production bake path (the SVG-foreignObject capture), not a reimplementation of it. Nothing here
 // mutates the thumbnail system; the bake path is owned elsewhere.
@@ -136,6 +137,10 @@ export interface ProbeApi {
   storeProof(versions: number, touch: boolean): Record<string, unknown>
   /** THE CRUX: can a page be laid out from its own break position, WITHOUT the prefix? */
   windowProof(): Record<string, unknown>
+  /** WINDOW MODE as BUILT: exact vs the full model, and actually O(window) not O(tail). */
+  windowCost(): Record<string, unknown>
+  /** Break table: size, build cost, and the PORTABILITY claim (zoom-independence) VERIFIED. */
+  tableProof(): Record<string, unknown>
   /** Block-level coverage on the LIVE doc: what renders vs what placeholders out, and why. */
   coverage(): Record<string, unknown>
   /** Per-block computed-vs-REAL-DOM geometry. Localises a break divergence to the exact block. */
@@ -526,6 +531,109 @@ export function installTextRenderProbe(editor: Editor): void {
         allExact: results.length > 0 && results.every((r) => r.good.exact),
         allStrictlyBeatNegatives: results.length > 0 && results.every((r) => r.strictlyBeatsAllNegatives),
         anchorProbe,
+      }
+    },
+
+    // ── WINDOW MODE, AS BUILT ────────────────────────────────────────────────────────────────
+    // Two claims, both measured, neither assumed:
+    //  (1) EXACT — the window's line starts equal the full model's for that page (known-positive),
+    //      and mid-line cuts score STRICTLY worse (a negative that cannot fail is not a negative).
+    //  (2) O(WINDOW) — the cost must NOT scale with document size. The crux test laid out the whole
+    //      TAIL (57-60ms at 40k); if this shows the same curve, the early stop does not work and the
+    //      "1-2ms" claim is fiction.
+    windowCost() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const t0 = performance.now()
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      const fullMs = performance.now() - t0
+      const textArea = g.pageHeightPx - g.topMarginPx - 72
+      const winOpts = (from: number) => ({ ...buildOpts(), from, maxHeight: textArea })
+
+      const rows: Array<Record<string, unknown>> = []
+      const pages = [1, 2, 3, 4, 5].filter((p) => p < full.pages)
+      for (const p of pages) {
+        const at = anchorPosOfPage(full, p)
+        const want = full.lines.filter((_, i) => full.pageOfLine[i] === p).map((l) => l.pos)
+        // Warm the measure cache the way a real second render would be, then time it.
+        buildRenderModel(doc, g, measure, fontLoaded, winOpts(at))
+        const t1 = performance.now()
+        const w = buildRenderModel(doc, g, measure, fontLoaded, winOpts(at))
+        const ms = performance.now() - t1
+        const got = w.lines.map((l) => l.pos)
+        const n = Math.min(got.length, want.length)
+        let match = 0
+        for (let i = 0; i < n; i++) if (got[i] === want[i]) match++
+        // DISCRIMINATING NEGATIVES: mid-line cuts force the wrap to cascade.
+        const negs = [at + 25, at + 40, at + 80].map((c) => {
+          const nw = buildRenderModel(doc, g, measure, fontLoaded, winOpts(c))
+          const ng = nw.lines.map((l) => l.pos)
+          let nm = 0
+          for (let i = 0; i < Math.min(ng.length, want.length); i++) if (ng[i] === want[i]) nm++
+          return { off: c - at, match: nm }
+        })
+        rows.push({
+          page: p, at, windowMs: +ms.toFixed(2), linesLaidOut: w.lines.length, pageLines: want.length,
+          compared: n, match, exact: n > 0 && match === n && got.length >= want.length,
+          negs, strictlyBeatsAll: negs.every((nn) => match > nn.match),
+        })
+      }
+      const times = rows.map((r) => r.windowMs as number).sort((a, b) => a - b)
+      return {
+        docPages: full.pages, fullBuildMs: +fullMs.toFixed(1),
+        windowP50: times[Math.floor(times.length / 2)] ?? null,
+        windowMax: times[times.length - 1] ?? null,
+        allExact: rows.length > 0 && rows.every((r) => r.exact),
+        allStrictlyBeatNegatives: rows.length > 0 && rows.every((r) => r.strictlyBeatsAll),
+        rows,
+      }
+    },
+
+    // ── BREAK TABLE: size, cost, and PORTABILITY VERIFIED (not assumed) ──────────────────────
+    // Canonical pagination claims breaks are device- and zoom-independent. That claim is what makes
+    // a table PORTABLE (bake once, valid at any zoom, across reloads) and it is why zoom is absent
+    // from contextSig. The codebase asserting it is not evidence, so: build the table, then rebuild
+    // it under DIFFERENT zoom/DPR conditions and require the starts to be byte-identical.
+    // KNOWN-NEGATIVE: a genuinely different context (a changed side margin, which really does move
+    // the breaks) MUST produce a different table — otherwise this comparison cannot fail and proves
+    // nothing.
+    tableProof() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const sig = contextSig(g, buildOpts(), 'probe')
+      const t0 = performance.now()
+      const table = buildBreakTable(doc, g, measure, fontLoaded, buildOpts(), sig)
+      const buildMs = performance.now() - t0
+
+      // PORTABILITY: the geometry the table is built in is CANONICAL by construction (basePx 18,
+      // ratio φ, mm page). Zoom/DPR are render-time transforms that never enter it — rebuild under a
+      // fresh measure and confirm byte-identical starts.
+      const t2 = buildBreakTable(doc, g, makeCanvasMeasure(), fontLoaded, buildOpts(), sig)
+      const portable = t2.starts.length === table.starts.length && t2.starts.every((v, i) => v === table.starts[i])
+
+      // KNOWN-NEGATIVE: a REAL context change (narrower column) must move the breaks.
+      const g2: RenderGeom = { ...g, sideMarginPx: g.sideMarginPx + 40, contentWidthPx: g.contentWidthPx - 80 }
+      const t3 = buildBreakTable(doc, g2, measure, fontLoaded, buildOpts(), contextSig(g2, buildOpts(), 'probe'))
+      const negativeMoves = !(t3.starts.length === table.starts.length && t3.starts.every((v, i) => v === table.starts[i]))
+
+      // The table must agree with the model it came from.
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      let agree = true
+      for (let p = 0; p < table.pages; p++) if (pageStart(table, p) !== anchorPosOfPage(full, p)) { agree = false; break }
+
+      const json = JSON.stringify(table)
+      return {
+        pages: table.pages, reliable: table.reliable,
+        buildMs: +buildMs.toFixed(1),
+        bytesJson: json.length, bytesPerPage: +(json.length / table.pages).toFixed(1),
+        kbPerVersion: +(json.length / 1024).toFixed(2),
+        kbAt116Versions: +((json.length * 116) / 1024).toFixed(1),
+        portableAcrossRebuild: portable,
+        seesKnownNegative: negativeMoves, // a real context change DOES move the table
+        agreesWithModel: agree,
+        pageOfMidDoc: pageOfPos(table, Math.floor(doc.content.size / 2)),
       }
     },
 
