@@ -303,6 +303,30 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   (>1 version/frame) still skips intermediates before show() sees them — at realistic notch
   cadence (~45ms) it commands 17/24 and presents them; only the fast-fling tail coalesces. Left
   as-is (touching scrubBy risks the swipe-perf invariants); revisit only if Peter still sees skips.
+  ROUND 6 (2026-07-16 — SHIFT-WHEEL FLIPBOOK, Peter: "if Apple Photos flickers frame-by-frame on
+  scroll, so should we"). ROOT CAUSE of "shift+wheel stays put until you finish, then jumps": the
+  window shift-wheel handler computed target off the COMMITTED idxRef and called goTo PER EVENT, so
+  it advanced at most ±1 per React commit — probed: 30 fast events commanded only 1-3 DISTINCT
+  versions; the panes never flipped. FIX (Photos model = swap resident textures decoupled from app
+  state): a COMMANDED index (swCmdRef) runs AHEAD of React per wheel event; an rAF driver (`tick`)
+  presents EVERY intermediate via presenter.show() from the resident DPR1 bitmap cache — NO React
+  re-render per step; the counter updates IMPERATIVELY (counterElRef ← counterStrings[idx], written
+  in the driver; React re-asserts on landing); ONE React commit lands the live full render on
+  settle (goTo, ≥120ms quiet). Heavy panes freeze for the scrub (frozenSnapId, 220ms hold). An
+  ISOLATED notch (not rapid) still takes the legible single live step (legacy goTo). MAX_PER_FRAME
+  2 (presents ~every version, catches up 2× on flings). Flag: window.__iwSwFlipbook=false disables;
+  touch is unaffected (isTouchDevice gate — touch keeps scrubBy). PROVED (chromium dSF 2): fast
+  burst now commands 16 distinct (was 3), counter flies through ~10-16 versions, JS show() 0.2ms,
+  lands clean (overlay lifts, URL+counter settle, active→false); single notch unchanged. HONEST
+  GAPS: (1) per-frame GPU present is UNMEASURABLE headless — WSL software raster shows 33ms frames
+  (JS is 0.2ms), unrepresentative of Peter's GPU where a DPR1 ~3MB drawImage+composite is a few ms;
+  confirm 60fps on device. If it's NOT 60fps there, the next lever is a RESIDENT opacity-pool
+  (present-by-opacity among pre-uploaded canvases = compositor-only swap, no re-upload) — but it
+  only helps RE-VISITS, a single forward sweep uploads each version once regardless. (2) COVERAGE =
+  the warmed window only: cold/never-visited versions have no bitmap → show() falls to nearest
+  (presentedDistinct collapses to 1 on a cold range); captures need a mounted DocLayer (≤5) so we
+  can't warm-ahead unvisited versions cheaply. Resident window ≈ the DPR1 cache (~12 versions)
+  around visited positions — Photos-like (a warm window, not the whole library).
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
