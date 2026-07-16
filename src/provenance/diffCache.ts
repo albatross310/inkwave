@@ -39,6 +39,16 @@ export function displayTextOf(s: Snapshot): string {
 
 const pairKey = (prev: Snapshot, cur: Snapshot) => `${prev.id}→${cur.id}`
 
+/** The cached ops for a pair, or null if they are NOT already computed. NEVER computes — this is
+ *  the read for the INPUT PATH (the flipbook driver's per-step header badges), where an LCS would
+ *  jank the gesture. `preloadDiffWindow` keeps ±PRELOAD_RADIUS resident, so during a scrub the
+ *  answer is almost always here already; a caller that misses must degrade visibly rather than
+ *  compute, and must never fall back to a DIFFERENT pair's number. */
+export function peekOpsBetween(prev: Snapshot | null, cur: Snapshot): DiffOp[] | null {
+  if (!prev) return null
+  return lruGet(opsCache, pairKey(prev, cur)) ?? null
+}
+
 /** The split word-diff between two snapshots — cache-through. null when there is no previous. */
 export function opsBetween(prev: Snapshot | null, cur: Snapshot): DiffOp[] | null {
   if (!prev) return null
