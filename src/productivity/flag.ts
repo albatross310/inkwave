@@ -3,8 +3,28 @@
 // Two independent lanes ship dark and land separately, so they get independent flags: the measured
 // graphs (`prodGraphs`, P1a-viz) and the AI report that overlays them (`prodReport`, P1c). The
 // ledger that feeds both (`feat/prod-ledger`) lands separately again. Nothing here reaches a writer
-// until the pieces agree — and off-by-default also means ZERO load-path cost for everyone else
-// (CLAUDE.md: load performance is sacred), since neither panel is imported unless asked for.
+// until the pieces agree.
+//
+// ─── LOAD-PATH COST: ~760 B gzip, NOT ZERO. THE CLAIM HERE USED TO BE FALSE. ─────────────────────
+// This comment previously read "off-by-default also means ZERO load-path cost for everyone else …
+// since neither panel is imported unless asked for". It was measured FALSE in the built output on
+// 2026-07-17 (`scripts/prodLoadPath.prove.mjs`): TiptapEditor.tsx STATICALLY imported
+// ProductivityReportModal and productivity/demo, so the modal, report/compile.ts's prompt strings
+// and fixtures.ts's synthetic prose were inlined into / preloaded alongside the editor chunk — the
+// one every writer loads — for a measured 16.0 KB gzip with every flag off. `{reportOpen && …}` and
+// `if (reportFlag) …` are RENDER and RUNTIME guards; NEITHER CAN STOP THE BUNDLER. The imports are
+// dynamic now and the probe fails the build if they regress.
+//
+// What remains is this module (407 B) + auth/config (353 B), and it is IRREDUCIBLE: to know whether
+// to offer the report at all, the editor must READ the flag, so the reader itself is on the load
+// path. That is the honest number. Do not restore the word ZERO — replacing one false claim with a
+// tidier false claim is the same defect.
+//
+// RULE FOR ANY FUTURE LANE HERE: a separate chunk file is NOT evidence of laziness. fixtures.ts had
+// its OWN chunk the whole time and was still statically imported, hence still fetched. Verify in
+// `react-router build` output (NOT `vite build` — it exits 0 and writes nothing), against the
+// EAGER-IN-EFFECT set: routes/Edit.tsx fires `import('../editor/TiptapEditor')` at module scope on
+// every load, so the editor chunk counts as load path even though the import is dynamic.
 //
 // STICKY URL FLAGS (the `?auth` / `?snapThumbs` pattern, and the round-8 lesson behind it): a flag
 // read fresh from the URL DIES the moment any local-first navigation rewrites it — which silently

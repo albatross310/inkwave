@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -63,7 +63,6 @@ import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
 import { getCapture } from '../productivity/capture'
-import { installLedgerSource } from '../productivity/installSource'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
@@ -71,9 +70,18 @@ import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clear
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { VerifyModal } from '../components/VerifyModal'
-import { ProductivityReportModal } from '../components/ProductivityReportModal'
+// LAZY, AND IT MUST STAY LAZY (2026-07-17). A static import here put the whole report lane —
+// the modal, report/compile.ts and its prompt strings — inside THIS chunk, which every writer
+// loads, with the flag off and no chunk of its own to show for it. `{reportOpen && <Modal/>}` is a
+// RENDER guard and `if (reportFlag)` is a RUNTIME guard; neither can stop the bundler. flag.ts's
+// "ZERO load-path cost … neither panel is imported unless asked for" was measured false in the
+// built output while that comment sat two lines above the flag it described. Verify in
+// `react-router build` output, never in the source: a separate chunk file is NOT evidence of
+// laziness (fixtures had its own chunk and was still statically imported, hence preloaded).
+const ProductivityReportModal = lazy(() =>
+  import('../components/ProductivityReportModal').then(m => ({ default: m.ProductivityReportModal })),
+)
 import { prodReportEnabled } from '../productivity/flag'
-import { installProdReportDemo } from '../productivity/demo'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
@@ -328,7 +336,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1, Path 1).
   const [reportOpen, setReportOpen] = useState(false)
   const reportFlag = prodReportEnabled()
-  useEffect(() => { if (reportFlag) installProdReportDemo() }, [reportFlag])
+  // Dynamic: demo.ts statically pulls fixtures.ts (2.8KB gzip of synthetic prose that ONLY
+  // `?prodReport=demo` ever reads). As a static import it rode into the editor chunk and was
+  // preloaded from home-*.js for every writer, flag off.
+  useEffect(() => {
+    if (!reportFlag) return
+    void import('../productivity/demo').then(m => m.installProdReportDemo())
+  }, [reportFlag])
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
   // PageMenu sets line height; listen for the settings-changed event to sync the CSS var.
   useEffect(() => {
@@ -1125,7 +1139,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     if (!editor || !prodLedgerEnabled()) return
     const cap = getCapture()
-    installLedgerSource() // the report/graphs read measured aggregates from the real ledger
+    // Dynamic (see the lazy note at the top): installSource.ts reaches the ledger's aggregate +
+    // store modules, 2.2KB gzip that a writer with the flag OFF has no use for. This runs only
+    // inside the `prodLedgerEnabled()` gate above.
+    void import('../productivity/installSource').then(m => m.installLedgerSource())
     void cap.bindDoc({ docId: doc.id, getDoc: () => ensureDocFresh() })
     cap.startIdleWatch()
 
@@ -3010,7 +3027,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             onClose={() => setVerifyOpen(false)}
           />
         )}
-        {reportOpen && <ProductivityReportModal onClose={() => setReportOpen(false)} />}
+        {reportOpen && (
+          // fallback={null}: the writer opened a modal, and a flash of placeholder chrome is worse
+          // than the modal appearing when its chunk lands.
+          <Suspense fallback={null}>
+            <ProductivityReportModal onClose={() => setReportOpen(false)} />
+          </Suspense>
+        )}
         {editor && <CiteAutocomplete editor={editor} />}
         <PdfSidePanel />
         <Toast />
