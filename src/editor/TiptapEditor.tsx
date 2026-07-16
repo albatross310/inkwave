@@ -38,6 +38,7 @@ import { LineNumbers } from './extensions/LineNumbers'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Scroll, isTouchDevice } from './Scroll'
+import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import { subscribe as subscribeMagnify } from './magnify'
@@ -1497,6 +1498,20 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
     )
     return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }
+  }, [editor])
+
+  // ── textRender probe surface (flag `inkwave:textRender`, default OFF) ─────────────────────────
+  // The plaintext page renderer is measured IN THE REAL APP — live doc, real shipped fonts, real
+  // DPR — never a harness that reimplements the context (the trap that has burned this codebase
+  // five times). Dynamic import ⇒ the module stays out of the bundle entirely when the flag is off.
+  useEffect(() => {
+    if (!editor || !textRenderEnabled()) return
+    let cancelled = false
+    void import('./textRenderProbe').then((m) => { if (!cancelled) m.installTextRenderProbe(editor) })
+    return () => {
+      cancelled = true
+      try { delete (window as unknown as { __iwTextRenderProbe?: unknown }).__iwTextRenderProbe } catch { /* noop */ }
+    }
   }, [editor])
 
   // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel

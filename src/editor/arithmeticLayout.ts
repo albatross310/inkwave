@@ -685,14 +685,31 @@ export function figureBlockBox(opts: {
   return { height: imgH + caption, marginTopPx: opts.marginTopPx ?? 0, marginBottomPx: opts.marginBottomPx ?? 0 }
 }
 
-// ─── Page splitter (a faithful port of PaginationExtension.computeBreaks) ───────────────────────
+// ─── Page splitter (a port of PaginationExtension.computeBreaks) ────────────────────────────────
 // Same math as the live break loop: textArea = pageH − topMargin − bottomMargin; break BEFORE the
-// line that would overflow; small orphans (≤22% of the text area) snap to the block start, else the
-// page fills mid-block; the reference list is forced onto a fresh page. The signature string uses
+// line that would overflow; the reference list is forced onto a fresh page. The signature string uses
 // the same `at:round(botMargin)` | … | `pages:N` format the live path emits, so a prover can compare
 // arithmetic-sourced lines against DOM-sourced lines through ONE splitter and assert byte-identity.
 // (Desktop/canonical only — the phone bottom-margin branch is not modelled; canonical breaks are
 // device-independent by design.)
+//
+// ⚠ ORPHAN SNAP — THIS PORT DRIFTED FROM PRODUCTION (found 2026-07-16 by the textRender pixel diff).
+// This splitter snaps small orphans (≤22% of the text area) to the block start. PRODUCTION NO LONGER
+// DOES: PaginationExtension.computeBreaks hard-codes `const snap = false` ("the widow/orphan snap is
+// gone: a straddling paragraph is broken at the overflow line wherever it falls"). So `snapOrphans:
+// true` reproduces a rule the live editor retired, and a consumer that paginates with it gets
+// DIFFERENT PAGES than the editor renders — measured on a 4k-word doc: first break at 2141 vs the
+// live 2403, 17 pages vs 16.
+//
+// WHY NO PROVER CAUGHT IT: the prover runs arith-sourced lines AND DOM-sourced lines through THIS
+// SAME function, so a stale rule cancels on both sides and byte-identity still passes. The splitter
+// is a shared constant in that comparison, and a shared constant is invisible to it — the divergence
+// only becomes observable against the LIVE editor's own gap widgets. This is the same shape as the
+// canvasShapingMatchesEditor lesson: a check that can't see a class of error reports success anyway.
+//
+// The default stays `true` so existing callers/tests are byte-unchanged; anything that must match
+// what the editor actually renders (the text renderer) MUST pass `snapOrphans: false`. Reconciling
+// the default is a separate, deliberate change — not a side effect of this round.
 export const MARGIN_BOTTOM_PX = 72
 
 export interface SplitLine { top: number; blockIdx: number; pos: number } // pos = the line's own doc position (lazy posAtCoords in the live path)
@@ -706,6 +723,7 @@ export function paginate(
   refListPos: number,      // -1 if none
   pageH: number,
   topM: number,
+  snapOrphans = true,       // see the ⚠ note above — production is FALSE; the default is legacy
 ): SplitResult {
   const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM_PX)
   const sig: string[] = []
@@ -730,7 +748,7 @@ export function paginate(
 
     if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
       const orphan = used - blockStartUsed
-      const snap = orphan <= textArea * 0.22 && blockStart > 0
+      const snap = snapOrphans && orphan <= textArea * 0.22 && blockStart > 0
       const at = snap ? blockStart : lines[i].pos
       const brokeUsed = snap ? blockStartUsed : used
       const botMargin = Math.max(MARGIN_BOTTOM_PX, pageH - topM - brokeUsed)

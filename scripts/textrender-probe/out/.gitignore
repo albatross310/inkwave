@@ -1,0 +1,6 @@
+# Probe output is REGENERABLE (re-run the probes) and some of it is multi-MB raster — it must not
+# bloat the repo. Only map-compare-3x.png is kept: it is the one piece of evidence the decision
+# actually turns on (real thumbnail vs text render vs line-rect, side by side).
+*
+!.gitignore
+!map-compare-3x.png

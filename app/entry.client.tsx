@@ -17,7 +17,7 @@ applyTheme()
 ;(() => {
   try {
     const params = new URLSearchParams(location.search)
-    for (const f of ['arithLayout', 'renderFill', 'waveVideo']) {
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender']) {
       const v = params.get(f)
       if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
       // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
