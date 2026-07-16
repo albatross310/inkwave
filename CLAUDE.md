@@ -443,7 +443,49 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     while the doc pane's centre content HELD only 33% of steps; diff and map hold 100%. So the
     doc pane is misregistered by construction: identical offsets, sliding content. Speed cannot
     fix that — the fix has the shape of the zoom focal anchor (99bf8a0): anchor on CONTENT
-    IDENTITY via the provenance spine, not on scrollTop. NOT YET BUILT.
+    IDENTITY via the provenance spine, not on scrollTop.
+  ROUND 11 (2026-07-17 — THE REGISTRATION FIX, and the metric that hid it). THE SEAM WAS ONE LINE:
+  DocLayer primed every WARM layer with `L.scrollTop = getAnchorTop()` — the ACTIVE pane's raw
+  offset — and a warm layer is exactly what the sweep bakes a bitmap from, and it never receives
+  the active path's midline reposition. So every baked frame was registered to an OFFSET forever,
+  while the active pane alone was content-anchored (the reposition effect). Two rules, one pane.
+  Now `getAnchorTop(scroller, snapId)` resolves the anchor IN THE TARGET VERSION'S OWN LAYOUT:
+  EXACT (anchor text found) → NEIGHBOUR (`survivingNeighbourSig`, provenance/anchorMap.ts: the
+  anchor was inserted/deleted, so land on the nearest text `opsBetween` says SURVIVES — pure,
+  7 unit tests) → RATIO (never the top). MEASURED (probe-anchor.mjs, full sample, real app/fonts/
+  DPR/doc), anchor drift per version: p50 186px / max 374px / 0-of-27 within 8px → **p50 0px /
+  max 1px / 26-of-26 within 8px**, exact 26/26. showJs A/B in the SAME build: 0.6ms old vs 0.5ms
+  new (the rule runs in the warm layer's deferred paginate task, ~1.4ms, never the input path);
+  flips 1.08× commanded, no drops. Thumb sig gains `|a1` (doc only) — a bitmap IS a picture at a
+  scrollTop, so thumbs baked under the old rule MUST NOT hydrate into an anchored library.
+  TWO TRAPS, both the house speciality:
+  (1) THE ANCHOR NEVER ENGAGED, SILENTLY. `midlineSignature` hit-tests via caretFromPoint, which
+      returns the TOPMOST element — at mount the LoadingVeil covers the pane, so it returned the
+      veil, the anchor came back null, and the effect only re-runs on a snapshot/mode change. The
+      anchor stayed null for the WHOLE SESSION unless the reader happened to scroll: probed 23/23
+      warm layers took `ratio.nosig`. Content anchoring has been dead code at load since it was
+      written. Fixed with an overlay-immune geometric fallback (`offsetAtContentY`, binary search
+      over Range rects). Same family as canvasShapingMatchesEditor.
+  (2) **THE 33% WAS SUBSTANTIALLY A METRIC ARTIFACT — do not re-chase it.** `paneCentreSig` (the
+      recorder's `registered`) returns the centre LINE'S OPENING 60 chars: every char on a line
+      shares a rect top, so its binary search converges on the line's FIRST char. When the anchor
+      sits mid-line — which WRAPPING alone decides, and wrapping differs between versions of
+      different length — the anchor is exactly under the reading line and the metric still scores
+      a miss. Proof: versions with drift 0px reporting a different centre sig. So line-open hold
+      CANNOT reach ~1.0 and reads 0.27→0.44 across this fix; it also runs on 0-7 steps of a
+      12-step burst (a hydrated thumb carries no capture-time sig), so it is a tiny sample too.
+      The honest measure of registration is DRIFT IN PX (what 99bf8a0 used: 0.0-0.3px), and it is
+      what probe-anchor.mjs reports, at full sample, with the old rule kept as a live KNOWN-
+      NEGATIVE (`window.__iwAnchorRule='scrolltop'`) that must reproduce the bug before any
+      verdict is read. Trust drift; treat `registered` as a wrapping-sensitive proxy.
+  DELIBERATE: the scrub is content-registered even under lineMode 'longest' (the DEFAULT), which
+  snaps each version to ITS OWN biggest change — right for one deliberate step, ruin for a burst
+  (measured: it flings the reading position a median 50,455px per version). 'longest' is untouched
+  on the LIVE landing render, so no navigation semantics change; only the flipbook frames hold.
+  RESIDUAL: thumbs are baked around the reading position the sweep ran at and the sig does not key
+  on the anchor, so scrolling far away and scrubbing presents frames anchored to the sweep's
+  position until re-baked (true of the old rule too; keying on the anchor would invalidate the
+  whole library on every scroll). Peter's call.
   - Note for the on-demand-text-renderer proposal: the MINIMAP still needs baked thumbnails
     regardless — it shows every page at once, so per-page on-demand rendering does not serve it.
   - `paneCentreSig` binary-SEARCHES text by char offset (~17 Range rect reads): /snapshot's doc
