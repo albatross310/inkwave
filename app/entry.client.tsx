@@ -28,6 +28,10 @@ applyTheme()
       // Peter tests on an iPhone 8 with no Mac/Web Inspector, and our AV1→H.264→CSS fallback chain
       // is otherwise SILENT and looks identical to the CSS water he's judging).
       else if (v === 'debug') localStorage.setItem(`inkwave:${f}`, 'debug')
+      // `?btDebug=race` — the KNOWN-NEGATIVE: build the tables WITHOUT waiting for the async
+      // library hydration, reproducing the exact race Peter's iPhone found (capa@0 baked at build,
+      // capa@20 after the reload ⇒ every lookup misses forever). It must FAIL.
+      else if (v === 'race') localStorage.setItem(`inkwave:${f}`, 'race')
       else if (params.has(f)) localStorage.setItem(`inkwave:${f}`, '1')
     }
   } catch { /* private mode / no localStorage */ }

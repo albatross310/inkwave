@@ -797,6 +797,48 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     whether there is a cheap unit-level version that KEEPS it true.** If it is 90ms and needs no
     browser, there is no excuse. The `.prove.mjs` probes stay as the in-browser truth — they are not
     redundant — but a browser-only proof is not a guard.
+  - **THE LIBRARY-HYDRATION RACE — PETER'S iPHONE 8 FOUND IT, AND THE iOS WRITE PATH PASSED (2026-07-17).**
+    `?btDebug=1` on his device: **the worker `createSyncAccessHandle` branch WORKS** — 24/24 read back,
+    HIT after reload, byte-identical starts, both negatives firing (build 183ms · write 1509ms · read
+    925ms, iOS 18_7). That is the branch no test on this box can reach (Playwright's Linux WebKit has
+    NO `navigator.storage` at all — verified directly), so it needed a real device and it got one.
+    THE RUN BEFORE IT **FAILED**, and it named its own cause: `capa@0:w7k42t` at build →
+    `capa@20:12qxw1k` after reload. **`bibSignature()` was RIGHT** — it hashes the bibliography's
+    CONTENT, and the content genuinely differed: **0 entries when the table was built, 20 after the
+    reload.** The library hydrates ASYNCHRONOUSLY from OPFS (`loadLibrary`), so a builder that runs
+    first bakes an EMPTY-library key and **every later lookup misses, forever, silently** — bug 1's
+    ghost wearing a correct signature. NOT fixed by loosening the key (under-invalidation paints wrong
+    words; the asymmetric-cost reasoning stands). FIXED AT THE SOURCE: `libraryReady()` in
+    `citations/library.ts` — a LATCH, not an event, because the defect's shape is **a one-shot async
+    signal with no "has it already happened?" check** (the wave video hit the identical shape the same
+    minute). Already done → resolves immediately; in flight → same promise; **never started → STARTS
+    it** (or a caller that only ever awaits hangs forever — the same stranding bug relocated). Resolves
+    on FAILURE too: the contract is "the initial attempt COMPLETED", not "a library exists" — 0 entries
+    is a real state that may legitimately sign a table. **ANY CALLER THAT PUTS THE BIBLIOGRAPHY IN A
+    PERSISTED KEY MUST AWAIT IT.** `loadLibrary()` keeps its exact semantics (still re-reads); only the
+    latch is memoised. PROVED BOTH WAYS (`btrace.prove.mjs`): `?btDebug=race` skips the await when
+    BUILDING and reproduces Peter's failure verbatim — the identical `capa@0:w7k42t` hash — while
+    `?btDebug=1` passes with 20 entries. **THE PROBE WOULD HAVE BEEN A FICTION WITHOUT ITS SEED:** with
+    an EMPTY library both phases sign `capa@0` and the signatures MATCH, so race mode would go GREEN
+    while reproducing nothing; it seeds 20 real entries into real OPFS and asserts the seed landed
+    before reading any verdict. The race only exists where there is something to hydrate. Race mode
+    races **phase 1 only** — skipping the await on BOTH sides lets phase 2 also catch an empty library,
+    the sigs agree, and the negative silently passes: **a negative that can accidentally agree with
+    itself is not a negative.** The RACE LINE is informational (`ok:null`), NOT a forced `ok:false` —
+    hardcoding the failure would make race mode go red whether or not the race reproduced, which proves
+    exactly as little as an assertion that passes by construction.
+    **AND MUTATION TESTING CAUGHT TWO OF THE FIVE NEW UNIT TESTS BEING DECORATION** (`library.ready
+    .test.ts`, the cheap guard that KEEPS this — the browser probe is the truth, not a guard):
+    (a) an explicit `_libDone` "already happened?" branch was **redundant and unkillable** — the
+        PROMISE is the latch, a resolved promise resolves every later await forever, so removing the
+        branch left all 5 tests green. **A guard no test can kill is not a guard; it is a comment that
+        costs a branch.** Deleted.
+    (b) the test named "resolves even when the OPFS read THROWS" **passed against a mutant with no
+        `finally` at all** — because `readFile()` swallows its own errors and returns `[]`, so the read
+        CANNOT throw and the finally was never reached. It measured nothing while reading like a
+        guarantee. Re-aimed at the path that can actually reach it (hydration throwing PAST the read),
+        and it asserts the throwing path really ran.
+    Mutants now die 4/1/1 (no self-start / no finally / latch resolves early), restored green.
     LIVE KNOWN-NEGATIVE: `window.__iwAtomPos='legacy'` restores the bug; `tail.prove.mjs` reproduces
     it (legacy 56/UNREACHABLE → fixed 57/REACHABLE) before reading any verdict, and VOIDS where the
     fixture's tail is not a leaf atom so the rules structurally cannot differ. It caught a real

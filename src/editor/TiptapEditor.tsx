@@ -1574,7 +1574,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     // helper to decide whether to import the module would pull the module on every load and make
     // "off costs nothing" false — the exact reason textRenderFlag.ts lives alone (see its header).
     let on = false
-    try { on = localStorage.getItem('inkwave:btDebug') === '1' } catch { /* private mode */ }
+    try { const v = localStorage.getItem('inkwave:btDebug'); on = v === '1' || v === 'race' } catch { /* private mode */ }
     if (!on) return
     let cancelled = false
     void import('./breakTableDebug').then((m) => { if (!cancelled) void m.runBreakTableDebug() })

@@ -33,6 +33,8 @@
 import { Schema, Node as PMNode } from '@tiptap/pm/model'
 import { makeCanvasMeasure } from './arithmeticLayout'
 import { canonicalGeom } from './textRender'
+import { libraryReady } from '../citations/library'
+import { bibProvider } from '../citations/bibProvider'
 import {
   buildBreakTable, contextSig, bibSignature, loadTables, putTable, getTable, persist, tableStats,
 } from './breakTable'
@@ -44,7 +46,7 @@ const DOC_ID = 'ios-btdebug-doc'
 const VERSIONS = 24 // enough to be real on a phone without making him wait
 
 export function btDebugEnabled(): boolean {
-  try { return localStorage.getItem(FLAG) === '1' } catch { return false }
+  try { const v = localStorage.getItem(FLAG); return v === '1' || v === 'race' } catch { return false }
 }
 
 // A MINIMAL SCHEMA, deliberately. What is under test is the STORE and the iOS WRITE PATH — not the
@@ -124,6 +126,33 @@ export async function runBreakTableDebug(): Promise<void> {
 
   try {
     const phase = (() => { try { return localStorage.getItem(PHASE) } catch { return null } })()
+
+    // ── THE FIX FOR THE RACE PETER'S PHONE FOUND, AND ITS OWN KNOWN-NEGATIVE ──────────────────
+    // The library hydrates async from OPFS. Build before it lands ⇒ `capa@0` is baked into the key
+    // ⇒ after the reload the real library signs `capa@20` and EVERY lookup misses, forever.
+    // `?btDebug=race` SKIPS this await deliberately, so the bug can be REPRODUCED on demand — on
+    // the same device, through the same code. A fix that cannot be made to fail first is a guess.
+    const raceMode = (() => { try { return localStorage.getItem(FLAG) === 'race' } catch { return false } })()
+    // RACE PHASE 1 ONLY. If race mode skipped the wait on BOTH sides, phase 2 could ALSO catch an
+    // empty library and the two signatures would MATCH — the probe would go green while reproducing
+    // nothing. The bug is precisely an asymmetry (built empty, read hydrated), so the negative must
+    // reproduce that asymmetry deterministically: skip the wait when BUILDING, always wait when
+    // VERIFYING. A negative that can accidentally agree with itself is not a negative.
+    if (!(raceMode && phase !== '2')) await libraryReady()
+    const bibN = bibProvider.getAll().length
+    // INFORMATIONAL (`ok: null`) — DELIBERATELY NOT a forced failure. Hardcoding `ok:false` here
+    // would make race mode go red whether or not the race actually reproduced: a negative that
+    // fails by construction proves exactly as little as an assertion that passes by construction
+    // (the graphs lane's disjoint-band fixture, inverted). Race mode must go red because the
+    // SIGNATURE CHECK below genuinely catches the drift — nothing else.
+    lines.push({
+      ok: null,
+      label: raceMode ? 'RACE MODE — deliberately NOT waiting for the library' : `Library hydrated before build (${bibN} entries)`,
+      detail: raceMode
+        ? `built against ${bibN} entries; expect the signature check to catch the drift after reload`
+        : 'the signature can only be stable if the state it hashes has settled',
+    })
+
     const geom = canonicalGeom(793.7, 1122.52, 96, 96)
     const measure = makeCanvasMeasure()
     // On a phone the shipped faces may still be loading; the store is what's under test, so accept
