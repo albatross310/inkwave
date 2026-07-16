@@ -27,6 +27,9 @@ import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
 import { TextRenderStore } from './textRenderStore'
 import { buildBreakTable, contextSig, pageStart, pageOfPos } from './breakTable'
+// The REAL production line-acquisition functions — exercised directly so the audit can never drift
+// from what the paginator actually does (a comparison run through a copy cancels its own error).
+import { blockLineRects, keepLineRects } from './extensions/PaginationExtension'
 // The BASELINE we are measured against — imported READ-ONLY so the head-to-head runs the REAL
 // production bake path (the SVG-foreignObject capture), not a reimplementation of it. Nothing here
 // mutates the thumbnail system; the bake path is owned elsewhere.
@@ -127,6 +130,12 @@ export interface ProbeApi {
   /** The LIVE editor's own page-break doc positions, read off its rendered gap widgets. The ground
    *  truth the arithmetic model must agree with — if it doesn't, pages show the wrong words. */
   liveBreaks(): number[]
+  /** Do the LIVE editor's breaks all land at true line starts? Line starts are derived from real
+   *  text rects, skipping inline-atom NodeView interiors — independent of collectLines. */
+  midlineAudit(debugNear?: number): Record<string, unknown>
+  /** Per-block line counts: truth vs the old whole-block rect path vs the collapsed path. Measures
+   *  the PHANTOM LINE itself, so it sees the artifact whether or not a break happens to land on it. */
+  lineCountAudit(): Record<string, unknown>
   /** BASELINE A — the REAL production bake: SVG-foreignObject capture of a live pane. */
   bake(selector: string, scale: number): Promise<Record<string, unknown>>
   /** BASELINE B — the REAL present path: WebP encode (0.5×/q0.7, as snapThumbs) → decode → blit. */
@@ -247,6 +256,254 @@ export function installTextRenderProbe(editor: Editor): void {
         } catch { /* a widget PM can't resolve — skip rather than fabricate */ }
       })
       return out.sort((a, b) => a - b)
+    },
+
+    // ── THE MID-LINE BREAK AUDIT ─────────────────────────────────────────────────────────────
+    // A page break must land at a LINE START. If it lands mid-line, the page gap opens in the middle
+    // of a rendered line — the "space left on the last line" of a split paragraph.
+    //
+    // ⚠ MEASURE THE NATURAL LAYOUT, NOT THE GAPPED ONE. The page-gap widget is a display:block span,
+    // so it FORCES a line break at its own position ("the break it forces coincides with the line
+    // start it sits at" — pageGap.ts). Asking the GAPPED DOM whether a break sits at a line start is
+    // therefore VACUOUS: every break trivially does, and the audit reports a confident 0 for a
+    // document full of real mid-line breaks. That is exactly the house failure mode, and the first
+    // version of this audit fell into it. So the gaps are removed from flow first, and the question
+    // is asked of the NATURAL wrapping — the gap-free canonical layout collectLines claims to
+    // measure (compute() clears the widgets before measuring; on desktop at defaults the live layout
+    // IS canonical, so hiding the gaps reproduces that context).
+    //
+    // Line starts are derived INDEPENDENTLY of collectLines: a document-order walk of the real text
+    // characters, plus each inline ATOM as ONE unit via its own outer box. An atom's INTERIOR boxes
+    // never vote — they are the fiction under test (the citation NodeView's inline-flex ⤵ button sits
+    // ~6px off the line, past the 3px dedup, and became a phantom line). An atom that begins a line
+    // IS a line start, so it must be counted, or a legitimate break before a line-leading citation
+    // false-positives.
+    //
+    // POLARITY — both must hold before any number here is believed:
+    //   • known-NEGATIVE: plain prose (no NodeViews) must audit 0 mid-line breaks;
+    //   • known-POSITIVE: pre-fix, citation-dense prose must reproduce real mid-line breaks.
+    // An audit that reports 0 everywhere is blind, not passing.
+    midlineAudit(debugNear?: number) {
+      const view = editor.view
+      const doc = view.state.doc
+      const trace: Array<Record<string, unknown>> = []
+      // Captured BEFORE the gaps are hidden — these are production's real, applied break positions.
+      const breaks = api.liveBreaks()
+
+      // ⚠ THE VERDICT IS ONLY MEANINGFUL WHERE THE RENDERING IS CANONICAL. Breaks are measured in a
+      // FORCED canonical context (18px base, desktop margins, zoom 1, magnify 1). The phone RENDERS
+      // the same doc at 22.5px in a ~350px column — a different reflow entirely — so a canonical
+      // break lands wherever it falls in the phone's own wrapping. That is canonical pagination
+      // working as designed (same words on the same page everywhere), not a mid-line bug; auditing
+      // canonical positions against a non-canonical reflow measures the question, not the code.
+      // Desktop at defaults IS canonical (canonicalIsLive), which is where the verdict counts.
+      const pm = document.querySelector('.ProseMirror') as HTMLElement | null
+      const baseFont = pm ? parseFloat(getComputedStyle(pm).fontSize) : NaN
+      const rootCS = getComputedStyle(document.documentElement)
+      const zoom = parseFloat(rootCS.getPropertyValue('--iw-editor-zoom') || '1') || 1
+      const magnify = parseFloat(rootCS.getPropertyValue('--iw-magnify') || '1') || 1
+      const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
+      const renderingIsCanonical = Math.abs(baseFont - 18) < 0.01 && zoom === 1 && magnify === 1 && !coarse
+
+      // PROSEMIRROR decides what an atom is (isInline && isAtom) — never a CSS class name, which
+      // would silently miss a future NodeView.
+      const atomEls = new Set<Element>()
+      const atomPos = new Map<Element, number>()
+      doc.descendants((node, pos) => {
+        if (node.isInline && node.isAtom) {
+          const el = view.nodeDOM(pos)
+          if (el && (el as Node).nodeType === 1) { atomEls.add(el as Element); atomPos.set(el as Element, pos) }
+        }
+        return true
+      })
+      const insideAtom = (n: Node): boolean => {
+        let cur: Node | null = n
+        while (cur) { if (cur.nodeType === 1 && atomEls.has(cur as Element)) return true; cur = cur.parentNode }
+        return false
+      }
+
+      const starts = new Set<number>()
+      const blockStarts = new Set<number>()
+      let charsScanned = 0
+      const range = document.createRange()
+
+      // REMOVE THE GAPS FROM FLOW so the text wraps naturally, then restore. Synchronous: no
+      // ResizeObserver/measure callback can interleave.
+      // The height is read BEFORE the widgets are hidden and again after — a natural layout MUST be
+      // shorter than a gapped one. If that delta is ~0 the gaps never left flow and every number
+      // below was measured in the gapped fiction again. Order matters: this is the reflow proof.
+      const pmEl = view.dom as HTMLElement
+      const gappedH = pmEl.getBoundingClientRect().height
+      const killer = document.createElement('style')
+      killer.textContent = '.inkwave-page-gap{display:none !important}'
+      document.head.appendChild(killer)
+      let naturalH = 0
+      try {
+        naturalH = pmEl.getBoundingClientRect().height // forces the reflow
+        doc.forEach((_child, offset) => {
+          const el = view.nodeDOM(offset) as HTMLElement | null
+          if (!el || el.nodeType !== 1) return
+          starts.add(offset); blockStarts.add(offset)
+          try { const p = view.posAtDOM(el, 0); if (p >= 0) starts.add(p) } catch { /* unmapped */ }
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+            acceptNode: (n: Node) => {
+              if (n.nodeType === 1) return atomEls.has(n as Element) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+              return insideAtom(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+            },
+          })
+          let lastTop: number | null = null
+          let n: Node | null = null
+          const vote = (r: DOMRect, at: () => number, kind: string, txt?: string) => {
+            if (r.width === 0 && r.height === 0) return // collapsed whitespace — no box, no vote
+            charsScanned++
+            const isNew = lastTop === null || r.top - lastTop > 3
+            let p = -1
+            try { p = at() } catch { /* unmapped */ }
+            if (debugNear !== undefined && p >= 0 && Math.abs(p - debugNear) <= 14) {
+              trace.push({ pos: p, kind, txt, top: +r.top.toFixed(2), h: +r.height.toFixed(2), left: +r.left.toFixed(2), lastTop: lastTop === null ? null : +lastTop.toFixed(2), votedNewLine: isNew })
+            }
+            if (isNew) { lastTop = r.top; if (p >= 0) starts.add(p) }
+          }
+          while ((n = walker.nextNode())) {
+            if (n.nodeType === 1) { // an inline atom: ONE box, and the doc pos in front of it
+              const el2 = n as Element
+              vote(el2.getBoundingClientRect(), () => atomPos.get(el2) ?? -1, 'ATOM', (el2.textContent || '').slice(0, 16))
+              continue
+            }
+            const text = n.nodeValue || ''
+            for (let i = 0; i < text.length; i++) {
+              range.setStart(n, i); range.setEnd(n, i + 1)
+              const tnode = n
+              vote(range.getBoundingClientRect(), () => view.posAtDOM(tnode, i), 'text', JSON.stringify(text[i]))
+            }
+          }
+        })
+      } finally { killer.remove() }
+
+      const sorted = Array.from(starts).sort((a, b) => a - b)
+      const bad = breaks
+        .filter((p) => !starts.has(p))
+        .map((p) => {
+          let before = -1, after = -1
+          for (const s of sorted) { if (s < p) before = s; else if (after < 0 && s > p) { after = s; break } }
+          const slice = (a: number, b: number) => {
+            try { return doc.textBetween(Math.max(0, a), Math.min(doc.content.size, b), '\u00b6', '\u2022') } catch { return '?' }
+          }
+          const $p = (() => { try { return doc.resolve(p) } catch { return null } })()
+          return {
+            at: p, prevLineStart: before, nextLineStart: after,
+            before20: JSON.stringify(slice(p - 20, p)),
+            after20: JSON.stringify(slice(p, p + 20)),
+            parent: $p?.parent.type.name ?? '?',
+            nodeBefore: $p?.nodeBefore?.type.name ?? null,
+            nodeAfter: $p?.nodeAfter?.type.name ?? null,
+            atomAdjacent: !!($p?.nodeBefore?.isAtom || $p?.nodeAfter?.isAtom),
+          }
+        })
+      return {
+        breaks: breaks.length,
+        midline: bad.length,
+        lineStarts: sorted.length,
+        blockStarts: blockStarts.size,
+        charsScanned,
+        atoms: atomEls.size,
+        // The reflow proof: gapped height MUST exceed natural height, or the gaps never left flow.
+        gappedH: +gappedH.toFixed(1),
+        naturalH: +naturalH.toFixed(1),
+        gapsLeftFlow: gappedH - naturalH > 100,
+        // Read `midline` ONLY when this is true (see above) — otherwise the number is the question's
+        // artifact, not the code's verdict.
+        renderingIsCanonical, baseFont, coarse,
+        offenders: bad.slice(0, 12),
+        trace,
+      }
+    },
+
+    // ── THE LINE OVER-COUNT AUDIT ────────────────────────────────────────────────────────────
+    // The mid-line rate only fires when a page break HAPPENS to land on a phantom line, so it is a
+    // poor instrument for a NodeView that is rare in the doc: inline math measured 0 mid-line breaks
+    // even UNFIXED, which says "no break landed there", not "no bug". The ARTIFACT itself is the
+    // phantom line, so measure THAT directly and per block: how many lines does the rect path report
+    // versus how many the block really has?
+    //   • truth  — line starts from the validated char/atom walk (the same rule midlineAudit uses);
+    //   • old    — keepLineRects(whole-block range rects): descends into NodeViews ⇒ over-counts;
+    //   • fixed  — keepLineRects(blockLineRects(...)): atoms collapsed to one box each.
+    // Both paths call the REAL production functions, not copies. Gaps are removed from flow first
+    // (a gap widget splits a block's rects and would corrupt every count).
+    lineCountAudit() {
+      const view = editor.view
+      const doc = view.state.doc
+      const atomEls = new Set<Element>()
+      doc.descendants((node, pos) => {
+        if (node.isInline && node.isAtom) {
+          const el = view.nodeDOM(pos)
+          if (el && (el as Node).nodeType === 1) atomEls.add(el as Element)
+        }
+        return true
+      })
+      const insideAtom = (n: Node): boolean => {
+        let cur: Node | null = n
+        while (cur) { if (cur.nodeType === 1 && atomEls.has(cur as Element)) return true; cur = cur.parentNode }
+        return false
+      }
+      const pmEl = view.dom as HTMLElement
+      const gappedH = pmEl.getBoundingClientRect().height
+      const killer = document.createElement('style')
+      killer.textContent = '.inkwave-page-gap{display:none !important}'
+      document.head.appendChild(killer)
+      let naturalH = 0
+      const rows: Array<Record<string, unknown>> = []
+      try {
+        naturalH = pmEl.getBoundingClientRect().height
+        const range = document.createRange()
+        doc.forEach((child, offset) => {
+          const el = view.nodeDOM(offset) as HTMLElement | null
+          if (!el || el.nodeType !== 1) return
+          const atoms: Element[] = []
+          child.descendants((node, pos) => {
+            if (!node.isInline || !node.isAtom) return true
+            const a = view.nodeDOM(offset + 1 + pos)
+            if (a && (a as Node).nodeType === 1) atoms.push(a as Element)
+            return false
+          })
+          // TRUTH: distinct line boxes, from real text + each atom as one unit.
+          let truth = 0, lastTop: number | null = null
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+            acceptNode: (n: Node) => {
+              if (n.nodeType === 1) return atomEls.has(n as Element) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+              return insideAtom(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+            },
+          })
+          let n: Node | null = null
+          const tally = (r: DOMRect) => {
+            if (r.width === 0 && r.height === 0) return
+            if (lastTop === null || r.top - lastTop > 3) { lastTop = r.top; truth++ }
+          }
+          while ((n = walker.nextNode())) {
+            if (n.nodeType === 1) { tally((n as Element).getBoundingClientRect()); continue }
+            const text = n.nodeValue || ''
+            for (let i = 0; i < text.length; i++) { range.setStart(n, i); range.setEnd(n, i + 1); tally(range.getBoundingClientRect()) }
+          }
+          range.selectNodeContents(el)
+          const oldLines = keepLineRects(Array.from(range.getClientRects()), 1).length
+          const fixedLines = keepLineRects(blockLineRects(el, atoms), 1).length
+          if (!truth) return // an empty block — no lines to over-count
+          rows.push({ i: rows.length, type: child.type.name, atoms: atoms.length, truth, oldLines, fixedLines })
+        })
+      } finally { killer.remove() }
+      const over = (k: string) => rows.filter((r) => (r[k] as number) > (r.truth as number))
+      return {
+        blocks: rows.length,
+        gapsLeftFlow: gappedH - naturalH > 100,
+        atomBlocks: rows.filter((r) => (r.atoms as number) > 0).length,
+        // THE HEADLINE: blocks whose line count the rect path gets WRONG, before and after.
+        oldOverCounted: over('oldLines').length,
+        fixedOverCounted: over('fixedLines').length,
+        oldExtraLines: rows.reduce((a, r) => a + Math.max(0, (r.oldLines as number) - (r.truth as number)), 0),
+        fixedExtraLines: rows.reduce((a, r) => a + Math.max(0, (r.fixedLines as number) - (r.truth as number)), 0),
+        worstOld: over('oldLines').slice(0, 6),
+        worstFixed: over('fixedLines').slice(0, 6),
+      }
     },
 
     // ── BASELINE A: the real bake (what a text render would DELETE) ──

@@ -13,6 +13,15 @@ PROBE_PORT=4231 NODE_PATH="$(pwd)/node_modules" node scripts/textrender-probe/pr
 PROBE_PORT=4231 node scripts/textrender-probe/breaks.prove.mjs   # arith breaks == live editor breaks
 PROBE_PORT=4231 node scripts/textrender-probe/fidelity.mjs       # pixel diff vs the real editor
 PROBE_PORT=4231 node scripts/textrender-probe/mapcompare.mjs     # thumbnail vs text vs line-rect
+PROBE_PORT=4231 node scripts/textrender-probe/isolate.prove.mjs  # engine vs live, per content kind
+
+# The collectLines NodeView-rect fix (2026-07-17) — all three must pass:
+PROBE_PORT=4231 node scripts/textrender-probe/linecount.prove.mjs    # phantom lines, per block
+PROBE_PORT=4231 node scripts/textrender-probe/midline.prove.mjs      # every break at a true line start
+PROBE_PORT=4231 node scripts/textrender-probe/crossdevice.prove.mjs  # canonical breaks: desktop == phone
+PROBE_PORT=4231 node scripts/textrender-probe/pagcheck.prove.mjs     # scoped measure == full measure
+EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run against an UNFIXED build:
+                                                                     # the probe must REPRODUCE the bug
 ```
 
 ## Files
@@ -40,3 +49,23 @@ PROBE_PORT=4231 node scripts/textrender-probe/mapcompare.mjs     # thumbnail vs 
    so a real per-model delta reads as exactly 0.00MB — i.e. "free" rather than "not measured".
 6. **A differ that can't see.** The pixel differ asserts identical→0% and a 4px shift→>0% before any
    fidelity number is believed.
+7. **THE VACUOUS AUDIT (2026-07-17 — cost the most, caught only by tracing a "pass").** The first
+   mid-line audit asked the GAPPED DOM whether each break sat at a line start and reported a
+   confident **0/104 — on a document with real mid-line breaks**. The page-gap widget is a
+   `display:block` span, so it FORCES a line break at its own position: in the gapped DOM every break
+   is trivially at a line start. The question answered itself. `midlineAudit` now removes the gaps
+   from flow and asks the NATURAL wrapping — the gap-free canonical layout collectLines actually
+   measures — and reports `gapsLeftFlow` (gapped height must exceed natural height) so the vacuous
+   configuration cannot pass silently. Same family as `canvasShapingMatchesEditor`.
+8. **The verdict is unreadable off-canonical.** Breaks are measured in a FORCED canonical context
+   (18px base); the phone RENDERS at 22.5px in a ~350px column. Auditing canonical break positions
+   against the phone's own reflow reports ~6 "mid-line" breaks that are canonical pagination working
+   as designed. `midlineAudit` returns `renderingIsCanonical`; read `midline` only when it is true.
+9. **A rate can't see a rare event.** Inline math measured 0 mid-line breaks even UNFIXED — not
+   "no phantom", just "no break happened to land on one" (24 pills, 9 breaks). Measuring the ARTIFACT
+   per block instead (`lineCountAudit`) showed math over-counting 23 blocks by +30 lines. If an
+   instrument depends on a coincidence, build the one that measures the thing itself.
+10. **Structurally blind fixtures.** A one-line-block fixture makes the buggy branch a no-op. The
+    fixture puts NodeViews MID-paragraph in MULTI-line paragraphs, and the math formulas are
+    deliberately sub/superscript- and fraction-heavy — a plain `x+1` pill has no off-baseline
+    interior and reproduces nothing.

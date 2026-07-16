@@ -510,6 +510,33 @@ from your OWN refs); (b) the ResizeObserver must FOLD into the edit debounce, no
 identity; (d) 'scroll' paper must still measure font-canonically. Citation-label hydration reflows
 invisibly to inputSig → bibProvider.subscribe drives a debounced re-measure.
 
+**INLINE-ATOM NODEVIEWS COLLAPSE TO ONE RECT (2026-07-17 — the mid-line break fix).** Peter: "even if
+the paras do split, there's space left on the last line." Root cause: `collectLines` built its line
+list from `range.selectNodeContents(block).getClientRects()`, which DESCENDS INTO NodeView subtrees —
+so an inline atom's internal boxes each contributed a rect. The citation NodeView's ⤵ biblink button
+(`display:inline-flex`, ~6px below the text line, i.e. past the **3px** same-line dedup) survived as a
+PHANTOM LINE whose posAtCoords sample sits MID-LINE, so a break attributed to it opened a page gap in
+the middle of a rendered line. Inline math has the identical artifact (KaTeX sub/superscript +
+fraction spans). THE RULE: an inline ATOM has no internal break opportunity — the parent line can only
+break AROUND it — so it contributes EXACTLY ONE rect, its own bounding box. Atomhood comes from
+ProseMirror (`isInline && isAtom`), never a CSS class (a class list silently misses the next
+NodeView); a block with NO atoms takes the byte-identical old path, which is what keeps plain/
+headings/lists bit-for-bit unchanged. SCOPE: inline atoms only — a TOP-LEVEL atom (refList, block
+math) keeps its deliberate `atomLike` pseudo-block-per-line treatment. MEASURED in the real app:
+phantom lines citations 24 blocks/+29, math 23 blocks/+30 → **0** (`linecount.prove.mjs`); mid-line
+breaks **6/55 → 0/55** on the thesis-shaped fixture (`midline.prove.mjs`); `isolate.prove.mjs`
+citations DIVERGE → **IDENTICAL**; desktop==phone breaks and scoped==full both unchanged. This also
+satisfies the long-documented co-requisite in `arithmeticLayout.ts` — but `mathEligible` is still
+passed FALSE deliberately; flipping it hands math paragraphs to the arithmetic engine and needs its
+own proof. THREE INSTRUMENT TRAPS THIS ROUND (all live, all in the probe README): (1) the page-gap
+widget is a `display:block` span that FORCES a line break at its own position, so auditing the GAPPED
+DOM for mid-line breaks is VACUOUS — it reported a confident 0/104 on a document full of them; hide
+the gaps and ask the NATURAL wrapping (`gapsLeftFlow` guards it). (2) The verdict is unreadable where
+the RENDERING is non-canonical — the phone renders 22.5px/350px, so canonical breaks land mid-line in
+its own reflow BY DESIGN (`renderingIsCanonical` guards it). (3) A mid-line RATE cannot see a rare
+NodeView: math showed 0 mid-line breaks even unfixed because no break happened to land on a phantom —
+measure the artifact per block, not the coincidence.
+
 ## Wave / water system (REBUILT 2026-07-11 — Peter's strip-down)
 
 Peter's spec, verbatim intent: "just sine waves, some stochastic glitters and wave marks from a
