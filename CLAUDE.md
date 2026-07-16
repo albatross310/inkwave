@@ -634,6 +634,62 @@ account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) a
 - `/privacy` has a "Your work report" section naming all three tiers — keep it in sync with the code.
 - 96 tests. Every guard is mutation-proved to FIRE (invert it → tests fail). Watch the vacuous-loop
   trap: the per-column rejection loop passed on an EMPTY list until a non-empty assertion was added.
+## Productivity layer — P1a-viz: aggregates + graphs (2026-07-17, `feat/prod-graphs`)
+
+The read half of the productivity layer (build-spec §A3.3/§A8, the private Productivity-Email spec —
+read it, never copy it into the repo). `src/productivity/`: `ledger.ts` (the §A3.2 row CONTRACT —
+owned by the `feat/prod-ledger` lane; replace with its import when it lands, do NOT fork the schema),
+`aggregate.ts` (pure day/week/month rollups), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
+AI seam + the honesty gate), `summary.ts` (the copy), `charts/` (hand-rolled SVG — NO chart
+dependency; follows `src/verify/ActivityGraph.tsx`), `ProductivityPanel.tsx`, `fixtures.ts`.
+Route `/productivity`, flag `inkwave:prodGraphs` DEFAULT OFF (`?prodGraphs=1` / `=demo` / `=off`,
+sticky, the `?auth` pattern). Off costs nothing BY CONSTRUCTION: the whole lane sits behind a lazy
+import (`Report-*.js`, 21kB/7kB gzip) and the route stub is 2kB. Nothing reads the `.studio` or walks
+the doc; aggregation is pure and runs on mount, never on the load path.
+
+**THE HEURISTIC DEVIATES FROM THE SPEC'S EXAMPLE, AND THE MEASUREMENT IS WHY.** §A3.3 offers "high
+add-to-delete ratio + long sessions → drafting; high delete + short → editing" as an `e.g.`. Scored
+against labelled synthetic writing (`phase.variants.test.ts`, 64 sessions, ~48% drafting truth):
+
+    rule                        precision   coverage   called-drafting
+    ratio + duration (spec e.g.)   100.0%      39.1%      84.0%   ← skews the mix badly
+    ratio only            SHIPPED  100.0%      81.3%      59.6%
+    duration only                   47.2%      82.8%      79.2%   ← worse than chance, 28 wrong
+
+Session LENGTH does not track what the writer is doing (long revising sessions and short drafting
+bursts are both ordinary). Conjoined it never causes a WRONG call, but it suppresses coverage to 39%
+and skews survivors to 84% drafting against a 48% truth — i.e. the spec's rule would tell a writer
+they spent the month drafting when they spent half of it editing. So the ratio ships ALONE; the
+duration thresholds remain only as the scored alternative. ⚠ Peter to confirm the deviation.
+`unclear` is a first-class share, not a rendering failure: forcing a call is exactly where precision
+breaks (95.3%, 3 wrong). Residual: `revising` (deep restructuring) is the class it still can't call.
+
+**Three provenances, not two.** §A6.1 names measured + judged; the heuristic is neither (a rule
+anyone can re-run — not AI; still an inference — not a measurement), so it gets its own tag/legend
+`estimated`. STRUCTURAL, not conventional: a series' style is a function of `series.provenance`
+(`charts/series.ts`) with no style prop anywhere, so no caller can paint AI output as a measured bar.
+Judged = hatched amber, reusing `--iw-badge-ai` (the amber CitationPanel already uses for AI-sourced
+material). Two series sharing a provenance vary by TONE only — never by identity.
+
+**The §A6.2 gate is enforced in the UI, not the prompt** (`selectClaims`): daily is a descriptive
+recap and pattern/causal claims are withheld there — and SHOWN AS withheld (§A9: never silently
+dropped), pointing at the weekly view. PROVED BOTH WAYS by mutation: forcing the gate open fails 3
+tests, forcing it closed fails 2 — a gate that can't fire is a feature silently disabled.
+`summary.ts` holds the §A5/§C3 kind, non-shaming copy as pure functions so the constraint is
+testable; `summary.test.ts` sweeps every day shape for shaming/target/scoring/causal language and
+proves the matchers fire on 17 banned strings. NO RED anywhere in the palette — cutting is writing.
+(The first cut of that matcher could NOT catch "productivity down 40%": `down\s+\d\b` fails between
+"4" and "0". A matcher that can't catch the thing it names is the house disease in miniature.)
+
+**Tests are the deliverable's spine** — 106 across `phase`/`phase.variants`/`aggregate`/`ledger`/
+`judged`/`summary`/`charts`. Fixtures (`fixtures.ts`) generate from labelled BEHAVIOURAL processes
+whose ranges deliberately straddle the rule's cut-points, so the classes overlap and the rule CAN
+fail; an inverted-classifier known-negative proves the scorer isn't measuring a fiction. Ledger tests
+carry explicit UTC offsets — a suite that passes only in Australia/Brisbane is a check that can't see
+its own failure. PRE-EXISTING, NOT THIS LANE'S: `vite preview` throws React hydration errors (#418/
+#423) on EVERY route — /about and /verify included, 28 apiece — which strips `<html data-theme>` (the
+recovery failure entry.client.tsx:100 documents), so the screenshot probe asserts the theme attribute
+directly.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
@@ -1039,7 +1095,13 @@ block; components don't change.
 Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
-ProductivityReportModal. When you add a panel, add it here too.
+ProductivityReportModal, ProductivityPanel (`/productivity`). When you add a panel, add it here too.
+
+**Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
+`fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the
+night block remaps them for free — `judged.test.ts` asserts that structurally (a bare hex in
+SERIES_STYLE fails the build). Verified both themes render distinctly: panel bg #fff → #454e59,
+`--iw-ink` #5c2d8a → #cbb8f2.
 
 ## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
 
