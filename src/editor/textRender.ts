@@ -278,6 +278,98 @@ export interface BuildOpts {
    *  Without it the walk lays out the entire tail (measured 57-60ms at 40k) — which is what the
    *  crux test did, and why its timings must not be quoted as the renderer's cost. */
   maxHeight?: number
+  // ── INCREMENTAL: THE PER-BLOCK LAYOUT CACHE (2026-07-17) ─────────────────────────────────────
+  /** Reuse identical blocks' layout across versions. Omit ⇒ the byte-identical full path.
+   *  See makeBlockLayoutCache() for the theorem this rests on and the invalidation contract. */
+  blockCache?: BlockLayoutCache
+}
+
+// ─── Incremental block cache ──────────────────────────────────────────────────────────────────
+// PETER'S TARGET: "if we can get it under 1s we can just load it when the snapshots screen loads
+// up" — <1s for 116 versions ⇒ <8.6ms/version, from a naive 62-82ms.
+//
+// THE THEOREM IT RESTS ON (confirmed, not assumed): `layoutParagraph(block, contentWidthPx, ratio,
+// measure, whiteSpace)` takes ONLY the block. No prefix, no preceding state, no document. Line
+// wrapping never crosses a block boundary, so a block's layout is a pure function of its own runs
+// and its width/font context. Everything a block's position depends on — `top`, `posBase`,
+// `blockIdx` — is applied by emitTextBlock as a pure OFFSET after the layout exists. So reuse is
+// the SAME ARITHMETIC, not an approximation: cache the block-relative geometry, re-emit at the new
+// offsets. This is the same rule the editor's `computeScoped` already runs on (unchanged blocks
+// reuse cached block-relative lines at the previous measure's tops).
+//
+// KEYED ON A CONTENT HASH, NEVER ON A DIFF. A diff (`opsBetween`) would be cheaper, but a wrong
+// diff SILENTLY REUSES WRONG LAYOUT — it paints the right words on the wrong page and reports
+// success. A content hash cannot: if the bytes differ, the key differs. The key is
+// self-validating, which is the whole difference between a fast renderer and a fast renderer that
+// is subtly wrong. Two independent 32-bit FNV-1a streams ⇒ an effective 64-bit key: collisions are
+// the ONLY way this can under-invalidate, and under-invalidation is the direction that paints wrong
+// words, so the extra stream is cheap insurance (the same asymmetry as bibSignature's whole-entry
+// hash).
+//
+// INVALIDATION IS THE CALLER'S JOB, and it is the same contract the canonical measure's block-line
+// WeakMap already carries: the key covers the block's CONTENT and its LAYOUT PARAMS, but NOT the
+// font-loading state that `measure` closes over. Fonts change advances. So the caller MUST drop the
+// cache whenever the canonical context moves (fonts ready/'loadingdone', page settings,
+// bibliography hydration) — exactly where clearLineCache already sits. A table's `contextSig`
+// covers the same ground for the persisted layer.
+export interface BlockCacheStats {
+  hits: number
+  misses: number
+  entries: number
+  evicted: number
+}
+
+interface CachedBlock {
+  relTops: number[]
+  lineHeights: number[]
+  startChars: number[]
+  endChars: number[]
+  segs: RenderSeg[][] // block-relative (x from the content-box left, startChar block-relative)
+  height: number
+}
+
+export interface BlockLayoutCache {
+  map: Map<string, CachedBlock>
+  stats: BlockCacheStats
+  max: number
+}
+
+/** A block-layout cache. Bounded FIFO — evictions are counted, never silent. */
+export function makeBlockLayoutCache(max = 4000): BlockLayoutCache {
+  return { map: new Map(), stats: { hits: 0, misses: 0, entries: 0, evicted: 0 }, max }
+}
+
+/**
+ * The content+context key. Hashes EVERYTHING the wrap is a function of and nothing it isn't:
+ * `top`/`posBase`/`blockIdx`/`marker` are deliberately absent — they are offsets applied at emit,
+ * and including them would key every block to its position and reduce the hit rate to zero on any
+ * insertion (which is exactly the case the cache exists to serve).
+ */
+function blockKey(
+  runs: InlineRun[], basePx: number, ratio: number, contentWidth: number,
+  marginTopPx: number, marginBottomPx: number,
+): string {
+  let h1 = 0x811c9dc5 >>> 0
+  let h2 = 0xcbf29ce4 >>> 0
+  const byte = (c: number) => {
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0
+    h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0
+  }
+  // Floats quantised to 1/1024px — finer than any layout decision, and it keeps the key stable
+  // against float noise that cannot move a break.
+  const num = (n: number) => { const v = Math.round(n * 1024) | 0; byte(v & 255); byte((v >>> 8) & 255); byte((v >>> 16) & 255); byte((v >>> 24) & 255) }
+  num(basePx); num(ratio); num(contentWidth); num(marginTopPx); num(marginBottomPx)
+  for (const r of runs) {
+    byte(r.atomic ? 1 : 0)
+    byte(r.italic ? 1 : 0)
+    num(r.fontWeight)
+    num(r.fontSizePx)
+    for (let i = 0; i < r.fontFamily.length; i++) byte(r.fontFamily.charCodeAt(i) & 255)
+    byte(0x1f) // field separator — "ab|c" must not collide with "a|bc"
+    for (let i = 0; i < r.text.length; i++) { const c = r.text.charCodeAt(i); byte(c & 255); byte(c >>> 8) }
+    byte(0x1e) // run separator
+  }
+  return `${h1.toString(36)}:${h2.toString(36)}:${runs.length}`
 }
 
 // Slice a block's runs to start at a block-relative char offset. Only ever called with a proven
@@ -324,6 +416,32 @@ export function buildRenderModel(
     marginTopPx: number, marginBottomPx: number, blockIdx: number, posBase: number,
     indentPx = 0, marker?: string,
   ): { ok: boolean; height: number } => {
+    // ── CACHE HIT: re-emit the cached block-relative geometry at THIS block's offsets ──
+    // Legal because layoutParagraph took only the block: `top`/`posBase`/`blockIdx`/`marker` never
+    // entered the layout, so applying them here reproduces the full build's lines exactly.
+    const cache = opts.blockCache
+    let key = ''
+    if (cache) {
+      key = blockKey(runs, basePx, ratio, contentWidth, marginTopPx, marginBottomPx)
+      const hit = cache.map.get(key)
+      if (hit) {
+        cache.stats.hits++
+        for (let k = 0; k < hit.relTops.length; k++) {
+          lines.push({
+            top: top + hit.relTops[k], height: hit.lineHeights[k], blockIdx,
+            pos: posBase + hit.startChars[k], startChar: hit.startChars[k], endChar: hit.endChars[k],
+            // Segments are block-relative and are never mutated after construction, so the array is
+            // shared by reference rather than copied — copying it would reintroduce the per-line
+            // allocation this cache exists to avoid.
+            segs: hit.segs[k],
+            indentPx, marker: k === 0 ? marker : undefined,
+          })
+        }
+        return { ok: true, height: hit.height }
+      }
+      cache.stats.misses++
+    }
+
     const arith: ArithBlock = {
       type: 'paragraph', runs, baseFontPx: basePx,
       marginTopPx, marginBottomPx, firstLineLeadingPx: 0,
@@ -332,15 +450,33 @@ export function buildRenderModel(
     if (!runs.every((r) => r.text === '\n' || r.atomic || fontLoaded(r.fontFamily, r.fontSizePx))) return { ok: false, height: 0 }
     const lay = layoutParagraph(arith, contentWidth, ratio, measure, EDITOR_WHITE_SPACE)
     const chars = blockChars(runs)
+    // ONLY SUCCESSES ARE CACHED, deliberately. `ok:false` turns on eligibility AND `fontLoaded`,
+    // and fontLoaded is NOT in the key — it flips to true when a face arrives. Caching a false
+    // would pin a placeholder forever for a block that became renderable; recomputing a miss is
+    // cheap and always correct. (A cached TRUE cannot rot the same way: faces load, never unload —
+    // and a face that changes ADVANCES is a context change the caller must drop the cache for.)
+    const cb: CachedBlock | null = cache ? { relTops: [], lineHeights: [], startChars: [], endChars: [], segs: [], height: lay.height } : null
     for (let k = 0; k < lay.lineCount; k++) {
       const sc = lay.breakStartChars[k]
       const ec = k + 1 < lay.lineCount ? lay.breakStartChars[k + 1] : chars.text.length
+      const segs = segsOfLine(runs, chars, sc, ec, measure)
       lines.push({
         top: top + lay.relTops[k], height: lay.lineHeights[k], blockIdx,
         pos: posBase + sc, startChar: sc, endChar: ec,
-        segs: segsOfLine(runs, chars, sc, ec, measure),
+        segs,
         indentPx, marker: k === 0 ? marker : undefined,
       })
+      if (cb) { cb.relTops.push(lay.relTops[k]); cb.lineHeights.push(lay.lineHeights[k]); cb.startChars.push(sc); cb.endChars.push(ec); cb.segs.push(segs) }
+    }
+    if (cache && cb) {
+      // Bounded FIFO. Distinct blocks across 116 versions of one document are ~hundreds, so this
+      // should not fire — which is exactly why it is COUNTED rather than assumed.
+      if (cache.map.size >= cache.max) {
+        const oldest = cache.map.keys().next().value
+        if (oldest !== undefined) { cache.map.delete(oldest); cache.stats.evicted++ }
+      }
+      cache.map.set(key, cb)
+      cache.stats.entries = cache.map.size
     }
     return { ok: true, height: lay.height }
   }

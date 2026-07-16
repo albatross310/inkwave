@@ -17,7 +17,11 @@ applyTheme()
 ;(() => {
   try {
     const params = new URLSearchParams(location.search)
-    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender']) {
+    // `btDebug` — the on-device break-table store test (iPhone 8, live site). iOS Safari has no
+    // createWritable, so every OPFS write there takes opfsWrite.ts's WORKER createSyncAccessHandle
+    // branch, which CI cannot reach (Playwright's Linux WebKit has no navigator.storage at all).
+    // Sticky, like the rest: a flag read fresh from the URL dies the moment nav rewrites it.
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug']) {
       const v = params.get(f)
       if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
       // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:

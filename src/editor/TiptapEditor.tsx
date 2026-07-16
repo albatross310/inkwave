@@ -1507,6 +1507,27 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }
   }, [editor])
 
+  // ── iOS break-table store test (flag `inkwave:btDebug`, default OFF) ──────────────────────────
+  // Peter opens `/?btDebug=1` on his iPhone 8, on the live site. The store's OPFS layer is proved
+  // on Chromium, but Chromium has createWritable — iOS takes opfsWrite.ts's OTHER branch (worker
+  // createSyncAccessHandle, ONE handle per file or it throws), which has never executed with this
+  // store and which CI physically cannot reach. The store's first execution found two bugs that were
+  // invisible until the code ran; this asks those same questions on the device.
+  // ZERO COST WHEN OFF, BY CONSTRUCTION: the flag read is a localStorage get and the module is a
+  // dynamic import, so nothing of this reaches the bundle — let alone the typing path — unless
+  // Peter turns it on. It self-mounts a fullscreen overlay; it touches no editor state.
+  useEffect(() => {
+    // The flag is read INLINE, not imported from the debug module: importing a `btDebugEnabled()`
+    // helper to decide whether to import the module would pull the module on every load and make
+    // "off costs nothing" false — the exact reason textRenderFlag.ts lives alone (see its header).
+    let on = false
+    try { on = localStorage.getItem('inkwave:btDebug') === '1' } catch { /* private mode */ }
+    if (!on) return
+    let cancelled = false
+    void import('./breakTableDebug').then((m) => { if (!cancelled) void m.runBreakTableDebug() })
+    return () => { cancelled = true }
+  }, [])
+
   // ── textRender probe surface (flag `inkwave:textRender`, default OFF) ─────────────────────────
   // The plaintext page renderer is measured IN THE REAL APP — live doc, real shipped fonts, real
   // DPR — never a harness that reimplements the context (the trap that has burned this codebase
