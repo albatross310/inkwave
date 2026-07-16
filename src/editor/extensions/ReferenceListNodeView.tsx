@@ -14,7 +14,8 @@ import { NodeViewWrapper } from '@tiptap/react'
 import { bibProvider } from '../../citations/bibProvider'
 import { addToLibrary } from '../../citations/library'
 import { referenceListKeysFromDoc } from '../../citations/resolve'
-import { formatReferenceEntries, simpleRefList } from '../../citations/format'
+import { simpleRefList } from '../../citations/format'
+import { ensureBibEntries } from '../../citations/bibFormat'
 import { highlightPages } from '../../citations/pdfHighlights'
 import { hasPdf } from '../../citations/pdfSource'
 import { openPdf, getLastPdfPage } from '../../citations/pdfViewer'
@@ -166,7 +167,16 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
     if (toAutoOpen.length) setOpenNotes(prev => { const n = new Set(prev); toAutoOpen.forEach(id => n.add(id)); return n })
 
     try {
-      const formatted = await formatReferenceEntries(items, getCitationStyle())
+      // ONE format per (entries, style, epoch), SHARED with the text renderer (citations/bibFormat).
+      // This used to be a direct `formatReferenceEntries` whose result lived only in this
+      // component's state — which is exactly why a synchronous renderer had to guess the
+      // bibliography's height. Reading the shared cache keeps the editor and the renderer drawing
+      // the same entries by construction, rather than by two formatters agreeing.
+      const formatted = await ensureBibEntries(items, getCitationStyle(), bibProvider.getVersion())
+      // ensureBibEntries SWALLOWS the CSL engine's error (it must not reject its shared promise for
+      // every concurrent awaiter), so null IS the failure signal that used to arrive as a throw.
+      // Route it into the same plain-text fallback rather than letting it blank the bibliography.
+      if (!formatted) throw new Error('csl-format-failed')
       const noteById = new Map(items.map(it => [it.id, noteOf(it)]))
       const itemById = new Map(items.map(it => [it.id, it]))
       setEntries(formatted.map(([id, html]) => {
@@ -282,9 +292,13 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
         borderRadius: 4,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.6em' }}>
+      {/* `iw-bib-header` exists so the text renderer can HARVEST this row's own geometry (its 0.6em
+          margin-bottom spaces the heading from the entries, and it resolves against the wrapper's
+          18px base, not the h2's 20.7px). Without a class the harvest could only select the h2,
+          whose margin is 0 — reading the row's spacing as zero. Keep the class. */}
+      <div className="iw-bib-header" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.6em' }}>
         <h2 style={{ fontSize: '1.15em', fontWeight: 600, color: INK, margin: 0 }}>References</h2>
-        <span style={{ fontSize: '0.7em', color: '#9ca3af', fontStyle: 'italic' }}>{MODE_LABEL[mode]}</span>
+        <span className="iw-bib-mode" style={{ fontSize: '0.7em', color: '#9ca3af', fontStyle: 'italic' }}>{MODE_LABEL[mode]}</span>
       </div>
       {count === 0 ? (
         <p style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: '0.9em' }}>

@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { buildCitationDoc } from './fixture.mjs'
 const require = createRequire(import.meta.url)
-const { PNG } = require('/root/dev/iw-textrender/node_modules/.pnpm/pngjs@5.0.0/node_modules/pngjs')
+// Resolve pngjs from THIS worktree. It was hard-coded to /root/dev/iw-textrender's node_modules —
+// another agent's checkout, which this probe must never depend on (and which need not exist).
+// pngjs is a transitive dep, so it is not hoisted to node_modules/ — resolve it out of the local
+// pnpm store rather than reaching across worktrees.
+const { PNG } = require(join(dirname(fileURLToPath(import.meta.url)), '../../node_modules/.pnpm/pngjs@5.0.0/node_modules/pngjs'))
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out')
 const BASE = `http://127.0.0.1:${process.env.PROBE_PORT||4239}`
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none','--disable-lcd-text'] })

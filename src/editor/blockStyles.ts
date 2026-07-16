@@ -96,9 +96,18 @@ export function harvestBlockStyles(root: HTMLElement, basePx: number): void {
     // wrapper is 2.5em/1em/1px-border, the header row 0.6em, the body 0.92em/1.38, each entry
     // 0.6em — nested ems that resolve against DIFFERENT bases (an entry's 0.6em is 0.6 x 16.56,
     // the header's is 0.6 x 18). Hand-computing that chain is exactly how a height becomes a guess.
-    ['refList:wrap', '.node-referenceList'],
+    // ⚠ `.node-referenceList` is the REACT-RENDERER DIV, not the styled box. MEASURED 2026-07-17:
+    // it computes marginTop/paddingTop/borderTop = 0/0/0, while the NodeViewWrapper `<section>`
+    // INSIDE it carries the real 45px/18px/1px (2.5em/1em/1px). Harvesting the wrapper from the
+    // outer div therefore read three zeros and called them the refList's box — a silent −64px. The
+    // section is the element with the box, so the section is what we harvest.
+    ['refList:wrap', '.node-referenceList > section'],
     ['refList:h2', '.node-referenceList h2'],
-    ['refList:headerRow', '.node-referenceList h2'],
+    // The header ROW is the h2's flex parent (its own 0.6em margin-bottom spaces the list); the h2
+    // is a different element with a different font size. They were the SAME selector, so the row's
+    // margin-bottom silently read as the h2's (0px) — the row is the parent, not the heading, and
+    // it now carries `iw-bib-header` precisely so it can be selected.
+    ['refList:headerRow', '.node-referenceList .iw-bib-header'],
     ['refList:body', '.node-referenceList .csl-bib-body'],
     ['refList:entry', '.node-referenceList .iw-bib-entry'],
   ]
