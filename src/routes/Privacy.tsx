@@ -6,6 +6,12 @@
 //   • The signing service receives hashes only (api/sign); OTS relays a hash (api/ots).
 //   • AI features (summaries, URL lookup, PDF page numbers) are OPT-IN, off by default
 //     (src/editor/aiSettings.ts), transit our functions, and are processed by Anthropic.
+//   • The work report (src/productivity/, flag-gated `?prodReport`) sends NOTHING itself: the
+//     writer copies a prompt and runs it in their own AI. Three consent tiers, and the page must
+//     keep naming them: session metadata always; place labels + diary notes opt-in off by
+//     default; per-document text opt-in off by default, per document. Places are TYPED BY THE
+//     WRITER — no geolocation, no coordinates, no permission prompt. If that ever changes, this
+//     page changes first.
 //   • Our functions log nothing and store nothing; Vercel keeps standard platform logs.
 //   • The extension's capture history expires after 5 minutes (extension-src/utils/constants.ts).
 // If a feature changes any of this, change this page in the same PR.
@@ -14,7 +20,7 @@ import { Link } from 'react-router'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
 const INK = '#5c2d8a'
-const UPDATED = '8 July 2026'
+const UPDATED = '17 July 2026'
 
 const pill = 'inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:brightness-110'
 
@@ -102,6 +108,34 @@ export function Privacy() {
               switched off by default and can be adjusted at any time in Settings. As Inkwave develops we are also
               exploring browser-local AI models for these features, so that this data truly never
               leaves your device.
+            </p>
+          </Section>
+
+          <Section title="Your work report">
+            <p>
+              Inkwave can keep a record of how you work — how long you wrote for, how many words
+              you added and deleted, when you took breaks — and, if you use them, a short note and
+              a place label you type yourself at the end of a session. All of it stays on your
+              device, in your own storage, exactly like your documents. A place is only ever the
+              word you typed: Inkwave has no access to your location and never asks for it.
+            </p>
+            <p className="mt-3">
+              To get an AI's read on that record, Inkwave compiles a prompt and{' '}
+              <strong>you</strong> run it in your own AI, then paste the reply back.{' '}
+              <strong>Inkwave sends nothing — this path needs no account and no key, and it is
+              free.</strong> You see the exact prompt before you copy it, and you choose what goes
+              in it:
+            </p>
+            <ul className="list-disc pl-5 space-y-2 mt-3">
+              <li><strong>Always included</strong> — how you worked: minutes, word counts, edits, breaks, and which document each session was in.</li>
+              <li><strong>Your notes and places</strong> — off unless you tick them. These are your own words about your day.</li>
+              <li><strong>The text of your documents</strong> — off unless you tick them, one document at a time, so you can share the essay and keep the journal to yourself.</li>
+            </ul>
+            <p className="mt-3">
+              The figures in your report are worked out and drawn by Inkwave on your device. They
+              are never sent to an AI to be recalculated, and nothing an AI says can change them —
+              its contribution is the written reflection, which is labelled as its assessment
+              wherever it appears.
             </p>
           </Section>
 

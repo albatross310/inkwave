@@ -103,6 +103,7 @@ export function OptionsMenu({
   onExportEquations,
   googleDriveActive,
   onVerifyRecord,
+  onWorkReport,
   onFileOpenError,
 }: {
   paperRight: number
@@ -127,6 +128,8 @@ export function OptionsMenu({
   onExportEquations?: () => void
   googleDriveActive?: boolean
   onVerifyRecord?: () => void
+  /** Flag-gated work report (§A7.1). Absent ⇒ the menu item does not exist. */
+  onWorkReport?: () => void
   onFileOpenError?: (msg: string) => void
 }) {
   const navigate = useNavigate()
@@ -205,6 +208,8 @@ export function OptionsMenu({
     { label: 'Export…', run: () => setModal('export') },
   ]
   const items: Array<{ label: string; run: () => void }> = [
+    // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1).
+    ...(onWorkReport ? [{ label: 'Work report', run: onWorkReport }] : []),
     { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
     { label: 'Privacy', run: () => navigate('/privacy') },

@@ -605,6 +605,36 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   point the 120px-vs-880px guess goes LIVE and silently moves every break below it. Its real height
   must come with it, or `reliablePages` must stop there honestly.
 
+## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
+
+`src/productivity/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in their own
+AI and pastes the reply back, Inkwave parses + merges + graphs client-side. Inkwave sends nothing; no
+account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) are NOT built.
+
+- **THE RULE (§A6.4): measured numbers never round-trip.** They go OUT (the model can't narrate what
+  it can't see) but must never come BACK — Inkwave graphs its own. Enforced, not just asked for:
+  `judged.ts` REFUSES a judged table carrying any measured column, and `claims.ts` flags narrative
+  numerals absent from the payload. PROBED: empty MEASURED_COLUMNS and a measured table is STILL
+  refused (exact-header rule) — two independent guards; the list supplies the diagnosis.
+- **A prompt is a request, not a guarantee.** §A6.2 (daily = descriptive recap; pattern/causal claims
+  weekly+) and §A5/§C3 (kind, non-shaming) are in the fixed prompt AND enforced client-side:
+  `findCausalClaims` flags cause/pattern markers on DAILY replies. It flags, never rewrites (§A9).
+- **Three consent tiers on the export screen** (Peter, 2026-07-17): session metadata always · place
+  labels + diary notes OPT-IN OFF (they are the writer's prose — without this tier "metadata only"
+  silently means "and what I wrote about my day") · per-document text OPT-IN OFF, per document
+  (§A7.3). **`place` is a word the writer TYPES — no geolocation, no coordinates, no permission
+  prompt. Never write copy implying Inkwave knows where you are (§C1.4).**
+- **The payload is an ALLOW-LIST** (compile.ts names every field that leaves), so a field the ledger
+  gains later cannot leak by riding along — it is simply not emitted until someone picks a tier for
+  it. A deny-list would fail the other way, silently. Tested.
+- **Seams, not forks:** `types.ts` type-mirrors §A3.2/§A3.3 and `source.ts` is the one function
+  `feat/prod-ledger`/`feat/prod-graphs` fill in; `?prodReport=demo` installs labelled synthetic
+  fixtures so the path is drivable meanwhile. The measured CHART is prod-graphs' — the bars here are
+  an interim read of the same rollups; the judged overlay stays whatever replaces them.
+- `/privacy` has a "Your work report" section naming all three tiers — keep it in sync with the code.
+- 96 tests. Every guard is mutation-proved to FIRE (invert it → tests fail). Watch the vacuous-loop
+  trap: the per-column rejection loop passed on an EMPTY list until a non-empty assertion was added.
+
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
 Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
@@ -1008,8 +1038,8 @@ block; components don't change.
 
 Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
-VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar. When you add a
-panel, add it here too.
+VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
+ProductivityReportModal. When you add a panel, add it here too.
 
 ## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
 
