@@ -9,6 +9,7 @@ import type { InkwaveDocument } from '../types/document'
 import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
 import { opsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
+import { survivingNeighbourSig } from '../provenance/anchorMap'
 import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
 import { pageBoxPx } from '../editor/pageModel'
 import { getPaperSize, getOrientation } from '../editor/pageSettings'
@@ -21,7 +22,7 @@ import { probePerf } from '../editor/perflog'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
-import { summariseRecord, createScrubPresenter, type ScrubPresenter } from '../editor/scrubRaster'
+import { summariseRecord, createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
@@ -379,14 +380,56 @@ function locateOffset(root: HTMLElement, globalOffset: number): { node: Text; of
   return null
 }
 
-/** The text signature currently sitting on the midline (or null if not over text). */
+/** Global char offset of the character at content-y `y`, by BINARY SEARCH over Range rects — no
+ *  hit-testing, so nothing that covers the pane can defeat it. Text lays out monotonically down a
+ *  block flow, so ~log2(chars) rect reads find the line. (The pane is a handful of giant
+ *  [data-opidx] spans, so each locateOffset walk is a few nodes, not a tree.) */
+function offsetAtContentY(el: HTMLElement, y: number): number | null {
+  const full = el.textContent ?? ''
+  if (!full.length) return null
+  const elRect = el.getBoundingClientRect()
+  const zf = elRect.width > 0 && el.offsetWidth > 0 ? elRect.width / el.offsetWidth : 1
+  const range = document.createRange()
+  const topAt = (i: number): number => {
+    const loc = locateOffset(el, i)
+    if (!loc || !loc.node.data.length) return NaN
+    const off = Math.min(loc.offset, loc.node.data.length - 1)
+    try {
+      range.setStart(loc.node, off)
+      range.setEnd(loc.node, Math.min(off + 1, loc.node.data.length))
+      const r = range.getBoundingClientRect()
+      if (!r.height && !r.width) return NaN
+      return (r.top - elRect.top) / zf + el.scrollTop
+    } catch { return NaN }
+  }
+  let lo = 0, hi = full.length - 1
+  for (let g = 0; g < 40 && lo < hi; g++) {
+    const mid = (lo + hi) >> 1
+    const t = topAt(mid)
+    if (Number.isNaN(t)) { lo = mid + 1; continue } // collapsed/hidden run — step past it
+    if (t < y) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** The text signature currently sitting on the midline (or null if not over text).
+ *
+ *  The caret hit-test is the fast path, but it reads the TOPMOST element at the point — and at
+ *  mount the LoadingVeil covers this pane, so it returned the veil (not a text node) and the
+ *  anchor came back null. This effect only re-runs on a snapshot/mode change, so the anchor then
+ *  stayed null for the WHOLE SESSION unless the reader happened to scroll: content anchoring was
+ *  silently never engaging at load and every reposition fell back to the RATIO (probed 2026-07-17:
+ *  23/23 warm layers took `ratio.nosig`). Hence the overlay-immune geometric fallback. */
 function midlineSignature(el: HTMLElement): string | null {
   const rect = el.getBoundingClientRect()
   const x = rect.left + rect.width / 2
   const y = rect.top + el.clientHeight / 2
   const caret = caretAtPoint(x, y)
-  if (!caret) return null
-  const globalOffset = globalOffsetOf(el, caret.node, caret.offset)
+  const globalOffset = caret
+    ? globalOffsetOf(el, caret.node, caret.offset)
+    : offsetAtContentY(el, el.scrollTop + el.clientHeight / 2)
+  if (globalOffset == null) return null
   const sig = (el.textContent ?? '').slice(globalOffset, globalOffset + SIG_LEN)
   return sig.trim().length >= SIG_MIN ? sig : null
 }
@@ -778,13 +821,50 @@ interface DocLayerHooks {
   onOpClick: (opIdx: number) => void
   onHoverOp: (opIdx: number | null) => void
   getZoom: () => number
-  getAnchorTop: () => number // the active pane's scrollTop — primes warm layers near their landing position
+  // Where THIS layer's version must sit so the reader's content stays under the reading line.
+  // CONTENT identity, not scroll offset: versions differ in LENGTH, so a shared scrollTop lands
+  // different words in every version (measured: anchor drift 0px, centre content held 33%). The
+  // scroller is passed in because the answer is a property of the TARGET version's own layout.
+  getAnchorTop: (scroller: HTMLDivElement, snapId: string) => number
   // Warm (NON-ACTIVE) layer painted → scrub-bitmap capture. `pages` is THIS layer's canonical page
   // geometry (round 10): the sweep's offscreen minimap replica needs a non-active version's real
   // page regions, and this hidden layer is the only place they exist. ADDITIVE — it rides the
   // warm-only branch that already ran; the ACTIVE path (onActivate / onGeo / the shared
   // leftScrollRef+pagRef+pageGeo binding) is untouched.
   onWarmReady?: (snapId: string, scroller: HTMLDivElement, pages: StaticPageGeo[] | null) => void
+}
+
+// ── Registration trace (harness-only; zero cost unless a probe defines the array) ─────────────
+// The burst RECORDER can only carry a centre signature for frames it CAPTURED this session — a
+// hydrated thumbnail has none — so its `registered` rate is computed over a handful of steps
+// (measured: 0-7 of a 12-step burst). Far too small to accept or reject an anchoring rule.
+// This traces the real thing at FULL sample instead: for every version the sweep primes, the text
+// actually sitting under that version's centre line AT THE SCROLLTOP ITS BITMAP IS CAPTURED AT.
+// Read across the sweep, consecutive versions agreeing = the flip is registered. Same locator the
+// recorder uses (paneCentreSig — text granularity; the pane is ~4 giant [data-opidx] spans, so
+// block granularity would call every frame registered).
+function traceAnchor(snapId: string, L: HTMLElement): void {
+  const w = window as unknown as {
+    __iwAnchorTrace?: Array<{ id: string; sig: string; want: string; mode: string; top: number; driftPx: number | null }>
+    __iwAnchorLast?: { mode: string; want: string; rawWant: string | null; ratio: number }
+  }
+  if (!w.__iwAnchorTrace) return
+  const last = w.__iwAnchorLast
+  try {
+    // DRIFT, in px — the measure the zoom focal anchor was proved with (99bf8a0: 0.0-0.3px), and
+    // the only one that is honest here. A signature of the centre LINE cannot answer this: it is
+    // the line's OPENING 60 chars, so an anchor sitting mid-line (which wrapping alone decides,
+    // and wrapping differs between versions of different length) reads as a miss even though it is
+    // exactly under the reading line. So ask geometry instead: where IS the anchor text now,
+    // relative to the centre? `null` = the anchor has no counterpart in this version at all.
+    const raw = last?.rawWant ?? null
+    const would = raw ? scrollTopForSignature(L, raw, last?.ratio ?? 0.5) : null
+    w.__iwAnchorTrace.push({
+      id: snapId, mode: last?.mode ?? '?', top: Math.round(L.scrollTop),
+      sig: paneCentreSig(L), want: (last?.want ?? '').replace(/\s+/g, ' ').trim().slice(0, 44),
+      driftPx: would == null ? null : Math.round(L.scrollTop - would),
+    })
+  } catch { /* best-effort */ }
 }
 
 const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: {
@@ -818,11 +898,17 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       })
       probePerf(activeRef.current ? 'paginate' : 'paginate.warm', performance.now() - t0)
       if (activeRef.current && pagRef.current) hooks.onActivate(L, pagRef.current, [...pagRef.current.pages])
-      // Warm layers pre-scroll to the active pane's position: adjacent snapshots lay out almost
-      // identically, so the flip's midline reposition then moves ~0px — the compositor keeps the
-      // already-rastered tiles instead of tiling a fresh scroll offset. Once painted here, the
-      // layer is also ready for its scrub-bitmap capture (idle — see scrubRaster).
-      else if (!activeRef.current) { L.scrollTop = hooks.getAnchorTop(); hooks.onWarmReady?.(snap.id, L, pagRef.current ? [...pagRef.current.pages] : null) }
+      // Warm layers pre-scroll to the anchor's position IN THEIR OWN VERSION — the same CONTENT
+      // under the reading line, not the same scrollTop (see getAnchorTop). This is the whole
+      // registration contract: this scrollTop is the one the layer's scrub bitmap is CAPTURED at,
+      // and a warm layer never gets the active path's midline reposition, so if it is primed to a
+      // raw offset its bitmap is misregistered FOREVER — every frame individually correct, the
+      // sequence sliding. Once painted here the layer is ready for its capture (idle — scrubRaster).
+      else if (!activeRef.current) {
+        L.scrollTop = hooks.getAnchorTop(L, snap.id)
+        traceAnchor(snap.id, L)
+        hooks.onWarmReady?.(snap.id, L, pagRef.current ? [...pagRef.current.pages] : null)
+      }
     }
     runRef.current = run
     // A hidden warm layer renders at the parent's current pane zoom so activation needs no repaint.
@@ -2226,6 +2312,9 @@ function SplitDiffView({
       // Refresh the anchor from the new midline so the next navigation stays locked to
       // these same words even if the user never manually scrolls.
       const s = midlineSignature(el)
+      // Observable: a null here means the pane has NO anchor, so every warm layer falls back to the
+      // ratio and the flipbook slides. This was silently the case at load for the veil's whole life.
+      probePerf(`scrub.sig.${s ? 'ok' : 'null'}`, 0)
       if (s) anchorSigRef.current = s
       } finally { probePerf('midline', performance.now() - tMid) }
     })
@@ -2282,6 +2371,71 @@ function SplitDiffView({
     window.addEventListener('touchend', onUp)
   }, [vertical])
 
+  // ── THE REGISTRATION ANCHOR (the doc pane's "same words at the centre" contract) ─────────────
+  // Same shape as the zoom focal anchor (99bf8a0): hold a CONTENT identity, re-find it after the
+  // thing changed, land on it. Here the "change" is the version itself, so the counterpart is
+  // found through the provenance word-diff rather than re-read from the same DOM.
+  //
+  // THE RULE, in order — every branch lands SOMEWHERE sensible, never the top:
+  //   1. EXACT      — the anchor text exists in this version → put it under the reading line.
+  //   2. NEIGHBOUR  — the anchor text was inserted/deleted between the versions, so it HAS no
+  //                   counterpart. Fall back to the nearest text that provenance says survives
+  //                   into this version (`same` ops) and land THAT under the line. The reader
+  //                   drifts by the length of the edit, which is the smallest honest error
+  //                   available: there is nothing else to be at the centre.
+  //   3. RATIO      — no anchor at all (never scrolled / no surviving text). Proportional
+  //                   position, the pre-existing behaviour.
+  // Runs on the WARM layer's deferred pagination task (idle, beside a 130-270ms paginate and a
+  // 300ms+ raster), never on the input path. Observable: probes below tally each branch, so a
+  // fallback storm is visible instead of silently reading as "registered".
+  const snapForAnchorRef = useRef(snapshot); snapForAnchorRef.current = snapshot
+  const allSnapsRef = useRef(allSnaps); allSnapsRef.current = allSnaps
+  const anchorScrollTopFor = useCallback((scroller: HTMLDivElement, snapId: string): number => {
+    const t0 = performance.now()
+    let mode = 'ratio.nosig'
+    try {
+      // KNOWN-NEGATIVE A/B (harness-only): the OLD rule — prime every version to the active pane's
+      // raw scrollTop. A probe must prove it can SEE this misregistration before its verdict on the
+      // fix means anything (this codebase has trusted instruments that measured a fiction).
+      if ((window as unknown as { __iwAnchorRule?: string }).__iwAnchorRule === 'scrolltop') {
+        mode = 'scrolltop'
+        return leftScrollRef.current?.scrollTop ?? 0
+      }
+      // NB the scrub is ALWAYS content-registered — including under lineMode 'longest' (the
+      // default), which deliberately abandons the anchor to snap each version to ITS OWN biggest
+      // change. That rule is right for a deliberate single step ("show me what changed") and ruin
+      // for a burst: measured, it flings the reading position a median 50,455px per version, which
+      // is the mush Peter is describing. So 'longest' stays exactly as it is on the LIVE landing
+      // render (this changes no navigation semantics), while the flipbook frames the sweep bakes
+      // hold the reader's place. Landing in 'longest' then snaps to the change — as it already did
+      // before this commit, since the live render always re-anchored itself on landing regardless.
+      const sig = anchorSigRef.current
+      if (sig) {
+        mode = 'ratio.miss'
+        const exact = scrollTopForSignature(scroller, sig, anchorRatioRef.current)
+        if (exact != null) { mode = 'exact'; return Math.max(0, exact) }
+        const active = snapForAnchorRef.current
+        const target = allSnapsRef.current.find((s) => s.id === snapId)
+        if (active && target && active.id !== target.id) {
+          const near = survivingNeighbourSig(active, target, sig, anchorRatioRef.current)
+          if (!near) mode = 'ratio.nosurvivor'
+          const t = near ? scrollTopForSignature(scroller, near, anchorRatioRef.current) : null
+          if (t != null) { mode = 'neighbour'; return Math.max(0, t) }
+        }
+      }
+      return Math.max(0, anchorRatioRef.current * scroller.scrollHeight - scroller.clientHeight * midFracRef.current)
+    } finally {
+      probePerf(`scrub.anchor.${mode}`, performance.now() - t0)
+      const w = window as unknown as {
+        __iwAnchorTrace?: unknown
+        __iwAnchorLast?: { mode: string; want: string; rawWant: string | null; ratio: number }
+      }
+      if (w.__iwAnchorTrace) { // harness-only
+        w.__iwAnchorLast = { mode, want: anchorSigRef.current ?? '', rawWant: anchorSigRef.current, ratio: anchorRatioRef.current }
+      }
+    }
+  }, [])
+
   // Stable hooks bundle for the keep-alive layers (identity-stable so memoised layers only
   // re-render when their own snap/active props change).
   const layerHooks = useMemo<DocLayerHooks>(() => ({
@@ -2291,7 +2445,7 @@ function SplitDiffView({
     onOpClick: handleLeftPaneClick,
     onHoverOp: handleHoverOp,
     getZoom: () => effZoomRef.current,
-    getAnchorTop: () => leftScrollRef.current?.scrollTop ?? 0,
+    getAnchorTop: anchorScrollTopFor,
     // A warm layer that just painted is capturable while hidden (opacity 0.001 keeps it laid
     // out + painted) — pre-rasters the ±1 neighbours before they're ever flipped to. Round 10:
     // also PARK this hidden layer's scroller + page geometry, the only source of a non-active
@@ -2301,7 +2455,7 @@ function SplitDiffView({
       warmGeoRef.current.set(id, { scroller, pages })
       presenter.queueCapture('doc', id, () => scroller)
     },
-  }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp, presenter])
+  }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp, presenter, anchorScrollTopFor])
 
   // ── Scrub bitmap wiring (round 3 — editor/scrubRaster.ts) ────────────────────────────────────
   // Surfaces: each pane gets an overlay host (absolute, inset 0, hidden at rest) the presenter

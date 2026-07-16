@@ -25,3 +25,4 @@ SECURITY-AUDIT-2026-06.md
 # bench harness: built vendor bundle (rebuild from tiptap-src) + scratch
 scripts/bench/static/tiptap/
 scripts/bench/dbg*.mjs
+scripts/scrub-probe/results-*.json

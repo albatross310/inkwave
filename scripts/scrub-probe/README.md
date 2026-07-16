@@ -39,6 +39,13 @@ PROBE_PORT=4225 NODE_PATH="$(pwd)/node_modules" node scripts/scrub-probe/probe-c
   REGISTRATION (did the content under the reading line hold across version steps?). The live
   `?snapThumbs=debug` overlay CANNOT see a burst — it repaints on the thread the scrub saturates,
   so a mid-scrub reading of it is a stale at-rest sample. Never trust it for burst numbers.
+- `probe-anchor.mjs` — **the registration gate.** Does the doc pane land the SAME CONTENT under the
+  reading line across versions? Reports anchor DRIFT IN PX at full sample (every version the sweep
+  primes), which is the only honest measure: the recorder's `registered` reads the centre LINE'S
+  OPENING chars, so an anchor sitting mid-line scores a miss at 0px drift, and it only sees frames
+  captured this session (0-7 steps of a burst). Cell A runs the OLD raw-scrollTop rule
+  (`window.__iwAnchorRule='scrolltop'`) as a live KNOWN-NEGATIVE and must reproduce the bug
+  (drift p50 ~186px) before cells B/C are read. Reports blank signatures as failures, not holds.
 - `probe-sweep-panes.mjs` — the idle sweep's per-pane bake coverage (doc/diff/map) + bytes/version,
   then a cold fling.
 - `probe-thumbkeys.mjs` — dumps the OPFS thumbnail store's BAKE and LOOKUP signatures verbatim

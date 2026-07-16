@@ -979,6 +979,11 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     const theme = (typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme')) || 'day'
     const box = `${Math.round(w)}x${Math.round(h)}|d${dpr.toFixed(2)}`
     if (kind === 'map') return `${box}|${theme}` // minimap: box + theme only (no body-font/zoom dep)
+    // `a1` = the doc pane's ANCHORING SCHEME. A doc thumbnail is a picture of a version at the
+    // scrollTop its warm layer was primed to, so the priming rule is part of what the bitmap IS:
+    // thumbs baked under the old raw-scrollTop rule are misregistered by construction and MUST NOT
+    // be hydrated into a content-anchored library. Bump this token whenever that rule changes.
+    if (kind === 'doc') return `${box}|z${zoom.toFixed(3)}|${theme}|f${fontsSig()}|a1`
     return `${box}|z${zoom.toFixed(3)}|${theme}|f${fontsSig()}`
   }
   function bakeThumb(kind: ScrubPaneKind, snapId: string, w: number, h: number, zoom: number, dpr: number, src: CanvasImageSource | null, srcW: number, srcH: number) {
