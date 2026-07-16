@@ -90,13 +90,21 @@ ${vs.map(v => `  ${v.name.padEnd(26)} ${pct(v.precision)}    ${pct(v.coverage)} 
     expect(vs).toHaveLength(4)
   })
 
-  it('THE DURATION PROXY IS THE PROBLEM — dropping it roughly doubles coverage at no cost to precision', () => {
+  it('THE DURATION PROXY IS THE PROBLEM — dropping it more than doubles coverage at no cost to precision', () => {
     // The justification for shipping ratio-only. If a future change makes the spec's conjunction
     // competitive again, this fails and the deviation should be revisited.
+    //
+    // ⚠ `expect(ro.wrong).toBe(0)` IS NOT SELF-SUPPORTING and must never be read as if it were. On
+    // the pre-audit fixture it was a TAUTOLOGY: the truth classes did not overlap in addRatio, so
+    // no threshold could produce a wrong call and this assertion held for every value in a wide
+    // void. What licenses it now is `phase.thresholds.test.ts`, which proves the fixture's classes
+    // OVERLAP and that moving either cut-point breaks something. Keep these two files together: this
+    // one states the finding, that one certifies the instrument.
     const conj = evaluate('c', conjunctive)
     const ro = evaluate('r', ratioOnly)
     expect(ro.coverage).toBeGreaterThan(conj.coverage * 1.8)
-    // And it stays perfectly precise: the add/delete ratio alone never made a wrong call here.
+    // And it stays perfectly precise: the add/delete ratio alone never made a wrong call here — on a
+    // fixture where wrong calls are now demonstrably POSSIBLE (edit≤0.65 makes 6 on this same seed).
     expect(ro.wrong).toBe(0)
   })
 
@@ -112,7 +120,7 @@ ${vs.map(v => `  ${v.name.padEnd(26)} ${pct(v.precision)}    ${pct(v.coverage)} 
     const truth = truthBalance()
     const conj = evaluate('c', conjunctive)
     const ro = evaluate('r', ratioOnly)
-    // The spec rule's calls are ~84% drafting against a ~48% truth — it would tell a writer they
+    // The spec rule's calls are ~82% drafting against a ~48% truth — it would tell a writer they
     // spent the month drafting when they spent half of it editing.
     expect(conj.balance - truth).toBeGreaterThan(0.3)
     // The shipped rule lands far closer to the real mix.

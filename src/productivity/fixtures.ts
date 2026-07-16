@@ -15,11 +15,22 @@
 //      rule's own cut-points scores ~100% by construction and measures nothing but its own
 //      circularity — the "known-negative that scored identically BY CONSTRUCTION" failure.
 //
-//   2. THE RANGES DELIBERATELY STRADDLE THE CUT-POINTS. Drafting runs from 18 minutes, so some
-//      drafting sessions fall on the short side of the rule's 25-minute line. Editing deletes
-//      80–160% of what it adds, so some editing sessions land above the rule's 0.50 add-ratio line.
-//      The classes OVERLAP in both proxies, exactly as real writing does. If they didn't, the rule
-//      could not fail here and this file would be a fiction that always reports success.
+//   2. THE CLASSES MUST OVERLAP IN THE PROXY THE RULE ACTUALLY USES. Not merely "in both proxies" —
+//      in the SHIPPED one. This file's first version got rule 1 right and rule 2 wrong, and an
+//      external audit caught it: the `deleteRatio` bands were DISJOINT across the truth classes
+//      (measured: editing topped out at addRatio 0.624, drafting started at 0.803, with ZERO of 64
+//      sessions in between). The rule's 0.70 cut-point sat in the middle of that void, so every
+//      draftAddRatio in [0.625, 0.800] produced numerically IDENTICAL output — 100% precision,
+//      81.3% coverage, 0 wrong. `expect(wrong).toBe(0)` was a tautology of the fixture, and
+//      mutating the threshold to 0.65 / 0.75 / 0.78 left the suite green. By this file's own
+//      standard it was the fiction it warns about.
+//
+//      The bands below now genuinely overlap in addRatio (drafting reaches DOWN to ~0.57, editing
+//      reaches UP to ~0.69), because that is what real writing does — see the per-process notes.
+//      Consequence, and it is the point: no threshold scores 100% any more, so the fixture can
+//      finally say a threshold is wrong. `phase.sweep.probe.test.ts` prints the distribution, the
+//      overlap band, and a full threshold sweep; `phase.thresholds.test.ts` fails if the overlap
+//      ever collapses back to a void.
 //
 // Ground truth is the WRITER'S ACTIVITY — what the feature claims to detect — not what the proxies
 // look like:
@@ -28,6 +39,13 @@
 // `burst` (short but composing) and `revising` (long but cutting) are the honest hard cases: the
 // spec's two proxies point OPPOSITE ways in both. They are ~35% of sessions here because they are
 // common in real writing, not rare corners.
+//
+// A NOTE ON WHAT THIS FIXTURE CAN AND CANNOT SETTLE. It is SYNTHETIC: it encodes a belief about how
+// writing sessions behave. It can prove a rule is INSENSITIVE (a threshold that changes nothing is
+// measuring nothing) and it can show a rule's shape. It CANNOT calibrate a threshold — tuning
+// cut-points to maximise a score on data invented by the same author who chose the cut-points is
+// circular in the other direction. Real calibration needs real ledger rows with the writer's own
+// account of what they were doing. Treat the sweep as a sensitivity analysis, not a recommendation.
 
 import type { DocType, SessionRow } from './types'
 import type { JudgedReport } from './judged'
@@ -72,14 +90,24 @@ const PROCESS: Record<Process, {
   /** Edit events per active minute — keystroke-batch operations, not keystrokes. */
   eventsPerMin: [number, number]
 }> = {
-  // A sustained compositional stretch. You delete as you go, but you're laying prose down.
-  drafting: { truth: 'drafting', minutes: [18, 90], wordsPerMin: [7, 14], deleteRatio: [0.08, 0.25], eventsPerMin: [9, 18] },
-  // Line-editing: tightening, cutting, reworking sentences that already exist.
-  editing: { truth: 'editing', minutes: [8, 35], wordsPerMin: [2, 6], deleteRatio: [0.8, 1.6], eventsPerMin: [14, 28] },
-  // A short compositional burst — twenty minutes between classes. Composing, but briefly.
-  burst: { truth: 'drafting', minutes: [6, 14], wordsPerMin: [10, 16], deleteRatio: [0.05, 0.2], eventsPerMin: [10, 20] },
-  // Deep restructuring: a long, heavy session working over existing text. Long AND delete-heavy.
-  revising: { truth: 'editing', minutes: [40, 75], wordsPerMin: [6, 10], deleteRatio: [0.6, 1.1], eventsPerMin: [12, 22] },
+  // A sustained compositional stretch. An EASY one cuts ~8% of what it lays down; a HARD one —
+  // wrestling the same paragraph of an argument into shape, which is most of thesis writing — cuts
+  // most of it and still ends the session with new prose on the page. That upper reach (0.75 ⇒
+  // addRatio 0.57) is why drafting overlaps editing at all, and it is the honest part: a hard
+  // drafting hour genuinely LOOKS like editing to a word counter.
+  drafting: { truth: 'drafting', minutes: [18, 90], wordsPerMin: [7, 14], deleteRatio: [0.08, 0.75], eventsPerMin: [9, 18] },
+  // Line-editing: tightening, cutting, reworking sentences that already exist. Usually net-negative,
+  // but rewriting a sentence in place adds nearly as much as it removes (0.65 ⇒ addRatio 0.61).
+  editing: { truth: 'editing', minutes: [8, 35], wordsPerMin: [2, 6], deleteRatio: [0.65, 2.5], eventsPerMin: [14, 28] },
+  // A short compositional burst — twenty minutes between classes. Composing, and little
+  // second-guessing: this is the least ambiguous class in the ratio proxy.
+  burst: { truth: 'drafting', minutes: [6, 14], wordsPerMin: [10, 16], deleteRatio: [0.04, 0.35], eventsPerMin: [10, 20] },
+  // Deep restructuring: a long, heavy session working over existing text. Cutting hard, but also
+  // writing the new connective prose that restructuring demands — so it can add well over what it
+  // cuts (0.45 ⇒ addRatio 0.69) while the writer is unambiguously working over what's already there.
+  // Capped at 0.45: below that the writer is composing more than restructuring and the 'editing'
+  // truth label would stop being defensible. The fixture must not manufacture errors by mislabelling.
+  revising: { truth: 'editing', minutes: [40, 75], wordsPerMin: [6, 10], deleteRatio: [0.45, 1.5], eventsPerMin: [12, 22] },
 }
 
 /** Realistic mixture for an honours student's month. */

@@ -11,17 +11,17 @@
 //
 // §A3.3 offers the rule as an example: "high add-to-delete ratio + long sessions → drafting; high
 // delete + short → editing". Scored against labelled synthetic writing (phase.variants.test.ts,
-// 64 sessions, ground truth ~48% drafting), the DURATION half of that conjunction does not work:
+// 64 sessions, ground truth 48.4% drafting), the DURATION half of that conjunction does not work:
 //
 //   rule                        precision   coverage   called-drafting
-//   ratio + duration (spec e.g.)   100.0%      39.1%      84.0%   ← skews the mix badly
-//   ratio only            SHIPPED  100.0%      81.3%      59.6%
-//   duration only                   47.2%      82.8%      79.2%   ← worse than chance
+//   ratio + duration (spec e.g.)   100.0%      34.4%      81.8%   ← skews the mix badly
+//   ratio only            SHIPPED  100.0%      78.1%      50.0%   ← mix ≈ the 48.4% truth
+//   duration only                   47.2%      82.8%      79.2%   ← worse than chance, 28 wrong
 //
 // Session LENGTH does not track what the writer was doing — long revising sessions and short
 // drafting bursts are both ordinary, so duration alone misclassifies (47% on a ~50/50 task, 28
 // outright wrong calls). Conjoined with the ratio it never causes a wrong call, but it suppresses
-// coverage to 39% AND skews the surviving calls to 84% drafting against a 48% truth — i.e. the
+// coverage to 34% AND skews the surviving calls to 82% drafting against a 48% truth — i.e. the
 // spec's rule would have told a writer they spent their month drafting when they spent half of it
 // editing. That is precisely "a number that looks meaningful and isn't".
 //
@@ -29,10 +29,28 @@
 // retained below ONLY as the documented alternative the variants test scores against.
 // ⚠ This is a deliberate, measured deviation from the spec's example — Peter to confirm.
 //
+// ─── THE NUMBERS ABOVE WERE ONCE UNSUPPORTED. READ THIS BEFORE CHANGING A CUT-POINT. ───
+//
+// An external audit found the fixture behind this table could not feel a wrong threshold: its
+// generative bands were DISJOINT in addRatio across the truth classes (editing topped at 0.624,
+// drafting started at 0.803, nothing between), so the 0.70 cut sat in a void and EVERY value in
+// [0.625, 0.800] scored identically. Mutating 0.70 → 0.65/0.75/0.78 left the suite green: the
+// evidence was a tautology of the data. The fixture now overlaps genuinely (drafting reaches down
+// to ~0.58, editing up to ~0.69, ~14% of sessions contested) and `phase.thresholds.test.ts` pins
+// that property AND proves each of those four mutants now FAILS.
+//
+// Re-derived on the corrected fixture, the conclusion HELD and sharpened: ratio-only keeps 100%
+// precision across 7 seeds (448 sessions, 0 wrong) and its mix lands at 47.9% against a 47.6%
+// truth — the closest of every candidate tried. The audit's own suggestion that `editAddRatio:
+// 0.65` beats 0.50 was itself an artifact of the void: on the corrected fixture it costs 35 wrong
+// calls across those seeds (90.5% precision). The thresholds did not move.
+//
 // THE `unclear` BAND IS LOAD-BEARING. Between the two cut-points the session is genuinely
 // ambiguous, and forcing a call there is exactly where precision breaks (measured: forcing every
-// session into a binary costs real misclassifications, 95.3% precision and 3 wrong). A ratio that
-// says "19% unclear" is worth more than one that says "81% drafting" by rounding away the doubt.
+// session into a binary costs real misclassifications, 93.8% precision and 4 wrong). A ratio that
+// says "22% unclear" is worth more than one that says "78% drafting" by rounding away the doubt.
+// What it declines is honest: the HARD drafting sessions that cut most of what they lay down, and
+// deep restructuring — sessions where the add/delete ratio genuinely does not carry the answer.
 
 import type { SessionRow } from './types'
 
