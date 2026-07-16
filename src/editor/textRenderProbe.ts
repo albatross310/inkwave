@@ -10,10 +10,10 @@
 // Loaded by a flag-gated dynamic import from TiptapEditor, so it costs nothing when off.
 
 import type { Editor } from '@tiptap/react'
-import type { Schema } from '@tiptap/pm/model'
 // The /snapshot seam under test — the standalone schema, imported here so the probe compares it
-// against the LIVE editor's rather than against another copy of itself.
-import { getEditorSchema, nodeFromContentJson } from './editorSchema'
+// against the LIVE editor's rather than against another copy of itself. `schemaSpec` is shared with
+// the gate-kept unit test so both compare schemas by the SAME definition of "same".
+import { getEditorSchema, nodeFromContentJson, schemaSpec } from './editorSchema'
 import { makeCanvasMeasure, type Measure } from './arithmeticLayout'
 import {
   buildRenderModel, paintPage, paintMapStrip, canonicalGeom,
@@ -1115,44 +1115,17 @@ export function installTextRenderProbe(editor: Editor): void {
       }
     },
     schemaIdentity() {
-      // Serialise a Schema to a comparable shape. NOT a hand-rolled subset of "fields we think
-      // matter" — that is how a check certifies its own blind spot. Everything PM itself uses to
-      // define a type: the attr names + their DEFAULTS, content/marks/group expressions, and the
-      // structural flags the paginator depends on (atom/inline).
-      const specOf = (s: Schema) => {
-        const nodes: Record<string, unknown> = {}
-        for (const name of Object.keys(s.nodes)) {
-          const t = s.nodes[name]
-          nodes[name] = {
-            attrs: Object.keys(t.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(t.spec.attrs?.[a]?.default ?? null)}`),
-            content: t.spec.content ?? null,
-            marks: t.spec.marks ?? null,
-            group: t.spec.group ?? null,
-            atom: t.isAtom, inline: t.isInline,
-          }
-        }
-        const marks: Record<string, unknown> = {}
-        for (const name of Object.keys(s.marks)) {
-          const m = s.marks[name]
-          marks[name] = {
-            attrs: Object.keys(m.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(m.spec.attrs?.[a]?.default ?? null)}`),
-            excludes: m.spec.excludes ?? null,
-            group: m.spec.group ?? null,
-            inclusive: m.spec.inclusive ?? null,
-          }
-        }
-        return { topNode: s.topNodeType.name, nodes, marks }
-      }
-
+      // ONE description of "same schema", shared with the gate-kept unit test — see schemaSpec's
+      // header. Two copies is how one instrument starts certifying a fiction.
       const mine = getEditorSchema()
       const live = editor.schema
-      const mineSpec = JSON.stringify(specOf(mine))
-      const liveSpec = JSON.stringify(specOf(live))
+      const mineSpec = schemaSpec(mine)
+      const liveSpec = schemaSpec(live)
 
       // Name the first divergence rather than reporting a bare false — a boolean cannot be acted on.
       const diffs: string[] = []
-      const a = specOf(mine) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
-      const b = specOf(live) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      const a = JSON.parse(mineSpec) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      const b = JSON.parse(liveSpec) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
       for (const kind of ['nodes', 'marks'] as const) {
         const keys = new Set([...Object.keys(a[kind]), ...Object.keys(b[kind])])
         for (const k of keys) {

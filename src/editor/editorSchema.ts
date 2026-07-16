@@ -51,3 +51,48 @@ export function nodeFromContentJson(json: unknown): PMNode | null {
 
 /** Tests only — drop the memo so a fresh schema is resolved. */
 export function _resetEditorSchema(): void { _schema = null }
+
+/**
+ * A Schema reduced to a comparable, schema-INSTANCE-INDEPENDENT description.
+ *
+ * WHY THIS IS HERE AND NOT COPIED INTO EACH CHECK. Two callers compare schemas — the in-browser
+ * `schemaIdentity.prove.mjs` (against the live editor) and the gate-kept `editorSchema.test.ts`
+ * (against a real Editor in jsdom). Two copies of "what makes two schemas the same" is precisely how
+ * one of them quietly starts certifying a fiction, which is the same argument that keeps ONE
+ * extension list. So there is one description, used by both.
+ *
+ * ⚠ AND WHY IT EXISTS AT ALL: `Node.eq` CANNOT be used across schemas. PM's `hasMarkup` compares
+ * `this.type == type` — REFERENCE equality on NodeType — so two Schema instances always compare
+ * unequal whatever their content. An eq-based check reported `false` for an UNTOUCHED document: a
+ * check structurally incapable of passing, which would have condemned a correct schema. Comparison
+ * across schemas must be STRUCTURAL (type names, attr names + defaults, content/marks expressions).
+ *
+ * Not a hand-picked subset of "fields we think matter" — that is how a check certifies its own blind
+ * spot. It carries everything PM uses to define a type, plus the atom/inline flags the paginator's
+ * correctness depends on.
+ */
+export function schemaSpec(s: Schema): string {
+  const nodes: Record<string, unknown> = {}
+  for (const name of Object.keys(s.nodes)) {
+    const t = s.nodes[name]
+    nodes[name] = {
+      attrs: Object.keys(t.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(t.spec.attrs?.[a]?.default ?? null)}`),
+      content: t.spec.content ?? null,
+      marks: t.spec.marks ?? null,
+      group: t.spec.group ?? null,
+      atom: t.isAtom,
+      inline: t.isInline,
+    }
+  }
+  const marks: Record<string, unknown> = {}
+  for (const name of Object.keys(s.marks)) {
+    const m = s.marks[name]
+    marks[name] = {
+      attrs: Object.keys(m.spec.attrs ?? {}).sort().map(a => `${a}=${JSON.stringify(m.spec.attrs?.[a]?.default ?? null)}`),
+      excludes: m.spec.excludes ?? null,
+      group: m.spec.group ?? null,
+      inclusive: m.spec.inclusive ?? null,
+    }
+  }
+  return JSON.stringify({ topNode: s.topNodeType.name, nodes, marks })
+}

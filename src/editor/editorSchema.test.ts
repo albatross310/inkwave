@@ -16,6 +16,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Schema } from '@tiptap/pm/model'
+import { Editor, getSchema } from '@tiptap/core'
+import TaskItem from '@tiptap/extension-task-item'
 
 // The NodeView React components are stubbed — NOT to dodge a failure, but because the reactRouter()
 // vite plugin is active under vitest and throws its Fast-Refresh preamble error on any .tsx import
@@ -30,7 +32,8 @@ vi.mock('./extensions/MathInlineView', () => ({ MathInlineView: () => null }))
 vi.mock('./extensions/MathBlockView', () => ({ MathBlockView: () => null }))
 vi.mock('./extensions/ReferenceListNodeView', () => ({ ReferenceListNodeView: () => null }))
 
-import { getEditorSchema, nodeFromContentJson, _resetEditorSchema } from './editorSchema'
+import { getEditorSchema, nodeFromContentJson, schemaSpec, _resetEditorSchema } from './editorSchema'
+import { buildEditorExtensions } from './extensions/editorExtensions'
 
 // A document shaped like the real thing: every risky node type, each with attributes set.
 //
@@ -104,6 +107,74 @@ describe('getEditorSchema', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// THE IDENTITY, KEPT BY THE GATE (2026-07-17 — the audit's headline finding).
+//
+// `schemaIdentity.prove.mjs` proves this against the LIVE editor in a real browser, and it is the
+// stronger instrument. But it is not in package.json and not in CI, and an auditor put the general
+// problem exactly: "a proof that ran once and convinced everyone is indistinguishable, six weeks
+// later, from a proof that never ran — and the gate says green either way." This codebase is superb
+// at ESTABLISHING truth and has no mechanism for KEEPING it.
+//
+// So the same claim runs on EVERY `pnpm test`, with no browser: build a REAL `Editor` from the real
+// list (jsdom, ~20ms) and compare its schema to the standalone one. This is NOT a self-consistency
+// check — it exercises the one genuine asymmetry between the two constructions: `getSchema(exts)`
+// resolves extensions itself, whereas `new Editor()` resolves them through its own ExtensionManager
+// WITH an editor bound (`getSchema`'s optional second argument). If those two ever disagree,
+// /snapshot's break tables model a document the editor does not paginate — CLAUDE.md ROUND 11's
+// "two rules, one pane" at the schema level.
+const makeDeps = () => ({
+  getDoc: () => ({ id: 'test-doc' }) as never,
+  getHintState: () => ({ focusedPos: null }) as never,
+  getScasLookup: () => ({ version: 1 }) as never,
+})
+
+const realEditorSchema = (exts: ReturnType<typeof buildEditorExtensions>) => {
+  const el = document.createElement('div')
+  document.body.appendChild(el)
+  const ed = new Editor({ element: el, extensions: exts, content: RICH })
+  const spec = schemaSpec(ed.schema)
+  ed.destroy()
+  el.remove()
+  return spec
+}
+
+describe('the standalone schema IS a real Editor\'s schema (gate-kept)', () => {
+  beforeEach(() => { _resetEditorSchema() })
+
+  it('getEditorSchema() === new Editor({ extensions: buildEditorExtensions(deps) }).schema', () => {
+    expect(schemaSpec(getEditorSchema())).toBe(realEditorSchema(buildEditorExtensions(makeDeps())))
+  })
+
+  it('KNOWN-NEGATIVE: the comparison FIRES on a drifted list, and still passes on the real one', () => {
+    // A comparison that cannot say NO is decoration. The drift must be VALID-BUT-DIFFERENT: the
+    // first cut DELETED taskItem, which merely made the schema unconstructable ('No node type
+    // taskItem found in content expression taskItem+') — an exception, not a divergence, so it
+    // proved the comparison could throw, not that it could DISCRIMINATE. This drops
+    // `.configure({ nested: true })` instead: a schema that builds fine and is subtly wrong, i.e.
+    // the failure that actually ships.
+    const drifted = buildEditorExtensions(makeDeps()).map(e => (e.name === 'taskItem' ? TaskItem : e))
+    expect(schemaSpec(getEditorSchema())).not.toBe(realEditorSchema(drifted))
+    // …and the correct list STILL matches — which is what proves the check discriminates rather
+    // than being broken (CLAUDE.md ROUND 13: the mutated sig is refused AND the correct sig hits).
+    expect(schemaSpec(getEditorSchema())).toBe(realEditorSchema(buildEditorExtensions(makeDeps())))
+  })
+
+  it('the deps do NOT change the schema — the premise the whole seam rests on', () => {
+    // /snapshot builds its schema with NO closures. If deps could reach the schema, the snapshot's
+    // model and the editor's would diverge silently. Asserted, not reasoned.
+    //
+    // NOTE both sides go through `getSchema`, and that is FORCED, not a shortcut: a real Editor
+    // CANNOT be built without deps — it throws "RedHighlightExtension: getDoc option is required"
+    // during plugin setup. That throw is the design (see editorExtensions.ts) and it is itself the
+    // proof that the two arms are not interchangeable: deps-less is safe for a SCHEMA and fatal for
+    // an EDITOR. The getSchema-vs-Editor axis is covered by the first test in this block, which
+    // crosses both variables at once.
+    expect(() => realEditorSchema(buildEditorExtensions())).toThrow(/getDoc option is required/)
+    expect(schemaSpec(getSchema(buildEditorExtensions(makeDeps())))).toBe(schemaSpec(getSchema(buildEditorExtensions())))
+  })
+})
+
 describe('nodeFromContentJson', () => {
   beforeEach(() => { _resetEditorSchema() })
 
@@ -163,6 +234,51 @@ describe('nodeFromContentJson', () => {
     expect(cite!.notAnAttribute).toBeUndefined() // and silently gone
     // ...and the junk changes NOTHING: it is eq to the clean parse.
     expect(doc!.eq(nodeFromContentJson(RICH)!)).toBe(true)
+  })
+
+  it('TaskItem.configure({ nested: true }) actually reaches the schema (audit finding F8)', () => {
+    // WHY THIS IS ITS OWN TEST. The RICH fixture's taskItem holds only a paragraph — which is valid
+    // under BOTH `nested: true` ('paragraph block*') and plain TaskItem ('paragraph+'). So dropping
+    // `.configure({ nested: true })` from the list left every assertion in this file GREEN: a real
+    // drift the suite could not see, while its own header warned about exactly this. Same shape as a
+    // fixture of 14 identical entries letting a constant score 14/14.
+    //
+    // Two independent discriminators, because the obvious one does NOT work: `Node.fromJSON` calls
+    // `type.create`, which does NOT validate content — so a nested taskItem PARSES FINE under the
+    // wrong schema and a round-trip assertion is blind to this. It takes `check()` (PM's explicit
+    // content validation) or the content expression itself.
+    const s = getEditorSchema()
+
+    // (1) The content expression — the drift, named.
+    expect(s.nodes.taskItem.spec.content).toBe('paragraph block*')
+
+    // (2) A NESTED taskItem — a taskList inside a taskItem — must be VALID content. Under plain
+    // TaskItem ('paragraph+') this is invalid and check() throws.
+    const nested = {
+      type: 'doc',
+      content: [{
+        type: 'taskList',
+        content: [{
+          type: 'taskItem', attrs: { checked: false },
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'outer' }] },
+            { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'inner' }] }] }] },
+          ],
+        }],
+      }],
+    }
+    const doc = nodeFromContentJson(nested)
+    expect(doc).not.toBeNull()
+    expect(() => doc!.check()).not.toThrow()
+
+    // KNOWN-NEGATIVE: check() must be capable of throwing, or "not.toThrow" is decoration. A
+    // taskItem whose FIRST child is not a paragraph is invalid under both variants.
+    const bad = nodeFromContentJson({
+      type: 'doc',
+      content: [{ type: 'taskList', content: [{ type: 'taskItem', content: [{ type: 'taskList', content: [{ type: 'taskItem', content: [{ type: 'paragraph' }] }] }] }] }],
+    })
+    expect(bad).not.toBeNull()          // it PARSES — proving fromJSON does not validate…
+    expect(() => bad!.check()).toThrow() // …and that check() is what actually sees it.
   })
 
   it('the citation is an inline ATOM — one node, no children (the pagination contract)', () => {

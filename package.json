@@ -10,7 +10,11 @@
     "typecheck": "react-router typegen && tsc -b",
     "preview": "vite preview --outDir build/client",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "prove:schema": "node scripts/textrender-probe/schemaIdentity.prove.mjs",
+    "prove:mount": "node scripts/textrender-probe/mountcount.prove.mjs",
+    "prove:breaks": "node scripts/textrender-probe/breaks.prove.mjs",
+    "prove:editor": "pnpm prove:schema && pnpm prove:mount && pnpm prove:breaks"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.13.0",

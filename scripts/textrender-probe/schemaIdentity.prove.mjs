@@ -17,12 +17,13 @@
 // script VOIDS if the census is empty, so a green result on an empty document cannot be read as a
 // pass. (CLAUDE.md: a metric that collects nothing must VOID, never read as zero.)
 //
-// Usage: node scripts/scrub-probe/server.mjs "$(pwd)/build/client" <port> &
-//        PROBE_PORT=<port> node scripts/textrender-probe/schemaIdentity.prove.mjs
+// Usage: pnpm build && pnpm prove:schema      (boots its own server on an ephemeral port)
+//    or: PROBE_PORT=<port> node scripts/textrender-probe/schemaIdentity.prove.mjs   (reuse a server)
 
 import { chromium } from '@playwright/test'
+import { startProbeServer } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4231}`
+const { base: BASE, stop } = await startProbeServer()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
 const page = await b.newPage({ deviceScaleFactor: 2, viewport: { width: 1600, height: 1400 } })
 page.on('pageerror', e => console.log('PAGEERROR:', e.message))
@@ -40,10 +41,10 @@ const surface = await page.evaluate(() => {
   const p = window.__iwTextRenderProbe
   return { present: !!p, hasSchemaIdentity: !!(p && typeof p.schemaIdentity === 'function') }
 })
-if (!surface.present) { console.log('VOID: no __iwTextRenderProbe — wrong build or flag off'); await b.close(); process.exit(2) }
+if (!surface.present) { console.log('VOID: no __iwTextRenderProbe — wrong build or flag off'); await b.close(); await stop(); process.exit(2) }
 if (!surface.hasSchemaIdentity) {
   console.log('VOID: probe surface has no schemaIdentity() — THE SERVED BUNDLE IS NOT YOURS (stale build?). Rebuild.')
-  await b.close(); process.exit(2)
+  await b.close(); await stop(); process.exit(2)
 }
 console.log('served bundle carries schemaIdentity(): OK')
 
@@ -85,7 +86,7 @@ const exercised = r.census.citation > 0 && r.census.mathInline > 0 && r.census.m
 if (!exercised) {
   console.log('VOID: the fixture did not reach the editor with citations/math/refList/marks.')
   console.log('A schema comparison over bare paragraphs proves nothing. Not reporting a verdict.')
-  await b.close(); process.exit(2)
+  await b.close(); await stop(); process.exit(2)
 }
 
 console.log('\n── verdict ──')
@@ -93,7 +94,9 @@ console.log('nodes:', r.nodeCount, ' marks:', r.markCount)
 console.log('SPEC IDENTICAL (standalone vs live editor.schema):', r.identical)
 if (!r.identical) { console.log('divergences:'); for (const d of r.diffs.slice(0, 20)) console.log('  ', d) }
 console.log('live doc re-parsed by standalone schema :', r.reparsed)
-console.log('re-parsed doc EQ live doc (PM equality)  :', r.docEq)
+// STRUCTURAL equality, deliberately NOT PM's `Node.eq`: PM compares NodeType by REFERENCE, so eq
+// is false across two Schema instances no matter what — it reported false for the UNTOUCHED doc.
+console.log('re-parsed doc == live doc (structural)   :', r.docEq)
 
 // ── THE KNOWN-NEGATIVE: prove this comparison CAN fail ───────────────────────────────────────────
 // Everything above passing is worthless unless the instrument can say NO. `docEqOf` is the SAME
@@ -119,7 +122,7 @@ console.log('\n── known-negative (same path, opposite answers) ──')
 if (!neg.mutationApplied) {
   console.log('VOID: no citation found to mutate — the negative could not be constructed,')
   console.log('so it cannot have fired. Refusing to report a pass. (A negative that cannot fail is not a negative.)')
-  await b.close(); process.exit(2)
+  await b.close(); await stop(); process.exit(2)
 }
 console.log('clean doc   → docEqOf =', neg.cleanEq,   '(must be true — the positive still holds)')
 console.log('mutated cite→ docEqOf =', neg.mutatedEq, '(must be FALSE — the negative fires)')
@@ -130,4 +133,5 @@ console.log('NEGATIVE DISCRIMINATES:', negOk)
 const pass = r.identical && r.reparsed && r.docEq && r.diffs.length === 0 && negOk
 console.log('\nRESULT:', pass ? 'PASS — standalone schema IS the editor\'s schema' : 'FAIL')
 await b.close()
+await stop()
 process.exit(pass ? 0 : 1)

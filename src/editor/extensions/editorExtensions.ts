@@ -18,8 +18,15 @@
 // WHY DEPS ARE OPTIONAL. The three closures (`getDoc`/`getHintState`/`getScasLookup`) are consumed
 // ONLY by RedHighlightExtension's `addProseMirrorPlugins`. RedHighlight is an `Extension.create`
 // with no nodes, no marks and no `addGlobalAttributes`, so it contributes NOTHING to the schema and
-// `getSchema` never installs plugins. A schema-only build therefore needs no closures — and
-// RedHighlight's own `addOptions` already supplies safe defaults for all three.
+// `getSchema` never installs plugins. A schema-only build therefore needs no closures.
+//
+// ⚠ AND THE REASON IS NOT "the defaults are harmless" — `getDoc`'s default THROWS by design. A
+// deps-less list is safe for ONE reason only: `getSchema` resolves nodes/marks and NEVER calls
+// `addProseMirrorPlugins`, so the defaults are never invoked. That distinction is load-bearing:
+// omitting deps is safe for the SCHEMA and unsafe for an EDITOR. Anything that ever builds a real
+// Editor from this list MUST pass deps — `editorExtensions.test.ts` asserts the editor half does,
+// and RedHighlight's throwing default is what makes a silent omission loud rather than subtly
+// wrong. Do not "tidy" that default into something forgiving.
 //
 // EDITOR CONSTRUCTION IS UNCHANGED. The list below is the former inline literal verbatim: same
 // entries, same order, same `.configure()` arguments. TiptapEditor called this array literal fresh
