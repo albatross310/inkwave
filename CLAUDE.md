@@ -1591,11 +1591,40 @@ as the water slows.
   wave layer AND the twinkle host at display:none for the session, and the video — which lives
   inside that host — painted nothing while `play()` resolved happily. On PHONE the reset is
   `.inkwave-editor-surface:not(.is-phone)`, so the aqua GRADIENT still painted: a flat aqua screen,
-  no waves, no document. Fix = a `hydrated()` barrier on `inkwave:twinkles-ready` (the app's only
-  timeout-free post-hydration signal — NOT `.iw-water-ready`, whose 1500ms timeout can open it
-  pre-hydration on a slow phone). The 150ms re-attach interval is GONE: it existed only to heal the
-  wipe, and post-hydration React never touches the host's children (waveTwinkle removes only its
-  own `.iw-twk-set` nodes). Probe: `scripts/wave-video/reveal.prove.mjs` (+ `--expect-broken`).
+  no waves, no document. CONFIRMED FIXED ON PETER'S iPHONE 8 (2026-07-17: `water-gate OPEN`). Fix =
+  a `hydrated()` barrier — every DOM write waits behind it. The 150ms re-attach interval is GONE:
+  it existed only to heal the wipe, and post-hydration React never touches the host's children
+  (waveTwinkle removes only its own `.iw-twk-set` nodes). Probes:
+  `scripts/wave-video/reveal.prove.mjs` + `barrier.prove.mjs` (both `--expect-broken`).
+- **ONE-SHOT ASYNC SIGNALS — THE BUG CLASS, and it hit TWO lanes in the same minute (2026-07-17).**
+  A signal you wait on can fail two ways: **(a) it never fires**, or **(b) it already fired before
+  you subscribed**. A bare `addEventListener` loses to both, silently and forever — no error, no
+  timeout, just a promise that never settles. THE RULE: only ever wait on a signal that ALWAYS
+  arrives, and make it ASKABLE — check the state first, subscribe only if the answer is no, both in
+  ONE synchronous block so nothing can slip between them. Do NOT paper over it with a timeout; that
+  re-creates the self-healing machinery this lane deleted. Instances:
+  - The wave video's barrier first keyed on `inkwave:twinkles-ready` — post-hydration, but the pool
+    announces only if BOTH its sets generate, while the water gate opens anyway on its own 1500ms
+    timeout. A load whose pool never announced hung the video FOREVER with the gate wide open
+    (PROBED). Now `inkwave:hydrated` + `__iwHydrated` (entry.client's `HydrationBeacon`, a null
+    component whose post-commit effect always fires). `__iwWaterReady` was added for the same reason
+    — the class `.iw-water-ready` is not a safe proxy for "it happened", since a recovery strips it.
+  - The break-table lane, same minute, same shape: a signature built before `bibProvider` had
+    hydrated, keyed on `capa@0` instead of `capa@20`, missing forever after.
+  Correctness of a feature must not depend on ANOTHER feature succeeding (the video did not need the
+  twinkles; it was merely borrowing their timing).
+- **A `reason`/status field that only some code paths write is a field that LIES.** waveVideo's
+  `reason` was set once before the barrier and then not again until `play()` resolved, so a video
+  stuck in its DECODE still displayed 'waiting for hydration…'. That stale line sent the next reader
+  (and Peter's coordinator) hunting a barrier bug that had already released — the same overlay's
+  `clip` and `fetch` fields, both written INSIDE `run()`, proved it was well past. Discriminate a
+  hang from a stall by asking which fields are POPULATED, not by reading the status string. `reason`
+  now tracks every stage of `run()`.
+- **`advancing` reported "YES (real decode)" for a video holding NO DATA.** `let last = -1` meant the
+  first tick satisfied `now > last + 0.001` for a `currentTime` of 0 — so Peter's overlay showed
+  `readyState 0 (NOT decoded)` beside `advancing YES (real decode)`, a physically impossible pair
+  that cost real time to see through. It now requires `readyState >= 2` AND a genuine delta against
+  a previous sample. Sentinel values must not be able to masquerade as measurements.
 - **entry.client's stamp-guard WAS A FICTION until 2026-07-17** — and it failed the one case it was
   written for. It captured `const root = document.documentElement` and observed THAT node, so after
   a recovery it re-stamped a DETACHED element forever while the live `<html>` stayed bare. Never

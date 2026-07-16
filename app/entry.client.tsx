@@ -44,6 +44,26 @@ applyTheme()
 // Wrap the app in Clerk ONLY when configured (paid-tier auth, M6). Dynamic import keeps Clerk out
 // of the bundle entirely when unconfigured, and entry.client is client-only so it never touches
 // the prerender/SSR build. The publishable key is public (safe in the client).
+// ─── The hydration beacon ─────────────────────────────────────────────────────────────────────
+// The one fact anything imperative must know before it may touch the DOM: REACT HAS COMMITTED.
+// `hydrateRoot` offers no completion callback, so render a null component and let its effect say
+// so. It renders NO host node, so it cannot itself perturb the hydration it reports on.
+//
+// STATE **AND** EVENT, deliberately (2026-07-17, the second round of Peter's iPhone bug). The
+// video's barrier first keyed on `inkwave:twinkles-ready`, which was post-hydration but is NOT
+// guaranteed to arrive: the twinkle pool announces only once BOTH its sets generate, while the
+// water gate opens anyway on its own 1500ms timeout — so a load where the pool never announced
+// left the barrier waiting for a signal that was never coming, forever (PROBED). A signal you
+// wait on must be one that ALWAYS fires, and it must be ASKABLE ("has it already happened?") so a
+// late subscriber can never wait for a past event. React always commits, so this always fires.
+function HydrationBeacon(): null {
+  useEffect(() => {
+    ;(window as unknown as { __iwHydrated?: boolean }).__iwHydrated = true
+    window.dispatchEvent(new Event('inkwave:hydrated'))
+  }, [])
+  return null
+}
+
 async function bootstrap() {
   const pk = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
   // Only mount Clerk when auth is explicitly requested (?auth) — NOT on every free-tier load, where
@@ -75,7 +95,10 @@ async function bootstrap() {
     tree = <ClerkProvider publishableKey={pk}><AutoSignIn />{tree}</ClerkProvider>
   }
   startTransition(() => {
-    hydrateRoot(document, <StrictMode>{tree}</StrictMode>)
+    // The beacon renders LAST so its effect runs after the app's own mount effects: when it fires,
+    // the commit is done and every host node (including the `.iw-wave-twinkles` the video needs)
+    // is in the DOM and owned by React.
+    hydrateRoot(document, <StrictMode>{tree}<HydrationBeacon /></StrictMode>)
   })
 }
 void bootstrap()
@@ -106,6 +129,10 @@ void bootstrap()
     if (stamped) return
     stamped = true
     document.documentElement.classList.add('iw-water-ready')
+    // ASKABLE, like __iwTwinklesReady: `inkwave:water-ready` is one-shot, and the class is not a
+    // safe proxy for "it happened" (a hydration recovery can strip it). A late subscriber must be
+    // able to ASK rather than wait forever for a past event.
+    ;(window as unknown as { __iwWaterReady?: boolean }).__iwWaterReady = true
     window.dispatchEvent(new Event('inkwave:water-ready'))
   }
   // GUARD (2026-07-10, the iOS "gradient without waves"): if hydration ever fails, React 18's

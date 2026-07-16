@@ -87,10 +87,20 @@ let started = false
 // `__iwTwinklesReady` covers the fired-before-we-listened race, as it does for the gate itself.
 // If the twinkles never announce, this never resolves and the video simply never runs — the CSS
 // water is the intended fallback at every step, and entry.client only ever `void`s us.
+// ASK, THEN SUBSCRIBE — and only ever wait on a signal that ALWAYS arrives. `inkwave:hydrated`
+// (entry.client's beacon) fires from a post-commit effect on every load, and `__iwHydrated` makes
+// it askable, so a caller that arrives late can never wait for an event already in the past. The
+// check and the subscribe are one synchronous block — nothing can slip between them.
+//
+// This first keyed on `inkwave:twinkles-ready`. That was post-hydration, but it is NOT guaranteed:
+// the pool announces only if BOTH its sets generate, while the water gate opens regardless on its
+// own 1500ms timeout — so a load whose pool never announced hung the video FOREVER with the water
+// gate wide open (PROBED 2026-07-17: reason stuck at 'waiting for hydration…', clip/fetch never
+// even set). Correctness of the video must not depend on the twinkles succeeding.
 function hydrated(): Promise<void> {
-  const w = window as unknown as { __iwTwinklesReady?: boolean }
-  if (w.__iwTwinklesReady) return Promise.resolve()
-  return new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
+  const w = window as unknown as { __iwHydrated?: boolean }
+  if (w.__iwHydrated) return Promise.resolve()
+  return new Promise<void>((res) => window.addEventListener('inkwave:hydrated', () => res(), { once: true }))
 }
 
 // Called from entry.client's gate (flag-gated). Resolves when the loop's first frame is decoded
@@ -100,6 +110,14 @@ export function prepareWaveVideo(): Promise<void> {
   if (started) return Promise.resolve()
   started = true
   diag.flag = flagValue()
+  // Choose the clip and START THE DOWNLOAD before the barrier. Picking a codec and fetching bytes
+  // touch NO DOM, so they are safe pre-hydration — and this is the whole reason the clip used to
+  // arrive in time. The first cut of the barrier moved the fetch behind hydration too, which on
+  // Peter's A11 pushed the download ~2s later and cost the video its 2.5s decode budget (his
+  // 8:15am overlay: `readyState 0`, `fetch requested`). Only the ATTACH has to wait.
+  const clip = planClip()
+  if (!clip) return Promise.resolve()
+  warmBytes(clip.loopUrl) // fire-and-forget: SW-cached, so the <video>'s Range probes hit memory
   diag.reason = 'waiting for hydration…'
   return new Promise<void>((resolve) => {
     void hydrated()
@@ -107,25 +125,42 @@ export function prepareWaveVideo(): Promise<void> {
         // The overlay appends to <body> — a DOM write, so it waits behind the barrier too. It was
         // the second offender: with `=debug` it broke hydration all by itself.
         if (diag.flag === 'debug') mountOverlay()
-        return run()
+        return run(clip)
       })
       .then(() => resolve())
       .catch((e) => { bail(`crashed: ${String(e).slice(0, 60)}`); resolve() })
   })
 }
-export function initWaveVideo(): void { void prepareWaveVideo() }
 
-async function run(): Promise<void> {
+type Clip = { loopUrl: string; brakeUrl: string }
+
+// DOM-FREE. Everything here is a capability query or a string.
+function planClip(): Clip | null {
   const codec = pickCodec()
   diag.codec = codec ?? 'NONE'
-  if (!codec) { bail('no decodable codec (no av01, no avc1) → CSS water'); return }
+  if (!codec) { bail('no decodable codec (no av01, no avc1) → CSS water'); return null }
   const rung = pickRung()
   const theme = document.documentElement.dataset.theme === 'night' ? 'night' : 'day'
   diag.rung = rung.name; diag.theme = theme
   const base = `/wave/${rung.name}.${theme}.${codec}`
-  const loopUrl = `${base}.mp4`
-  const brakeUrl = `${base}.brake.mp4`
-  diag.clip = loopUrl
+  diag.clip = `${base}.mp4`
+  return { loopUrl: `${base}.mp4`, brakeUrl: `${base}.brake.mp4` }
+}
+
+// The warm fetch the SW's /wave/ handler was written to receive ("non-Range GET (our warm fetch…)"):
+// ONE full 200 that populates the cache, so the <video>'s later Range probes are served from the
+// cached buffer with no network. Fire-and-forget on purpose — nothing may AWAIT this, or a stalled
+// network would become a stalled load. If it loses to the <video>, the SW just fetches once more.
+function warmBytes(url: string): void {
+  diag.fetch = 'warming bytes (pre-hydration)…'
+  void fetch(url)
+    .then((r) => { diag.fetch = r.ok ? `warm ${r.status} → cached` : `warm FAILED ${r.status}` })
+    .catch((e) => { diag.fetch = `warm FAILED (${String(e).slice(0, 30)})` })
+}
+export function initWaveVideo(): void { void prepareWaveVideo() }
+
+async function run(clip: Clip): Promise<void> {
+  const { loopUrl, brakeUrl } = clip
 
   // DIRECT same-origin src, NOT a blob (2026-07-16 — THE iPhone-8 fix). iOS decodes a <video> only
   // when it can Range-request the moov atom; a blob URL cannot be ranged → readyState stuck at 0
@@ -147,7 +182,12 @@ async function run(): Promise<void> {
     '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
   )
   if (!host) { bail('no water host on this page → CSS water'); return }
-  diag.fetch = 'requested (direct URL via SW)'
+  // `reason` MUST TRACK WHERE THIS FUNCTION ACTUALLY IS (2026-07-17). It used to be written once
+  // before the barrier and then never again until play() resolved, so a video stuck in its decode
+  // still displayed 'waiting for hydration…' — and that stale line sent the next reader hunting a
+  // barrier bug that had already released (clip/fetch on the same overlay proved run() was well
+  // past it). A field nobody updates is a field that lies.
+  diag.reason = 'hydrated — attaching + decoding…'
   host.appendChild(video)
   video.load()
 
@@ -158,17 +198,22 @@ async function run(): Promise<void> {
   await Promise.race([playable, new Promise<void>((r) => setTimeout(r, 2500))]) // iOS metadata is slower
   diag.ready = video.readyState
   if (video.readyState < 2) { teardown(video); bail(`decode timeout (readyState ${video.readyState} after 2.5s) → CSS water`); return }
-  diag.fetch = '200 / decoded'
 
   // Don't become master before the atomic water has painted, and never veil a load that already
   // reached its coast/rest (a slow decode on a fast open) — that would show drift over settled text.
+  // ASKABLE, not just an event: the class is not a safe thing to test alone (a hydration recovery
+  // can strip it — that WAS this bug), and the event may have fired while we were decoding. Same
+  // rule as `hydrated()`: ask first, subscribe only if the answer is no.
+  diag.reason = 'decoded — waiting for the water gate…'
   await new Promise<void>((res) => {
-    if (document.documentElement.classList.contains('iw-water-ready')) res()
+    const w = window as unknown as { __iwWaterReady?: boolean }
+    if (w.__iwWaterReady || document.documentElement.classList.contains('iw-water-ready')) res()
     else window.addEventListener('inkwave:water-ready', () => res(), { once: true })
   })
   if (!document.querySelector('.inkwave-editor-surface.iw-fill.iw-wave-anim')) {
     teardown(video); bail('load already past drift → CSS water'); return
   }
+  diag.reason = 'starting playback…'
 
   video.play().then(() => {
     video.style.opacity = '1' // THE loop was invisible: CSS defaults .iw-wave-video-el to opacity 0
@@ -336,12 +381,17 @@ reason    ${diag.reason}`
   }
   keepAttached()
   // currentTime advancing = a REAL decode (not a frozen first frame — the iOS silent-failure tell).
+  // `last` seeded at -1 meant the FIRST tick of any video satisfied `now > last + 0.001` and
+  // reported "YES (real decode)" for a video holding NO DATA — Peter's 8:15am overlay showed
+  // `readyState 0 (NOT decoded)` next to `advancing YES (real decode)`, a physically impossible
+  // pair that cost real time to see through. Require decoded data AND a genuine delta against a
+  // previous sample; `last = -1` now means "no sample yet", which can never look like motion.
   let last = -1
   setInterval(() => {
     keepAttached()
     const v = document.querySelector<HTMLVideoElement>('video.iw-wave-video-el')
     const now = v ? v.currentTime : -1
-    diag.advancing = v ? now > last + 0.001 : false
+    diag.advancing = !!v && v.readyState >= 2 && last >= 0 && now > last + 0.001
     last = now
     paint()
   }, 400)
