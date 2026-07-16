@@ -99,14 +99,19 @@ export interface RenderModel {
   coverage: Record<string, number> // reason → block count (the honest coverage map)
   breaks: Array<{ at: number; botMargin: number }> // the splitter's own output (for prover comparison)
   sig: string             // the page-break signature — comparable byte-for-byte with the live path
-  // FALSE ⇔ at least one block's height was ESTIMATED, so every break below it is unreliable.
-  // This is not a cosmetic flag. A placeholder with a guessed height does not merely look wrong —
-  // it MOVES EVERY PAGE BREAK AFTER IT, silently, and the pages then carry the wrong words while
-  // the renderer reports success. Measured 2026-07-16: with headings/lists/refList estimated, breaks
-  // diverged from the live editor on the very first break (2075 vs 2344) on a citation-heavy doc,
-  // while a prose-only doc was byte-identical. A caller MUST NOT present pages from an unreliable
-  // model as if they were the editor's pages.
-  breaksReliable: boolean
+  // ── RELIABILITY IS POSITIONAL, NOT A DOCUMENT-WIDE BOOLEAN (2026-07-17) ────────────────────
+  // A placeholder with a guessed height does not merely look wrong — it MOVES EVERY PAGE BREAK
+  // AFTER IT, silently, and the pages then carry the wrong words while the renderer reports
+  // success. But it only moves the breaks BELOW it: everything above is unaffected.
+  // A whole-model boolean therefore reported EVERY thesis unreliable (they all have a
+  // bibliography, which is force-broken onto its own page at the very END) and said nothing about
+  // WHERE — throwing away ~57 of 58 perfectly exact pages. So:
+  //   pages [0, reliablePages) are trustworthy; from reliablePages on, they are not.
+  // This is the general contract for "we estimated something here" — any future estimated block
+  // inherits it, not just the refList.
+  breaksReliable: boolean        // convenience: reliablePages === pages (nothing estimated at all)
+  reliablePages: number          // count of leading pages whose breaks are trustworthy
+  firstEstimatedPos: number | null // doc position of the first estimated block (null ⇒ none)
   estimatedBlocks: number
 }
 
@@ -491,10 +496,12 @@ export function buildRenderModel(
   // there is nothing to paginate. paintPage(model, 0) draws it unchanged.
   if (windowMode) {
     const est = blocks.filter((b) => b.estimated).length
+    const firstEst = blocks.find((b) => b.estimated)
     return {
       lines, blocks, pageOfLine: new Array(lines.length).fill(0), pageTop: [lines[0]?.top ?? 0],
       pages: 1, contentHeight: top, coverage, breaks: [], sig: '',
-      breaksReliable: est === 0, estimatedBlocks: est,
+      breaksReliable: est === 0, reliablePages: est === 0 ? 1 : 0,
+      firstEstimatedPos: firstEst ? firstEst.start : null, estimatedBlocks: est,
     }
   }
 
@@ -540,10 +547,20 @@ export function buildRenderModel(
   }
 
   const estimatedBlocks = blocks.filter((b) => b.estimated).length
+  const firstEst = blocks.find((b) => b.estimated)
+  const totalPages = Math.max(res.pages, page + 1)
+  // The first page carrying (or following) an estimated block is where trust stops. Everything
+  // above it was laid out from measured geometry and is exact.
+  let reliablePages = totalPages
+  if (firstEst) {
+    const li = lines.findIndex((l) => blocks[l.blockIdx] === firstEst)
+    reliablePages = li >= 0 ? pageOfLine[li] : 0
+  }
   return {
-    lines, blocks, pageOfLine, pageTop, pages: Math.max(res.pages, page + 1),
+    lines, blocks, pageOfLine, pageTop, pages: totalPages,
     contentHeight: top, coverage, breaks: res.breaks, sig: res.sig,
-    breaksReliable: estimatedBlocks === 0, estimatedBlocks,
+    breaksReliable: estimatedBlocks === 0, reliablePages,
+    firstEstimatedPos: firstEst ? firstEst.start : null, estimatedBlocks,
   }
 }
 
@@ -876,6 +893,11 @@ function xOfChar(line: RenderLine, charIdx: number, measure: Measure): number {
   }
   const last = line.segs[line.segs.length - 1]
   return last ? last.x + last.w : 0
+}
+
+/** Is this page's break position trustworthy? Positional — see RenderModel.reliablePages. */
+export function pageReliable(model: RenderModel, pageIdx: number): boolean {
+  return pageIdx < model.reliablePages
 }
 
 /** Canonical geometry for the desktop/canonical context (the one canonical breaks are defined in). */

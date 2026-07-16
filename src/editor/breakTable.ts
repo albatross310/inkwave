@@ -29,7 +29,12 @@ export interface BreakTable {
   sig: string       // canonical-context signature — a mismatch MUST rebuild, never reuse
   pages: number
   starts: number[]  // doc position each page begins at (starts[0] is the doc start)
-  reliable: boolean // false ⇒ some block's height was estimated ⇒ breaks below it are not trustworthy
+  reliable: boolean // convenience: nothing was estimated anywhere
+  // POSITIONAL RELIABILITY: pages [0, reliablePages) are trustworthy. A bibliography is force-broken
+  // onto its own page at the END, so a whole-table boolean threw away ~57 of 58 exact pages and told
+  // us nothing about WHERE. The table carries the boundary so a caller can render the exact pages and
+  // fall back to the bitmap ONLY from there on.
+  reliablePages: number
 }
 
 /**
@@ -71,7 +76,15 @@ export function buildBreakTable(
     const p = model.pageOfLine[i]
     if (starts.length === p) starts.push(model.lines[i].pos)
   }
-  return { v: 1, sig, pages: Math.max(1, starts.length), starts, reliable: model.breaksReliable }
+  return {
+    v: 1, sig, pages: Math.max(1, starts.length), starts,
+    reliable: model.breaksReliable, reliablePages: model.reliablePages,
+  }
+}
+
+/** Is page N's break trustworthy? Positional — pages below the first estimated block are exact. */
+export function tablePageReliable(t: BreakTable, pageIdx: number): boolean {
+  return pageIdx < t.reliablePages
 }
 
 /** The doc position page N begins at — the seam the window renderer opens from. */

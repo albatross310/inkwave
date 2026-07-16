@@ -209,7 +209,7 @@ export function installTextRenderProbe(editor: Editor): void {
     // actually text.
     paintFloor(opts = {}) {
       const g = liveGeom()
-      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '', breaksReliable: true, estimatedBlocks: 0 }
+      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '', breaksReliable: true, reliablePages: 1, firstEstimatedPos: null, estimatedBlocks: 0 }
       const canvas = (opts as { fresh?: boolean }).fresh ? document.createElement('canvas') : scratch()
       const t0 = performance.now()
       paintPage(empty, 0, canvas, g, { dpr: window.devicePixelRatio, measure, ...opts })
@@ -314,6 +314,9 @@ export function installTextRenderProbe(editor: Editor): void {
         key: buildOpts(),
         pages: model.pages,
         breaksReliable: model.breaksReliable,
+        reliablePages: model.reliablePages,
+        firstEstimatedPos: model.firstEstimatedPos,
+        firstEstimatedType: model.blocks.find((b) => b.estimated)?.type ?? null,
         estimatedBlocks: model.estimatedBlocks,
       }
     },
