@@ -8,7 +8,7 @@ import { VerifyModal } from '../components/VerifyModal'
 import type { InkwaveDocument } from '../types/document'
 import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
-import { opsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
+import { opsBetween, peekOpsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
 import { survivingNeighbourSig } from '../provenance/anchorMap'
 import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
 import { pageBoxPx } from '../editor/pageModel'
@@ -2978,6 +2978,16 @@ export function SnapshotView() {
       window.clearTimeout(unfreezeTimerRef.current)
       unfreezeTimerRef.current = window.setTimeout(() => setFrozenSnapId(null), 180)
       presenter.show(s.id)
+      // This path FLIPS THE BITMAP TOO, so it owes the badges the same update the rAF driver gives
+      // them — otherwise the header keeps the old version's number while a new version is on
+      // screen. That is the exact lie this whole change removes, and it was measurable: a burst's
+      // first notch is not yet `rapid` (lastNavInputAt is 0 on a fresh page), so it lands HERE, and
+      // the probe saw 14 versions presented against 13 badge paints — one stale frame at the start
+      // of every gesture. Same cache-only read; an uncached pair still blanks rather than lying.
+      if ((window as unknown as { __iwBadgeLive?: boolean }).__iwBadgeLive !== false) {
+        const si = allRef.current.findIndex((x) => x.id === s.id) // not the 60fps path — once per notch
+        if (si >= 0) paintHeaderDiffRef.current(deltaForIndexRef.current(si), si)
+      }
     }
     presenter.noteInput()
     lastNavInputAtRef.current = now
@@ -3036,6 +3046,70 @@ export function SnapshotView() {
   }, [allSnapshots, groups])
   const counterStringsRef = useRef(counterStrings); counterStringsRef.current = counterStrings
   const counterElRef = useRef<HTMLDivElement>(null)
+
+  // ── Header words-diff badges (+N / −N) — live per step, like the counter ──────────────────────
+  // These used to be pinned to the HEAVY (frozen) pair, on the stated reasoning that an LCS per
+  // intermediate would jank the gesture "for a number nobody reads mid-fling". Peter reads it
+  // mid-fling: the premise was wrong, not the implementation. The counter already shows the shape
+  // — precomputed per index, written imperatively by the driver, no React commit per step — which
+  // is exactly why the version number keeps up while these crawled.
+  //
+  // NEVER an LCS on the input path (that concern was legitimate): peekOpsBetween is cache-only.
+  // `preloadDiffWindow` keeps ±20 resident, so a scrub is reading numbers already paid for.
+  // Memoised per PAIR (not per index — indices shift when a snapshot arrives; ids don't).
+  const hdWrapRef = useRef<HTMLSpanElement>(null)
+  const hdAddedRef = useRef<HTMLSpanElement>(null)
+  const hdRemovedRef = useRef<HTMLSpanElement>(null)
+  const hdNoChangeRef = useRef<HTMLSpanElement>(null)
+  const hdMemoRef = useRef(new Map<string, { added: number; removed: number }>())
+  /** The delta for snapshot index `i` vs its predecessor. null = UNKNOWN (uncached / no previous)
+   *  — the caller must show that honestly, never the last good number. */
+  const deltaForIndex = useCallback((i: number): { added: number; removed: number } | null => {
+    const all = allRef.current
+    if (i <= 0 || !all[i] || !all[i - 1]) return null
+    const key = `${all[i - 1].id}→${all[i].id}`
+    const hit = hdMemoRef.current.get(key)
+    if (hit) return hit
+    const ops = peekOpsBetween(all[i - 1], all[i]) // CACHE-ONLY — no LCS on the input path
+    if (!ops) return null
+    const d = diffStats(ops)
+    hdMemoRef.current.set(key, d)
+    return d
+  }, [])
+  /** The ONLY writer of the badges' content. React owns the structure; this owns the text, so a
+   *  driver write can never be silently reverted-or-not by the vdom (it holds no value to diff). */
+  const paintHeaderDiff = useCallback((d: { added: number; removed: number } | null, traceIdx = -1) => {
+    const wrap = hdWrapRef.current, nc = hdNoChangeRef.current
+    if (!wrap) return
+    // The trace carries the INDEX it painted for: pairing paints to presents BY ORDER assumes a
+    // 1:1 this code does not guarantee (it isn't — a show() can land without a paint), and that
+    // assumption alone invented an off-by-one and 8 phantom "stale" steps.
+    const trace = (window as unknown as { __iwBadgeTrace?: Array<{ idx: number; state: string; added: number; removed: number }> }).__iwBadgeTrace
+    if (!d) {
+      // UNKNOWN. A stale number that looks live is the same lie as a wrong-sized bitmap under a
+      // right-looking key — this pane's whole complaint is "it shows me something that isn't where
+      // I am". So: blank, but keep the BOX (visibility, not display) so the header cannot reflow
+      // mid-fling. Nothing is claimed rather than something false.
+      wrap.style.display = ''
+      wrap.style.visibility = 'hidden'
+      if (nc) nc.style.display = 'none'
+      if (trace) trace.push({ idx: traceIdx, state: 'blank', added: -1, removed: -1 }) // traced too — a trace that
+      // only records SUCCESSES silently drops the failure class it exists to expose (and it did:
+      // one unrecorded blank shifted the pairing and invented 8 "stale" steps).
+      return
+    }
+    const zero = d.added === 0 && d.removed === 0
+    wrap.style.display = zero ? 'none' : ''
+    wrap.style.visibility = 'visible'
+    if (!zero) {
+      if (hdAddedRef.current) hdAddedRef.current.textContent = `+${d.added}`
+      if (hdRemovedRef.current) hdRemovedRef.current.textContent = `−${d.removed}`
+    }
+    if (nc) nc.style.display = zero ? '' : 'none' // the zero branch flips too — never sticks
+    if (trace) trace.push({ idx: traceIdx, state: zero ? 'nochange' : 'shown', added: d.added, removed: d.removed })
+  }, [])
+  const paintHeaderDiffRef = useRef(paintHeaderDiff); paintHeaderDiffRef.current = paintHeaderDiff
+  const deltaForIndexRef = useRef(deltaForIndex); deltaForIndexRef.current = deltaForIndex
   // Scrub by a NET number of snapshots at once (positive = forward). rAF-COALESCED (2026-07-11):
   // a fast drag streams several touchmoves per frame and each used to navigate — now the steps
   // accumulate and ONE navigation per frame moves by the net. virtualIdx tracks the last COMMANDED
@@ -3126,6 +3200,11 @@ export function SnapshotView() {
         presenter.show(all[pres].id) // resident bitmap flip — no React re-render per step
         const cs = counterStringsRef.current[pres]
         if (cs && counterElRef.current) counterElRef.current.textContent = cs // live counter, imperative
+        // The badges ride the SAME imperative path as the counter — per PRESENTED version, no
+        // React commit. Cache-only; an uncached pair blanks rather than lying with a stale number.
+        if ((window as unknown as { __iwBadgeLive?: boolean }).__iwBadgeLive !== false) {
+          paintHeaderDiffRef.current(deltaForIndexRef.current(pres), pres)
+        }
       }
       swRafRef.current = requestAnimationFrame(tick)
     }
@@ -3288,7 +3367,6 @@ export function SnapshotView() {
   const lastGroup = groups[groups.length - 1]
 
   // Always diff against the immediately preceding snapshot (not direction-sensitive)
-  const prevSnap = idx > 0 ? allSnapshots[idx - 1] : null
 
   // ── Fling coalescing (2026-07-11) ────────────────────────────────────────────
   // Rapid navigation streams (fling / held key / shift-wheel storm) FREEZE the heavy split view on
@@ -3323,6 +3401,11 @@ export function SnapshotView() {
     if (!heavySnap || !heavyPrev) return null
     return diffStats(opsBetween(heavyPrev, heavySnap) ?? [])
   }, [heavySnap?.id, heavyPrev?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  // LANDING: React re-asserts the true value post-commit, exactly as it does for the counter. The
+  // driver only writes during a burst, so this always wins the last word. It runs on mount too —
+  // React renders the badge spans EMPTY and this fills them, which is what keeps a single writer
+  // for the content (the vdom holds no text to silently diff against a driver write).
+  useEffect(() => { paintHeaderDiff(headerDiff) }, [headerDiff, paintHeaderDiff])
 
   // The landing snapshot's live render committed → the presenter can lift the bitmap overlay off
   // the (now identical) painted frame. Runs post-commit; the presenter double-rAFs past paint.
@@ -3414,15 +3497,17 @@ export function SnapshotView() {
             The words-diff sits just left of the first (biggest-change) toggle. */}
         <div className={`flex-1 flex items-center ${isPhone ? 'justify-end' : 'justify-center'}`} style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
         {/* Words vs previous — bigger, immediately left of the biggest-change toggle */}
-        {headerDiff && (headerDiff.added > 0 || headerDiff.removed > 0) && (
-          <span className="flex items-baseline tabular-nums" style={{ fontSize: isPhone ? '0.72rem' : 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: isPhone ? 2 : 'clamp(6px, 1.4vw, 16px)', columnGap: isPhone ? 3 : 8, letterSpacing: isPhone ? '-0.03em' : undefined }} title="words added / removed vs the previous snapshot">
-            <span style={{ color: '#15803d', fontWeight: 800 }}>+{headerDiff.added}</span>
-            <span style={{ color: '#b91c1c', fontWeight: 800 }}>−{headerDiff.removed}</span>
-          </span>
-        )}
-        {prevSnap && headerDiff && headerDiff.added === 0 && headerDiff.removed === 0 && (
-          <span className="text-stone-500 italic">no change</span>
-        )}
+        {/* Structure only — `paintHeaderDiff` owns the CONTENT (see the badge block above), so the
+            flipbook driver can write these per presented version without a React commit, the way
+            the counter already does. Both branches stay MOUNTED (an unmounted node cannot be
+            written to mid-fling, and remounting per step is the commit we are avoiding); the
+            paint toggles them. Rendered empty on purpose: React holds no text here, so there is
+            exactly one writer and no vdom/imperative desync. */}
+        <span ref={hdWrapRef} className="flex items-baseline tabular-nums" style={{ fontSize: isPhone ? '0.72rem' : 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: isPhone ? 2 : 'clamp(6px, 1.4vw, 16px)', columnGap: isPhone ? 3 : 8, letterSpacing: isPhone ? '-0.03em' : undefined, visibility: 'hidden' }} title="words added / removed vs the previous snapshot">
+          <span ref={hdAddedRef} style={{ color: '#15803d', fontWeight: 800 }} />
+          <span ref={hdRemovedRef} style={{ color: '#b91c1c', fontWeight: 800 }} />
+        </span>
+        <span ref={hdNoChangeRef} className="text-stone-500 italic" style={{ display: 'none' }}>no change</span>
         <button
           type="button"
           onClick={toggleLineMode}
