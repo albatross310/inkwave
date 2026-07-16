@@ -36,7 +36,7 @@ import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
-import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from '../pageGap'
+import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, GAP, PHONE_GAP, PHONE_SHEET_RADIUS, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
 import { harvestCiteBoxes, clearCiteBoxes } from '../../citations/citeBox'
 import { getCitationStyle } from '../../citations/citationsBus'
@@ -308,6 +308,10 @@ function computeBreaks(
   topM: number,
   gapped: boolean,
   posOf: (l: MeasuredLine) => number,
+  // ARITH BAND GEOMETRY (Job 2): when supplied, collects per-break {brokeUsed, botMargin} — the
+  // content px used on the page + the gap's bottom margin — enough to reconstruct every band's
+  // pixel top arithmetically (see computeArithBands), so the zoom-exit never un-skips the doc.
+  bandOut?: { breaks: Array<{ at: number; brokeUsed: number; botMargin: number }>; lastUsed: number },
 ): { decos: Decoration[]; sig: string } {
   // Decision 1's dotted continuation bracket is INDEPENDENT of renderFill (2026-07-15): it marks a
   // MID-PARAGRAPH split — semantically true at canonical breaks too (Decision 5 splits every
@@ -345,6 +349,7 @@ function computeBreaks(
       const gapTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
+      bandOut?.breaks.push({ at: refListPos, brokeUsed: used, botMargin })
       pageNo++; used = 0; curBlock = -1; refBroken = true
     }
     // Break before the LINE that would overflow the text area.
@@ -370,6 +375,7 @@ function computeBreaks(
         // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
         decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped, midBlock), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}${midBlock ? 'b' : ''}` }))
         sig.push(`${at}:${Math.round(botMargin)}`)
+        bandOut?.breaks.push({ at, brokeUsed, botMargin })
         pageNo++
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
         curBlock = -1             // recompute the block-on-page baseline at the next line
@@ -378,6 +384,7 @@ function computeBreaks(
     used += lh
   }
   sig.push(`pages:${pageNo}`)
+  if (bandOut) bandOut.lastUsed = used
   return { decos, sig: sig.join('|') }
 }
 
@@ -845,6 +852,89 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               const numSpan = (d.firstChild as HTMLElement).querySelector('span')
               if (numSpan) numSpan.textContent = String(i + 1)
             })
+          }
+          // ── ARITH BAND GEOMETRY (Job 2, flag inkwave:arithBands) ──────────────────────────────
+          // Compute BandGeo REFLOW-FREE, so the zoom-exit never un-skips the whole document (the
+          // 240/722/1642ms@5k/20k/40k spike). The bands sit at the CANONICAL break positions (which
+          // don't move with zoom) but at RENDER pixel tops (which do). Two cheap arith passes, no
+          // DOM read: (1) a CANONICAL measure reproduces the exact break set + each gap's botMargin
+          // (byte-identical to the DOM canonical measure — proven); (2) a RENDER-zoom measure gives
+          // each break line's render pixel top. The gap WIDGETS are FIXED px (baked at canonical
+          // measure — botMargin+GAP+topM), so they don't scale: the rendered top of break k is its
+          // render line top + the fixed gap heights ABOVE it. Returns null (⇒ caller falls back to
+          // the DOM readBands/un-skip) when any block defers or the faces aren't loaded.
+          const computeArithBands = (): BandGeo | null => {
+            if (!sheet || !gapped) return null
+            const edEl = view.dom as HTMLElement
+            // Wrap in the PARAGRAPH's own content box, not the editor's clientWidth (they can differ
+            // by a fraction under phone rounding / block box-sizing — an off-by-fraction flips one
+            // line on the odd block and the per-page error compounds). Sample the first in-flow
+            // paragraph; fall back to the editor content box.
+            const firstBlk = Array.from(edEl.children).find((c) => !(c as HTMLElement).classList.contains('inkwave-page-gap')) as HTMLElement | undefined
+            const cs = getComputedStyle(firstBlk ?? edEl)
+            const boxEl = firstBlk ?? edEl
+            const renderW = boxEl.getBoundingClientRect().width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+              - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0)
+            if (renderW <= 40) return null
+            const renderBase = parseFloat(cs.fontSize) || 18
+            const lhPx = parseFloat(cs.lineHeight)
+            const renderRatio = lhPx && renderBase ? lhPx / renderBase : (phoneLike() ? 1.55 : 1.618)
+            const style = getCitationStyle(); const epoch = bibProvider.getVersion(); const paraSp = getParaSpacingEm()
+            // (1) CANONICAL breaks + botMargins (base 18, canonical A4 width).
+            const paper = getPaperSize(); const topM = getTopMarginPx()
+            const { pageWidthPx, pageHeightPx: pageH } = pageBoxPx({
+              paperSize: paper === 'letter' ? 'letter' : 'a4', orientation: getOrientation(),
+              topMarginPx: topM, bottomMarginPx: MARGIN_BOTTOM,
+            })
+            const canonW = Math.floor((pageWidthPx - 2 * getSideMarginPx()) * 64) / 64
+            const canon = buildArithMeasure(view.state.doc, canonW, 1.618, paraSp, arithMeasureFn, arithFaceLoaded, true, 18, style, epoch)
+            if (!canon) return null
+            const bandOut = { breaks: [] as Array<{ at: number; brokeUsed: number; botMargin: number }>, lastUsed: 0 }
+            computeBreaks(canon.lines as unknown as MeasuredLine[], canon.blocks, findRefListPos(view.state.doc), pageH, topM, gapped, (l) => (l as unknown as { pos: number }).pos, bandOut)
+            // (2) RENDER pixel tops of every break line (render width + render font).
+            const render = buildArithMeasure(view.state.doc, Math.floor(renderW * 64) / 64, renderRatio, paraSp, arithMeasureFn, arithFaceLoaded, true, renderBase, style, epoch)
+            if (!render) return null
+            // Render lines sorted by top, each with its own height (top→next top). A canonical break
+            // at doc position `at` sits at the render BOTTOM of the line CONTAINING at (the gap forces
+            // a line end there) — unless `at` is itself a render line start, when it's that line's top.
+            const rl = render.lines.map((l, i) => ({ pos: l.pos, top: l.top, h: i + 1 < render.lines.length ? Math.max(1, render.lines[i + 1].top - l.top) : Math.max(1, render.contentHeight - l.top) }))
+              .sort((a, b) => a.top - b.top)
+            const gapTopOf = (at: number): number | null => {
+              // the render line with the greatest top whose pos-range starts at/before `at`
+              let best: { pos: number; top: number; h: number } | null = null
+              for (const l of rl) if (l.pos <= at && (!best || l.top > best.top)) best = l
+              if (!best) return null
+              return best.pos === at ? best.top : best.top + best.h
+            }
+            // Assemble. Origin = sheet paddingTop; band top = padTop + gapTop + gapsAbove +
+            // botMargin − bleed. Gap widget height (fixed px) = botMargin + GAP + nextTopM.
+            const padTop = phoneLike() ? PHONE_PAGE_MARGIN : topM
+            const gap = phoneLike() ? PHONE_GAP : GAP
+            const bleed = phoneLike() ? PHONE_SHEET_RADIUS : 0
+            const nextTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
+            const tops: number[] = []; const heights: number[] = []
+            let gapAccum = 0
+            for (const b of bandOut.breaks) {
+              const gt = gapTopOf(b.at)
+              if (gt === null) return null
+              tops.push(padTop + gt + gapAccum + b.botMargin - bleed)
+              heights.push(gap + 2 * bleed)
+              gapAccum += b.botMargin + gap + nextTopM
+            }
+            const total = padTop + render.contentHeight + gapAccum + (parseFloat(getComputedStyle(sheet).paddingBottom) || 0)
+            return { tops, heights, total }
+          }
+          // Debug: compare arith bands vs the DOM readBands at the CURRENT zoom (must match ~0px).
+          ;(window as unknown as { __iwCmpArithBands?: () => unknown }).__iwCmpArithBands = () => {
+            const dom = readBands(); const ar = computeArithBands()
+            if (!dom || !ar) return { dom: !!dom, arith: !!ar }
+            const n = Math.min(dom.tops.length, ar.tops.length)
+            let maxDT = 0, maxDH = 0
+            for (let i = 0; i < n; i++) { maxDT = Math.max(maxDT, Math.abs(dom.tops[i] - ar.tops[i])); maxDH = Math.max(maxDH, Math.abs(dom.heights[i] - ar.heights[i])) }
+            const edEl = view.dom as HTMLElement; const cs = getComputedStyle(edEl)
+            const deltas = []; for (let i = 0; i < n; i++) deltas.push(+(ar.tops[i] - dom.tops[i]).toFixed(1))
+            return { bands: `${dom.tops.length}/${ar.tops.length}`, maxTopΔ: +maxDT.toFixed(2), maxHtΔ: +maxDH.toFixed(2), totalΔ: +Math.abs(dom.total - ar.total).toFixed(2),
+              renderFont: cs.fontSize, renderLH: cs.lineHeight, perBandΔ: deltas.slice(0, 10) }
           }
           const paint = () => {
             const paintT0 = performance.now() // perflog: band repaint cost

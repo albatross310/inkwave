@@ -121,7 +121,7 @@ export function arithBlockLayout(
 }
 
 export interface ArithLine { top: number; blockIdx: number; pos: number }
-export interface ArithMeasureResult { lines: ArithLine[]; blocks: Array<{ start: number; end: number }> }
+export interface ArithMeasureResult { lines: ArithLine[]; blocks: Array<{ start: number; end: number }>; contentHeight: number }
 
 // `fontLoaded(stack, sizePx)` gates a text run whose face isn't loaded (measureText would fall back
 // to a system face). `ratio` = the render context's line-height (1.618 desktop / 1.55 phone / the
@@ -163,7 +163,7 @@ export function buildArithMeasure(
     // Next block is a paragraph (marginTop 0), so the adjacent-margin collapse is just marginBottom.
     top += lay.height + arith.marginBottomPx
   }
-  return { lines, blocks }
+  return { lines, blocks, contentHeight: top }
 }
 
 export { isCertifiedStack }
