@@ -149,6 +149,10 @@ export function buildFlatMap(doc: TiptapJSON, resolveCitations = true): FlatMap 
 // WRONG DOCUMENT, not a cosmetic bug, and it would look exactly like the diff being wrong rather
 // than the projection being wrong.
 export interface AnchoredOp {
+  /** Index into the ORIGINAL ops array. The pane's hover/click/highlight machinery keys on
+   *  `data-opidx`, so a renderer splitting ops into runs must carry the source op's identity —
+   *  a run is a slice of an op, never a new op. */
+  idx: number
   type: DiffOp['type']
   text: string
   /** Range in CUR's flat text. For a `del` this is EMPTY (curStart === curEnd): a splice point. */
@@ -159,10 +163,11 @@ export interface AnchoredOp {
 export function anchorOps(ops: readonly DiffOp[]): AnchoredOp[] {
   let cur = 0
   const out: AnchoredOp[] = []
-  for (const op of ops) {
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i]
     const curStart = cur
     if (op.type !== 'del') cur += op.text.length // dels occupy nothing in cur
-    out.push({ type: op.type, text: op.text, curStart, curEnd: cur })
+    out.push({ idx: i, type: op.type, text: op.text, curStart, curEnd: cur })
   }
   return out
 }
@@ -184,7 +189,7 @@ export function opsInRange(anchored: readonly AnchoredOp[], from: number, to: nu
     const s = Math.max(op.curStart, from)
     const e = Math.min(op.curEnd, to)
     if (e <= s) continue
-    out.push({ type: op.type, text: op.text.slice(s - op.curStart, e - op.curStart), curStart: s, curEnd: e })
+    out.push({ idx: op.idx, type: op.type, text: op.text.slice(s - op.curStart, e - op.curStart), curStart: s, curEnd: e })
   }
   return out
 }

@@ -593,14 +593,56 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   "(key)" form — so the suite looked like it covered the display path (`displayTextOf` → pmToText(doc,
   true), the one the diff is computed under) and did not. bibProvider is now seeded, guarded by a test
   asserting resolve actually changes the bytes.
-  STILL TO BUILD: the `RichDiffView` component itself (walk contentJson like DocView, but split each
-  text leaf by `opsInRange` over its seg's flat range, and splice each `del` in at its anchor as a
-  strikethrough run) → swap it into `FullDiffView`'s `ops !== null` branch behind the flag → then:
-  both halves move together (canvas frames and the DOM landing must produce IDENTICAL offsets, not
-  similar, or it is round 11 inverted); **measure the diff-mark increment** (rich WITH marks vs the
-  DocView floor, same conditions — if marks erase the 2× saving Peter must be told); the show() miss
-  path; idle-pumped cancellable table builds; the COLD far-from-origin burst; and OPFS persistence,
-  which still has zero callers. WATCH: rich rendering may bring the refList into the pane FOR THE
+  **RichDiffView IS BUILT** (2026-07-17, `components/RichDiffView.tsx` + 26 tests, wired into
+  `FullDiffView`'s `ops !== null` branch, gated on `textRenderEnabled()` — DEFAULT OFF). It walks
+  contentJson exactly as DocView does and splits each text leaf into marked runs via `opsInRange`
+  over its seg's flat range. Gated on the TEXTRENDER flag deliberately, not one of its own: the
+  canvas frames and the DOM landing must move TOGETHER, and one flag makes "rich canvas onto flat
+  pane" unrepresentable rather than merely unlikely (round 11 inverted).
+  - CONTRACT KEPT: the runs emit the SAME `diff-add`/`diff-del` classes and the SAME `data-opidx` as
+    FullDiffView, because the hover / click-to-jump / highlight-injection / `computeDiffPagesFor`
+    machinery all key on exactly those. A run is a SLICE of an op, never a new op — hence
+    `AnchoredOp.idx`. With `ops === null` it renders markup BYTE-IDENTICAL to DocView (asserted).
+  - **THE "GAP DEL" MECHANISM WAS DEAD CODE — instrumented, not reasoned about.** The first cut
+    carried elaborate machinery to place a del falling in a '\n\n' join (a whole deleted paragraph)
+    at the head of the following block. Instrumented across **15 document shapes it NEVER FIRED
+    ONCE**, while all 24 tests passed. Structural reason: `diffWords` tokenises `\S+\s*`, so a
+    block's last token ABSORBS the join ⇒ every block's `flatStart` IS a token boundary and a join's
+    interior never is ⇒ a del can only anchor at a block's start or inside it ⇒ `opsInRange`
+    (inclusive at `from`) already claims it. Deleted. **Tracing a PASSING result found it.**
+  - **AND THE INSTRUMENTATION FOUND A REAL HOLE THE TESTS MISSED:** when CUR has NO blocks (all
+    blocks empty ⇒ pmToText drops them ⇒ `map.blocks === []`), nothing could claim a del and **every
+    deletion vanished from the pane** while the flat view still showed them. Deleting all your text
+    is not exotic. FIXED with an ORPHAN rule (any del no block claims renders at the end); pinned by
+    2 tests, MUTATION-PROVED (disable the rule ⇒ exactly those 2 fail, nothing else — so the rule is
+    load-bearing precisely where claimed and inert elsewhere).
+  - TEST-INSTRUMENT TRAP: the conservation extractor used `.*?`, which DOES NOT MATCH NEWLINES —
+    and `splitChangesAtReturns` keeps newlines in a del's text ("\n\ndoomed\n"), so it read a
+    correctly-rendered deleted paragraph as DROPPED. An extractor blind to its own subject fails
+    toward "the feature is broken", the most expensive direction to be wrong in. Use `[\s\S]*?`.
+  **THE DIFF-MARK INCREMENT — MEASURED, AND IT ERASES THE 2× WIN. Do not quote "rich is 2× cheaper".**
+  That earlier figure compared a DocView FLOOR (no marks) against a flat pane fed BYTE-IDENTICAL
+  versions (one `same` op ⇒ ONE span) — both sides unrepresentative, as its own caveats said. Re-run
+  with versions that genuinely differ (~2% of paragraphs reworded per version) and the real
+  RichDiffView under the flag (`landingcost.prove.mjs`, thesis scale, n=8):
+    desktop    paginateStaticDoc  floor 215.8 · RICH+MARKS 569.9 (2.64× floor) · FLAT 582.4 → **0.98× flat**
+    phone-emu  paginateStaticDoc  floor 328.4 · RICH+MARKS 920.1 (2.80× floor) · FLAT 981.0 → **0.94× flat**
+  So: **the diff MARKS dominate, not the structure** — both diff-carrying renderers cost ~2.7× the
+  no-marks floor, and rich+marks lands at PARITY with the flat pane (2-6% cheaper, inside the noise).
+  Peter gets the formatted pages he asked for at ~the landing cost he already pays. That is a fine
+  trade and it is the HONEST one; the 2× saving is not real for the shipped renderer.
+  READ RATIOS, NOT ABSOLUTES: this box is CPU-contended (auditor agents probe concurrently; round 13
+  measured 103→177ms/version from contention alone), so the absolute ms are inflated ~3× vs the
+  quiet-box run and the maxima are wild. Every ratio is measured WITHIN one run across conditions.
+  The structural gate had to be rewritten to see this at all: `flat.blocks <= 2` was written when the
+  versions were identical and the flat pane was ONE span — with a real diff it is ~524 top-level
+  spans, so child count no longer separates the conditions. It VOIDED rather than reporting a
+  fiction; the discriminator is now real BLOCK ELEMENTS (`p,h1..h4,li,blockquote,pre`), which the
+  flat transcript has ZERO of by construction.
+  STILL TO BUILD: both halves move together (the canvas frames and this DOM landing must produce
+  IDENTICAL offsets, not similar, or it is round 11 inverted — RichDiffView makes the two COMPARABLE
+  for the first time, but they have not been compared); the show() miss path; idle-pumped cancellable
+  table builds; the COLD far-from-origin burst. WATCH: rich rendering may bring the refList into the pane FOR THE
   FIRST TIME (today `pmToText` skips the atom, so the pane has never shown a bibliography) — at which
   point the 120px-vs-880px guess goes LIVE and silently moves every break below it. Its real height
   must come with it, or `reliablePages` must stop there honestly.
@@ -707,6 +749,31 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     ("which page holds this doc position?") can, which is exactly the seam RichDiffView and the
     content anchor use. **THE SHAPE TO REMEMBER: when a bug survives every self-consistency check,
     stop adding checks derived from the same structure and ask it from outside.**
+    **THE GATE COULD NOT SEE THIS FIX AT ALL — F6, found by the test auditor, now CLOSED.** Reverting
+    `blockFirstLinePos` to the legacy rule left `pnpm test` at **exit 0, all 79 files green**: the
+    only guard was `tail.prove.mjs`, which is in no CI and no package.json script, needs a browser +
+    a thesis-shape doc, and is run BY HAND. A fix for a bug MEASURED in the real app was one careless
+    edit from silently returning. `src/editor/textRender.test.ts` now carries it in the gate —
+    4-node schema (doc/paragraph/referenceList/horizontalRule/text), `measure = t => t.length * 8`,
+    **~90ms, no browser, no canvas, no fixture** (harness adapted from the auditor's own
+    reproduction, `/root/dev/iw-audit-tests/audit/probe-atompos.test.ts.txt`, rather than
+    reinvented). PROVED: applying the auditor's exact mutation takes the FULL gate to **exit 1, 4
+    failures**. `tail.prove.mjs` remains the in-browser truth; the unit test is what stops a silent
+    revert six weeks from now.
+    **AND THE NEGATIVE HAD TO SWEEP PLACEMENTS TO WORK.** The two rules can only differ where the
+    atom STARTS a page — an atom mid-page resolves identically either way. The first cut tested a
+    `horizontalRule` at index 25, it landed mid-page, and that test PASSED AGAINST THE MUTATED BUILD
+    while its neighbours failed: a true invariant discriminating nothing. The negative now sweeps
+    every placement per atom type and asserts `discriminating > 0`, so it cannot silently become a
+    coin toss again.
+    **THE GENERAL LESSON (the auditor's, and it is the sharpest one this project has produced):**
+    *"This codebase's probe culture is genuinely excellent at ESTABLISHING truth. It has no mechanism
+    for KEEPING it. A proof that ran once and convinced everyone is indistinguishable, six weeks
+    later, from a proof that never ran — and the gate says green either way. The measured facts in
+    these file headers read as guarantees; they're archaeology."* So: **of every claim you prove, ask
+    whether there is a cheap unit-level version that KEEPS it true.** If it is 90ms and needs no
+    browser, there is no excuse. The `.prove.mjs` probes stay as the in-browser truth — they are not
+    redundant — but a browser-only proof is not a guard.
     LIVE KNOWN-NEGATIVE: `window.__iwAtomPos='legacy'` restores the bug; `tail.prove.mjs` reproduces
     it (legacy 56/UNREACHABLE → fixed 57/REACHABLE) before reading any verdict, and VOIDS where the
     fixture's tail is not a leaf atom so the rules structurally cannot differ. It caught a real
@@ -1524,6 +1591,19 @@ checkout) with the full gate: typecheck (ignore pre-existing TS7016/TS2550 in te
 build (gate on real exit codes — `| tail` swallows failures), then push (= production deploy).
 Snapshot React state is METADATA-ONLY (`SnapshotMeta`; fetch full snapshots via `listSnapshots` at
 action time — never hold contentJson in state). Autosave failures dispatch `inkwave:save-failed`.
+
+**A GREEN GATE IS NOT A GUARD (2026-07-17, the test auditor's headline — read this before trusting
+one).** The probe culture here ESTABLISHES truth superbly and has no mechanism for KEEPING it: a
+`.prove.mjs` that ran once and convinced everyone is indistinguishable, six weeks later, from one
+that never ran — and `pnpm test` says green either way. The measured facts in these file headers read
+as guarantees; they are archaeology. Demonstrated on a real fix: reverting `textRender.ts`'s
+leaf-atom rule (a bug MEASURED in the real app) left the full gate at exit 0 / 79 files green,
+because its only guard was a hand-run browser probe. **So: for every claim you prove, ask whether a
+cheap unit-level version can KEEP it true — if it is ~90ms and needs no browser, there is no
+excuse.** The browser probes stay (they are the in-browser truth, and they catch what unit tests
+structurally cannot); they are simply not guards. Corollary for reviewers: `git diff master..<branch>`
+on a branch that is BEHIND renders enormous fictional deletions (one lane showed 18,393 deletions for
+a real change of 3 files, +196/−11) — always diff `$(git merge-base HEAD origin/master)..HEAD`.
 
 **Standing preferences (Peter, 2026-07-10):**
 - **No browser windows over Peter's screen.** Agents running HEADED browsers (Playwright probes

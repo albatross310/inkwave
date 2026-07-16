@@ -22,6 +22,8 @@ import { probePerf } from '../editor/perflog'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
+import { RichDiffView } from '../components/RichDiffView'
+import { textRenderEnabled } from '../editor/textRenderFlag'
 import { summariseRecord, createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
 import { Toast } from '../components/Toast'
@@ -212,6 +214,22 @@ function FullDiffView({
     return (
       <div className="tiptap-editor ProseMirror">
         <DocView doc={snapshot.contentJson} />
+      </div>
+    )
+  }
+  // RICH PAGES FOR EVERY VERSION (2026-07-17, flag `inkwave:textRender`, DEFAULT OFF). Below this
+  // line is the FLAT transcript: one pre-wrap span of `pmToText`, which is what 115 of 116 versions
+  // have rendered. RichDiffView projects the same ops back onto the PM tree (provenance/textMap.ts)
+  // so the pane shows real headings/lists/citations with the diff marks intact.
+  //
+  // GATED ON textRenderEnabled(), DELIBERATELY — not on a flag of its own. The canvas renderer and
+  // this DOM landing must move TOGETHER: a rich canvas frame settling onto a flat pane (or the
+  // reverse) is round 11's two-rules-one-pane disease, which cost 186px of drift. One flag makes
+  // that combination unrepresentable rather than merely unlikely.
+  if (textRenderEnabled()) {
+    return (
+      <div className="tiptap-editor ProseMirror">
+        <RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />
       </div>
     )
   }
