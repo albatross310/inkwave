@@ -25,6 +25,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaS
 import { getCitationStyle } from '../citations/citationsBus'
 import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
+import { harvestRefChromeStyles, backrefBox, noteBox } from '../citations/refChrome'
 import { TextRenderStore } from './textRenderStore'
 import { buildBreakTable, contextSig, pageStart, pageOfPos } from './breakTable'
 // The REAL production line-acquisition functions — exercised directly so the audit can never drift
@@ -76,6 +77,11 @@ function harvestNow(): { ok: boolean; reason: string } {
   const mag = parseFloat(root.getPropertyValue('--iw-magnify') || '1') || 1
   if (Math.abs(zoom - 1) > 0.001 || Math.abs(mag - 1) > 0.001) return { ok: false, reason: `not canonical: zoom ${zoom} magnify ${mag}` }
   harvestBlockStyles(pm, 18)
+  // The refList chrome's CSS sub-styles (the arrow's 1.15em, the link's 0.22em padding, the button's
+  // border) ride the same canonical harvest. They are VERSION-INDEPENDENT — properties of the
+  // stylesheet, not of a document — which is what lets the renderer compose a back-ref box for a
+  // version whose bibliography it has never rendered.
+  harvestRefChromeStyles(pm, 18)
   return { ok: true, reason: 'canonical' }
 }
 
@@ -156,6 +162,10 @@ export interface ProbeApi {
   blockGeoCheck(): Record<string, unknown>
   /** The known-positive self-test: PROVE the probe can see a difference before trusting a null. */
   selfTest(): Record<string, unknown>
+  /** COMPOSED chrome boxes (back-ref group / note button) for a set of marks, from the harvested
+   *  sub-styles. The prover compares these against the live DOM's own rects — if the composition is
+   *  right, a version we have never rendered can still be laid out. */
+  chromeBox(kind: 'backref' | 'note', arg: unknown): Record<string, unknown> | null
 }
 
 export function installTextRenderProbe(editor: Editor): void {
@@ -924,6 +934,15 @@ export function installTextRenderProbe(editor: Editor): void {
         inflatedPages: mutated.pages,
         coverage: base.coverage,
       }
+    },
+    chromeBox(kind, arg) {
+      harvestNow()
+      if (kind === 'note') {
+        const b = noteBox(String(arg ?? '+'), measure, 18)
+        return b ? { advanceWidth: b.advanceWidth, lineHeightDemand: b.lineHeightDemand } : null
+      }
+      const b = backrefBox(arg as Array<{ label: string; quote: string }>, measure, 18)
+      return b ? { advanceWidth: b.advanceWidth, lineHeightDemand: b.lineHeightDemand } : null
     },
   }
 

@@ -1,156 +1,242 @@
-// REFERENCE-LIST CHROME BOXES (2026-07-17) — the citeBox treatment, applied to the bibliography's
-// non-text furniture.
+// REFERENCE-LIST CHROME — COMPUTED, not harvested per version (2026-07-17, round 2).
 //
 // WHAT THE CHROME IS. ReferenceListNodeView injects three things into each rendered entry that
 // citeproc never emitted: the `↩ 4 5.1` back-reference group, an `esp. pp 2, 4–6` span, and the
-// `+`/`✎` note button. None is prose and none may be shaped as text.
+// `+`/`✎` note button. None is prose and none may be shaped as body text.
 //
 // WHY THEY CANNOT SIMPLY BE OMITTED. "Honest omission" is available for a GLYPH; it is not available
-// for a BOX. Measured in the real app (reflistcensus.mjs), the note button is a `<button>` with its
-// own border+padding standing 17.73px tall on a 22.85px line — it RAISES that line to 26.28px, so a
-// 2-line entry is 49.13px, not the 45.71px its line-height implies. Drop the button and every entry
-// loses 3.42px; over a 14-entry bibliography that is ~48px of silent drift, and a wrong height moves
-// every break below it. The back-ref group is worse: it is `white-space: nowrap` and 35-100px wide,
-// so removing it can pull a whole line back. So: we omit the DRAWING, and we keep the BOX.
+// for a BOX. The chrome occupies real advance and RAISES its line (see the demand note below), so we
+// omit the DRAWING and keep the BOX.
 //
-// WHY IT IS HARVESTED AND NOT COMPUTED. Each of these is a composite of CSS this module does not
-// own: a button's border+padding, `.iw-cite-link`'s `padding: 0 0.22em`, `.iw-backref-arrow`'s
-// 1.15em, `.iw-backref-quote`'s 0.86em italic. Re-deriving that chain by hand is exactly how
-// blockStyles.ts's preamble says a height becomes a guess. So the box is MEASURED once from the real
-// rendered element and cached by an immutable key — the same discipline, and the same self-healing
-// contract, as citeBox: a key that isn't cached returns null ⇒ the caller DEFERS.
+// ⚠ STATUS (2026-07-17, round 2): `backrefBox` IS NOT WIRED INTO THE RENDERER, and must not be until
+// the refusal below is resolved. Its ARITHMETIC is proved (`reflchrome.prove.mjs` CLAIM A: composed
+// == the browser's own rect to 0.055px across every single-line group, with dropMark/dropQuote/
+// extraMark negatives all firing, on a fixture carrying real quote previews). Its PRECONDITION is
+// not:
 //
-// THE KEY, and the trap it exists to avoid. A back-ref group reads `↩ 4 5.1` — those are DOCUMENT
-// PAGE NUMBERS, and `occurrencePages` gets them by `document.getElementById(...)` + `docPageOf`,
-// i.e. from the LIVE DOM's own pagination widgets. So this chrome is NOT a function of
-// (entries, style, epoch) the way a citeBox is: it is a function of THE WHOLE DOCUMENT'S PAGINATION.
-// Two different versions of a thesis share their citekeys and their CSL style, and their back-refs
-// still differ, because the citations sit on different pages.
+//   THE BACK-REF GROUP IS NOT AN UNBREAKABLE BOX. `.iw-backref-group` DECLARES `white-space: nowrap`
+//   — and that declaration is DEAD. The group carries `contenteditable="false"`, and
+//   prosemirror-view's injected `.ProseMirror [contenteditable="false"] { white-space: normal }`
+//   (0,2,0) OUT-SPECIFIES `.iw-backref-group` (0,1,0). Verified by asking the CASCADE, not by
+//   reasoning about it. So the group WRAPS — measured, 6/13 groups occupy more than one line — and
+//   `getBoundingClientRect()` on it returns a UNION OF LINES, not an advance. (That union is what
+//   made this probe's first cut report 300+px errors and blame the quote term.) This is the IDENTICAL
+//   trap citeBox.ts documents for the citation label; CitationNodeView pins `nowrap` inline to win
+//   it, and the back-ref group never got that fix.
 //
-// Therefore the key is scoped to the DOCUMENT VERSION the chrome was harvested from — a WeakMap on
-// the PM doc node (persistent structures: same reference ⇔ unchanged content, the same identity rule
-// collectLines' line cache uses). Keying on citekey alone would have been the disaster: every
-// snapshot version shares the live doc's citekeys, so every lookup would HIT the live document's
-// chrome and hand a different version a confidently wrong height — a cache that cannot miss is the
-// bake counter reporting 116/116 while every lookup was wrong. Here a version we have not rendered
-// MISSES and defers, which is the true answer: we have not measured that version's chrome, so we do
-// not know its height.
+//   AND THE CHIP FIX IS NOT AVAILABLE HERE. Pinning `nowrap` would make the group one opaque
+//   advance — but the widest observed group is 631.8px against a 601.69px column, i.e. ALREADY WIDER
+//   THAN THE PAGE. Pinning it would overflow the sheet, not fix the model. The honest model is
+//   therefore RUNS (breakable text: arrow @1.15em, labels @600 with the link's 0.22em padding, quote
+//   previews @0.86em italic), which is what the composition below already computes the pieces of.
+//   A product change (shortening the preview, or dropping the group to one line) is Peter's call.
+//
+// ── WHY THIS IS COMPUTED RATHER THAN HARVESTED ───────────────────────────────────────────────────
+// Round 1 harvested each entry's chrome box from the live DOM, keyed by PM doc identity. That was
+// CORRECT but USELESS for the renderer's actual purpose: back-ref labels are DOCUMENT PAGE NUMBERS
+// (`occurrencePages` reads document.getElementById + `docPageOf` off the live pagination widgets), so
+// a version we have never rendered has no harvestable chrome — and the renderer exists to paint the
+// 115 versions Peter scrubs, not the one in the editor. Harvest-by-version means the refList stops
+// estimating on the live doc and defers forever on every snapshot. That is not the goal.
+//
+// So the chrome is COMPUTED. The labels come from the MODEL's own pagination (the renderer already
+// knows every citation's page — that is exactly what `occurrencePages` scrapes from the DOM), and the
+// box is composed from CSS SUB-STYLES that are VERSION-INDEPENDENT: `.iw-backref-arrow`'s 1.15em,
+// `.iw-cite-link`'s `padding: 0 0.22em`, `.iw-backref-quote`'s 0.86em italic, the button's
+// border+padding. Those are properties of the STYLESHEET, identical for every version, so one harvest
+// serves them all — the same argument blockStyles.ts makes for keying on block TYPE.
+//
+// THIS IS STILL NOT A HAND-DERIVATION. The sub-styles are READ from real rendered elements (never a
+// detached probe — that is how canvasShapingMatchesEditor died); only their COMPOSITION is arithmetic,
+// and that composition is proved against the live DOM's own rects per entry (reflchrome.prove.mjs),
+// with a known-negative that must fire. A sub-style that was never harvested returns null ⇒ DEFER.
+//
+// ── THE DEMAND RULE, AND THE 3.42px IT COST TO LEARN ─────────────────────────────────────────────
+// `lineHeightDemand` IS NOT THE ELEMENT'S RECT HEIGHT. Round 1 used `getBoundingClientRect().height`
+// — the obvious reading of the engine's "the line-box height this element forces" — and it is wrong
+// by 3.42px PER ENTRY, silently (~48px over a bibliography, which moves every break below it).
+// PROVED causally (`reflarrow.prove.mjs`, negative fires): an entry measures 49.13px, not the 45.71px
+// its 2 x 22.8528 line-height implies, because `.iw-backref-arrow` sets `font-size: 1.15em` while
+// `.csl-bib-body` sets a UNITLESS `line-height: 1.38` — and a unitless line-height INHERITS AS A
+// RATIO, so the arrow's line box is 16.56 x 1.15 x 1.38 = 26.2807. The group's own rect is 22px
+// (getBoundingClientRect on an INLINE element returns its text's content box, NOT its line box), so
+// the rect could never have seen the 26.28. Shrinking the arrow to 1em drops the entry to 45.688 —
+// the mechanism, not a coincidence. The `+` button (17.73px) does NOT bind and is NOT the cause.
 
 import type { CiteInlineBox } from './citeBox'
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { cssFontOf, type Measure } from '../editor/arithmeticLayout'
 
-export type ChromeKind = 'backref' | 'esp' | 'note'
-
-// key = kind + the entry's citekey + the measurement base. The base joins the key for the same
-// reason it joins citeBox's: these boxes inherit `em` sizes from the entry's font, so a box measured
-// at the canonical 18px base is not the box at the phone's 22.5px render base. The DOC is the outer
-// key (the WeakMap), not part of this string.
-function keyOf(kind: ChromeKind, citekey: string, basePx: number): string {
-  return `${kind}|${citekey}|${basePx}`
+/** One inline element's computed geometry — everything needed to compose it into a line. */
+export interface InlineStyle {
+  fontFamily: string
+  fontSizePx: number
+  fontWeight: number
+  italic: boolean
+  /** Computed line-height in px — the line box this element demands. NOT its rect height. */
+  lineHeightPx: number
+  marginLeftPx: number
+  marginRightPx: number
+  paddingLeftPx: number
+  paddingRightPx: number
+  borderLeftPx: number
+  borderRightPx: number
+  borderTopPx: number
+  borderBottomPx: number
+  /** inline / inline-block — an inline-block sits its MARGIN BOX on the baseline. */
+  display: string
 }
 
-// doc → its own chrome boxes. WeakMap so a superseded version's boxes are collected with it.
-const byDoc = new WeakMap<PMNode, Map<string, CiteInlineBox>>
-const dbg = { harvested: 0, skippedNoRect: 0, hits: 0, misses: 0, docs: 0, entries: 0 }
+/** The chrome classes whose CSS the composition needs. Version-independent by construction. */
+const SUB: Array<[string, string]> = [
+  ['group', '.node-referenceList .iw-backref-group'],
+  ['arrow', '.node-referenceList .iw-backref-arrow'],
+  ['link', '.node-referenceList .iw-backref-group .iw-cite-link'],
+  ['quote', '.node-referenceList .iw-backref-quote'],
+  ['note', '.node-referenceList .iw-note-add'],
+  ['esp', '.node-referenceList .iw-esp'],
+]
+
+const cache = new Map<string, InlineStyle>()
+const dbg = { harvested: 0, hits: 0, misses: 0, size: 0, keys: [] as string[] }
 if (typeof window !== 'undefined') (window as unknown as { __iwRefChrome?: unknown }).__iwRefChrome = dbg
 
-/**
- * Cached box for this entry's chrome IN THIS DOCUMENT VERSION, or null ⇒ the caller MUST defer the
- * refList. A box harvested from another version is NOT a match — see the key note above.
- */
-export function refChromeBox(doc: PMNode, kind: ChromeKind, citekey: string, basePx: number): CiteInlineBox | null {
-  const m = byDoc.get(doc)
-  const r = m?.get(keyOf(kind, citekey, basePx)) ?? null
+function keyOf(kind: string, basePx: number): string { return `${kind}|${basePx}` }
+
+/** Drop everything — the canonical CONTEXT changed (fonts, page settings, paper, zoom). */
+export function clearRefChrome(): void { cache.clear(); dbg.size = 0; dbg.keys = [] }
+
+/** A harvested sub-style, or null ⇒ the caller MUST defer. Never a guess. */
+export function chromeStyle(kind: string, basePx: number): InlineStyle | null {
+  const r = cache.get(keyOf(kind, basePx)) ?? null
   if (r) dbg.hits++; else dbg.misses++
   return r
 }
 
-/** True when this version's chrome has been harvested at all (used to report WHY we deferred). */
-export function hasRefChrome(doc: PMNode): boolean { return byDoc.has(doc) }
-
-/**
- * Harvest every chrome box in the live bibliography, ATTRIBUTED TO `doc` — the document version
- * currently rendered. MUST run inside the forced canonical context (otherwise the rects are render
- * widths, not canonical ones), from the DOM canonical measure, so it rides that measure's existing
- * layout pass: ~3 getBoundingClientRect per entry, no extra reflow.
- *
- * REPLACES the version's whole set rather than merging: a back-ref's text changes when the pagination
- * moves, and a merge would leave the previous label's box in place under the same key. A stale box
- * is the one thing this cache must not be able to serve.
- *
- * The advance is the MARGIN box (inline margins contribute to the line's advance while
- * getBoundingClientRect returns only the border box — the same correction harvestCiteBox makes for
- * the citation label's `margin: 0 2px`).
- *
- * ⚠ `lineHeightDemand` IS NOT THE ELEMENT'S RECT HEIGHT. The first cut of this module used
- * `getBoundingClientRect().height` — the obvious reading of the engine's "the line-box height this
- * element forces" — and it is WRONG BY 3.42px PER ENTRY, silently. PROVED causally
- * (`reflarrow.prove.mjs`, with the negative firing): an entry measures 49.13px, not the 45.71px its
- * 2 x 22.8528 line-height implies, because `.iw-backref-arrow` sets `font-size: 1.15em` while
- * `.csl-bib-body` sets a UNITLESS `line-height: 1.38` — and a unitless line-height INHERITS AS A
- * RATIO, so the arrow's line box is 16.56 x 1.15 x 1.38 = 26.2807. The group's own rect is 22px
- * (getBoundingClientRect on an inline element returns its text's content box, NOT its line box), so
- * the rect could never have seen the 26.28. Shrinking the arrow to 1em drops the entry to 45.688 —
- * the mechanism, not a coincidence. So the demand is computed from each descendant's OWN computed
- * font-size x its own computed line-height, which is what the browser actually does.
- */
-function lineDemandOf(el: HTMLElement): number {
-  // The line box must fit EVERY inline box on it — so the demand is the max over the subtree.
-  let max = 0
-  const visit = (n: HTMLElement) => {
-    const cs = getComputedStyle(n)
-    if (cs.display === 'inline-block' || cs.display === 'inline-flex') {
-      // ⚠ UNVERIFIED RULE. An inline-block on `vertical-align: baseline` sits its MARGIN BOX on the
-      // baseline, so it demands (box height + the strut's descent) — not its height. The `+` note
-      // button is the only such chrome here and at 17.73px it is DOMINATED by the arrow's 26.28, so
-      // it never binds and this branch is NOT EXERCISED on any real bibliography. It is therefore
-      // measured by nothing: the probe that proved the arrow could not see this rule at all (remove
-      // the button, nothing moves). Left as the box height — the conservative floor — and flagged
-      // here rather than dressed up. If chrome ever appears whose box exceeds the arrow's line, this
-      // is the line that will be wrong, and it must be proved before it is trusted.
-      const r = n.getBoundingClientRect()
-      max = Math.max(max, r.height)
-      return
-    }
-    const fs = parseFloat(cs.fontSize) || 0
-    const lh = parseFloat(cs.lineHeight)
-    // A `normal` line-height has no px value — it is the font's own, which we cannot read here.
-    // Fall back to the element's rect rather than invent a ratio.
-    max = Math.max(max, Number.isFinite(lh) ? lh : (fs > 0 ? n.getBoundingClientRect().height : 0))
-    for (const c of Array.from(n.children)) visit(c as HTMLElement)
+function readInline(el: HTMLElement): InlineStyle | null {
+  const cs = getComputedStyle(el)
+  const fontSizePx = parseFloat(cs.fontSize)
+  if (!(fontSizePx > 0)) return null
+  const lh = parseFloat(cs.lineHeight)
+  return {
+    fontFamily: cs.fontFamily,
+    fontSizePx,
+    fontWeight: parseInt(cs.fontWeight, 10) || 400,
+    italic: cs.fontStyle === 'italic',
+    // A `normal` line-height has no px value. We cannot read the font's own here, and inventing a
+    // ratio is the guess this module exists to avoid — so refuse, and let the caller defer.
+    lineHeightPx: Number.isFinite(lh) ? lh : NaN,
+    marginLeftPx: parseFloat(cs.marginLeft) || 0,
+    marginRightPx: parseFloat(cs.marginRight) || 0,
+    paddingLeftPx: parseFloat(cs.paddingLeft) || 0,
+    paddingRightPx: parseFloat(cs.paddingRight) || 0,
+    borderLeftPx: parseFloat(cs.borderLeftWidth) || 0,
+    borderRightPx: parseFloat(cs.borderRightWidth) || 0,
+    borderTopPx: parseFloat(cs.borderTopWidth) || 0,
+    borderBottomPx: parseFloat(cs.borderBottomWidth) || 0,
+    display: cs.display,
   }
-  visit(el)
-  return max
 }
 
-export function harvestRefChromes(root: HTMLElement, doc: PMNode, basePx: number): void {
-  const entries = root.querySelectorAll<HTMLElement>('.node-referenceList .iw-bib-entry')
-  if (!entries.length) return // nothing rendered (unhydrated / no citations) ⇒ leave it unharvested
-  const m = new Map<string, CiteInlineBox>()
-  const sel: Array<[string, ChromeKind]> = [
-    ['.iw-backref-group', 'backref'],
-    ['.iw-esp', 'esp'],
-    ['.iw-note-add', 'note'],
-  ]
-  let n = 0
-  entries.forEach(entry => {
-    // The entry's citekey comes from the anchor id the NodeView injected (`iwbib-<key>`) — the same
-    // id the renderer holds from bibFormat, so harvest and lookup name the entry identically.
-    const anchor = entry.querySelector('[id^="iwbib-"]')
-    const citekey = anchor ? anchor.id.slice('iwbib-'.length) : ''
-    if (!citekey) return
-    n++
-    for (const [s, kind] of sel) {
-      const el = entry.querySelector<HTMLElement>(s)
-      if (!el) continue // this entry has no esp / no back-refs — a real absence, not a miss
-      const r = el.getBoundingClientRect()
-      if (!(r.width > 0) || !(r.height > 0)) { dbg.skippedNoRect++; continue }
-      const cs = getComputedStyle(el)
-      const advanceWidth = r.width + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0)
-      m.set(keyOf(kind, citekey, basePx), { advanceWidth, lineHeightDemand: lineDemandOf(el) })
-      dbg.harvested++
+/**
+ * Harvest the chrome sub-styles from the REAL rendered bibliography. Call from inside the DOM
+ * canonical measure, beside harvestCiteBoxes/harvestBlockStyles — one getComputedStyle per distinct
+ * class, not per entry.
+ *
+ * Only classes PRESENT in the live DOM are harvested (an entry with no `esp` leaves `esp`
+ * unharvested); an absent class stays absent ⇒ any entry needing it defers, rather than being
+ * synthesised from a fabricated element.
+ */
+export function harvestRefChromeStyles(root: HTMLElement, basePx: number): void {
+  for (const [kind, sel] of SUB) {
+    const key = keyOf(kind, basePx)
+    if (cache.has(key)) continue
+    let el: HTMLElement | null = null
+    try { el = root.querySelector(sel) as HTMLElement | null } catch { el = null }
+    if (!el) continue
+    if (!el.getClientRects().length) continue // no box (display:none / not laid out) ⇒ defer
+    const s = readInline(el)
+    if (!s || !Number.isFinite(s.lineHeightPx)) continue
+    cache.set(key, s)
+    dbg.harvested++; dbg.size = cache.size
+    if (!dbg.keys.includes(kind)) dbg.keys.push(kind)
+  }
+}
+
+/** One back-reference mark: its label ("4", "5.1") and the first-few-words quote preview, if any. */
+export interface BackrefMark { label: string; quote: string }
+
+/**
+ * Compose the back-ref group's box ARITHMETICALLY from the harvested sub-styles.
+ *
+ * Mirrors `backrefHtml`'s structure exactly — that shape is the contract:
+ *   <span .iw-backref-group><span .iw-backref-arrow>↩</span> MARK MARK …</span>
+ *   MARK = <a .iw-cite-link>LABEL[ <span .iw-backref-quote>WORDS…</span>]</a>
+ *
+ * ⚠ RETURNS THE GROUP'S TOTAL ADVANCE — i.e. the width it would occupy IF it were unbreakable. It is
+ * NOT. See the refusal at the top of this file: the group's `nowrap` is dead, it wraps, and a group
+ * can exceed the column. So this value is CORRECT ARITHMETIC for a group that happens to fit on one
+ * line (proved to 0.055px) and is the right sum to build a RUNS model out of — but it MUST NOT be
+ * handed to the engine as an atom `box`, or every wrapping group silently claims one line it does
+ * not have. Wiring this in as-is is the bug this comment exists to prevent.
+ *
+ * Returns null when any sub-style it needs is unharvested ⇒ the caller DEFERS the refList.
+ */
+export function backrefBox(marks: readonly BackrefMark[], measure: Measure, basePx: number): CiteInlineBox | null {
+  if (!marks.length) return { advanceWidth: 0, lineHeightDemand: 0 } // no back-refs ⇒ no box, a real answer
+  const group = chromeStyle('group', basePx)
+  const arrow = chromeStyle('arrow', basePx)
+  const link = chromeStyle('link', basePx)
+  if (!group || !arrow || !link) return null
+  const quoteNeeded = marks.some(m => m.quote)
+  const quote = quoteNeeded ? chromeStyle('quote', basePx) : null
+  if (quoteNeeded && !quote) return null
+
+  const groupFont = cssFontOf(group)
+  const arrowFont = cssFontOf(arrow)
+  const linkFont = cssFontOf(link)
+  const spaceW = measure(' ', groupFont)
+
+  let w = group.marginLeftPx + group.marginRightPx
+  w += measure('↩', arrowFont)
+  w += spaceW // the literal space after the arrow span
+  marks.forEach((m, i) => {
+    w += link.marginLeftPx + link.borderLeftPx + link.paddingLeftPx
+    w += measure(m.label, linkFont)
+    if (m.quote && quote) {
+      // The preview is INSIDE the <a>: a space in the link's font, then the quote span's own face.
+      w += measure(' ', linkFont)
+      w += measure(`${m.quote}…`, cssFontOf(quote))
     }
+    w += link.paddingRightPx + link.borderRightPx + link.marginRightPx
+    if (i < marks.length - 1) w += spaceW // marks.join(' ')
   })
-  byDoc.set(doc, m)
-  dbg.docs++; dbg.entries = n
+
+  // The line box must fit EVERY inline box on it — the max, not the sum. This is where the arrow's
+  // 1.15em x unitless 1.38 = 26.2807 enters, and it is the whole reason an entry is 49.13 not 45.71.
+  let demand = Math.max(group.lineHeightPx, arrow.lineHeightPx, link.lineHeightPx)
+  if (quote) demand = Math.max(demand, quote.lineHeightPx)
+  return { advanceWidth: w, lineHeightDemand: demand }
+}
+
+/**
+ * The `+`/`✎` note button's box. An inline-block `<button>`: its margin box sits ON the baseline.
+ *
+ * ⚠ THE DEMAND HERE IS A CONSERVATIVE FLOOR AND IS NOT PROVED. A baseline-aligned inline-block
+ * demands (its box height + the strut's descent below the baseline), not its height — but at 17.73px
+ * it is DOMINATED by the arrow's 26.28 on every real entry, so it never binds and no probe can see
+ * the rule (remove the button: nothing moves — measured). It is left as the box height and flagged
+ * here rather than dressed up. If chrome ever appears whose box exceeds the arrow's line, THIS is
+ * the line that will be wrong; prove it before trusting it.
+ *
+ * The box height itself IS verified arithmetic: borderTop + borderBottom + fontSize x line-height(1)
+ * = 1 + 1 + 15.732 = 17.73, matching the measured rect exactly.
+ */
+export function noteBox(glyph: string, measure: Measure, basePx: number): CiteInlineBox | null {
+  const note = chromeStyle('note', basePx)
+  if (!note) return null
+  const w = note.marginLeftPx + note.borderLeftPx + note.paddingLeftPx
+    + measure(glyph, cssFontOf(note))
+    + note.paddingRightPx + note.borderRightPx + note.marginRightPx
+  const h = note.borderTopPx + note.borderBottomPx + note.lineHeightPx
+  return { advanceWidth: w, lineHeightDemand: h }
 }
