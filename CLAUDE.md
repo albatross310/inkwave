@@ -1182,7 +1182,16 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
   question, only one live, docs pointing at the dead one. **Do not reintroduce a deny-list** (compile.ts's
   banner has the argument: it fails the opposite way, and that failure is silent); name new columns in
   compile.ts instead. `/privacy` MUST stay in sync and MUST name the guard that is real.
-- **`doc_label` IS TIER 1 (ungated) AND ITS §A3.2 SUPPRESSION IS UNREACHABLE — Peter's call, raised 2026-07-17.**
+- **`doc_label` IS TIER 1 (ungated); its §A3.2 suppression is now REACHABLE (2026-07-17).** `/ledger` has a
+  **Titles** section listing every document the month recorded, with a per-doc Hide/Record toggle wired to
+  `setLabelSuppressed` — which until now had ZERO non-test callers, so the mechanism was live and nothing
+  could turn it on. It changes what FUTURE sessions record: rows already written sit inside an attested
+  daily block, and silently rewriting history is the one thing the ledger exists to make impossible.
+  STILL OPEN (Peter's call, proposal with the lane's report): the sharp case is the EXPORT, not the local
+  file — the ledger never leaves the device, so the disclosure happens at §A7.3's tick-box. Proposed there:
+  a per-document **pseudonym** ("Document 1") rather than dropping the label, which keeps §B1's "40m on
+  email" readable while the title stays home. That screen is prod-ai-report's; not built unilaterally.
+  THE ORIGINAL FINDING, kept for the argument:
   `isLabelSuppressed` is wired into capture.ts's close path, but `setLabelSuppressed` has ZERO non-test
   callers: no UI turns it on, so in practice EVERY title travels to the AI in tier 1. A title is
   writer-authored prose, so compile.ts's tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
@@ -1193,8 +1202,39 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
   §A3.2 asks for per-doc suppression. **The missing control is a real gap; placement is a consent decision.**
 - **§A5 is a hard constraint:** kind, non-shaming, no scoring. The day summary leads with TIME and SESSIONS;
   a cutting day reads "editing is writing too". Nothing here may grow a red number.
-- NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo
-  has no encryption layer for ANY document (spec §C2 assumes one), so the ledger inherits the same posture.
+- **CLOUD SYNC IS WIRED (2026-07-17) — `ledgerSync.ts` + `ledgerRemotes.ts`, and it is shaped by the
+  2026-07-15 blind overwrite.** The ledger is its OWN file beside the .studio (`inkwave-ledger-2026-07.json`),
+  never inside it (the .studio is per-document; the ledger spans all of them). READ-MERGE-WRITE, always:
+  - **A FAILED READ IS NOT AN EMPTY REMOTE.** `RemoteRead` is a discriminated union with NO `null` member —
+    'absent' (safe to write) and 'error' (never write) are different words and the type system enforces it.
+    That distinction IS the 2026-07-15 bug. Malformed/truncated JSON and a wrong-month file are ERRORS, not
+    empty ledgers. MUTATION-PROVED: treating 'error' as empty kills exactly the "FAILED READ WRITES NOTHING"
+    test; writing local instead of the union kills 5.
+  - **NO ONCE-PER-SESSION MERGE GATE.** `syncToOneDrive` merges the remote's snapshots once per session
+    because re-reading a 20MB .studio per save is real lag. A month of rows is tens of KB, so the ledger
+    takes the safe path on EVERY write. The file's cheapness buys the stronger invariant — don't copy the gate.
+  - `mergeIntoLocalLedger` re-reads local INSIDE the per-month write chain (the read-to-write gap is where a
+    blind overwrite lives); a row queued mid-sync is pinned by a test.
+  - Sync is debounced + single-flight, runs only at session boundaries, and is **DYNAMICALLY imported**
+    (`ledgerRemotes-*.js`, 4KB) — PROBED in the real browser: 0 requests on the editor's load, >0 after a
+    close (the known-positive, so "never fetched" can't be a blind detector reporting success).
+  - ONEDRIVE is the only adapter (the live provider). Drive/folder take the same `LedgerRemote` shape and are
+    deliberately NOT written blind — an absent-vs-error mapping never exercised against the real API is the
+    guess that becomes a blind overwrite. **STATED, NOT PROBED: Graph 404 ⇒ absent.** It fails SAFE (a wrong
+    mapping means sync never starts, never that data is lost), but it needs Peter's account to confirm live.
+- **F5 (test auditor) FIXED BEFORE IT WENT LIVE:** `mergeLedgers` returned `attestations: []` — harmless
+  while unwired, a proof-shredder the moment sync called it (every write-back would drop both devices'
+  Bitcoin anchors and re-stamp the month). It now offers BOTH sides' proofs to `buildAttestations`, which
+  keeps one only where it still attests the recomputed block, preferring the strongest (confirmed > pending).
+  Mutation-proved: the original bug restored verbatim kills 3 tests.
+- **`doc_type` DEFAULTS TO 'essay' — DECIDED (2026-07-17), and there will be no heuristic.** Nothing in the
+  document model distinguishes a note from an essay, and inventing a rule (length? title?) is the
+  vibes-as-numbers §A6.1 forbids for a measured field. Inkwave's documents ARE prose documents, so 'essay' is
+  the honest default and the email layer's explicit `docType: 'email'` — the one distinction any feature
+  actually reads (§B1's "40m on email") — flows through untouched. If note-vs-essay ever earns a feature it
+  needs a field the WRITER sets, like the email lane's, never a guess.
+- NOT wired: at-rest ENCRYPTION — the repo has no encryption layer for ANY document (spec §C2 assumes one),
+  so the ledger inherits the same posture. Google Drive / local-folder ledger adapters.
 
 ## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
 

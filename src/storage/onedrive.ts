@@ -183,6 +183,45 @@ async function putFile(token: string, name: string, content: string): Promise<st
   return (data as { webUrl?: string }).webUrl ?? null
 }
 
+// ─── Generic small-file access (the productivity ledger; NOT the .studio) ─────
+// The ledger is its own small JSON file beside the .studio. These two exports are deliberately
+// dumb: they move bytes and REPORT WHAT HAPPENED. In particular a 404 (the file does not exist yet)
+// is a DIFFERENT answer from a failure, and the caller must be able to tell them apart — treating
+// "I couldn't read it" as "there's nothing there" is precisely the 2026-07-15 blind overwrite.
+
+export type OneDriveReadResult =
+  | { status: 'ok'; text: string }
+  | { status: 'absent' }
+  | { status: 'error'; reason: string }
+
+/** Read a small file by name from the chosen folder. Never throws; never conflates absent with failed. */
+export async function readOneDriveText(name: string): Promise<OneDriveReadResult> {
+  if (!CLIENT_ID) return { status: 'error', reason: 'OneDrive not configured' }
+  const token = await getSilentToken()
+  if (!token) return { status: 'error', reason: 'not signed in' }
+  try {
+    const res = await fetch(contentUrl(name), { headers: { Authorization: `Bearer ${token}` } })
+    if (res.status === 404) return { status: 'absent' }
+    if (!res.ok) return { status: 'error', reason: `Graph GET ${res.status}` }
+    return { status: 'ok', text: await res.text() }
+  } catch (e) {
+    return { status: 'error', reason: `network: ${(e as Error).message}` }
+  }
+}
+
+/** Write a small file by name into the chosen folder. False on any failure (caller keeps local). */
+export async function writeOneDriveText(name: string, text: string): Promise<boolean> {
+  if (!CLIENT_ID) return false
+  const token = await getSilentToken()
+  if (!token) return false
+  try {
+    await putFile(token, name, text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // The Graph metadata URL for the synced file (same addressing as contentUrl, minus `:/content`).
 function itemUrl(name: string): string {
   const folder = getChosenFolder()

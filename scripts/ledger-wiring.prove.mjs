@@ -90,7 +90,8 @@ async function run(flagOn) {
   const ctx = await browser.newContext()
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.log('  [pageerror]', String(e).slice(0, 200)))
-  page.on('request', (r) => { if (/flags-|TiptapEditor-/.test(r.url())) console.log('  [req]', r.url().split('/').pop()) })
+  const fetched = []
+  page.on('request', (r) => { fetched.push(r.url().split('/').pop()) })
   page.on('requestfailed', (r) => console.log('  [reqfail]', r.url().split('/').pop(), r.failure()?.errorText))
   page.on('console', (m) => { if (/ledger|error|fail/i.test(m.text())) console.log('  [console]', m.text().slice(0, 200)) })
   // Set the flag BEFORE any app code runs — it is cached in a module variable on first read.
@@ -117,6 +118,12 @@ async function run(flagOn) {
   console.log(`  [typed] ${JSON.stringify(typed.slice(0, 60))}`)
   console.log(`  [flag]  ${await page.evaluate(() => localStorage.getItem('inkwave:prodLedger'))}`)
 
+  // THE LOAD-PATH CLAIM, asked of the browser rather than asserted: the sync + provider adapters
+  // must not ride the editor's load. A separate chunk FILE is not evidence — only "the browser
+  // never asked for it" is. Sampled AFTER typing and BEFORE any close, which is exactly the window
+  // in which a writer who never ends a session pays for sync code they never used.
+  const syncChunkOnLoad = fetched.filter((f) => /^ledgerRemotes-/.test(f))
+
   // Did the tap SEE the edit stream? This is the wiring question, asked directly.
   const tap = await page.evaluate(() => {
     const l = window.__iwLedger
@@ -127,10 +134,14 @@ async function run(flagOn) {
   // Close at a real boundary + flush the debounced write.
   await page.evaluate(async () => { await window.__iwLedger?.close('exit') })
   await sleep(1500)
+  // KNOWN-POSITIVE for the check above: closing a session DOES pull the chunk in. Without this, a
+  // broken request listener would report "never fetched" and read as success.
+  const syncChunkAfterClose = fetched.filter((f) => /^ledgerRemotes-/.test(f))
+  console.log(`  [chunk] ledgerRemotes on load: ${syncChunkOnLoad.length} | after close: ${syncChunkAfterClose.length}`)
 
   const res = await readLedgerFromOpfs(page)
   await browser.close()
-  return res
+  return { ...res, syncChunkOnLoad: syncChunkOnLoad.length, syncChunkAfterClose: syncChunkAfterClose.length }
 }
 
 const fail = (msg) => { console.error(`\n✗ ${msg}`); stopServer(); process.exit(1) }
@@ -170,6 +181,8 @@ const checks = [
   ['session_id present', typeof r.session_id === 'string' && r.session_id.length > 0],
   ['attested: one daily block with a hash', (on.ledger.attestations ?? []).length === 1 && !!on.ledger.attestations[0].blockHash],
   ['block rowHashes match row count', on.ledger.attestations?.[0]?.rowHashes?.length === rows.length],
+  ['sync chunk is NOT on the editor load path', on.syncChunkOnLoad === 0],
+  ['...and the detector CAN see it — it arrives on close (known-positive)', on.syncChunkAfterClose > 0],
 ]
 let bad = 0
 for (const [label, ok] of checks) { console.log(`${ok ? '✓' : '✗'} ${label}`); if (!ok) bad++ }

@@ -4,6 +4,7 @@
 // most — GROW-ONLY merge and the attestation chain — are unit-testable without a disk.
 
 import { hashCanonical } from '../provenance/hash'
+import type { OtsProofState } from '../types/document'
 import type { LedgerAttestation, MonthLedger, SessionRow } from './types'
 import { localDayOf } from './sessionLogic'
 
@@ -63,9 +64,22 @@ function winsOver(next: SessionRow, prev: SessionRow): boolean {
 
 const annotationScore = (r: SessionRow): number => (r.note ? 1 : 0) + (r.place ? 1 : 0)
 
-/** Union a whole ledger with another copy of the same month (the write-back path). */
-export function mergeLedgers(target: MonthLedger, local: MonthLedger): MonthLedger {
-  return { v: 1, month: local.month, rows: mergeLedgerRows(target.rows, local.rows), attestations: [] }
+/**
+ * Union two copies of the SAME month — the write-back path (cloud sync, another device's file).
+ *
+ * F5 (test auditor, 2026-07-17): this returned `attestations: []`. Harmless only while nothing
+ * called it — a PROOF-SHREDDER the moment sync wired it up, because every write-back would have
+ * dropped every Bitcoin anchor both devices held and silently re-stamped the month. Fixed before
+ * wiring, not after.
+ *
+ * Proofs from BOTH sides are offered to `buildAttestations`, which keeps one only where it still
+ * attests the recomputed block. So a day the remote anchored and this device never saw arrives
+ * WITH its proof intact; a day whose rows actually changed correctly loses its stale one.
+ */
+export async function mergeLedgers(a: MonthLedger, b: MonthLedger): Promise<MonthLedger> {
+  const month = a.month || b.month
+  const rows = mergeLedgerRows(a.rows, b.rows)
+  return { v: 1, month, rows, attestations: await buildAttestations(month, rows, [...a.attestations, ...b.attestations]) }
 }
 
 // ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
@@ -81,6 +95,10 @@ export function mergeLedgers(target: MonthLedger, local: MonthLedger): MonthLedg
  * unchanged, so an anchored day survives appends to OTHER days (the multi-device case), while a day
  * that gained or lost a row correctly loses its stale anchor — the old proof attests content that
  * block no longer has.
+ *
+ * `existing` MAY carry several candidates for one day (a merge offers both devices' copies). The
+ * strongest STILL-VALID proof wins: a Bitcoin-confirmed anchor from either device outranks a
+ * pending one, and neither can be dropped merely for arriving second in the array.
  */
 export async function buildAttestations(
   month: string,
@@ -94,25 +112,27 @@ export async function buildAttestations(
     if (list) list.push(r)
     else byDay.set(day, [r])
   }
-  const priorByDay = new Map(existing.map((a) => [a.day, a]))
+  const priorByDay = new Map<string, LedgerAttestation[]>()
+  for (const a of existing) {
+    const list = priorByDay.get(a.day)
+    if (list) list.push(a)
+    else priorByDay.set(a.day, [a])
+  }
 
   const out: LedgerAttestation[] = []
   for (const day of [...byDay.keys()].sort()) {
     const rowHashes = await Promise.all(byDay.get(day)!.map((r) => hashCanonical(r)))
     // Bound to month + day: a block cannot be lifted into another month or another date.
     const blockHash = await hashCanonical({ v: 1, month, day, rowHashes })
-    const prior = priorByDay.get(day)
-    out.push({
-      v: 1,
-      day,
-      rowHashes,
-      blockHash,
-      // Carry the proof ONLY if it attests this exact block; otherwise the day is unstamped again.
-      ots: prior && prior.blockHash === blockHash ? prior.ots : { status: 'unstamped' },
-    })
+    // Carry a proof ONLY if it attests this exact block; otherwise the day is unstamped again.
+    const valid = (priorByDay.get(day) ?? []).filter((p) => p.blockHash === blockHash)
+    const best = valid.sort((x, y) => otsRank(y.ots.status) - otsRank(x.ots.status))[0]
+    out.push({ v: 1, day, rowHashes, blockHash, ots: best ? best.ots : { status: 'unstamped' } })
   }
   return out
 }
+
+const otsRank = (s: OtsProofState['status']): number => (s === 'confirmed' ? 2 : s === 'pending' ? 1 : 0)
 
 /** Rebuild `attestations` from `rows` (preserving still-valid OTS proofs). The write path's last step. */
 export async function attestLedger(l: MonthLedger): Promise<MonthLedger> {

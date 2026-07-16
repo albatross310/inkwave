@@ -271,10 +271,27 @@ export class SessionCapture {
     await this.closeDraft(d, reason)
   }
 
-  /** Close + flush every buffered write (idle / exit / save). */
+  /** Close + flush every buffered write (idle / exit / save), then queue a cloud sync. */
   async closeAndFlush(reason: CloseReason): Promise<void> {
     await this.close(reason)
     await flushLedgerNow()
+    this.queueSync()
+  }
+
+  /**
+   * Ask for a debounced ledger sync of the current month.
+   *
+   * DYNAMICALLY IMPORTED on purpose: the sync + provider adapters must not ride the editor's load
+   * path just because capture.ts does. Chunking is not laziness (a lane shipped 16KB gzip onto
+   * every writer's load while claiming zero cost) — an `import()` behind a runtime boundary is.
+   * Fire-and-forget: a sync failure must never surface as a broken close.
+   */
+  private queueSync(): void {
+    if (typeof window === 'undefined') return
+    const month = this.monthForNow()
+    void import('./ledgerRemotes')
+      .then((m) => m.syncLedgerSoon([month]))
+      .catch(() => { /* offline / no provider — the rows are safe locally */ })
   }
 
   private async closeDraft(d: SessionDraft, _reason: CloseReason): Promise<void> {
