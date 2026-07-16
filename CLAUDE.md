@@ -1899,6 +1899,18 @@ write shim, so metadata can say a PDF exists with no local bytes).
 
 ## Working model (how these sessions run)
 
+**NAME THE FEATURE, EVERY TIME (Peter, 2026-07-17 — a standing reporting rule).** He runs many lanes
+at once and intends to keep parallelising aggressively, so a report that says "the model diverges" or
+"the signature was stale" is unreadable: he cannot know which of a dozen in-flight features it means.
+His words: *"you're gonna have to contextualise which feature you're discussing a bit more going
+forward as I intend to keep aggressively parallising."* So every finding reported to him must open by
+naming (a) the FEATURE in his words, not the module's ("the fast snapshot scrubbing", not
+"`buildRenderModel`"), and (b) **the blast radius — is this live, or behind a default-OFF flag?**
+That second half matters most: nearly everything built in these sessions ships dark, so "wrong words
+on a page" in an unreleased renderer and "wrong words on a page" in his thesis are the same sentence
+and utterly different news. Say which. The same applies to agent briefs — an agent that doesn't know
+which user-visible thing it serves optimises the wrong axis.
+
 Peter tests live on iPhone + desktop and reports in batches; work is delegated to parallel
 isolated-worktree agents with precise briefs (root-cause first, no half-fixes), merged serially into
 master from `/root/dev/Inkwave-perf` (Peter's own sessions use `/root/dev/Inkwave` — NEVER share a
