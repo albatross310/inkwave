@@ -681,11 +681,39 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     the whole-document claim COLLAPSING when the truth was that it queried a key it had thrown away.
     Now it asks the MOST-RECENTLY-USED version (LRU-guaranteed resident) and carries `refId`/
     `refResident` so a null can never be read as a zero: `pagesPerVersion` 0 → **58**.
-    **NEWLY VISIBLE, UNATTRIBUTED — do not assume it is benign:** with the artifact gone,
-    `lastPageReachableByContent` is STILL false for a REAL reason (lastPos → page 16 of an 18-page
-    model, two pages of slack). PROBED that it is **NOT the refList** (identical with `refList:false`),
-    and `unreliableVersions` is all-versions either way. It sits in textRender's model semantics and
-    wants attribution by that lane — it was invisible until now.
+    **ATTRIBUTED AND FIXED (2026-07-17, `tail.prove.mjs`) — it was TWO faults stacked, and the
+    refList WAS involved after all.** The handoff said "PROBED that it is NOT the refList (identical
+    with refList:false)"; measured directly, that is **wrong** — refList:true → pageOfLast 56 vs
+    lastPageIdx 57 = UNREACHABLE; refList:false → 56 vs 56 = REACHABLE. Both faults are real:
+    (1) **THE MODEL BUG — a LEAF ATOM's line claimed the position AFTER itself.** Every placeholder
+        block pushed `pos: offset + 1`, which is right for a normal block (content starts past the
+        opening token) and WRONG for a leaf atom (`referenceList`, `mathBlock`, `horizontalRule`):
+        `nodeSize === 1`, so it occupies exactly `[offset, offset+1)` and `offset+1` is the position
+        AFTER it — the next block's start, or (trailing) the doc end. MEASURED: refList at
+        start=122267 end=122268 took line pos **122268 = doc.content.size**, so
+        `pageContainingPos(122267)` — the refList's OWN position — returned page 56 while it rendered
+        on 57. FIXED: `blockFirstLinePos(node, offset)` = `node.isLeaf ? offset : offset + 1`.
+        **Breaks are byte-unchanged against the LIVE EDITOR** (`breaks.prove.mjs`
+        [2403,4856,7205,9476,…] IDENTICAL) — this moves what a position MEANS, not where pages fall.
+    (2) **THE PROBE ASKED THE WRONG POSITION.** `lastPos = doc.content.size - 2` lands INSIDE the
+        second-to-last block whenever the doc ends in a leaf atom, and correctly resolves to the
+        second-to-last page — so the assertion read "last page unreachable" while measuring a
+        different page. Now asks the LAST BLOCK's own position, derived from the DOC
+        (`doc.content.size - doc.lastChild.nodeSize`), not the model.
+    **WHY THE SELF-CONSISTENCY CHECKS COULD NOT SEE IT** (`pagesAgreesWithWalk`, `maxPageOfLine ===
+    pages-1`, `pageTopLen === pages` all PASSED, and `emptyPages` was `[]`): every one of them is
+    derived from the SAME line list, so they agree with each other perfectly. The error was in what a
+    line's pos MEANS. Nothing built from the line list can check that — only a query from OUTSIDE
+    ("which page holds this doc position?") can, which is exactly the seam RichDiffView and the
+    content anchor use. **THE SHAPE TO REMEMBER: when a bug survives every self-consistency check,
+    stop adding checks derived from the same structure and ask it from outside.**
+    LIVE KNOWN-NEGATIVE: `window.__iwAtomPos='legacy'` restores the bug; `tail.prove.mjs` reproduces
+    it (legacy 56/UNREACHABLE → fixed 57/REACHABLE) before reading any verdict, and VOIDS where the
+    fixture's tail is not a leaf atom so the rules structurally cannot differ. It caught a real
+    tooling failure doing so: the negative "did not fire" purely because the flag had been added but
+    NOT REBUILT — the served chunk was the previous bundle, and the probe's own build check only
+    asserted `tailProof` existed (it did, from the older build). **Assert the served chunk carries the
+    thing you just changed, not merely that the probe surface exists.**
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
 

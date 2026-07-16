@@ -118,6 +118,40 @@ export interface RenderModel {
 // A placeholder's height when the node declares none. This IS a guess; `estimated` flags it.
 const PLACEHOLDER_FALLBACK_H = 120
 
+/**
+ * THE DOC POSITION A BLOCK'S FIRST LINE SITS AT — and the one place a LEAF ATOM differs.
+ *
+ * For a normal block (paragraph, heading, listItem, bulletList…) the content starts at `offset + 1`
+ * (past the opening token), which is what every line's pos is built from.
+ *
+ * A LEAF ATOM (`referenceList`, `mathBlock`, `horizontalRule`) has NO content and `nodeSize === 1`:
+ * it occupies exactly `[offset, offset + 1)`. So `offset + 1` is not "inside" it — it is the position
+ * AFTER it, which belongs to the next block (or, for a trailing atom, is the doc end). Giving an
+ * atom's line `offset + 1` makes it claim a position it does not own, and leaves its OWN position
+ * pointing at the previous block's page.
+ *
+ * MEASURED (tail.prove.mjs, thesis-shape, real app): the trailing `referenceList` at start=122267
+ * end=122268 got line pos 122268 = doc.content.size, so `pageContainingPos(122267)` — the refList's
+ * own position — returned page 56 while the refList rendered on page 57. That is
+ * `lastPageReachableByContent: false`, and with `refList:false` the same fixture reports TRUE.
+ *
+ * WHY THE SELF-CONSISTENCY CHECKS COULD NOT SEE IT: `pageOfLine`, `pageTop` and the page walk are
+ * all built from the SAME line list, so they agree with each other perfectly — every page has a
+ * line, `maxPageOfLine === pages-1`, `pageTopLen === pages`, `pos` is monotonic. The error is in
+ * what a line's pos MEANS, and nothing that derives from the line list can check that. Only a query
+ * from OUTSIDE — "which page holds this doc position?" — can, which is exactly the seam
+ * RichDiffView and the content anchor both use.
+ *
+ * THE LIVE KNOWN-NEGATIVE: `window.__iwAtomPos = 'legacy'` restores the bug (every block gets
+ * `offset + 1`). A probe asserting the fix MUST reproduce the failure through this before its pass
+ * means anything — the round-11 `__iwAnchorRule='scrolltop'` pattern. Reading it costs one property
+ * check per placeholder block, off any input path.
+ */
+const blockFirstLinePos = (node: PMNode, offset: number): number => {
+  if (typeof window !== 'undefined' && (window as unknown as { __iwAtomPos?: string }).__iwAtomPos === 'legacy') return offset + 1
+  return node.isLeaf ? offset : offset + 1
+}
+
 // ─── Line-rect tone calibration (MEASURED 2026-07-16, not chosen) ─────────────────────────────
 // A line drawn as a solid bar is far darker than the text it stands for, and at map scale tone IS
 // the signal — the eye reads a page thumbnail as grey texture, so getting the density wrong makes
@@ -389,7 +423,7 @@ export function buildRenderModel(
       // break below it.
       const h = snappedLineHeight(geom.basePx * 1.5, geom.ratio)
       blocks.push({ kind: 'placeholder', type: 'heading', start: offset, end: offset + node.nodeSize, top, height: h, label: `heading ${lvl}`, estimated: true })
-      lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+      lines.push({ top, height: h, blockIdx: bi, pos: blockFirstLinePos(node, offset), startChar: 0, endChar: 0, segs: [] })
       top += h + marginBottom
       bump(`placeholder:heading:${lvl}`)
       return
@@ -439,7 +473,7 @@ export function buildRenderModel(
       }
       const h = PLACEHOLDER_FALLBACK_H
       blocks.push({ kind: 'placeholder', type: node.type.name, start: offset, end: offset + node.nodeSize, top, height: h, label: 'list', estimated: true })
-      lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+      lines.push({ top, height: h, blockIdx: bi, pos: blockFirstLinePos(node, offset), startChar: 0, endChar: 0, segs: [] })
       top += h + marginBottom
       bump(`placeholder:${node.type.name}`)
       return
@@ -474,7 +508,7 @@ export function buildRenderModel(
       // Ineligible paragraph → placeholder (never guessed text).
       const h = snappedLineHeight(geom.basePx, geom.ratio)
       blocks.push({ kind: 'placeholder', type: 'paragraph', start: offset, end: offset + node.nodeSize, top, height: h, label: 'text (deferred)', estimated: true })
-      lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+      lines.push({ top, height: h, blockIdx: bi, pos: blockFirstLinePos(node, offset), startChar: 0, endChar: 0, segs: [] })
       top += h + marginBottom
       return
     }
@@ -487,7 +521,7 @@ export function buildRenderModel(
       kind: 'placeholder', type: node.type.name, start: offset, end: offset + node.nodeSize,
       top, height: h, label, estimated: declaredH === null,
     })
-    lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+    lines.push({ top, height: h, blockIdx: bi, pos: blockFirstLinePos(node, offset), startChar: 0, endChar: 0, segs: [] })
     top += h + marginBottom
     bump(`placeholder:${node.type.name}`)
   })

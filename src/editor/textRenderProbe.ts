@@ -146,6 +146,13 @@ export interface ProbeApi {
   /** Per-block line counts: truth vs the old whole-block rect path vs the collapsed path. Measures
    *  the PHANTOM LINE itself, so it sees the artifact whether or not a break happens to land on it. */
   lineCountAudit(): Record<string, unknown>
+  /** WHY IS THE LAST PAGE UNREACHABLE BY CONTENT? Dumps the model's TAIL — the per-page line
+   *  histogram (an EMPTY page is a page no position can map into), the last blocks/lines, and the
+   *  page every candidate tail position resolves to. Diagnostic only: it asserts nothing, it shows
+   *  the structure, because the self-consistency checks (pagesAgreesWithWalk, maxPageOfLine ==
+   *  pages-1, pageTopLen == pages) all PASS while the bug survives — so the answer is somewhere
+   *  those three cannot look. */
+  tailProof(): Record<string, unknown>
   // ── OPFS BREAK-TABLE ROUND TRIP (2026-07-17) ───────────────────────────────────────────────
   // The persistence layer had ZERO CALLERS and had never executed once. These are the first, and
   // they exist to make it EXECUTE against real OPFS through storage/opfsWrite.ts, across a real
@@ -744,6 +751,60 @@ export function installTextRenderProbe(editor: Editor): void {
       return { reused: !!t, staleCounted: after - before, realSig: real, wrongSig: wrong }
     },
 
+    tailProof() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const m = buildRenderModel(doc, g, makeCanvasMeasure(), fontLoaded, buildOpts())
+      // Per-page line counts. A page with ZERO lines is a page NO doc position can resolve to —
+      // pageContainingPos returns pageOfLine[someLine], so a page owning no line is unreachable by
+      // construction, no matter how healthy `pages`/`pageTop` look.
+      const perPage: number[] = new Array(m.pages).fill(0)
+      for (const p of m.pageOfLine) if (p >= 0 && p < m.pages) perPage[p]++
+      const emptyPages: number[] = []
+      for (let i = 0; i < m.pages; i++) if (perPage[i] === 0) emptyPages.push(i)
+      let maxPageOfLine = -1
+      for (const p of m.pageOfLine) if (p > maxPageOfLine) maxPageOfLine = p
+      let maxPos = -1
+      for (const l of m.lines) if (l.pos > maxPos) maxPos = l.pos
+      // Is pos monotonic? pageContainingPos BINARY-SEARCHES it; if it is not sorted the search is
+      // meaningless and would fail in exactly this quiet way.
+      let nonMonotonic = 0, firstNonMono = -1
+      for (let i = 1; i < m.lines.length; i++) {
+        if (m.lines[i].pos < m.lines[i - 1].pos) { nonMonotonic++; if (firstNonMono < 0) firstNonMono = i }
+      }
+      const tailLines = m.lines.slice(-8).map((l, k) => ({
+        i: m.lines.length - 8 + k, pos: l.pos, top: Math.round(l.top),
+        blockIdx: l.blockIdx, page: m.pageOfLine[m.lines.length - 8 + k],
+      }))
+      const tailBlocks = m.blocks.slice(-6).map((b) => ({
+        type: b.type, kind: b.kind, start: b.start, end: b.end,
+        top: Math.round(b.top), height: Math.round(b.height), estimated: !!b.estimated,
+      }))
+      const contentSize = doc.content.size
+      const cands: Record<string, unknown>[] = []
+      for (const [name, pos] of [
+        ['content.size - 2 (the probe used this)', contentSize - 2],
+        ['content.size - 1', contentSize - 1],
+        ['content.size', contentSize],
+        ['maxLinePos (the last line start)', maxPos],
+      ] as Array<[string, number]>) {
+        cands.push({ name, pos, page: pageContainingPos(m, pos) })
+      }
+      return {
+        pages: m.pages, maxPageOfLine, pageTopLen: m.pageTop.length, lines: m.lines.length,
+        blocks: m.blocks.length, contentSize, maxLinePos: maxPos,
+        // The three checks that PASS — reported here so it is visible they cannot see this.
+        maxPageOfLineIsLast: maxPageOfLine === m.pages - 1,
+        pageTopLenEqualsPages: m.pageTop.length === m.pages,
+        posIsMonotonic: nonMonotonic === 0, nonMonotonic, firstNonMono,
+        emptyPages, emptyPageCount: emptyPages.length,
+        perPageTail: perPage.slice(-6),
+        estimatedBlocks: m.estimatedBlocks, reliablePages: m.reliablePages, breaksReliable: m.breaksReliable,
+        tailBlocks, tailLines, candidates: cands,
+      }
+    },
+
     tableStats(docId) { return tableStats(docId) },
 
     tableForgetMemory() { _resetTables() },
@@ -794,7 +855,17 @@ export function installTextRenderProbe(editor: Editor): void {
       const leanPer = TextRenderStore.leanBytes(probe0)
       // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
       // if the model only covered a window, a far position would clamp to the window's edge.
-      const lastPos = doc.content.size - 2
+      //
+      // ASK THE LAST BLOCK'S OWN POSITION, derived from the DOC (2026-07-17). `doc.content.size - 2`
+      // was wrong whenever the document ends in a LEAF ATOM (`nodeSize === 1` — a refList, a
+      // mathBlock): the atom occupies [size-1, size), so size-2 is inside the SECOND-TO-LAST block
+      // and resolves, correctly, to the second-to-last page. The assertion then read as "the last
+      // page is unreachable" when the probe had simply asked about a different page. It ALSO masked
+      // a real model bug underneath (a leaf atom's line claimed `offset + 1` — the position AFTER
+      // itself; see blockFirstLinePos in textRender.ts), which is why this was worth chasing rather
+      // than silencing: two independent faults, the probe's one hiding the model's.
+      const lastChild = doc.lastChild
+      const lastPos = lastChild ? doc.content.size - lastChild.nodeSize : Math.max(0, doc.content.size - 1)
       const pageOfLast = store.pageFor(refId, lastPos)
       return {
         versions, cachedModels: store.stats.models, droppedCount: store.stats.dropped.length,
