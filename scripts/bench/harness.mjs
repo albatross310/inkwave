@@ -110,10 +110,9 @@ async function setupLocal(page, url, size) {
   await page.waitForTimeout(300)
 }
 
-async function setupInkwave(page, size, arith) {
-  const url = INKWAVE + (arith ? '/?arithLayout' : '/?arithLayout=off')
-  await page.goto(url, { waitUntil: 'load' })
-  await page.waitForSelector('.ProseMirror', { timeout: 30000 })
+async function setupInkwave(page, size /* flags seeded on the context before navigate */) {
+  await page.goto(INKWAVE + '/', { waitUntil: 'load' })
+  await page.waitForSelector('.ProseMirror', { state: 'attached', timeout: 30000 })
   // let the reveal/coast settle
   await page.waitForTimeout(2500)
   // inject synthetic doc via the app's own open-doc path (remounts the editor)
@@ -165,8 +164,12 @@ const EDITORS = [
   { key: 'textarea',        kind: 'local', url: STATIC + '/textarea.html' },
   { key: 'contenteditable', kind: 'local', url: STATIC + '/contenteditable.html' },
   { key: 'tiptap',          kind: 'local', url: STATIC + '/tiptap/index.html' },
-  { key: 'inkwave',         kind: 'inkwave', arith: false },
-  { key: 'inkwave-arith',   kind: 'inkwave', arith: true },
+  // Inkwave ablation rows — flags seeded into localStorage before mount (read at mount).
+  { key: 'inkwave-default', kind: 'inkwave', flags: {} },
+  { key: 'inkwave-arith',   kind: 'inkwave', flags: { 'inkwave:arithLayout': '1' } },
+  { key: 'inkwave-pagoff',  kind: 'inkwave', flags: { 'inkwave:pagOff': '1' } },
+  { key: 'inkwave-scasoff', kind: 'inkwave', flags: { 'inkwave:scasEngineOff': '1' } },
+  { key: 'inkwave-bothoff', kind: 'inkwave', flags: { 'inkwave:pagOff': '1', 'inkwave:scasEngineOff': '1' } },
 ]
 const REGIMES = [
   { key: '1x', rate: 1, timeoutMs: 3000, interKeyMs: 130 },
@@ -182,12 +185,18 @@ try {
       for (const rg of REGIMES) {
         const tag = `${ed.key}:${size}:${rg.key}`
         if (!want(tag)) continue
-        const context = await browser.newContext()
+        const context = await browser.newContext({ serviceWorkers: 'block' })
+        // Seed Inkwave ablation flags into localStorage BEFORE any page script runs.
+        if (ed.kind === 'inkwave') {
+          await context.addInitScript((flags) => {
+            try { for (const [k, v] of Object.entries(flags)) localStorage.setItem(k, v) } catch { /* private */ }
+          }, ed.flags || {})
+        }
         const page = await context.newPage()
         const client = await context.newCDPSession(page)
         try {
           if (ed.kind === 'local') await setupLocal(page, ed.url, size)
-          else await setupInkwave(page, size, ed.arith)
+          else await setupInkwave(page, size)
           // sanity: one probe keystroke must move the signature (editor is focused/editable)
           await throttle(client, rg.rate)
           const deltas = await typeAndMeasure(page, {
