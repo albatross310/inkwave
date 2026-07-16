@@ -25,6 +25,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaS
 import { getCitationStyle } from '../citations/citationsBus'
 import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
+import { TextRenderStore } from './textRenderStore'
 // The BASELINE we are measured against — imported READ-ONLY so the head-to-head runs the REAL
 // production bake path (the SVG-foreignObject capture), not a reimplementation of it. Nothing here
 // mutates the thumbnail system; the bake path is owned elsewhere.
@@ -131,6 +132,10 @@ export interface ProbeApi {
   thumbRoundTrip(canvas: HTMLCanvasElement, scale: number): Promise<Record<string, unknown>>
   /** Heap cost of N render models — the honest comparison against the 62.7MB bitmap pool. */
   modelMem(n: number): Record<string, unknown>
+  /** WHOLE-DOCUMENT + memory proof at real session scale (N versions through the store). */
+  storeProof(versions: number, touch: boolean): Record<string, unknown>
+  /** THE CRUX: can a page be laid out from its own break position, WITHOUT the prefix? */
+  windowProof(): Record<string, unknown>
   /** Block-level coverage on the LIVE doc: what renders vs what placeholders out, and why. */
   coverage(): Record<string, unknown>
   /** Per-block computed-vs-REAL-DOM geometry. Localises a break divergence to the exact block. */
@@ -385,6 +390,112 @@ export function installTextRenderProbe(editor: Editor): void {
         pages: models[0]?.pages ?? 0,
         // What ONE page bitmap costs at this DPR, for the like-for-like comparison.
         onePageBitmapBytes: Math.round(g.pageWidthPx * window.devicePixelRatio) * Math.round(g.pageHeightPx * window.devicePixelRatio) * 4,
+      }
+    },
+
+    // ── WHOLE-DOCUMENT + MEMORY AT SESSION SCALE ─────────────────────────────────────────────
+    // Peter: "I wanna make sure we sweep and load the whole document." A bitmap cache can only hold
+    // a window; a model is whole-document by construction. This proves BOTH halves of that claim
+    // rather than asserting it: (a) every cached version has an origin for EVERY page (a short
+    // pageTop array = pages that render blank — the exact bug the first pixel diff caught), and
+    // (b) what N versions actually cost, with eviction NAMED when coverage gets bounded.
+    storeProof(versions, touch) {
+      harvestNow()
+      const g = liveGeom()
+      const store = new TextRenderStore(touch)
+      const doc = editor.state.doc
+      const geomSig = `${g.pageWidthPx}x${g.pageHeightPx}|${g.basePx}|${g.ratio}|${g.sideMarginPx}`
+      const mem = () => (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0
+      const before = mem()
+      const t0 = performance.now()
+      const cov: Array<Record<string, unknown>> = []
+      for (let v = 0; v < versions; v++) {
+        // Distinct snapId per "version" — the same doc stands in for a version's content, which is
+        // honest for MEMORY and PAGE-SPAN (both scale with doc size, not with what changed).
+        store.get(`v${v}`, () => doc, g, geomSig, fontLoaded, buildOpts())
+      }
+      const ms = performance.now() - t0
+      const after = mem()
+      let whole = 0, notWhole = 0, unreliable = 0
+      for (let v = 0; v < versions; v++) {
+        const c = store.coverageOf(`v${v}`)
+        if (!c || !c.cached) continue
+        if (c.whole) whole++; else { notWhole++; cov.push({ v, ...c }) }
+        if (!c.reliable) unreliable++
+      }
+      const m0 = store.coverageOf('v0')
+      // The LEAN trade, measured on the same models: geometry-only (segments re-sliced from the doc
+      // at paint time) vs the current fat model that duplicates the text.
+      const probe0 = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      const leanPer = TextRenderStore.leanBytes(probe0)
+      // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
+      // if the model only covered a window, a far position would clamp to the window's edge.
+      const lastPos = doc.content.size - 2
+      const pageOfLast = store.pageFor(`v${versions - 1}`, lastPos)
+      return {
+        versions, cachedModels: store.stats.models, droppedCount: store.stats.dropped.length,
+        droppedSample: store.stats.dropped.slice(0, 5),
+        bytesEst: store.stats.bytes, budget: store.stats.budget,
+        mbEst: +(store.stats.bytes / 1048576).toFixed(2),
+        mbPerVersion: +((store.stats.bytes / Math.max(1, store.stats.models)) / 1048576).toFixed(3),
+        heapDeltaMB: +((after - before) / 1048576).toFixed(2),
+        buildMsTotal: +ms.toFixed(0), buildMsPerVersion: +(ms / versions).toFixed(1),
+        pagesPerVersion: m0?.pages ?? 0,
+        wholeDocVersions: whole, notWholeVersions: notWhole, notWholeSample: cov.slice(0, 3),
+        unreliableVersions: unreliable,
+        lastPosPage: pageOfLast, lastPageIdx: (m0?.pages ?? 1) - 1,
+        lastPageReachableByContent: pageOfLast === (m0?.pages ?? 1) - 1,
+        leanBytesPerVersion: leanPer,
+        leanMBPerVersion: +(leanPer / 1048576).toFixed(3),
+        leanMBat116: +((leanPer * 116) / 1048576).toFixed(1),
+        fatMBat116: +(((store.stats.bytes / Math.max(1, store.stats.models)) * 116) / 1048576).toFixed(1),
+      }
+    },
+
+    // ── THE CRUX: PREFIX-INDEPENDENT WINDOW LAYOUT ───────────────────────────────────────────
+    // Peter: "we only need the plaintext of the precise part of the doc that will be visible at the
+    // current zoom." That only works if page N can be laid out WITHOUT laying out pages 0..N-1.
+    // Line breaks cascade, so the prefix decides where page N BEGINS — but a break position IS a
+    // line start, and greedy wrap restarts deterministically at a line start. So the claim under
+    // test is: given the break position, the page's own layout is prefix-independent.
+    // TEST: build the full model; then for several pages, cut the doc at that page's break position
+    // and lay the REMAINDER out from scratch (no prefix at all). If the first lines of the cut
+    // layout match the full model's lines for that page, the claim holds.
+    // KNOWN-POSITIVE: a deliberately WRONG cut (2 chars off a line start) must FAIL the same check —
+    // otherwise the comparison proves nothing.
+    windowProof() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      const cmp = (cutAt: number, pageIdx: number) => {
+        // Lay out ONLY the tail from this position — zero prefix knowledge.
+        const tail = doc.cut(cutAt)
+        const t0 = performance.now()
+        const m = buildRenderModel(tail, g, measure, fontLoaded, buildOpts())
+        const ms = performance.now() - t0
+        const wantLines = full.lines.filter((_, i) => full.pageOfLine[i] === pageIdx)
+        // Compare the first N line STARTS, rebased: full lines are absolute, tail lines are relative
+        // to the cut. A cut inside a paragraph makes the tail's first block start at 0.
+        const got = m.lines.slice(0, wantLines.length).map((l) => l.pos)
+        const want = wantLines.map((l) => l.pos - cutAt + 1)
+        const n = Math.min(got.length, want.length)
+        let match = 0
+        for (let i = 0; i < n; i++) if (got[i] === want[i]) match++
+        return { pageIdx, cutAt, lines: wantLines.length, compared: n, match, exact: n > 0 && match === n, tailBuildMs: +ms.toFixed(1) }
+      }
+      const pages = [1, 2, 3, 4].filter((p) => p < full.pages)
+      const results = pages.map((p) => {
+        const at = anchorPosOfPage(full, p)
+        return cmp(at - 1, p) // break pos → the paragraph position the line starts at
+      })
+      // KNOWN-POSITIVE: an off-by-2 cut must NOT match, or the test is blind.
+      const bogus = pages.length ? (() => { const at = anchorPosOfPage(full, pages[0]); return cmp(at - 1 + 2, pages[0]) })() : null
+      return {
+        pages: full.pages, tested: results,
+        allExact: results.length > 0 && results.every((r) => r.exact),
+        knownNegative: bogus ? { exact: bogus.exact, match: bogus.match, compared: bogus.compared } : null,
+        seesKnownNegative: bogus ? !bogus.exact : false,
       }
     },
 
