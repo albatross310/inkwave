@@ -12,7 +12,7 @@
 // token with a day fallback — never a hard-coded hex.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { LEDGER_ROW_EVENT } from '../productivity/capture'
+import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { chimeMuted, setChimeMuted } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
 import { installLedgerSource } from '../productivity/installSource'
@@ -75,6 +75,13 @@ export function Ledger(): JSX.Element {
   }, [refresh])
 
   const todays = useMemo(() => rows.filter((r) => localDayOf(r.start) === today).reverse(), [rows, today])
+
+  // The documents this month's ledger has recorded, newest first — the list the title control acts on.
+  const docs = useMemo(() => {
+    const seen = new Map<string, string | undefined>()
+    for (const r of rows) if (!seen.has(r.doc_id)) seen.set(r.doc_id, r.doc_label)
+    return [...seen.entries()].map(([id, label]) => ({ id, label }))
+  }, [rows])
 
   const applyPlace = useCallback((label: string) => {
     setCurrentPlace(label)
@@ -229,6 +236,22 @@ export function Ledger(): JSX.Element {
           </ul>
         </section>
 
+        {/* ── Titles (§A3.2: doc_label is suppressible per-doc) ──────────── */}
+        {docs.length > 0 && (
+          <section className="mt-10">
+            <h2 className="mb-1 text-lg" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>Titles</h2>
+            <p className="mb-3 text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+              Your ledger records each document&rsquo;s title so you can tell your sessions apart. If a
+              title is private, hide it — future sessions record the work without the name.
+            </p>
+            <ul className="space-y-2">
+              {docs.map((d) => (
+                <TitleRow key={d.id} docId={d.id} label={d.label} />
+              ))}
+            </ul>
+          </section>
+        )}
+
         <footer className="mt-10 text-center text-xs" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
           <button
             onClick={() => { setProdLedgerEnabled(false); setEnabled(false) }}
@@ -241,6 +264,31 @@ export function Ledger(): JSX.Element {
         </footer>
       </div>
     </main>
+  )
+}
+
+// ─── One document's title, and whether it is recorded (§A3.2) ────────────────
+// The mechanism was wired into capture.ts's close path from the start, but NOTHING turned it on —
+// so in practice every title travelled. This is the missing control. It is deliberately honest
+// about its scope: it changes what FUTURE sessions record, because rows already written are inside
+// an attested daily block and silently rewriting history is exactly what the ledger exists to make
+// impossible.
+
+function TitleRow({ docId, label }: { docId: string; label?: string }): JSX.Element {
+  const [hidden, setHidden] = useState(() => isLabelSuppressed(docId))
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2" style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}>
+      <span className="truncate text-sm" style={{ color: hidden ? 'var(--iw-pill-fg, #78716c)' : 'var(--iw-ink, #5c2d8a)' }}>
+        {hidden ? <em>title hidden</em> : (label ?? <em>untitled</em>)}
+      </span>
+      <button
+        onClick={() => { const next = !hidden; setLabelSuppressed(docId, next); setHidden(next) }}
+        className="shrink-0 rounded-full border px-3 py-1 text-xs"
+        style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+      >
+        {hidden ? 'Record title' : 'Hide title'}
+      </button>
+    </li>
   )
 }
 

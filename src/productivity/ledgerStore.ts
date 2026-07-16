@@ -11,7 +11,7 @@
 
 import { readAppJson, writeAppJson } from '../storage/opfs'
 import { stampBundle } from '../provenance/ots'
-import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows } from './ledger'
+import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers } from './ledger'
 import { cleanText } from './sessionLogic'
 import type { MonthLedger, SessionRow } from './types'
 
@@ -136,6 +136,47 @@ export async function annotateRow(
   _chain.set(month, next)
   await next
   return ok
+}
+
+/**
+ * Union an incoming ledger (another device's, via cloud sync) into the LOCAL file. Grow-only.
+ *
+ * Runs on the SAME per-month write chain as every other write, which is the point: a row queued by
+ * the capture engine between sync's load and its write-back cannot be interleaved away. Reads local
+ * FRESH inside the chain rather than trusting a copy the caller loaded earlier — the gap between a
+ * read and a write is exactly where a blind overwrite lives.
+ */
+export async function mergeIntoLocalLedger(month: string, incoming: MonthLedger): Promise<MonthLedger> {
+  let result: MonthLedger = incoming
+  const prev = _chain.get(month) ?? Promise.resolve()
+  const next = prev
+    .catch(() => { /* keep the chain alive */ })
+    .then(async () => {
+      const local = await loadLedger(month)
+      const merged = await mergeLedgers(local, incoming)
+      // Only write when the union actually differs — a no-op write is a chance to corrupt for nothing.
+      if (merged.rows.length !== local.rows.length || anchorsDiffer(local, merged)) {
+        await writeAppJson(fileFor(month), merged)
+      }
+      result = merged
+    })
+    .catch((err) => {
+      console.warn('[inkwave] ledger local merge failed:', err)
+      result = incoming
+    })
+  _chain.set(month, next)
+  await next
+  return result
+}
+
+/** True when the merge gained or upgraded any OTS proof — worth persisting even at equal row count. */
+function anchorsDiffer(a: MonthLedger, b: MonthLedger): boolean {
+  const rank = (s: string): number => (s === 'confirmed' ? 2 : s === 'pending' ? 1 : 0)
+  const byDay = new Map(a.attestations.map((x) => [x.day, x]))
+  return b.attestations.some((x) => {
+    const prev = byDay.get(x.day)
+    return !prev || prev.blockHash !== x.blockHash || rank(x.ots.status) > rank(prev.ots.status)
+  })
 }
 
 /** True when rows are waiting to be written (test/diagnostic). */

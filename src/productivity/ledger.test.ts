@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attestLedger, buildAttestations, ledgerNameFor, mergeLedgerRows, verifyLedger } from './ledger'
+import { attestLedger, buildAttestations, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, verifyLedger } from './ledger'
 import type { MonthLedger, SessionRow } from './types'
 
 function row(id: string, start: string, over: Partial<SessionRow> = {}): SessionRow {
@@ -203,5 +203,59 @@ describe('attestation chain (§A3.1 — tamper-evident, OTS-anchorable)', () => 
     l.attestations = l.attestations.map((a) => ({ ...a, ots: { status: 'confirmed', bitcoinBlock: 1 } as const }))
     const again = await attestLedger(l)
     expect(again.attestations.every((a) => a.ots.status === 'confirmed')).toBe(true)
+  })
+})
+
+describe('mergeLedgers — the write-back path (F5: it used to shred every proof)', () => {
+  const stamped = (l: MonthLedger, status: 'pending' | 'confirmed'): MonthLedger => ({
+    ...l,
+    attestations: l.attestations.map((a) => ({ ...a, ots: { status, proofBase64: `proof-${a.day}` } as const })),
+  })
+  const of = (rows: SessionRow[]): Promise<MonthLedger> => attestLedger({ v: 1, month: '2026-07', rows, attestations: [] })
+
+  it('PRESERVES the Bitcoin anchors of both sides — F5, pinned', async () => {
+    // The assertion that would have caught `attestations: []`. Two devices, each holding an anchored
+    // day the other never saw; the union must keep BOTH proofs.
+    const local = stamped(await of([A]), 'confirmed')
+    const remote = stamped(await of([C]), 'confirmed')
+
+    const merged = await mergeLedgers(remote, local)
+    expect(merged.rows.map((r) => r.session_id)).toEqual(['a', 'c'])
+    expect(merged.attestations).toHaveLength(2) // ← `attestations: []` made this 0, silently
+    for (const a of merged.attestations) {
+      expect(a.ots.status).toBe('confirmed')
+      expect(a.blockHash).toBeTruthy()
+    }
+    expect((await verifyLedger(merged)).ok).toBe(true)
+  })
+
+  it('drops only the proof of the day that actually CHANGED', async () => {
+    const local = await of([A, B, C])
+    const remote = stamped(await of([A, C]), 'confirmed')
+    const byDay = new Map((await mergeLedgers(remote, local)).attestations.map((a) => [a.day, a]))
+    expect(byDay.get('2026-07-17')!.ots.status).toBe('unstamped') // gained B ⇒ stale anchor dropped
+    expect(byDay.get('2026-07-18')!.ots.status).toBe('confirmed') // untouched ⇒ anchor survives
+  })
+
+  it('keeps the STRONGEST valid proof when both sides anchored the same day', async () => {
+    const weak = stamped(await of([A]), 'pending')
+    const strong = stamped(await of([A]), 'confirmed')
+    // Direction must not decide it: a confirmed anchor cannot be demoted by a pending copy.
+    expect((await mergeLedgers(weak, strong)).attestations[0].ots.status).toBe('confirmed')
+    expect((await mergeLedgers(strong, weak)).attestations[0].ots.status).toBe('confirmed')
+  })
+
+  it('is grow-only: a short remote cannot truncate a long local (and vice versa)', async () => {
+    const long = await of([A, B, C])
+    const short = await of([A])
+    expect((await mergeLedgers(short, long)).rows).toHaveLength(3)
+    expect((await mergeLedgers(long, short)).rows).toHaveLength(3)
+    expect(short.rows).toHaveLength(1) // the negative is real: the short side genuinely lacks two
+  })
+
+  it('an EMPTY remote (first sync, or a wiped file) cannot empty the ledger', async () => {
+    const merged = await mergeLedgers(emptyLedger('2026-07'), await of([A, B]))
+    expect(merged.rows).toHaveLength(2)
+    expect(merged.month).toBe('2026-07')
   })
 })
