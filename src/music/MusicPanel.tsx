@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ScoreView } from './ScoreView'
+import { LibraryBrowser } from './LibraryBrowser'
 import { importMaster, listMasters, loadMasterXml, type MasterMeta } from './master'
 import { parseMusicXml } from './parse'
 import { makeTransclusion, resolveTransclusion, type ResolvedExcerpt, type Transclusion } from './transclusion'
@@ -21,6 +22,7 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
   const [active, setActive] = useState<{ meta: MasterMeta | null; xml: string; score: Score } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [excerpts, setExcerpts] = useState<ResolvedExcerpt[]>([])
+  const [showLibrary, setShowLibrary] = useState(false)
 
   const refresh = useCallback(async () => {
     try { setMasters(await listMasters()) } catch { /* no OPFS → the list stays empty */ }
@@ -97,7 +99,23 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
         </p>
       )}
 
-      <ImportRow onFile={onFile} />
+      <div className="flex items-center gap-2">
+        <ImportRow onFile={onFile} />
+        {/* §B7. The catalogue is only fetched when this opens — never on load. */}
+        <button
+          onClick={() => setShowLibrary(v => !v)}
+          className="text-sm font-serif px-3 py-1.5 rounded"
+          style={{ border: '1px solid var(--iw-nightable-border, #d6d3d1)', ...ink }}
+        >
+          {showLibrary ? 'Hide the library' : 'Browse public-domain scores'}
+        </button>
+      </div>
+
+      {showLibrary && (
+        <LibraryBrowser
+          onImported={meta => { void refresh(); void openMaster(meta); setShowLibrary(false) }}
+        />
+      )}
 
       {error && (
         <p role="alert" className="text-xs font-serif my-2" style={{ color: 'var(--iw-badge-ai, #b45309)' }}>{error}</p>
