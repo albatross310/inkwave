@@ -476,7 +476,16 @@ function tokenize(runs: InlineRun[], measure: Measure, ratio: number): Array<Tok
 // --inkwave-lh line-height (φ = 1.618 default). Assumes the caller has already confirmed
 // blockEligibility(block).eligible — a non-eligible block would produce a WRONG result (that's why
 // the gate defers it). Pure arithmetic: no DOM, no layout read.
-export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio: number, measure: Measure, whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE): BlockLayout {
+//
+// `forcedBreakChars` — char offsets (into the block's concatenated text) at which a line MUST START.
+// A page-gap widget is `display:block` INSIDE the `<p>`, so it forces the pre-gap line to end where
+// the gap sits (partial — the DOM's pre-gap line measured only 85px of 350) and text resumes on a
+// fresh line AFTER the gap. Without this the continuous greedy fills that slack with after-gap words
+// and loses one render line, drifting every band below by a render line height. The offsets are the
+// mid-block canonical break positions computeBreaks produces (doc pos → char via `at − offset − 1`).
+// EXACT, not "+1 line": each forced offset ends the current line partial and the tail RE-WRAPS from
+// that point (which cascades correctly). Empty/absent ⇒ byte-identical to the gap-free layout.
+export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio: number, measure: Measure, whiteSpace: WhiteSpaceMode = EDITOR_WHITE_SPACE, forcedBreakChars: number[] = []): BlockLayout {
   const hang = hangsTrailingSpace(whiteSpace) // break-spaces (the editor) ⇒ false ⇒ the space counts
   const strut = snappedLineHeight(block.baseFontPx, ratio) // the paragraph's own font always occupies the line
   const leading = block.firstLineLeadingPx ?? 0 // baseline offset to match getClientRects text-rects
@@ -484,6 +493,8 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
   const lineHeights: number[] = []
   const breakStartChars: number[] = [0]
   const tokens = tokenize(block.runs, measure, ratio)
+  const forced = forcedBreakChars.length ? [...forcedBreakChars].sort((a, b) => a - b) : forcedBreakChars
+  let fb = 0 // pointer into `forced`
 
   let top = 0
   let lineW = 0
@@ -498,6 +509,21 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
   }
 
   for (const tk of tokens) {
+    // FORCED BREAK (page gap): a line MUST start at this offset. Honour any forced offset landing
+    // exactly at the current position BEFORE this token contributes — the pre-gap line ends here,
+    // partial, and the token opens a fresh line. A forced offset at a natural line start (started
+    // === false) is a no-op; one at charIdx 0 / the block start never fires. Runs before the fit
+    // test so it can't double-break with a natural overflow at the same token.
+    while (fb < forced.length && forced[fb] <= charIdx) {
+      if (forced[fb] === charIdx && started) {
+        closeLine()
+        breakStartChars.push(charIdx)
+        lineW = 0
+        lineDemand = strut
+        started = false
+      }
+      fb++
+    }
     if (tk === 'BR') {
       // Hard break: end the current line here; the next token starts a fresh line.
       closeLine()
