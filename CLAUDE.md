@@ -351,6 +351,34 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   still the visited set (a version must be warmed once in review to bake) — but now it PERSISTS
   across reload/eviction, so the second-ever scrub of any range is instant. A never-visited range
   is cold once; the (unbuilt) next lever is a background idle sweep to bake ahead.
+  ROUND 8 (2026-07-16 — Peter: "still not noticing it… the minimap goes a few times a second but no
+  flashing like apple photos"). Built the DEBUG OVERLAY FIRST (the wave-video lesson) — `?snapThumbs
+  =debug` (sticky) shows, live: flipbook DRIVER engaged?, wheel events, legacy-goTo count, LANDS,
+  commanded distinct, show() calls, per-pane hit/thumb/near/none, each overlay's computed
+  display/opacity/z/box/canvas + a NOT-PAINTED warning, and store/mem sizes. It found three real
+  bugs the guessing missed:
+  (1) LAND_QUIET_MS was 120ms — SHORTER than a real mouse-wheel notch gap (~150-250ms). Between
+      notches the driver caught up, saw "quiet", and LANDED = a full React commit + live render PER
+      NOTCH. That is exactly "the minimap goes a few times a second": the live path re-rendering at
+      notch pace while the bitmaps never got a chance. Now 260ms (= goTo's own rapid window) +
+      FREEZE_HOLD 400ms. Overlay proof: lands 0 across a 12-notch fling (was 1/notch).
+  (2) STICKY FLAGS: /snapshot's local-first nav rewrites the URL every step (goTo → navigate without
+      our params), so a flag read fresh from the URL DIED on the first scrub — silently disabling
+      thumbnails AND the overlay exactly when you started using them. Flags now resolve ONCE per
+      load into localStorage (the `?auth` pattern): ?snapThumbs=1 | debug | off.
+  (3) COLD CACHE was the rest of it — his flag was OFF and nothing was baked, so show() had nothing
+      to show. THE SWEEP (Peter: "yes add the sweep") now bakes the library in idle: it drives ONE
+      extra hidden warm DocLayer at a time (opacity 0.001, the same keep-alive machinery) →
+      onWarmReady → queueCapture → bake → next; outward from the current position; idle-only
+      (pauses on any input / active scrub, 900ms gate), resumable, LRU-budgeted. MEASURED from
+      cold: 7→23 thumbs in 35s idle, 21/36 doc versions baked (~0.6 versions/s).
+  HEADLESS OVERLAY READOUT after the sweep (12-notch fast fling): DRIVER ENGAGED, lands 0,
+  commanded 11, shows 7, doc pane 7/0/0/0 (every present a REAL version), all three panes PAINTED
+  (display block, opacity 1, z 4, real canvas backing) — so it is NOT the video's invisible-element
+  bug. HONEST GAP: the sweep bakes the DOC pane only — the diff panel + minimap render from the
+  ACTIVE snapshot's ops, not per-DocLayer, so they can't be rastered for an unvisited version and
+  still fall to nearest on a cold fling (overlay: diff/map 0/0/5/2). Doc is the big pane; diff/map
+  bake as visited. What Peter reads back: "flipbook DRIVER", "lands", and the doc hit/near line.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 

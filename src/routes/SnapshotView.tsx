@@ -22,6 +22,7 @@ import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { createScrubPresenter, type ScrubPresenter } from '../editor/scrubRaster'
+import { snapThumbsDebug, snapThumbsEnabled, thumbStats } from '../editor/snapThumbs'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
@@ -845,6 +846,63 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
   )
 })
 
+// ── ?snapThumbs=debug overlay ─────────────────────────────────────────────────────────────────
+// The wave-video lesson: an on-device readout beats hours of guessing. One glance must separate
+// the three failure modes: (1) the rAF flipbook never ran (legacy per-notch goTo → live renders a
+// few times a second), (2) it ran but the cache was EMPTY (show() had nothing → frozen pane), or
+// (3) it presented into an INVISIBLE node (the video's transparent-element bug). Read PAINTED.
+function ScrubDebugOverlay({ presenter, dbg, docId }: {
+  presenter: ScrubPresenter
+  dbg: React.MutableRefObject<{ engaged: boolean; events: number; legacy: number; lands: number; commanded: Set<string> }>
+  docId: string | null
+}) {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => force((n) => n + 1), 200)
+    return () => window.clearInterval(id)
+  }, [])
+  const info = presenter.debugInfo()
+  const d = dbg.current
+  const st = docId ? thumbStats(docId) : { entries: 0, bytes: 0, loaded: false }
+  const on = snapThumbsEnabled()
+  const row = (k: string, v: string, bad?: boolean) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: bad ? '#ff8080' : '#c8ffc8' }}>
+      <span style={{ opacity: 0.75 }}>{k}</span><span style={{ fontWeight: 700 }}>{v}</span>
+    </div>
+  )
+  return (
+    <div style={{
+      position: 'fixed', top: 6, left: 6, zIndex: 99999, pointerEvents: 'none',
+      background: 'rgba(0,0,0,0.86)', color: '#fff', font: '11px/1.35 ui-monospace, monospace',
+      padding: '7px 9px', borderRadius: 6, minWidth: 268, border: '1px solid #444',
+    }}>
+      <div style={{ fontWeight: 800, marginBottom: 3, color: '#ffd479' }}>scrub debug — burst</div>
+      {row('flipbook DRIVER', d.engaged ? 'ENGAGED (rAF)' : 'idle', !d.engaged)}
+      {row('wheel events', String(d.events))}
+      {row('legacy goTo (live)', String(d.legacy), d.legacy > 0)}
+      {row('lands (live render)', String(d.lands), d.lands > 1)}
+      {row('commanded distinct', String(d.commanded.size))}
+      {row('show() calls', String(info.shows), info.shows === 0)}
+      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>per pane — hit/thumb/near/none</div>
+      {info.panes.map((p) => (
+        <div key={p.kind} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: p.visible ? '#c8ffc8' : '#ff8080' }}>
+          <span style={{ opacity: 0.75 }}>{p.kind}{p.visible ? '' : ' ⚠NOT PAINTED'}</span>
+          <span style={{ fontWeight: 700 }}>{p.hitCapture}/{p.hitThumb}/{p.nearest}/{p.none}</span>
+        </div>
+      ))}
+      {info.panes.map((p) => (
+        <div key={p.kind + 'v'} style={{ opacity: 0.6, fontSize: 10 }}>
+          {p.kind}: disp={p.display} op={p.opacity} vis={p.visibility} z={p.zIndex} box={p.rectW}×{p.rectH} cv={p.canvasW}×{p.canvasH}
+        </div>
+      ))}
+      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>store</div>
+      {row('snapThumbs flag', on ? 'ON' : 'OFF', !on)}
+      {row('OPFS thumbs', st.loaded ? `${st.entries} · ${(st.bytes / 1e6).toFixed(1)}MB` : 'index loading…', st.entries === 0)}
+      {row('mem bitmaps', `${info.entries} · ${(info.bytes / 1e6).toFixed(1)}MB`, info.entries === 0)}
+    </div>
+  )
+}
+
 function SplitDiffView({
   snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, counterRef, summariesOn, onOptInSummaries, nav, allSnaps,
   snapMode, bijMode, onCycleSnap, onCycleBijection, presenter,
@@ -1093,7 +1151,17 @@ function SplitDiffView({
   // never evicting current/prev/next.
   const MAX_LAYERS = 5
   const [layerIds, setLayerIds] = useState<string[]>([])
-  const renderLayerIds = layerIds.includes(snapshot.id) ? layerIds : [...layerIds, snapshot.id]
+  // BACKGROUND SWEEP (2026-07-16 — Peter "yes add the sweep"): bake a thumbnail for EVERY version
+  // while /snapshot sits open, Photos-style library pre-generation. A thumbnail can only be
+  // rasterised from a MOUNTED pane, so the sweep drives one extra hidden warm DocLayer at a time
+  // (opacity 0.001 — same keep-alive machinery): mount → onWarmReady → queueCapture → bake → next.
+  // Idle-only, pauses on ANY input or active scrub, resumable, bakes OUTWARD from the current
+  // position. Without this the flipbook has nothing to flip on a first-pass cold scroll.
+  const [sweepId, setSweepId] = useState<string | null>(null)
+  const renderLayerIds = (() => {
+    const base = layerIds.includes(snapshot.id) ? layerIds : [...layerIds, snapshot.id]
+    return sweepId && !base.includes(sweepId) ? [...base, sweepId] : base
+  })()
   useEffect(() => {
     // LRU-touch the active id (array order = recency, most recent last). No-op when it's already
     // most-recent — the extra setState re-rendered the whole split view after every flip.
@@ -1123,6 +1191,48 @@ function SplitDiffView({
     setLayerIds((prev) => prune(prev))
     return () => timers.forEach((t) => window.clearTimeout(t))
   }, [snapshot.id, prevSnap?.id, nextSnap?.id])
+
+  // ── The sweep driver ────────────────────────────────────────────────────────────────────────
+  const sweepIdRef = useRef<string | null>(null)
+  const sweepInputRef = useRef(0)
+  useEffect(() => {
+    const mark = () => { sweepInputRef.current = performance.now() }
+    const evs = ['wheel', 'keydown', 'pointerdown', 'touchstart'] as const
+    for (const e of evs) window.addEventListener(e, mark, { passive: true })
+    return () => { for (const e of evs) window.removeEventListener(e, mark) }
+  }, [])
+  useEffect(() => {
+    if (!snapThumbsEnabled() || allSnaps.length < 2) return
+    let stopped = false, timer = 0, waited = 0
+    const later = (ms: number) => { timer = window.setTimeout(tick, ms) }
+    // Outward from the current position — the versions you'd reach first get bitmaps first.
+    const nextUnbaked = (): string | null => {
+      const ci = Math.max(0, allSnaps.findIndex((s) => s.id === snapshot.id))
+      for (let d = 0; d < allSnaps.length; d++) {
+        for (const dir of d === 0 ? [0] : [1, -1]) {
+          const i = ci + d * dir
+          if (i < 0 || i >= allSnaps.length) continue
+          if (!presenter.isThumbBaked('doc', allSnaps[i].id)) return allSnaps[i].id
+        }
+      }
+      return null
+    }
+    function tick() {
+      if (stopped) return
+      // IDLE-ONLY: pause on any input or while a scrub is presenting (same gate as captures).
+      if (presenter.isActive() || performance.now() - sweepInputRef.current < 900) return later(700)
+      const cur = sweepIdRef.current
+      if (cur && !presenter.isThumbBaked('doc', cur) && waited++ < 14) return later(500) // still baking
+      waited = 0
+      const next = nextUnbaked()
+      if (!next) { sweepIdRef.current = null; setSweepId(null); return later(5000) } // library complete
+      sweepIdRef.current = next
+      setSweepId(next) // mounts a hidden warm DocLayer → onWarmReady → queueCapture → bake
+      later(500)
+    }
+    later(2500) // let the open settle before any background rendering
+    return () => { stopped = true; window.clearTimeout(timer) }
+  }, [presenter, allSnaps, snapshot.id])
 
   // Layer activation: the active DocLayer points the shared refs here in ITS layout effect (which
   // flushes before this component's own per-snapshot effects — React guarantees child-first).
@@ -2600,25 +2710,35 @@ export function SnapshotView() {
   // ahead of React per event, an rAF driver presents EVERY intermediate from the resident bitmap
   // cache (compositor swap, no React commit), the counter updates imperatively, and ONE React
   // commit lands the live full render on settle. DPR1 cap keeps the resident pool affordable.
+  // Live diagnostics for ?snapThumbs=debug — separates "driver never ran" from "driver ran but had
+  // nothing to show" from "showed into an invisible node" (the wave-video bug class).
+  const swDbgRef = useRef({ engaged: false, events: 0, legacy: 0, lands: 0, commanded: new Set<string>() })
   const swCmdRef = useRef(-1)       // commanded index — runs AHEAD of React commits
   const swPresentedRef = useRef(-1) // last index shown via the bitmap flipbook
   const swRafRef = useRef(0)
   useEffect(() => () => cancelAnimationFrame(swRafRef.current), [])
   useEffect(() => {
-    const SW_STEP = 40, MAX_PER_FRAME = 2, LAND_QUIET_MS = 120, FREEZE_HOLD_MS = 220
+    // LAND_QUIET_MS must be LONGER than a real mouse-wheel notch gap. At 120ms it landed BETWEEN
+    // notches (a hand-rolled wheel fires every ~150-250ms): the driver caught up, saw "quiet", and
+    // committed a full live render per notch — which is exactly Peter's "the minimap goes a few
+    // times a second but no flashing". Land only once the stream is no longer RAPID (same 250ms
+    // window goTo uses), and hold the freeze past that so the panes don't re-render mid-scrub.
+    const SW_STEP = 40, MAX_PER_FRAME = 2, LAND_QUIET_MS = 260, FREEZE_HOLD_MS = 400
     const flipEnabled = !isTouchDevice() && (window as unknown as { __iwSwFlipbook?: boolean }).__iwSwFlipbook !== false
 
     const land = () => {
       swRafRef.current = 0
+      swDbgRef.current.lands++; swDbgRef.current.engaged = false
       const all = allRef.current, cmd = swCmdRef.current
       swCmdRef.current = -1; swPresentedRef.current = -1
       if (cmd >= 0 && all[cmd]) goToRef.current(all[cmd]) // one React commit → live render + URL sync
     }
     const tick = () => {
       swRafRef.current = 0
+      swDbgRef.current.engaged = true
       const all = allRef.current, cmd = swCmdRef.current
       let pres = swPresentedRef.current
-      if (cmd < 0 || !all.length) return
+      if (cmd < 0 || !all.length) { swDbgRef.current.engaged = false; return }
       if (pres === cmd) { // caught up — land when inputs go quiet, else idle a frame
         if (performance.now() - lastNavInputAtRef.current >= LAND_QUIET_MS) return land()
         swRafRef.current = requestAnimationFrame(tick); return
@@ -2649,7 +2769,11 @@ export function SnapshotView() {
       const inp = inputTimesRef.current
       const rapid = (nowT - lastNavInputAtRef.current < 250) || (inp.last - inp.prev < 250)
       lastNavInputAtRef.current = nowT
+      const D = swDbgRef.current
+      D.events++
+      if (!rapid) { D.events = 1; D.legacy = 0; D.lands = 0; D.commanded = new Set(); presenter.resetBurst() } // new burst
       if (!flipEnabled || !rapid) { // isolated notch (or flag off) → the legible single live step
+        D.legacy++
         const cur = idxRef.current
         const target = Math.max(0, Math.min(all.length - 1, cur + n))
         if (target === cur) return
@@ -2661,6 +2785,7 @@ export function SnapshotView() {
       if (target === base) return
       if (swPresentedRef.current < 0) swPresentedRef.current = idxRef.current
       swCmdRef.current = target
+      if (all[target]) D.commanded.add(all[target].id)
       setNavDir(n > 0 ? 'fwd' : 'back')
       setFrozenSnapId((p) => p ?? heavySnapIdRef.current) // freeze the heavy panes for the scrub
       window.clearTimeout(unfreezeTimerRef.current)
@@ -3008,6 +3133,7 @@ export function SnapshotView() {
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
           </p>
         )}
+        {snapThumbsDebug() && <ScrubDebugOverlay presenter={presenter} dbg={swDbgRef} docId={docId} />}
         {status === 'ready' && libReady && snapshot && heavySnap && (
           <SplitDiffView
             snapshot={heavySnap}
