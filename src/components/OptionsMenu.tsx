@@ -13,6 +13,7 @@ import type { DocumentMeta, InkwaveDocument } from '../types/document'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
+import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/Scroll'
 import { oneDriveFilename } from '../storage/onedrive'
@@ -69,11 +70,21 @@ function openDocument(id: string) {
   })()
 }
 
-async function createDocument(title: string, contentJson: InkwaveDocument['contentJson'], id: string = uuidv4()): Promise<void> {
+async function createDocument(
+  title: string,
+  contentJson: InkwaveDocument['contentJson'],
+  id: string = uuidv4(),
+  // Extra document fields — used by "+ New email" to stamp `docType: 'email'` + empty headers.
+  // An email is created through THIS path on purpose: it must be an ordinary document in every
+  // respect (same storage, same meta index, same open flow) or none of the inherited behaviour
+  // (edit history, provenance hashing, session capture) applies to it.
+  extra: Partial<InkwaveDocument> = {},
+): Promise<void> {
   const now = new Date().toISOString()
   const doc = withScasDefaults({
     id, title, contentJson, createdAt: now, updatedAt: now,
     schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: uuidv4(),
+    ...extra,
   })
   await saveDocument(doc)
   await upsertMeta({ id: doc.id, title: doc.title, updatedAt: doc.updatedAt })
@@ -201,6 +212,15 @@ export function OptionsMenu({
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
     { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
+    // An email is created exactly like any other document (§B2.1) — same path, one extra field.
+    // Flag-gated, so the menu is unchanged until `?email=1`.
+    ...(emailEnabled() ? [{
+      label: 'New email',
+      run: () => void createDocument('Untitled email', emptyTiptapDoc(), uuidv4(), {
+        docType: 'email' as const,
+        email: { to: [], cc: [], bcc: [], subject: '' },
+      }),
+    }] : []),
     { label: 'Open…', run: () => setModal('upload') },
     { label: 'Recent', run: () => setModal('recent') },
     { label: 'Save…', run: () => setModal('save') },

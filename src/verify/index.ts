@@ -23,7 +23,8 @@
 
 import type { ExportBundle } from '../provenance/bundle'
 import type { SignedReceipt, TiptapJSON } from '../types/document'
-import { canonicalize, sha256Hex, bundleHash, bibliographyHash } from '../provenance/hash'
+import { canonicalize, sha256Hex, bundleHash, bibliographyHash, emailHeadersHash } from '../provenance/hash'
+import { normaliseHeaders } from '../email/headers'
 import { verifyChain, bitmaskToLemmas, PUBLISHED_SIGNING_PK } from '../provenance/receipts'
 import { cadenceDigest, BIN_MS } from '../provenance/cadence'
 import { pmToText } from '../provenance/bundle'
@@ -102,7 +103,28 @@ async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport
       if (recomputed !== s.bibHash) return { ok: false, checked, reason: `snapshot ${s.id}: bibHash mismatch` }
       bibHashForBundle = recomputed
     }
-    const bh = await bundleHash(s.contentHash, s.receipts ?? [], bibHashForBundle)
+    // Same treatment for a frozen EMAIL header set (v:3): recompute its hash from the stored
+    // headers, so tampering with a recipient or the subject is caught here — and fold it into the
+    // bundleHash recompute, which is what makes the OTS anchor actually BIND the headers rather
+    // than merely sit beside them. Non-email snapshots (no emailHash) verify exactly as before.
+    let emailHashForBundle = s.emailHash
+    if (s.email) {
+      // The stored headers must ALREADY be canonical. createSnapshotIfChanged only ever writes the
+      // canonical form, so a non-canonical one is anomalous — and without this check a tamperer
+      // could store a spelling that merely RE-NORMALISES to the anchored hash ("ADA@X.COM" for
+      // "ada@x.com"), so a reader looking at snapshot.email verbatim would see different bytes from
+      // the ones the Bitcoin anchor actually commits to. It cannot change WHO the recipient is (that
+      // changes the normalised form, hence the hash), but displayed bytes and anchored bytes must
+      // not be allowed to diverge at all on a provenance surface.
+      const canonical = normaliseHeaders(s.email)
+      if (canonicalize(canonical) !== canonicalize({ to: s.email.to, cc: s.email.cc ?? [], bcc: s.email.bcc ?? [], subject: s.email.subject })) {
+        return { ok: false, checked, reason: `snapshot ${s.id}: email headers are not in canonical form` }
+      }
+      const recomputed = await emailHeadersHash(canonical)
+      if (recomputed !== s.emailHash) return { ok: false, checked, reason: `snapshot ${s.id}: emailHash mismatch` }
+      emailHashForBundle = recomputed
+    }
+    const bh = await bundleHash(s.contentHash, s.receipts ?? [], bibHashForBundle, emailHashForBundle)
     if (bh !== s.bundleHash) return { ok: false, checked, reason: `snapshot ${s.id}: bundleHash mismatch` }
     for (const r of s.receipts ?? []) {
       if (genuine.get(r.signature) !== canonicalize(r)) {

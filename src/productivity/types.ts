@@ -1,61 +1,178 @@
-// The productivity layer's data contract — spec §A3.2 (session rows) and §A3.3 (derived
-// aggregates).
+// Productivity ledger — THE SCHEMA CONTRACT (build spec §A3.2).
 //
-// ─── THIS IS A CONSUMED SEAM, NOT A FORK ────────────────────────────────────────────────────
-// The ledger itself is owned by `feat/prod-ledger`; the client-side aggregates and the measured
-// graphs are owned by `feat/prod-graphs`. Neither had landed when the AI-report path was built,
-// so these are TYPE-ONLY mirrors of the spec's tables — no ledger reader, no aggregator, and no
-// measured chart is implemented here. They are structural, so the real modules' objects satisfy
-// them as-is: when those branches land, delete the mirrors and re-point the imports at the real
-// types. If a field below is missing from the real schema, that is a contract disagreement to
-// raise — do NOT add it here unilaterally.
-// ────────────────────────────────────────────────────────────────────────────────────────────
+// This module is the integration surface for the productivity layer: the graphs, the AI report and
+// the email layer all read `SessionRow`. Treat the field names as a wire protocol — they are
+// snake_case (not the repo's usual camelCase) BECAUSE they are a cross-agent/CSV contract, and the
+// AI-report path emits/parses CSV keyed by exactly these column names. Do not "tidy" them.
+//
+// DATA MINIMISATION (§A3.2, §C1.3) — a hard product constraint, not a preference. A row carries
+// only metadata about HOW the writer worked. It stores NONE of:
+//   • geolocation (explicitly not collected — habits + whereabouts, for no feature benefit)
+//   • IP address
+//   • keystroke-level content
+//   • the prose itself
+// Anything added here later must clear the "does a real feature need this?" bar. What you don't
+// hold can't leak or be subpoenaed.
 
 /**
- * Spec §A3.2 — the atomic ledger row.
+ * Which kind of document a session was spent in. `email` is set by the email layer (spec Part B).
  *
- * TWO FIELDS ARE THE WRITER'S OWN PROSE (Peter, 2026-07-17), so §A3.2's "never document prose in
- * the persistent ledger" no longer strictly holds:
- *   • `note`  — a free-text diary line the writer adds at the end of a session.
- *   • `place` — a label the writer TYPES ("library", "home"). It is NOT geolocation: there is no
- *     GPS, no coordinates, no permission prompt, and nothing is harvested. It is a word the
- *     writer wrote, of exactly the same class as the note. Any copy that implies Inkwave
- *     collects whereabouts is FALSE and must not be written (§C1.4 — precise claims).
+ * DECLARED IN `types/document.ts`, RE-EXPORTED HERE — not redeclared (feat/prod-integrate,
+ * 2026-07-17). This lane and `feat/email-compose` wrote identical unions in parallel: a document
+ * type is a property of the DOCUMENT, so the document model owns the classification and the ledger
+ * reads it. Two identical declarations are not harmless — they agree today and drift the first time
+ * one side gains a member, and the ledger would silently keep tagging rows against a stale union.
+ * (The email lane deleted its own competing `docTypeOf` accessor for exactly this reason; the rule
+ * that RESOLVES an absent docType to a row's `doc_type` stays in capture.ts, which owns the ledger.)
+ */
+export type { DocType } from '../types/document'
+import type { DocType } from '../types/document'
+
+/**
+ * One session row — the atomic unit of the ledger (§A3.2).
  *
- * Both would otherwise ride out inside "metadata", which is always included — making "metadata
- * only" quietly mean "and what I wrote about my day". So both are gated behind their own opt-in
- * on the way out (report/compile.ts, tier 2). Do not fold either into the always-included tier.
- *
- * FIELD NAMES ARE OWNED BY `feat/prod-ledger` and not yet final. `note`/`place` are placeholders
- * pending its report; the export path reads them in exactly one place each (compileData's
- * sensitive section), so re-pointing is a two-line change. Do not guess further.
+ * TIME ZONES (§A9): `start`/`end` are ISO-8601 WITH the writer's local UTC offset
+ * (e.g. `2026-07-17T09:14:03.000+10:00`). That single field carries the UTC instant AND the offset,
+ * so consumers can aggregate in the writer's local day (take the date part as written) without a
+ * second field — which is why there is no separate `tz` column. Never emit a bare `Z` timestamp:
+ * the local day is not recoverable from it.
  */
 export interface SessionRow {
   session_id: string
+  /** Stable document id — never the title, so a title can't leak into the ledger unbidden. */
   doc_id: string
-  /** User-visible title; may be suppressed per-doc, hence optional. */
+  /** User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed. */
   doc_label?: string
-  /** ISO-8601. */
+  /** ISO-8601 with local offset. */
   start: string
-  /** ISO-8601. */
+  /** ISO-8601 with local offset. */
   end: string
+  /** Time actually editing, excluding idle within the session. See activeMsOf() in sessionLogic. */
   active_minutes: number
   words_start: number
   words_end: number
+  /** Gross word additions across the session (start→end word diff). */
   words_added: number
+  /** Gross word deletions — the editing/restructuring signal. */
   words_deleted: number
+  /** words_end - words_start. */
   net_words: number
+  /** Discrete edit operations (content-changing transactions). */
   edit_events: number
+  /** Gap since the previous session closed, in minutes. 0 for the first session in the ledger. */
   break_before_min: number
+  /** True when this block was a timed Pomodoro work block. */
   pomodoro: boolean
   doc_type: DocType
-  /** TIER 2 — the writer's own prose. Never exported without its own explicit opt-in. */
+
+  // ─── User-authored fields (Peter, 2026-07-17) — see LEDGER_PRIVATE_FIELDS ───
+  // These two are categorically different from every field above: they are text the WRITER chose to
+  // type, not telemetry derived from their editing. They are always optional, always omitted when
+  // empty, and NEVER flow to an AI without a separate, explicit opt-in.
+
+  /**
+   * The writer's diary note for the session — "what I did", written at session end (§A5's reward
+   * loop, not a compliance form). Optional; a skipped note is not a failure and is simply absent.
+   *
+   * This is the first user prose the ledger holds. §A3.2's "never document prose in the persistent
+   * ledger" rule was about HARVESTED prose; a note the writer deliberately writes into their own
+   * ledger is theirs by intent. It still gets document-grade care on the export path.
+   */
   note?: string
-  /** TIER 2 — a place label the writer TYPED. Not geolocation. Same gate as `note`. */
+
+  /**
+   * A place label the writer TYPES — "library", "home", "cafe". Serves "where do I work best".
+   *
+   * NOT geolocation. There is no `navigator.geolocation` call, no coordinates, no reverse
+   * geocoding, no permission prompt, and no auto-capture anywhere in this layer. This is a word the
+   * writer chose, in the same class as `note` — which is why §A3.2's location argument ("habits +
+   * whereabouts", sensitivity for no feature benefit) does not bite: we hold no whereabouts, only a
+   * label. Do not "upgrade" this to real location later without re-reading §A3.2 and asking Peter.
+   */
   place?: string
 }
 
-export type DocType = 'note' | 'essay' | 'email' | 'other'
+/**
+ * The fields that are USER PROSE rather than measured telemetry, and therefore must never reach an
+ * AI (or any export) without their own explicit, off-by-default opt-in (§A7.3).
+ *
+ * This is the integration seam for the AI-report path: `stripPrivateFields(row)` is the DEFAULT
+ * payload shape; including them requires the writer ticking the box that names them.
+ */
+export const LEDGER_PRIVATE_FIELDS = ['note', 'place'] as const
+
+/** A row with the user-authored fields removed — the default AI-export shape (§A7.3). */
+export type PublicSessionRow = Omit<SessionRow, 'note' | 'place'>
+
+/**
+ * Drop the user-authored fields. Use this on ANY path that leaves the device unless the writer has
+ * ticked the notes/place opt-in. Deletes the keys entirely (never blanks them), so an omitted note
+ * leaves no trace in the payload at all.
+ */
+export function stripPrivateFields(row: SessionRow): PublicSessionRow {
+  const { note: _n, place: _p, ...rest } = row
+  return rest
+}
+
+// ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
+// The ledger doubles as a signed provenance ledger: rows hash into a chain so the ledger is
+// tamper-evident and OTS-anchorable, reusing the existing spine (provenance/hash.ts, ots.ts) —
+// never a parallel mechanism. One block per LOCAL day (§A9 aggregates in the local day).
+
+import type { OtsProofState } from '../types/document'
+
+/**
+ * One day's attestation block.
+ *
+ * WHY DAYS ARE INDEPENDENT AND NOT CHAINED TO EACH OTHER (a design decision a failing test forced,
+ * and the right one): a cross-day prevHash chain means ANY late append invalidates every later
+ * day's blockHash — and late appends are the NORMAL case here, because §A9 says the ledger syncs
+ * through the writer's own cloud and two devices append concurrently. Yesterday's row arriving from
+ * a phone would burn the Bitcoin anchor on every day after it, forcing a re-stamp of the whole
+ * month. So each day's block hashes only its own rows (bound to its month + day, so a block cannot
+ * be replayed elsewhere) and is independently OTS-anchorable.
+ *
+ * This is exactly how the existing spine already works — snapshots are NOT chained to one another;
+ * each snapshot's bundleHash is independently OTS-anchored, and the hash CHAIN lives inside a
+ * signing session (receipts). Ordering evidence comes from Bitcoin's own timestamps, which is
+ * stronger than a self-asserted prevHash anyway.
+ */
+export interface LedgerAttestation {
+  v: 1
+  /** Local day 'YYYY-MM-DD' — the day this block attests. */
+  day: string
+  /** sha256Hex(JCS(row)) per row, in the block's row order. */
+  rowHashes: string[]
+  /** sha256Hex(JCS({v,month,day,rowHashes})) — what OTS anchors. */
+  blockHash: string
+  /** OTS proof over blockHash → Bitcoin, via the existing relay. Stamped on demand, never on load. */
+  ots: OtsProofState
+}
+
+/**
+ * A per-month ledger (§A3.1) — e.g. `inkwave-ledger-2026-07`. Stored exactly like any other
+ * Inkwave document: in the writer's own storage. Inkwave's servers never hold it.
+ *
+ * MERGE-SAFETY (§A9): the file lives in the writer's own cloud sync, so two devices can append
+ * concurrently. `rows` is APPEND-ONLY and keyed by `session_id`; every write-back unions with the
+ * target's existing rows FIRST (grow-only — see mergeLedgerRows). CLAUDE.md documents a real
+ * 2026-07-05 data-loss incident where a snapshot write-back truncated the archive; the ledger
+ * inherits that invariant deliberately.
+ */
+export interface MonthLedger {
+  v: 1
+  /** 'YYYY-MM' — the calendar month this ledger covers. */
+  month: string
+  rows: SessionRow[]
+  /** Recomputed deterministically from `rows` on every write; existing OTS proofs are preserved. */
+  attestations: LedgerAttestation[]
+}
+
+
+// ─── Derived aggregates (§A3.3) — the report/graphs seam ─────────────────────
+// Contributed by `feat/prod-ai-report` as a type-only mirror while this branch was in flight; the
+// SessionRow/DocType mirrors it carried are now gone, superseded by the real schema above. These
+// aggregate shapes are kept verbatim so its imports keep resolving.
 
 /** Spec §A3.3 — the per-day rollup computed CLIENT-SIDE from the ledger. */
 export interface DayAggregate {
@@ -97,14 +214,36 @@ export interface WindowAggregate {
   to: string
   days: DayAggregate[]
   /**
-   * Session rows. Required for the DAILY window, whose judged rows are per-session.
+   * Session rows — supplied for the DAILY window, whose judged rows are per-session.
    *
-   * CONTRACT NOTE for prod-ledger/prod-graphs: they are ALSO required at weekly/monthly when the
-   * writer opts into tier 2 (notes + place), because a note is per-session and there is nowhere
-   * else to read it from. Weekly/monthly payloads still send day ROLLUPS only (§A3.3) — the
-   * session rows are used solely to list the opted-in notes, never as raw logs. If supplying
-   * them at weekly+ is a problem, say so and we can define a per-day note digest instead.
+   * CONTRACT (decided by prod-ledger, 2026-07-17, answering the note-digest question): at
+   * WEEKLY/MONTHLY this is `[]` and opted-in notes travel as `note_digest` instead. Two reasons,
+   * and the first is the serious one:
+   *   • §A6.4. Shipping full session rows at monthly puts a SECOND copy of every measured number
+   *     in the payload alongside the day rollups. The rule that measured numbers never round-trip
+   *     through the model exists because it silently tidies them — and two copies is precisely how
+   *     a narrative ends up contradicting the bars. One representation of measurement, always.
+   *   • §A6/§A7. "Compact rollups, not raw logs" is what keeps a monthly payload bounded. The note
+   *     TEXT dominates tokens either way, so the digest costs the writer's own words and nothing
+   *     more — it just stops the schema from dragging 150 rows of measurement along with them.
+   * NB "where do I work best" must be computed CLIENT-SIDE as a measured by-place rollup, not
+   * inferred by the model from raw rows — same §A6.4 rule.
    */
   sessions: SessionRow[]
+  /**
+   * The writer's opted-in notes/places, rolled up per LOCAL day. Present ONLY when tier 2 is on;
+   * absent otherwise, so a payload that never opted in has no place to carry prose at all.
+   */
+  note_digest?: DayNoteDigest[]
   docs: WindowDoc[]
+}
+
+/** Tier-2 carrier (§A7.3): the writer's own words for one local day, and nothing measured. */
+export interface DayNoteDigest {
+  /** Local calendar day, `YYYY-MM-DD`. */
+  day: string
+  /** The day's session notes, in session order. Sessions without a note contribute nothing. */
+  notes: string[]
+  /** Distinct place labels the writer typed that day. */
+  places: string[]
 }

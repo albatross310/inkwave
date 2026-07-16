@@ -18,9 +18,9 @@
 import { useMemo, useState } from 'react'
 import { BarChart, HourHistogram, Legend, LineChart, PhaseMixBar } from './charts/Charts'
 import type { Series } from './charts/series'
-import type { DayAggregate, LedgerAggregates, MonthAggregate, WeekAggregate } from './aggregate'
+import type { ChartDayAggregate as DayAggregate, LedgerAggregates, MonthAggregate, WeekAggregate } from './aggregate'
 import { comparePhases, selectClaims, type JudgedReport, type ReportWindow } from './judged'
-import type { LedgerSession } from './ledger'
+import type { SessionRow } from './types'
 import { classifySession } from './phase'
 import { DAILY_CAVEAT, dayDetail, dayHeadline, describeCorrelation, formatMinutes } from './summary'
 
@@ -29,7 +29,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 export interface ProductivityPanelProps {
   aggregates: LedgerAggregates
   /** The ledger rows the aggregates were built from — used only to compare the rule against the AI. */
-  sessions?: readonly LedgerSession[]
+  sessions?: readonly SessionRow[]
   /** The AI half (§A6.1). Absent until the writer runs the AI path — the panel is complete without it. */
   judged?: JudgedReport
   /** Demo mode renders fixture data; the panel says so rather than implying it's the writer's record. */
@@ -114,7 +114,7 @@ function DayView({ day }: { day: DayAggregate }) {
 
 // ─── Week: the default window, where patterns become permissible ───────────────
 
-function WeekView({ week, sessions, judged }: { week: WeekAggregate; sessions?: readonly LedgerSession[]; judged?: JudgedReport }) {
+function WeekView({ week, sessions, judged }: { week: WeekAggregate; sessions?: readonly SessionRow[]; judged?: JudgedReport }) {
   const labels = week.days.map(d => WEEKDAYS[(new Date(`${d.day}T00:00:00Z`).getUTCDay() + 6) % 7])
 
   const timeSeries: Series[] = [{ provenance: 'measured', label: 'active minutes', values: week.days.map(d => d.activeMinutes) }]
@@ -201,7 +201,7 @@ function MonthView({ month }: { month: MonthAggregate }) {
 function PhaseBlock({ phases, sessions, judged }: {
   phases: { drafting: number; editing: number; unclear: number; total: number }
   /** The rows behind `phases` — needed to compare the rule against the AI, per session. */
-  sessions?: readonly LedgerSession[]
+  sessions?: readonly SessionRow[]
   judged?: JudgedReport
 }) {
   if (phases.total === 0) return null

@@ -737,8 +737,9 @@ account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) a
 - **The payload is an ALLOW-LIST** (compile.ts names every field that leaves), so a field the ledger
   gains later cannot leak by riding along — it is simply not emitted until someone picks a tier for
   it. A deny-list would fail the other way, silently. Tested.
-- **Seams, not forks:** `types.ts` type-mirrors §A3.2/§A3.3 and `source.ts` is the one function
-  `feat/prod-ledger`/`feat/prod-graphs` fill in; `?prodReport=demo` installs labelled synthetic
+- **Seams, not forks:** `types.ts` WAS a type-mirror of §A3.2/§A3.3 — the mirrors are GONE (see the
+  integration section below); it is now the real schema, and `source.ts` is the one function
+  `feat/prod-ledger` fills in (via `installSource.ts`); `?prodReport=demo` installs labelled synthetic
   fixtures so the path is drivable meanwhile. The measured CHART is prod-graphs' — the bars here are
   an interim read of the same rollups; the judged overlay stays whatever replaces them.
 - `/privacy` has a "Your work report" section naming all three tiers — keep it in sync with the code.
@@ -747,9 +748,10 @@ account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) a
 ## Productivity layer — P1a-viz: aggregates + graphs (2026-07-17, `feat/prod-graphs`)
 
 The read half of the productivity layer (build-spec §A3.3/§A8, the private Productivity-Email spec —
-read it, never copy it into the repo). `src/productivity/`: `ledger.ts` (the §A3.2 row CONTRACT —
-owned by the `feat/prod-ledger` lane; replace with its import when it lands, do NOT fork the schema),
-`aggregate.ts` (pure day/week/month rollups), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
+read it, never copy it into the repo). `src/productivity/`: ~~`ledger.ts` (the §A3.2 row CONTRACT)~~ — **that mirror is RETIRED; the schema
+is `types.ts` and `ledger.ts` is now the real attested per-month ledger (see the integration section
+below)**, `aggregate.ts` (pure day/week/month rollups, now sharing one module with the ledger's
+window builder), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
 AI seam + the honesty gate), `summary.ts` (the copy), `charts/` (hand-rolled SVG — NO chart
 dependency; follows `src/verify/ActivityGraph.tsx`), `ProductivityPanel.tsx`, `fixtures.ts`.
 Route `/productivity`, flag `inkwave:prodGraphs` DEFAULT OFF (`?prodGraphs=1` / `=demo` / `=off`,
@@ -800,6 +802,217 @@ its own failure. PRE-EXISTING, NOT THIS LANE'S: `vite preview` throws React hydr
 #423) on EVERY route — /about and /verify included, 28 apiece — which strips `<html data-theme>` (the
 recovery failure entry.client.tsx:100 documents), so the screenshot probe asserts the theme attribute
 directly.
+
+## Productivity ledger (P1a-core, 2026-07-17 — `src/productivity/`, flag `inkwave:prodLedger`, DEFAULT OFF)
+
+Session capture + a per-month ledger, per the Productivity/Email build spec §A3–A5. `/ledger` is the
+openable surface (Pomodoro + diary notes). **The schema (`types.ts`) is a CONTRACT** — `feat/prod-graphs`,
+`feat/prod-ai-report` and the email layer all read `SessionRow`. snake_case is deliberate (it is a CSV/wire
+contract, not repo style); don't "tidy" it. `types.ts` is now the ONE contract file: the AI-report path's
+type-only mirrors were folded in on rebase (its aggregate shapes kept verbatim; its SessionRow/DocType
+mirrors deleted — the real schema supersedes them, and the names matched already).
+
+- **The flag is `ledgerFlag.ts` (`?prodLedger=1` / `=off`, sticky), NOT `flag.ts`** — that one is the AI
+  report's (`?prodReport`). A `flag.ts`/`flags.ts` pair in one directory is how someone imports the wrong
+  feature and never notices; hence the rename.
+- **`sessions` at weekly/monthly is `[]` — DECIDED (2026-07-17), answering prod-ai-report's contract ask.**
+  Opted-in notes travel as `note_digest` (per LOCAL day) instead. The serious reason is §A6.4: shipping
+  session rows at monthly puts a SECOND copy of every measured number in the payload beside the day
+  rollups, and two copies is exactly how a narrative ends up contradicting the bars. One representation of
+  measurement, always. (§A6/§A7's "rollups, not raw logs" is the second reason; the note TEXT dominates
+  tokens either way, so the digest costs the writer's own words and nothing more.) COROLLARY: "where do I
+  work best" must be a MEASURED client-side by-place rollup, never inferred by the model from raw rows.
+- `installSource.ts` fills prod-ai-report's `setAggregateSource` seam with `aggregate.ts` (real §A3.3
+  rollups from the real ledger). Gated on the ledger flag: with capture OFF there is no source, so the
+  panel says "tracking is off" rather than measuring an empty ledger and reporting "you did nothing".
+  It never clobbers the labelled `?prodReport=demo` fixtures.
+
+- **TYPING COST IS THE WHOLE DESIGN.** The tap rides the EXISTING `onTransaction` stream and reuses
+  `countSteps` (provenance/cadence.ts) — no new content instrumentation. Per keystroke it does: countSteps →
+  compare 2 numbers → increment 3 fields. **MEASURED (Node, 13k-word doc): 0.30µs/keystroke, flat from 200 →
+  40k words (0.39µs → 0.52µs); disabled gate 0.07µs.** The known-positive in `capture.perf.test.ts` (one
+  `countWords` walk = 1.97ms, 6581×) proves the harness can SEE an O(doc) cost before its verdict is read.
+- **THE BASELINE TRICK (why words_start is free):** a session boundary IS an inactivity gap, so the document
+  cannot change while nobody edits it ⇒ the word count at the previous CLOSE is exactly the next session's
+  `words_start`. Every O(doc) number (words_end, the word diff) is computed at CLOSE, never on a keystroke.
+  Idle is found by ONE 30s interval — never a clearTimeout/setTimeout churn per input.
+- **GROW-ONLY (§A9 + the real 2026-07-05 truncation incident):** every write reads the target and UNIONS
+  first (`mergeLedgerRows`, keyed by session_id). LWW only within one session_id: later `end` wins, then more
+  edit_events, then the RICHER row — that last clause stops a plain copy syncing in from another device from
+  erasing a diary note (annotating does NOT change `end`).
+- **DAILY ATTESTATION BLOCKS ARE NOT CHAINED TO EACH OTHER — deliberate, a failing test forced it.** A
+  cross-day prevHash chain makes any late append (the NORMAL multi-device case) invalidate every later day's
+  blockHash and burn its Bitcoin anchor. Each day hashes only its own rows (bound to month+day) and is
+  independently OTS-anchorable — exactly how snapshots already work (they aren't chained either; the chain
+  lives inside a signing session). Proofs carry over iff the blockHash is unchanged. OTS stamping runs on
+  demand for CLOSED days only, NEVER on load (the ~10s sweep rule).
+- **`wordDiffStats` (capture.ts), not raw `diffWords`:** diffWords tokenises as [word][trailing-whitespace]
+  for display round-tripping, so a 2-word addition measured 3 added + 1 deleted; and `diffStats` counts \S+
+  while `countWords` counts [\p{L}\p{N}]+, so `added-removed` would contradict `net_words` in the same row.
+  Both are pinned with a live known-negative. HONEST LIMIT: churn that nets out inside one session isn't
+  counted (that evidence is the paid cadence tap's, not the ledger's).
+- **§A9 time:** `start`/`end` are ISO-8601 WITH the local offset — one field carrying the UTC instant AND
+  the offset, so the local day is recoverable. Never emit a bare `Z`.
+- **Location: there is NO location collection and no `navigator.geolocation` anywhere.** `place` is a word the
+  writer TYPES ("library"), same class as their `note`. Peter overruled §A3.2 to want location, then chose
+  user-labelled (2026-07-17). Do not "upgrade" it to real location without re-reading §A3.2 and asking him.
+- **`note`/`place` are USER PROSE, not telemetry:** `LEDGER_PRIVATE_FIELDS` + `stripPrivateFields(row)` are
+  the AI-export seam — they are OFF by default and need their own opt-in (§A7.3). `/privacy` documents all of
+  this and MUST stay in sync (it currently claims exactly: no location, notes/place are typed, opt-in only).
+- **§A5 is a hard constraint:** kind, non-shaming, no scoring. The day summary leads with TIME and SESSIONS;
+  a cutting day reads "editing is writing too". Nothing here may grow a red number.
+- NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo
+  has no encryption layer for ANY document (spec §C2 assumes one), so the ledger inherits the same posture.
+
+## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
+
+Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (Peter's private doc — read it, never copy it
+into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
+off to the provider to send. Inkwave never sends mail and never touches an inbox.
+
+**An email is an ORDINARY document — that is the whole design.** `docType: 'email'` + an `email`
+header block (To/Cc/Bcc/Subject) on InkwaveDocument; the BODY is `contentJson`. Edit history,
+provenance hashing and ledger session capture apply because it is an ordinary document, not because
+anything in `src/email/` arranges it. Don't grow a parallel email path.
+
+**THE HONESTY BOUNDARY (§B2.2/§C1.4 — existential, not cosmetic).** OTS proves *this content existed
+by time T*. It does NOT prove sending, delivery, or origin. Proof of origin needs DKIM (Phase 3, not
+built). The handoff hands the draft to the provider's compose window and the user can edit before
+sending — so the provenance is of the *Inkwave draft*, not the sent bytes.
+
+⚠️ **THERE IS NO AT-REST ENCRYPTION IN THIS BUILD — DO NOT SAY THERE IS** (verified in the code
+2026-07-17). Spec §C2 says at-rest encryption is "default on" and the P1b brief repeated it as fact,
+but it is design INTENT: `storage/opfs.ts` writes `JSON.stringify(data)` through writeOpfsFile in
+PLAINTEXT, `crypto.subtle.encrypt`/AES-GCM appear NOWHERE in src, and package.json carries no crypto
+library. Documents, snapshots and emails are gzip'd JSON in OPFS — protected by the browser's origin
+sandbox and the device's own disk encryption, not by Inkwave. The email copy shipped "stored
+encrypted on your device" until the code was checked; it now says "stored on your device — we never
+hold it", which is TRUE (zero-retention is real: there is no server holding it). `copy.test.ts`
+guards this with a matcher. **Copy tracks the CODE, not the spec** — the spec is a plan, and a plan
+is not a property. When §C2's encryption ships, the word can come back. NOT E2E either, ever, unless
+the recipient runs PGP/S-MIME.
+
+ALL in-product copy lives in `src/email/copy.ts` (one source
+of truth) and `copy.test.ts` asserts the forbidden claims are absent — each matcher proved to fire on
+known-bad copy AND not to fire on an honest control FIRST, because "assert the bad phrase is absent"
+passes trivially on empty or broken matchers. The control earned its keep immediately: the naive
+matchers flagged "It does not prove that you sent the email" — they could not tell an assertion from
+its denial. Hence two matcher classes (affirmative-only vs literal). If new copy sounds better than
+"you had written exactly this by this time", it is wrong.
+
+**Hashing — `bundleHash` gained a v:3 form.** v:1 `{contentHash,receipts}` / v:2 adds `bibHash` /
+**v:3** `{v:3,contentHash,bibHash:…|null,emailHash,receipts}` when the doc is an email. Snapshots
+freeze `email` + `emailHash` exactly as they freeze `bibliography` + `bibHash`; verify recomputes
+both and folds them into the bundleHash recompute, so OTS genuinely BINDS the headers. Non-email
+docs keep v:1/v:2 BYTE-IDENTICALLY — every already-anchored snapshot verifies unchanged (asserted
+against literal canonical forms, not against the function's own output). Headers are canonicalised
+before hashing (`email/headers.ts` normaliseHeaders: address lowercased, display name kept,
+whitespace collapsed, de-duped, order PRESERVED, absent cc/bcc ⇒ `[]`) so one header set has exactly
+one anchored hash. That rule is a provenance boundary like pmToText — changing it changes what past
+anchors mean. `pmToText` itself is UNTOUCHED.
+
+**PROVED, not assumed** (`email/roundtrip.test.ts`, 13 tests): drives the REAL
+createSnapshotIfChanged → gzip archive → stampSnapshot → buildExportBundle → verifyBundle, with an
+in-memory OPFS shim (`email/testOpfsShim.ts`, test-only) and fetch stubbed at the network boundary
+only. Asserts the digest submitted to the calendar IS the v:3 bundleHash (not contentHash), and that
+tampering with a recipient / subject / bcc / body, STRIPPING the headers (downgrade to v:1), or
+tampering-and-recomputing emailHash all FAIL verify. A round-trip that only ever passes proves
+nothing.
+
+**Sending — `MailSender` (§B3)**, one interface, `email/sender.ts`. Only adapter today: `handoff`
+(Gmail/Outlook compose URL, `mailto:` fallback), no OAuth. Gmail API send (`gmail.send`) is Phase 2
+and needs Google's restricted-scope verification — it slots in as another MailSender. If an API
+adapter ever lands it is SEND-ONLY; never request inbox-read (§B5). `SendOutcome` has no `'sent'`
+variant on purpose — the handoff genuinely cannot know. Over-long drafts are REFUSED, never
+truncated (mailto 2000 / web compose 8000 chars, conservative).
+
+**Ledger seam (§A3.2 `doc_type`):** this layer sets `docType: 'email'` on the document and NOTHING
+else; `productivity/capture.ts` `resolveDocType(doc)` reads it and tags the session row. The two
+branches agreed on this contract independently — the ledger's own comment says "the email layer sets
+`docType: 'email'` explicitly and it flows through untouched" — so no field negotiation was needed.
+The ledger owns RESOLUTION (its `DEFAULT_DOC_TYPE` is 'essay' for untyped docs); this owns the
+classification only. An accessor with a competing 'note' default was written here and REMOVED before
+commit: two rules for one question is how implementations drift. MERGE NOTE: `DocType` is declared
+in BOTH `types/document.ts` and `productivity/types.ts` (identical unions, written in parallel) —
+whichever lands second should import from `types/document.ts` rather than keep the copy.
+
+**Live probe:** `scripts/email.prove.mjs` (headless, own port, nothing on Peter's screen) drives the
+REAL built app: flag-off → no panel, `?email=1` → menu → panel, the copy, header PERSISTENCE across
+a reload, finalise → frozen canonical headers + emailHash, and asserts the digest the browser
+submits to `/api/ots` is the v:3 bundleHash and NOT the contentHash. 16/16. It caught two bugs the
+unit tests structurally could not: a header edit never called `scheduleSave` (autosave is driven by
+the editor's own update handler, which a header field never fires — headers lived in React state and
+died on reload), and `ensureDocFresh` overwrote an email's subject-derived title with the first line
+of the BODY. Its copy checks VOID rather than pass when no panel renders — "no forbidden claim" on a
+page with no copy is a pass that means nothing, and it did exactly that on the first run.
+
+TRAPS FOUND HERE (both the house speciality): (1) `listSnapshots` serves from a write-through
+in-memory cache, so reading back through the same module instance NEVER touches the archive — the
+first cut of the persistence test passed while proving nothing; it now resets modules for a genuine
+cold gunzip. (2) That cold read exposed a REAL latent bug in `workers/parseClient.ts`
+`inlineGunzipJson`: it wrote a raw ArrayBuffer to DecompressionStream, which REJECTS the chunk — and
+both promises were `void`ed, so it HUNG forever instead of throwing, defeating the caller's
+try/catch. The no-Worker fallback (node/vitest/prerender) had never once been exercised. Fixed
+(write a Uint8Array view).
+
+## Productivity + email INTEGRATION (2026-07-17, `feat/prod-integrate` — the four lanes merged)
+
+P1a-core (ledger), P1a-viz (graphs), P1b (email) and P1c (AI report) were built in parallel and are
+now ONE layer. What was decided on the merge, and what the merge FOUND. **All flags stay default OFF**
+(`prodGraphs`, `prodReport`, `prodLedger`, `email`) — verified, not assumed.
+
+- **ONE SCHEMA: `productivity/types.ts`.** prod-graphs' `ledger.ts` was an explicit placeholder mirror
+  of §A3.2 ("THE LEDGER SEAM: a one-line import swap when feat/prod-ledger lands") — retired exactly
+  as it anticipated. `LedgerSession` → the real `SessionRow` everywhere. `ledger.ts` is now the real
+  per-month ATTESTED ledger; the mirror's five time functions moved to `sessionLogic.ts`, which
+  already owned `localDayOf` — one rule for one question. Its tests live on verbatim in
+  `dayKeys.test.ts` (imports re-pointed, not one assertion changed).
+- **`DocType` is declared ONCE, in `types/document.ts`** — a document's own property; the ledger READS
+  it (`capture.ts` resolveDocType owns the absent→default rule). `productivity/types.ts` re-exports.
+  Two identical unions are not harmless: they drift the first time one side gains a member.
+- **ONE `aggregate.ts`, TWO output shapes — and that is NOT a fork.** `DayAggregate` (types.ts,
+  snake_case) is the §A3.3 WIRE contract the report emits; `ChartDayAggregate` (camelCase) is the
+  charts' view model (prod-graphs' `DayAggregate`, renamed — the wire name belongs to the schema
+  owner; two exported types sharing one name in one module is how a caller silently gets the wrong
+  contract). `busiest_hours` (start-hour) and `hourHistogram` (apportioned across the span) BOTH
+  conserve total active minutes, so they cannot contradict each other on any total — they differ only
+  in distribution WITHIN a day and each documents its own limitation. Collapsing them would have
+  silently rewritten a lane's measured behaviour to make a merge look tidy.
+- **The deep-vs-shallow heuristic is RATIO ONLY — no duration.** Do not let a future merge quietly
+  reintroduce it; the measurement (39% coverage / 84%-called-drafting vs a 48% truth) is in phase.ts.
+  Three provenance tags stay: `measured` / `estimated` / `judged`.
+- **THE SILENT BREAK THIS MERGE FOUND (the house disease, live).** `report/compile.ts` read tier-2
+  notes off `agg.sessions` at EVERY window — an assumption written BEFORE prod-ledger answered the
+  contract question. The ledger's answer: `sessions: []` at weekly/monthly, notes travel as
+  `note_digest` per local day (§A6.4 — rows at monthly would put a SECOND copy of every measured
+  number beside the day rollups, and two copies is how a narrative ends up contradicting the bars).
+  Result: a writer who ticked "include my notes" on a weekly or monthly report got NO notes,
+  `notesIncluded: false`, and no error anywhere. **Both lanes' suites were green** — the `?prodReport
+  =demo` fixtures still carried the pre-answer shape, so the path a developer eyeballs worked while
+  the real ledger's did not. compile.ts now reads `note_digest` first (session fallback kept for daily
+  + demo); the fixtures now mirror the decided contract. A demo whose shape the real source never
+  produces is a fiction to build against.
+
+**THE JOINT PROBE — `productivity/emailLedger.integration.test.ts`.** §B1's primary goal ("2h10m
+writing, of which 40m on email") had never been verified by anything: the email lane owns
+`docType: 'email'` but had no ledger to tag; the ledger lane owns the row but nothing in its tree ever
+set `docType: 'email'`. It drives the REAL chain — `newEmailDocument` → `SessionCapture` (real PM
+steps) → the real debounced `ledgerStore` on a real OPFS shim → the real §A3.3 `aggregate` → the real
+`compilePayload` — and asserts 130 active minutes of which 40 are email, with no message text or
+address anywhere in the ledger or payload. **PROVED TO FIRE, both directions:** mutate
+`resolveDocType` to ignore the document (the real silent bug — every email minute filed as 'essay')
+⇒ 4 §B1 tests fail; hard-wire it to 'email' ⇒ the known-negative fails. No constant passes both.
+
+**TEST-HARNESS TRAP, and it cost a real detour.** `storage/opfsWrite.ts` decides ONCE AT MODULE LOAD
+whether OPFS writes use createWritable or the parse worker (`hasCreateWritable`), and node has
+neither. Under STATIC imports that constant is already false before any `beforeEach` can install the
+OPFS shim, so every ledger write routes to a worker that does not exist, throws, and is SWALLOWED by
+`writeAppJson`'s catch — the probe then reads an empty ledger and concludes "the email row never
+arrives", which is exactly the fiction it exists to detect. Install the shim, THEN `await import()`
+the modules under test (`vi.resetModules()` first) — `feat/email-compose`'s `roundtrip.test.ts` does
+this for the same reason, and its comment about `_snapCache` is the other half of the same discipline.
+`testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
+arrayBuffer, and its absence surfaced only as an empty ledger.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
@@ -1205,7 +1418,8 @@ block; components don't change.
 Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
-ProductivityReportModal, ProductivityPanel (`/productivity`). When you add a panel, add it here too.
+ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
+`/ledger`), EmailComposePanel (+ its provider drop-up). When you add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the

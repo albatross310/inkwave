@@ -121,18 +121,52 @@ function sessionsWithNotes(sessions: SessionRow[]): SessionRow[] {
   return sessions.filter(s => (s.note && s.note.trim()) || (s.place && s.place.trim()))
 }
 
+/** One rendered tier-2 line: WHEN the writer wrote, where they said they were, and what they said. */
+interface NoteLine { when: string; place: string; note: string }
+
+/**
+ * THE TIER-2 CARRIER (§A7.3) — read from the ledger's `note_digest` first, sessions second.
+ *
+ * WHY BOTH, and why the digest leads (feat/prod-integrate, 2026-07-17): this module was built while
+ * `feat/prod-ledger` was still in flight, and it asked that branch for session rows at every window
+ * because a note is per-session. The ledger lane ANSWERED — `sessions` is `[]` at weekly/monthly and
+ * opted-in notes travel as `note_digest`, per LOCAL day — because rows at monthly would put a SECOND
+ * copy of every measured number beside the day rollups (§A6.4), and two copies is how a narrative
+ * ends up contradicting the bars. This function is that answer being honoured.
+ *
+ * It was a SILENT break, which is why it is worth this comment: reading only `agg.sessions`, a
+ * writer who ticked "include my notes" on a WEEKLY or MONTHLY report got a payload with no notes in
+ * it, `notesIncluded: false`, and no error anywhere — the tick-box simply did nothing. Both lanes'
+ * suites were green; the demo fixtures still carried the old shape, so the path a developer eyeballs
+ * worked while the real ledger's did not. Proved end-to-end in emailLedger.integration.test.ts.
+ *
+ * The session fallback is kept deliberately: DAILY rows legitimately carry notes, and a source that
+ * predates the digest (the `?prodReport=demo` fixtures) must not silently lose them either.
+ */
+function noteLines(agg: WindowAggregate): NoteLine[] {
+  if (agg.note_digest && agg.note_digest.length) {
+    return agg.note_digest.flatMap(d => {
+      const place = d.places.join(', ').trim() || '—'
+      // A day with places but no note still says where the writer worked — it is their word either
+      // way, and dropping it would quietly discard part of what they opted into.
+      if (!d.notes.length) return [{ when: d.day, place, note: '—' }]
+      return d.notes.map(n => ({ when: d.day, place, note: n.trim() || '—' }))
+    })
+  }
+  return sessionsWithNotes(agg.sessions).map(s => ({
+    when: s.start,
+    place: (s.place ?? '').trim() || '—',
+    note: (s.note ?? '').trim() || '—',
+  }))
+}
+
 /**
  * The place label is rendered as the plain string the writer typed. It is deliberately NOT
  * parsed, geocoded or interpreted — it is a word, and treating it as anything more would be the
  * beginning of exactly the claim we must not make.
  */
-function notesSection(sessions: SessionRow[]): string {
-  const rows = sessionsWithNotes(sessions).map(s => [
-    s.session_id,
-    s.start,
-    (s.place ?? '').trim() || '—',
-    (s.note ?? '').trim() || '—',
-  ])
+function notesSection(lines: NoteLine[]): string {
+  const rows = lines.map(l => [l.when, l.place, l.note])
   return [
     'THE WRITER\'S OWN NOTES (they chose to include these)',
     '',
@@ -140,7 +174,9 @@ function notesSection(sessions: SessionRow[]): string {
     'place they typed for it. Read them as context for how the work felt. Do not treat a note as',
     'a task list, do not grade it, and do not repeat it back at length.',
     '',
-    table(['session_id', 'start', 'place', 'note'], rows),
+    // Keyed by WHEN, not by session_id: the digest is per-day and carries no session id (§A6.4 —
+    // it holds the writer's words and nothing measured, so there is no row to point at).
+    table(['when', 'place', 'note'], rows),
   ].join('\n')
 }
 
@@ -202,12 +238,12 @@ export function compileData(
 
   parts.push('', 'DOCUMENTS IN THIS WINDOW', '', docsSection(agg.docs, included))
 
-  // TIER 2 — only on an explicit opt-in, and only where there is something to say. Note this
-  // reads `agg.sessions` at EVERY window: a note is per-session, so weekly/monthly need the rows
-  // to list them (the day rollups above are still the only measured data sent).
-  const noted = opts.includeNotes ? sessionsWithNotes(agg.sessions) : []
+  // TIER 2 — only on an explicit opt-in, and only where there is something to say. The carrier is
+  // `note_digest` (per local day) with a session-row fallback; see noteLines(). The day rollups
+  // above remain the only measured data sent, at every window.
+  const noted = opts.includeNotes ? noteLines(agg) : []
   const notesIncluded = noted.length > 0
-  if (notesIncluded) parts.push('', notesSection(agg.sessions))
+  if (notesIncluded) parts.push('', notesSection(noted))
 
   if (includedDocIds.length) {
     parts.push('', contentSection(agg.docs, includedDocIds, opts.contentText ?? {}))

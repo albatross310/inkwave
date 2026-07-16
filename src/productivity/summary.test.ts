@@ -9,11 +9,11 @@
 import { describe, it, expect } from 'vitest'
 import { aggregateDays } from './aggregate'
 import { DAILY_CAVEAT, dayDetail, dayHeadline, describeCorrelation, formatMinutes } from './summary'
-import { makeLightDay, makeLedgerSessions } from './fixtures'
-import type { DayAggregate } from './aggregate'
+import { makeLightDay, makeSessionRows } from './fixtures'
+import type { ChartDayAggregate as DayAggregate } from './aggregate'
 
 const lightDay = aggregateDays(makeLightDay())[0]
-const realDays = aggregateDays(makeLedgerSessions({ seed: 20260716 }))
+const realDays = aggregateDays(makeSessionRows({ seed: 20260716 }))
 const emptyDay: DayAggregate = {
   day: '2026-07-15', activeMinutes: 0, sessionCount: 0, wordsAdded: 0, wordsDeleted: 0, netWords: 0,
   editEvents: 0, breaks: { count: 0, totalMinutes: 0, medianMinutes: 0, longestMinutes: 0 },

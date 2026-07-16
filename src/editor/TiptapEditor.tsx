@@ -55,9 +55,15 @@ import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
 import { createSnapshotIfChanged, listSnapshots, listSnapshotMeta, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
+import { EmailComposePanel } from '../components/EmailComposePanel'
+import { emailEnabled } from '../email/flag'
+import { titleForEmail } from '../email/newEmail'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
+import { prodLedgerEnabled } from '../productivity/ledgerFlag'
+import { getCapture } from '../productivity/capture'
+import { installLedgerSource } from '../productivity/installSource'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
 import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
@@ -894,6 +900,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         cadenceTapRef.current.record(transaction.steps)
       }
 
+      // ── Productivity ledger: session capture (spec §A4) ──────────────────────
+      // Rides the SAME stream, derives counts from the SAME countSteps primitive — no new content
+      // instrumentation. O(steps): it compares two numbers and increments three fields. Every
+      // O(doc) number the ledger needs is computed at session CLOSE, off this path. Flag default
+      // OFF and cached in a module variable, so the disabled cost is one boolean test.
+      if (prodLedgerEnabled()) getCapture().record(transaction.steps)
+
       // ── SCAS tick (deferred): CONSOLE-SNAPPY RULE — a keystroke does no O(doc) work. ──────────
       // The engine scan (processDoc walks every committed word) and the decoration rebuild both
       // move to ONE debounced tick ~120ms after the last input; the decoration plugin meanwhile
@@ -1103,6 +1116,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  // ── Productivity ledger: bind the doc + close sessions at real boundaries (§A4) ──
+  // Binding takes the document's word baseline ONCE per open (an O(doc) count, off the keystroke
+  // path) — that baseline is what makes a session's words_start free. A doc switch closes the
+  // outgoing session; `visibilitychange → hidden` closes and flushes while the page is still alive
+  // (pagehide is too late to do async work reliably, and a backgrounded tab throttles timers).
+  useEffect(() => {
+    if (!editor || !prodLedgerEnabled()) return
+    const cap = getCapture()
+    installLedgerSource() // the report/graphs read measured aggregates from the real ledger
+    void cap.bindDoc({ docId: doc.id, getDoc: () => ensureDocFresh() })
+    cap.startIdleWatch()
+
+    const onHide = () => { if (document.visibilityState === 'hidden') void cap.closeAndFlush('exit') }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onHide)
+      cap.stopIdleWatch()
+      void cap.closeAndFlush('doc-switch')
+    }
+  }, [editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // DEV-ONLY: expose SCAS internals for manual/automated inspection. Stripped from prod builds.
   useEffect(() => {
@@ -1675,7 +1711,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       contentJson: e.getJSON(),
       updatedAt: new Date().toISOString(),
       // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
-      title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
+      // An EMAIL titles itself from its SUBJECT, not its body: the generic rule would overwrite the
+      // subject with the first line of the message ("Dear Ada,") on the next save beat, so the
+      // library and the ledger's doc_label would show the greeting instead of the subject.
+      title: docRef.current.docType === 'email' && docRef.current.email
+        ? titleForEmail(docRef.current.email)
+        : deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
       scasState: scasRef.current?.state ?? docRef.current.scasState,
       scasGreenAnchors: getGreenAnchors(e.state),
     }
@@ -2548,6 +2589,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           </div>
         )}
         <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled} covered={isTouch ? !waveRest : !settled}>
+          {/* Email header block (§B2.1), behind the default-OFF flag. The BODY below is the
+              ordinary editor — which is what makes an email an ordinary document. */}
+          {emailEnabled() && doc.docType === 'email' && (
+            <EmailComposePanel
+              doc={doc}
+              onDocChange={(updated) => {
+                // A header edit is a document edit, and NOTHING else saves it: scheduleSave is
+                // driven by the editor's own update handler, which a header field never fires. Left
+                // to onDocChange alone the headers lived in React state and vanished on reload
+                // unless the writer happened to also touch the body. docRef is updated FIRST so any
+                // snapshot/finalise work that reads it sees the new headers immediately.
+                docRef.current = updated
+                onDocChange(updated)
+                scheduleSave(updated)
+              }}
+            />
+          )}
           <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />

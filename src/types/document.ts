@@ -71,6 +71,33 @@ export interface Bibliography {
 import type { JSONContent } from '@tiptap/react'
 export type TiptapJSON = JSONContent
 
+// ─── Document type (productivity spec §A3.2 `doc_type`) ──────────────────────
+// A document's OWN property — it knows what it is. The productivity ledger READS this to tag its
+// session rows (`doc_type: email`), which is what makes email writing show up in the report.
+// Optional, so every pre-existing document still loads without a migration write.
+//
+// OWNERSHIP: this is the classification only. RESOLVING an absent docType to a row's `doc_type` is
+// the LEDGER's rule and lives there (`productivity/capture.ts` resolveDocType / DEFAULT_DOC_TYPE) —
+// deliberately NOT duplicated here. An accessor with its own default used to sit in this file and
+// answered 'note' where the ledger answers 'essay': two rules for one question, which is how two
+// implementations drift apart (cf. citationText, exported rather than copied). One rule, in the
+// module that owns the ledger.
+
+export type DocType = 'note' | 'essay' | 'email' | 'other'
+
+// ─── Email headers (email layer §B2.1) ───────────────────────────────────────
+// An email is an ORDINARY Inkwave document: the BODY is contentJson (so edit history, provenance
+// hashing and session capture all apply for free), and these are the structured header fields that
+// sit alongside it. Addresses are stored as the user typed them, trimmed — canonicalisation for
+// hashing happens in email/headers.ts, never here.
+
+export interface EmailHeaders {
+  to: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject: string
+}
+
 // ─── Schema versioning ────────────────────────────────────────────────────────
 
 export type SchemaVersion = '0.1.0'
@@ -105,6 +132,10 @@ export interface InkwaveDocument {
   // ─── Citation / bibliography (M-Zotero) ──────────────────────────────────
   bibliography?: Bibliography      // embedded, self-contained cited entries (populated by resolve.ts)
   citationStyle?: string           // CSL style id, e.g. 'apa', 'chicago-author-date'
+
+  // ─── Email layer (§B2.1) ─────────────────────────────────────────────────
+  docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
+  email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
 }
 
 // ─── SCAS engine state (M0) ───────────────────────────────────────────────────
@@ -164,7 +195,12 @@ export interface Snapshot {
   // pre-citation documents hash byte-identically to before. See §3/§12 of the citations spec.
   bibliography?: Bibliography       // frozen copy (its generatedAt is NOT part of bibHash)
   bibHash?: string                  // sha256Hex(JCS({ v:1, entries, style }))
-  bundleHash: string                // v:1 {contentHash,receipts} OR v:2 {contentHash,bibHash,receipts} when bibHash present
+  // The email headers frozen at snapshot time, and their hash. Present only on `doc_type: email`
+  // documents — absent ⇒ the bundle keeps its v:1/v:2 form, so every non-email document (i.e. every
+  // document anchored before this feature existed) hashes byte-identically to before. §B2.2.
+  email?: EmailHeaders              // frozen copy of To/Cc/Bcc/Subject
+  emailHash?: string                // sha256Hex(JCS({ v:1, to, cc, bcc, subject })) — canonicalised
+  bundleHash: string                // v:1 {contentHash,receipts}; v:2 adds bibHash; v:3 adds emailHash
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
   summary?: string                  // 5-10 word AI summary (async, patched after snapshot creation)
   nudgeWord?: { from: string; to: string }  // old→new word for 'word-nudge' trigger snapshots

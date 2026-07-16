@@ -18,7 +18,7 @@
 //  4. Deleting words is writing. Cutting is never framed as loss or damage.
 //  5. Daily says what happened. It never says what it means (§A6.2 — that's a pattern claim).
 
-import type { DayAggregate } from './aggregate'
+import type { ChartDayAggregate as DayAggregate } from './aggregate'
 
 /** "1h 20m" / "45m" / "0m" — never a bare decimal, never a percentage of anything. */
 export function formatMinutes(mins: number): string {
