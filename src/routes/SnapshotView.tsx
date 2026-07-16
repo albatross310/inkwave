@@ -3116,6 +3116,25 @@ export function SnapshotView() {
       e.preventDefault()
       // Shift+wheel arrives as horizontal delta on many setups → take whichever axis is larger.
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+      // ── DEBT ON REVERSAL (Peter's oldest complaint: "lags behind which version you're actually
+      // up to. When you stop it catches up.") ────────────────────────────────────────────────────
+      // A step consumes only SW_STEP(40) of the event's delta, but a mouse notch delivers 120 — so
+      // 80 of undischarged intent survives EVERY notch and compounds. After 12 backward notches the
+      // accumulator sits at ~-960, and a forward notch then reads -840: still negative, so it steps
+      // BACKWARD. Probed: 12 back then 12 forward = 5 fwd / 5 back, starts at 8, ends at 8 — the
+      // reversal nets nothing until the debt is paid off. Everyone (me included) read that as
+      // presentation latency for weeks; presenting was measured at 49-51/s the whole time.
+      // So: a direction change cancels the debt. NOT a full discharge — one notch stays one version
+      // (Peter's call: it removes the bug and changes nothing he likes).
+      // The `>= SW_STEP` test is what makes this safe for a TRACKPAD: a fine-delta stream never
+      // leaves debt (its accumulator always lands back inside [0, SW_STEP) after a step), so its
+      // jittery sign flips can never wipe legitimate in-progress accumulation. Only a coarse-delta
+      // device — the one that actually leaks — can hold a debt worth cancelling.
+      const debtFixOn = (window as unknown as { __iwWheelDebtFix?: boolean }).__iwWheelDebtFix !== false
+      if (debtFixOn && d !== 0 && wheelAccum.current !== 0
+        && Math.sign(d) !== Math.sign(wheelAccum.current) && Math.abs(wheelAccum.current) >= SW_STEP) {
+        wheelAccum.current = 0
+      }
       wheelAccum.current += d
       let n = 0
       if (Math.abs(wheelAccum.current) >= SW_STEP) { n = wheelAccum.current > 0 ? 1 : -1; wheelAccum.current -= n * SW_STEP }

@@ -1108,7 +1108,11 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       const sEl = s.getEl()
       const w = sEl ? sEl.clientWidth : el.clientWidth
       const h = sEl ? sEl.clientHeight : el.clientHeight
-      const dw = sEl ? Math.abs(sEl.clientWidth - el.clientWidth) : 0
+      // A guard of the form "measure X, compare to Y, refuse if they differ" is the exact shape
+      // that silently disabled arithLayout for months: it never fires, and never-fires looks
+      // identical to not-needed. So a harness can inject a KNOWN divergence and assert this fires.
+      const nudge = (window as unknown as { __iwBakeBoxNudge?: number }).__iwBakeBoxNudge || 0
+      const dw = sEl ? Math.abs(sEl.clientWidth - (el.clientWidth + nudge)) : 0
       const dh = sEl ? Math.abs(sEl.clientHeight - el.clientHeight) : 0
       if (dw > 0.5 || dh > 0.5) {
         // NEVER silent: a divergence is either a cosmetic sub-pixel (blitted to the surface canvas
