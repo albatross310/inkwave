@@ -21,3 +21,7 @@ SECURITY-AUDIT-2026-06.md
 # Claude Code local worktrees / session data
 .claude/
 .vercel
+
+# bench harness: built vendor bundle (rebuild from tiptap-src) + scratch
+scripts/bench/static/tiptap/
+scripts/bench/dbg*.mjs
