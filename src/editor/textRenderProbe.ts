@@ -113,6 +113,12 @@ export interface ProbeApi {
    *  itself. Also re-parses the live doc through the standalone schema and asserts PM-level
    *  equality, so the answer covers this document's real citations/math, not just type names. */
   schemaIdentity(): Record<string, unknown>
+  /** THE COST /snapshot's sweep ADDS, which no previous number covers. ROUND 13's 62-82ms/version
+   *  was `buildRenderModel` fed `editor.state.doc` — an ALREADY-PARSED node. /snapshot has no
+   *  editor, so every version must first be parsed from its contentJson, and that parse is this
+   *  seam's own increment. Warmed in-page before timing (12 identical calls go 291.7 → 81.8ms
+   *  settled: a probe timing a few calls over CDP round-trips reports the JIT tier-up, not the work). */
+  parseCost(iters: number): Record<string, unknown>
   /** Parse `json` with the STANDALONE schema and compare it to the LIVE editor's doc — the same
    *  path `schemaIdentity().docEq` takes. Exists so the known-negative can drive that identical
    *  comparison to the OPPOSITE answer (a negative that runs through a different path proves
@@ -1155,6 +1161,25 @@ export function installTextRenderProbe(editor: Editor): void {
         // actually exercised so a green result on an empty document is visibly worthless.
         census,
         liveJson, mutatedJson, mutationApplied,
+      }
+    },
+    parseCost(iters) {
+      const json = editor.state.doc.toJSON()
+      const words = editor.state.doc.textBetween(0, editor.state.doc.content.size, ' ').split(/\s+/).filter(Boolean).length
+      // WARM FIRST — the JIT tier-up is the single biggest liar in this probe suite.
+      for (let i = 0; i < 12; i++) nodeFromContentJson(json)
+      const ms: number[] = []
+      for (let i = 0; i < iters; i++) {
+        const t0 = performance.now()
+        const n = nodeFromContentJson(json)
+        ms.push(performance.now() - t0)
+        if (!n) return { void: true, reason: 'parse returned null — a cost measured on a failed parse is a fiction' }
+      }
+      ms.sort((a, b) => a - b)
+      return {
+        words, iters,
+        p50: ms[Math.floor(ms.length / 2)],
+        min: ms[0], max: ms[ms.length - 1],
       }
     },
     docEqOf(json) {

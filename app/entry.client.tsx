@@ -21,7 +21,11 @@ applyTheme()
     // createWritable, so every OPFS write there takes opfsWrite.ts's WORKER createSyncAccessHandle
     // branch, which CI cannot reach (Playwright's Linux WebKit has no navigator.storage at all).
     // Sticky, like the rest: a flag read fresh from the URL dies the moment nav rewrites it.
-    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug']) {
+    // `snapBreaks` — the /snapshot break-table sweep. Sticky for the reason the round-8 note gives
+    // in the sharpest form: /snapshot's local-first nav REWRITES THE URL on every scrub step, so a
+    // flag read fresh from the URL dies on the first scrub — silently disabling the very feature you
+    // came to test, exactly when you started testing it.
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug', 'snapBreaks']) {
       const v = params.get(f)
       if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
       // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
