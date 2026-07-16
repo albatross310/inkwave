@@ -345,10 +345,70 @@ describe('pearson — the descriptive correlation (§A3.3 DESCRIPTIVE ONLY)', ()
     expect(c.r).toBe(0)
   })
 
-  it('stays inside [-1, 1]', () => {
+  // ─── THE NON-DEGENERATE CASE — the only fixture here that can tell Pearson's r from an impostor ──
+  //
+  // WHY THIS ASSERTS A VALUE AND NOT A RANGE. This test used to read:
+  //     expect(c.r).toBeGreaterThanOrEqual(-1); expect(c.r).toBeLessThanOrEqual(1)
+  // — which `clamp(_, -1, 1)` GUARANTEES BY CONSTRUCTION. It could not fail. An external audit
+  // mutated the denominator `sqrt(dx2*dy2)` → `sqrt(dx2*dx2)`, DROPPING THE Y SPREAD ENTIRELY, and
+  // the whole 1054-test repo stayed green (reproduced here before fixing). Every other fixture is
+  // degenerate: on the perfect-positive case the mutant computes r=2 and the clamp launders it back
+  // to exactly the 1 the test expects. So the defensive clamp was hiding the bug the range check was
+  // too weak to catch — two pieces of careful-looking engineering combining into a blind spot.
+  //
+  // This is user-facing: pearson feeds `breakVsOutput`, shown to the writer. The mutant reports
+  // r=1.0 — "your breaks predict your output" — where the truth is 0.696. That is vibes-as-numbers
+  // presented as MEASURED, the exact failure §A6.1 exists to prevent.
+  //
+  // Hand-computable: x=1..6 (mean 3.5), y=[3,1,4,1,5,9] (mean 23/6); Σdxdy=19.5, Σdx²=17.5,
+  // Σdy²=44.833 ⇒ r = 19.5/√(17.5·44.833) = 0.6962…
+  it('computes the TRUE r on a non-degenerate sample — not merely something inside [-1, 1]', () => {
     const c = pearson([1, 2, 3, 4, 5, 6], [3, 1, 4, 1, 5, 9])
-    expect(c.r).toBeGreaterThanOrEqual(-1)
-    expect(c.r).toBeLessThanOrEqual(1)
+    expect(c.r).toBeCloseTo(0.696, 3)
+    expect(c.reportable).toBe(true)
+  })
+
+  it('is symmetric in its arguments — r(x,y) === r(y,x)', () => {
+    // A denominator that drops one axis is asymmetric by construction, so this catches the same
+    // class from the other side without needing a hand-computed constant.
+    const xs = [1, 2, 3, 4, 5, 6], ys = [3, 1, 4, 1, 5, 9]
+    expect(pearson(xs, ys).r).toBeCloseTo(pearson(ys, xs).r, 12)
+  })
+
+  it('is invariant to SCALING either axis — the property that pins the denominator', () => {
+    // Pearson's r is scale-free. Multiplying Y by 10 inflates both `num` and `dy2` by 10, so a
+    // correct denominator cancels it exactly; any denominator that ignores dy2 cannot.
+    const xs = [1, 2, 3, 4, 5, 6], ys = [3, 1, 4, 1, 5, 9]
+    const base = pearson(xs, ys).r
+    expect(pearson(xs, ys.map(y => y * 10)).r).toBeCloseTo(base, 12)
+    expect(pearson(xs.map(x => x * 4), ys).r).toBeCloseTo(base, 12)
+  })
+
+  // ─── F3: the `n` truncation had never been exercised ──────────────────────
+  //
+  // Every fixture above passes equal-length arrays, so `Math.min(xs.length, ys.length)` and the
+  // `mean(xs.slice(0, n))` truncation were dead weight no test could distinguish from `mean(xs)`.
+  it('truncates BOTH axes to the shorter one — including the means', () => {
+    // The trailing 999 must be ignored ENTIRELY: not just skipped in the sum (the loop stops at n
+    // anyway), but excluded from x's mean. If `mean` saw it, r would not match the clean pair.
+    const clean = pearson([1, 2, 3, 4, 5, 6], [3, 1, 4, 1, 5, 9])
+    const ragged = pearson([1, 2, 3, 4, 5, 6, 999], [3, 1, 4, 1, 5, 9])
+    expect(ragged.n).toBe(6)
+    expect(ragged.r).toBeCloseTo(clean.r, 12)
+  })
+
+  it('truncates when the SHORTER array is x', () => {
+    const clean = pearson([1, 2, 3, 4, 5], [2, 4, 6, 8, 10])
+    const ragged = pearson([1, 2, 3, 4, 5], [2, 4, 6, 8, 10, 777, 888])
+    expect(ragged.n).toBe(5)
+    expect(ragged.r).toBeCloseTo(clean.r, 12)
+  })
+
+  it('applies the minimum-sample gate to the TRUNCATED length, not the longer array', () => {
+    // 20 xs against 4 ys is a 4-point sample wearing a long coat. It must not be reportable.
+    const c = pearson(Array.from({ length: 20 }, (_, i) => i), [1, 5, 2, 8])
+    expect(c.n).toBe(4)
+    expect(c.reportable).toBe(false)
   })
 })
 

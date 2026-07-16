@@ -761,20 +761,45 @@ the doc; aggregation is pure and runs on mount, never on the load path.
 
 **THE HEURISTIC DEVIATES FROM THE SPEC'S EXAMPLE, AND THE MEASUREMENT IS WHY.** §A3.3 offers "high
 add-to-delete ratio + long sessions → drafting; high delete + short → editing" as an `e.g.`. Scored
-against labelled synthetic writing (`phase.variants.test.ts`, 64 sessions, ~48% drafting truth):
+against labelled synthetic writing (`phase.variants.test.ts`, 64 sessions, 48.4% drafting truth):
 
     rule                        precision   coverage   called-drafting
-    ratio + duration (spec e.g.)   100.0%      39.1%      84.0%   ← skews the mix badly
-    ratio only            SHIPPED  100.0%      81.3%      59.6%
+    ratio + duration (spec e.g.)   100.0%      34.4%      81.8%   ← skews the mix badly
+    ratio only            SHIPPED  100.0%      78.1%      50.0%   ← mix ≈ the 48.4% truth
     duration only                   47.2%      82.8%      79.2%   ← worse than chance, 28 wrong
 
 Session LENGTH does not track what the writer is doing (long revising sessions and short drafting
-bursts are both ordinary). Conjoined it never causes a WRONG call, but it suppresses coverage to 39%
-and skews survivors to 84% drafting against a 48% truth — i.e. the spec's rule would tell a writer
+bursts are both ordinary). Conjoined it never causes a WRONG call, but it suppresses coverage to 34%
+and skews survivors to 82% drafting against a 48% truth — i.e. the spec's rule would tell a writer
 they spent the month drafting when they spent half of it editing. So the ratio ships ALONE; the
 duration thresholds remain only as the scored alternative. ⚠ Peter to confirm the deviation.
 `unclear` is a first-class share, not a rendering failure: forcing a call is exactly where precision
-breaks (95.3%, 3 wrong). Residual: `revising` (deep restructuring) is the class it still can't call.
+breaks (93.8%, 4 wrong). Residual, honest: it declines ~25% of HARD drafting sessions (they cut most
+of what they lay down — indistinguishable from editing to a word counter) and ~half of `revising`.
+
+**THE EVIDENCE ABOVE WAS ONCE A TAUTOLOGY — the F1 audit finding, and the fix (2026-07-17).** An
+external mutation audit found `phase.variants.test.ts` could not feel a wrong threshold: mutating
+`draftAddRatio` 0.70 → 0.65/0.75/0.78 and `editAddRatio` 0.50 → 0.79 ALL SURVIVED GREEN. The
+assertions weren't the problem — THE FIXTURE was: its `deleteRatio` bands were DISJOINT across the
+truth classes (measured: editing topped at addRatio 0.624, drafting started at 0.803, **zero of 64
+sessions between them**), so the 0.70 cut sat in a void and every value in [0.625, 0.800] scored
+numerically identically. `expect(wrong).toBe(0)` was a property of the data, not of the rule. The
+fixture's own header had named the standard it was breaking ("the classes OVERLAP… if they didn't,
+this file would be a fiction that always reports success") — they overlapped in DURATION, the proxy
+the rule does NOT use. **THE SHAPE: check the overlap in the proxy the rule actually reads, not in
+the one that happens to be there.** Fixed by widening the bands to what real writing does (a hard
+drafting hour cuts most of what it lays down ⇒ addRatio ~0.58; restructuring writes new connective
+prose ⇒ ~0.69) — the classes now overlap [0.577, 0.689] with ~14% of sessions contested.
+`phase.thresholds.test.ts` PINS that property (drafting's floor must stay below editing's ceiling,
+both classes must be present in the band) and proves all four audit mutants now FAIL (4/3/1/2).
+**RE-DERIVED, THE CONCLUSION HELD AND SHARPENED:** ratio-only keeps 100% precision across 7 seeds
+(448 sessions, 0 wrong) and its mix lands 47.9% vs a 47.6% truth — the closest of every candidate.
+The audit's own sharper claim (that `editAddRatio: 0.65` beats 0.50 on all three criteria) was
+ITSELF an artifact of the void: on the corrected fixture it costs 35 wrong calls (90.5% precision).
+The thresholds did not move. **A synthetic fixture can prove a rule INSENSITIVE; it cannot CALIBRATE
+a cut-point** (tuning thresholds on data invented by the same author who chose them is circular the
+other way) — real calibration needs real ledger rows. `phase.sweep.probe.test.ts` prints the
+distribution, the overlap band and the full sweep; read it before touching a threshold.
 
 **Three provenances, not two.** §A6.1 names measured + judged; the heuristic is neither (a rule
 anyone can re-run — not AI; still an inference — not a measurement), so it gets its own tag/legend
@@ -793,8 +818,29 @@ proves the matchers fire on 17 banned strings. NO RED anywhere in the palette �
 (The first cut of that matcher could NOT catch "productivity down 40%": `down\s+\d\b` fails between
 "4" and "0". A matcher that can't catch the thing it names is the house disease in miniature.)
 
-**Tests are the deliverable's spine** — 106 across `phase`/`phase.variants`/`aggregate`/`ledger`/
-`judged`/`summary`/`charts`. Fixtures (`fixtures.ts`) generate from labelled BEHAVIOURAL processes
+**THE DEFENSIVE CLAMP THAT LAUNDERED A BROKEN FORMULA — the F2 audit finding (2026-07-17).**
+`pearson()` shipped as `clamp(num/den, -1, 1)`. The audit dropped the Y spread from the denominator
+(`sqrt(dx2*dy2)` → `sqrt(dx2*dx2)` — i.e. NOT Pearson's r at all) and **the whole 1054-test repo
+stayed green** (reproduced before fixing). Two things combined: every fixture was degenerate (on the
+perfect-positive case the mutant computes r=2 and the clamp returns exactly the 1 the test asserts),
+and the ONE non-degenerate fixture asserted only `-1 ≤ r ≤ 1` — **which the clamp guarantees by
+construction**. A vacuous assertion sitting on the only data that could have caught it. User-facing:
+it feeds `breakVsOutput`, so the mutant would show the writer r=1.0 ("your breaks predict your
+output") where the truth is 0.696 — vibes-as-numbers presented as MEASURED, §A6.1's exact failure.
+FIXED: that assertion is now `toBeCloseTo(0.696, 3)` plus symmetry and scale-invariance properties
+(a denominator that drops an axis is asymmetric and scale-sensitive by construction). **AND THE
+CLAMP IS GONE**: for a correct Pearson, Cauchy–Schwarz makes |r| ≤ 1 always, so a wide clamp is
+UNREACHABLE in working code and its only possible effect is to disguise a broken formula as a
+plausible number. It now snaps only the floating-point hair (±1e-9) and REFUSES anything grossly out
+of range — an impossible measurement must stop being reported, not be rounded into looking fine.
+Mutation-proved: drop-Y now fails 6 tests (3 from the value assertion, 3 more from the guard).
+**THE SHAPE TO REMEMBER: a defensive clamp on a quantity with a provable range is not safety — it is
+a silencer.** F3 (also real): pearson's `n`-truncation had never been exercised (every fixture passed
+equal-length arrays, so `mean(xs.slice(0,n))` → `mean(xs)` survived); now covered both directions
+plus the min-sample gate applying to the TRUNCATED length. Five pearson mutants die (3/6/4/2/2).
+
+**Tests are the deliverable's spine** — 122 across `phase`/`phase.variants`/`phase.thresholds`/
+`phase.sweep.probe`/`aggregate`/`judged`/`summary`/`charts`. Fixtures (`fixtures.ts`) generate from labelled BEHAVIOURAL processes
 whose ranges deliberately straddle the rule's cut-points, so the classes overlap and the rule CAN
 fail; an inverted-classifier known-negative proves the scorer isn't measuring a fiction. Ledger tests
 carry explicit UTC offsets — a suite that passes only in Australia/Brisbane is a check that can't see

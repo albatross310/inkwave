@@ -383,7 +383,24 @@ export function pearson(xs: readonly number[], ys: readonly number[]): Correlati
   const den = Math.sqrt(dx2 * dy2)
   // Zero variance on either axis ⇒ r is undefined, not zero. Don't report a made-up 0.
   if (den === 0) return { r: 0, n, reportable: false }
-  return { r: clamp(num / den, -1, 1), n, reportable: true }
+
+  const r = num / den
+  // ─── WHY THIS IS NOT A CLAMP ────────────────────────────────────────────────
+  // For a correct Pearson, Cauchy–Schwarz puts |r| ≤ 1 ALWAYS: a clamp to [-1, 1] is unreachable in
+  // working code, and the only thing it can ever actually do is disguise a BROKEN formula as a
+  // plausible number. That is not hypothetical — this function shipped with `clamp(num/den, -1, 1)`
+  // and an external audit dropped the Y spread from the denominator (`sqrt(dx2*dy2)` →
+  // `sqrt(dx2*dx2)`); the mutant computed r=2 for a perfectly-correlated fixture and the clamp
+  // returned exactly the 1.0 the test asserted. The whole 1054-test repo stayed green while a
+  // correlation shown to the writer would have read 1.0 ("your breaks predict your output") where
+  // the truth was 0.70. The clamp was load-bearing for the bug, not for the user.
+  //
+  // So: snap only the floating-point hair (a legitimate ±1 can land at 1.0000000000000002), and
+  // REFUSE anything grossly out of range. An impossible r means the maths is wrong, and the honest
+  // response to "my measurement is impossible" is to stop reporting it — not to round it into the
+  // range where it looks fine. Unreportable is the one answer that cannot mislead (§A6.1).
+  if (!Number.isFinite(r) || Math.abs(r) > 1 + 1e-9) return { r: 0, n, reportable: false }
+  return { r: clamp(r, -1, 1), n, reportable: true }
 }
 
 export interface WeekAggregate {
