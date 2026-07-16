@@ -63,6 +63,18 @@ export type ScasHintMeta = true | { window: { from: number; to: number } }
 // double-rAF later so the now-persisted element transitions 0 → visible (after the ghost).
 export const SCAS_REVEAL_META = 'scasRevealUpdate'
 
+// SCAS WINDOWED RENDERING (flag `inkwave:scasWindow`, default OFF). The verdict SCAN stays doc-wide
+// (redWords, flagged, engine) — only which verdicts currently have a LIVE Decoration object is
+// windowed to the viewport (+ a generous margin). The lever: the per-keystroke DecorationSet.map()
+// is O(decorated words), and a thesis lights ~2,600 (~22ms/keystroke, 4× throttle). Dispatch this
+// meta with the viewport's doc range {from,to} (from the scroll listener) to re-window. STATE is
+// never touched — flagged words stay REMEMBERED off-screen; only their paint is deferred.
+export const SCAS_WINDOW_META = 'scasWindowUpdate'
+export function scasWindowOn(): boolean {
+  if (typeof window === 'undefined') return false
+  try { return window.localStorage.getItem('inkwave:scasWindow') === '1' } catch { return false }
+}
+
 const WORD_RE = /[a-zA-Z]+/g
 
 export interface HintState {
@@ -143,6 +155,10 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
 
   addProseMirrorPlugins() {
     const { getDoc, getHintState, getScasLookup } = this.options
+    // The current viewport render window (doc positions), maintained by the scroll listener in
+    // view(). null ⇒ render ALL decorations (flag off, or before the first scroll sample).
+    let winRange: { from: number; to: number } | null = null
+    const getRW = () => (scasWindowOn() ? winRange : null)
     return [
       new Plugin({
         key: RED_HIGHLIGHT_KEY,
@@ -153,7 +169,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
               ? new Set(inkDoc.scasGreenAnchors.map(w => w.toLowerCase()))
               : undefined
             const initFlagged = savedAnchors ? initialFlaggedFromAnchors(state.doc, [...savedAnchors]) : new Map<number, string>()
-            const built = buildDecorations(state.doc, inkDoc, state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, initFlagged, savedAnchors)
+            const built = buildDecorations(state.doc, inkDoc, state.selection.from, getHintState(), getScasLookup(), EMPTY_REVEALS, initFlagged, savedAnchors, getRW())
             return { decorations: built.decorations, reveals: EMPTY_REVEALS, flagged: built.flagged }
           },
           apply(tr, old, _prev, next): RedHighlightState {
@@ -164,7 +180,12 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
             // (or a reveal) is what rebuilds. Verdicts are frozen at commit anyway, so a ≤120ms
             // repaint delay changes nothing semantically.
             const hintMeta = tr.getMeta(SCAS_HINT_META) as ScasHintMeta | undefined
-            const rebuild = !!hintMeta || !!revealMeta
+            // A scroll re-window: adopt the new viewport range and full-rebuild the (windowed) set
+            // from the doc-wide verdict. Cheap — the scan rides the per-paragraph WeakMap cache and
+            // this only fires on scroll settle, never per keystroke.
+            const windowMeta = tr.getMeta(SCAS_WINDOW_META) as { from: number; to: number } | undefined
+            if (windowMeta) winRange = windowMeta
+            const rebuild = !!hintMeta || !!revealMeta || !!windowMeta
             if (!rebuild && !tr.docChanged) return old
 
             // Remap the reveal anchors across the edit, then fold in this tr's reveal meta.
@@ -210,7 +231,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
               // ever rides a doc-changing one: splice against the MAPPED set (flagged was already
               // remapped above).
               const base = tr.docChanged ? old.decorations.map(tr.mapping, tr.doc) : old.decorations
-              const wb = buildWindowDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged, win)
+              const wb = buildWindowDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged, win, getRW())
               if (!wb.bounds) return { decorations: base, reveals, flagged } // no paragraphs in range
               const decorations = base
                 .remove(base.find(wb.bounds.from, wb.bounds.to))
@@ -223,7 +244,7 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
               return { decorations, reveals, flagged: merged }
             }
 
-            const built = buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged)
+            const built = buildDecorations(next.doc, getDoc(), next.selection.from, getHintState(), getScasLookup(), reveals, flagged, undefined, getRW())
             return { decorations: built.decorations, reveals, flagged: built.flagged }
           },
         },
@@ -236,7 +257,62 @@ export const RedHighlightExtension = Extension.create<RedHighlightOptions>({
         view(editorView) {
           const onChange = () => editorView.dispatch(editorView.state.tr.setMeta(SCAS_HINT_META, true))
           window.addEventListener('inkwave:scas-display-changed', onChange)
-          return { destroy() { window.removeEventListener('inkwave:scas-display-changed', onChange) } }
+
+          // ── SCAS WINDOWED RENDERING: keep winRange tracking the viewport (± margin) ──
+          const dom = editorView.dom as HTMLElement
+          const scrollerOf = () => dom.closest('.inkwave-editor-surface.iw-fill:not(.is-phone)') as HTMLElement | null
+          // Compute the viewport render window (doc positions) at ± MARGIN screens.
+          const computeWide = (): { from: number; to: number; vh: number } | null => {
+            const sc = scrollerOf()
+            const r = sc ? sc.getBoundingClientRect() : null
+            const clientTop = r ? r.top : 0
+            const clientBot = r ? r.bottom : window.innerHeight
+            const vh = Math.max(1, clientBot - clientTop)
+            const margin = vh * 1.5
+            const edR = dom.getBoundingClientRect()
+            const x = edR.left + Math.min(24, Math.max(2, edR.width / 2))
+            const top = editorView.posAtCoords({ left: x, top: clientTop - margin })
+            const bot = editorView.posAtCoords({ left: x, top: clientBot + margin })
+            const size = editorView.state.doc.content.size
+            const from = top ? Math.max(0, top.pos) : 0
+            const to = bot ? Math.min(size, bot.pos) : size
+            return { from, to, vh }
+          }
+          let lastWinTop = Number.NEGATIVE_INFINITY
+          let raf = 0
+          const reWindow = (force: boolean) => {
+            if (!scasWindowOn()) return
+            const sc = scrollerOf()
+            const st = sc ? sc.scrollTop : window.scrollY
+            const vh = sc ? sc.clientHeight : window.innerHeight
+            // Re-window only after ~0.75 screen of scroll — the ±1.5-screen window always keeps
+            // ≥0.75 screen of decorated margin ahead, so a word is painted before it scrolls in.
+            if (!force && Math.abs(st - lastWinTop) < vh * 0.75) return
+            const w = computeWide()
+            if (!w) return
+            lastWinTop = st
+            editorView.dispatch(editorView.state.tr.setMeta(SCAS_WINDOW_META, { from: w.from, to: w.to }))
+          }
+          const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; reWindow(false) }) }
+          const onResize = () => reWindow(true)
+          // The desktop surface scrolls; the phone body scrolls — listen to both (scroll doesn't bubble).
+          const sc0 = scrollerOf()
+          sc0?.addEventListener('scroll', onScroll, { passive: true })
+          window.addEventListener('scroll', onScroll, { passive: true })
+          window.addEventListener('resize', onResize)
+          // Prime the window once the first layout exists (a frame after mount).
+          const prime = requestAnimationFrame(() => reWindow(true))
+
+          return {
+            destroy() {
+              window.removeEventListener('inkwave:scas-display-changed', onChange)
+              sc0?.removeEventListener('scroll', onScroll)
+              window.removeEventListener('scroll', onScroll)
+              window.removeEventListener('resize', onResize)
+              if (raf) cancelAnimationFrame(raf)
+              cancelAnimationFrame(prime)
+            },
+          }
         },
       }),
     ]
@@ -289,6 +365,7 @@ export function buildDecorations(
   reveals: ReadonlySet<number>,
   flagged: Map<number, string>,
   initialAnchors?: ReadonlySet<string>,
+  renderWindow?: { from: number; to: number } | null,
 ): { decorations: DecorationSet; flagged: Map<number, string> } {
   const newFlagged = new Map<number, string>()
   // SCAS engine off (un-migrated or non-N-mode), or the writer switched suggestions off → no decorations.
@@ -310,7 +387,7 @@ export function buildDecorations(
     return false
   })
 
-  const decorations = decorationsFor(ctx.redWords, hintState, reveals)
+  const decorations = decorationsFor(ctx.redWords, hintState, reveals, renderWindow)
   return { decorations: DecorationSet.create(pmDoc, decorations), flagged: newFlagged }
 }
 
@@ -329,6 +406,7 @@ export function buildWindowDecorations(
   reveals: ReadonlySet<number>,
   flagged: Map<number, string>,
   window: { from: number; to: number },
+  renderWindow?: { from: number; to: number } | null,
 ): { list: Decoration[]; flagged: Map<number, string>; bounds: { from: number; to: number } | null } {
   const newFlagged = new Map<number, string>()
   if (inkDoc.scasMode !== 'n' || !inkDoc.scasState || scasSuggestionsOff()) return { list: [], flagged: newFlagged, bounds: null }
@@ -353,7 +431,7 @@ export function buildWindowDecorations(
   for (const p of paras) scanParagraphWords(p.node, p.pos, pIdx++, ctx)
   const last = paras[paras.length - 1]
   return {
-    list: decorationsFor(ctx.redWords, hintState, reveals),
+    list: decorationsFor(ctx.redWords, hintState, reveals, renderWindow),
     flagged: newFlagged,
     bounds: { from: paras[0].pos, to: last.pos + last.node.nodeSize },
   }
@@ -453,12 +531,18 @@ function scanParagraphWords(node: PMNode, pos: number, pIdx: number, ctx: ScanCt
 // ── 3. Build decorations from the collected words ───────────────────────────
 // (Tab/⇧+tab hint badges were removed — the visual hints feature is gone. Tab navigation still
 // works from the keyboard; it just no longer paints a per-word badge.)
-function decorationsFor(redWords: RedWord[], hintState: HintState, reveals: ReadonlySet<number>): Decoration[] {
+function decorationsFor(redWords: RedWord[], hintState: HintState, reveals: ReadonlySet<number>, renderWindow?: { from: number; to: number } | null): Decoration[] {
   const decorations: Decoration[] = []
   const { focusedPos } = hintState
 
   for (const { from, to, dataWord, pIdx, seqInPara, secondary, firstAt, testOnly } of redWords) {
     const isFocused = focusedPos !== null && from === focusedPos
+    // SCAS WINDOWED RENDERING (flag inkwave:scasWindow): the verdict scan stays doc-wide (redWords,
+    // flagged), but only words in the viewport window get a Decoration object — the per-keystroke
+    // DecorationSet.map() is O(decorated words), and a thesis lights ~2,600. The FOCUSED word and any
+    // REVEALING word are always realised (the popover/compression read their geometry); the window
+    // carries a generous margin so a word is decorated well before it scrolls into view (no flicker).
+    if (renderWindow && !isFocused && !reveals.has(from) && (to <= renderWindow.from || from >= renderWindow.to)) continue
     // Two categories: scas-stochastic = in S_v exclusion set; scas-test = pool-only (debugAll).
     // The distinction lets CSS or future tooling style them differently (e.g. lighter green for test).
     const catClass = testOnly ? ' scas-test' : ' scas-stochastic'
