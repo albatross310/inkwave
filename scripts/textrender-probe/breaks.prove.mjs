@@ -1,5 +1,8 @@
+// Usage: pnpm build && pnpm prove:breaks   (boots its own server on an ephemeral port)
+//    or: PROBE_PORT=<port> node scripts/textrender-probe/breaks.prove.mjs   (reuse a running server)
 import { chromium } from '@playwright/test'
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT||4231}`
+import { startProbeServer } from './serve.mjs'
+const { base: BASE, stop } = await startProbeServer()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none','--disable-lcd-text'] })
 const page = await b.newPage({ deviceScaleFactor: 2, viewport: { width: 1600, height: 1400 } })
 await page.goto(`${BASE}/?textRender`, { waitUntil: 'domcontentloaded' })
@@ -28,3 +31,9 @@ console.log('IDENTICAL BREAKS:', same)
 if(!same){ for(let i=0;i<Math.max(r.mine.length,r.live.length)&&i<10;i++) if(r.mine[i]!==r.live[i]) { console.log(`first divergence at break ${i}: mine=${r.mine[i]} live=${r.live[i]} (delta ${r.mine[i]-r.live[i]})`); break } }
 console.log('geom contentWidth=', r.geom.contentWidthPx)
 await b.close()
+await stop()
+// ⚠ THIS SCRIPT USED TO END HERE — with no process.exit, so it ALWAYS exited 0. It printed
+// "IDENTICAL BREAKS: false" and reported SUCCESS to its caller: a gate that could not fail, and
+// therefore was not a gate. Nothing noticed while it was only ever read by eye; chaining it into
+// `pnpm prove:editor` would have made a real divergence green. Exit on the verdict.
+process.exit(same ? 0 : 1)

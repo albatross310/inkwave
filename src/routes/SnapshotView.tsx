@@ -26,6 +26,9 @@ import { RichDiffView } from '../components/RichDiffView'
 import { textRenderEnabled } from '../editor/textRenderFlag'
 import { summariseRecord, createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
+// THE BREAK-TABLE SWEEP. Imported ONLY here — /snapshot has no editor, so this whole path cannot
+// run while Peter types, by construction rather than by measurement (snapshotBreaks.ts header).
+import { sweepBreakTables, snapBreaksEnabled, type SweepResult } from '../editor/snapshotBreaks'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
@@ -2881,6 +2884,41 @@ export function SnapshotView() {
     })()
     return () => { cancelled = true }
   }, [docId, snapId])
+
+  // ── BREAK TABLES FOR EVERY VERSION (flag `inkwave:snapBreaks`, default OFF) ──────────────────
+  // The whole-document index the plaintext page renderer opens from: per version, the doc position
+  // each page starts at (~656B on disk vs the 62.9MB bitmap pool). Built here — on the route that
+  // OWNS the versions — because /snapshot has no editor, which is exactly why the tables could not
+  // be built at all until `editorSchema.ts` made a version's contentJson parseable outside one.
+  //
+  // Keyed on [docId, allSnapshots.length] — NOT on snapId. A scrub step must never restart the
+  // sweep (the perf note above this block is the same lesson: a pure snapId change must not re-read
+  // the archive). Hydration makes a re-run nearly free anyway, but "nearly free × every scrub step"
+  // is how a background task becomes the thing you are debugging at 2am.
+  //
+  // This does NOT paint. It fills the index and stops; wiring the renderer's show() path is the
+  // paint lane's, and a table is useless-but-harmless until then. Nothing here can touch typing:
+  // there is no editor on this route (see snapshotBreaks.ts's header).
+  useEffect(() => {
+    if (!docId || !snapBreaksEnabled() || allSnapshots.length === 0) return
+    const signal = { aborted: false }
+    // Let the open settle before any background work — the same 2.5s courtesy the thumbnail sweep
+    // takes. /snapshot's first frame is the product; the index can wait.
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const r = await sweepBreakTables(docId, allSnapshotsRef.current, signal)
+        if (signal.aborted) return
+        // The sweep's honest picture, published for the prover. NOT a gate and NOT a UI: it reports
+        // what the sweep actually did (built vs hydrated, unparseable COUNTED, and how many pages
+        // are genuinely reliable) so the wired cost can be read from the real route rather than
+        // projected from a synthetic.
+        ;(window as unknown as { __iwSnapBreakSweep?: SweepResult }).__iwSnapBreakSweep = r
+        window.dispatchEvent(new Event('inkwave:snapbreaks-done'))
+        probePerf('snapbreaks-sweep', r.ms)
+      })()
+    }, 2500)
+    return () => { signal.aborted = true; window.clearTimeout(t) }
+  }, [docId, allSnapshots.length])
 
   // Background-generate any missing diff + version summaries. Keyed on [docId, genSeed] so
   // snapshot navigation never cancels a run; genSeed increment forces full regeneration.

@@ -10,14 +10,16 @@
 // Loaded by a flag-gated dynamic import from TiptapEditor, so it costs nothing when off.
 
 import type { Editor } from '@tiptap/react'
-import { makeCanvasMeasure, type Measure } from './arithmeticLayout'
+// The /snapshot seam under test — the standalone schema, imported here so the probe compares it
+// against the LIVE editor's rather than against another copy of itself. `schemaSpec` is shared with
+// the gate-kept unit test so both compare schemas by the SAME definition of "same".
+import { getEditorSchema, nodeFromContentJson, schemaSpec } from './editorSchema'
+import { makeCanvasMeasure, makeFontLoaded, type Measure } from './arithmeticLayout'
 import {
-  buildRenderModel, paintPage, paintMapStrip, canonicalGeom,
+  buildRenderModel, paintPage, paintMapStrip, canonicalGeomFromSettings,
   pageContainingPos, anchorPosOfPage,
   type RenderGeom, type RenderModel,
 } from './textRender'
-import { pageBoxPx } from './pageModel'
-import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
 // The citeBox cache key MUST be the same one PaginationExtension's DOM canonical measure harvested
 // under (it calls harvestCiteBoxes(doc, …, getCitationStyle(), bibProvider.getVersion(), 18)) — a
 // different style/epoch/base misses every lookup and every citation block placeholders out. Read the
@@ -42,18 +44,9 @@ import { captureRegion } from './scrubRaster'
 
 // The REAL geometry the live document is paginated in — read from the same settings the live
 // PaginationExtension reads, never a harness constant.
-function liveGeom(): RenderGeom {
-  const paper = getPaperSize()
-  const { pageWidthPx, pageHeightPx } = pageBoxPx({
-    paperSize: paper === 'scroll' ? 'a4' : paper,
-    orientation: getOrientation(),
-    topMarginPx: getTopMarginPx(),
-    bottomMarginPx: 72,
-  })
-  const g = canonicalGeom(pageWidthPx, pageHeightPx, getSideMarginPx(), getTopMarginPx())
-  g.paraSpacingEm = getParaSpacingEm()
-  return g
-}
+// liveGeom now lives in textRender.ts as canonicalGeomFromSettings() — /snapshot needs the same
+// rule and two copies is how two routes start paginating to different page sizes.
+const liveGeom = canonicalGeomFromSettings
 
 // The citeBox lookup key, read from the SAME sources the DOM canonical measure harvests under.
 // If these drift, every citation misses ⇒ every citation-bearing block placeholders out ⇒ coverage
@@ -89,33 +82,6 @@ function harvestNow(): { ok: boolean; reason: string } {
   return { ok: true, reason: 'canonical' }
 }
 
-// REAL font-loaded check. `document.fonts.check()` returns TRUE for a family with NO @font-face (the
-// system fallback counts) — that trap silently measures a fallback against itself and "agrees" at
-// 0.000. So compare the family's advance against the monospace fallback's: a family that measures
-// IDENTICALLY to `monospace` for a proportional probe string is not really loaded.
-function makeFontLoaded(measure: Measure): (stack: string, sizePx: number) => boolean {
-  const cache = new Map<string, boolean>()
-  const PROBE = 'iiiiiiiiiiWWWWWWWWWW'
-  return (stack: string, sizePx: number): boolean => {
-    const key = `${stack}|${sizePx}`
-    const hit = cache.get(key)
-    if (hit !== undefined) return hit
-    let ok = false
-    try {
-      ok = document.fonts.check(`${sizePx}px ${stack}`)
-      if (ok) {
-        const w = measure(PROBE, `400 ${sizePx}px ${stack}`)
-        const mono = measure(PROBE, `400 ${sizePx}px monospace`)
-        // A proportional face cannot have the same advance as monospace for this probe. Equal ⇒ we
-        // are measuring the fallback, i.e. the face never loaded.
-        if (Math.abs(w - mono) < 0.01) ok = false
-      }
-    } catch { ok = false }
-    cache.set(key, ok)
-    return ok
-  }
-}
-
 export interface PaintResult {
   /** = flushedMs. The honest number. */
   ms: number
@@ -140,6 +106,24 @@ export interface ProbeApi {
   /** The LIVE editor's own page-break doc positions, read off its rendered gap widgets. The ground
    *  truth the arithmetic model must agree with — if it doesn't, pages show the wrong words. */
   liveBreaks(): number[]
+  /** THE /snapshot SCHEMA SEAM (2026-07-17). Compares the standalone `getEditorSchema()` — the one
+   *  /snapshot parses contentJson with, built WITHOUT the editor's plugin closures and WITHOUT an
+   *  Editor instance — against the LIVE editor's OWN `editor.schema`. This is the from-outside
+   *  query: everything else about the seam is derived from the same list and would agree with
+   *  itself. Also re-parses the live doc through the standalone schema and asserts PM-level
+   *  equality, so the answer covers this document's real citations/math, not just type names. */
+  schemaIdentity(): Record<string, unknown>
+  /** THE COST /snapshot's sweep ADDS, which no previous number covers. ROUND 13's 62-82ms/version
+   *  was `buildRenderModel` fed `editor.state.doc` — an ALREADY-PARSED node. /snapshot has no
+   *  editor, so every version must first be parsed from its contentJson, and that parse is this
+   *  seam's own increment. Warmed in-page before timing (12 identical calls go 291.7 → 81.8ms
+   *  settled: a probe timing a few calls over CDP round-trips reports the JIT tier-up, not the work). */
+  parseCost(iters: number): Record<string, unknown>
+  /** Parse `json` with the STANDALONE schema and compare it to the LIVE editor's doc — the same
+   *  path `schemaIdentity().docEq` takes. Exists so the known-negative can drive that identical
+   *  comparison to the OPPOSITE answer (a negative that runs through a different path proves
+   *  nothing about this one). Returns null if the standalone schema refused the json. */
+  docEqOf(json: unknown): boolean | null
   /** Do the LIVE editor's breaks all land at true line starts? Line starts are derived from real
    *  text rects, skipping inline-atom NodeView interiors — independent of collectLines. */
   midlineAudit(debugNear?: number): Record<string, unknown>
@@ -1097,6 +1081,119 @@ export function installTextRenderProbe(editor: Editor): void {
         inflatedPages: mutated.pages,
         coverage: base.coverage,
       }
+    },
+    schemaIdentity() {
+      // ONE description of "same schema", shared with the gate-kept unit test — see schemaSpec's
+      // header. Two copies is how one instrument starts certifying a fiction.
+      const mine = getEditorSchema()
+      const live = editor.schema
+      const mineSpec = schemaSpec(mine)
+      const liveSpec = schemaSpec(live)
+
+      // Name the first divergence rather than reporting a bare false — a boolean cannot be acted on.
+      const diffs: string[] = []
+      const a = JSON.parse(mineSpec) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      const b = JSON.parse(liveSpec) as { nodes: Record<string, unknown>; marks: Record<string, unknown> }
+      for (const kind of ['nodes', 'marks'] as const) {
+        const keys = new Set([...Object.keys(a[kind]), ...Object.keys(b[kind])])
+        for (const k of keys) {
+          const x = JSON.stringify(a[kind][k]), y = JSON.stringify(b[kind][k])
+          if (x !== y) diffs.push(`${kind}.${k}: mine=${x ?? 'MISSING'} live=${y ?? 'MISSING'}`)
+        }
+      }
+
+      // THE DOCUMENT-LEVEL CHECK — and the trap it walked into first (2026-07-17).
+      //
+      // The obvious instrument is `Node.fromJSON(mine, liveDoc.toJSON()).eq(liveDoc)`. IT CAN NEVER
+      // RETURN TRUE. PM's `hasMarkup` is `this.type == type` — REFERENCE equality on NodeType — so
+      // two Schema instances (which is the entire premise here) always compare unequal, whatever the
+      // content. It reported `false` for the UNTOUCHED live document: a check structurally incapable
+      // of passing, i.e. one that would have condemned a perfectly correct schema. It was caught
+      // ONLY because the known-negative reads its positive arm too (clean must still say yes).
+      // Same family as canvasShapingMatchesEditor, the gate that always returned false and silently
+      // disabled arithLayout for months.
+      //
+      // The correct cross-schema comparison is STRUCTURAL: type NAMES, attrs, marks and text — i.e.
+      // the serialised form, which is schema-independent by construction and is also exactly what a
+      // snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
+      // can never masquerade as a difference.
+      const liveDoc = editor.state.doc
+      const liveJson0 = liveDoc.toJSON()
+      const reparsed = nodeFromContentJson(liveJson0)
+      const stable = (v: unknown): string => {
+        if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+        if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+        const o = v as Record<string, unknown>
+        return `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`
+      }
+      const sameDoc = (a: unknown, b: unknown) => stable(a) === stable(b)
+      const census = { citation: 0, mathInline: 0, mathBlock: 0, referenceList: 0, heading: 0, marks: 0 }
+      liveDoc.descendants((n) => {
+        if (n.type.name in census) (census as Record<string, number>)[n.type.name]++
+        census.marks += n.marks.length
+        return true
+      })
+
+      // Material for the known-negative, built HERE so it mutates a REAL attribute of a REAL node
+      // of THIS document (an invented attr would be silently dropped and the negative would not
+      // fire — the trap pinned in editorSchema.test.ts).
+      const liveJson = liveJson0
+      const mutatedJson = JSON.parse(JSON.stringify(liveJson)) as { content?: unknown[] }
+      let mutationApplied = false
+      const walk = (n: { type?: string; attrs?: Record<string, unknown>; content?: unknown[] }) => {
+        if (n.type === 'citation' && !mutationApplied) {
+          n.attrs = { ...n.attrs, citekeys: ['MUTATED-BY-THE-NEGATIVE'] }
+          mutationApplied = true
+        }
+        if (Array.isArray(n.content)) n.content.forEach(c => walk(c as typeof n))
+      }
+      walk(mutatedJson as Parameters<typeof walk>[0])
+
+      return {
+        identical: mineSpec === liveSpec,
+        diffs,
+        nodeCount: Object.keys(mine.nodes).length,
+        markCount: Object.keys(mine.marks).length,
+        // Does the standalone schema round-trip the LIVE document? (Structural — see above.)
+        reparsed: !!reparsed,
+        docEq: reparsed ? sameDoc(reparsed.toJSON(), liveJson0) : false,
+        // TRACE THE PASS: a doc with no citations/math would make docEq vacuous. Report what was
+        // actually exercised so a green result on an empty document is visibly worthless.
+        census,
+        liveJson, mutatedJson, mutationApplied,
+      }
+    },
+    parseCost(iters) {
+      const json = editor.state.doc.toJSON()
+      const words = editor.state.doc.textBetween(0, editor.state.doc.content.size, ' ').split(/\s+/).filter(Boolean).length
+      // WARM FIRST — the JIT tier-up is the single biggest liar in this probe suite.
+      for (let i = 0; i < 12; i++) nodeFromContentJson(json)
+      const ms: number[] = []
+      for (let i = 0; i < iters; i++) {
+        const t0 = performance.now()
+        const n = nodeFromContentJson(json)
+        ms.push(performance.now() - t0)
+        if (!n) return { void: true, reason: 'parse returned null — a cost measured on a failed parse is a fiction' }
+      }
+      ms.sort((a, b) => a - b)
+      return {
+        words, iters,
+        p50: ms[Math.floor(ms.length / 2)],
+        min: ms[0], max: ms[ms.length - 1],
+      }
+    },
+    docEqOf(json) {
+      // STRUCTURAL, not `Node.eq` — see schemaIdentity(): PM's eq is reference equality on NodeType
+      // and can never be true across two schemas, which is precisely the comparison being made here.
+      const n = nodeFromContentJson(json)
+      if (!n) return null
+      const stable = (v: unknown): string => {
+        if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+        if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+        const o = v as Record<string, unknown>
+        return `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`
+      }
+      return stable(n.toJSON()) === stable(editor.state.doc.toJSON())
     },
     chromeBox(kind, arg) {
       harvestNow()

@@ -35,6 +35,8 @@ import {
 } from './arithmeticLayout'
 import { citeBox, citeFontKey } from '../citations/citeBox'
 import { blockStyle, type BlockStyle } from './blockStyles'
+import { pageBoxPx } from './pageModel'
+import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
 
 // The flag lives in its own module so the editor can gate on it WITHOUT static-importing this
 // paint path — see textRenderFlag.ts. Re-exported here for callers that already have the renderer.
@@ -1080,3 +1082,26 @@ export function canonicalGeom(pageWidthPx: number, pageHeightPx: number, sideMar
 }
 
 export { MARGIN_BOTTOM_PX }
+
+// THE CANONICAL GEOMETRY, FROM SETTINGS ALONE (2026-07-17 — the /snapshot seam).
+//
+// Note what this does NOT touch: the DOM. The canonical geometry is a pure function of the page
+// SETTINGS — paper, orientation, margins, paragraph spacing — with a pinned 18px base and 1.618
+// ratio. That is precisely why /snapshot, which has no editor and no .ProseMirror, can compute the
+// SAME geometry the editor paginates under rather than a lookalike.
+//
+// It lived privately inside textRenderProbe.ts as `liveGeom`. /snapshot needs the identical rule,
+// and a second copy of "what is the canonical geometry" is how one route silently starts paginating
+// to a different page size. One implementation; the probe now calls this too.
+export function canonicalGeomFromSettings(): RenderGeom {
+  const paper = getPaperSize()
+  const { pageWidthPx, pageHeightPx } = pageBoxPx({
+    paperSize: paper === 'scroll' ? 'a4' : paper,
+    orientation: getOrientation(),
+    topMarginPx: getTopMarginPx(),
+    bottomMarginPx: 72,
+  })
+  const g = canonicalGeom(pageWidthPx, pageHeightPx, getSideMarginPx(), getTopMarginPx())
+  g.paraSpacingEm = getParaSpacingEm()
+  return g
+}

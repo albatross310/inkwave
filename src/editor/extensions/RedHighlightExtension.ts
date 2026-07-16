@@ -103,7 +103,7 @@ const EMPTY_LOOKUP: ScasLookup = {
 // Shared empty reveal set — avoids allocating a new Set on every rebuild that has no reveals.
 const EMPTY_REVEALS: ReadonlySet<number> = new Set<number>()
 
-interface RedHighlightOptions {
+export interface RedHighlightOptions {
   getDoc: () => InkwaveDocument
   getHintState: () => HintState
   getScasLookup: () => ScasLookup
