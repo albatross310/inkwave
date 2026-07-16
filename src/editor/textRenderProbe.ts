@@ -18,6 +18,13 @@ import {
 } from './textRender'
 import { pageBoxPx } from './pageModel'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
+// The citeBox cache key MUST be the same one PaginationExtension's DOM canonical measure harvested
+// under (it calls harvestCiteBoxes(doc, …, getCitationStyle(), bibProvider.getVersion(), 18)) — a
+// different style/epoch/base misses every lookup and every citation block placeholders out. Read the
+// same sources rather than passing a constant.
+import { getCitationStyle } from '../citations/citationsBus'
+import { bibProvider } from '../citations/bibProvider'
+import { harvestBlockStyles } from './blockStyles'
 // The BASELINE we are measured against — imported READ-ONLY so the head-to-head runs the REAL
 // production bake path (the SVG-foreignObject capture), not a reimplementation of it. Nothing here
 // mutates the thumbnail system; the bake path is owned elsewhere.
@@ -36,6 +43,35 @@ function liveGeom(): RenderGeom {
   const g = canonicalGeom(pageWidthPx, pageHeightPx, getSideMarginPx(), getTopMarginPx())
   g.paraSpacingEm = getParaSpacingEm()
   return g
+}
+
+// The citeBox lookup key, read from the SAME sources the DOM canonical measure harvests under.
+// If these drift, every citation misses ⇒ every citation-bearing block placeholders out ⇒ coverage
+// collapses — and it would look exactly like "the arithmetic engine can't do citations" rather than
+// "the probe asked with the wrong key". That failure mode is why coverage is reported alongside the
+// citeBox hit/miss counters, never on its own.
+function buildOpts(): { citationStyle: string; bibEpoch: number } {
+  return { citationStyle: getCitationStyle(), bibEpoch: bibProvider.getVersion() }
+}
+
+// Harvest heading/list styles from the LIVE .ProseMirror. This is only legitimate in the CANONICAL
+// context — a rendered value is the canonical value only when the live layout IS canonical, which on
+// desktop at defaults it is (PaginationExtension's `canonicalIsLive`: no phone rules, zoom 1,
+// magnify 1). Asserted, not assumed: harvesting under a zoom would bake the zoomed font size into a
+// "canonical" table and every break would be wrong in a way that looks like an engine bug.
+// PRODUCTION HOME (not this file): beside harvestCiteBoxes inside the DOM canonical measure, which
+// forces that context explicitly. Here the probe drives it because the prototype has no wire-in.
+function harvestNow(): { ok: boolean; reason: string } {
+  const pm = document.querySelector('.ProseMirror') as HTMLElement | null
+  if (!pm) return { ok: false, reason: 'no .ProseMirror' }
+  const cs = getComputedStyle(pm)
+  if (Math.abs(parseFloat(cs.fontSize) - 18) > 0.01) return { ok: false, reason: `not canonical: base ${cs.fontSize}` }
+  const root = getComputedStyle(document.documentElement)
+  const zoom = parseFloat(root.getPropertyValue('--iw-editor-zoom') || '1') || 1
+  const mag = parseFloat(root.getPropertyValue('--iw-magnify') || '1') || 1
+  if (Math.abs(zoom - 1) > 0.001 || Math.abs(mag - 1) > 0.001) return { ok: false, reason: `not canonical: zoom ${zoom} magnify ${mag}` }
+  harvestBlockStyles(pm, 18)
+  return { ok: true, reason: 'canonical' }
 }
 
 // REAL font-loaded check. `document.fonts.check()` returns TRUE for a family with NO @font-face (the
@@ -95,6 +131,10 @@ export interface ProbeApi {
   thumbRoundTrip(canvas: HTMLCanvasElement, scale: number): Promise<Record<string, unknown>>
   /** Heap cost of N render models — the honest comparison against the 62.7MB bitmap pool. */
   modelMem(n: number): Record<string, unknown>
+  /** Block-level coverage on the LIVE doc: what renders vs what placeholders out, and why. */
+  coverage(): Record<string, unknown>
+  /** Per-block computed-vs-REAL-DOM geometry. Localises a break divergence to the exact block. */
+  blockGeoCheck(): Record<string, unknown>
   /** The known-positive self-test: PROVE the probe can see a difference before trusting a null. */
   selfTest(): Record<string, unknown>
 }
@@ -113,20 +153,22 @@ export function installTextRenderProbe(editor: Editor): void {
     geom: liveGeom,
 
     build() {
+      harvestNow()
       const g = liveGeom()
       const t0 = performance.now()
-      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded)
+      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
       return { model, ms: performance.now() - t0 }
     },
 
     // COLD = a fresh measure cache (no memoised advances). This is the honest first-open number;
     // `build()` after it is the warm number. Conflating them is how a "few ms" claim gets made.
     buildCold() {
+      harvestNow()
       measure = makeCanvasMeasure()
       fontLoaded = makeFontLoaded(measure)
       const g = liveGeom()
       const t0 = performance.now()
-      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded)
+      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
       return { model, ms: performance.now() - t0 }
     },
 
@@ -157,7 +199,7 @@ export function installTextRenderProbe(editor: Editor): void {
     // actually text.
     paintFloor(opts = {}) {
       const g = liveGeom()
-      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '' }
+      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '', breaksReliable: true, estimatedBlocks: 0 }
       const canvas = (opts as { fresh?: boolean }).fresh ? document.createElement('canvas') : scratch()
       const t0 = performance.now()
       paintPage(empty, 0, canvas, g, { dpr: window.devicePixelRatio, measure, ...opts })
@@ -236,6 +278,76 @@ export function installTextRenderProbe(editor: Editor): void {
       return { encodeMs: tEncode, decodeMs: tDecode, blitMs: tBlit, bytes: blob.size, w, h }
     },
 
+    // ── COVERAGE: the question that decides whether any of this is usable ────────────────────
+    // A preview that placeholders out most of a real thesis is not a preview. This reports the
+    // block census by kind + the coverage map's DEFER REASONS, plus the citeBox counters so a
+    // collapse can be attributed (engine limitation vs a cold/mis-keyed cache) instead of guessed.
+    coverage() {
+      const harvest = harvestNow()
+      const g = liveGeom()
+      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
+      const byType: Record<string, number> = {}
+      let citations = 0
+      editor.state.doc.forEach((n) => { byType[n.type.name] = (byType[n.type.name] ?? 0) + 1 })
+      editor.state.doc.descendants((n) => { if (n.type.name === 'citation') citations++; return true })
+      const text = model.blocks.filter((b) => b.kind === 'text').length
+      const placeholder = model.blocks.filter((b) => b.kind === 'placeholder').length
+      const citeDbg = (window as unknown as { __iwCiteBox?: Record<string, number> }).__iwCiteBox ?? {}
+      return {
+        blocks: model.blocks.length, rendered: text, placeholdered: placeholder,
+        renderedPct: +((text / Math.max(1, model.blocks.length)) * 100).toFixed(1),
+        docBlockTypes: byType, citationNodes: citations,
+        coverageReasons: model.coverage,
+        citeBox: { ...citeDbg },
+        blockStyles: { ...((window as unknown as { __iwBlockStyles?: Record<string, unknown> }).__iwBlockStyles ?? {}) },
+        harvest,
+        key: buildOpts(),
+        pages: model.pages,
+        breaksReliable: model.breaksReliable,
+        estimatedBlocks: model.estimatedBlocks,
+      }
+    },
+
+    // ── BLOCK GEOMETRY vs the REAL DOM ───────────────────────────────────────────────────────
+    // "Breaks diverge" is a symptom, not a diagnosis: the break is just where accumulated height
+    // crosses the text area, so ANY block being a few px wrong moves it. This compares EVERY
+    // top-level block's computed top/height against its real rendered element, so the culprit is
+    // named rather than guessed. Only meaningful in the canonical context (asserted by harvestNow).
+    blockGeoCheck() {
+      const harvest = harvestNow()
+      const g = liveGeom()
+      const model = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
+      const pm = document.querySelector('.ProseMirror') as HTMLElement | null
+      if (!pm) return { error: 'no .ProseMirror' }
+      // Page-gap widgets inject height into the live flow; compare against a doc with gaps CLEARED
+      // is impossible here, so compare block HEIGHTS only (gap-independent) plus the delta each
+      // block contributes, and report the first block whose height disagrees.
+      const rows: Array<Record<string, unknown>> = []
+      let i = 0
+      editor.state.doc.forEach((node, offset) => {
+        const el = editor.view.nodeDOM(offset) as HTMLElement | null
+        const b = model.blocks[i++]
+        if (!el || el.nodeType !== 1 || !b) return
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        const domH = r.height
+        const dH = b.height - domH
+        rows.push({
+          i: i - 1, type: node.type.name, offset,
+          mineH: +b.height.toFixed(2), domH: +domH.toFixed(2), dH: +dH.toFixed(2),
+          mineKind: b.kind,
+          domMarginTop: cs.marginTop, domMarginBottom: cs.marginBottom, domFont: cs.fontSize, domLH: cs.lineHeight,
+        })
+      })
+      const bad = rows.filter((r) => Math.abs(r.dH as number) > 0.5)
+      return {
+        harvest, blocks: rows.length, mismatched: bad.length,
+        worst: bad.sort((a, b) => Math.abs(b.dH as number) - Math.abs(a.dH as number)).slice(0, 8),
+        byType: bad.reduce((acc: Record<string, number>, r) => { acc[r.type as string] = (acc[r.type as string] ?? 0) + 1; return acc }, {}),
+        sampleOk: rows.filter((r) => Math.abs(r.dH as number) <= 0.5).slice(0, 3),
+      }
+    },
+
     // ── MEMORY: what a cached MODEL costs vs a cached BITMAP ─────────────────────────────────
     // The bitmap pool holds ~62.7MB for 57 bitmaps because a bitmap is W×H×4 bytes no matter how
     // little ink is on it. A render model holds geometry + the segment strings instead. This builds
@@ -250,7 +362,7 @@ export function installTextRenderProbe(editor: Editor): void {
       // Settle the heap first so the delta isn't dominated by unrelated garbage.
       const before = mem()
       const t0 = performance.now()
-      for (let i = 0; i < n; i++) models.push(buildRenderModel(editor.state.doc, g, makeCanvasMeasure(), fontLoaded))
+      for (let i = 0; i < n; i++) models.push(buildRenderModel(editor.state.doc, g, makeCanvasMeasure(), fontLoaded, buildOpts()))
       const after = mem()
       const ms = performance.now() - t0
       let lines = 0, segs = 0, chars = 0
@@ -285,10 +397,10 @@ export function installTextRenderProbe(editor: Editor): void {
     //     line count — if it doesn't, the comparison is blind and nothing it reports means anything).
     selfTest() {
       const g = liveGeom()
-      const base = buildRenderModel(editor.state.doc, g, measure, fontLoaded)
+      const base = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
       // Inflate every advance 5% — the model MUST get more lines. If it doesn't, the probe is blind.
       const inflated: Measure = (t, f) => measure(t, f) * 1.05
-      const mutated = buildRenderModel(editor.state.doc, g, inflated, fontLoaded)
+      const mutated = buildRenderModel(editor.state.doc, g, inflated, fontLoaded, buildOpts())
       const ebg = "'EB Garamond', Georgia, serif"
       return {
         fontsReallyLoaded: fontLoaded(ebg, 18),

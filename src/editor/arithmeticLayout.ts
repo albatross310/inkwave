@@ -693,23 +693,30 @@ export function figureBlockBox(opts: {
 // (Desktop/canonical only — the phone bottom-margin branch is not modelled; canonical breaks are
 // device-independent by design.)
 //
-// ⚠ ORPHAN SNAP — THIS PORT DRIFTED FROM PRODUCTION (found 2026-07-16 by the textRender pixel diff).
-// This splitter snaps small orphans (≤22% of the text area) to the block start. PRODUCTION NO LONGER
-// DOES: PaginationExtension.computeBreaks hard-codes `const snap = false` ("the widow/orphan snap is
-// gone: a straddling paragraph is broken at the overflow line wherever it falls"). So `snapOrphans:
-// true` reproduces a rule the live editor retired, and a consumer that paginates with it gets
-// DIFFERENT PAGES than the editor renders — measured on a 4k-word doc: first break at 2141 vs the
-// live 2403, 17 pages vs 16.
+// ⚠ ORPHAN SNAP — THIS PORT HAD DRIFTED FROM PRODUCTION (found + fixed 2026-07-16 by the textRender
+// pixel diff). It snapped small orphans (≤22% of the text area) to the block start; PRODUCTION DOES
+// NOT: PaginationExtension.computeBreaks hard-codes `const snap = false` ("the widow/orphan snap is
+// gone: a straddling paragraph is broken at the overflow line wherever it falls"). A consumer taking
+// the old default got DIFFERENT PAGES than the editor renders — measured on a 4k-word doc: first
+// break at 2141 vs the live 2403, 17 pages vs 16.
+//
+// THE DEFAULT NOW MATCHES PRODUCTION (`snapOrphans = false`). Anything wanting the retired rule must
+// opt IN. Rationale for flipping rather than preserving the old default: this function's ONLY job is
+// to model computeBreaks — a "compatible" default that models a deleted rule is not compatibility,
+// it is a bug every caller inherits. Blast radius checked before flipping: NOTHING in production
+// calls paginate() (PaginationExtension owns computeBreaks and imports only makeCanvasMeasure from
+// here; arithMeasure doesn't import it) — the callers are this repo's prover and tests.
 //
 // WHY NO PROVER CAUGHT IT: the prover runs arith-sourced lines AND DOM-sourced lines through THIS
 // SAME function, so a stale rule cancels on both sides and byte-identity still passes. The splitter
 // is a shared constant in that comparison, and a shared constant is invisible to it — the divergence
-// only becomes observable against the LIVE editor's own gap widgets. This is the same shape as the
-// canvasShapingMatchesEditor lesson: a check that can't see a class of error reports success anyway.
+// only becomes observable against the LIVE editor's own gap widgets (scripts/textrender-probe/
+// breaks.prove.mjs). Same shape as the canvasShapingMatchesEditor lesson: a check that cannot see a
+// class of error reports success anyway.
 //
-// The default stays `true` so existing callers/tests are byte-unchanged; anything that must match
-// what the editor actually renders (the text renderer) MUST pass `snapOrphans: false`. Reconciling
-// the default is a separate, deliberate change — not a side effect of this round.
+// AND THE UNIT TESTS WERE STRUCTURALLY BLIND TO IT: arithmeticLayout.test.ts gives every line its own
+// block with `blocks[i].start === lines[i].pos`, so snapping to the block start yields the IDENTICAL
+// number and the assertions pass under both rules. A test can only see a rule it varies.
 export const MARGIN_BOTTOM_PX = 72
 
 export interface SplitLine { top: number; blockIdx: number; pos: number } // pos = the line's own doc position (lazy posAtCoords in the live path)
@@ -723,7 +730,7 @@ export function paginate(
   refListPos: number,      // -1 if none
   pageH: number,
   topM: number,
-  snapOrphans = true,       // see the ⚠ note above — production is FALSE; the default is legacy
+  snapOrphans = false,      // matches production (computeBreaks `snap = false`). Opt IN for legacy.
 ): SplitResult {
   const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM_PX)
   const sig: string[] = []

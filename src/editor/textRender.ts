@@ -33,6 +33,8 @@ import {
   blockEligibility, layoutParagraph, paginate, cssFontOf, snappedLineHeight,
   EDITOR_WHITE_SPACE, MARGIN_BOTTOM_PX,
 } from './arithmeticLayout'
+import { citeBox, citeFontKey } from '../citations/citeBox'
+import { blockStyle, type BlockStyle } from './blockStyles'
 
 // The flag lives in its own module so the editor can gate on it WITHOUT static-importing this
 // paint path — see textRenderFlag.ts. Re-exported here for callers that already have the renderer.
@@ -57,6 +59,9 @@ export interface RenderSeg {
   x: number      // px from the content-box left edge
   w: number      // advance width
   startChar: number // block-relative char index this seg starts at (highlight mapping)
+  // Set when this seg is an inline ATOM (a citation chip) rather than text. Its `w` is the MEASURED
+  // box advance, so it occupies exactly the right space on the line; it carries no glyphs to draw.
+  atom?: string
 }
 
 export interface RenderLine {
@@ -67,6 +72,8 @@ export interface RenderLine {
   startChar: number  // block-relative char index
   endChar: number
   segs: RenderSeg[]
+  indentPx?: number  // list items sit indented; the marker hangs to the left of this
+  marker?: string    // '•' / '1.' — drawn once, on the item's FIRST line only
 }
 
 export type BlockKind = 'text' | 'placeholder'
@@ -92,6 +99,15 @@ export interface RenderModel {
   coverage: Record<string, number> // reason → block count (the honest coverage map)
   breaks: Array<{ at: number; botMargin: number }> // the splitter's own output (for prover comparison)
   sig: string             // the page-break signature — comparable byte-for-byte with the live path
+  // FALSE ⇔ at least one block's height was ESTIMATED, so every break below it is unreliable.
+  // This is not a cosmetic flag. A placeholder with a guessed height does not merely look wrong —
+  // it MOVES EVERY PAGE BREAK AFTER IT, silently, and the pages then carry the wrong words while
+  // the renderer reports success. Measured 2026-07-16: with headings/lists/refList estimated, breaks
+  // diverged from the live editor on the very first break (2075 vs 2344) on a citation-heavy doc,
+  // while a prose-only doc was byte-identical. A caller MUST NOT present pages from an unreliable
+  // model as if they were the editor's pages.
+  breaksReliable: boolean
+  estimatedBlocks: number
 }
 
 // A placeholder's height when the node declares none. This IS a guess; `estimated` flags it.
@@ -147,17 +163,37 @@ function runOf(node: PMNode, basePx: number): InlineRun {
   return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic }
 }
 
-function runsOfParagraph(node: PMNode, basePx: number): InlineRun[] {
+// One paragraph's inline content → engine runs. Mirrors arithMeasure.runsOfParagraph EXACTLY (same
+// mark resolution, same citeBox lookup) so the renderer and the canonical measure can never disagree
+// about what a paragraph contains.
+//
+// CITATIONS (wired 2026-07-16 — Peter: "can't you do a math version that includes citations? just
+// calculates how long they are and includes it in the math?"). A citation IS a proven opaque box:
+// CitationNodeView pins `white-space: nowrap`, so its label has no internal break opportunity and
+// the parent line can only break BEFORE or AFTER it — one unbreakable advance, measurable once and
+// cached by an immutable key (citations/citeBox.ts). Supplying it is what lets a citation-bearing
+// paragraph render arithmetically instead of placeholdering out; without it Peter's thesis (174
+// citations) would placeholder ~every paragraph.
+//
+// SELF-HEALING, NOT GUESSING: a key that isn't cached (new citekey, bibliography not yet hydrated,
+// CSL style switch, wrong measurement base) returns null ⇒ no box ⇒ blockEligibility's `!r.box` gate
+// DEFERS that block to a labelled placeholder. We never invent an advance that is about to change.
+// Anything else atomic (inline math) still supplies no box and still defers, by the same rule.
+function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bibEpoch: number): InlineRun[] {
   const runs: InlineRun[] = []
   node.forEach((child) => {
     if (child.type.name === 'text') runs.push(runOf(child, basePx))
     else if (child.type.name === 'hardBreak')
       runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false })
-    else
-      // An inline atom with no reflow-free box (citation label, inline math): blockEligibility's
-      // `!r.box` gate defers the whole block. We deliberately supply NO box here — this prototype
-      // never guesses an atom's advance.
-      runs.push({ text: '', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false, atomic: true, atomType: child.type.name })
+    else {
+      const box = child.type.name === 'citation'
+        ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks), basePx) ?? undefined
+        : undefined
+      runs.push({
+        text: '', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false,
+        atomic: true, atomType: child.type.name, box,
+      })
+    }
   })
   return runs
 }
@@ -190,7 +226,16 @@ function segsOfLine(
     let j = i
     while (j < endChar && chars.runAt[j] === ri) j++
     const run = runs[ri]
-    if (!run.atomic) {
+    if (run.atomic) {
+      // An inline atom OCCUPIES ITS ADVANCE. Skipping it (as the first cut did) left x short by the
+      // citation's whole width, so every word after a citation on that line drew in the wrong place
+      // — invisible until citations were actually wired. A block whose atom has no box never gets
+      // here: blockEligibility defers it.
+      if (run.box) {
+        segs.push({ text: '', font: '', x, w: run.box.advanceWidth, startChar: i, atom: run.atomType ?? 'atom' })
+        x += run.box.advanceWidth
+      }
+    } else {
       const text = chars.text.slice(i, j)
       const font = cssFontOf(run)
       const w = measure(text, font)
@@ -210,24 +255,145 @@ function segsOfLine(
  * `fontLoaded(stack, sizePx)` MUST be real: canvas measureText silently falls back to a system face
  * for an unloaded font and would then "agree" with nothing. An unloaded run defers its block.
  */
+export interface BuildOpts {
+  /** CSL style id + bibliography epoch — the citeBox cache key. Must be the SAME values the DOM
+   *  canonical measure harvested under (getCitationStyle() / bibProvider.getVersion()), or every
+   *  lookup misses and every citation-bearing block placeholders out. */
+  citationStyle?: string
+  bibEpoch?: number
+}
+
 export function buildRenderModel(
   doc: PMNode,
   geom: RenderGeom,
   measure: Measure,
   fontLoaded: (stack: string, sizePx: number) => boolean,
+  opts: BuildOpts = {},
 ): RenderModel {
+  const citationStyle = opts.citationStyle ?? ''
+  const bibEpoch = opts.bibEpoch ?? -1
   const lines: RenderLine[] = []
   const blocks: RenderBlock[] = []
   const coverage: Record<string, number> = {}
   const bump = (k: string) => { coverage[k] = (coverage[k] ?? 0) + 1 }
 
   let top = 0
+
+  // Lay out one paragraph-like run set at a given font/width/indent, appending its lines. Shared by
+  // paragraphs, headings and list items so the three can never drift apart in how they wrap.
+  const emitTextBlock = (
+    runs: InlineRun[], basePx: number, ratio: number, contentWidth: number,
+    marginTopPx: number, marginBottomPx: number, blockIdx: number, posBase: number,
+    indentPx = 0, marker?: string,
+  ): { ok: boolean; height: number } => {
+    const arith: ArithBlock = {
+      type: 'paragraph', runs, baseFontPx: basePx,
+      marginTopPx, marginBottomPx, firstLineLeadingPx: 0,
+    }
+    if (!blockEligibility(arith, ratio).eligible) return { ok: false, height: 0 }
+    if (!runs.every((r) => r.text === '\n' || r.atomic || fontLoaded(r.fontFamily, r.fontSizePx))) return { ok: false, height: 0 }
+    const lay = layoutParagraph(arith, contentWidth, ratio, measure, EDITOR_WHITE_SPACE)
+    const chars = blockChars(runs)
+    for (let k = 0; k < lay.lineCount; k++) {
+      const sc = lay.breakStartChars[k]
+      const ec = k + 1 < lay.lineCount ? lay.breakStartChars[k + 1] : chars.text.length
+      lines.push({
+        top: top + lay.relTops[k], height: lay.lineHeights[k], blockIdx,
+        pos: posBase + sc, startChar: sc, endChar: ec,
+        segs: segsOfLine(runs, chars, sc, ec, measure),
+        indentPx, marker: k === 0 ? marker : undefined,
+      })
+    }
+    return { ok: true, height: lay.height }
+  }
+
+  // A heading/list run inherits its font from CSS, NOT from marks — so the harvested style supplies
+  // family/size/weight and the node's own marks only add bold/italic on top.
+  const styledRuns = (node: PMNode, s: BlockStyle): InlineRun[] => {
+    const runs = runsOfParagraph(node, s.fontSizePx, citationStyle, bibEpoch)
+    for (const r of runs) {
+      if (r.atomic) continue
+      r.fontFamily = s.fontFamily
+      r.fontSizePx = s.fontSizePx
+      if (s.fontWeight > r.fontWeight) r.fontWeight = s.fontWeight
+      if (s.italic) r.italic = true
+    }
+    return runs
+  }
+
   doc.forEach((node, offset) => {
     const bi = blocks.length
     const marginBottom = geom.paraSpacingEm * geom.basePx
 
+    // ── HEADING: a text block in its own harvested font ──
+    if (node.type.name === 'heading') {
+      const lvl = (node.attrs?.level as number) ?? 1
+      const s = blockStyle(`heading:${lvl}`, geom.basePx)
+      if (s) {
+        const runs = styledRuns(node, s)
+        const r = emitTextBlock(runs, s.fontSizePx, s.lineHeightRatio, geom.contentWidthPx,
+          s.marginTopPx, s.marginBottomPx, bi, offset + 1)
+        if (r.ok) {
+          blocks.push({ kind: 'text', type: 'heading', start: offset, end: offset + node.nodeSize, top, height: r.height })
+          top += r.height + s.marginBottomPx
+          bump(`heading:${lvl}`)
+          return
+        }
+      }
+      // Unharvested level / unloaded face ⇒ DEFER. Never guess a heading's height: it moves every
+      // break below it.
+      const h = snappedLineHeight(geom.basePx * 1.5, geom.ratio)
+      blocks.push({ kind: 'placeholder', type: 'heading', start: offset, end: offset + node.nodeSize, top, height: h, label: `heading ${lvl}`, estimated: true })
+      lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+      top += h + marginBottom
+      bump(`placeholder:heading:${lvl}`)
+      return
+    }
+
+    // ── LIST: ONE block (as the live DOM's <ul>/<ol> is one top-level block), many item lines ──
+    if (node.type.name === 'bulletList' || node.type.name === 'orderedList') {
+      const ls = blockStyle(node.type.name, geom.basePx)
+      const ip = blockStyle('listItemPara', geom.basePx)
+      if (ls && ip) {
+        const startTop = top
+        const startLines = lines.length
+        let ok = true
+        let idx = 0
+        // listItem → its paragraph. Doc positions: list@offset, item@+1, para@+2, text@+3.
+        node.forEach((item, itemOff) => {
+          if (!ok) return
+          const itemBase = offset + 1 + itemOff
+          item.forEach((child, childOff) => {
+            if (!ok || child.type.name !== 'paragraph') return
+            const runs = runsOfParagraph(child, ip.fontSizePx, citationStyle, bibEpoch)
+            idx++
+            const marker = node.type.name === 'orderedList' ? `${idx}.` : '•'
+            const r = emitTextBlock(runs, ip.fontSizePx, ip.lineHeightRatio,
+              geom.contentWidthPx - ls.indentPx, 0, ip.marginBottomPx, bi,
+              itemBase + 1 + childOff + 1, ls.indentPx, marker)
+            if (!r.ok) { ok = false; return }
+            top += r.height + ip.marginBottomPx
+          })
+        })
+        if (ok) {
+          blocks.push({ kind: 'text', type: node.type.name, start: offset, end: offset + node.nodeSize, top: startTop, height: top - startTop })
+          top += ls.marginBottomPx
+          bump(node.type.name)
+          return
+        }
+        lines.length = startLines // roll back a partial list — never render half a block
+        top = startTop
+      }
+      const h = PLACEHOLDER_FALLBACK_H
+      blocks.push({ kind: 'placeholder', type: node.type.name, start: offset, end: offset + node.nodeSize, top, height: h, label: 'list', estimated: true })
+      lines.push({ top, height: h, blockIdx: bi, pos: offset + 1, startChar: 0, endChar: 0, segs: [] })
+      top += h + marginBottom
+      bump(`placeholder:${node.type.name}`)
+      return
+    }
+
     if (node.type.name === 'paragraph') {
-      const runs = runsOfParagraph(node, geom.basePx)
+      const runs = runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch)
       const arith: ArithBlock = {
         type: 'paragraph', runs, baseFontPx: geom.basePx,
         marginTopPx: 0, marginBottomPx: marginBottom, firstLineLeadingPx: 0,
@@ -277,12 +443,13 @@ export function buildRenderModel(
   const splitLines: SplitLine[] = lines.map((l) => ({ top: l.top, blockIdx: l.blockIdx, pos: l.pos }))
   const splitBlocks = blocks.map((b) => ({ start: b.start }))
   const refBlock = blocks.find((b) => b.type === 'referenceList')
-  // snapOrphans: FALSE — production retired the orphan snap (`const snap = false` in
-  // PaginationExtension.computeBreaks). paginate()'s default still applies it, and taking that
-  // default put the WRONG WORDS on every page after the first (measured: first break 2141 vs the
-  // editor's 2403; 17 pages vs 16). A preview that shows different text than the editor is worse
-  // than no preview, so this must track the live rule exactly.
-  const res = paginate(splitLines, splitBlocks, refBlock ? refBlock.start : -1, geom.pageHeightPx, geom.topMarginPx, false)
+  // paginate()'s default now MATCHES production (no orphan snap — see its ⚠ note). It used to snap,
+  // which put the WRONG WORDS on every page after the first (first break 2141 vs the editor's 2403;
+  // 17 pages vs 16). A preview showing different text than the editor is worse than no preview, so
+  // this deliberately rides the default: if the default ever drifts from computeBreaks again,
+  // breaks.prove.mjs fails against the live editor's own gap widgets rather than this file silently
+  // compensating for it.
+  const res = paginate(splitLines, splitBlocks, refBlock ? refBlock.start : -1, geom.pageHeightPx, geom.topMarginPx)
 
   // Assign each line to a page by walking the breaks the splitter produced (never re-deriving them
   // — a second copy of the break rule is a second chance to disagree with production).
@@ -313,9 +480,11 @@ export function buildRenderModel(
     pageOfLine[i] = page
   }
 
+  const estimatedBlocks = blocks.filter((b) => b.estimated).length
   return {
     lines, blocks, pageOfLine, pageTop, pages: Math.max(res.pages, page + 1),
     contentHeight: top, coverage, breaks: res.breaks, sig: res.sig,
+    breaksReliable: estimatedBlocks === 0, estimatedBlocks,
   }
 }
 
@@ -367,7 +536,19 @@ function metricsOf(ctx: CanvasRenderingContext2D, font: string): FontMetrics {
 }
 
 /** Drop the memoised font metrics (fonts changed / a new context). */
-export function _resetMetrics(): void { _metrics.clear() }
+export function _resetMetrics(): void { _metrics.clear(); _mw.clear() }
+
+// Marker widths only — a tiny memo so the paint path doesn't re-measure '•' per list item.
+const _mw = new Map<string, number>()
+function measureTextCached(ctx: CanvasRenderingContext2D, text: string, font: string): number {
+  const k = font + ' ' + text
+  const hit = _mw.get(k)
+  if (hit !== undefined) return hit
+  if (ctx.font !== font) ctx.font = font
+  const w = ctx.measureText(text).width
+  _mw.set(k, w)
+  return w
+}
 
 /**
  * Paint ONE page of a built model onto a canvas. Sizes the canvas to the page at `dpr × scale`.
@@ -469,13 +650,38 @@ export function paintPage(
       continue
     }
 
-    ctx.fillStyle = ink
+    const originX = geom.sideMarginPx + (line.indentPx ?? 0)
+
+    // List marker, on the item's first line only, hanging left of the indent (as list-style does).
+    if (line.marker && line.segs.length) {
+      const mFont = line.segs.find((s) => s.font)?.font
+      if (mFont) {
+        ctx.fillStyle = ink
+        if (ctx.font !== mFont) ctx.font = mFont
+        const met = metricsOf(ctx, mFont)
+        const baseline = y + (line.height - (met.ascent + met.descent)) / 2 + met.ascent
+        ctx.fillText(line.marker, originX - measureTextCached(ctx, line.marker, mFont) - 6, baseline)
+      }
+    }
+
     for (const seg of line.segs) {
+      // CITATION CHIP: we measured its box, we did not measure its glyphs — so draw the box, in the
+      // citation colour, at exactly its advance. That is what a citation looks like at preview scale
+      // (a purple hook) and it is honest: the space is right because it was measured, and no text is
+      // invented. Rendering its label would mean re-deriving CSL output the NodeView owns.
+      if (seg.atom) {
+        if (seg.w <= 0) continue
+        ctx.fillStyle = seg.atom === 'citation' ? 'rgba(92,45,138,0.55)' : 'rgba(92,45,138,0.30)'
+        const chipH = Math.max(1, line.height * 0.44)
+        ctx.fillRect(originX + seg.x + 1, y + (line.height - chipH) / 2, Math.max(1, seg.w - 2), chipH)
+        continue
+      }
       if (!seg.text.trim()) continue
+      ctx.fillStyle = ink
       if (ctx.font !== seg.font) ctx.font = seg.font
       const met = metricsOf(ctx, seg.font)
       const baseline = y + (line.height - (met.ascent + met.descent)) / 2 + met.ascent
-      ctx.fillText(seg.text, geom.sideMarginPx + seg.x, baseline)
+      ctx.fillText(seg.text, originX + seg.x, baseline)
     }
   }
 
@@ -578,11 +784,12 @@ export function paintMapStrip(
       const last = line.segs[line.segs.length - 1]
       const runW = last.x + last.w
       if (runW <= 0) continue
+      const originX = geom.sideMarginPx + (line.indentPx ?? 0)
       if (mode === 'rects') {
         const bandH = Math.max(1 / k, line.height * MAP_BAND_RATIO)
         ctx.fillStyle = ink
         ctx.globalAlpha = opts.bandAlpha ?? MAP_BAND_ALPHA
-        ctx.fillRect(geom.sideMarginPx, y + (line.height - bandH) / 2, runW, bandH)
+        ctx.fillRect(originX, y + (line.height - bandH) / 2, runW, bandH)
         ctx.globalAlpha = 1
       } else {
         ctx.fillStyle = ink
@@ -590,7 +797,7 @@ export function paintMapStrip(
           if (!seg.text.trim()) continue
           if (ctx.font !== seg.font) ctx.font = seg.font
           const met = metricsOf(ctx, seg.font)
-          ctx.fillText(seg.text, geom.sideMarginPx + seg.x, y + (line.height - (met.ascent + met.descent)) / 2 + met.ascent)
+          ctx.fillText(seg.text, originX + seg.x, y + (line.height - (met.ascent + met.descent)) / 2 + met.ascent)
         }
       }
     }
