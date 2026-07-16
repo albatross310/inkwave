@@ -168,6 +168,34 @@ describe('greedy wrap — the fit test is white-space dependent', () => {
     const lay = layoutParagraph(para([run('aaaa 3-4 bbbb')]), 1000, 1.618, measure)
     expect(lay.lineCount).toBe(1) // no spurious split of "3-4"
   })
+  // ── FORCED mid-paragraph breaks (page gaps): a line MUST start at the given char offset ──
+  it('a forced break ends the pre-gap line partial and resumes after it', () => {
+    // "aaaa bbbb cccc dddd" fits one line at width 1000; force a break where "cccc" starts (char 10).
+    const b = para([run('aaaa bbbb cccc dddd')])
+    const lay = layoutParagraph(b, 1000, 1.618, measure, 'break-spaces', [10])
+    expect(lay.lineCount).toBe(2)
+    expect(lay.breakStartChars).toEqual([0, 10]) // line 1 "aaaa bbbb ", line 2 "cccc dddd"
+  })
+  it('no forced breaks ⇒ byte-identical to the gap-free layout (additive)', () => {
+    const b = para([run('aaaa bbbb cccc dddd')])
+    const a = layoutParagraph(b, 1000, 1.618, measure)
+    const c = layoutParagraph(b, 1000, 1.618, measure, 'break-spaces', [])
+    expect(c).toEqual(a)
+  })
+  it('a forced break at a natural line start (or at 0) is a no-op', () => {
+    // width 100 = 10 chars/line → natural line starts at 0, 10 ("cccc"). Forcing 0 and 10 changes nothing.
+    const b = para([run('aaaa bbbb cccc dddd')])
+    const natural = layoutParagraph(b, 100, 1.618, measure)
+    const forced = layoutParagraph(b, 100, 1.618, measure, 'break-spaces', [0, natural.breakStartChars[1]])
+    expect(forced.breakStartChars).toEqual(natural.breakStartChars)
+  })
+  it('the tail RE-WRAPS from the forced point (cascades — not a naive +1 line)', () => {
+    // width 100 = 10 chars/line. Force a break at char 5 ("bbbb"): line1 "aaaa " (partial), then the
+    // greedy re-wraps "bbbb cccc dddd" from there → "bbbb cccc " (10), "dddd". 3 lines, not 2.
+    const b = para([run('aaaa bbbb cccc dddd')])
+    const lay = layoutParagraph(b, 100, 1.618, measure, 'break-spaces', [5])
+    expect(lay.breakStartChars).toEqual([0, 5, 15])
+  })
 })
 
 describe('resolveBlocks — arithmetic where eligible, DOM otherwise, margin collapse', () => {

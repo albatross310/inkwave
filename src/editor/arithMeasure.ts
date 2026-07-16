@@ -18,7 +18,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import {
   type ArithBlock, type InlineRun, type Measure,
-  blockEligibility, layoutParagraph, isCertifiedStack,
+  blockEligibility, layoutParagraph, isCertifiedStack, EDITOR_WHITE_SPACE,
 } from './arithmeticLayout'
 import { citeBox, citeFontKey } from '../citations/citeBox'
 
@@ -100,6 +100,7 @@ export function arithBlockLayout(
   citationStyle: string,
   bibEpoch: number,
   basePx = 18,
+  forcedBreakChars: number[] = [], // block-relative char offsets a line must start at (page gaps)
 ): ArithBlockLayout | null {
   if (node.type.name !== 'paragraph') return null
   const runs = runsOfParagraph(node, basePx, citationStyle, bibEpoch)
@@ -109,7 +110,7 @@ export function arithBlockLayout(
   }
   if (!blockEligibility(arith, ratio).eligible) return null
   for (const r of runs) if (r.text !== '\n' && !r.atomic && !fontLoaded(r.fontFamily, r.fontSizePx)) return null
-  const lay = layoutParagraph(arith, contentWidthPx, ratio, measure)
+  const lay = layoutParagraph(arith, contentWidthPx, ratio, measure, EDITOR_WHITE_SPACE, forcedBreakChars)
   return {
     relTops: lay.relTops,
     relPos: lay.breakStartChars.map((c) => 1 + c),
@@ -126,6 +127,12 @@ export interface ArithMeasureResult { lines: ArithLine[]; blocks: Array<{ start:
 // `fontLoaded(stack, sizePx)` gates a text run whose face isn't loaded (measureText would fall back
 // to a system face). `ratio` = the render context's line-height (1.618 desktop / 1.55 phone / the
 // live --inkwave-lh). `contentWidthPx` = the CANONICAL content width (pageWidthPx − 2·sideMargin).
+// `forcedBreaks` — doc positions at which a line MUST start (the mid-block canonical break `at`
+// positions from computeBreaks). The RENDER pass needs these: a page-gap widget is display:block
+// inside the `<p>`, so it ends the pre-gap line partial and text resumes AFTER the gap; without it
+// the continuous wrap fills that slack and loses a render line, drifting every band below. The
+// CANONICAL pass passes none (it PRODUCES the breaks; feeding them back would be circular and its
+// own gaps are cleared before it measures). Absent ⇒ byte-identical to the gap-free layout.
 export function buildArithMeasure(
   doc: PMNode,
   contentWidthPx: number,
@@ -137,6 +144,7 @@ export function buildArithMeasure(
   basePx = 18, // base font px: 18 = canonical 1.125rem (Decision 6); the LIVE render font for renderFill
   citationStyle = '',  // CSL style + bib epoch: the citation box cache key (see citations/citeBox.ts)
   bibEpoch = -1,
+  forcedBreaks: number[] = [],
 ): ArithMeasureResult | null {
   const CANON_BASE = basePx
   const items: Array<{ node: PMNode; offset: number }> = []
@@ -155,7 +163,12 @@ export function buildArithMeasure(
     }
     if (!blockEligibility(arith, ratio, mathEligible).eligible) return null
     for (const r of runs) if (r.text !== '\n' && !r.atomic && !fontLoaded(r.fontFamily, r.fontSizePx)) return null
-    const lay = layoutParagraph(arith, contentWidthPx, ratio, measure)
+    // Mid-block forced line-starts for THIS block: doc pos → block-relative char (pos − offset − 1).
+    // A gap AT the block start (charOffset 0) is a no-op; a break past the content never matches.
+    const forcedChars = forcedBreaks.length
+      ? forcedBreaks.filter((p) => p > offset && p < offset + node.nodeSize).map((p) => p - offset - 1)
+      : forcedBreaks
+    const lay = layoutParagraph(arith, contentWidthPx, ratio, measure, EDITOR_WHITE_SPACE, forcedChars)
     const bi = blocks.length
     blocks.push({ start: offset, end: offset + node.nodeSize })
     for (let k = 0; k < lay.lineCount; k++)
