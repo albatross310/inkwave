@@ -693,14 +693,32 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     **58 pages** vs pane **88** — the pane carries **86,717 chars of deleted text (261 spans)** the
     model has never heard of. This is not a drift to tune: until the model is fed the diff, "identical
     offsets" cannot be claimed, and a scrub frame would paint a document the landing does not show.
-  - **STILL OPEN 2 — THE PANE'S CITATION IS NOT THE EDITOR'S.** The model uses `citeBox` (the EDITOR's
-    CitationNodeView: `nowrap`, `margin 0 2px`, the ⤵ biblink, real CSL); the pane renders DocView's
-    bare `simpleInText` span. Different elements, different advances — exactly what round 12 predicted
-    when it rejected harvesting boxes from a warm DocLayer. Invisible at 80 cites / 6k words (Δ0);
-    at **174 cites / 13k words the model reads 57 pages vs the editor's 56 — `model != EDITOR`**, the
-    one row where the model is the outlier. NB this qualifies `breaks.prove.mjs`'s "IDENTICAL": that
-    holds on its fixture, and does NOT hold at real citation density. Unattributed; needs its own
-    probe (suspects: the marked-citation font key, the basePx-18 box vs the pane's plain span).
+  - **STILL OPEN 2 — THE MODEL'S LISTS DIVERGE FROM THE EDITOR'S, SILENTLY. IT IS NOT CITATIONS —
+    I ATTRIBUTED IT WRONG AND THE SWEEP REFUTED ME** (`breakdensity.prove.mjs`, 2026-07-17).
+    **`breaks.prove.mjs` — the load-bearing proof, the sentence everyone quotes — runs on 4,000 words
+    of PLAIN PARAGRAPHS: not one citation, heading, list, blockquote or refList.** So "byte-identical
+    to the live editor" was established on prose alone and had never seen a citation. Sweeping
+    density and structure at 13k against the SAME live editor:
+        LEGACY prose 4k · prose 13k · 20/80/174 cites · 174 UNMARKED · 174 in 4k   → ALL IDENTICAL
+        13k + HEADINGS only                                                        → IDENTICAL
+        13k + LISTS (0 cites)          → **DIVERGES** first break 23, mine 55007 vs live 55021 (Δ −14)
+        13k + LISTS + HEADINGS         → **DIVERGES** first break 2,  mine 6975  vs live 7055  (Δ −80)
+        13k + 174 cites + LISTS + HEADINGS → DIVERGES first break 25, Δ −33  (halvesbisect's row)
+    **CITATIONS ARE EXONERATED** — identical at every density, marked and unmarked, with **0 citeBox
+    misses** throughout. My "the pane's citation is not the editor's" was a GUESS from the round-12
+    prediction, and it was wrong; the divergent fixture merely also carried `lists: true`. The
+    round-12 point still stands about the PANE (DocView's bare span ≠ CitationNodeView) — it is just
+    not what moves these breaks.
+    **LISTS ARE THE CAUSE, and the failure is SILENT**: `estimatedBlocks 0`, `reliablePages 55/55` —
+    the model lays lists out ARITHMETICALLY (not placeholders), gets them subtly wrong, and reports
+    FULL reliability. Wrong words on the page, declared trustworthy. Headings alone are clean, so it
+    is lists, and lists+headings is worse than either (Δ −80, break 2) ⇒ an INTERACTION, likely list
+    spacing after a heading. Unfixed, unattributed further — needs the next round.
+    **AND A LIMIT OF MY OWN INSTRUMENT, worth more than the finding:** the +LISTS row reads **model
+    55p / live 55p — the page COUNT agrees while the break POSITIONS diverge.** `halvesbisect`
+    compares COUNTS, so its Δ0 rows do NOT establish identical offsets; they establish identical
+    counts, which is exactly the weaker claim that lets wrong words sit on a right-numbered page.
+    Compare POSITIONS. This is why the divergence hid at 6k.
   - **STILL OPEN 3 — THE PANE RENDERS NO BIBLIOGRAPHY.** The model/editor give the refList its own
     forced page; DocView has no case for it, so the pane has never shown one: Δ1 at 6k, Δ2 at 13k.
     `feat/reflist-layout`'s; deliberately not touched here (rendering it makes the 120px-vs-880px
