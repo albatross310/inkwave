@@ -7,8 +7,12 @@
 //   1. measure line rects in the SAME forced canonical context (canonicalMeasure: mm paper width,
 //      desktop side margins, zoom 1, base font — plus the pane's own CSS-`zoom` wrapper forced
 //      to 1), inside one synchronous no-paint window;
-//   2. compute breaks with the SAME page box (pageModel) and the SAME overflow / orphan-snap
-//      rules as PaginationExtension.compute();
+//   2. compute breaks with the SAME page box (pageModel) and the SAME overflow rules as
+//      PaginationExtension.compute() — INCLUDING its retirement of the widow/orphan snap. That
+//      sentence used to say "orphan-snap rules" and this file still snapped after the editor
+//      stopped, which is precisely how a claim of sameness outlives the sameness. It is now
+//      MEASURED rather than asserted: halvesbisect.prove.mjs reads the model, the LIVE EDITOR's own
+//      gap widgets and this pane from ONE document and requires all three to agree.
 //   3. insert the SAME gap elements (pageGap.ts) at the break points — recorded as text-node
 //      CHARACTER OFFSETS, the static analog of a ProseMirror document position, so breaks ride
 //      any live reflow (diff zoom, phone width, editor-zoom var) exactly like the editor's
@@ -64,7 +68,7 @@ const cacheSet = (k: string, v: BreakSpec[]) => {
 // The static analog of the editor's top-level blocks. Block-level children (DocView's p/h/ul/…)
 // are one block each; a run of INLINE children (FullDiffView's flat diff spans under
 // white-space:pre-wrap) is grouped into ONE block — its lines wrap freely across the spans, so
-// per-span "blocks" would be meaningless for the orphan snap.
+// per-span "blocks" would be meaningless for a block-level rule.
 interface Block { els: HTMLElement[] }
 const INLINE_TAGS = new Set(['SPAN', 'A', 'EM', 'STRONG', 'B', 'I', 'U', 'S', 'CODE', 'SUB', 'SUP', 'BR', 'IMG'])
 
@@ -121,29 +125,51 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
   return lines
 }
 
-// ── Break computation (mirrors PaginationExtension.compute's overflow/orphan-snap rules) ───────
+// ── Break computation (mirrors PaginationExtension.compute's overflow rules; NO orphan snap) ───
 interface Pick { lineIdx: number; snap: boolean; brokeUsed: number }
+
+// EXPORTED AS A TEST SEAM (2026-07-17). This function is PURE — lines in, picks out, no DOM — so
+// the rule it carries can be pinned in the GATE in milliseconds instead of only by a hand-run
+// browser probe. That distinction is not academic: the orphan snap below survived here for a week
+// after the editor retired it, with every suite green, because its only possible witness was a
+// browser comparison nobody ran. A proof that ran once is not a guard.
+export function _computeBreakPicksForTest(lines: Array<{ top: number; absTop: number; blockIdx: number }>, textArea: number): Pick[] {
+  return computeBreakPicks(lines as StaticLine[], textArea)
+}
 
 function computeBreakPicks(lines: StaticLine[], textArea: number): Pick[] {
   const picks: Pick[] = []
   let used = 0
+  // `blockIdx` is all the block tracking this rule needs now: `blockStartUsed`/`blockFirstLine`
+  // existed ONLY to feed the orphan snap, and typecheck flagged them the moment it went — which is
+  // its own small confirmation that the snap was the only thing reading them.
   let blockIdx = -2 // -2 forces the first line to (re)resolve its block (mirrors blockStart=-1)
-  let blockStartUsed = 0
-  let blockFirstLine = 0
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    if (lines[i].blockIdx !== blockIdx || blockIdx === -2) {
-      blockIdx = lines[i].blockIdx
-      blockStartUsed = used
-      blockFirstLine = i
-    }
+    if (lines[i].blockIdx !== blockIdx || blockIdx === -2) blockIdx = lines[i].blockIdx
     if (i > 0 && used + lh > textArea) {
-      // Snap only small orphans to the block start; otherwise break mid-block so the page fills —
-      // identical policy (and 0.22 constant) to the editor.
-      const orphan = used - blockStartUsed
-      const snap = orphan <= textArea * 0.22 && blockFirstLine > 0
-      picks.push({ lineIdx: snap ? blockFirstLine : i, snap, brokeUsed: snap ? blockStartUsed : used })
-      used = snap ? orphan : 0
+      // THE ORPHAN SNAP IS GONE — because it is gone in the editor (2026-07-17).
+      //
+      // This is the THIRD copy of the break rule (PaginationExtension.computeBreaks,
+      // arithmeticLayout.paginate, and here). When production retired the widow/orphan snap
+      // (`const snap = false`, PaginationExtension ~457: "a straddling paragraph is broken at the
+      // overflow line wherever it falls"), `paginate()`'s default was corrected and THIS COPY WAS
+      // MISSED — while the comment above it claimed "identical policy (and 0.22 constant) to the
+      // editor" and this file's header claimed "the SAME overflow / orphan-snap rules as
+      // PaginationExtension.compute()". Both were false, and the claim is exactly why nobody looked.
+      //
+      // MEASURED (halvesbisect.prove.mjs, three corners from ONE document — the canvas model, the
+      // LIVE EDITOR's own gap widgets, and this pane): the pane was +2 pages on a 25-page document,
+      // on PLAIN PROSE — no lists, no citations, no refList. canvas === EDITOR on every shape, so
+      // the pane was the outlier. Snapping pushes a small orphan onto the next page, which the
+      // editor stopped doing, so /snapshot has shown page numbers the editor disagrees with since
+      // staticPagination was written (2026-07-10) — the minimap's and the diff panel's included.
+      //
+      // Canonical pagination's whole claim is "the same text on page N at every zoom, on phone, and
+      // in print". A pane that mirrors the editor may not carry a rule the editor retired.
+      const snap = false
+      picks.push({ lineIdx: i, snap, brokeUsed: used })
+      used = 0
       blockIdx = -2 // re-resolve the block on the new page (mirrors the extension)
     }
     used += lh

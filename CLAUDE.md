@@ -662,10 +662,50 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   spans, so child count no longer separates the conditions. It VOIDED rather than reporting a
   fiction; the discriminator is now real BLOCK ELEMENTS (`p,h1..h4,li,blockquote,pre`), which the
   flat transcript has ZERO of by construction.
-  STILL TO BUILD: both halves move together (the canvas frames and this DOM landing must produce
-  IDENTICAL offsets, not similar, or it is round 11 inverted — RichDiffView makes the two COMPARABLE
-  for the first time, but they have not been compared); the show() miss path; idle-pumped cancellable
-  table builds; the COLD far-from-origin burst. WATCH: rich rendering may bring the refList into the pane FOR THE
+  **BOTH HALVES — COMPARED FOR THE FIRST TIME (2026-07-17, `halvesbisect.prove.mjs` +
+  `bothhalves.prove.mjs`). ONE REAL BUG FOUND AND FIXED; THREE DIVERGENCES REMAIN, all named.**
+  The probe reads THREE corners from ONE document — the canvas model, the LIVE EDITOR's own gap
+  widgets, and the /snapshot pane — and bisects by content kind, because a rate over a mixed document
+  cannot say WHICH ingredient diverged. Its CONTROL is `ops === null` (DocView, no marks): if the two
+  halves cannot agree with NO diff, on the document the model models exactly, nothing may be read
+  from the diff row. That control VOIDED, and the void was the finding.
+  - **FIXED — `staticPagination` STILL SNAPPED ORPHANS AFTER THE EDITOR RETIRED THE RULE.** There are
+    THREE copies of the break rule (PaginationExtension.computeBreaks · arithmeticLayout.paginate ·
+    staticPagination.computeBreakPicks). When production retired the widow/orphan snap
+    (`const snap = false`), `paginate()`'s default was corrected and **this copy was missed** — while
+    its own comment claimed "identical policy (and 0.22 constant) to the editor" and the file header
+    claimed "the SAME overflow / orphan-snap rules as PaginationExtension.compute()". **The claim of
+    sameness is why nobody looked.** MEASURED: the pane was **+2 pages on a 25-page document of PLAIN
+    PROSE** — no lists, no citations, no refList — so every page number /snapshot has shown since
+    2026-07-10 (the minimap's and the diff panel's included) disagreed with the editor. After the fix
+    canvas === EDITOR === pane, **Δ0**, on prose / headings / lists / citations.
+    KEPT, not just fixed: `computeBreakPicks` is PURE, so `staticPagination.test.ts` pins it in the
+    gate in **7ms, no browser** (`_computeBreakPicksForTest`). Its fixture SEPARATES `blockFirstLine`
+    from `i` — the same trap one level down that CLAUDE.md already records for arithmeticLayout.test
+    ("a test only sees a rule it VARIES"). MUTATION-PROVED with the retired rule restored VERBATIM ⇒
+    3 tests fail, full gate exit 1. **The first mutation attempt SURVIVED and the keeper was
+    innocent: it wrote `lineIdx: snap ? i : i` and `orphan = used - 0`, so `snap` stayed false and
+    nothing was mutated.** A mutation that does not reproduce the bug tests nothing — check that your
+    mutant actually misbehaves before concluding the guard is weak.
+  - **STILL OPEN 1 — THE MODEL HAS NO DELETIONS.** `buildRenderModel(doc, …)` takes ONLY the document;
+    textRender.ts contains no `DiffOp`/`opsBetween`/`anchorOps` (grep -a is empty). RichDiffView
+    renders cur's document PLUS every deleted run. MEASURED at thesis scale with a real diff: canvas
+    **58 pages** vs pane **88** — the pane carries **86,717 chars of deleted text (261 spans)** the
+    model has never heard of. This is not a drift to tune: until the model is fed the diff, "identical
+    offsets" cannot be claimed, and a scrub frame would paint a document the landing does not show.
+  - **STILL OPEN 2 — THE PANE'S CITATION IS NOT THE EDITOR'S.** The model uses `citeBox` (the EDITOR's
+    CitationNodeView: `nowrap`, `margin 0 2px`, the ⤵ biblink, real CSL); the pane renders DocView's
+    bare `simpleInText` span. Different elements, different advances — exactly what round 12 predicted
+    when it rejected harvesting boxes from a warm DocLayer. Invisible at 80 cites / 6k words (Δ0);
+    at **174 cites / 13k words the model reads 57 pages vs the editor's 56 — `model != EDITOR`**, the
+    one row where the model is the outlier. NB this qualifies `breaks.prove.mjs`'s "IDENTICAL": that
+    holds on its fixture, and does NOT hold at real citation density. Unattributed; needs its own
+    probe (suspects: the marked-citation font key, the basePx-18 box vs the pane's plain span).
+  - **STILL OPEN 3 — THE PANE RENDERS NO BIBLIOGRAPHY.** The model/editor give the refList its own
+    forced page; DocView has no case for it, so the pane has never shown one: Δ1 at 6k, Δ2 at 13k.
+    `feat/reflist-layout`'s; deliberately not touched here (rendering it makes the 120px-vs-880px
+    guess live).
+  THEN: the show() miss path; idle-pumped cancellable table builds; the COLD far-from-origin burst. WATCH: rich rendering may bring the refList into the pane FOR THE
   FIRST TIME (today `pmToText` skips the atom, so the pane has never shown a bibliography) — at which
   point the 120px-vs-880px guess goes LIVE and silently moves every break below it. Its real height
   must come with it, or `reliablePages` must stop there honestly.
