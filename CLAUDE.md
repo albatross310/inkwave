@@ -1419,7 +1419,9 @@ Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, f
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
-`/ledger`), EmailComposePanel (+ its provider drop-up). When you add a panel, add it here too.
+`/ledger`), EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
+`?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap). When you
+add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the
