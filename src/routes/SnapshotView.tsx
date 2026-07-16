@@ -846,12 +846,13 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
 })
 
 function SplitDiffView({
-  snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, summariesOn, onOptInSummaries, nav, allSnaps,
+  snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, counterRef, summariesOn, onOptInSummaries, nav, allSnaps,
   snapMode, bijMode, onCycleSnap, onCycleBijection, presenter,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; nextSnap: Snapshot | null; allSnaps: Snapshot[]
   isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
+  counterRef?: React.RefObject<HTMLDivElement> // shift-wheel flipbook writes the live version text here
   summariesOn?: boolean; onOptInSummaries?: () => void
   snapMode: SnapMode; bijMode: BijMode // lifted to SnapshotView (phone hosts the toggles in the bottom bar)
   onCycleSnap: () => void; onCycleBijection: () => void
@@ -2126,7 +2127,7 @@ function SplitDiffView({
       <div style={vertical
         ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
         : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
-        {counter && (<div style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
+        {counter && (<div ref={counterRef} style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
@@ -2508,6 +2509,7 @@ export function SnapshotView() {
     }, 200)
     probePerf('nav.returned', 0)
   }, [navigate, presenter])
+  const goToRef = useRef(goTo); goToRef.current = goTo
 
   // Nav actions stamp ONE input each. They double as onClick handlers (React passes the event) —
   // only a real numeric timestamp (the keyboard path) is used; anything else falls back to now().
@@ -2537,6 +2539,21 @@ export function SnapshotView() {
   // scrolling still flies because the OS streams many notches, but each is a single, legible step.
   const idxRef = useRef(idx); idxRef.current = idx
   const allRef = useRef(allSnapshots); allRef.current = allSnapshots
+  // Per-snapshot-index counter strings ("v2.4/3.12") — the flipbook writes these into the counter
+  // DOM imperatively per presented step (no React commit per intermediate — the Photos trick).
+  const counterStrings = useMemo(() => {
+    if (allSnapshots.length <= 1) return []
+    const gi = new Map<string, number>()
+    groups.forEach((g, i) => g.items.forEach((s) => gi.set(s.id, i)))
+    const lastLen = groups[groups.length - 1]?.items.length ?? 1
+    return allSnapshots.map((s) => {
+      const g = gi.get(s.id) ?? 0
+      const pos = (groups[g]?.items.findIndex((x) => x.id === s.id) ?? 0) + 1
+      return `v${g + 1}.${pos}/${groups.length}.${lastLen}`
+    })
+  }, [allSnapshots, groups])
+  const counterStringsRef = useRef(counterStrings); counterStringsRef.current = counterStrings
+  const counterElRef = useRef<HTMLDivElement>(null)
   // Scrub by a NET number of snapshots at once (positive = forward). rAF-COALESCED (2026-07-11):
   // a fast drag streams several touchmoves per frame and each used to navigate — now the steps
   // accumulate and ONE navigation per frame moves by the net. virtualIdx tracks the last COMMANDED
@@ -2574,34 +2591,87 @@ export function SnapshotView() {
   }, [goTo, stampInput])
   useEffect(() => () => cancelAnimationFrame(scrubRafRef.current), [])
   const wheelAccum = useRef(0)
+  // Shift-wheel FLIPBOOK (2026-07-16 — Peter: "if Apple Photos can flicker frame-by-frame on
+  // scroll, so should we"). Root cause of the old "stays put until you stop": the handler computed
+  // target off the COMMITTED idxRef and called goTo per event, so it advanced at most ±1 per React
+  // commit — a fast shift-wheel commanded only 1-3 distinct versions of 30 (probed). Photos swaps
+  // among ALREADY-RESIDENT textures decoupled from app state; so does this: a COMMANDED index runs
+  // ahead of React per event, an rAF driver presents EVERY intermediate from the resident bitmap
+  // cache (compositor swap, no React commit), the counter updates imperatively, and ONE React
+  // commit lands the live full render on settle. DPR1 cap keeps the resident pool affordable.
+  const swCmdRef = useRef(-1)       // commanded index — runs AHEAD of React commits
+  const swPresentedRef = useRef(-1) // last index shown via the bitmap flipbook
+  const swRafRef = useRef(0)
+  useEffect(() => () => cancelAnimationFrame(swRafRef.current), [])
   useEffect(() => {
+    const SW_STEP = 40, MAX_PER_FRAME = 2, LAND_QUIET_MS = 120, FREEZE_HOLD_MS = 220
+    const flipEnabled = !isTouchDevice() && (window as unknown as { __iwSwFlipbook?: boolean }).__iwSwFlipbook !== false
+
+    const land = () => {
+      swRafRef.current = 0
+      const all = allRef.current, cmd = swCmdRef.current
+      swCmdRef.current = -1; swPresentedRef.current = -1
+      if (cmd >= 0 && all[cmd]) goToRef.current(all[cmd]) // one React commit → live render + URL sync
+    }
+    const tick = () => {
+      swRafRef.current = 0
+      const all = allRef.current, cmd = swCmdRef.current
+      let pres = swPresentedRef.current
+      if (cmd < 0 || !all.length) return
+      if (pres === cmd) { // caught up — land when inputs go quiet, else idle a frame
+        if (performance.now() - lastNavInputAtRef.current >= LAND_QUIET_MS) return land()
+        swRafRef.current = requestAnimationFrame(tick); return
+      }
+      const dir = Math.sign(cmd - pres)
+      pres += dir * Math.min(Math.abs(cmd - pres), MAX_PER_FRAME) // present ~every intermediate
+      swPresentedRef.current = pres
+      if (all[pres]) {
+        presenter.show(all[pres].id) // resident bitmap flip — no React re-render per step
+        const cs = counterStringsRef.current[pres]
+        if (cs && counterElRef.current) counterElRef.current.textContent = cs // live counter, imperative
+      }
+      swRafRef.current = requestAnimationFrame(tick)
+    }
     const onWheel = (e: WheelEvent) => {
       if (!e.shiftKey) return
       e.preventDefault()
       // Shift+wheel arrives as horizontal delta on many setups → take whichever axis is larger.
       const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
       wheelAccum.current += d
-      const STEP = 40 // wheel px to cross before stepping
       let n = 0
-      // Move at most ±1 per event (then reset), so one notch = one snapshot regardless of its size.
-      if (Math.abs(wheelAccum.current) >= STEP) {
-        n = wheelAccum.current > 0 ? 1 : -1
-        wheelAccum.current = 0
-      }
+      if (Math.abs(wheelAccum.current) >= SW_STEP) { n = wheelAccum.current > 0 ? 1 : -1; wheelAccum.current -= n * SW_STEP }
       if (!n) return
-      const cur = idxRef.current, all = allRef.current
-      if (cur < 0 || !all.length) return
-      const target = Math.max(0, Math.min(all.length - 1, cur + n))
-      if (target === cur) return
+      const all = allRef.current
+      if (!all.length) return
       stampInput(e.timeStamp)
+      const nowT = performance.now()
+      const inp = inputTimesRef.current
+      const rapid = (nowT - lastNavInputAtRef.current < 250) || (inp.last - inp.prev < 250)
+      lastNavInputAtRef.current = nowT
+      if (!flipEnabled || !rapid) { // isolated notch (or flag off) → the legible single live step
+        const cur = idxRef.current
+        const target = Math.max(0, Math.min(all.length - 1, cur + n))
+        if (target === cur) return
+        setNavDir(n > 0 ? 'fwd' : 'back'); goToRef.current(all[target]); return
+      }
+      // FLIPBOOK: advance the commanded index AHEAD of React; the driver flips through every step.
+      const base = swCmdRef.current >= 0 ? swCmdRef.current : idxRef.current
+      const target = Math.max(0, Math.min(all.length - 1, base + n))
+      if (target === base) return
+      if (swPresentedRef.current < 0) swPresentedRef.current = idxRef.current
+      swCmdRef.current = target
       setNavDir(n > 0 ? 'fwd' : 'back')
-      goTo(all[target])
+      setFrozenSnapId((p) => p ?? heavySnapIdRef.current) // freeze the heavy panes for the scrub
+      window.clearTimeout(unfreezeTimerRef.current)
+      unfreezeTimerRef.current = window.setTimeout(() => setFrozenSnapId(null), FREEZE_HOLD_MS)
+      presenter.noteInput()
+      if (!swRafRef.current) swRafRef.current = requestAnimationFrame(tick)
     }
     // Capture phase + preventDefault so the scrub owns the wheel BEFORE the pane scrolls it (no tiny
     // pre-scroll before the snap kicks in).
     window.addEventListener('wheel', onWheel, { passive: false, capture: true })
     return () => window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
-  }, [goTo, stampInput])
+  }, [stampInput, presenter])
 
   // ── Touch swipe → snapshot scrub (phone) ──────────────────────────────────────
   // TWO modes, split by a PRESS-AND-HOLD (Peter, round 2: "a single flick goes over lots of
@@ -2953,6 +3023,7 @@ export function SnapshotView() {
             lineMode={lineMode}
             summary={currentDiff}
             counter={allSnapshots.length > 1 ? `v${groupIdx + 1}.${snapInGroup}/${groups.length}.${lastGroup?.items.length ?? 1}` : undefined}
+            counterRef={counterElRef}
             summariesOn={aiOn}
             onOptInSummaries={() => setConsentOpen(true)}
             nav={{

@@ -384,6 +384,20 @@ export function hangsTrailingSpace(mode: WhiteSpaceMode): boolean { return mode 
 // tallest-line-box rule (r7 test c).
 const WRAP_EPS = 0.001 // r7's `> W + 0.001` — matches the browser's fractional-advance tolerance
 
+// The browser lays text out on the LayoutUnit grid (1/64 px), and a line FITS the container when its
+// grid-quantised width does — NOT its exact float width. So the fit test must quantise the candidate
+// line width to 1/64 before comparing (2026-07-16). WHY IT MATTERS at the RENDER font (22.5px phone,
+// and 1.037em → 23.3325px): canvas measureText returns a raw float sum that runs ~0.01px WIDER than
+// the browser's grid-accumulated width over a line — negligible at the canonical 18px (never reached
+// a break boundary; the 18px cert was 23/23) but at the larger render size it flips a boundary word
+// (measured: blk11 "…substrate of linguistic " canvas 360.6984 vs box 360.6875 — floor(360.6984·64)
+// /64 = 360.6875 = box ⇒ FITS, matching the DOM; the raw float said overflow ⇒ arith broke one word
+// early ⇒ the render band drifted N·renderLH). Quantising reconciles it AND the AAA-BBB white-space
+// case (full width ≈ grid boundary). floor, not round: the browser truncates in LayoutUnit arithmetic
+// (measured: width:360.7px → getBoundingClientRect 360.6875 = floor(360.7·64)/64).
+const LU = 64 // LayoutUnits per CSS px
+function luFloor(px: number): number { return Math.floor(px * LU + 1e-6) / LU } // +1e-6: float-safe ×64
+
 // A piece is either TEXT (measured by canvas) or an inline ATOM (a replaced box of fixed width +
 // line-height demand — math, inline image). Atoms GLUE to adjacent non-space text in the same token
 // (CSS offers no break opportunity between an inline-block and neighbouring non-space text), so
@@ -432,10 +446,25 @@ function tokenize(runs: InlineRun[], measure: Measure, ratio: number): Array<Tok
     const textDemand = snappedLineHeight(run.fontSizePx, ratio)
     let buf = ''
     const pushBuf = () => { if (buf) { cur.push({ text: buf, font, demand: textDemand }); curLen += buf.length; buf = '' } }
-    for (const ch of run.text) {
+    // Array.from → code points (surrogate-safe) + index, so we can look at the neighbours of a hyphen.
+    const chars = Array.from(run.text)
+    for (let ci = 0; ci < chars.length; ci++) {
+      const ch = chars[ci]
       if (ch === '\n') { pushBuf(); flush(); out.push('BR'); continue }
       buf += ch
-      if (/\s/.test(ch)) { pushBuf(); flush() } // whitespace ends the token (split-after-ws)
+      if (/\s/.test(ch)) { pushBuf(); flush(); continue } // whitespace ends the token (split-after-ws)
+      // HYPHEN-MINUS (U+002D) is a soft-break opportunity AFTER the hyphen (the browser breaks
+      // "constructed-language" → "constructed-" / "language"; the hyphen stays on the first line and
+      // counts toward its width). End the token AFTER the hyphen when it sits between two
+      // alphanumerics — an INTRA-WORD hyphen — so numeric ranges ("3-4") and leading/trailing dashes
+      // don't get a spurious break. Only reachable within a run; a hyphen exactly at a run boundary
+      // (mark change) keeps its token glued (rare — real compounds carry one mark). This is what the
+      // RENDER font (22.5px) exposed: a hyphenated compound the browser split but the engine kept
+      // whole wrapped as one unit → one extra line → the render band drifted by a line height.
+      if (ch === '-' && ci > 0 && ci + 1 < chars.length
+        && /[\p{L}\p{N}]/u.test(chars[ci - 1]) && /[\p{L}\p{N}]/u.test(chars[ci + 1])) {
+        pushBuf(); flush()
+      }
     }
     pushBuf()
   }
@@ -484,7 +513,7 @@ export function layoutParagraph(block: ArithBlock, contentWidthPx: number, ratio
     // the BARE width. no-hang (break-spaces — the editor): the space occupies width and counts, so
     // test the FULL width. Measured, not assumed — see the sweep in the WhiteSpaceMode note above.
     const fitW = hang ? tk.bareW : tk.fullW
-    if (started && lineW > 0 && lineW + fitW > contentWidthPx + WRAP_EPS) {
+    if (started && lineW > 0 && luFloor(lineW + fitW) > contentWidthPx + WRAP_EPS) {
       // This token overflows → break BEFORE it. Close the line; the token opens the next one.
       closeLine()
       breakStartChars.push(charIdx)

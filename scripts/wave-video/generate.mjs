@@ -159,7 +159,10 @@ function encode(dir, frames, rung, prefix, suffix) {
   const input = ['-framerate', String(FPS), '-i', join(dir, 'f%05d.png'), '-frames:v', String(frames), '-vf', S]
   const av1 = `${prefix}.av1${suffix}.mp4`, h264 = `${prefix}.h264${suffix}.mp4`
   execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libsvtav1', '-crf', CRF_AV1, '-preset', '6', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', av1], { stdio: 'ignore' })
-  execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libx264', '-preset', 'slow', '-crf', CRF_H264, '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-movflags', '+faststart', h264], { stdio: 'ignore' })
+  // iPhone-8-conservative H.264: Main profile @ Level 4.0 (A11 handles High, but Main is
+  // universally decodable), yuv420p, and +faststart (moov atom at the FRONT — without it, a
+  // Range-less first load never reaches the metadata and readyState sticks at 0).
+  execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libx264', '-preset', 'slow', '-crf', CRF_H264, '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0', '-movflags', '+faststart', h264], { stdio: 'ignore' })
   console.log(`    → ${prefix.split('/').pop()}.<codec>${suffix}.mp4: av1 ${kb(av1)}KB · h264 ${kb(h264)}KB`)
 }
 
