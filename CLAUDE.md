@@ -604,6 +604,88 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   FIRST TIME (today `pmToText` skips the atom, so the pane has never shown a bibliography) — at which
   point the 120px-vs-880px guess goes LIVE and silently moves every break below it. Its real height
   must come with it, or `reliablePages` must stop there honestly.
+  ROUND 13 (2026-07-17 — THE STORE EXECUTES FOR THE FIRST TIME; the WebKit zoom re-run; and the
+  per-version cost, traced).
+  - **⚠ `src/editor/textRender.ts` CONTAINS A NUL BYTE — GREP IS SILENTLY BLIND TO THE WHOLE FILE.**
+    Line 620 is `const k = font + '\0' + text` (a deliberate cache-key separator, committed in
+    21febe3). One NUL makes `file` report "data", so **grep treats it as BINARY: it matches NOTHING
+    and exits 1** — which reads as "that symbol doesn't exist" rather than "grep refused to look".
+    Every agent grepping this file since 21febe3 has been getting silence and believing it. **Use
+    `grep -a`** (or ripgrep). This is the house disease in the TOOLING rather than the code: an
+    instrument that cannot report its own failure. Same family as canvasShapingMatchesEditor.
+  - **THE WEBKIT ZOOM RE-RUN — the free-zoom claim HOLDS on Peter's device class.** The proof was
+    Chromium-only and WebKit's CSS-`zoom` LayoutUnit quantisation was unprobed. `panezoom.prove.mjs`
+    is now PARAMETERISED by `PROBE_ENGINE` (not forked — a second copy is how two probes drift and
+    one starts certifying a fiction). PROBED: WebKit's known-negative FIRES on its own text stack
+    (canonical side margin 96→220px: 37 gaps → 61, first offsets [2007,3981,5846] → [1194,2424,3631]
+    — identical to Chromium's), so the verdict is readable; all four conditions (0.5/0.75/1.5/2.0×)
+    leave the offsets UNCHANGED; `zoomSeenByMeasure "1"` confirms the canonical pin engages. BONUS,
+    stronger than the claim under test: **WebKit's baseline offsets are BYTE-IDENTICAL to
+    Chromium's** — canonical pagination agrees cross-engine. Zoom stays a pure PAINT SCALE; one
+    table serves every zoom. NB the Chromium baseline was re-run FIRST to prove the instrument
+    faithful on this build before the WebKit verdict was read.
+  - **THE 10s IS REAL — and the word-width cache was ALREADY BUILT.** The "116 × 90ms" projection is
+    sound (`versioncost.prove.mjs`, 12,563 words / 174 cites synthetic): naive full build **~62-82ms
+    settled ⇒ ~9.1s/116**. The repo's own numbers did NOT reconcile (breakTable.ts said 4/16/62ms at
+    2k/10k/40k; textRenderStore.ts said cold 129.5/warm 82.2 at 40k, contradicting it AT THE SAME
+    SIZE; landingcost's `paginateStaticDoc` max was 90.9ms — a DIFFERENT operation that happens to
+    read "90ms"), so the constant was measured rather than inherited. `makeCanvasMeasure` ALREADY
+    memoises per (cssFont, text) and `TextRenderStore` holds ONE for its lifetime, so versions 2..116
+    never paid the cold price: worth 67% off a cold build (753→249ms) and **already banked** inside
+    the 62-82ms. There is no second win there. **JIT TIER-UP was poisoning the numbers**
+    (`versioncost.attrib.mjs`): 12 identical in-page `build()` calls go 291.7 → settled p50 81.8ms.
+    Any probe timing a few builds over separate CDP round-trips reports the tier-up, not the build —
+    that is where the bogus "249ms warm" came from. Also: per-version cost is CPU-CONTENDED on this
+    box (103 → 177ms/version between runs while other agents' probes ran); quote the attributed
+    settled number, not a single loaded run.
+  - **THE OPFS LAYER RAN FOR THE FIRST TIME, AND IT WAS BROKEN TWO WAYS.** `loadTables`/`putTable`/
+    `getTable`/`persist`/`tableStats` had ZERO callers and had never executed once. `opfs.prove.mjs`
+    is the first execution — real OPFS, real reload, through `storage/opfsWrite.ts`. It caught both:
+    (1) **THE SIGNATURE COULD NEVER REPRODUCE.** `contextSig` embedded `opts.bibEpoch` =
+        `bibProvider.getVersion()`, which is a **monotonic SESSION EVENT COUNTER** (`notify()` does
+        `_version++`). Measured 15 before reload, 2 after, on a byte-identical document. So EVERY
+        hydrated table stale-missed, always: the layer was **structurally incapable of ever scoring a
+        hit** and would have shipped reporting "116 tables persisted" while serving ZERO lookups
+        forever. The intent was right (a citation's box changes its wrap, so the bibliography belongs
+        in the sig); the instrument was wrong — an epoch is a proxy for "something changed", not a
+        description of WHAT THE STATE IS, and only the latter crosses a process boundary. FIXED:
+        `bibSignature()` = FNV-1a over the sorted CSL entries (content-derived, stable), memoised BY
+        the epoch — which keeps the epoch's one legitimate job, an in-session memo key. Over-
+        invalidation is safe (a miss rebuilds); under-invalidation paints wrong words, so it hashes
+        the whole entry rather than guessing which fields a style reads. **RULE: no component of a
+        persisted signature may be counted since page load.**
+    (2) **`getTable` REFUSED TABLES IT HAD JUST BUILT.** It early-returned a miss whenever
+        `!i.loaded`, but `putTable` populates `tables` WITHOUT setting `loaded` — so a session that
+        built its own tables and looked one up MISSED EVERY TIME, silently rebuilding forever.
+        `loaded` only ever meant "ABSENCE is authoritative", and absence already returns null. Same
+        family as the signature-blind bake counter reporting 116/116 while every lookup missed.
+    PROVED after the fixes (Chromium, real OPFS, real reload, thesis-scale synthetic): 116 tables
+    built → `persist` 744ms → **RELOAD** → `loadedFromDisk 116/116`, hydrate **148ms**, HIT with
+    byte-identical starts ([1,2277,4448,6775]), **74.3KB on disk / 656B per version** (vs the 62.9MB
+    bitmap pool), zero evictions at 3.6% of a 2MB budget. Signature REPRODUCES across the reload.
+    KNOWN-NEGATIVE fires: a mutated sig is REFUSED and COUNTED as stale — and the correct sig STILL
+    HITS afterwards, which is what proves the negative DISCRIMINATES rather than merely breaking the
+    cache. `tableStats` now reports per-doc hits/misses/stale/builds/persisted/loadedFromDisk + bytes
+    + **evictions BY NAME** (LRU to a 2MB budget; it should never fire at Peter's scale, which is
+    exactly why it must be reported rather than assumed).
+    **SCOPE, STATED:** this proves THE STORE. It does NOT wire tables to the pane and says NOTHING
+    about the renderer's fidelity — round 12 stands: the pane renders FLAT for 115/116 until
+    RichDiffView lands, so wiring now would model the wrong document.
+    **ENGINE GAP, STATED:** Playwright's Linux WebKit has NO `navigator.storage` at all (verified
+    directly), so this proves the **main-thread `createWritable` branch only**. The iOS worker
+    `createSyncAccessHandle` path — the one Peter's iPhone 8 actually takes — remains UNPROVEN here
+    and needs a real device.
+  - **`storeProof` WAS LYING, and fixing it unmasked a real signal.** It read `coverageOf('v0')` for
+    its reference model — but the LRU evicts the OLDEST FIRST, so at n=116 v0 is the first casualty:
+    it reported `pagesPerVersion: 0` and `lastPageReachableByContent: false`, which read exactly like
+    the whole-document claim COLLAPSING when the truth was that it queried a key it had thrown away.
+    Now it asks the MOST-RECENTLY-USED version (LRU-guaranteed resident) and carries `refId`/
+    `refResident` so a null can never be read as a zero: `pagesPerVersion` 0 → **58**.
+    **NEWLY VISIBLE, UNATTRIBUTED — do not assume it is benign:** with the artifact gone,
+    `lastPageReachableByContent` is STILL false for a REAL reason (lastPos → page 16 of an 18-page
+    model, two pages of slack). PROBED that it is **NOT the refList** (identical with `refList:false`),
+    and `unreliableVersions` is all-versions either way. It sits in textRender's model semantics and
+    wants attribution by that lane — it was invisible until now.
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
 

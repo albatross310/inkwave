@@ -27,7 +27,11 @@ import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
 import { harvestRefChromeStyles, backrefBox, noteBox } from '../citations/refChrome'
 import { TextRenderStore } from './textRenderStore'
-import { buildBreakTable, contextSig, pageStart, pageOfPos } from './breakTable'
+import {
+  buildBreakTable, contextSig, bibSignature, pageStart, pageOfPos,
+  loadTables, putTable, getTable, persist, tableStats, _resetTables,
+  type TableStats,
+} from './breakTable'
 // The REAL production line-acquisition functions — exercised directly so the audit can never drift
 // from what the paginator actually does (a comparison run through a copy cancels its own error).
 import { blockLineRects, keepLineRects } from './extensions/PaginationExtension'
@@ -142,6 +146,28 @@ export interface ProbeApi {
   /** Per-block line counts: truth vs the old whole-block rect path vs the collapsed path. Measures
    *  the PHANTOM LINE itself, so it sees the artifact whether or not a break happens to land on it. */
   lineCountAudit(): Record<string, unknown>
+  // ── OPFS BREAK-TABLE ROUND TRIP (2026-07-17) ───────────────────────────────────────────────
+  // The persistence layer had ZERO CALLERS and had never executed once. These are the first, and
+  // they exist to make it EXECUTE against real OPFS through storage/opfsWrite.ts, across a real
+  // reload. NOT a pane wiring: what document the table models is a separate, blocked question
+  // (round 12 — the pane renders flat for 115/116 until RichDiffView lands). This proves the
+  // STORE, and says nothing about the renderer's fidelity to the pane.
+  /** Build `versions` tables from the live doc, put them, and FLUSH to OPFS (awaited, not debounced). */
+  tableWrite(docId: string, versions: number): Promise<Record<string, unknown>>
+  /** Hydrate the index from OPFS. The reload side of the round trip. */
+  tableLoad(docId: string): Promise<Record<string, unknown>>
+  /** Look a version up under the CURRENT canonical signature. */
+  tableGet(docId: string, snapId: string): Record<string, unknown>
+  /** THE KNOWN-NEGATIVE: look up under a DELIBERATELY WRONG signature. Must be a counted stale
+   *  MISS that rebuilds — never a silent reuse. A table from another context paints wrong words. */
+  tableGetStale(docId: string, snapId: string): Record<string, unknown>
+  /** The canonical signature this session computes — compared across a reload it proves the sig is
+   *  REPRODUCIBLE. An unstable sig would stale-miss every hydrated table and the cache would be
+   *  silently worthless while reporting a full disk index. */
+  tableSig(): string
+  tableStats(docId: string): TableStats
+  /** Drop the in-memory index WITHOUT touching disk — simulates a cold start in one page. */
+  tableForgetMemory(): void
   /** BASELINE A — the REAL production bake: SVG-foreignObject capture of a live pane. */
   bake(selector: string, scale: number): Promise<Record<string, unknown>>
   /** BASELINE B — the REAL present path: WebP encode (0.5×/q0.7, as snapThumbs) → decode → blit. */
@@ -668,6 +694,60 @@ export function installTextRenderProbe(editor: Editor): void {
       }
     },
 
+    // ── OPFS BREAK-TABLE ROUND TRIP ──────────────────────────────────────────────────────────
+    tableSig() {
+      harvestNow()
+      return contextSig(liveGeom(), getCitationStyle(), bibSignature(), 'probe')
+    },
+
+    async tableWrite(docId, versions) {
+      harvestNow()
+      const g = liveGeom()
+      const sig = contextSig(g, getCitationStyle(), bibSignature(), 'probe')
+      const doc = editor.state.doc
+      const t0 = performance.now()
+      for (let v = 0; v < versions; v++) {
+        // Distinct snapId per version. The SAME doc stands in for each — honest for the STORE's
+        // shape (bytes, eviction, round trip), which is what this proves; it is NOT a claim about
+        // per-version content, and reuse is not being measured here.
+        putTable(docId, `snap-${String(v).padStart(3, '0')}`, buildBreakTable(doc, g, measure, fontLoaded, buildOpts(), sig))
+      }
+      const buildMs = performance.now() - t0
+      const p0 = performance.now()
+      await persist(docId) // AWAITED — never race the 1500ms debounce in a probe
+      return { versions, buildMs: +buildMs.toFixed(1), persistMs: +(performance.now() - p0).toFixed(1), sig, stats: tableStats(docId) }
+    },
+
+    async tableLoad(docId) {
+      const t0 = performance.now()
+      await loadTables(docId)
+      return { loadMs: +(performance.now() - t0).toFixed(1), stats: tableStats(docId) }
+    },
+
+    tableGet(docId, snapId) {
+      harvestNow()
+      const sig = contextSig(liveGeom(), getCitationStyle(), bibSignature(), 'probe')
+      const t = getTable(docId, snapId, sig)
+      return { hit: !!t, pages: t?.pages ?? 0, starts: t?.starts.length ?? 0, firstStarts: t?.starts.slice(0, 4) ?? [], sig }
+    },
+
+    // THE NEGATIVE. A signature mismatch MUST return null and be COUNTED as stale. If this ever
+    // returns a table, hydration is reusing a pagination from a different canonical context — the
+    // failure mode is not a crash, it is the wrong words on the page, reported as success.
+    tableGetStale(docId, snapId) {
+      harvestNow()
+      const real = contextSig(liveGeom(), getCitationStyle(), bibSignature(), 'probe')
+      const wrong = real + '|MUTATED'
+      const before = tableStats(docId).stale
+      const t = getTable(docId, snapId, wrong)
+      const after = tableStats(docId).stale
+      return { reused: !!t, staleCounted: after - before, realSig: real, wrongSig: wrong }
+    },
+
+    tableStats(docId) { return tableStats(docId) },
+
+    tableForgetMemory() { _resetTables() },
+
     // ── WHOLE-DOCUMENT + MEMORY AT SESSION SCALE ─────────────────────────────────────────────
     // Peter: "I wanna make sure we sweep and load the whole document." A bitmap cache can only hold
     // a window; a model is whole-document by construction. This proves BOTH halves of that claim
@@ -698,7 +778,16 @@ export function installTextRenderProbe(editor: Editor): void {
         if (c.whole) whole++; else { notWhole++; cov.push({ v, ...c }) }
         if (!c.reliable) unreliable++
       }
-      const m0 = store.coverageOf('v0')
+      // THE REFERENCE MODEL MUST BE ONE THAT SURVIVED (fixed 2026-07-17). This read `coverageOf('v0')`
+      // — and the LRU evicts the OLDEST first, so v0 is the FIRST casualty at any n that overflows the
+      // budget. At n=116 it reported `pagesPerVersion: 0` and `lastPageReachableByContent: false`:
+      // both read exactly like the whole-document claim COLLAPSING, when the truth was that the probe
+      // asked an evicted key. A probe that reports a scary zero because it queried something it threw
+      // away is this project's signature failure — fourteen times over. Ask the MOST-RECENTLY-USED
+      // version, which the LRU guarantees is resident, and VOID loudly if somehow nothing survived.
+      const refId = `v${versions - 1}`
+      const m0 = store.coverageOf(refId)
+      const refResident = !!m0?.cached
       // The LEAN trade, measured on the same models: geometry-only (segments re-sliced from the doc
       // at paint time) vs the current fat model that duplicates the text.
       const probe0 = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
@@ -706,7 +795,7 @@ export function installTextRenderProbe(editor: Editor): void {
       // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
       // if the model only covered a window, a far position would clamp to the window's edge.
       const lastPos = doc.content.size - 2
-      const pageOfLast = store.pageFor(`v${versions - 1}`, lastPos)
+      const pageOfLast = store.pageFor(refId, lastPos)
       return {
         versions, cachedModels: store.stats.models, droppedCount: store.stats.dropped.length,
         droppedSample: store.stats.dropped.slice(0, 5),
@@ -715,11 +804,14 @@ export function installTextRenderProbe(editor: Editor): void {
         mbPerVersion: +((store.stats.bytes / Math.max(1, store.stats.models)) / 1048576).toFixed(3),
         heapDeltaMB: +((after - before) / 1048576).toFixed(2),
         buildMsTotal: +ms.toFixed(0), buildMsPerVersion: +(ms / versions).toFixed(1),
-        pagesPerVersion: m0?.pages ?? 0,
+        // Named for what they are: a reading of ONE resident reference version, not a per-version
+        // average. `refId`/`refResident` travel with them so a null can never be read as a zero.
+        refId, refResident,
+        pagesPerVersion: refResident ? (m0?.pages ?? 0) : null,
         wholeDocVersions: whole, notWholeVersions: notWhole, notWholeSample: cov.slice(0, 3),
         unreliableVersions: unreliable,
-        lastPosPage: pageOfLast, lastPageIdx: (m0?.pages ?? 1) - 1,
-        lastPageReachableByContent: pageOfLast === (m0?.pages ?? 1) - 1,
+        lastPosPage: pageOfLast, lastPageIdx: refResident ? (m0?.pages ?? 1) - 1 : null,
+        lastPageReachableByContent: refResident ? pageOfLast === (m0?.pages ?? 1) - 1 : null,
         leanBytesPerVersion: leanPer,
         leanMBPerVersion: +(leanPer / 1048576).toFixed(3),
         leanMBat116: +((leanPer * 116) / 1048576).toFixed(1),
@@ -872,7 +964,7 @@ export function installTextRenderProbe(editor: Editor): void {
       harvestNow()
       const g = liveGeom()
       const doc = editor.state.doc
-      const sig = contextSig(g, buildOpts(), 'probe')
+      const sig = contextSig(g, getCitationStyle(), bibSignature(), 'probe')
       const t0 = performance.now()
       const table = buildBreakTable(doc, g, measure, fontLoaded, buildOpts(), sig)
       const buildMs = performance.now() - t0
@@ -885,7 +977,7 @@ export function installTextRenderProbe(editor: Editor): void {
 
       // KNOWN-NEGATIVE: a REAL context change (narrower column) must move the breaks.
       const g2: RenderGeom = { ...g, sideMarginPx: g.sideMarginPx + 40, contentWidthPx: g.contentWidthPx - 80 }
-      const t3 = buildBreakTable(doc, g2, measure, fontLoaded, buildOpts(), contextSig(g2, buildOpts(), 'probe'))
+      const t3 = buildBreakTable(doc, g2, measure, fontLoaded, buildOpts(), contextSig(g2, getCitationStyle(), bibSignature(), 'probe'))
       const negativeMoves = !(t3.starts.length === table.starts.length && t3.starts.every((v, i) => v === table.starts[i]))
 
       // The table must agree with the model it came from.
