@@ -1,104 +1,151 @@
-// The productivity ledger schema — build-spec §A3.2.
+// The per-month master ledger (spec §A3.1) — merge-safety + provenance attestation. PURE.
 //
-// ⚠ CONTRACT, NOT OURS TO CHANGE. The ledger (capture + per-month persistence) is owned by the
-// `feat/prod-ledger` lane; this file mirrors the spec'd row shape so the aggregation/graph lane can
-// build against it without waiting. When the ledger lands, this type should be REPLACED by an import
-// from its module — the field names/units here are the spec's, verbatim, so that swap is mechanical.
-// If a graph needs a field that isn't here, ASK: a silent schema fork breaks four lanes at once.
-//
-// Data minimisation (§A3.2): metadata only — never prose, never geolocation, never keystrokes.
+// Storage/IO lives in ledgerStore.ts; this module is the arithmetic, so the two rules that matter
+// most — GROW-ONLY merge and the attestation chain — are unit-testable without a disk.
 
-/** §A3.2 `doc_type`. Email sessions are flagged here (Part B). */
-export type DocType = 'note' | 'essay' | 'email' | 'other'
+import { hashCanonical } from '../provenance/hash'
+import type { LedgerAttestation, MonthLedger, SessionRow } from './types'
+import { localDayOf } from './sessionLogic'
 
-/** One session row — the atomic unit of the ledger (§A3.2). */
-export interface LedgerSession {
-  session_id: string
-  doc_id: string
-  /** User-visible title; suppressible per-doc, so treat as optional at every use site. */
-  doc_label?: string
-  /** ISO-8601. Carries a UTC offset (§A9: store UTC + offset, aggregate in the user's local day). */
-  start: string
-  /** ISO-8601. */
-  end: string
-  /** Time actually editing — excludes idle within the session. */
-  active_minutes: number
-  words_start: number
-  words_end: number
-  /** Gross additions. */
-  words_added: number
-  /** Deletions — the editing/restructuring signal. */
-  words_deleted: number
-  /** `words_end - words_start`. May be negative on a cutting session; that is not a failure. */
-  net_words: number
-  edit_events: number
-  /** Gap since the previous session, in minutes. */
-  break_before_min: number
-  pomodoro: boolean
-  doc_type: DocType
+/** The ledger's document name for a local month ('YYYY-MM') — e.g. `inkwave-ledger-2026-07`. */
+export function ledgerNameFor(month: string): string {
+  return `inkwave-ledger-${month}`
 }
 
-// ─── Local-day resolution (§A9) ───────────────────────────────────────────────
-//
-// Aggregates roll up by the WRITER'S local day, not by UTC day — a 9pm Brisbane session belongs to
-// that evening, not to the next UTC date. The offset in the ISO string is the source of truth when
-// present, so aggregation is a pure function of the ledger's own bytes and does NOT depend on the
-// machine's TZ. (A test suite that silently passes only in Australia/Brisbane is the kind of check
-// that can't see its own failure — the fixtures therefore carry explicit offsets.)
+export function emptyLedger(month: string): MonthLedger {
+  return { v: 1, month, rows: [], attestations: [] }
+}
 
-/** Matches a trailing `Z` or `±HH:MM` / `±HHMM` offset on an ISO-8601 timestamp. */
-const OFFSET_RE = /(Z|[+-]\d{2}:?\d{2})$/
+// ─── Merge-safety (§A9) ──────────────────────────────────────────────────────
 
 /**
- * The local calendar day (`YYYY-MM-DD`) an ISO timestamp falls in, honouring its own UTC offset.
- * Falls back to the runtime's local day when the string carries no offset at all.
+ * Union two row sets — GROW-ONLY, keyed by `session_id`.
+ *
+ * The ledger lives in the writer's own cloud sync, so two devices can append concurrently. Rows are
+ * append-only; a write-back must NEVER shrink the target just because this device's copy is
+ * momentarily short (a fresh sign-in, cleared site data, a save racing a restore). CLAUDE.md
+ * documents the real 2026-07-05 incident where exactly that truncated the snapshot archive — the
+ * ledger inherits the invariant: every write-back unions with the target's existing rows FIRST.
+ *
+ * LAST-WRITER-WINS APPLIES ONLY WITHIN ONE session_id (§A9). Two devices cannot legitimately hold
+ * different rows for the same session, so on an id clash we take the LATER-ENDING row: a session is
+ * only ever extended (an idle close can be superseded by a later close of the same session), so the
+ * later `end` is the more complete record. Ties break deterministically on `edit_events` then on the
+ * incoming row, so the merge is confluent — merge(a,b) and merge(b,a) agree on content.
  */
-export function localDayOf(iso: string): string {
-  const m = OFFSET_RE.exec(iso.trim())
-  if (!m) {
-    // No offset in the data → the only meaning available is the runtime's local day.
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ''
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+export function mergeLedgerRows(a: readonly SessionRow[], b: readonly SessionRow[]): SessionRow[] {
+  const byId = new Map<string, SessionRow>()
+  for (const r of a) if (r && r.session_id) byId.set(r.session_id, r)
+  for (const r of b) {
+    if (!r || !r.session_id) continue
+    const prev = byId.get(r.session_id)
+    if (!prev || winsOver(r, prev)) byId.set(r.session_id, r)
   }
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  const offMin = m[1] === 'Z' ? 0 : offsetMinutes(m[1])
-  // Shift into the writer's wall clock, then read the date parts in UTC.
-  const shifted = new Date(t + offMin * 60_000)
-  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`
+  // Sort by start, then session_id — a total order, so two devices that merged the same rows in a
+  // different arrival order still serialise (and therefore HASH) identically.
+  return [...byId.values()].sort((x, y) =>
+    x.start < y.start ? -1 : x.start > y.start ? 1 : x.session_id < y.session_id ? -1 : x.session_id > y.session_id ? 1 : 0,
+  )
 }
 
-/** The local wall-clock hour (0–23) an ISO timestamp falls in — the busiest-hours histogram's bucket. */
-export function localHourOf(iso: string): number {
-  const m = OFFSET_RE.exec(iso.trim())
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return 0
-  if (!m) return new Date(iso).getHours()
-  const offMin = m[1] === 'Z' ? 0 : offsetMinutes(m[1])
-  return new Date(t + offMin * 60_000).getUTCHours()
+/**
+ * The same-session tie-break. Later `end` wins (a session is only ever extended). On an equal end,
+ * the RICHER row wins — more edit events, then a row carrying the writer's note/place over one that
+ * doesn't. That last clause is load-bearing: annotating a session with a diary note does NOT change
+ * its `end`, so without it a plain copy of the row syncing in from another device could silently
+ * erase a note the writer had just written.
+ */
+function winsOver(next: SessionRow, prev: SessionRow): boolean {
+  if (next.end !== prev.end) return next.end > prev.end
+  if (next.edit_events !== prev.edit_events) return next.edit_events > prev.edit_events
+  return annotationScore(next) >= annotationScore(prev)
 }
 
-function offsetMinutes(off: string): number {
-  const sign = off[0] === '-' ? -1 : 1
-  const body = off.slice(1).replace(':', '')
-  return sign * (Number(body.slice(0, 2)) * 60 + Number(body.slice(2, 4)))
+const annotationScore = (r: SessionRow): number => (r.note ? 1 : 0) + (r.place ? 1 : 0)
+
+/** Union a whole ledger with another copy of the same month (the write-back path). */
+export function mergeLedgers(target: MonthLedger, local: MonthLedger): MonthLedger {
+  return { v: 1, month: local.month, rows: mergeLedgerRows(target.rows, local.rows), attestations: [] }
 }
 
-function pad2(n: number): string { return String(n).padStart(2, '0') }
+// ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
+// Each daily block hashes into a chain, so the ledger is tamper-evident and OTS-anchorable. This
+// reuses the existing spine's hashing (RFC 8785 JCS + SHA-256, provenance/hash.ts) — deliberately
+// NOT a parallel mechanism. Anchoring is provenance/ots.ts, driven by ledgerStore.
 
-/** ISO weekday index for a `YYYY-MM-DD` day key: 0 = Monday … 6 = Sunday. */
-export function weekdayOf(dayKey: string): number {
-  const d = new Date(`${dayKey}T00:00:00Z`)
-  return (d.getUTCDay() + 6) % 7
+/**
+ * Recompute every daily attestation block from `rows` — deterministic, so any verifier (or a future
+ * device) rebuilds it byte-identically from the rows alone.
+ *
+ * `existing` supplies OTS proofs to CARRY OVER: a proof is kept only when that day's blockHash is
+ * unchanged, so an anchored day survives appends to OTHER days (the multi-device case), while a day
+ * that gained or lost a row correctly loses its stale anchor — the old proof attests content that
+ * block no longer has.
+ */
+export async function buildAttestations(
+  month: string,
+  rows: readonly SessionRow[],
+  existing: readonly LedgerAttestation[] = [],
+): Promise<LedgerAttestation[]> {
+  const byDay = new Map<string, SessionRow[]>()
+  for (const r of rows) {
+    const day = localDayOf(r.start)
+    const list = byDay.get(day)
+    if (list) list.push(r)
+    else byDay.set(day, [r])
+  }
+  const priorByDay = new Map(existing.map((a) => [a.day, a]))
+
+  const out: LedgerAttestation[] = []
+  for (const day of [...byDay.keys()].sort()) {
+    const rowHashes = await Promise.all(byDay.get(day)!.map((r) => hashCanonical(r)))
+    // Bound to month + day: a block cannot be lifted into another month or another date.
+    const blockHash = await hashCanonical({ v: 1, month, day, rowHashes })
+    const prior = priorByDay.get(day)
+    out.push({
+      v: 1,
+      day,
+      rowHashes,
+      blockHash,
+      // Carry the proof ONLY if it attests this exact block; otherwise the day is unstamped again.
+      ots: prior && prior.blockHash === blockHash ? prior.ots : { status: 'unstamped' },
+    })
+  }
+  return out
 }
 
-/** The Monday (`YYYY-MM-DD`) of the ISO week containing `dayKey`. */
-export function weekStartOf(dayKey: string): string {
-  const d = new Date(`${dayKey}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() - weekdayOf(dayKey))
-  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
+/** Rebuild `attestations` from `rows` (preserving still-valid OTS proofs). The write path's last step. */
+export async function attestLedger(l: MonthLedger): Promise<MonthLedger> {
+  return { ...l, attestations: await buildAttestations(l.month, l.rows, l.attestations) }
 }
 
-/** The `YYYY-MM` month a day key falls in. */
-export function monthOf(dayKey: string): string { return dayKey.slice(0, 7) }
+export interface LedgerVerifyReport {
+  ok: boolean
+  /** Days whose recomputed blockHash does not match the stored one (rows altered/added/removed). */
+  badDays: string[]
+  /** Days that have rows but no attestation block at all (the block was dropped). */
+  missingBlocks: string[]
+  blocks: number
+}
+
+/**
+ * Verify the ledger is internally consistent: every day's rows still hash to its stored blockHash.
+ * Tamper-evidence — a row edited, added or dropped after the fact fails here, and an OTS-anchored
+ * blockHash additionally pins that day's rows to a Bitcoin time (so they cannot be backdated).
+ */
+export async function verifyLedger(l: MonthLedger): Promise<LedgerVerifyReport> {
+  const recomputed = await buildAttestations(l.month, l.rows, [])
+  const badDays: string[] = []
+  const missingBlocks: string[] = []
+  const storedByDay = new Map(l.attestations.map((a) => [a.day, a]))
+
+  for (const r of recomputed) {
+    const stored = storedByDay.get(r.day)
+    if (!stored) missingBlocks.push(r.day)
+    else if (stored.blockHash !== r.blockHash) badDays.push(r.day)
+  }
+  // A stored block whose day no longer has any rows = the day's rows were removed wholesale.
+  for (const s of l.attestations) if (!recomputed.some((r) => r.day === s.day)) badDays.push(s.day)
+
+  return { ok: badDays.length === 0 && missingBlocks.length === 0, badDays, missingBlocks, blocks: recomputed.length }
+}

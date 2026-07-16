@@ -7,17 +7,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { aggregateLedger } from './aggregate'
 import type { JudgedReport } from './judged'
-import type { LedgerSession } from './ledger'
+import type { SessionRow } from './types'
 import { ProductivityPanel } from './ProductivityPanel'
 
 export function Report({ demo }: { demo: boolean }) {
-  const [sessions, setSessions] = useState<LedgerSession[] | null>(null)
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
   const [judged, setJudged] = useState<JudgedReport | undefined>()
 
   useEffect(() => {
     let live = true
     void (async () => {
-      const { makeJudgedReport, makeLedgerSessions } = await import('./fixtures')
+      const { makeJudgedReport, makeSessionRows } = await import('./fixtures')
       if (!live) return
 
       // ─── THE LEDGER SEAM ───────────────────────────────────────────────────
@@ -25,7 +25,7 @@ export function Report({ demo }: { demo: boolean }) {
       // exist yet. When it lands, THIS is the line that changes — read its rows here instead of the
       // fixtures. Everything downstream (aggregation, charts, the honesty gate) already builds
       // against the spec'd §A3.2 row shape and needs no edit.
-      const rows = makeLedgerSessions()
+      const rows = makeSessionRows()
       setSessions(rows)
 
       // The AI half (§A6.1) is owned by `feat/prod-ai-report`. In demo mode we render a synthetic

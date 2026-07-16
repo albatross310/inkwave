@@ -691,6 +691,67 @@ its own failure. PRE-EXISTING, NOT THIS LANE'S: `vite preview` throws React hydr
 recovery failure entry.client.tsx:100 documents), so the screenshot probe asserts the theme attribute
 directly.
 
+## Productivity ledger (P1a-core, 2026-07-17 — `src/productivity/`, flag `inkwave:prodLedger`, DEFAULT OFF)
+
+Session capture + a per-month ledger, per the Productivity/Email build spec §A3–A5. `/ledger` is the
+openable surface (Pomodoro + diary notes). **The schema (`types.ts`) is a CONTRACT** — `feat/prod-graphs`,
+`feat/prod-ai-report` and the email layer all read `SessionRow`. snake_case is deliberate (it is a CSV/wire
+contract, not repo style); don't "tidy" it. `types.ts` is now the ONE contract file: the AI-report path's
+type-only mirrors were folded in on rebase (its aggregate shapes kept verbatim; its SessionRow/DocType
+mirrors deleted — the real schema supersedes them, and the names matched already).
+
+- **The flag is `ledgerFlag.ts` (`?prodLedger=1` / `=off`, sticky), NOT `flag.ts`** — that one is the AI
+  report's (`?prodReport`). A `flag.ts`/`flags.ts` pair in one directory is how someone imports the wrong
+  feature and never notices; hence the rename.
+- **`sessions` at weekly/monthly is `[]` — DECIDED (2026-07-17), answering prod-ai-report's contract ask.**
+  Opted-in notes travel as `note_digest` (per LOCAL day) instead. The serious reason is §A6.4: shipping
+  session rows at monthly puts a SECOND copy of every measured number in the payload beside the day
+  rollups, and two copies is exactly how a narrative ends up contradicting the bars. One representation of
+  measurement, always. (§A6/§A7's "rollups, not raw logs" is the second reason; the note TEXT dominates
+  tokens either way, so the digest costs the writer's own words and nothing more.) COROLLARY: "where do I
+  work best" must be a MEASURED client-side by-place rollup, never inferred by the model from raw rows.
+- `installSource.ts` fills prod-ai-report's `setAggregateSource` seam with `aggregate.ts` (real §A3.3
+  rollups from the real ledger). Gated on the ledger flag: with capture OFF there is no source, so the
+  panel says "tracking is off" rather than measuring an empty ledger and reporting "you did nothing".
+  It never clobbers the labelled `?prodReport=demo` fixtures.
+
+- **TYPING COST IS THE WHOLE DESIGN.** The tap rides the EXISTING `onTransaction` stream and reuses
+  `countSteps` (provenance/cadence.ts) — no new content instrumentation. Per keystroke it does: countSteps →
+  compare 2 numbers → increment 3 fields. **MEASURED (Node, 13k-word doc): 0.30µs/keystroke, flat from 200 →
+  40k words (0.39µs → 0.52µs); disabled gate 0.07µs.** The known-positive in `capture.perf.test.ts` (one
+  `countWords` walk = 1.97ms, 6581×) proves the harness can SEE an O(doc) cost before its verdict is read.
+- **THE BASELINE TRICK (why words_start is free):** a session boundary IS an inactivity gap, so the document
+  cannot change while nobody edits it ⇒ the word count at the previous CLOSE is exactly the next session's
+  `words_start`. Every O(doc) number (words_end, the word diff) is computed at CLOSE, never on a keystroke.
+  Idle is found by ONE 30s interval — never a clearTimeout/setTimeout churn per input.
+- **GROW-ONLY (§A9 + the real 2026-07-05 truncation incident):** every write reads the target and UNIONS
+  first (`mergeLedgerRows`, keyed by session_id). LWW only within one session_id: later `end` wins, then more
+  edit_events, then the RICHER row — that last clause stops a plain copy syncing in from another device from
+  erasing a diary note (annotating does NOT change `end`).
+- **DAILY ATTESTATION BLOCKS ARE NOT CHAINED TO EACH OTHER — deliberate, a failing test forced it.** A
+  cross-day prevHash chain makes any late append (the NORMAL multi-device case) invalidate every later day's
+  blockHash and burn its Bitcoin anchor. Each day hashes only its own rows (bound to month+day) and is
+  independently OTS-anchorable — exactly how snapshots already work (they aren't chained either; the chain
+  lives inside a signing session). Proofs carry over iff the blockHash is unchanged. OTS stamping runs on
+  demand for CLOSED days only, NEVER on load (the ~10s sweep rule).
+- **`wordDiffStats` (capture.ts), not raw `diffWords`:** diffWords tokenises as [word][trailing-whitespace]
+  for display round-tripping, so a 2-word addition measured 3 added + 1 deleted; and `diffStats` counts \S+
+  while `countWords` counts [\p{L}\p{N}]+, so `added-removed` would contradict `net_words` in the same row.
+  Both are pinned with a live known-negative. HONEST LIMIT: churn that nets out inside one session isn't
+  counted (that evidence is the paid cadence tap's, not the ledger's).
+- **§A9 time:** `start`/`end` are ISO-8601 WITH the local offset — one field carrying the UTC instant AND
+  the offset, so the local day is recoverable. Never emit a bare `Z`.
+- **Location: there is NO location collection and no `navigator.geolocation` anywhere.** `place` is a word the
+  writer TYPES ("library"), same class as their `note`. Peter overruled §A3.2 to want location, then chose
+  user-labelled (2026-07-17). Do not "upgrade" it to real location without re-reading §A3.2 and asking him.
+- **`note`/`place` are USER PROSE, not telemetry:** `LEDGER_PRIVATE_FIELDS` + `stripPrivateFields(row)` are
+  the AI-export seam — they are OFF by default and need their own opt-in (§A7.3). `/privacy` documents all of
+  this and MUST stay in sync (it currently claims exactly: no location, notes/place are typed, opt-in only).
+- **§A5 is a hard constraint:** kind, non-shaming, no scoring. The day summary leads with TIME and SESSIONS;
+  a cutting day reads "editing is writing too". Nothing here may grow a red number.
+- NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo
+  has no encryption layer for ANY document (spec §C2 assumes one), so the ledger inherits the same posture.
+
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
 Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
@@ -1095,7 +1156,8 @@ block; components don't change.
 Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
-ProductivityReportModal, ProductivityPanel (`/productivity`). When you add a panel, add it here too.
+ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
+`/ledger`). When you add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the

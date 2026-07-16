@@ -34,7 +34,7 @@
 // session into a binary costs real misclassifications, 95.3% precision and 3 wrong). A ratio that
 // says "19% unclear" is worth more than one that says "81% drafting" by rounding away the doubt.
 
-import type { LedgerSession } from './ledger'
+import type { SessionRow } from './types'
 
 export type Phase = 'drafting' | 'editing' | 'unclear'
 
@@ -69,7 +69,7 @@ export interface PhaseVerdict {
  * Classify one session by its add-to-delete ratio. Pure; no clock, no storage, no I/O.
  * Deliberately does not read `active_minutes` — see the deviation note above.
  */
-export function classifySession(s: Pick<LedgerSession, 'words_added' | 'words_deleted'>): PhaseVerdict {
+export function classifySession(s: Pick<SessionRow, 'words_added' | 'words_deleted'>): PhaseVerdict {
   const churn = s.words_added + s.words_deleted
   if (churn < MIN_WORDS_TO_CLASSIFY) {
     return { phase: 'unclear', addRatio: churn === 0 ? 0 : s.words_added / churn, reason: 'too little writing to tell' }
@@ -90,7 +90,7 @@ export interface PhaseMix {
 }
 
 /** The deep-vs-shallow ratio for a set of sessions (§A3.3), with `unclear` kept as a first-class share. */
-export function phaseMix(sessions: readonly LedgerSession[]): PhaseMix {
+export function phaseMix(sessions: readonly SessionRow[]): PhaseMix {
   const mix: PhaseMix = { drafting: 0, editing: 0, unclear: 0, total: sessions.length }
   for (const s of sessions) mix[classifySession(s).phase]++
   return mix

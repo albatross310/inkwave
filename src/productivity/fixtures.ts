@@ -29,7 +29,7 @@
 // spec's two proxies point OPPOSITE ways in both. They are ~35% of sessions here because they are
 // common in real writing, not rare corners.
 
-import type { DocType, LedgerSession } from './ledger'
+import type { DocType, SessionRow } from './types'
 import type { JudgedReport } from './judged'
 
 /** The activity that actually generated a session — the label the heuristic is scored against. */
@@ -39,7 +39,7 @@ export type TruePhase = 'drafting' | 'editing'
 export type Process = 'drafting' | 'editing' | 'burst' | 'revising'
 
 export interface LabelledSession {
-  session: LedgerSession
+  session: SessionRow
   /** Ground truth — NEVER a field on the ledger row (that would be a schema fork, and a leak). */
   truth: TruePhase
   process: Process
@@ -183,7 +183,7 @@ export function makeLedger(opts: FixtureOptions = {}): LabelledSession[] {
 }
 
 /** Just the ledger rows — what a consumer of the real ledger would see (no labels attached). */
-export function makeLedgerSessions(opts: FixtureOptions = {}): LedgerSession[] {
+export function makeSessionRows(opts: FixtureOptions = {}): SessionRow[] {
   return makeLedger(opts).map(l => l.session)
 }
 
@@ -191,7 +191,7 @@ export function makeLedgerSessions(opts: FixtureOptions = {}): LedgerSession[] {
  * A deliberately LIGHT day — the §A5 case that must never read as a scolding: one short session,
  * few words. Used to test that the panel's copy stays kind when the numbers are small.
  */
-export function makeLightDay(offset = '+10:00'): LedgerSession[] {
+export function makeLightDay(offset = '+10:00'): SessionRow[] {
   return [{
     session_id: 's-light-1',
     doc_id: 'doc-essay-01',
@@ -215,7 +215,7 @@ export function makeLightDay(offset = '+10:00'): LedgerSession[] {
  * dead code that first runs the day the AI lane lands. The `pattern` claims below are exactly what
  * the daily window must refuse to show; the `descriptive` one is what it may.
  */
-export function makeJudgedReport(sessions: readonly LedgerSession[] = []): JudgedReport {
+export function makeJudgedReport(sessions: readonly SessionRow[] = []): JudgedReport {
   return {
     narrative:
       'A steady stretch. The long Tuesday and Thursday sessions carried most of the new prose, and the shorter ' +
@@ -260,7 +260,9 @@ function round1(n: number): number { return Math.round(n * 10) / 10 }
 // the deterministic WindowAggregate + demo prose the report panel's `?prodReport=demo` reads.
 // No export names collide with the graphs lane's; the two are complementary.
 
-import type { DayAggregate, SessionRow, WindowAggregate, WindowDoc } from './types'
+// `SessionRow`/`DocType` are already imported at the top of this file — both lanes now read the
+// ONE schema (types.ts), so there is nothing left to import twice.
+import type { DayAggregate, WindowAggregate, WindowDoc } from './types'
 
 const DOCS: WindowDoc[] = [
   { doc_id: 'doc-essay', doc_label: 'Seminar paper draft', doc_type: 'essay', active_minutes: 214, session_count: 5 },

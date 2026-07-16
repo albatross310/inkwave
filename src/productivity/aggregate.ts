@@ -1,17 +1,213 @@
-// Client-side daily/weekly/monthly aggregates over the ledger — build-spec §A3.3.
+// Client-side aggregates (spec §A3.3) — the ledger → report/graphs seam.
+//
+// §A6.4 IS WHY THIS IS CLIENT-SIDE: these numbers are MEASURED. They are computed here,
+// deterministically, from the writer's own ledger, and the model never gets to hand them back.
+// Aggregating here is also what keeps AI payloads small regardless of window (§A6): the report
+// sends compact day rollups, not raw logs.
+//
+// Everything is a pure function of the rows + a clock, so the arithmetic is testable without a disk.
+// `feat/prod-graphs` owns the CHARTS; this is the data they read.
+
+import { loadLedger } from './ledgerStore'
+import { localDayOf, localHourOf, localMonthOf, monthOf, weekStartOf, weekdayOf } from './sessionLogic'
+import { phaseMix, type PhaseMix } from './phase'
+import type { DayAggregate, DayNoteDigest, ReportWindow, SessionRow, WindowAggregate, WindowDoc } from './types'
+
+/** Local hour a row started in — its ISO carries the writer's offset, so this IS their local hour. */
+const startHourOf = (r: SessionRow): number => Number(r.start.slice(11, 13))
+
+const round1 = (n: number): number => Math.round(n * 10) / 10
+
+/**
+ * §A3.3's drafting-vs-editing signal, as a MEASURED, deterministic rule: the share of the day's
+ * gross word churn that was ADDITION. 1 = pure drafting, 0 = pure cutting, 0.5 = balanced revision.
+ * A day with no churn has no signal, and says so with 0 rather than inventing a midpoint.
+ *
+ * Deliberately NOT the model's judged `phase` (§A6.1) — this is a rule anyone can recompute from
+ * the same rows and get the same answer.
+ */
+export function deepShallowRatio(rows: readonly SessionRow[]): number {
+  const added = rows.reduce((a, r) => a + r.words_added, 0)
+  const deleted = rows.reduce((a, r) => a + r.words_deleted, 0)
+  const churn = added + deleted
+  return churn === 0 ? 0 : round1(added / churn * 100) / 100
+}
+
+/** Roll one local day's rows up (§A3.3). */
+export function dayAggregate(day: string, rows: readonly SessionRow[]): DayAggregate {
+  const busiest = new Array<number>(24).fill(0)
+  // A session's active minutes are attributed to the hour it STARTED in. That is a convention, and
+  // the honest one available: the ledger records when a session ran, not minute-by-minute where the
+  // work fell inside it, and spreading minutes across a span would invent a distribution we never
+  // measured. Sessions are short (a Pomodoro is 25 min), so the attribution is close.
+  for (const r of rows) busiest[startHourOf(r)] += r.active_minutes
+
+  // A "break" is a real gap BEFORE a session — the first session of the ledger has none (0).
+  const breaks = rows.filter((r) => r.break_before_min > 0)
+
+  return {
+    day,
+    active_minutes: round1(rows.reduce((a, r) => a + r.active_minutes, 0)),
+    session_count: rows.length,
+    words_added: rows.reduce((a, r) => a + r.words_added, 0),
+    words_deleted: rows.reduce((a, r) => a + r.words_deleted, 0),
+    net_words: rows.reduce((a, r) => a + r.net_words, 0),
+    edit_events: rows.reduce((a, r) => a + r.edit_events, 0),
+    break_count: breaks.length,
+    break_total_min: round1(breaks.reduce((a, r) => a + r.break_before_min, 0)),
+    deep_shallow_ratio: deepShallowRatio(rows),
+    busiest_hours: busiest.map(round1),
+  }
+}
+
+/** Group rows by their LOCAL day (§A9). */
+export function groupByDay(rows: readonly SessionRow[]): Map<string, SessionRow[]> {
+  const byDay = new Map<string, SessionRow[]>()
+  for (const r of rows) {
+    const d = localDayOf(r.start)
+    if (!d) continue // unresolvable timestamp — dropped, never filed under a wrong day
+    const list = byDay.get(d)
+    if (list) list.push(r)
+    else byDay.set(d, [r])
+  }
+  return byDay
+}
+
+/** Per-document totals for the content tick-box screen (§A7.3). Carries no prose. */
+export function windowDocs(rows: readonly SessionRow[]): WindowDoc[] {
+  const byDoc = new Map<string, WindowDoc>()
+  for (const r of rows) {
+    const cur = byDoc.get(r.doc_id)
+    if (cur) {
+      cur.active_minutes = round1(cur.active_minutes + r.active_minutes)
+      cur.session_count++
+      if (!cur.doc_label && r.doc_label) cur.doc_label = r.doc_label
+    } else {
+      byDoc.set(r.doc_id, {
+        doc_id: r.doc_id,
+        ...(r.doc_label ? { doc_label: r.doc_label } : {}),
+        doc_type: r.doc_type,
+        active_minutes: round1(r.active_minutes),
+        session_count: 1,
+      })
+    }
+  }
+  return [...byDoc.values()].sort((a, b) => b.active_minutes - a.active_minutes)
+}
+
+/**
+ * The writer's own words for each day (§A7.3 tier 2). Days with nothing written contribute nothing,
+ * so an untouched ledger yields an EMPTY digest rather than a list of blanks.
+ */
+export function noteDigest(rows: readonly SessionRow[]): DayNoteDigest[] {
+  const out: DayNoteDigest[] = []
+  for (const [day, dayRows] of [...groupByDay(rows).entries()].sort()) {
+    const notes = dayRows.map((r) => r.note).filter((n): n is string => !!n)
+    const places = [...new Set(dayRows.map((r) => r.place).filter((p): p is string => !!p))]
+    if (notes.length || places.length) out.push({ day, notes, places })
+  }
+  return out
+}
+
+// ─── Window bounds ───────────────────────────────────────────────────────────
+
+/** Inclusive local-day bounds for a window, ending on `todayLocal` ('YYYY-MM-DD'). */
+export function windowBounds(window: ReportWindow, todayLocal: string): { from: string; to: string } {
+  if (window === 'daily') return { from: todayLocal, to: todayLocal }
+  if (window === 'weekly') {
+    const d = new Date(`${todayLocal}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 6) // the last 7 local days, inclusive
+    return { from: d.toISOString().slice(0, 10), to: todayLocal }
+  }
+  return { from: `${todayLocal.slice(0, 7)}-01`, to: todayLocal } // the calendar month to date
+}
+
+/** Every 'YYYY-MM' a [from,to] day range touches — a week can straddle two ledgers. */
+export function monthsSpanning(from: string, to: string): string[] {
+  const out: string[] = []
+  let cur = from.slice(0, 7)
+  const last = to.slice(0, 7)
+  for (let i = 0; i < 24 && cur <= last; i++) {
+    out.push(cur)
+    const [y, m] = cur.split('-').map(Number)
+    cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+  }
+  return out
+}
+
+// ─── The seam ────────────────────────────────────────────────────────────────
+
+/** Build a window from rows already loaded — pure, so the whole shape is testable. */
+export function buildWindow(
+  window: ReportWindow,
+  todayLocal: string,
+  rows: readonly SessionRow[],
+): WindowAggregate {
+  const { from, to } = windowBounds(window, todayLocal)
+  const inWindow = rows.filter((r) => {
+    const d = localDayOf(r.start)
+    return d >= from && d <= to
+  })
+  const days = [...groupByDay(inWindow).entries()].sort().map(([day, rs]) => dayAggregate(day, rs))
+  const digest = noteDigest(inWindow)
+
+  return {
+    window,
+    from,
+    to,
+    days,
+    // §A6.4 (see types.ts): raw session rows only at DAILY, where judged rows are per-session. At
+    // weekly/monthly the day rollups are the ONLY copy of the measured numbers, and the writer's
+    // opted-in words travel as the digest.
+    sessions: window === 'daily' ? [...inWindow] : [],
+    ...(digest.length ? { note_digest: digest } : {}),
+    docs: windowDocs(inWindow),
+  }
+}
+
+/** Read the writer's ledger(s) and build the window. Returns null only if there is no data at all. */
+export async function loadWindowFromLedger(
+  window: ReportWindow,
+  todayLocal: string,
+): Promise<WindowAggregate | null> {
+  const { from, to } = windowBounds(window, todayLocal)
+  const rows: SessionRow[] = []
+  for (const m of monthsSpanning(from, to)) rows.push(...(await loadLedger(m)).rows)
+  if (rows.length === 0) return null // honest: no ledger yet — never invent numbers to fill a screen
+  return buildWindow(window, todayLocal, rows)
+}
+
+/** The month a day belongs to — re-exported for callers that only import this module. */
+export const monthOfDay = (day: string): string => localMonthOf(day)
+
+
+// ═══ THE CHART AGGREGATES (§A3.3) — `feat/prod-graphs`' rollups ══════════════════════════════════
+//
+// MERGED 2026-07-17 (feat/prod-integrate). Both lanes wrote an `aggregate.ts`; this is ONE module
+// now, over ONE schema. What was reconciled, and what deliberately was not:
+//
+// • ONE ROW TYPE. The graphs lane built against `ledger.ts`'s `LedgerSession` — an explicit
+//   placeholder mirror of §A3.2, retired here in favour of the real `SessionRow` (types.ts), and
+//   the day-grouping/rounding/time rules below are now the same ones the window builder uses.
+//   That is the swap its own THE LEDGER SEAM comment anticipated.
+//
+// • TWO OUTPUT SHAPES, KEPT — they answer different questions and are NOT a fork:
+//     `DayAggregate`      (types.ts, snake_case) = the §A3.3 WIRE contract the report payload emits.
+//     `ChartDayAggregate` (here,     camelCase)  = the view model the SVG charts read.
+//   The graphs lane's `DayAggregate` was renamed to `ChartDayAggregate` because two exported types
+//   sharing one name in one module is exactly how a caller silently gets the wrong contract. The
+//   wire name belongs to the schema owner.
+//
+// • THE HOUR HISTOGRAMS DIFFER ON PURPOSE, and both are honest about it: `busiest_hours` (above)
+//   attributes a session's minutes to the hour it STARTED in; `hourHistogram` (below) apportions
+//   them across the hours the session spans. Both conserve total active minutes, so they cannot
+//   contradict each other on any total — they differ only in how they distribute WITHIN a day, and
+//   each documents its own limitation. Collapsing them would have silently rewritten one lane's
+//   measured behaviour to make a merge look tidy.
 //
 // PURE. No clock, no storage, no network, no React, no AI. Every number here is computed from the
 // ledger's own bytes and is GROUND TRUTH (§A6.4): these must never round-trip through an LLM, which
-// is the whole reason the graphs are worth believing. Keeping the module pure is also what keeps it
-// off the load path (§CLAUDE.md load performance) — the caller decides when to run it, and nothing
-// in here reads the .studio or walks the doc.
-//
-// Aggregating client-side is additionally what keeps AI payloads small at any window (§A3.3): the
-// AI lane sends these compact rollups, never raw logs.
-
-import type { LedgerSession } from './ledger'
-import { localDayOf, localHourOf, monthOf, weekStartOf, weekdayOf } from './ledger'
-import { phaseMix, type PhaseMix } from './phase'
+// is the whole reason the graphs are worth believing.
 
 // ─── Day ──────────────────────────────────────────────────────────────────────
 
@@ -23,7 +219,7 @@ export interface BreakStats {
   longestMinutes: number
 }
 
-export interface DayAggregate {
+export interface ChartDayAggregate {
   /** Local calendar day, `YYYY-MM-DD` (§A9). */
   day: string
   activeMinutes: number
@@ -57,7 +253,7 @@ export interface DayAggregate {
  * "which part of the day do you write in" scale it is drawn at, and should not be read as a
  * minute-accurate record of any single hour.
  */
-function spreadActiveMinutes(s: LedgerSession, into: number[]): void {
+function spreadActiveMinutes(s: SessionRow, into: number[]): void {
   const t0 = Date.parse(s.start), t1 = Date.parse(s.end)
   const startHour = localHourOf(s.start)
   const spanMin = Number.isNaN(t0) || Number.isNaN(t1) ? 0 : (t1 - t0) / 60_000
@@ -105,8 +301,8 @@ function breakStats(gaps: number[]): BreakStats {
 }
 
 /** Group ledger rows into per-day aggregates, ascending by day. */
-export function aggregateDays(sessions: readonly LedgerSession[]): DayAggregate[] {
-  const byDay = new Map<string, LedgerSession[]>()
+export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregate[] {
+  const byDay = new Map<string, SessionRow[]>()
   for (const s of sessions) {
     const day = localDayOf(s.start)
     if (!day) continue
@@ -114,7 +310,7 @@ export function aggregateDays(sessions: readonly LedgerSession[]): DayAggregate[
     if (list) list.push(s); else byDay.set(day, [s])
   }
 
-  const out: DayAggregate[] = []
+  const out: ChartDayAggregate[] = []
   for (const [day, rows] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const ordered = [...rows].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     const hourHistogram = new Array(24).fill(0)
@@ -194,7 +390,7 @@ export interface WeekAggregate {
   /** Monday of the ISO week, `YYYY-MM-DD`. */
   weekStart: string
   /** Day rollups present in this week, ascending. Absent days are ABSENT, never fabricated (§A9). */
-  days: DayAggregate[]
+  days: ChartDayAggregate[]
   activeMinutes: number
   sessionCount: number
   wordsAdded: number
@@ -210,14 +406,14 @@ export interface WeekAggregate {
   breakVsOutput: Correlation
 }
 
-export function aggregateWeeks(days: readonly DayAggregate[], sessions: readonly LedgerSession[]): WeekAggregate[] {
-  const byWeek = new Map<string, DayAggregate[]>()
+export function aggregateWeeks(days: readonly ChartDayAggregate[], sessions: readonly SessionRow[]): WeekAggregate[] {
+  const byWeek = new Map<string, ChartDayAggregate[]>()
   for (const d of days) {
     const k = weekStartOf(d.day)
     const list = byWeek.get(k)
     if (list) list.push(d); else byWeek.set(k, [d])
   }
-  const sessionsByDay = groupSessionsByDay(sessions)
+  const sessionsByDay = groupByDay(sessions)
 
   return [...byWeek.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -256,7 +452,7 @@ export interface MonthAggregate {
   /** `YYYY-MM`. */
   month: string
   weeks: WeekAggregate[]
-  days: DayAggregate[]
+  days: ChartDayAggregate[]
   activeMinutes: number
   wordsAdded: number
   netWords: number
@@ -269,7 +465,7 @@ export interface MonthAggregate {
   weekOverWeekWords: number[]
 }
 
-export function aggregateMonths(weeks: readonly WeekAggregate[], sessions: readonly LedgerSession[]): MonthAggregate[] {
+export function aggregateMonths(weeks: readonly WeekAggregate[], sessions: readonly SessionRow[]): MonthAggregate[] {
   const byMonth = new Map<string, WeekAggregate[]>()
   // A week can straddle two months; attribute it to the month of its FIRST day that has data, so a
   // week is never double-counted and its totals stay internally consistent.
@@ -278,7 +474,7 @@ export function aggregateMonths(weeks: readonly WeekAggregate[], sessions: reado
     const list = byMonth.get(k)
     if (list) list.push(w); else byMonth.set(k, [w])
   }
-  const sessionsByDay = groupSessionsByDay(sessions)
+  const sessionsByDay = groupByDay(sessions)
 
   return [...byMonth.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -304,7 +500,7 @@ export function aggregateMonths(weeks: readonly WeekAggregate[], sessions: reado
 
 /** The whole client-side aggregate set — one pass over the ledger (§A3.3). */
 export interface LedgerAggregates {
-  days: DayAggregate[]
+  days: ChartDayAggregate[]
   weeks: WeekAggregate[]
   months: MonthAggregate[]
 }
@@ -313,7 +509,7 @@ export interface LedgerAggregates {
  * Compute every aggregate from a month's ledger rows. Deterministic and pure — same rows in, same
  * numbers out, no clock read.
  */
-export function aggregateLedger(sessions: readonly LedgerSession[]): LedgerAggregates {
+export function aggregateLedger(sessions: readonly SessionRow[]): LedgerAggregates {
   const days = aggregateDays(sessions)
   const weeks = aggregateWeeks(days, sessions)
   const months = aggregateMonths(weeks, sessions)
@@ -322,17 +518,6 @@ export function aggregateLedger(sessions: readonly LedgerSession[]): LedgerAggre
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function groupSessionsByDay(sessions: readonly LedgerSession[]): Map<string, LedgerSession[]> {
-  const m = new Map<string, LedgerSession[]>()
-  for (const s of sessions) {
-    const day = localDayOf(s.start)
-    if (!day) continue
-    const list = m.get(day)
-    if (list) list.push(s); else m.set(day, [s])
-  }
-  return m
-}
-
 function deltas(xs: readonly number[]): number[] {
   return xs.slice(1).map((x, i) => round1(x - xs[i]))
 }
@@ -340,4 +525,3 @@ function deltas(xs: readonly number[]): number[] {
 function sum(xs: readonly number[]): number { return xs.reduce((a, b) => a + b, 0) }
 function mean(xs: readonly number[]): number { return xs.length ? sum(xs) / xs.length : 0 }
 function clamp(n: number, lo: number, hi: number): number { return Math.min(hi, Math.max(lo, n)) }
-function round1(n: number): number { return Math.round(n * 10) / 10 }

@@ -11,6 +11,9 @@ export default [
   // Productivity report (P1a) — flag-gated, default OFF (`?prodGraphs=1` / `?prodGraphs=demo`).
   // NOT prerendered: private to the writer, no SEO value, and nothing to render without a ledger.
   route('productivity', 'routes/productivity.tsx'),
+  // The productivity ledger: Pomodoro + session diary notes (§A5). Client-only + NOT prerendered —
+  // it renders the writer's own data, which must never be baked into a static page.
+  route('ledger', 'routes/ledger.tsx'),
   // Redirect any unmatched path (e.g. a stale `/edit` bookmark from before the editor
   // moved to `/`) to the editor, restoring the old SPA's catch-all behaviour.
   route('*', 'routes/catch-all.tsx'),
