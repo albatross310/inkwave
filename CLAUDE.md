@@ -1014,6 +1014,93 @@ this for the same reason, and its comment about `_snapCache` is the other half o
 `testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
 arrayBuffer, and its absence surfaced only as an empty ledger.
 
+## Music module — photo score + reflow + markup (2026-07-17, `src/music/`, flag `?music`, DEFAULT OFF)
+
+Spec: `Inkwave-Music-Module-BuildSpec-v0.1.md` §A1/§A2 (Peter's private doc — read it, never copy it
+into the repo). Build order step 1 of 7. `/music` is the surface; the studio, the detector, pdf.js and
+all canvas work sit behind a lazy import (`MusicStudio` 29kB/11.3kB gzip; route stub 2.3kB) so OFF
+costs nothing BY CONSTRUCTION — the editor bundle is untouched.
+
+- **⚠️ NO OMR, EVER (§0, repeatedly).** The CV is barline/whitespace GEOMETRY only: row darkness,
+  longest horizontal run, longest vertical run. Nothing recognises a note, and nothing may. The score
+  is **markup-only, never editable** — no field on `Piece` changes a note. Inkwave consumes
+  Sibelius/MuseScore/Dorico output; it does not compete with them.
+- **`music/types.ts` IS A CONTRACT** — the §1 `Piece`. Two other lanes (MusicXML §B, lesson capture
+  §A3) build against it. snake_case is deliberate (a document/wire contract written as the spec
+  writes it, so three lanes reading one spec converge); don't "tidy" it. ADD to it; never redefine a
+  field in place. `Anchor` is a discriminated union (`region` for photo | `musicxml` for notation)
+  with `bar` as the optional JOIN KEY on both — that is what links a lesson note, a heatmap range and
+  a recording to the same music whichever path the Piece came in through.
+- **⚠️ THERE IS NO AT-REST ENCRYPTION — the spec says there is, and it is WRONG.** §0 lists
+  "encryption at rest" as reused from the engine and §1 repeats it. Verified in the code (again,
+  2026-07-17): `storage/opfs.ts` writes `JSON.stringify` in PLAINTEXT, no `crypto.subtle.encrypt`/
+  AES-GCM anywhere in src, no crypto library in package.json (`@noble/ed25519` is for SIGNING).
+  Copy tracks the CODE, not the spec — a plan is not a property. The shipped sentence is the email
+  lane's: **"Stored on your device — we never hold it"**, which is exactly true (zero-retention IS
+  real: no server holds any of it). Do not build a music-only encryption scheme over an app-wide gap.
+- **ANCHORS LIVE IN SOURCE-IMAGE SPACE; THE REFLOW IS A PURE VIEW TRANSFORM.** The whole §A1 feature
+  inserts blank bands between systems, and the student drags handles to resize them. Had anchors been
+  stored in rendered coordinates, one handle-drag would slide every mark below it off its music. So
+  `reflow.ts` maps source↔layout (`buildLayout`/`sourceToLayout`/`layoutToSource`) and the image is
+  NEVER rewritten — each slice is the same `<img>` shifted under its own window. Marks written INTO
+  inserted space have no source pixel (that is the point of the gap), so they carry `GapOffset`
+  {after_system, t} and travel with their gap when it resizes. Pinned by tests.
+- **DESKEW HAPPENS AT CAPTURE, ONCE** (`capture.ts` rotates the bitmap before storing) so the stored
+  image, the anchors, the layout and the bar regions share ONE coordinate space. Two spaces for one
+  page is round 11's bug ("two rules, one pane").
+- **THE CONNECTOR TEST IS WHAT KEEPS A GRAND STAVE WHOLE — gap size alone cannot.** §A1's "never
+  split a system" fails exactly where it matters: engravers cramp system spacing, so on a piano score
+  the treble→bass gap and the system→system gap nearly collide and a size heuristic slices the
+  pianist's hands apart. The robust signal is structural and still pure geometry: staves inside one
+  system are JOINED by barlines running through the gap. `hasVerticalConnector` reads that; it reads
+  the same on a cramped page as a spacious one because it measures the engraver's INTENT, not their
+  spacing budget. `groupStavesIntoSystems({connectorTest:false})` exists ONLY as the test's
+  known-negative (it splits every grand stave) — never turn it off in the app.
+- **`deskew`'s `repair` step is NOT polish — without it deskew makes things WORSE, silently.**
+  MEASURED: the skew estimate came back EXACT (2.40 vs a 2.4 truth) and detection still found **0
+  staves**, because a binary shear rounds each column's shift to a whole row, so a staff line wobbles
+  between adjacent rows and no ROW holds a long run (longest collapsed to 0.15 of the width). A 1px
+  vertical dilation stitches it back: 0 staves → 4, at the fixture's exact truth positions. It lives
+  inside `deskew` because it repairs that function's OWN quantisation.
+- **`binarise` is LOCAL (Bradley–Roth), and the reason was measured, not assumed.** At moderate
+  lighting a global Otsu threshold does JUST AS WELL — the first version of that test proved nothing.
+  Local only wins under a harsh shadow (fixture `harshShadow`, strength 1.4) where shadowed paper is
+  darker than lit ink: global floods 36% of the page and detection collapses 2 systems → 1; local
+  holds. That is the known-negative; if it stops firing, `binarise` has no proven reason to be local.
+- **FIXTURES ARE SYNTHETIC AND GENERATED (`fixtures.ts`)** — copyright/thesis integrity (no real
+  engraving, none of Peter's material, ever) and ground truth (the generator knows where it put every
+  system). They rotate for REAL while the detector models skew as a SHEAR, deliberately: a fixture
+  sharing the model's assumption certifies that assumption against itself. Each one exists to break
+  something: `crampedGrandStaves` (the collision), `skewedPhoto`, `harshShadow`, `withLyrics` (ink in
+  the whitespace), `singleSystem` (no gap population to reason from), `mixedGrandAndSingle`.
+  **HONEST GAP: synthetic proves the GEOMETRY, not a real phone photo of real paper** — no
+  perspective/keystone (only rotation), no paper texture, no JPEG ringing. A page held at an angle has
+  converging staff lines no shear can straighten; the manual handles are the current answer.
+- **Leader routing (`leader.ts`) scores candidate curves** (crossings → exit style → length), and its
+  "avoidance" has an HONEST LIMIT recorded in the code: a system spans the page width, so a leader
+  from a distant gap MUST cross what lies between — no curve routes around a band with no ends. It
+  chooses WHERE to cross. What it genuinely routes around are LOCAL obstacles (the student's other
+  sticky notes crowding the same gap), which is the congestion §A2 actually describes. The vertical
+  exit exists ONLY to dodge; the sideways exit wins ties for LEGIBILITY (a line leaving the label
+  sideways reads as a pointer; a vertical one reads as a stem) — it must not win on length, which it
+  otherwise does whenever the target sits directly below the label, i.e. the commonest case.
+  **⚠️ §A2's midline rule ("above-midline → belongs to the stave below") is GENUINELY AMBIGUOUS** and
+  is implemented LITERALLY as a default with `LeaderContent.side` overriding it — Peter to confirm.
+- **`scripts/music.prove.mjs`** (headless, own port 4941, nothing on Peter's screen) drives the REAL
+  built app: flag-off → stub + the chunk never fetched (with a known-negative proving the listener can
+  see a fetch), demo → capture → detect → reflow handles → OPFS round-trip → a stroke → RELOAD → the
+  stroke survives. 13/13. **It caught a bug the unit tests structurally could not:** the demo minted a
+  fresh `uuidv4()` per load, so reloading orphaned every mark under the old id AND leaked a piece
+  (two page images) into OPFS every time. Both live in browser storage, not in the pure detector.
+  Its hydration-error control is `/productivity`, NOT `/verify`: /verify is PRERENDERED so it has no
+  mismatch to reproduce and threw nothing, which read as "these errors are yours". Non-prerendered
+  routes are served the prerendered EDITOR page through the SPA fallback and hydrate against it — the
+  same artefact CLAUDE.md records for /snapshot. Compare like with like.
+- NOT BUILT (later steps, other lanes): OMR (never), lesson STT §A3, MusicXML/OSMD §B, the heatmap
+  §A2 (step 5 — contract declared in types.ts), reference tracks/tap-sync §A4 (step 3), practice
+  tools §A5 (step 4). `Practice.sessions` REFERENCES productivity ledger rows rather than copying
+  minutes — §A6.4's "one representation of measurement, always".
+
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
 Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
@@ -1422,6 +1509,9 @@ ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`
 `/ledger`), EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap). When you
 add a panel, add it here too.
+`/ledger`), EmailComposePanel (+ its provider drop-up), the music studio (`music/MusicStudio.tsx` —
+its footer toolbar + symbol drop-up carry `iw-touch-guard`, `music/ScorePage.tsx` gap bands +
+sticky notes). When you add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the
