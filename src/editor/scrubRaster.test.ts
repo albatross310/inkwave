@@ -1,7 +1,7 @@
 // Pure-logic tests for the scrub raster layer (round 3): cache keys, nearest-bitmap fallback,
 // and byte-budget eviction planning. The DOM capture path is exercised by browser probes.
 import { describe, it, expect } from 'vitest'
-import { rasterKey, pickNearest, planEviction } from './scrubRaster'
+import { rasterKey, pickNearest, planEviction, summariseRecord, type ScrubRecEntry } from './scrubRaster'
 
 describe('rasterKey', () => {
   it('buckets by pane size, zoom and dpr', () => {
@@ -51,5 +51,74 @@ describe('planEviction', () => {
   it('takes protected entries only when unprotected cannot cover the deficit', () => {
     const plan = planEviction([item('win', 100, 1, true), item('far', 100, 2)], 200)
     expect(plan).toEqual(['far', 'win'])
+  })
+})
+
+// ── summariseRecord — the burst RECORDER's verdict (round 10) ─────────────────────────────────
+// The overlay repaints on the thread a scrub saturates, so its live numbers are an at-rest sample;
+// the ring buffer is the real instrument and THIS is the roll-up both it and the harness read.
+describe('summariseRecord', () => {
+  const row = (
+    t: number, pane: ScrubRecEntry['pane'], want: number, shown: number,
+    src: ScrubRecEntry['src'], centre = 0, anchor = 0,
+  ): ScrubRecEntry => ({ t, pane, want, shown, src, anchor, centre })
+
+  it('empty burst reports nothing rather than dividing by zero', () => {
+    const s = summariseRecord([])
+    expect(s).toMatchObject({ presents: 0, commandedDistinct: 0, presentedDistinct: 0, spanMs: 0, perSec: 0 })
+    expect(s.panes).toEqual([])
+  })
+
+  it('presents = rows / panes, and counts commanded vs presented versions', () => {
+    const rows: ScrubRecEntry[] = []
+    for (let i = 0; i < 4; i++) for (const p of ['doc', 'diff', 'map'] as const) rows.push(row(i * 16, p, i, i, 'hit'))
+    const s = summariseRecord(rows)
+    expect(s.presents).toBe(4)
+    expect(s.commandedDistinct).toBe(4)
+    expect(s.presentedDistinct).toBe(4)
+  })
+
+  it('exactRate counts hits AND hydrated thumbs as real, nearest/none as stale', () => {
+    const s = summariseRecord([
+      row(0, 'doc', 0, 0, 'hit'), row(1, 'doc', 1, 1, 'thumb'),
+      row(2, 'doc', 2, 1, 'near'), row(3, 'doc', 3, -1, 'none'),
+    ])
+    expect(s.panes[0].exactRate).toBe(0.5)
+  })
+
+  it('REGISTRATION: content held under the line across version steps', () => {
+    // Three steps to three different versions; the centre content survives two of them.
+    const s = summariseRecord([
+      row(0, 'doc', 0, 0, 'hit', 7), row(16, 'doc', 1, 1, 'hit', 7),
+      row(32, 'doc', 2, 2, 'hit', 7), row(48, 'doc', 3, 3, 'hit', 9),
+    ])
+    expect(s.panes[0].centreSteps).toBe(3)
+    expect(s.panes[0].registered).toBeCloseTo(2 / 3)
+  })
+
+  it('re-presenting the SAME version is not a step (it cannot misregister)', () => {
+    const s = summariseRecord([
+      row(0, 'doc', 0, 0, 'hit', 7), row(16, 'doc', 1, 0, 'near', 7), row(32, 'doc', 2, 1, 'hit', 9),
+    ])
+    expect(s.panes[0].centreSteps).toBe(1) // only 0→1 counted
+  })
+
+  it('registration is -1 (not 0) when no centre signature was recorded — unmeasured != unregistered', () => {
+    const s = summariseRecord([row(0, 'doc', 0, 0, 'hit'), row(16, 'doc', 1, 1, 'hit')])
+    expect(s.panes[0].registered).toBe(-1)
+    expect(s.panes[0].centreSteps).toBe(0)
+  })
+
+  it('anchor drift averages the per-step scroll-offset jump', () => {
+    const s = summariseRecord([
+      row(0, 'doc', 0, 0, 'hit', 1, 100), row(16, 'doc', 1, 1, 'hit', 1, 140), row(32, 'doc', 2, 2, 'hit', 1, 120),
+    ])
+    expect(s.panes[0].anchorDriftPx).toBe(30) // |140-100| and |120-140| → (40+20)/2
+  })
+
+  it('rate is presents per second across the burst span', () => {
+    const s = summariseRecord([row(0, 'doc', 0, 0, 'hit'), row(500, 'doc', 1, 1, 'hit')])
+    expect(s.spanMs).toBe(500)
+    expect(s.perSec).toBeCloseTo(4) // 2 presents / 0.5s
   })
 })

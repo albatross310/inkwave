@@ -107,6 +107,59 @@ export function planEviction(
   return out
 }
 
+/** Roll a recorded burst up into the numbers Peter reads. PURE (unit-tested) — the recorder's
+ *  serialised rows in, one verdict out; no DOM, no presenter state. */
+export function summariseRecord(rows: ScrubRecEntry[]): {
+  presents: number; commandedDistinct: number; presentedDistinct: number; spanMs: number; perSec: number
+  panes: Array<{
+    kind: ScrubPaneKind; hit: number; thumb: number; near: number; none: number; exactRate: number
+    // REGISTRATION: across consecutive presents of this pane, how often did the content under the
+    // centre line STAY THE SAME? Registered frames read as animation; sliding ones read as mush,
+    // and no presenting speed can fix that. `-1` = not measurable (no centre signatures).
+    registered: number; centreSteps: number; anchorDriftPx: number
+  }>
+} {
+  const want = new Set<number>(), shownSet = new Set<number>()
+  const byPane = new Map<ScrubPaneKind, { hit: number; thumb: number; near: number; none: number }>()
+  const seq = new Map<ScrubPaneKind, ScrubRecEntry[]>()
+  let lo = Infinity, hi = -Infinity
+  for (const r of rows) {
+    if (r.want >= 0) want.add(r.want)
+    if (r.shown >= 0) shownSet.add(r.shown)
+    if (r.t < lo) lo = r.t
+    if (r.t > hi) hi = r.t
+    let c = byPane.get(r.pane)
+    if (!c) { c = { hit: 0, thumb: 0, near: 0, none: 0 }; byPane.set(r.pane, c) }
+    c[r.src]++
+    const q = seq.get(r.pane); if (q) q.push(r); else seq.set(r.pane, [r])
+  }
+  const spanMs = rows.length ? hi - lo : 0
+  const panes = [...byPane.entries()].map(([kind, c]) => {
+    const total = c.hit + c.thumb + c.near + c.none
+    // Walk this pane's presents in order and compare each to the one before it.
+    const q = seq.get(kind) ?? []
+    let same = 0, steps = 0, drift = 0, driftN = 0
+    for (let i = 1; i < q.length; i++) {
+      const a = q[i - 1], b = q[i]
+      if (a.shown === b.shown) continue // same version re-presented — not a step
+      if (a.centre > 0 && b.centre > 0) { steps++; if (a.centre === b.centre) same++ }
+      if (a.shown >= 0 && b.shown >= 0) { drift += Math.abs(b.anchor - a.anchor); driftN++ }
+    }
+    return {
+      kind, ...c, exactRate: total ? (c.hit + c.thumb) / total : 0,
+      registered: steps ? same / steps : -1, centreSteps: steps,
+      anchorDriftPx: driftN ? drift / driftN : 0,
+    }
+  })
+  // Presents = per-pane rows / panes seen — i.e. how many show() calls the recorder actually saw.
+  const presents = panes.length ? Math.round(rows.length / panes.length) : 0
+  return {
+    presents, commandedDistinct: want.size, presentedDistinct: shownSet.size, spanMs,
+    perSec: spanMs > 0 ? (presents / spanMs) * 1000 : 0,
+    panes,
+  }
+}
+
 // ── Style / font / image inlining (session-cached) ───────────────────────────────────────────
 
 let cssBundlePromise: Promise<string> | null = null
@@ -495,6 +548,7 @@ interface Entry {
   bytes: number
   lastUsed: number
   src: 'capture' | 'thumb' // where the pixels came from — the debug overlay separates these
+  centre: number // interned CONTENT identity under the centre line at capture (0 = unknown)
 }
 
 interface Surface {
@@ -523,8 +577,17 @@ export interface ScrubPresenter {
   stats(): { entries: number; bytes: number }
   /** Does a baked thumbnail already exist for this pane+snapshot at the CURRENT signature? (sweep) */
   isThumbBaked(kind: ScrubPaneKind, snapId: string): boolean
+  /** Which REGISTERED panes still lack a baked thumbnail for `snapId` (round 10 — the sweep now
+   *  bakes all three, and only panes that actually exist in this layout can ever bake: asking
+   *  about an unregistered surface would stall the sweep forever). */
+  pendingThumbs(snapId: string): ScrubPaneKind[]
   /** Live diagnostic state for the `?snapThumbs=debug` overlay. */
   debugInfo(): ScrubDebugInfo
+  /** Serialise the burst RECORDER's ring buffer (oldest→newest). Call AFTER the burst settles —
+   *  never during, or you measure the measurement. */
+  record(): ScrubRecEntry[]
+  /** Drop every recorded present (arm a fresh burst). */
+  resetRecord(): void
   resetBurst(): void
   dispose(): void
   disposed: boolean
@@ -547,6 +610,106 @@ export interface ScrubDebugInfo {
   shows: number           // show() calls this burst
   panes: ScrubPaneDebug[]
 }
+
+/** One recorded present: which pane showed which version, for which commanded version, from where —
+ *  and REGISTRATION: which content the presented frame actually put under the reading line. */
+export interface ScrubRecEntry {
+  t: number                    // performance.now() at show()
+  pane: ScrubPaneKind
+  want: number                 // commanded snapshot index (-1 = not in the order)
+  shown: number                // PRESENTED snapshot index (-1 = nothing shown)
+  src: 'hit' | 'thumb' | 'near' | 'none'
+  anchor: number               // the scroll offset this bitmap was rastered at (px)
+  centre: number               // CONTENT identity under the pane's centre line (0 = unknown)
+}
+
+// ── REGISTRATION (Peter, 2026-07-16: "nothing happens except the version number") ──────────────
+// Versions differ in LENGTH, so preserving the SCROLL OFFSET does not preserve the CONTENT: every
+// frame can be individually correct while the text slides under the viewport and the sequence
+// reads as mush rather than animation. Apple Photos flickers legibly precisely BECAUSE consecutive
+// frames are registered to each other. So the recorder carries a CONTENT identity per present: the
+// text under the pane's centre line, hashed at CAPTURE time (idle — never in the hot path) and
+// INTERNED to an integer, so recording it is one array write of a number already on the entry.
+// Consecutive presents with the same `centre` = registered; a changing `centre` = the frames are
+// sliding, and no amount of presenting speed can fix that.
+const centreIds = new Map<string, number>()
+function internCentre(sig: string): number {
+  let id = centreIds.get(sig)
+  if (id === undefined) { id = centreIds.size + 1; centreIds.set(sig, id) }
+  return id
+}
+
+/** The TEXT under `el`'s centre line, as a content signature. Runs at CAPTURE time (idle, next to
+ *  a 300ms+ raster) — never on the input path.
+ *
+ *  Block granularity does NOT work here: /snapshot's doc pane renders FullDiffView, whose flow is a
+ *  handful of giant `[data-opidx]` spans (measured: 4 spans over a 151,000px pane), so "the block
+ *  at the centre" is a quarter of the document and would report every frame as registered. So we
+ *  BINARY-SEARCH the text by character offset — text lays out monotonically down a block flow, so
+ *  ~log2(chars) ≈ 17 Range rect reads find the exact line under the reading line. */
+export function paneCentreSig(el: HTMLElement): string {
+  const flow = el.querySelector<HTMLElement>('.tiptap-editor') ?? el
+  const y = el.scrollTop + el.clientHeight / 2
+  const r0 = el.getBoundingClientRect()
+  const zf = r0.width > 0 && el.offsetWidth > 0 ? r0.width / el.offsetWidth : 1
+  // Flatten the text nodes once (no rect reads — this walk is cheap).
+  const walker = document.createTreeWalker(flow, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  const starts: number[] = []
+  let total = 0
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    if (!n.data.length) continue
+    starts.push(total); nodes.push(n); total += n.data.length
+  }
+  if (!total) return ''
+  const range = document.createRange()
+  // Content-y of the character at global offset `i` (a 1-char range's own rect).
+  const topAt = (i: number): number => {
+    let k = 0
+    while (k < nodes.length - 1 && starts[k + 1] <= i) k++
+    const off = Math.min(Math.max(0, i - starts[k]), nodes[k].data.length - 1)
+    try {
+      range.setStart(nodes[k], off)
+      range.setEnd(nodes[k], Math.min(off + 1, nodes[k].data.length))
+      const r = range.getBoundingClientRect()
+      if (!r.height && !r.width) return NaN
+      return (r.top - r0.top) / zf + el.scrollTop
+    } catch { return NaN }
+  }
+  let lo = 0, hi = total - 1
+  for (let guard = 0; guard < 40 && lo < hi; guard++) {
+    const mid = (lo + hi) >> 1
+    const t = topAt(mid)
+    if (Number.isNaN(t)) { lo = mid + 1; continue } // collapsed/hidden run — step past it
+    if (t < y) lo = mid + 1
+    else hi = mid
+  }
+  // The signature is the text AT the line — the identity we want held across versions.
+  let k = 0
+  while (k < nodes.length - 1 && starts[k + 1] <= lo) k++
+  const off = Math.max(0, lo - starts[k])
+  let text = nodes[k].data.slice(off, off + 60).replace(/\s+/g, ' ').trim()
+  if (text.length < 12) { // a short run at the line — widen to its parent's text for a stable id
+    const pt = (nodes[k].parentElement?.textContent || '').replace(/\s+/g, ' ').trim()
+    if (pt.length > text.length) text = pt.slice(0, 60)
+  }
+  return text
+}
+
+// ── Burst RECORDER ────────────────────────────────────────────────────────────────────────────
+// The `?snapThumbs=debug` overlay is a DOM node re-rendering on the SAME main thread a scrub
+// saturates — so a mid-burst screenshot of it is a stale render of the INSTRUMENT, and every
+// number read off it was really an at-rest sample (Peter's mid-scrub capture came back
+// byte-identical to his idle one). This codebase has been burned repeatedly by instruments that
+// can't see the thing they measure (canvasShapingMatchesEditor returning false forever, silently
+// disabling arithLayout for months) — so the burst is RECORDED, not watched: a preallocated ring
+// buffer written per present with no allocation, no string building, no DOM and no console in the
+// hot path, serialised only once the burst has settled. `resetRecord()`/`record()` on the
+// presenter; window.__iwScrub.record() for a harness or for Peter's clipboard.
+const REC_CAP = 4096 // power of two — the write is an & mask, not a modulo
+const PANE_ID: Record<ScrubPaneKind, number> = { doc: 0, diff: 1, map: 2 }
+const PANE_NAME: ScrubPaneKind[] = ['doc', 'diff', 'map']
+const SRC_NAME: Array<ScrubRecEntry['src']> = ['hit', 'thumb', 'near', 'none']
 
 export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => string | null; getDocId?: () => string | null }): ScrubPresenter {
   const budget = opts.touch ? TOUCH_BUDGET : DESKTOP_BUDGET
@@ -572,6 +735,22 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
   let hideRaf = 0
 
   const attached = new Map<ScrubPaneKind, Entry | null>()
+
+  // Burst recorder — preallocated ONCE, written per present. Typed arrays only: no allocation, no
+  // strings, nothing that could perturb the burst it is measuring.
+  const recT = new Float64Array(REC_CAP)
+  const recPane = new Uint8Array(REC_CAP)
+  const recWant = new Int16Array(REC_CAP)
+  const recShown = new Int16Array(REC_CAP)
+  const recSrc = new Uint8Array(REC_CAP)
+  const recAnchor = new Float32Array(REC_CAP)
+  const recCentre = new Int32Array(REC_CAP)
+  let recN = 0
+  const rec = (pane: number, want: number, shown: number, src: number, anchor: number, centre: number) => {
+    const i = recN++ & (REC_CAP - 1)
+    recT[i] = performance.now(); recPane[i] = pane; recWant[i] = want; recShown[i] = shown; recSrc[i] = src
+    recAnchor[i] = anchor; recCentre[i] = centre
+  }
 
   // Per-burst diagnostic counters (the `?snapThumbs=debug` overlay). Zero cost when unread.
   type Cnt = { hitCapture: number; hitThumb: number; nearest: number; none: number }
@@ -620,11 +799,12 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       const dpr = dprOf()
       let shown = 0
       dbgShows++
-      probePerf('scrub.want', order.indexOf(snapId)) // version-fidelity: commanded target index
+      const wantIdx = order.indexOf(snapId)
+      probePerf('scrub.want', wantIdx) // version-fidelity: commanded target index
       preloadThumbs(snapId) // hydrate this + a small direction window from the OPFS thumbnail cache
       for (const [kind, s] of surfaces) {
         const el = s.getEl()
-        if (!el) { s.host.style.display = 'none'; continue }
+        if (!el) { s.host.style.display = 'none'; rec(PANE_ID[kind], wantIdx, -1, 3, 0, 0); continue }
         const zoom = s.getZoom()
         const exact = entries.get(rasterKey(kind, snapId, el.clientWidth, el.clientHeight, zoom, dpr))
         let entry: Entry | null = exact ?? null
@@ -651,6 +831,8 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           if (kind === 'doc') { probePerf('scrub.shown', order.indexOf(entry.snapId)); probePerf('scrub.exact', entry === exact ? 1 : 0) }
           const c = cntOf(kind)
           if (entry === exact) { if (entry.src === 'thumb') c.hitThumb++; else c.hitCapture++ } else c.nearest++
+          rec(PANE_ID[kind], wantIdx, order.indexOf(entry.snapId),
+            entry !== exact ? 2 : entry.src === 'thumb' ? 1 : 0, entry.scrollTop, entry.centre)
           entry.lastUsed = ++tick
           if (attached.get(kind) !== entry) {
             drawEntry(s, entry) // GPU blit into the persistent canvas — no element churn
@@ -660,6 +842,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           shown++
         } else {
           cntOf(kind).none++ // nothing cached for this bucket at all — the frozen live pane shows
+          rec(PANE_ID[kind], wantIdx, -1, 3, 0, 0)
           s.host.style.display = 'none' // no bitmap → the frozen live pane shows (not blank)
           attached.set(kind, null)
         }
@@ -696,7 +879,27 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       return hasThumb(docId, snapId, kind as ThumbPane, thumbSig(kind, el.clientWidth, el.clientHeight, zoom, dpr))
     },
 
-    resetBurst() { dbg.clear(); dbgShows = 0 },
+    pendingThumbs(snapId) {
+      const out: ScrubPaneKind[] = []
+      for (const kind of surfaces.keys()) if (!p.isThumbBaked(kind, snapId)) out.push(kind)
+      return out
+    },
+
+    record() {
+      // Oldest→newest. Once the ring has wrapped, the oldest live slot is the next write position.
+      const n = Math.min(recN, REC_CAP)
+      const start = recN > REC_CAP ? recN & (REC_CAP - 1) : 0
+      const out: ScrubRecEntry[] = []
+      for (let k = 0; k < n; k++) {
+        const i = (start + k) & (REC_CAP - 1)
+        out.push({ t: recT[i], pane: PANE_NAME[recPane[i]], want: recWant[i], shown: recShown[i], src: SRC_NAME[recSrc[i]], anchor: recAnchor[i], centre: recCentre[i] })
+      }
+      return out
+    },
+
+    resetRecord() { recN = 0 },
+
+    resetBurst() { dbg.clear(); dbgShows = 0; recN = 0 },
 
     debugInfo() {
       const panes: ScrubPaneDebug[] = []
@@ -750,6 +953,14 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
   // on its box + theme (its diff ticks come from immutable snapshot geometry, not the body font).
   const HYDRATE_AHEAD = 5
   const hydrating = new Set<string>()
+  // Key TRACE (round 10). The thumbnail store is a two-sided key contract — bake writes a
+  // signature, hydrate recomputes one — and a silent mismatch makes the whole cache inert while
+  // every counter still looks plausible. A harness sets `window.__iwThumbTrace = []` to record both
+  // sides verbatim and DIFF them; zero cost otherwise (same contract as probePerf/__iwPerf).
+  const trace = (ev: string, s: string) => {
+    const w = window as unknown as { __iwThumbTrace?: string[] }
+    if (Array.isArray(w.__iwThumbTrace)) w.__iwThumbTrace.push(`${ev} ${s}`)
+  }
   let fontsSigCache = ''
   let fontsSigAt = 0
   function fontsSig(): string {
@@ -781,7 +992,9 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       const tc = document.createElement('canvas'); tc.width = tw; tc.height = th
       const tctx = tc.getContext('2d'); if (!tctx) return
       tctx.drawImage(src, 0, 0, tw, th)
-      void putThumb(docId, snapId, kind as ThumbPane, thumbSig(kind, w, h, zoom, dpr), tc, tw, th, 1)
+      const sig = thumbSig(kind, w, h, zoom, dpr)
+      trace('BAKE', `${snapId}|${kind}|${sig}`)
+      void putThumb(docId, snapId, kind as ThumbPane, sig, tc, tw, th, 1)
     } catch { /* thumbnail is best-effort */ }
   }
   function hydrate(kind: ScrubPaneKind, snapId: string) {
@@ -792,7 +1005,8 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     const key = rasterKey(kind, snapId, w, h, zoom, dpr)
     if (entries.has(key) || hydrating.has(key)) return
     const sig = thumbSig(kind, w, h, zoom, dpr)
-    if (!hasThumb(docId, snapId, kind as ThumbPane, sig)) return
+    if (!hasThumb(docId, snapId, kind as ThumbPane, sig)) { trace('LOOK.miss', `${snapId}|${kind}|${sig}`); return }
+    trace('LOOK.hit', `${snapId}|${kind}|${sig}`)
     hydrating.add(key)
     void (async () => {
       try {
@@ -800,9 +1014,10 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
         if (!blob || p.disposed || entries.has(key)) return
         const bmp = await createImageBitmap(blob)
         const b = bmp.width * bmp.height * 4
-        entries.set(key, { key, snapId, kind, bitmap: bmp, canvas: null, width: bmp.width, height: bmp.height, scrollTop: 0, scrollLeft: 0, bytes: b, lastUsed: ++tick, src: 'thumb' })
+        entries.set(key, { key, snapId, kind, bitmap: bmp, canvas: null, width: bmp.width, height: bmp.height, scrollTop: 0, scrollLeft: 0, bytes: b, lastUsed: ++tick, src: 'thumb', centre: 0 })
+        trace('HYDRATED', key)
         bytes += b; enforceBudget()
-      } catch { /* decode failed — the live path still renders */ } finally { hydrating.delete(key) }
+      } catch (e) { trace('HYDRATE.throw', `${key} ${String(e).slice(0, 80)}`) } finally { hydrating.delete(key) }
     })()
   }
   function preloadThumbs(center: string) {
@@ -882,6 +1097,10 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
         busy = true
         try {
           const scale = dpr * (ZOOM_IN_SCALE[job.kind] ? zoom : 1)
+          // Content identity under the centre line — measured HERE (idle, next to a 300ms+
+          // raster), never in the hot path; the recorder just copies the interned int.
+          let centre = 0
+          try { const cs = paneCentreSig(el); if (cs) centre = internCentre(cs) } catch { /* best-effort */ }
           const res = await captureRegion(el, scale)
           if (res && (res.bitmap || res.canvas) && !p.disposed) {
             if (existing) evictOne(existing)
@@ -889,15 +1108,24 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
               key, snapId: job.snapId, kind: job.kind, bitmap: res.bitmap, canvas: res.canvas,
               width: res.width, height: res.height,
               scrollTop: el.scrollTop, scrollLeft: el.scrollLeft, bytes: res.bytes, lastUsed: ++tick,
-              src: 'capture',
+              src: 'capture', centre,
             }
             entries.set(key, entry)
             bytes += res.bytes
             enforceBudget()
             probePerf('scrub.mem', bytes / 1e6)
             bakeThumb(job.kind, job.snapId, el.clientWidth, el.clientHeight, zoom, dpr, res.bitmap ?? res.canvas, res.width, res.height)
-          } else if (res && res.bitmap) { res.bitmap.close() }
-        } catch { /* capture failed — stay uncached, the live path still works */ }
+          } else {
+            // Per-kind capture OUTCOME (round 10): a pane that silently returns null (blank-detect,
+            // a WebKit foreignObject refusal) never bakes and stalls the sweep on that version —
+            // and every other probe reports only successes, so the failure was invisible.
+            probePerf('scrub.capture.fail.' + job.kind, 1)
+            if (res && res.bitmap) res.bitmap.close()
+          }
+        } catch (e) {
+          probePerf('scrub.capture.throw.' + job.kind, 1)
+          void e // capture failed — stay uncached, the live path still works
+        }
         busy = false
       }
     }
@@ -947,7 +1175,11 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
   }
 
   if (typeof window !== 'undefined') {
-    ;(window as unknown as { __iwScrub?: ScrubPresenter }).__iwScrub = p // probe hook (like __iwTwkPool)
+    // Probe hooks (like __iwTwkPool). __iwSummarise is the SAME pure roll-up the overlay renders —
+    // a harness must never re-implement the verdict it is checking.
+    const w = window as unknown as { __iwScrub?: ScrubPresenter; __iwSummarise?: typeof summariseRecord }
+    w.__iwScrub = p
+    w.__iwSummarise = summariseRecord
   }
   return p
 }

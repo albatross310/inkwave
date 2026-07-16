@@ -33,3 +33,13 @@ PROBE_PORT=4225 NODE_PATH="$(pwd)/node_modules" node scripts/scrub-probe/probe-c
   projection (no server needed).
 - `probe-shiftwheel.mjs` / `probe-flipbook-clean.mjs` — shift-wheel flipbook advance + fidelity +
   swap-cost isolation.
+- `probe-recorder.mjs` — **start here for any fidelity question.** Proves the burst RECORDER against
+  a known-POSITIVE (17 show()s must record exactly 17 presents/pane) and a known-NEGATIVE before
+  reading a single real number, then reports per-pane hit/thumb/near/none, exactRate and
+  REGISTRATION (did the content under the reading line hold across version steps?). The live
+  `?snapThumbs=debug` overlay CANNOT see a burst — it repaints on the thread the scrub saturates,
+  so a mid-scrub reading of it is a stale at-rest sample. Never trust it for burst numbers.
+- `probe-sweep-panes.mjs` — the idle sweep's per-pane bake coverage (doc/diff/map) + bytes/version,
+  then a cold fling.
+- `probe-thumbkeys.mjs` — dumps the OPFS thumbnail store's BAKE and LOOKUP signatures verbatim
+  (`window.__iwThumbTrace`) and diffs them. Use before theorising about a key mismatch.

@@ -21,8 +21,8 @@ import { probePerf } from '../editor/perflog'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
-import { createScrubPresenter, type ScrubPresenter } from '../editor/scrubRaster'
-import { snapThumbsDebug, snapThumbsEnabled, thumbStats } from '../editor/snapThumbs'
+import { summariseRecord, createScrubPresenter, type ScrubPresenter } from '../editor/scrubRaster'
+import { snapThumbsDebug, snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
 import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
@@ -245,6 +245,38 @@ function FullDiffView({
       {spans}
     </div>
   )
+}
+
+// The sweep replicas are never interactive (aria-hidden, pointer-events none) — module-level
+// no-ops keep their handler identities stable so the replica's diff nodes don't re-memo per render.
+const noopOp = (_opIdx: number): void => { /* offscreen replica — not interactive */ }
+const noopHover = (_opIdx: number | null): void => { /* offscreen replica — not interactive */ }
+
+/** Each diff op's real DOCUMENT page + the doc's total page count, read off a doc-pane scroller
+ *  and its canonical page regions (`pageGeo`; √2 fallback until the paginator publishes). Pulled
+ *  out of the active pane's effect so the sweep's offscreen diff replica can derive the SAME
+ *  page-break rules from a HIDDEN layer's scroller — identical maths, one implementation. */
+function computeDiffPagesFor(L: HTMLElement, pageGeo: StaticPageGeo[] | null): { map: Record<number, number>; total: number } {
+  const geo = pageGeo && pageGeo.length ? pageGeo : null
+  const paper = L.querySelector('.scroll-paper') as HTMLElement | null
+  const pw = paper?.clientWidth || L.clientWidth || 1
+  const pageH = Math.max(200, pw * Math.SQRT2) // fallback only, until the paginator publishes
+  const pageOf = (y: number): number => {
+    if (!geo) return Math.floor(y / pageH) + 1
+    let k = 0
+    while (k < geo.length - 1 && geo[k + 1].top <= y) k++
+    return k + 1
+  }
+  const lr = L.getBoundingClientRect()
+  const map: Record<number, number> = {}
+  L.querySelectorAll('[data-opidx]').forEach((node) => {
+    const el = node as HTMLElement
+    if (!el.classList.contains('diff-add') && !el.classList.contains('diff-del')) return
+    const idx = Number(el.getAttribute('data-opidx'))
+    const y = el.getBoundingClientRect().top - lr.top + L.scrollTop
+    map[idx] = pageOf(y)
+  })
+  return { map, total: geo ? geo.length : Math.max(1, Math.ceil(L.scrollHeight / pageH)) }
 }
 
 // ── InlineDiffView ────────────────────────────────────────────────────────────
@@ -747,7 +779,12 @@ interface DocLayerHooks {
   onHoverOp: (opIdx: number | null) => void
   getZoom: () => number
   getAnchorTop: () => number // the active pane's scrollTop — primes warm layers near their landing position
-  onWarmReady?: (snapId: string, scroller: HTMLDivElement) => void // warm layer painted → scrub-bitmap capture
+  // Warm (NON-ACTIVE) layer painted → scrub-bitmap capture. `pages` is THIS layer's canonical page
+  // geometry (round 10): the sweep's offscreen minimap replica needs a non-active version's real
+  // page regions, and this hidden layer is the only place they exist. ADDITIVE — it rides the
+  // warm-only branch that already ran; the ACTIVE path (onActivate / onGeo / the shared
+  // leftScrollRef+pagRef+pageGeo binding) is untouched.
+  onWarmReady?: (snapId: string, scroller: HTMLDivElement, pages: StaticPageGeo[] | null) => void
 }
 
 const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: {
@@ -785,7 +822,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       // identically, so the flip's midline reposition then moves ~0px — the compositor keeps the
       // already-rastered tiles instead of tiling a fresh scroll offset. Once painted here, the
       // layer is also ready for its scrub-bitmap capture (idle — see scrubRaster).
-      else if (!activeRef.current) { L.scrollTop = hooks.getAnchorTop(); hooks.onWarmReady?.(snap.id, L) }
+      else if (!activeRef.current) { L.scrollTop = hooks.getAnchorTop(); hooks.onWarmReady?.(snap.id, L, pagRef.current ? [...pagRef.current.pages] : null) }
     }
     runRef.current = run
     // A hidden warm layer renders at the parent's current pane zoom so activation needs no repaint.
@@ -851,19 +888,34 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
 // the three failure modes: (1) the rAF flipbook never ran (legacy per-notch goTo → live renders a
 // few times a second), (2) it ran but the cache was EMPTY (show() had nothing → frozen pane), or
 // (3) it presented into an INVISIBLE node (the video's transparent-element bug). Read PAINTED.
-function ScrubDebugOverlay({ presenter, dbg, docId }: {
+function ScrubDebugOverlay({ presenter, dbg, docId, snapCount }: {
   presenter: ScrubPresenter
   dbg: React.MutableRefObject<{ engaged: boolean; events: number; legacy: number; lands: number; commanded: Set<string> }>
   docId: string | null
+  snapCount: number // library size — the sweep's denominator
 }) {
   const [, force] = useState(0)
+  // RECORDED burst (round 10). This overlay repaints on the SAME main thread the scrub saturates,
+  // so anything it draws MID-burst is a stale render of the instrument itself — Peter's mid-scrub
+  // capture came back byte-identical to his idle one, which is why every number we had was really
+  // an at-rest sample. So: while a burst runs, say RECORDING and show nothing; the moment it
+  // settles, serialise the presenter's ring buffer and print THAT. Never trust the live counters.
+  const [burst, setBurst] = useState<ReturnType<typeof summariseRecord> | null>(null)
+  const wasActive = useRef(false)
   useEffect(() => {
-    const id = window.setInterval(() => force((n) => n + 1), 200)
+    const id = window.setInterval(() => {
+      const act = presenter.isActive()
+      if (wasActive.current && !act) setBurst(summariseRecord(presenter.record())) // settled → dump
+      wasActive.current = act
+      force((n) => n + 1)
+    }, 200)
     return () => window.clearInterval(id)
-  }, [])
+  }, [presenter])
+  const recording = presenter.isActive()
   const info = presenter.debugInfo()
   const d = dbg.current
   const st = docId ? thumbStats(docId) : { entries: 0, bytes: 0, loaded: false }
+  const bake = docId ? thumbPaneCounts(docId) : { doc: 0, diff: 0, map: 0 }
   const on = snapThumbsEnabled()
   const row = (k: string, v: string, bad?: boolean) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: bad ? '#ff8080' : '#c8ffc8' }}>
@@ -876,7 +928,28 @@ function ScrubDebugOverlay({ presenter, dbg, docId }: {
       background: 'rgba(0,0,0,0.86)', color: '#fff', font: '11px/1.35 ui-monospace, monospace',
       padding: '7px 9px', borderRadius: 6, minWidth: 268, border: '1px solid #444',
     }}>
-      <div style={{ fontWeight: 800, marginBottom: 3, color: '#ffd479' }}>scrub debug — burst</div>
+      {/* THE RECORDED BURST — the only numbers on this overlay that a burst can't lie about. */}
+      <div style={{ fontWeight: 800, marginBottom: 3, color: '#ffd479' }}>
+        last burst — RECORDED {recording && <span style={{ color: '#ff8080' }}>● REC…</span>}
+      </div>
+      {!burst && row('recorded bursts', 'none yet — scrub once', true)}
+      {burst && (<>
+        {row('presents', String(burst.presents), burst.presents === 0)}
+        {row('commanded distinct', String(burst.commandedDistinct))}
+        {row('presented distinct', String(burst.presentedDistinct), burst.presentedDistinct < burst.commandedDistinct)}
+        {row('rate', `${burst.perSec.toFixed(0)}/s over ${burst.spanMs.toFixed(0)}ms`)}
+        {burst.panes.map((p) => row(
+          `${p.kind} hit/thumb/near/none`, `${p.hit}/${p.thumb}/${p.near}/${p.none}  ${(p.exactRate * 100).toFixed(0)}% real`,
+          p.exactRate < 0.5,
+        ))}
+        <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>registration — content held?</div>
+        {burst.panes.map((p) => row(
+          `${p.kind} centre held`,
+          p.registered < 0 ? 'n/a' : `${(p.registered * 100).toFixed(0)}% of ${p.centreSteps}`,
+          p.registered >= 0 && p.registered < 0.8,
+        ))}
+      </>)}
+      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>live (AT REST ONLY — stale mid-burst)</div>
       {row('flipbook DRIVER', d.engaged ? 'ENGAGED (rAF)' : 'idle', !d.engaged)}
       {row('wheel events', String(d.events))}
       {row('legacy goTo (live)', String(d.legacy), d.legacy > 0)}
@@ -897,6 +970,11 @@ function ScrubDebugOverlay({ presenter, dbg, docId }: {
           {p.kind}: disp={p.display} op={p.opacity} vis={p.visibility} z={p.zIndex} box={p.rectW}×{p.rectH} cv={p.canvasW}×{p.canvasH}
         </div>
       ))}
+      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>sweep — versions baked</div>
+      {(['doc', 'diff', 'map'] as const).map((k) => row(
+        k, `${bake[k]}/${snapCount}`, snapCount > 0 && bake[k] < snapCount,
+      ))}
+      {row('bytes/version', bake.doc ? `${(st.bytes / Math.max(1, bake.doc) / 1024).toFixed(1)}KB` : '—')}
       <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>store</div>
       {row('snapThumbs flag', on ? 'ON' : 'OFF', !on)}
       {row('OPFS thumbs', st.loaded ? `${st.entries} · ${(st.bytes / 1e6).toFixed(1)}MB` : 'index loading…', st.entries === 0)}
@@ -1091,26 +1169,8 @@ function SplitDiffView({
     if (!L) return
     const compute = () => {
       const tDp = performance.now()
-      const geo = pageGeo && pageGeo.length ? pageGeo : null
-      const paper = L.querySelector('.scroll-paper') as HTMLElement | null
-      const pw = paper?.clientWidth || L.clientWidth || 1
-      const pageH = Math.max(200, pw * Math.SQRT2) // fallback only, until the paginator publishes
-      const pageOf = (y: number): number => {
-        if (!geo) return Math.floor(y / pageH) + 1
-        let k = 0
-        while (k < geo.length - 1 && geo[k + 1].top <= y) k++
-        return k + 1
-      }
-      const lr = L.getBoundingClientRect()
-      const map: Record<number, number> = {}
-      L.querySelectorAll('[data-opidx]').forEach((node) => {
-        const el = node as HTMLElement
-        if (!el.classList.contains('diff-add') && !el.classList.contains('diff-del')) return
-        const idx = Number(el.getAttribute('data-opidx'))
-        const y = el.getBoundingClientRect().top - lr.top + L.scrollTop
-        map[idx] = pageOf(y)
-      })
-      setTotalPages(geo ? geo.length : Math.max(1, Math.ceil(L.scrollHeight / pageH)))
+      const { map, total } = computeDiffPagesFor(L, pageGeo ?? null)
+      setTotalPages(total)
       setDiffPages((prev) => {
         const mk = Object.keys(map)
         return (mk.length === Object.keys(prev).length && mk.every(k => prev[+k] === map[+k])) ? prev : map
@@ -1194,6 +1254,31 @@ function SplitDiffView({
     return () => timers.forEach((t) => window.clearTimeout(t))
   }, [snapshot.id, prevSnap?.id, nextSnap?.id])
 
+  // ── Sweep PANES (round 10, 2026-07-16) — the diff panel + minimap for an UNVISITED version ──
+  // The sweep bakes from a hidden warm DocLayer, which only ever gave us the DOC pane; the diff
+  // panel and the minimap render off the ACTIVE snapshot's state, so two of the three panes had no
+  // thumbnail for an unvisited version and a cold fling fell back to a stale nearest for both
+  // (the asymmetry Peter saw: one pane flickering, two lagging).
+  //
+  // Neither needs the version ACTIVATED, and neither touches the visible panes:
+  //  · DIFF — `opsBetween(prev, target)` is a PURE, diffCache-backed function of two snapshots and
+  //    InlineDiffView is a pure render of those ops. So we render a second InlineDiffView into an
+  //    OFFSCREEN host sized to the real diff pane's box and capture THAT.
+  //  · MAP  — MinimapPanel is already parameterised by (leftRef, ops, pageGeo); it never reads the
+  //    active snapshot. Point it at the SWEEP LAYER's own scroller + that layer's page geometry.
+  // The contract change is exactly one line in DocLayer: the warm-only branch now hands its pages
+  // to onWarmReady. The ACTIVE layer's activation path is byte-unchanged.
+  const warmGeoRef = useRef(new Map<string, { scroller: HTMLDivElement; pages: StaticPageGeo[] | null }>())
+  const [sweepReady, setSweepReady] = useState<{ id: string; pages: StaticPageGeo[] | null } | null>(null)
+  const sweepScrollerRef = useRef<HTMLDivElement | null>(null)
+  const sweepDiffScrollRef = useRef<HTMLDivElement>(null)
+  const sweepMapHostRef = useRef<HTMLDivElement>(null)
+  // The replicas must land in the SAME cache bucket as the real panes (rasterKey = kind|id|WxH|
+  // zoom|dpr), so they're sized from the live panes' own boxes — local px, unaffected by the diff
+  // pane's CSS zoom, which the replica re-applies identically.
+  const [sweepBox, setSweepBox] = useState<{ dw: number; dh: number; mw: number; mh: number } | null>(null)
+  const [sweepDiffPages, setSweepDiffPages] = useState<{ map: Record<number, number>; total: number }>({ map: {}, total: 1 })
+
   // ── The sweep driver ────────────────────────────────────────────────────────────────────────
   const sweepIdRef = useRef<string | null>(null)
   const sweepInputRef = useRef(0)
@@ -1206,7 +1291,14 @@ function SplitDiffView({
   useEffect(() => {
     if (!snapThumbsEnabled() || allSnaps.length < 2) return
     let stopped = false, timer = 0, waited = 0
+    // Ids whose bake never completed within the wait budget (a pane that can't rasterise in this
+    // layout, a WebKit foreignObject failure). Without this the outward scan re-picks the same
+    // stalled id forever and the rest of the library never bakes. Reset on every nav (deps below).
+    const gaveUp = new Set<string>()
     const later = (ms: number) => { timer = window.setTimeout(tick, ms) }
+    // Round 10: a version is DONE only when every REGISTERED pane (doc + diff + map) has a
+    // thumbnail — a doc-only bake left two of the three panes falling back to a stale nearest.
+    const done = (id: string) => presenter.pendingThumbs(id).length === 0
     // Outward from the current position — the versions you'd reach first get bitmaps first.
     const nextUnbaked = (): string | null => {
       const ci = Math.max(0, allSnaps.findIndex((s) => s.id === snapshot.id))
@@ -1214,7 +1306,8 @@ function SplitDiffView({
         for (const dir of d === 0 ? [0] : [1, -1]) {
           const i = ci + d * dir
           if (i < 0 || i >= allSnaps.length) continue
-          if (!presenter.isThumbBaked('doc', allSnaps[i].id)) return allSnaps[i].id
+          const id = allSnaps[i].id
+          if (!gaveUp.has(id) && !done(id)) return id
         }
       }
       return null
@@ -1224,7 +1317,12 @@ function SplitDiffView({
       // IDLE-ONLY: pause on any input or while a scrub is presenting (same gate as captures).
       if (presenter.isActive() || performance.now() - sweepInputRef.current < 900) return later(700)
       const cur = sweepIdRef.current
-      if (cur && !presenter.isThumbBaked('doc', cur) && waited++ < 14) return later(500) // still baking
+      if (cur && !done(cur)) {
+        // Three panes now, each an idle-pumped SVG-foreignObject render → a longer budget than
+        // the doc-only 7s. Past it, park this id and move on rather than spin.
+        if (waited++ < 40) return later(500)
+        gaveUp.add(cur)
+      }
       waited = 0
       const next = nextUnbaked()
       if (!next) { sweepIdRef.current = null; setSweepId(null); return later(5000) } // library complete
@@ -1235,6 +1333,53 @@ function SplitDiffView({
     later(2500) // let the open settle before any background rendering
     return () => { stopped = true; window.clearTimeout(timer) }
   }, [presenter, allSnaps, snapshot.id])
+
+  // Bind the replicas to the sweep layer once it has painted + paginated. POLLED rather than
+  // driven straight off onWarmReady because the sweep can pick an id that is ALREADY mounted (a
+  // warm ±1 neighbour whose onWarmReady fired before it was the sweep target) — that layer's geo
+  // is in warmGeoRef but no fresh event will arrive for it.
+  useEffect(() => {
+    if (!sweepId || !snapThumbsEnabled()) { setSweepReady(null); return }
+    let tries = 0, timer = 0
+    const look = () => {
+      const g = warmGeoRef.current.get(sweepId)
+      if (g && g.scroller.isConnected) {
+        sweepScrollerRef.current = g.scroller
+        setSweepReady({ id: sweepId, pages: g.pages })
+        return
+      }
+      if (tries++ < 40) timer = window.setTimeout(look, 250) // ~10s: mount + the warm 150ms + fonts
+    }
+    look()
+    return () => window.clearTimeout(timer)
+  }, [sweepId])
+
+  // Measure the replica boxes off the LIVE panes + derive the sweep version's page-break rules
+  // from its own hidden scroller (same maths as the active pane — computeDiffPagesFor).
+  useLayoutEffect(() => {
+    if (!sweepReady) return
+    const R = rightScrollRef.current, M = mapHostRef.current, L = sweepScrollerRef.current
+    if (!R || !M || !L) return
+    setSweepBox((prev) => {
+      const next = { dw: R.offsetWidth, dh: R.offsetHeight, mw: M.clientWidth, mh: M.clientHeight }
+      return prev && prev.dw === next.dw && prev.dh === next.dh && prev.mw === next.mw && prev.mh === next.mh ? prev : next
+    })
+    setSweepDiffPages(computeDiffPagesFor(L, sweepReady.pages))
+  }, [sweepReady])
+
+  // Replicas mounted → queue their captures. Same idle pump, same quiet gate, same LRU budget as
+  // every other capture; the bake rides queueCapture's existing path (see scrubRaster.bakeThumb).
+  useEffect(() => {
+    if (!sweepReady || !sweepBox || !snapThumbsEnabled()) return
+    const id = sweepReady.id
+    // 450ms: the replica's own layout + MinimapPanel's deferred 350ms re-measure (its diff ticks
+    // land on the second pass). Capturing earlier baked a half-drawn minimap.
+    const t = window.setTimeout(() => {
+      if (sweepDiffScrollRef.current) presenter.queueCapture('diff', id, () => sweepDiffScrollRef.current)
+      if (sweepMapHostRef.current) presenter.queueCapture('map', id, () => sweepMapHostRef.current)
+    }, 450)
+    return () => window.clearTimeout(t)
+  }, [presenter, sweepReady, sweepBox])
 
   // Layer activation: the active DocLayer points the shared refs here in ITS layout effect (which
   // flushes before this component's own per-snapshot effects — React guarantees child-first).
@@ -2148,8 +2293,14 @@ function SplitDiffView({
     getZoom: () => effZoomRef.current,
     getAnchorTop: () => leftScrollRef.current?.scrollTop ?? 0,
     // A warm layer that just painted is capturable while hidden (opacity 0.001 keeps it laid
-    // out + painted) — pre-rasters the ±1 neighbours before they're ever flipped to.
-    onWarmReady: (id, scroller) => presenter.queueCapture('doc', id, () => scroller),
+    // out + painted) — pre-rasters the ±1 neighbours before they're ever flipped to. Round 10:
+    // also PARK this hidden layer's scroller + page geometry, the only source of a non-active
+    // version's real geometry (the sweep's offscreen minimap replica binds to it). Recording
+    // only — nothing here touches the shared active refs.
+    onWarmReady: (id, scroller, pages) => {
+      warmGeoRef.current.set(id, { scroller, pages })
+      presenter.queueCapture('doc', id, () => scroller)
+    },
   }), [handleLayerActivate, handleLayerGeo, onLeftScroll, handleLeftPaneClick, handleHoverOp, presenter])
 
   // ── Scrub bitmap wiring (round 3 — editor/scrubRaster.ts) ────────────────────────────────────
@@ -2348,6 +2499,51 @@ function SplitDiffView({
   // CSS instead of tearing down and rebuilding every pane (the remount storm that caused the switch jank).
   //   wide:  [ diff | d1 | editor | d2 | side ]           (one row)
   //   narrow: editor on top; d1 splits it from a bottom row of [ side | d2 | diff ]
+  // ── Sweep replica panes (round 10) — the offscreen diff panel + minimap for the sweep version.
+  // opacity 0.001 (the DocLayer keep-alive rule, NOT display:none/visibility): a truly-hidden
+  // subtree has no boxes to measure and nothing to rasterise. Fixed at the viewport origin behind
+  // the panes (z 0, pointer-events none); everything on top of it is opaque.
+  const sweepReplicas = (() => {
+    if (!snapThumbsEnabled() || !sweepReady || !sweepBox || sweepReady.id !== sweepId) return null
+    const si = allSnaps.findIndex((s) => s.id === sweepReady.id)
+    if (si < 0) return null
+    const sSnap = allSnaps[si], sPrev = si > 0 ? allSnaps[si - 1] : null
+    const sOps = opsBetween(sPrev, sSnap) // pure + diffCache-backed — no active state involved
+    // LAY THE REPLICAS OUT IN FLOW (flex row), NEVER with position:absolute + a left/top offset.
+    // A captured element's OWN inline position rides into the clone, and captureRegion drops the
+    // clone at the foreignObject's origin — so an offset host rasters OUTSIDE the crop, comes back
+    // blank, gets silently dropped by blank-detect, and stalls the sweep on that version forever
+    // (probed: scrub.capture.fail.map, map baked 1/36). Each host also mirrors its real
+    // counterpart's `position` exactly (mapHost is relative).
+    return (
+      <div key={sweepReady.id} aria-hidden="true" style={{
+        position: 'fixed', left: 0, top: 0, zIndex: 0, opacity: 0.001, pointerEvents: 'none',
+        display: 'flex', alignItems: 'flex-start', gap: 8,
+      }}>
+        {/* Mirrors diffPaneEl's wrapper exactly (box + CSS zoom + background) so the capture lands
+            in the real diff surface's cache bucket and rasters at the same scale. */}
+        <div style={{
+          position: 'relative', flexShrink: 0, width: sweepBox.dw, height: sweepBox.dh,
+          background: '#f9f7f4', overflow: 'hidden', zoom: diffZoom,
+        } as React.CSSProperties}>
+          <InlineDiffView
+            ops={sOps} prevSnap={sPrev} onChangeClick={noopOp} onHoverOp={noopHover}
+            scrollBodyRef={sweepDiffScrollRef} midFrac={midFrac}
+            diffPages={sweepDiffPages.map} totalPages={sweepDiffPages.total}
+          />
+        </div>
+        {/* Mirrors the mapHost box; MinimapPanel is already parameterised by (leftRef, ops,
+            pageGeo) — pointing it at the SWEEP LAYER's scroller needs no change to it at all. */}
+        <div ref={sweepMapHostRef} style={{
+          position: 'relative', flexShrink: 0, width: sweepBox.mw, height: sweepBox.mh,
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <MinimapPanel leftRef={sweepScrollerRef} ops={sOps} snapKey={sweepReady.id} midFrac={midFrac} pageGeo={sweepReady.pages} />
+        </div>
+      </div>
+    )
+  })()
+
   const grid: React.CSSProperties = vertical
     ? { gridTemplateColumns: '1fr 3px 1fr', gridTemplateRows: `${vSplitPct}% 7px 1fr`,
         gridTemplateAreas: '"editor editor editor" "d1 d1 d1" "side d2 diff"' }
@@ -2374,6 +2570,7 @@ function SplitDiffView({
           </div>
         )}
       </div>
+      {sweepReplicas}
       <Toast />
     </>
   )
@@ -3140,7 +3337,7 @@ export function SnapshotView() {
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
           </p>
         )}
-        {snapThumbsDebug() && <ScrubDebugOverlay presenter={presenter} dbg={swDbgRef} docId={docId} />}
+        {snapThumbsDebug() && <ScrubDebugOverlay presenter={presenter} dbg={swDbgRef} docId={docId} snapCount={allSnapshots.length} />}
         {status === 'ready' && libReady && snapshot && heavySnap && (
           <SplitDiffView
             snapshot={heavySnap}
