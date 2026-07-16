@@ -1774,8 +1774,37 @@ OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBa
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
 `/ledger`), EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
-`?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap). When you
+`?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
+MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path). When you
 add a panel, add it here too.
+
+**RENDERED NOTATION CANNOT USE var() — which is why it needs MORE care, not less (2026-07-17).**
+`src/music/theme.ts` + `ScoreView.tsx`: OpenSheetMusicDisplay GENERATES the notation SVG and its
+engraving rules accept only concrete `#rrggbb` strings, so the charts' trick (write `var(--iw-ink,
+#5c2d8a)` straight into a `fill` and let the night block remap it) is UNAVAILABLE — a `var()` handed
+to OSMD is written into the SVG verbatim and renders nothing. So the colours still live ONLY as
+tokens (`--iw-score-ink/cursor/paper/highlight/title`, defined in BOTH themes in index.css) and
+`theme.ts` RESOLVES them against the live DOM at draw time; a `data-theme` MutationObserver redraws
+the score on a theme switch, because a baked-in colour cannot restyle itself. TWO TRAPS: (1) the
+night palette is declared `:root[data-theme="night"] .iw-nightable { … }` — SCOPED to that class,
+NOT on :root — so a score container missing `iw-nightable` silently reads every day fallback and
+renders black on a charcoal page, with no error at all; (2) jsdom does NOT resolve custom properties
+from a stylesheet, so a "the night colour applies" unit test reports the DAY value in both themes and
+PASSES while proving nothing. `theme.test.ts` therefore checks three independent things: no bare hex
+in the TS, every token defined in both themes *with different values* (read off index.css itself, not
+off jsdom), and the resolver's own fallback logic. Whether the two palettes are LEGIBLE is unverified
+— that needs eyes on a browser.
+
+**Component tests are possible now (2026-07-17).** `vite.config.ts` drops the React Router plugin
+under vitest (`process.env.VITEST`): its HMR preamble check made every `render()` throw "React Router
+Vite plugin can't detect preamble", which is why this repo had 86 `.ts` test files and not one
+component test. Verified it changes nothing else — all 87 pre-existing files still pass. Two gotchas
+for the next one: `@testing-library/react` only auto-cleans with `globals: true` (this repo does not
+set it), so `afterEach(cleanup)` is MANDATORY or every test silently measures the previous test's
+still-mounted components (it inflated a re-render count from 2 to 4 here and read as a component
+bug); and in a `.tsx` file `vi.mock`'s factory is hoisted above vitest's OWN import, so `vi.hoisted`
+and `await import('vitest')` both fail — build the recorder inside the factory out of plain
+functions (see `ScoreView.test.tsx`).
 `/ledger`), EmailComposePanel (+ its provider drop-up), the music studio (`music/MusicStudio.tsx` —
 its footer toolbar + symbol drop-up carry `iw-touch-guard`, `music/ScorePage.tsx` gap bands +
 sticky notes). When you add a panel, add it here too.

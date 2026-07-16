@@ -9,19 +9,36 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { musicDemo, musicEnabled } from '../music/flag'
+import { musicXmlDemo, musicXmlEnabled } from '../music/xmlFlag'
 
 const MusicStudio = lazy(() => import('../music/MusicStudio').then(m => ({ default: m.MusicStudio })))
+// The MusicXML path (§B) — its own lazy chunk, so the photo path never pays for OSMD (338 kB gzip)
+// and the MusicXML path never pays for the reflow detector. `music/chunk.test.ts` asserts the split
+// against the real build output. See music/xmlFlag.ts for why this is a separate switch.
+const MusicPanel = lazy(() => import('../music/MusicPanel').then(m => ({ default: m.MusicPanel })))
 
 export function Music() {
-  const [state, setState] = useState<{ enabled: boolean; demo: boolean } | null>(null)
+  const [state, setState] = useState<{ enabled: boolean; demo: boolean; xml: boolean; xmlDemo: boolean } | null>(null)
 
   // Flags resolve against localStorage/location, which don't exist during prerender — read them
   // after mount so the static shell and the hydrated page agree.
-  useEffect(() => { setState({ enabled: musicEnabled(), demo: musicDemo() }) }, [])
+  useEffect(() => {
+    setState({
+      enabled: musicEnabled(), demo: musicDemo(),
+      // `?musicXml` implies the module: a reader should not have to hold two switches at once.
+      xml: musicXmlEnabled(), xmlDemo: musicXmlDemo(),
+    })
+  }, [])
 
   return (
     <main className="min-h-screen px-4 py-8" style={{ background: 'var(--iw-paper, #fcfaf6)' }}>
-      {state?.enabled ? (
+      {/* The MusicXML path is opt-in ON TOP of the module; without it this route renders exactly
+          what it rendered before that path existed. */}
+      {state?.xml ? (
+        <Suspense fallback={<Loading />}>
+          <MusicPanel demo={state.xmlDemo} />
+        </Suspense>
+      ) : state?.enabled ? (
         <Suspense fallback={<Loading />}>
           <MusicStudio demo={state.demo} />
         </Suspense>
