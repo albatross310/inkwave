@@ -14,8 +14,19 @@
 // Anything added here later must clear the "does a real feature need this?" bar. What you don't
 // hold can't leak or be subpoenaed.
 
-/** Which kind of document a session was spent in. `email` is set by the email layer (spec Part B). */
-export type DocType = 'note' | 'essay' | 'email' | 'other'
+/**
+ * Which kind of document a session was spent in. `email` is set by the email layer (spec Part B).
+ *
+ * DECLARED IN `types/document.ts`, RE-EXPORTED HERE — not redeclared (feat/prod-integrate,
+ * 2026-07-17). This lane and `feat/email-compose` wrote identical unions in parallel: a document
+ * type is a property of the DOCUMENT, so the document model owns the classification and the ledger
+ * reads it. Two identical declarations are not harmless — they agree today and drift the first time
+ * one side gains a member, and the ledger would silently keep tagging rows against a stale union.
+ * (The email lane deleted its own competing `docTypeOf` accessor for exactly this reason; the rule
+ * that RESOLVES an absent docType to a row's `doc_type` stays in capture.ts, which owns the ledger.)
+ */
+export type { DocType } from '../types/document'
+import type { DocType } from '../types/document'
 
 /**
  * One session row — the atomic unit of the ledger (§A3.2).

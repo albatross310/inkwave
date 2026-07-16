@@ -262,7 +262,7 @@ function round1(n: number): number { return Math.round(n * 10) / 10 }
 
 // `SessionRow`/`DocType` are already imported at the top of this file — both lanes now read the
 // ONE schema (types.ts), so there is nothing left to import twice.
-import type { DayAggregate, WindowAggregate, WindowDoc } from './types'
+import type { DayAggregate, DayNoteDigest, WindowAggregate, WindowDoc } from './types'
 
 const DOCS: WindowDoc[] = [
   { doc_id: 'doc-essay', doc_label: 'Seminar paper draft', doc_type: 'essay', active_minutes: 214, session_count: 5 },
@@ -304,6 +304,18 @@ const SESSIONS: SessionRow[] = [
   { session_id: 's-3', doc_id: 'doc-journal', doc_label: 'Journal', start: '2026-07-06T16:30:00+10:00', end: '2026-07-06T16:47:00+10:00', active_minutes: 17, words_start: 0, words_end: 20, words_added: 50, words_deleted: 30, net_words: 20, edit_events: 52, break_before_min: 350, pomodoro: false, doc_type: 'note' },
 ]
 
+/**
+ * The weekly/monthly tier-2 carrier — the SAME days/notes/places the SESSIONS above hold, rolled up
+ * per local day exactly as `aggregate.ts`'s `noteDigest()` does it from a real ledger.
+ */
+const NOTE_DIGEST: DayNoteDigest[] = [
+  {
+    day: '2026-07-06',
+    notes: SESSIONS.filter(s => s.note).map(s => s.note!),
+    places: [...new Set(SESSIONS.filter(s => s.place).map(s => s.place!))],
+  },
+]
+
 export function fixtureWindow(window: 'daily' | 'weekly' | 'monthly'): WindowAggregate {
   if (window === 'daily') {
     return {
@@ -316,9 +328,17 @@ export function fixtureWindow(window: 'daily' | 'weekly' | 'monthly'): WindowAgg
     from: '2026-07-06',
     to: window === 'weekly' ? '2026-07-12' : '2026-07-31',
     days: DAYS,
-    // Session rows are PRESENT at weekly/monthly (tier 2 needs them to list notes) but must not
-    // appear in the payload as raw logs — which is exactly what compile.test.ts pins.
-    sessions: SESSIONS,
+    // THE DECIDED CONTRACT (feat/prod-ledger, 2026-07-17 — updated here on integration): `sessions`
+    // is EMPTY at weekly/monthly, because rows here would put a SECOND copy of every measured number
+    // beside the day rollups above (§A6.4). The writer's opted-in words travel as `note_digest`, per
+    // local day — exactly what `buildWindow` produces from the real ledger.
+    //
+    // These fixtures previously carried the pre-answer shape (rows at every window). That is why the
+    // weekly/monthly notes break was invisible: `?prodReport=demo` — the path a developer actually
+    // looks at — kept working off the session rows while the real ledger sent none. A demo whose
+    // shape the real source never produces is a fiction to build against.
+    sessions: [],
+    note_digest: NOTE_DIGEST,
     docs: DOCS,
   }
 }

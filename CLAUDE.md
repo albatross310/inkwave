@@ -752,6 +752,97 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
 - NOT wired: cloud sync of the ledger file (mergeLedgerRows is ready for it); at-rest ENCRYPTION — the repo
   has no encryption layer for ANY document (spec §C2 assumes one), so the ledger inherits the same posture.
 
+## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
+
+Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (Peter's private doc — read it, never copy it
+into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
+off to the provider to send. Inkwave never sends mail and never touches an inbox.
+
+**An email is an ORDINARY document — that is the whole design.** `docType: 'email'` + an `email`
+header block (To/Cc/Bcc/Subject) on InkwaveDocument; the BODY is `contentJson`. Edit history,
+provenance hashing and ledger session capture apply because it is an ordinary document, not because
+anything in `src/email/` arranges it. Don't grow a parallel email path.
+
+**THE HONESTY BOUNDARY (§B2.2/§C1.4 — existential, not cosmetic).** OTS proves *this content existed
+by time T*. It does NOT prove sending, delivery, or origin. Proof of origin needs DKIM (Phase 3, not
+built). The handoff hands the draft to the provider's compose window and the user can edit before
+sending — so the provenance is of the *Inkwave draft*, not the sent bytes.
+
+⚠️ **THERE IS NO AT-REST ENCRYPTION IN THIS BUILD — DO NOT SAY THERE IS** (verified in the code
+2026-07-17). Spec §C2 says at-rest encryption is "default on" and the P1b brief repeated it as fact,
+but it is design INTENT: `storage/opfs.ts` writes `JSON.stringify(data)` through writeOpfsFile in
+PLAINTEXT, `crypto.subtle.encrypt`/AES-GCM appear NOWHERE in src, and package.json carries no crypto
+library. Documents, snapshots and emails are gzip'd JSON in OPFS — protected by the browser's origin
+sandbox and the device's own disk encryption, not by Inkwave. The email copy shipped "stored
+encrypted on your device" until the code was checked; it now says "stored on your device — we never
+hold it", which is TRUE (zero-retention is real: there is no server holding it). `copy.test.ts`
+guards this with a matcher. **Copy tracks the CODE, not the spec** — the spec is a plan, and a plan
+is not a property. When §C2's encryption ships, the word can come back. NOT E2E either, ever, unless
+the recipient runs PGP/S-MIME.
+
+ALL in-product copy lives in `src/email/copy.ts` (one source
+of truth) and `copy.test.ts` asserts the forbidden claims are absent — each matcher proved to fire on
+known-bad copy AND not to fire on an honest control FIRST, because "assert the bad phrase is absent"
+passes trivially on empty or broken matchers. The control earned its keep immediately: the naive
+matchers flagged "It does not prove that you sent the email" — they could not tell an assertion from
+its denial. Hence two matcher classes (affirmative-only vs literal). If new copy sounds better than
+"you had written exactly this by this time", it is wrong.
+
+**Hashing — `bundleHash` gained a v:3 form.** v:1 `{contentHash,receipts}` / v:2 adds `bibHash` /
+**v:3** `{v:3,contentHash,bibHash:…|null,emailHash,receipts}` when the doc is an email. Snapshots
+freeze `email` + `emailHash` exactly as they freeze `bibliography` + `bibHash`; verify recomputes
+both and folds them into the bundleHash recompute, so OTS genuinely BINDS the headers. Non-email
+docs keep v:1/v:2 BYTE-IDENTICALLY — every already-anchored snapshot verifies unchanged (asserted
+against literal canonical forms, not against the function's own output). Headers are canonicalised
+before hashing (`email/headers.ts` normaliseHeaders: address lowercased, display name kept,
+whitespace collapsed, de-duped, order PRESERVED, absent cc/bcc ⇒ `[]`) so one header set has exactly
+one anchored hash. That rule is a provenance boundary like pmToText — changing it changes what past
+anchors mean. `pmToText` itself is UNTOUCHED.
+
+**PROVED, not assumed** (`email/roundtrip.test.ts`, 13 tests): drives the REAL
+createSnapshotIfChanged → gzip archive → stampSnapshot → buildExportBundle → verifyBundle, with an
+in-memory OPFS shim (`email/testOpfsShim.ts`, test-only) and fetch stubbed at the network boundary
+only. Asserts the digest submitted to the calendar IS the v:3 bundleHash (not contentHash), and that
+tampering with a recipient / subject / bcc / body, STRIPPING the headers (downgrade to v:1), or
+tampering-and-recomputing emailHash all FAIL verify. A round-trip that only ever passes proves
+nothing.
+
+**Sending — `MailSender` (§B3)**, one interface, `email/sender.ts`. Only adapter today: `handoff`
+(Gmail/Outlook compose URL, `mailto:` fallback), no OAuth. Gmail API send (`gmail.send`) is Phase 2
+and needs Google's restricted-scope verification — it slots in as another MailSender. If an API
+adapter ever lands it is SEND-ONLY; never request inbox-read (§B5). `SendOutcome` has no `'sent'`
+variant on purpose — the handoff genuinely cannot know. Over-long drafts are REFUSED, never
+truncated (mailto 2000 / web compose 8000 chars, conservative).
+
+**Ledger seam (§A3.2 `doc_type`):** this layer sets `docType: 'email'` on the document and NOTHING
+else; `productivity/capture.ts` `resolveDocType(doc)` reads it and tags the session row. The two
+branches agreed on this contract independently — the ledger's own comment says "the email layer sets
+`docType: 'email'` explicitly and it flows through untouched" — so no field negotiation was needed.
+The ledger owns RESOLUTION (its `DEFAULT_DOC_TYPE` is 'essay' for untyped docs); this owns the
+classification only. An accessor with a competing 'note' default was written here and REMOVED before
+commit: two rules for one question is how implementations drift. MERGE NOTE: `DocType` is declared
+in BOTH `types/document.ts` and `productivity/types.ts` (identical unions, written in parallel) —
+whichever lands second should import from `types/document.ts` rather than keep the copy.
+
+**Live probe:** `scripts/email.prove.mjs` (headless, own port, nothing on Peter's screen) drives the
+REAL built app: flag-off → no panel, `?email=1` → menu → panel, the copy, header PERSISTENCE across
+a reload, finalise → frozen canonical headers + emailHash, and asserts the digest the browser
+submits to `/api/ots` is the v:3 bundleHash and NOT the contentHash. 16/16. It caught two bugs the
+unit tests structurally could not: a header edit never called `scheduleSave` (autosave is driven by
+the editor's own update handler, which a header field never fires — headers lived in React state and
+died on reload), and `ensureDocFresh` overwrote an email's subject-derived title with the first line
+of the BODY. Its copy checks VOID rather than pass when no panel renders — "no forbidden claim" on a
+page with no copy is a pass that means nothing, and it did exactly that on the first run.
+
+TRAPS FOUND HERE (both the house speciality): (1) `listSnapshots` serves from a write-through
+in-memory cache, so reading back through the same module instance NEVER touches the archive — the
+first cut of the persistence test passed while proving nothing; it now resets modules for a genuine
+cold gunzip. (2) That cold read exposed a REAL latent bug in `workers/parseClient.ts`
+`inlineGunzipJson`: it wrote a raw ArrayBuffer to DecompressionStream, which REJECTS the chunk — and
+both promises were `void`ed, so it HUNG forever instead of throwing, defeating the caller's
+try/catch. The no-Worker fallback (node/vitest/prerender) had never once been exercised. Fixed
+(write a Uint8Array view).
+
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
 Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
@@ -1157,7 +1248,7 @@ Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, f
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
-`/ledger`). When you add a panel, add it here too.
+`/ledger`), EmailComposePanel (+ its provider drop-up). When you add a panel, add it here too.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #5c2d8a)`), never a bare hex, so the

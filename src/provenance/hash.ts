@@ -81,10 +81,38 @@ export function bundleHash(
   content: string,
   receipts: readonly unknown[] = [],
   bibHash?: string,
+  emailHash?: string,
 ): Promise<string> {
+  // v:3 — an email document. Commits to the BODY (contentHash) and the HEADERS (emailHash) in one
+  // anchored hash, which is what §B2.2's draft-provenance claim is over. `bibHash` is carried
+  // explicitly as null when absent so a v:3 bundle has ONE shape regardless (an email may cite).
+  if (emailHash) {
+    return hashCanonical({ v: 3, contentHash: content, bibHash: bibHash ?? null, emailHash, receipts })
+  }
   return bibHash
     ? hashCanonical({ v: 2, contentHash: content, bibHash, receipts })
     : hashCanonical({ v: 1, contentHash: content, receipts })
+}
+
+/**
+ * Deterministic hash of an email's headers. Canonicalises first (lowercased/trimmed addresses, in
+ * the caller's order — see email/headers.ts normaliseHeaders) so that two byte-different spellings
+ * of the same header set hash the same, and absent cc/bcc are `[]` rather than undefined — a header
+ * set must have exactly ONE canonical hash or the anchored claim is ambiguous.
+ */
+export function emailHeadersHash(headers: {
+  to: readonly string[]
+  cc?: readonly string[]
+  bcc?: readonly string[]
+  subject: string
+}): Promise<string> {
+  return hashCanonical({
+    v: 1,
+    to: headers.to,
+    cc: headers.cc ?? [],
+    bcc: headers.bcc ?? [],
+    subject: headers.subject,
+  })
 }
 
 /**

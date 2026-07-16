@@ -55,6 +55,9 @@ import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
 import { createSnapshotIfChanged, listSnapshots, listSnapshotMeta, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
+import { EmailComposePanel } from '../components/EmailComposePanel'
+import { emailEnabled } from '../email/flag'
+import { titleForEmail } from '../email/newEmail'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
@@ -1687,7 +1690,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       contentJson: e.getJSON(),
       updatedAt: new Date().toISOString(),
       // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
-      title: deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
+      // An EMAIL titles itself from its SUBJECT, not its body: the generic rule would overwrite the
+      // subject with the first line of the message ("Dear Ada,") on the next save beat, so the
+      // library and the ledger's doc_label would show the greeting instead of the subject.
+      title: docRef.current.docType === 'email' && docRef.current.email
+        ? titleForEmail(docRef.current.email)
+        : deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
       scasState: scasRef.current?.state ?? docRef.current.scasState,
       scasGreenAnchors: getGreenAnchors(e.state),
     }
@@ -2560,6 +2568,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           </div>
         )}
         <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled} covered={isTouch ? !waveRest : !settled}>
+          {/* Email header block (§B2.1), behind the default-OFF flag. The BODY below is the
+              ordinary editor — which is what makes an email an ordinary document. */}
+          {emailEnabled() && doc.docType === 'email' && (
+            <EmailComposePanel
+              doc={doc}
+              onDocChange={(updated) => {
+                // A header edit is a document edit, and NOTHING else saves it: scheduleSave is
+                // driven by the editor's own update handler, which a header field never fires. Left
+                // to onDocChange alone the headers lived in React state and vanished on reload
+                // unless the writer happened to also touch the body. docRef is updated FIRST so any
+                // snapshot/finalise work that reads it sees the new headers immediately.
+                docRef.current = updated
+                onDocChange(updated)
+                scheduleSave(updated)
+              }}
+            />
+          )}
           <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
           {editor && (
             <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />

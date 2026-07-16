@@ -3,7 +3,7 @@
 // signed receipt chain, and the signing key reference. A third party verifies it with no Inkwave
 // login (src/verify), against Bitcoin and the published key. Pure data assembly — no I/O here.
 
-import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem, IwCitationMeta } from '../types/document'
+import type { InkwaveDocument, Snapshot, SignedReceipt, TiptapJSON, CSLItem, IwCitationMeta, DocType, EmailHeaders } from '../types/document'
 import { bibProvider } from '../citations/bibProvider'
 import { simpleInText } from '../citations/format'
 import { usedCitekeys, referenceListKeys } from '../citations/resolve'
@@ -106,6 +106,11 @@ export interface ExportBundle {
     scasMode?: string
     scasSetSize?: number
     scasPoolId?: string
+    // Email documents (§B2.1). Carried so a recipient of the .studio sees what the draft was
+    // addressed to. NOT hashed here — the anchored header claim lives on each snapshot's frozen
+    // `email` + `emailHash`, which is what verify recomputes and what OTS binds.
+    docType?: DocType
+    email?: EmailHeaders
   }
   snapshots: Snapshot[]       // each with contentJson, contentHash, bundleHash, ots proof, receipts
   receipts: SignedReceipt[]   // the live-composition signed chain (held by the writer)
@@ -171,6 +176,8 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
       scasMode: doc.scasMode,
       scasSetSize: doc.scasSetSize,
       scasPoolId: doc.scasPoolId,
+      docType: doc.docType,
+      email: doc.email,
     },
     snapshots,
     receipts,
