@@ -1388,6 +1388,19 @@
 /* ── Chrome (toolbars, popups, pills): "dolphin-back grey" panels with light-grey text. Panels opt in
    with the `iw-nightable` class; scoping the sweeping overrides to it keeps the blast radius small. ── */
 :root { --iw-ink: #5c2d8a; }               /* app ink/purple; lightened inside night chrome */
+
+/* Music module (MusicXML path) — the rendered notation's colours. Day values here, night values in
+   the night block below. Unlike the charts, these are NOT consumed as var() inside an SVG attribute:
+   OSMD generates the notation SVG and only accepts concrete colour strings, so src/music/theme.ts
+   RESOLVES these tokens against the DOM and hands the values to the engine (and re-renders on a
+   theme change). The tokens remain the single source of truth either way. */
+:root {
+  --iw-score-ink: #1c1917;                 /* staves, noteheads, stems — the engraving */
+  --iw-score-cursor: #5c2d8a;              /* the playback cursor */
+  --iw-score-paper: #ffffff;               /* the page behind the notation */
+  --iw-score-highlight: #9b5ccc;           /* a bar an annotation or citation points at */
+  --iw-score-title: #44403c;               /* title / composer above the score */
+}
 :root[data-theme="night"] .iw-nightable {
   background-color: #454e59 !important;   /* dolphin-back grey */
   color: #dfe3e9 !important;
@@ -1407,6 +1420,13 @@
   --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
   --iw-badge-manual: #a8b0bc;
   --iw-verify-tick: #4a9d6a;                  /* verify ✓ — muted green (darker than a vivid tick) on dark */
+  /* Music module — notation on the dark page. The engraving goes light-on-dark like body text;
+     the cursor keeps the night purple (--iw-ink's family) so it reads against pale staves. */
+  --iw-score-ink: #dfe3e9;                    /* staves/noteheads — was #1c1917 */
+  --iw-score-cursor: #cbb8f2;                 /* playback cursor — was #5c2d8a */
+  --iw-score-paper: #2c2e35;                  /* the page — charcoal, matching --iw-paper */
+  --iw-score-highlight: #c3a8ef;              /* highlighted bar — was #9b5ccc */
+  --iw-score-title: #dfe3e9;                  /* title/composer — was #44403c */
 }
 /* Catch Tailwind arbitrary purple text/border classes (text-[#5c2d8a] etc.) that inline-lose to iw-ink
    otherwise — so purple toolbar buttons / labels don't vanish on the dark chrome. */

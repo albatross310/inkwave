@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { reactRouter } from '@react-router/dev/vite'
+import react from '@vitejs/plugin-react'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig, loadEnv, type PluginOption } from 'vite'
 import type { InlineConfig } from 'vitest'
@@ -112,7 +113,12 @@ Object.assign(process.env, env)
 return {
   // Vitest config. Only scan src/ to avoid git worktrees Claude Code creates under .claude/.
   test: { include: ['src/**/*.test.{ts,tsx}'] } as InlineConfig,
-  plugins: [devApi, reactRouter(), tsconfigPaths()],
+  // The React Router plugin is EXCLUDED under vitest. It injects an HMR preamble that only a real
+  // dev-server document provides, so any test that RENDERS a component died with "React Router Vite
+  // plugin can't detect preamble" — which is why this repo had 86 `.ts` test files and not one
+  // component test. Nothing under test imports the route config, so the plugin has no job in a test
+  // run. `@vitejs/plugin-react` still supplies the JSX transform.
+  plugins: [devApi, ...(process.env.VITEST ? [react()] : [reactRouter()]), tsconfigPaths()],
   // A unique id per build. The service worker is registered as /sw.js?v=<id> and names its cache
   // after it, so EVERY deploy looks like an SW update → old caches purged + tabs reloaded once →
   // changes always show up, with no manual "unregister".
