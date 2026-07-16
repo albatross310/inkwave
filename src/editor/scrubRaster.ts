@@ -1096,7 +1096,29 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     if (el && el.isConnected && s) {
       const dpr = dprOf()
       const zoom = s.getZoom()
-      const key = rasterKey(job.kind, job.snapId, el.clientWidth, el.clientHeight, zoom, dpr)
+      // ONE SOURCE OF TRUTH for the key: the SURFACE this bitmap will be PRESENTED into and looked
+      // up against. The box used to come from `el` — the CAPTURED element, which for a sweep job is
+      // a warm DocLayer or an offscreen replica, not the surface — while `hydrate()`/`show()` key
+      // off the surface. Two elements that merely HAPPEN to agree (both DocLayers share CSS, and
+      // `scrollbar-gutter:stable` keeps the gutter reserved so clientWidth can't drift with content
+      // height). Traced verbatim they match byte-for-byte today — but a latent second source keys
+      // every bake to a box no lookup ever asks for the day it diverges, which reads as "all baked,
+      // never hit" and is unfalsifiable from the outside. The MAP keeps its bake permanently even
+      // if doc/diff move to on-demand text rendering, so this contract has to be sound, not lucky.
+      const sEl = s.getEl()
+      const w = sEl ? sEl.clientWidth : el.clientWidth
+      const h = sEl ? sEl.clientHeight : el.clientHeight
+      const dw = sEl ? Math.abs(sEl.clientWidth - el.clientWidth) : 0
+      const dh = sEl ? Math.abs(sEl.clientHeight - el.clientHeight) : 0
+      if (dw > 0.5 || dh > 0.5) {
+        // NEVER silent: a divergence is either a cosmetic sub-pixel (blitted to the surface canvas
+        // anyway — keep the coverage) or a real geometry bug (refuse; a wrong-sized bitmap under a
+        // right-looking key is worse than a miss, because it LOOKS registered).
+        trace('BAKE.boxMismatch', `${job.snapId}|${job.kind}|captured ${el.clientWidth}x${el.clientHeight}|surface ${w}x${h}`)
+        probePerf('scrub.bake.boxMismatch.' + job.kind, Math.max(dw, dh))
+        if (dw > 2 || dh > 2) { probePerf('scrub.bake.refused.' + job.kind, 1); return }
+      }
+      const key = rasterKey(job.kind, job.snapId, w, h, zoom, dpr)
       const existing = entries.get(key)
       if (!existing || existing.scrollTop !== el.scrollTop || existing.scrollLeft !== el.scrollLeft) {
         busy = true
@@ -1119,7 +1141,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
             bytes += res.bytes
             enforceBudget()
             probePerf('scrub.mem', bytes / 1e6)
-            bakeThumb(job.kind, job.snapId, el.clientWidth, el.clientHeight, zoom, dpr, res.bitmap ?? res.canvas, res.width, res.height)
+            bakeThumb(job.kind, job.snapId, w, h, zoom, dpr, res.bitmap ?? res.canvas, res.width, res.height) // surface box — same source as hydrate()'s lookup
           } else {
             // Per-kind capture OUTCOME (round 10): a pane that silently returns null (blank-detect,
             // a WebKit foreignObject refusal) never bakes and stalls the sweep on that version —
