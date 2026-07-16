@@ -2960,6 +2960,16 @@ export function SnapshotView() {
       window.clearTimeout(unfreezeTimerRef.current)
       unfreezeTimerRef.current = window.setTimeout(() => setFrozenSnapId(null), 180)
       presenter.show(s.id)
+      // This path FLIPS THE BITMAP TOO, so it owes the badges the same update the rAF driver gives
+      // them — otherwise the header keeps the old version's number while a new version is on
+      // screen. That is the exact lie this whole change removes, and it was measurable: a burst's
+      // first notch is not yet `rapid` (lastNavInputAt is 0 on a fresh page), so it lands HERE, and
+      // the probe saw 14 versions presented against 13 badge paints — one stale frame at the start
+      // of every gesture. Same cache-only read; an uncached pair still blanks rather than lying.
+      if ((window as unknown as { __iwBadgeLive?: boolean }).__iwBadgeLive !== false) {
+        const si = allRef.current.findIndex((x) => x.id === s.id) // not the 60fps path — once per notch
+        if (si >= 0) paintHeaderDiffRef.current(deltaForIndexRef.current(si), si)
+      }
     }
     presenter.noteInput()
     lastNavInputAtRef.current = now

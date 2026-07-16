@@ -57,22 +57,27 @@ console.log('TRUTH (at-rest, React path):', JSON.stringify(truth.slice(0, 4)))
 
 const cell = async (label, live) => {
   const page = await open(live ? null : () => { window.__iwBadgeLive = false })
-  // Read the PAINT TRACE, not the DOM: a DOM read races the driver's rAF (it caught the mount
-  // value at step 1 and looked like a one-step lag). Every paint is recorded in order, so the
-  // trace pairs 1:1 with the presented sequence with no timing assumption at all.
+  // SCORE WHAT THE USER SEES. An earlier version scored cell A on the PAINT TRACE — but cell A's
+  // flag disables the only call that stamps an index into that trace, so `painted === 0` was true
+  // BY CONSTRUCTION and the control could not fail: it proved the flag worked, not that the badge
+  // was frozen. A negative that cannot fail is not a negative. So both cells are now scored off
+  // the DOM (__readBadge), where a frozen badge is OBSERVED. The trace is kept for diagnostics
+  // only — never for the verdict.
   const rows = await page.evaluate(async (n) => {
     window.__iwScrub.resetRecord()
     window.__iwBadgeTrace.length = 0
+    const out = []
     for (let i = 0; i < n; i++) {
       window.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, shiftKey: true, bubbles: true, cancelable: true }))
-      await new Promise((r) => setTimeout(r, 16))
+      // Two rAFs: the driver's tick is an rAF registered during the dispatch, so it has run and
+      // painted by the second. This is the frame the reader is actually looking at.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      const rec = window.__iwScrub.record().filter((x) => x.pane === 'doc')
+      const last = rec[rec.length - 1]
+      if (last && last.want >= 0) out.push({ presented: last.want, badge: window.__readBadge() })
     }
-    await new Promise((r) => setTimeout(r, 120)) // drain the driver, but land() is 260ms away
-    const presented = window.__iwScrub.record().filter((x) => x.pane === 'doc').map((x) => x.want).filter((v) => v >= 0)
-    const painted = window.__iwBadgeTrace.filter((p) => p.idx >= 0) // driver paints carry their index
-    // No ordering assumption: each paint says which version it was FOR.
-    const out = painted.map((p) => ({ presented: p.idx, badge: p }))
-    return { out, nPresented: presented.length, nPainted: painted.length }
+    const painted = window.__iwBadgeTrace.filter((p) => p.idx >= 0)
+    return { out, nPresented: out.length, nPainted: painted.length }
   }, N)
   await page.close()
   const { out: pairs, nPresented, nPainted } = rows
@@ -93,8 +98,9 @@ const cell = async (label, live) => {
 const A = await cell('A OLD — badge pinned to the heavy pair', false)
 const B = await cell('B NEW — badge per presented version', true)
 console.log(JSON.stringify(A)); console.log(JSON.stringify(B))
-// The OLD badge never repaints during a burst at all — that IS the bug, and it is the cleanest
-// statement of it: N versions presented, ZERO badge paints. So score the negative on paint count.
-console.log('\nKNOWN-NEGATIVE:', A.painted === 0 && A.presented > 0 ? `✅ reproduces: ${A.presented} versions presented, ${A.painted} badge paints — it sits frozen on the heavy pair` : `❌ old behaviour painted ${A.painted}x — B proves nothing`)
-console.log('FIXED        :', B.rate >= 0.9 && B.stale === 0 ? `✅ badges track the PRESENTED version (${B.matchesPresented}/${B.steps}, ${B.stale} stale, ${B.blank} blank)` : `⚠️  ${B.matchesPresented}/${B.steps} matched, ${B.stale} stale, ${B.blank} blank`)
+// The control must be able to FAIL: it is scored on the DOM, so if the old code had tracked the
+// presented version this cell would match and say so.
+console.log('\nKNOWN-NEGATIVE:', A.stale >= A.steps * 0.5 ? `✅ reproduces — the badge Peter SEES is stale on ${A.stale}/${A.steps} steps (matched only ${A.matchesPresented}, where the frozen number happens to coincide)` : `❌ old behaviour tracked (${A.matchesPresented}/${A.steps} matched, only ${A.stale} stale) — B proves nothing`)
+console.log('FIXED        :', B.rate >= 0.99 && B.stale === 0 ? `✅ badges track the PRESENTED version (${B.matchesPresented}/${B.steps}, ${B.stale} stale, ${B.blank} blank)` : `⚠️  ${B.matchesPresented}/${B.steps} matched, ${B.stale} stale, ${B.blank} blank`)
+console.log('DENOMINATORS :', `A ${A.steps} steps / ${A.painted} idx-paints · B ${B.steps} steps / ${B.painted} idx-paints — same denominator, both scored on the DOM`)
 await browser.close()

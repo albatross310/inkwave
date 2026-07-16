@@ -482,6 +482,29 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   snaps each version to ITS OWN biggest change — right for one deliberate step, ruin for a burst
   (measured: it flings the reading position a median 50,455px per version). 'longest' is untouched
   on the LIVE landing render, so no navigation semantics change; only the flipbook frames hold.
+  ROUND 12 (2026-07-17 — A NEGATIVE THAT CANNOT FAIL, and who keeps a proof alive).
+  The header +N/-N badges were pinned to the frozen heavy pair ("a number nobody reads mid-fling"
+  — Peter reads it mid-fling). They now ride the counter's imperative per-version path, reading
+  `peekOpsBetween` (CACHE-ONLY; an uncached pair BLANKS with `visibility`, keeping the box, rather
+  than showing another version's number). MEASURED on the DOM: old = stale on 10/14 steps; new =
+  14/14 exact, 0 stale, 0 blank.
+  THE INSTRUMENT BUG, and it is the third of the same species in one lane: the probe's own header
+  demanded the control "MUST show stale numbers, or cell B proves nothing" — and it never could.
+  It scored cell A by counting index-stamped paints, while cell A's flag disabled the ONLY call
+  site that stamps an index. `painted === 0` was true BY CONSTRUCTION: the control proved the FLAG
+  worked, not that the badge was frozen, and the commit message claimed "frozen" as if observed.
+  Caught by an outside auditor reading the code, not by the probe passing. Fixed by scoring what
+  the DOM actually SHOWS. **Any cell whose PASS condition is satisfiable by the mechanism that
+  disables the feature is not a control.** Ask of every negative: what would have to be true for
+  this cell to FAIL? If the answer is "nothing the feature could do", it is decoration.
+  THE DEEPER ONE — this codebase is excellent at ESTABLISHING truth and has no mechanism for
+  KEEPING it. A browser probe needs a build, a server and a burst; it proves a thing once, is not
+  in `package.json`, and six weeks later a proof that ran once is indistinguishable from one that
+  never ran — the gate says green either way. So when a probe establishes an invariant, ask what
+  cheap UNIT-level assertion keeps it true. `provenance/diffCache.test.ts` is the worked example:
+  it pins "peek never computes" in 14ms with no browser, and it was MUTATION-TESTED (inject
+  `?? opsBetween(...)` — the innocent fallback someone will one day add — and 3 of 6 tests fail).
+  A keeper that has never been shown to fail is the same disease one level up.
   RESIDUAL: thumbs are baked around the reading position the sweep ran at and the sig does not key
   on the anchor, so scrolling far away and scrubbing presents frames anchored to the sweep's
   position until re-baked (true of the old rule too; keying on the anchor would invalidate the
