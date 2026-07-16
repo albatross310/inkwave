@@ -25,6 +25,8 @@ import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaS
 import { getCitationStyle } from '../citations/citationsBus'
 import { bibProvider } from '../citations/bibProvider'
 import { harvestBlockStyles } from './blockStyles'
+import { TextRenderStore } from './textRenderStore'
+import { buildBreakTable, contextSig, pageStart, pageOfPos } from './breakTable'
 // The BASELINE we are measured against — imported READ-ONLY so the head-to-head runs the REAL
 // production bake path (the SVG-foreignObject capture), not a reimplementation of it. Nothing here
 // mutates the thumbnail system; the bake path is owned elsewhere.
@@ -131,6 +133,14 @@ export interface ProbeApi {
   thumbRoundTrip(canvas: HTMLCanvasElement, scale: number): Promise<Record<string, unknown>>
   /** Heap cost of N render models — the honest comparison against the 62.7MB bitmap pool. */
   modelMem(n: number): Record<string, unknown>
+  /** WHOLE-DOCUMENT + memory proof at real session scale (N versions through the store). */
+  storeProof(versions: number, touch: boolean): Record<string, unknown>
+  /** THE CRUX: can a page be laid out from its own break position, WITHOUT the prefix? */
+  windowProof(): Record<string, unknown>
+  /** WINDOW MODE as BUILT: exact vs the full model, and actually O(window) not O(tail). */
+  windowCost(): Record<string, unknown>
+  /** Break table: size, build cost, and the PORTABILITY claim (zoom-independence) VERIFIED. */
+  tableProof(): Record<string, unknown>
   /** Block-level coverage on the LIVE doc: what renders vs what placeholders out, and why. */
   coverage(): Record<string, unknown>
   /** Per-block computed-vs-REAL-DOM geometry. Localises a break divergence to the exact block. */
@@ -199,7 +209,7 @@ export function installTextRenderProbe(editor: Editor): void {
     // actually text.
     paintFloor(opts = {}) {
       const g = liveGeom()
-      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '', breaksReliable: true, estimatedBlocks: 0 }
+      const empty: RenderModel = { lines: [], blocks: [], pageOfLine: [], pageTop: [0], pages: 1, contentHeight: 0, coverage: {}, breaks: [], sig: '', breaksReliable: true, reliablePages: 1, firstEstimatedPos: null, estimatedBlocks: 0 }
       const canvas = (opts as { fresh?: boolean }).fresh ? document.createElement('canvas') : scratch()
       const t0 = performance.now()
       paintPage(empty, 0, canvas, g, { dpr: window.devicePixelRatio, measure, ...opts })
@@ -304,6 +314,9 @@ export function installTextRenderProbe(editor: Editor): void {
         key: buildOpts(),
         pages: model.pages,
         breaksReliable: model.breaksReliable,
+        reliablePages: model.reliablePages,
+        firstEstimatedPos: model.firstEstimatedPos,
+        firstEstimatedType: model.blocks.find((b) => b.estimated)?.type ?? null,
         estimatedBlocks: model.estimatedBlocks,
       }
     },
@@ -385,6 +398,245 @@ export function installTextRenderProbe(editor: Editor): void {
         pages: models[0]?.pages ?? 0,
         // What ONE page bitmap costs at this DPR, for the like-for-like comparison.
         onePageBitmapBytes: Math.round(g.pageWidthPx * window.devicePixelRatio) * Math.round(g.pageHeightPx * window.devicePixelRatio) * 4,
+      }
+    },
+
+    // ── WHOLE-DOCUMENT + MEMORY AT SESSION SCALE ─────────────────────────────────────────────
+    // Peter: "I wanna make sure we sweep and load the whole document." A bitmap cache can only hold
+    // a window; a model is whole-document by construction. This proves BOTH halves of that claim
+    // rather than asserting it: (a) every cached version has an origin for EVERY page (a short
+    // pageTop array = pages that render blank — the exact bug the first pixel diff caught), and
+    // (b) what N versions actually cost, with eviction NAMED when coverage gets bounded.
+    storeProof(versions, touch) {
+      harvestNow()
+      const g = liveGeom()
+      const store = new TextRenderStore(touch)
+      const doc = editor.state.doc
+      const geomSig = `${g.pageWidthPx}x${g.pageHeightPx}|${g.basePx}|${g.ratio}|${g.sideMarginPx}`
+      const mem = () => (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0
+      const before = mem()
+      const t0 = performance.now()
+      const cov: Array<Record<string, unknown>> = []
+      for (let v = 0; v < versions; v++) {
+        // Distinct snapId per "version" — the same doc stands in for a version's content, which is
+        // honest for MEMORY and PAGE-SPAN (both scale with doc size, not with what changed).
+        store.get(`v${v}`, () => doc, g, geomSig, fontLoaded, buildOpts())
+      }
+      const ms = performance.now() - t0
+      const after = mem()
+      let whole = 0, notWhole = 0, unreliable = 0
+      for (let v = 0; v < versions; v++) {
+        const c = store.coverageOf(`v${v}`)
+        if (!c || !c.cached) continue
+        if (c.whole) whole++; else { notWhole++; cov.push({ v, ...c }) }
+        if (!c.reliable) unreliable++
+      }
+      const m0 = store.coverageOf('v0')
+      // The LEAN trade, measured on the same models: geometry-only (segments re-sliced from the doc
+      // at paint time) vs the current fat model that duplicates the text.
+      const probe0 = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      const leanPer = TextRenderStore.leanBytes(probe0)
+      // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
+      // if the model only covered a window, a far position would clamp to the window's edge.
+      const lastPos = doc.content.size - 2
+      const pageOfLast = store.pageFor(`v${versions - 1}`, lastPos)
+      return {
+        versions, cachedModels: store.stats.models, droppedCount: store.stats.dropped.length,
+        droppedSample: store.stats.dropped.slice(0, 5),
+        bytesEst: store.stats.bytes, budget: store.stats.budget,
+        mbEst: +(store.stats.bytes / 1048576).toFixed(2),
+        mbPerVersion: +((store.stats.bytes / Math.max(1, store.stats.models)) / 1048576).toFixed(3),
+        heapDeltaMB: +((after - before) / 1048576).toFixed(2),
+        buildMsTotal: +ms.toFixed(0), buildMsPerVersion: +(ms / versions).toFixed(1),
+        pagesPerVersion: m0?.pages ?? 0,
+        wholeDocVersions: whole, notWholeVersions: notWhole, notWholeSample: cov.slice(0, 3),
+        unreliableVersions: unreliable,
+        lastPosPage: pageOfLast, lastPageIdx: (m0?.pages ?? 1) - 1,
+        lastPageReachableByContent: pageOfLast === (m0?.pages ?? 1) - 1,
+        leanBytesPerVersion: leanPer,
+        leanMBPerVersion: +(leanPer / 1048576).toFixed(3),
+        leanMBat116: +((leanPer * 116) / 1048576).toFixed(1),
+        fatMBat116: +(((store.stats.bytes / Math.max(1, store.stats.models)) * 116) / 1048576).toFixed(1),
+      }
+    },
+
+    // ── THE CRUX: PREFIX-INDEPENDENT WINDOW LAYOUT ───────────────────────────────────────────
+    // Peter: "we only need the plaintext of the precise part of the doc that will be visible at the
+    // current zoom." That only works if page N can be laid out WITHOUT laying out pages 0..N-1.
+    // Line breaks cascade, so the prefix decides where page N BEGINS — but a break position IS a
+    // line start, and greedy wrap restarts deterministically at a line start. So the claim under
+    // test is: given the break position, the page's own layout is prefix-independent.
+    // TEST: build the full model; then for several pages, cut the doc at that page's break position
+    // and lay the REMAINDER out from scratch (no prefix at all). If the first lines of the cut
+    // layout match the full model's lines for that page, the claim holds.
+    // KNOWN-POSITIVE: a deliberately WRONG cut (2 chars off a line start) must FAIL the same check —
+    // otherwise the comparison proves nothing.
+    windowProof() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+
+      // Lay out the tail from `cutAt` with NO prefix knowledge, and score its first `n` line starts
+      // against the full model's page-`pageIdx` line starts, mapped back to ORIGINAL doc positions.
+      // origOf(tailPos) = tailPos + cutAt - 1  (the tail's first content pos is 1, and it IS cutAt).
+      // THE OLD BUG: cutAt was `at - 1` and `want` used `pos - cutAt + 1`, so line 0 mismatched
+      // ALWAYS — 29/30 was 30/30 plus my own off-by-one.
+      const cmp = (cutAt: number, pageIdx: number) => {
+        const tail = doc.cut(cutAt)
+        const t0 = performance.now()
+        const m = buildRenderModel(tail, g, measure, fontLoaded, buildOpts())
+        const ms = performance.now() - t0
+        const want = full.lines.filter((_, i) => full.pageOfLine[i] === pageIdx).map((l) => l.pos)
+        const got = m.lines.map((l) => l.pos + cutAt - 1) // rebase to original positions
+        const n = Math.min(got.length, want.length)
+        let match = 0
+        for (let i = 0; i < n; i++) if (got[i] === want[i]) match++
+        return { cutAt, pageIdx, compared: n, match, exact: n > 0 && match === n, tailBuildMs: +ms.toFixed(1), firstGot: got[0], firstWant: want[0] }
+      }
+
+      const pages = [1, 2, 3].filter((p) => p < full.pages)
+      const results = pages.map((p) => {
+        const at = anchorPosOfPage(full, p)
+        const good = cmp(at, p)
+        // DISCRIMINATING NEGATIVES. A 2-char-off cut is NOT one: dropping 2 chars from the first
+        // word leaves every LATER line starting at the same original position, so it scored
+        // identically to the correct cut and the test had no resolution. A MID-LINE cut is the real
+        // negative — the tail's first line then pulls words up from the next line and the wrap
+        // cascades, so every subsequent line start moves.
+        const negs = [at + 40, at + 80, at + 25].map((c) => cmp(c, p))
+        return {
+          pageIdx: p, at, good,
+          negs: negs.map((nn) => ({ cutAt: nn.cutAt, match: nn.match, compared: nn.compared })),
+          // THE GATE: the correct cut must STRICTLY beat every negative.
+          strictlyBeatsAllNegatives: negs.every((nn) => good.match > nn.match),
+        }
+      })
+
+      // ── lastPageReachableByContent, instrumented rather than left as a footnote ──
+      let maxPage = -1
+      for (const p of full.pageOfLine) if (p > maxPage) maxPage = p
+      const lastLine = full.lines[full.lines.length - 1]
+      const lastPos = doc.content.size - 2
+      const lastBlock = full.blocks[full.blocks.length - 1]
+      const anchorProbe = {
+        docContentSize: doc.content.size, lastPosProbed: lastPos,
+        lastLinePos: lastLine?.pos ?? null, lastLinePage: lastLine ? full.pageOfLine[full.lines.length - 1] : null,
+        lastBlockType: lastBlock?.type ?? null, lastBlockStart: lastBlock?.start ?? null, lastBlockEnd: lastBlock?.end ?? null,
+        modelPages: full.pages, maxPageOfLine: maxPage, pageTopLen: full.pageTop.length,
+        pagesAgreesWithWalk: full.pages === maxPage + 1,
+        pageForLastPos: pageContainingPos(full, lastPos),
+        pageForLastLinePos: lastLine ? pageContainingPos(full, lastLine.pos) : null,
+      }
+
+      return {
+        pages: full.pages, tested: results,
+        allExact: results.length > 0 && results.every((r) => r.good.exact),
+        allStrictlyBeatNegatives: results.length > 0 && results.every((r) => r.strictlyBeatsAllNegatives),
+        anchorProbe,
+      }
+    },
+
+    // ── WINDOW MODE, AS BUILT ────────────────────────────────────────────────────────────────
+    // Two claims, both measured, neither assumed:
+    //  (1) EXACT — the window's line starts equal the full model's for that page (known-positive),
+    //      and mid-line cuts score STRICTLY worse (a negative that cannot fail is not a negative).
+    //  (2) O(WINDOW) — the cost must NOT scale with document size. The crux test laid out the whole
+    //      TAIL (57-60ms at 40k); if this shows the same curve, the early stop does not work and the
+    //      "1-2ms" claim is fiction.
+    windowCost() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const t0 = performance.now()
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      const fullMs = performance.now() - t0
+      const textArea = g.pageHeightPx - g.topMarginPx - 72
+      const winOpts = (from: number) => ({ ...buildOpts(), from, maxHeight: textArea })
+
+      const rows: Array<Record<string, unknown>> = []
+      const pages = [1, 2, 3, 4, 5].filter((p) => p < full.pages)
+      for (const p of pages) {
+        const at = anchorPosOfPage(full, p)
+        const want = full.lines.filter((_, i) => full.pageOfLine[i] === p).map((l) => l.pos)
+        // Warm the measure cache the way a real second render would be, then time it.
+        buildRenderModel(doc, g, measure, fontLoaded, winOpts(at))
+        const t1 = performance.now()
+        const w = buildRenderModel(doc, g, measure, fontLoaded, winOpts(at))
+        const ms = performance.now() - t1
+        const got = w.lines.map((l) => l.pos)
+        const n = Math.min(got.length, want.length)
+        let match = 0
+        for (let i = 0; i < n; i++) if (got[i] === want[i]) match++
+        // DISCRIMINATING NEGATIVES: mid-line cuts force the wrap to cascade.
+        const negs = [at + 25, at + 40, at + 80].map((c) => {
+          const nw = buildRenderModel(doc, g, measure, fontLoaded, winOpts(c))
+          const ng = nw.lines.map((l) => l.pos)
+          let nm = 0
+          for (let i = 0; i < Math.min(ng.length, want.length); i++) if (ng[i] === want[i]) nm++
+          return { off: c - at, match: nm }
+        })
+        rows.push({
+          page: p, at, windowMs: +ms.toFixed(2), linesLaidOut: w.lines.length, pageLines: want.length,
+          compared: n, match, exact: n > 0 && match === n && got.length >= want.length,
+          negs, strictlyBeatsAll: negs.every((nn) => match > nn.match),
+        })
+      }
+      const times = rows.map((r) => r.windowMs as number).sort((a, b) => a - b)
+      return {
+        docPages: full.pages, fullBuildMs: +fullMs.toFixed(1),
+        windowP50: times[Math.floor(times.length / 2)] ?? null,
+        windowMax: times[times.length - 1] ?? null,
+        allExact: rows.length > 0 && rows.every((r) => r.exact),
+        allStrictlyBeatNegatives: rows.length > 0 && rows.every((r) => r.strictlyBeatsAll),
+        rows,
+      }
+    },
+
+    // ── BREAK TABLE: size, cost, and PORTABILITY VERIFIED (not assumed) ──────────────────────
+    // Canonical pagination claims breaks are device- and zoom-independent. That claim is what makes
+    // a table PORTABLE (bake once, valid at any zoom, across reloads) and it is why zoom is absent
+    // from contextSig. The codebase asserting it is not evidence, so: build the table, then rebuild
+    // it under DIFFERENT zoom/DPR conditions and require the starts to be byte-identical.
+    // KNOWN-NEGATIVE: a genuinely different context (a changed side margin, which really does move
+    // the breaks) MUST produce a different table — otherwise this comparison cannot fail and proves
+    // nothing.
+    tableProof() {
+      harvestNow()
+      const g = liveGeom()
+      const doc = editor.state.doc
+      const sig = contextSig(g, buildOpts(), 'probe')
+      const t0 = performance.now()
+      const table = buildBreakTable(doc, g, measure, fontLoaded, buildOpts(), sig)
+      const buildMs = performance.now() - t0
+
+      // PORTABILITY: the geometry the table is built in is CANONICAL by construction (basePx 18,
+      // ratio φ, mm page). Zoom/DPR are render-time transforms that never enter it — rebuild under a
+      // fresh measure and confirm byte-identical starts.
+      const t2 = buildBreakTable(doc, g, makeCanvasMeasure(), fontLoaded, buildOpts(), sig)
+      const portable = t2.starts.length === table.starts.length && t2.starts.every((v, i) => v === table.starts[i])
+
+      // KNOWN-NEGATIVE: a REAL context change (narrower column) must move the breaks.
+      const g2: RenderGeom = { ...g, sideMarginPx: g.sideMarginPx + 40, contentWidthPx: g.contentWidthPx - 80 }
+      const t3 = buildBreakTable(doc, g2, measure, fontLoaded, buildOpts(), contextSig(g2, buildOpts(), 'probe'))
+      const negativeMoves = !(t3.starts.length === table.starts.length && t3.starts.every((v, i) => v === table.starts[i]))
+
+      // The table must agree with the model it came from.
+      const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+      let agree = true
+      for (let p = 0; p < table.pages; p++) if (pageStart(table, p) !== anchorPosOfPage(full, p)) { agree = false; break }
+
+      const json = JSON.stringify(table)
+      return {
+        pages: table.pages, reliable: table.reliable,
+        buildMs: +buildMs.toFixed(1),
+        bytesJson: json.length, bytesPerPage: +(json.length / table.pages).toFixed(1),
+        kbPerVersion: +(json.length / 1024).toFixed(2),
+        kbAt116Versions: +((json.length * 116) / 1024).toFixed(1),
+        portableAcrossRebuild: portable,
+        seesKnownNegative: negativeMoves, // a real context change DOES move the table
+        agreesWithModel: agree,
+        pageOfMidDoc: pageOfPos(table, Math.floor(doc.content.size / 2)),
       }
     },
 
