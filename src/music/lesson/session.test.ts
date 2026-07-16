@@ -98,7 +98,7 @@ function recordedSession(): LessonSession {
   s.append(SENTINEL_B)
   // The student distils ONE line, in their own words — the §A3 workflow, and the reason the
   // "nothing survives" verdicts below are about a session that genuinely HAD a transcript.
-  s.distil(a.id, { text: SENTINEL_KEPT, anchor: { bar: 24 } })
+  s.distil(a.id, { text: SENTINEL_KEPT, bar: { bar: 24 } })
   return s
 }
 
@@ -253,8 +253,8 @@ describe('only the student’s curated notes persist (§A3)', () => {
     s.end()
     const rec = s.toRecord()
     expect(rec.lesson_notes).toHaveLength(1)
-    expect(rec.lesson_notes[0].snippet).toBe(SENTINEL_KEPT)
-    expect(rec.lesson_notes[0].anchor).toEqual({ bar: 24 })
+    expect(rec.lesson_notes[0].note.snippet).toBe(SENTINEL_KEPT)
+    expect(rec.lesson_notes[0].bar).toEqual({ bar: 24 })
     expect(rec.piece_id).toBe('piece-1')
   })
 
@@ -329,14 +329,13 @@ describe('the recap is storable BECAUSE it was authored (§A3b)', () => {
     const s = startSession({ piece_id: 'p', consent: CONSENT })
     s.append(SENTINEL_A)
     s.setRecap('Good progress on the Chopin. Slow practice on the left hand.')
-    s.addAssignment('youtube', 'https://www.youtube.com/watch?v=fixture', { bar: 24 })
+    s.addAssignment('youtube', 'https://www.youtube.com/watch?v=fixture')
     s.addAssignment('note', 'Hands separately, quarter = 60.')
     s.end()
     const rec = s.toRecord()
     expect(rec.recap?.summary).toMatch(/Good progress/)
     expect(rec.recap?.assignments).toHaveLength(2)
     expect(rec.recap?.assignments[0].due).toBe('next_week')
-    expect(rec.recap?.assignments[0].anchor).toEqual({ bar: 24 })
     // The storable side must not have laundered the transcript into itself.
     expect(JSON.stringify(rec)).not.toContain(SENTINEL_A)
   })

@@ -26,9 +26,19 @@
 //     make), but it is not built. See the report for its real price.
 //
 // SO THIS BUILD DOES NOT TRANSCRIBE THE TEACHER AT ALL, and none of the copy below says it does.
-// What it says instead is TRUE AND STRUCTURAL, and is a stronger sentence than the spec's:
-// **Inkwave never records audio.** There is no `getUserMedia` in this module. The spec promises the
-// audio is deleted when the lesson ends; the honest version is that there was never any audio.
+// What it says instead is TRUE AND STRUCTURAL, and is a stronger sentence than the spec's: the
+// spec promises the audio is deleted when the lesson ends; the honest version is that there was
+// never any audio. THREE things make that true, and none of them is a promise in a comment:
+// `Permissions-Policy: microphone=()` (vercel.json — the mic is off at the HTTP header for the
+// whole origin), no capture API in this module's source, and nothing mic-capable REACHABLE from it.
+// See `micBoundary.ts`; `micBoundary.test.ts` asserts all three and fires if any moves.
+//
+// ⚠️ THE CLAIM IS SCOPED TO THIS SCREEN, DELIBERATELY — "Inkwave does not record audio" would be an
+// APP-WIDE claim, and §A5's bar-anchored practice recordings will make it FALSE (a student
+// recording themselves is consensual, theirs, and storable — a different feature keeping a
+// different promise). "Nothing on this screen can reach a microphone" is what the teacher actually
+// needs to know, it is what the firebreak actually guarantees, and it stays true after §A5 ships.
+// A sentence that will expire is a sentence that will be forgotten and go on being read.
 //
 // ─── THE OTHER THREE THINGS THIS COPY MAY NOT SAY ────────────────────────────────────────────
 //
@@ -68,9 +78,9 @@ export const CONSENT_TITLE = 'Ask your teacher first'
  * reassurance is a fact about what this screen is, not a promise about where audio goes.
  */
 export const CONSENT_EXPLAINER =
-  'Show your teacher this screen before you begin. Inkwave does not record audio and does not ' +
-  'listen to your lesson — this is a page for you to take notes on, pinned to the bars they are ' +
-  'about. Nothing you write here leaves your device.'
+  'Show your teacher this screen before you begin. Inkwave is not recording this lesson — nothing ' +
+  'on this screen can reach a microphone. This is a page for you to take notes on, pinned to the ' +
+  'bars they are about. Nothing you write here leaves your device.'
 
 /** The limit, at the same weight as the ask — never a footnote. */
 export const CONSENT_LIMIT =

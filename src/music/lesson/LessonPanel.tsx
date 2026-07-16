@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LessonSession, startSession, type TranscriptLine } from './session'
-import type { Assignment, LessonNote, LessonRecord } from './types'
+import type { Assignment, LessonRecord, PinnedLessonNote } from './types'
 import * as copy from './copy'
 
 interface Props {
@@ -32,7 +32,7 @@ type Screen = 'consent' | 'notes' | 'recap'
 export function LessonPanel({ pieceId, onRecord, onClose }: Props) {
   const [screen, setScreen] = useState<Screen>('consent')
   const sessionRef = useRef<LessonSession | null>(null)
-  const [notes, setNotes] = useState<readonly LessonNote[]>([])
+  const [notes, setNotes] = useState<readonly PinnedLessonNote[]>([])
   const [lines, setLines] = useState<readonly TranscriptLine[]>([])
 
   // The session is a ref, not state. A live session is not a value to render — it is an object with
@@ -148,9 +148,9 @@ function NotesScreen({
   onEnd,
 }: {
   session: LessonSession
-  notes: readonly LessonNote[]
+  notes: readonly PinnedLessonNote[]
   lines: readonly TranscriptLine[]
-  onNotes: (n: readonly LessonNote[]) => void
+  onNotes: (n: readonly PinnedLessonNote[]) => void
   onRecap: () => void
   onEnd: () => void
 }) {
@@ -236,13 +236,13 @@ function NotesScreen({
 
       <ul className="text-sm mb-3">
         {notes.map((n) => (
-          <li key={n.id} className="py-0.5">
-            {n.anchor && (
+          <li key={n.note.id} className="py-0.5">
+            {n.bar && (
               <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #9b5ccc)' }}>
-                bar {n.anchor.bar}
+                bar {n.bar.bar}
               </span>
             )}
-            {n.snippet}
+            {n.note.snippet}
           </li>
         ))}
       </ul>
@@ -351,8 +351,10 @@ function RecapScreen({
       </div>
 
       <ul className="text-sm mb-3">
-        {assignments.map((a) => (
-          <li key={a.id} className="py-0.5">
+        {assignments.map((a, i) => (
+          // §1's Assignment has no id — keyed by position, which is stable here because the list is
+          // append-only within a recap and is never reordered.
+          <li key={`${a.kind}:${i}`} className="py-0.5">
             <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #9b5ccc)' }}>
               {a.kind}
             </span>

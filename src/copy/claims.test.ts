@@ -132,8 +132,39 @@ describe('§C1.4 — no forbidden claim anywhere in the product (repo-wide sweep
     // claimMatchers.ts is skipped because it holds the knownBad examples. That is only legitimate
     // while nothing in production imports it: otherwise a real overclaim could be parked there and
     // swept under the exclusion. Proven, not assumed.
-    const importers = FILES.filter((f) => readFileSync(f, 'utf8').includes('claimMatchers'))
+    //
+    // ⚠️ THIS CHECK READ A MENTION AS AN IMPORT until 2026-07-17. It was a bare
+    // `.includes('claimMatchers')` over the RAW file, so ANY file whose COMMENTS named this guard
+    // failed it — `src/music/lesson/micBoundary.ts` cites claimMatchers.ts as the precedent its own
+    // pattern-carrier exclusion follows, and that sentence alone turned the suite red. The fix this
+    // invites is the corrosive one: delete the comment. But this file's own next test is "comments
+    // are stripped — the guard survives its own documentation", and the rule holds here too. A
+    // guard that punishes accurate documentation of itself gets documented less, then understood
+    // less, then deleted. So: strip comments and match a real IMPORT, exactly as the sweep does.
+    const importers = FILES.filter((f) => {
+      const code = readFileSync(f, 'utf8')
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+        .join('\n')
+      return /(?:from\s*|import\s*\(\s*)['"][^'"]*claimMatchers['"]/.test(code)
+    })
     expect(importers, `production code imports the fixture carrier: ${importers}`).toEqual([])
+  })
+
+  it('…and that importer check still FIRES on a real import (mention ≠ use)', () => {
+    // The fix above narrowed the check, so it must be proved it can still catch what it is for.
+    // A narrowed guard nobody re-proves is how a real hole opens.
+    const strip = (s: string) =>
+      s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+    const isImport = (s: string) =>
+      /(?:from\s*|import\s*\(\s*)['"][^'"]*claimMatchers['"]/.test(strip(s))
+
+    expect(isImport("import { FORBIDDEN } from './claimMatchers'"), 'real import missed').toBe(true)
+    expect(isImport("import { FORBIDDEN } from '../copy/claimMatchers'")).toBe(true)
+    expect(isImport("const m = await import('./claimMatchers')")).toBe(true)
+    // …and does NOT fire on prose that merely names it — the false positive that prompted this.
+    expect(isImport('// Same shape as src/copy/claimMatchers.ts, which carries the knownBads.')).toBe(false)
+    expect(isImport('/** claimMatchers is the precedent this follows. */')).toBe(false)
   })
 
   it('comments are stripped — the guard survives its own documentation', () => {
