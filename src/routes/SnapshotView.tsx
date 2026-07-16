@@ -883,6 +883,8 @@ function ScrubDebugOverlay({ presenter, dbg, docId }: {
       {row('lands (live render)', String(d.lands), d.lands > 1)}
       {row('commanded distinct', String(d.commanded.size))}
       {row('show() calls', String(info.shows), info.shows === 0)}
+      {row('presented/commanded', d.commanded.size ? `${(info.shows / d.commanded.size).toFixed(2)}×` : '—',
+        d.commanded.size > 0 && info.shows < d.commanded.size)}
       <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>per pane — hit/thumb/near/none</div>
       {info.panes.map((p) => (
         <div key={p.kind} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: p.visible ? '#c8ffc8' : '#ff8080' }}>
@@ -2723,7 +2725,12 @@ export function SnapshotView() {
     // committed a full live render per notch — which is exactly Peter's "the minimap goes a few
     // times a second but no flashing". Land only once the stream is no longer RAPID (same 250ms
     // window goTo uses), and hold the freeze past that so the panes don't re-render mid-scrub.
-    const SW_STEP = 40, MAX_PER_FRAME = 2, LAND_QUIET_MS = 260, FREEZE_HOLD_MS = 400
+    // MAX_PER_FRAME=1 — EVERY commanded version gets its own frame (the Photos bar). At 2 the
+    // driver jumped two versions when behind and only show()ed the landing one, silently DROPPING
+    // the intermediate: a 12-notch fling commanded 11 but presented 7. One-per-frame at 60fps =
+    // 60 versions/s, far above any wheel cadence, so it keeps up AND flickers every version; an
+    // extreme fling just trails by a few frames and catches up (Photos does exactly this).
+    const SW_STEP = 40, MAX_PER_FRAME = 1, LAND_QUIET_MS = 260, FREEZE_HOLD_MS = 400
     const flipEnabled = !isTouchDevice() && (window as unknown as { __iwSwFlipbook?: boolean }).__iwSwFlipbook !== false
 
     const land = () => {
@@ -2744,7 +2751,7 @@ export function SnapshotView() {
         swRafRef.current = requestAnimationFrame(tick); return
       }
       const dir = Math.sign(cmd - pres)
-      pres += dir * Math.min(Math.abs(cmd - pres), MAX_PER_FRAME) // present ~every intermediate
+      pres += dir * Math.min(Math.abs(cmd - pres), MAX_PER_FRAME) // one version per frame — no drops
       swPresentedRef.current = pres
       if (all[pres]) {
         presenter.show(all[pres].id) // resident bitmap flip — no React re-render per step

@@ -379,6 +379,20 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   ACTIVE snapshot's ops, not per-DocLayer, so they can't be rastered for an unvisited version and
   still fall to nearest on a cold fling (overlay: diff/map 0/0/5/2). Doc is the big pane; diff/map
   bake as visited. What Peter reads back: "flipbook DRIVER", "lands", and the doc hit/near line.
+  ROUND 9 (2026-07-16 — "keep searching on the 60hz scrub"). PER-FRAME DROP FIXED: MAX_PER_FRAME
+  was 2, so when the driver fell behind it JUMPED two versions and show()ed only the landing one —
+  silently dropping the intermediate (12 notches → 11 commanded → 7 presented). Now 1: every
+  commanded version gets its own frame. MEASURED after the fix: presented == commanded exactly
+  (20 events → 21 shows → 21 wants, 1.05×; 24-event 4ms fling → 11/11) — ZERO drops at 31-79
+  versions/s. JS per swap 0.5-0.9ms ⇒ the DPR1 swap is cheap and the RESIDENT-POOL idea is DROPPED
+  (the ceiling is the frame rate, 60 versions/s, far above any wheel cadence; only a real GPU can
+  confirm the paint). Overlay now shows presented/commanded as a ratio (flags drops).
+  PROBE ARTEFACT worth knowing: an await-loop probe at a 150ms notch cadence showed 0 shows —
+  because each legacy live render (200-700ms) pushed the NEXT synthetic event past the 250ms rapid
+  window, so it never latched. Real hardware queues events with their ORIGINAL timeStamps (which is
+  why round-3 made rapid-detection read e.timeStamp), so this shouldn't happen on device — BUT if
+  Peter's overlay shows "legacy goTo (live)" counting up per notch, that IS this failure and it is
+  the same felt bug (a live render per notch). The overlay diagnoses it directly.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
