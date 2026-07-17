@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Schema, type Node as PMNode } from '@tiptap/pm/model'
-import { paginate, type SplitLine } from './arithmeticLayout'
+import { paginate, blockEligibility, type SplitLine, type InlineRun, type ArithBlock } from './arithmeticLayout'
+import { unmodelledMark } from './arithMeasure'
 import { buildRenderModel, pageContainingPos, type RenderGeom } from './textRender'
 
 // ── The orphan-snap drift (found + fixed 2026-07-16 by the textRender pixel diff) ─────────────
@@ -198,5 +199,87 @@ describe('buildRenderModel — a leaf atom owns its OWN position', () => {
     expect(a.lines.map((l) => l.pos)).toEqual(b.lines.map((l) => l.pos))
     expect(a.pages).toBe(b.pages)
     expect(a.lines.length).toBeGreaterThan(20) // …on a document big enough for it to mean something
+  })
+})
+
+// ── THE UNMODELLED-MARK GATE (2026-07-18) ──────────────────────────────────────────────────────
+// `runOf` walked node.marks, acted on bold/italic/textStyle, and SILENTLY IGNORED everything else.
+// For a metric-neutral mark that is right by luck; for `code` — which renders MONOSPACE — it was
+// right by nothing. MEASURED against the live editor (typematrix.prove.mjs, 13k words, 434 code
+// runs): the model said 47 pages, the editor said 79, and NOT ONE of the 79 break positions
+// matched — while `estimatedBlocks` was 0 and the model claimed FULL reliability. Wrong words on
+// every page, reported trustworthy.
+//
+// The rule now mirrors `isCertifiedStack`, which already does this for FONTS: an allowlist, and
+// anything outside it DEFERS to the DOM measure. What this really buys is the NEXT mark added to
+// the schema — today it would have silently corrupted every break below it.
+//
+// A BROWSER PROBE CANNOT KEEP THIS. typematrix.prove.mjs needs a real editor and is run by hand;
+// F6 taught us that a proof which ran once is indistinguishable, six weeks on, from one that never
+// ran. This runs in the gate, in milliseconds, with no browser.
+describe('blockEligibility — a mark the engine cannot model DEFERS the block', () => {
+  const run = (over: Partial<InlineRun> = {}): InlineRun =>
+    ({ text: 'hello world ', fontFamily: "'EB Garamond', Georgia, serif", fontSizePx: 18, fontWeight: 400, italic: false, ...over })
+  const para = (runs: InlineRun[]): ArithBlock =>
+    ({ type: 'paragraph', runs, baseFontPx: 18, marginTopPx: 0, marginBottomPx: 9, firstLineLeadingPx: 0 })
+
+  it('a plain certified run is eligible (the control — the gate must not refuse everything)', () => {
+    expect(blockEligibility(para([run()])).eligible).toBe(true)
+  })
+
+  it('an unmodelled mark refuses the block, and NAMES it', () => {
+    const e = blockEligibility(para([run({ unmodelledMark: 'code' })]))
+    expect(e.eligible).toBe(false)
+    expect(e.reason).toBe('unmodelled-mark:code')
+  })
+
+  it('ONE bad run in a paragraph of good ones is enough to refuse it', () => {
+    // The engine lays out a BLOCK, so a single unmeasurable run poisons the whole paragraph's wrap.
+    const e = blockEligibility(para([run(), run({ unmodelledMark: 'code' }), run()]))
+    expect(e.eligible).toBe(false)
+    expect(e.reason).toBe('unmodelled-mark:code')
+  })
+
+  it('a FUTURE unknown mark defers too — the property the allowlist exists for', () => {
+    const e = blockEligibility(para([run({ unmodelledMark: 'someMarkNobodyHasWrittenYet' })]))
+    expect(e.eligible).toBe(false)
+    expect(e.reason).toContain('someMarkNobodyHasWrittenYet')
+  })
+
+  // THE KNOWN-NEGATIVE: without it these assertions could pass against a gate that refuses
+  // everything, which would be "safe" and useless. The control above proves it does not — and this
+  // proves the two answers actually differ on the SAME block.
+  it('the gate DISCRIMINATES: same runs, only the mark differs', () => {
+    const clean = para([run()])
+    const dirty = para([run({ unmodelledMark: 'code' })])
+    expect(blockEligibility(clean).eligible).toBe(true)
+    expect(blockEligibility(dirty).eligible).toBe(false)
+  })
+})
+
+describe('unmodelledMark — which marks the engine claims to handle', () => {
+  const mk = (names: string[]): PMNode =>
+    ({ text: 'x', marks: names.map((n) => ({ type: { name: n } })) } as unknown as PMNode)
+
+  it('models bold/italic/textStyle', () => {
+    for (const n of ['bold', 'italic', 'textStyle']) expect(unmodelledMark(mk([n]))).toBeNull()
+  })
+
+  // Each of these is PROVED byte-identical to the live editor by typematrix.prove.mjs (~46
+  // breaks/fixture). They are ignorable because they carry no advance — not because we hope so.
+  it('treats the PROVED metric-neutral decorations as ignorable', () => {
+    for (const n of ['underline', 'strike', 'highlight', 'scasSlot', 'comment', 'insertion', 'deletion']) {
+      expect(unmodelledMark(mk([n]))).toBeNull()
+    }
+  })
+
+  it('refuses `code` — it renders MONOSPACE and was measured in the body font', () => {
+    expect(unmodelledMark(mk(['code']))).toBe('code')
+  })
+
+  it('refuses an unknown mark, and finds it among modelled ones', () => {
+    expect(unmodelledMark(mk(['future']))).toBe('future')
+    expect(unmodelledMark(mk(['bold', 'italic', 'code']))).toBe('code')
+    expect(unmodelledMark(mk([]))).toBeNull()
   })
 })

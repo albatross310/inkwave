@@ -34,6 +34,39 @@ function resolveSizePx(v: unknown, basePx: number): number {
   return isNaN(n) ? basePx : n
 }
 
+// MARKS THIS ENGINE MODELS — and marks it has PROVED it may ignore. Anything else DEFERS.
+//
+// WHY AN ALLOWLIST (2026-07-18, `typematrix.prove.mjs`). `runOf` used to walk `node.marks` and act
+// on bold/italic/textStyle, SILENTLY IGNORING every other mark. For a metric-neutral mark that is
+// right by luck; for `code` it was right by nothing at all. The `code` mark renders the run in a
+// MONOSPACE face, and the engine measured it in the body font: MEASURED against the live editor on
+// a 13k-word fixture with 434 code runs — **the model said 47 pages, the editor 79, and NOT ONE of
+// its 79 break positions matched (first divergence at break 0, Δ955)**. It reported
+// `estimatedBlocks 0` and full reliability the whole time. Wrong words on every page, declared
+// trustworthy — the worst failure this renderer can produce.
+//
+// The gate is modelled on `isCertifiedStack`, which already does exactly this for FONTS: an
+// allowlist, and anything outside it defers to the DOM measure rather than being guessed. The
+// property that matters is what happens to the NEXT mark someone adds to the schema — today it
+// would silently corrupt every break below it; with this it defers and says so.
+//
+// METRIC_NEUTRAL is not an assumption: every family below is PROVED byte-identical to the live
+// editor by typematrix.prove.mjs at ~46 breaks/fixture (underline, strike, highlight, scasSlot,
+// comment, insertion, deletion — decorations and colour, no advance change). If a future change
+// gives one of them a metric (padding, a font swap), its row goes red and this list is the first
+// place to look.
+const MODELLED_MARKS = new Set(['bold', 'italic', 'textStyle'])
+const METRIC_NEUTRAL_MARKS = new Set(['underline', 'strike', 'highlight', 'scasSlot', 'comment', 'insertion', 'deletion'])
+
+/** A mark this engine can neither model nor prove harmless ⇒ its block must DEFER to the DOM. */
+export function unmodelledMark(node: PMNode): string | null {
+  for (const m of node.marks || []) {
+    const n = m.type.name
+    if (!MODELLED_MARKS.has(n) && !METRIC_NEUTRAL_MARKS.has(n)) return n
+  }
+  return null
+}
+
 function runOf(node: PMNode, basePx: number): InlineRun {
   let family = DEFAULT_STACK, size = basePx, weight = 400, italic = false
   for (const m of node.marks || []) {
@@ -44,7 +77,11 @@ function runOf(node: PMNode, basePx: number): InlineRun {
       if (m.attrs.fontSize) size = resolveSizePx(m.attrs.fontSize, basePx)
     }
   }
-  return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic }
+  // An unmodelled mark rides the run so blockEligibility can refuse the block. It is carried as a
+  // REASON rather than acted on here: this function's job is metrics, and inventing a metric for a
+  // mark we have not certified is precisely the bug.
+  const bad = unmodelledMark(node)
+  return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic, ...(bad ? { unmodelledMark: bad } : {}) }
 }
 
 // One paragraph's inline content → engine runs. SHARED by the whole-doc path and the scoped
