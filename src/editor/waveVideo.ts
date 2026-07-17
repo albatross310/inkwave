@@ -182,6 +182,7 @@ async function run(clip: Clip): Promise<void> {
     '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
   )
   if (!host) { bail('no water host on this page → CSS water'); return }
+  guardMaster(host)
   // `reason` MUST TRACK WHERE THIS FUNCTION ACTUALLY IS (2026-07-17). It used to be written once
   // before the barrier and then never again until play() resolved, so a video stuck in its decode
   // still displayed 'waiting for hydration…' — and that stale line sent the next reader hunting a
@@ -225,6 +226,39 @@ async function run(clip: Clip): Promise<void> {
     bail(`autoplay-blocked (${String(e).slice(0, 50)}) → CSS water`)
     teardown(video)
   })
+}
+
+// THE MASTER LATCH MUST NOT OUTLIVE THE ELEMENT (2026-07-17 — Peter, live: "after I signed in just
+// now the wave background completely went away"; flat teal, no waves, document fine).
+//
+// `html.iw-wave-video-on` SUPPRESSES the CSS water outright (visibility:hidden on the wave pseudos
+// AND the twinkle host) with no dependency on this video existing. The class is therefore a PROMISE
+// that something else is drawing the water. When a re-render tears our <video> out of the DOM —
+// mounting Clerk at sign-in does exactly that — the promise is broken and the surface is left a
+// bare gradient: the CSS water suppressed, the video gone, nothing drawing. The water dies.
+//
+// So the class must be DERIVED, not latched: the moment nothing of ours is left to draw, hand the
+// water straight back. Event-driven, not polled — the host's children change only when the twinkle
+// sets or our own videos mount/unmount, and MutationObserver callbacks are microtasks, so the CSS
+// water is restored before the bare-gradient frame can paint. `:not([data-going])` is what makes
+// the legitimate loop→brake swap a non-event: the dying loop is already marked, the brake is live.
+//
+// LIMIT, stated: this sees our element leaving the host, and the host leaving its parent. A
+// re-render that replaces a HIGHER ancestor wholesale would go unseen — covering that needs a
+// subtree observer over the surface, which contains the ProseMirror subtree and would re-run on
+// every keystroke (the --wave-x invalidation lesson). Peter's ruling deletes this whole latch
+// anyway; this is the smallest thing that makes the live bug impossible.
+function guardMaster(host: HTMLElement): void {
+  const check = () => {
+    if (!diag.master) return
+    if (document.querySelector('video.iw-wave-video-el:not([data-going])')) return
+    document.documentElement.classList.remove('iw-wave-video-on')
+    diag.master = false
+    diag.reason = 'video element vanished (a re-render?) → CSS water'
+  }
+  const mo = new MutationObserver(check)
+  mo.observe(host, { childList: true })
+  if (host.parentElement) mo.observe(host.parentElement, { childList: true })
 }
 
 function mkVideo(): HTMLVideoElement {
@@ -371,17 +405,18 @@ function mountOverlay(): void {
     // the video ran, from then on just the css". The finished state and the never-ran state MUST
     // NOT look alike. `masterEver` is what tells them apart.
     const gate = document.documentElement.classList.contains('iw-water-ready')
+    // NO "BENIGN" STATE FOR master-WITHOUT-AN-ELEMENT. Round 3 called that a mid-swap transient and
+    // greyed it out; Peter's sign-in screenshot then showed EXACTLY that state while his water was
+    // dead — `master` suppresses the CSS water, so master with nothing painting IS the water dying.
+    // The alarm was telling the truth and I muted it. The legitimate loop→brake swap is excluded
+    // properly instead, by reading the LIVE element (`:not([data-going])`) rather than by excusing
+    // the symptom.
     const head =
       diag.master && p.ok ? '<b style="color:#4ade80">● VIDEO ON SCREEN</b>'
-        // Master with no element = mid-swap (loop→brake) or mid-teardown: a transition, not a fault.
-        : diag.master && !v ? '<b style="color:#9ca3af">◌ VIDEO handing over (loop→brake)…</b>'
-          // The REAL alarm, and now it can only mean the real thing: the video is master, the
-          // element is right there, and it is structurally unable to paint.
-          : diag.master ? `<b style="color:#fbbf24">▲ VIDEO IS MASTER BUT NOT PAINTED — ${p.why}</b>`
-            : masterEver ? '<b style="color:#4ade80">✔ VIDEO RAN, then handed back to the CSS water — HEALTHY</b>'
-              // Red means exactly ONE thing now: the video never ran on this load. THIS is the
-              // state worth reporting; `reason` says which exit it took.
-              : '<b style="color:#f87171">● CSS WATER — the video never ran this load</b>'
+        : diag.master ? `<b style="color:#fbbf24">▲ VIDEO IS MASTER BUT NOT PAINTED — ${p.why}</b>`
+          : masterEver ? '<b style="color:#4ade80">✔ VIDEO RAN, then handed back to the CSS water — HEALTHY</b>'
+            // Red means exactly ONE thing: the video never ran on this load. `reason` says which exit.
+            : '<b style="color:#f87171">● CSS WATER — the video never ran this load</b>'
     box.innerHTML = `${head}
 build     ${__BUILD_COMMIT__}
 flag      ${diag.flag}
