@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Whisper probe — Inkwave</title>
+<!--
+  WHISPER PROBE — does on-device transcription keep up on Peter's iPhone 12?
+  ==========================================================================
+  Peter approved SHIPPING whisper. This page does not re-litigate that. It answers the three
+  questions that are left: WHICH MODEL, THREADED OR NOT, and WHAT IS THE HONEST LATENCY.
+
+  ── WHY THIS IS A STANDALONE STATIC PAGE, NOT A ROUTE ──────────────────────────────────────
+  COOP/COEP are per-DOCUMENT headers, and Inkwave is an SPA (`ssr:false`) where a route is NOT a
+  document — a client-side <Link> to /lesson keeps the ENTRY document's headers, so an "isolated
+  route" is isolated on a hard load and silently NOT isolated when you navigate to it. A probe built
+  as a route would measure whichever document you happened to arrive in. So: a real separate
+  document, served from public/, with its own headers in vercel.json. It also keeps 40MB of ML off
+  the app's load path entirely (CLAUDE.md: load performance is sacred).
+
+  ── THE TWO TRAPS THIS PAGE IS BUILT AROUND ────────────────────────────────────────────────
+  1. ORT INITIALISES WASM THREADS ONCE PER DOCUMENT. Setting `numThreads` after the first pipeline
+     is created SILENTLY DOES NOTHING. A single-page "1 thread vs N threads" comparison would run
+     BOTH THREADED, print two nearly-identical numbers, and "prove" that threads don't help. That is
+     the bake-counter bug (116/116 while every lookup missed). So each config runs in a FRESH
+     DOCUMENT — the page reloads between configs and accumulates results in localStorage.
+  2. WITHOUT crossOriginIsolated THERE IS NO SharedArrayBuffer, so ORT falls back to ONE THREAD
+     WITHOUT SAYING SO. Printing a number under a "threaded" heading in that state would be a
+     measurement of a fiction. This page checks `crossOriginIsolated` AT RUNTIME (never infers it
+     from the URL) and marks threaded configs INVALID rather than printing a number that lies.
+
+  ── WHAT THIS MEASURES, AND WHAT IT DOES NOT ───────────────────────────────────────────────
+  · transformers.js Whisper (ONNX Runtime / WASM) — NOT whisper.cpp/ggml. There is no emscripten
+    toolchain in this repo, so a whisper.cpp WASM build cannot be produced or shipped without adding
+    emsdk to CI. If we ship whisper.cpp instead, THESE NUMBERS DO NOT TRANSFER and must be re-taken.
+  · sample.wav is whisper.cpp's canonical benchmark clip (JFK, public domain, 11s, clean studio
+    mono). A real lesson room — a piano, an untrained mic, two people, reverb — is HARDER. So every
+    number here is a LOWER BOUND. If it is marginal on this clip it is worse in the room.
+  · PEAK MEMORY IS NOT MEASURABLE ON iOS SAFARI. `performance.memory` is Chrome-only and
+    `measureUserAgentSpecificMemory()` is not implemented in Safari. Rather than print a fabricated
+    figure, this page leaves a breadcrumb before each run and reports "DIED" if a run never came
+    back — which is what an OOM actually looks like on iOS, and is the honest instrument.
+  · No microphone. A latency benchmark does not need one, and this page therefore needs no change to
+    `Permissions-Policy: microphone=()`. That change belongs with the real feature and /privacy.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    margin: 0; padding: 16px; background: #faf9f7; color: #1c1917;
+  }
+  @media (prefers-color-scheme: dark) { body { background: #1c1917; color: #f5f5f4; } }
+  h1 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; opacity: .6; margin: 0 0 12px; }
+  /* THE VERDICT — legible at arm's length, across a room, in a photograph. */
+  #verdict {
+    font-size: 40px; font-weight: 700; line-height: 1.1; padding: 20px 16px; border-radius: 12px;
+    text-align: center; margin-bottom: 6px; color: #fff; background: #78716c;
+  }
+  #verdict.pass { background: #15803d; }
+  #verdict.slow { background: #b45309; }
+  #verdict.fail { background: #b91c1c; }
+  #headline { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; margin-bottom: 14px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid rgba(128,128,128,.3); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; opacity: .6; }
+  td.n { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .good { color: #15803d; } .warn { color: #b45309; } .bad { color: #b91c1c; }
+  .invalid { opacity: .55; font-style: italic; }
+  button {
+    font-size: 19px; font-weight: 600; padding: 14px 20px; width: 100%; border-radius: 10px;
+    border: 0; background: #5c2d8a; color: #fff; margin-bottom: 14px;
+  }
+  button:disabled { opacity: .5; }
+  #env { font-size: 13px; opacity: .75; margin-bottom: 14px; }
+  #env div { padding: 2px 0; }
+  #log { font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; opacity: .7; max-height: 34vh; overflow-y: auto; }
+  .note { font-size: 12px; opacity: .6; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>Inkwave · whisper probe · iPhone 12</h1>
+<div id="verdict">READY</div>
+<div id="headline">Tap Run. Takes a few minutes — keep the screen awake.</div>
+<button id="run">Run the probe</button>
+<div id="env"></div>
+<table id="results">
+  <thead><tr><th>Config</th><th>Load</th><th>First line</th><th>RTF</th><th>Bytes</th></tr></thead>
+  <tbody></tbody>
+</table>
+<div class="note" id="limits"></div>
+<div id="log"></div>
+
+<script type="module">
+// ─── The configs. Each runs in its OWN document (see the header). ────────────
+const CONFIGS = [
+  { id: 'tiny-1',  model: 'Xenova/whisper-tiny.en', threads: 1, label: 'tiny · 1 thread' },
+  { id: 'tiny-n',  model: 'Xenova/whisper-tiny.en', threads: 0, label: 'tiny · threaded' },
+  { id: 'base-1',  model: 'Xenova/whisper-base.en', threads: 1, label: 'base · 1 thread' },
+  { id: 'base-n',  model: 'Xenova/whisper-base.en', threads: 0, label: 'base · threaded' },
+]
+const STORE = 'iw:whisperProbe:results'
+const CRUMB = 'iw:whisperProbe:running'
+const SAMPLE_RATE = 16000
+const CHUNK_SEC = 5   // the live case: one chunk of lesson audio → one line on the panel
+
+const $ = (id) => document.getElementById(id)
+const log = (s) => { $('log').textContent += s + '\n'; $('log').scrollTop = 1e9 }
+
+const results = () => { try { return JSON.parse(localStorage.getItem(STORE) || '{}') } catch { return {} } }
+const save = (r) => localStorage.setItem(STORE, JSON.stringify(r))
+
+// ─── Environment, PROBED at runtime ──────────────────────────────────────────
+// crossOriginIsolated is READ, never inferred from the URL or assumed from a header we think we
+// set. A header that didn't apply looks exactly like one that did until you ask.
+const isolated = globalThis.crossOriginIsolated === true
+const hasSAB = typeof SharedArrayBuffer !== 'undefined'
+const cores = navigator.hardwareConcurrency || 0
+const hasWebGPU = 'gpu' in navigator
+
+$('env').innerHTML = [
+  `<div><b>crossOriginIsolated:</b> ${isolated ? '✅ true' : '❌ false — threaded runs are IMPOSSIBLE here'}</div>`,
+  `<div><b>SharedArrayBuffer:</b> ${hasSAB ? '✅ present' : '❌ absent'}</div>`,
+  `<div><b>hardwareConcurrency:</b> ${cores || 'unknown'}</div>`,
+  `<div><b>WebGPU:</b> ${hasWebGPU ? '✅ present (NOT used by this probe — WASM only)' : '— absent'}</div>`,
+  `<div><b>UA:</b> ${navigator.userAgent}</div>`,
+].join('')
+
+$('limits').textContent =
+  'Measures transformers.js Whisper (ONNX/WASM), NOT whisper.cpp/ggml — if we ship whisper.cpp these ' +
+  'numbers do not transfer. Sample is a clean studio clip (JFK, public domain, 11s): a real lesson ' +
+  'room is harder, so these are a LOWER BOUND. Peak memory is not measurable on iOS Safari — a run ' +
+  'that dies is reported as DIED, which is what an OOM looks like here.'
+
+// ─── The OOM detector ────────────────────────────────────────────────────────
+// iOS kills the tab on OOM; there is no event and no memory API. A breadcrumb written BEFORE the run
+// and cleared AFTER it is the only honest instrument: if it survives, the run did not.
+const crumb = localStorage.getItem(CRUMB)
+if (crumb) {
+  const r = results()
+  r[crumb] = { died: true }
+  save(r)
+  localStorage.removeItem(CRUMB)
+  log(`⚠️  previous run "${crumb}" never finished — recorded as DIED (this is what an iOS OOM looks like)`)
+}
+
+// ─── Audio ───────────────────────────────────────────────────────────────────
+async function loadSample(seconds) {
+  const buf = await (await fetch('./probe/sample.wav')).arrayBuffer()
+  // Decode the WAV by hand: OfflineAudioContext would resample to the device rate, and Whisper
+  // wants exactly 16kHz mono. The file IS 16kHz mono PCM16, so read it directly and there is no
+  // resampler in the measurement to argue about.
+  const view = new DataView(buf)
+  let off = 12, dataOff = 0, dataLen = 0
+  while (off < view.byteLength - 8) {
+    const id = String.fromCharCode(view.getUint8(off), view.getUint8(off+1), view.getUint8(off+2), view.getUint8(off+3))
+    const size = view.getUint32(off + 4, true)
+    if (id === 'data') { dataOff = off + 8; dataLen = size; break }
+    off += 8 + size + (size % 2)
+  }
+  if (!dataOff) throw new Error('no data chunk in sample.wav')
+  const n = Math.min(dataLen / 2, Math.floor(seconds * SAMPLE_RATE))
+  const out = new Float32Array(n)
+  for (let i = 0; i < n; i++) out[i] = view.getInt16(dataOff + i * 2, true) / 32768
+  return out
+}
+
+// ─── One config, in this document ────────────────────────────────────────────
+async function runConfig(cfg) {
+  const t = (m) => log(`   ${m}`)
+  const { env, pipeline } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0')
+
+  env.allowLocalModels = false
+  env.backends.onnx.wasm.proxy = false
+  // Set BEFORE any pipeline exists — after that it is silently ignored (the trap in the header).
+  env.backends.onnx.wasm.numThreads = cfg.threads === 0 ? (cores || 4) : 1
+  t(`numThreads requested: ${env.backends.onnx.wasm.numThreads}`)
+
+  let bytes = 0
+  const seen = new Set()
+  const onProgress = (p) => {
+    if (p.status === 'progress' && p.total && !seen.has(p.file)) { seen.add(p.file); bytes += p.total }
+  }
+
+  const tLoad = performance.now()
+  const asr = await pipeline('automatic-speech-recognition', cfg.model, {
+    device: 'wasm',            // explicit: never let it silently pick WebGPU and flatter the number
+    dtype: 'q8',
+    progress_callback: onProgress,
+  })
+  const loadMs = Math.round(performance.now() - tLoad)
+  t(`loaded in ${loadMs}ms, ~${(bytes / 1e6).toFixed(1)}MB`)
+
+  const chunk = await loadSample(CHUNK_SEC)
+  // Warm-up is deliberately NOT done: the first chunk of a real lesson is a real first chunk, and
+  // the student is waiting for it. Measuring the second one would flatter the thing being decided.
+  const t0 = performance.now()
+  const out = await asr(chunk)
+  const firstMs = Math.round(performance.now() - t0)
+  const rtf = firstMs / (CHUNK_SEC * 1000)
+  t(`first line in ${firstMs}ms (RTF ${rtf.toFixed(2)}) → "${(out.text || '').trim().slice(0, 60)}"`)
+
+  return { loadMs, firstMs, rtf, bytes, text: (out.text || '').trim() }
+}
+
+// ─── The runner: one config per document, reloading between ──────────────────
+async function drive() {
+  const params = new URLSearchParams(location.search)
+  const current = params.get('cfg')
+  if (!current) return
+
+  const cfg = CONFIGS.find((c) => c.id === current)
+  if (!cfg) return
+
+  // A threaded config without isolation is NOT a measurement — ORT would fall back to one thread
+  // and the number would sit under a "threaded" heading telling a lie.
+  if (cfg.threads === 0 && !(isolated && hasSAB)) {
+    const r = results()
+    r[cfg.id] = { invalid: 'no crossOriginIsolated ⇒ no SharedArrayBuffer ⇒ ORT runs 1 thread' }
+    save(r)
+    log(`⏭  ${cfg.label}: SKIPPED — not isolated, a "threaded" number here would be fiction`)
+    return next(cfg)
+  }
+
+  $('run').disabled = true
+  $('headline').textContent = `Running ${cfg.label}…`
+  log(`▶  ${cfg.label}`)
+  localStorage.setItem(CRUMB, cfg.id)
+  try {
+    const res = await runConfig(cfg)
+    const r = results(); r[cfg.id] = res; save(r)
+  } catch (e) {
+    const r = results(); r[cfg.id] = { error: String(e && e.message || e) }; save(r)
+    log(`✗  ${cfg.label}: ${e}`)
+  }
+  localStorage.removeItem(CRUMB)
+  next(cfg)
+}
+
+function next(cfg) {
+  const i = CONFIGS.indexOf(cfg)
+  const n = CONFIGS[i + 1]
+  // A fresh document per config — the only way numThreads is honoured (see the header).
+  location.search = n ? `?cfg=${n.id}` : '?done=1'
+}
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+function render() {
+  const r = results()
+  const tb = $('results').querySelector('tbody')
+  tb.innerHTML = ''
+  let best = null
+  for (const c of CONFIGS) {
+    const v = r[c.id]
+    const tr = document.createElement('tr')
+    if (!v) {
+      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="invalid">not run</td>`
+    } else if (v.invalid) {
+      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="invalid">N/A — ${v.invalid}</td>`
+    } else if (v.died) {
+      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="bad"><b>DIED</b> — ran out of memory</td>`
+    } else if (v.error) {
+      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="bad">error: ${v.error}</td>`
+    } else {
+      const cls = v.rtf < 0.5 ? 'good' : v.rtf < 1 ? 'warn' : 'bad'
+      tr.innerHTML =
+        `<td>${c.label}</td><td class="n">${(v.loadMs / 1000).toFixed(1)}s</td>` +
+        `<td class="n ${cls}">${v.firstMs}ms</td><td class="n ${cls}">${v.rtf.toFixed(2)}×</td>` +
+        `<td class="n">${(v.bytes / 1e6).toFixed(0)}MB</td>`
+      if (!best || v.rtf < best.rtf) best = { ...v, label: c.label }
+    }
+    tb.appendChild(tr)
+  }
+
+  const done = new URLSearchParams(location.search).has('done')
+  if (!done) return
+  const V = $('verdict'), H = $('headline')
+  const anyDied = CONFIGS.some((c) => r[c.id]?.died)
+  if (!best) {
+    V.className = 'fail'; V.textContent = 'FAIL'
+    H.textContent = anyDied ? 'Every config died or errored.' : 'Nothing produced a number.'
+  } else if (best.rtf < 0.5) {
+    V.className = 'pass'; V.textContent = 'PASS'
+    H.textContent = `${best.label} — ${best.firstMs}ms per 5s chunk (${best.rtf.toFixed(2)}× realtime). Live transcription keeps up.`
+  } else if (best.rtf < 1) {
+    V.className = 'slow'; V.textContent = 'SLOW'
+    H.textContent = `Best is ${best.label} at ${best.rtf.toFixed(2)}× realtime — keeps up, but with no headroom on a clean clip. A real room is harder.`
+  } else {
+    V.className = 'fail'; V.textContent = 'FAIL'
+    H.textContent = `Best is ${best.label} at ${best.rtf.toFixed(2)}× realtime — slower than the audio. The panel falls behind and never catches up.`
+  }
+}
+
+$('run').onclick = () => { localStorage.removeItem(STORE); location.search = `?cfg=${CONFIGS[0].id}` }
+render()
+drive()
+</script>
+</body>
+</html>
