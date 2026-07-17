@@ -257,6 +257,75 @@ describe('blockEligibility — a mark the engine cannot model DEFERS the block',
   })
 })
 
+// ── A RUN IN A FACE THE STRUT DOES NOT SET DEFERS (2026-07-17) ─────────────────────────────────
+// A line box spans from the highest inline-box top to the lowest bottom over the STRUT (the block
+// element's own font) and every run on the line, each centring its own (ascent + descent) in its own
+// line-height. So a run whose baseline sits differently from the strut's makes the DOM's line TALLER
+// than `ratio × size`, while the wrap — and every check derived from it — stays perfect.
+// MEASURED in the real editor (strut = EB Garamond 18px φ, scripts/textrender-probe/strutrule.mjs),
+// line gap vs the model's 29.109375: EB Garamond / bold / italic +0 · Crimson Pro +1 · Spectral +1 ·
+// Atkinson +1 · Bitter +1 · Carlito +1 · Cormorant +1 · Gelasio +1 · **IM Fell DW Pica +2** (the
+// app's own identity serif is the worst case). At ~44 lines/page that is ~1.5 lines of drift per
+// page — it made `mark textStyle:fontFamily` diverge Δ+76 at the FIRST break while claiming full
+// reliability.
+// NOT CORRECTABLE FROM CANVAS: the correction needs each face's ascent/descent, and the only metrics
+// canvas exposes (fontBoundingBoxAscent/Descent) are ROUNDED TO WHOLE PIXELS — EB Garamond and
+// JetBrains Mono both report 18/5 though they are different faces. Fed those, the formula mispredicts
+// 6 of 16 measured cases by 0.5px per line: ~22px over one page, enough to move a break. A height we
+// cannot compute is one we do not invent.
+describe('blockEligibility — a run off the STRUT\'s face DEFERS the block', () => {
+  const STRUT = "'EB Garamond', Georgia, serif"
+  const OTHER = "'Crimson Pro', 'Times New Roman', serif"
+  const run = (over: Partial<InlineRun> = {}): InlineRun =>
+    ({ text: 'hello world ', fontFamily: STRUT, fontSizePx: 18, fontWeight: 400, italic: false, ...over })
+  const para = (runs: InlineRun[], baseFontFamily?: string): ArithBlock =>
+    ({ type: 'paragraph', runs, baseFontPx: 18, baseFontFamily, marginTopPx: 0, marginBottomPx: 9, firstLineLeadingPx: 0 })
+
+  it('a run in the strut\'s own family is eligible (the control — the rule must not refuse everything)', () => {
+    expect(blockEligibility(para([run()], STRUT)).eligible).toBe(true)
+  })
+
+  it('a run in ANOTHER family refuses the block, and NAMES the family', () => {
+    const e = blockEligibility(para([run({ fontFamily: OTHER })], STRUT))
+    expect(e.eligible).toBe(false)
+    expect(e.reason).toBe('mixed-family:Crimson Pro')
+  })
+
+  it('ONE marked run among plain ones is enough — the line it lands on is the one that grows', () => {
+    const e = blockEligibility(para([run(), run({ fontFamily: OTHER }), run()], STRUT))
+    expect(e.eligible).toBe(false)
+    expect(e.reason).toContain('mixed-family')
+  })
+
+  it('BOLD and ITALIC of the strut\'s own family stay eligible — measured +0px, and they must not defer', () => {
+    expect(blockEligibility(para([run({ fontWeight: 700 })], STRUT)).eligible).toBe(true)
+    expect(blockEligibility(para([run({ italic: true })], STRUT)).eligible).toBe(true)
+  })
+
+  it('atoms and hard breaks are not text runs and never trip it', () => {
+    // An atom carries no family of its own to compare (runsOfParagraph gives both of these the
+    // DEFAULT stack); what matters is that the rule reads neither as a text run off the strut.
+    const atom: InlineRun = { text: '', fontFamily: OTHER, fontSizePx: 18, fontWeight: 400, italic: false, atomic: true, box: { advanceWidth: 40, lineHeightDemand: 29 } }
+    const br: InlineRun = { text: '\n', fontFamily: OTHER, fontSizePx: 18, fontWeight: 400, italic: false }
+    expect(blockEligibility(para([run(), atom, br], STRUT)).eligible).toBe(true)
+  })
+
+  // THE OPT-IN. arithMeasure's live-editor path builds ArithBlocks WITHOUT a strut family; omitting
+  // the field must leave this engine byte-identical to its behaviour before the rule existed, or a
+  // renderer fix silently changes the editor's own pagination.
+  it('OMITTING baseFontFamily disables the rule entirely (existing callers unchanged)', () => {
+    expect(blockEligibility(para([run({ fontFamily: OTHER })])).eligible).toBe(true)
+  })
+
+  // THE KNOWN-NEGATIVE: same runs, only the strut differs — so the rule is proved to discriminate
+  // rather than to be a constant that happens to read the way the assertions want.
+  it('DISCRIMINATES: identical runs, one strut agrees and the other does not', () => {
+    const runs = [run({ fontFamily: OTHER })]
+    expect(blockEligibility(para(runs, OTHER)).eligible).toBe(true)
+    expect(blockEligibility(para(runs, STRUT)).eligible).toBe(false)
+  })
+})
+
 describe('unmodelledMark — which marks the engine claims to handle', () => {
   const mk = (names: string[]): PMNode =>
     ({ text: 'x', marks: names.map((n) => ({ type: { name: n } })) } as unknown as PMNode)
