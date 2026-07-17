@@ -123,9 +123,37 @@ async function readJson<T>(
 // break the caller (the 2026-07-10 Firefox-private picker report). Document persistence
 // (saveDocument below) deliberately KEEPS throwing — autosave failures must stay loud.
 
-/** Read a small app-level JSON file from the OPFS root (e.g. recent-folder choices). */
+/**
+ * Read a small app-level JSON file from the OPFS root (e.g. recent-folder choices).
+ *
+ * ⚠ CONVENIENCE STATE ONLY — this collapses "I could not read it" into "it isn't there", which is
+ * the 2026-07-15 defect, accepted HERE and only here because the answer feeds a cache or a picker
+ * list: the cost of being wrong is a re-fetch, never a lost row. **If a failure could reach a
+ * WRITE, this is the wrong function** — use `readAppJsonStrict`. The ledger used to read through
+ * here, and that is exactly how a transient read turned into a destroyed month (see below).
+ */
 export async function readAppJson<T>(name: string): Promise<T | null> {
   try { return await readJson<T>(await getRoot(), name) } catch { return null }
+}
+
+/**
+ * Read a small app-level JSON file that is NOT convenience state — the writer's own records.
+ *
+ * The OPPOSITE contract to `readAppJson`, deliberately, and named so the difference is visible at
+ * the call site: returns null ONLY when the file genuinely does not exist, and THROWS on any other
+ * failure. `getRoot()` is inside the throw path on purpose — in a private window it rejects, and
+ * "storage is unavailable" is emphatically not "you have no sessions this month".
+ *
+ * WHY IT EXISTS (auditor, 2026-07-17): `loadLedger` read through `readAppJson`, so one transient
+ * OPFS failure answered "you have no rows". Its callers are read-modify-WRITE — `flushMonth` then
+ * wrote the buffered rows ALONE over the month (its own comment: "Union first, always — never
+ * write `rows` alone"), and `saveReflection` wrote a 0-row ledger, so saving a reflection could
+ * erase the month it belonged to. No race required; a single failed read did it. The repo had
+ * already SEEN this and fixed the instance, not the class: `email/testOpfsShim.ts` records "the
+ * ledger read as merely EMPTY" and repaired the shim.
+ */
+export async function readAppJsonStrict<T>(name: string): Promise<T | null> {
+  return readJson<T>(await getRoot(), name)
 }
 
 /** Write a small app-level JSON file to the OPFS root. Best-effort — never throws. */

@@ -10,7 +10,7 @@
 // target's current rows and UNIONS first. A write can only ever grow the ledger.
 
 import { v4 as uuidv4 } from 'uuid'
-import { readAppJson, writeAppJson } from '../storage/opfs'
+import { readAppJsonStrict, writeAppJson } from '../storage/opfs'
 import { stampBundle } from '../provenance/ots'
 import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, mergeReflections } from './ledger'
 import { buildPostHocRow, cleanText, localMonthOf, type PostHocEntry } from './sessionLogic'
@@ -26,10 +26,37 @@ function isLedger(v: unknown): v is MonthLedger {
   return !!l && l.v === 1 && typeof l.month === 'string' && Array.isArray(l.rows)
 }
 
-/** Read a month's ledger from the writer's storage. Missing/corrupt → an empty ledger (never throws). */
+/**
+ * ⚠ THROWS on a failed read — and that is the whole point (auditor, 2026-07-17).
+ *
+ * This used to read through `readAppJson`, which answers `null` to BOTH "no ledger yet" and "the
+ * disk just failed". Every caller below is a read-modify-WRITE, so the lie was destructive:
+ * `flushMonth` unions against `stored.rows` and would write the buffered rows ALONE over a real
+ * month; `saveReflection` would write a 0-row ledger, so saving a reflection erased the sessions it
+ * was about. One transient failure, no race. The 2026-07-15 shape, in the ledger's local store.
+ *
+ * THE FIX IS MOSTLY DELETION, because the recovery was already written and simply unreachable:
+ * every writer here runs inside `.then(...).catch(...)`, and those catches already do the right
+ * thing — `flushMonth` puts the rows back for the next flush ("A failed write must not lose the
+ * rows"), the others decline to write and warn. They were built for a failure the read swallowed
+ * before they could ever see it. Making the read honest is what turns them on.
+ *
+ * An ABSENT file still returns an empty ledger: that is a real answer (a first-ever month), and it
+ * is the one case where writing cannot lose anything.
+ *
+ * Do not "fix" a noisy console by wrapping this in `.catch(() => emptyLedger(month))` — that is the
+ * bug again in eleven characters, it typechecks, and `ledgerStore.readfail.test.ts` will go red.
+ */
 export async function loadLedger(month: string): Promise<MonthLedger> {
-  const raw = await readAppJson<MonthLedger>(fileFor(month))
-  if (!isLedger(raw)) return emptyLedger(month)
+  const raw = await readAppJsonStrict<MonthLedger>(fileFor(month))
+  // ONLY a genuinely missing file is an absence. This is the sole branch that licenses a write.
+  if (raw === null) return emptyLedger(month)
+  // Present but unrecognised (a future schema, a foreign file under our name) — NOT an absence.
+  // `parseRemoteLedger` has always called this an error for the REMOTE copy; the LOCAL copy read it
+  // as empty and overwrote it. That asymmetry — the far copy guarded, the near one not — is the
+  // 2026-07-15 bug's own signature (snapshots grow-only, `current.json` blind). An older build must
+  // refuse a newer ledger, not flatten it.
+  if (!isLedger(raw)) throw new Error(`ledger ${fileFor(month)} has an unrecognised shape — refusing to overwrite it`)
   return {
     v: 1, month,
     rows: raw.rows.filter((r) => r && r.session_id),
