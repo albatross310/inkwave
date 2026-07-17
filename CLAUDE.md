@@ -1178,8 +1178,8 @@ nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3
 
 ## Productivity layer — P1a-viz: aggregates + graphs (2026-07-17, `feat/prod-graphs`)
 
-The read half of the productivity layer (build-spec §A3.3/§A8, the private Productivity-Email spec —
-read it, never copy it into the repo). `src/productivity/`: ~~`ledger.ts` (the §A3.2 row CONTRACT)~~ — **that mirror is RETIRED; the schema
+The read half of the productivity layer (build-spec §A3.3/§A8 — the spec is COMMITTED at
+`docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md`; Peter approved 2026-07-17). `src/productivity/`: ~~`ledger.ts` (the §A3.2 row CONTRACT)~~ — **that mirror is RETIRED; the schema
 is `types.ts` and `ledger.ts` is now the real attested per-month ledger (see the integration section
 below)**, `aggregate.ts` (pure day/week/month rollups, now sharing one module with the ledger's
 window builder), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
@@ -1440,7 +1440,7 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
 
 ## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
 
-Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (Peter's private doc — read it, never copy it
+Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
 off to the provider to send. Inkwave never sends mail and never touches an inbox.
 
@@ -1617,7 +1617,7 @@ arrayBuffer, and its absence surfaced only as an empty ledger.
 
 ## Music module — photo score + reflow + markup (2026-07-17, `src/music/`, flag `?music`, DEFAULT OFF)
 
-Spec: `Inkwave-Music-Module-BuildSpec-v0.1.md` §A1/§A2 (Peter's private doc — read it, never copy it
+Spec: `Inkwave-Music-Module-BuildSpec-v0.1.md` §A1/§A2 (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). Build order step 1 of 7. `/music` is the surface; the studio, the detector, pdf.js and
 all canvas work sit behind a lazy import (`MusicStudio` 29kB/11.3kB gzip; route stub 2.3kB) so OFF
 costs nothing BY CONSTRUCTION — the editor bundle is untouched.
@@ -2850,3 +2850,25 @@ Match the surrounding code: terse purposeful comments explaining *why*, section 
 (`// ─── … ───`), single-responsibility modules. Calm visual identity: ink/purple
 (`#5c2d8a` / `#9b5ccc`), parchment/cream, serif body (IM Fell DW Pica / EB Garamond).
 Commit messages: `feat:` / `fix:` / `refactor:` prefixes, present tense.
+
+## The specs are IN THE REPO (2026-07-17) — `docs/specs/`
+
+Peter: *"yep commit the specs. **Academic integrity not an issue there.**"* The old rule — *"read it, never
+copy it into the repo"* — was MY over-caution and it was wrong. His thesis-integrity boundary is about
+**his prose**, never his product decisions.
+
+**Why it mattered:** an auditor measured **900 § citations across 60 distinct anchors, and ZERO of the 60
+were defined in the repo** — 30 appear nowhere at all. Every rule this codebase enforces was traceable
+only to another agent's comment about it. A lane went to verify its own load-bearing quote and couldn't;
+when it finally read the source, the **full line was stronger than the ellipsis it had been quoting**.
+The most-cited authority was the least verifiable artifact.
+
+- `docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md` — the productivity + email layers
+- `docs/specs/Inkwave-Music-Module-BuildSpec-v0.1.md` — the music module
+
+**§ citations are now checkable. Check them.** And note the versions (`v0.2`, `v0.1`): of 900 citations
+exactly ONE named a version. Cite the version when the anchor is load-bearing, or a spec edit re-points
+your comment silently and nothing detects it.
+
+**Peter's prose — thesis, essays, real documents — still NEVER enters the repo, fixtures, logs, or
+screenshots.** That boundary is unchanged and absolute. This was never that.
