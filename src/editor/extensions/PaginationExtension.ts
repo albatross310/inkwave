@@ -29,6 +29,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, getParaSpacingEm, MARGIN_BOTTOM } from '../pageSettings'
 import { pageBoxPx } from '../pageModel'
+import { isLineRect, sameLine } from '../lineRects'
 import { forceCanonicalContext } from '../canonicalMeasure'
 import { buildArithMeasure, arithBlockLayout } from '../arithMeasure'
 import { makeCanvasMeasure, canvasShapingMatchesEditor, type Measure } from '../arithmeticLayout'
@@ -257,7 +258,13 @@ export function keepLineRects(rects: DOMRect[], s: number): DOMRect[] {
   const out: DOMRect[] = []
   let lastTop = -1e9
   for (const r of rects) {
-    if (r.width < 1 || r.height < 1 || r.height > 80 * s || r.top - lastTop <= 3) continue
+    // `isLineRect`/`sameLine` (lineRects.ts) — the SAME predicate the /snapshot pane's collector
+    // applies, now in ONE place instead of two. A byte-identical restatement of
+    // `w < 1 || h < 1 || h > 80 * s || top - lastTop <= 3`: the pane carried its own copy of that
+    // line, its own `80` and its own `3`, under a comment claiming they were "the same 80px filter
+    // as the editor" — and the container-box bug then had to be found and fixed twice, once per
+    // copy. breaks.prove.mjs is the live control on this restatement: [2403,4856,7205,9476,…].
+    if (!isLineRect(r, s) || sameLine(r.top, lastTop)) continue
     lastTop = r.top
     out.push(r)
   }

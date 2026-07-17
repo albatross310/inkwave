@@ -30,6 +30,7 @@
 import { probePerf } from './perflog'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from './pageSettings'
 import { pageBoxPx } from './pageModel'
+import { isLineRect, sameLine } from './lineRects'
 import { forceCanonicalContext } from './canonicalMeasure'
 import { gappedPagesEnabled } from './pageView'
 import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from './pageGap'
@@ -95,21 +96,143 @@ function collectBlocks(root: HTMLElement): Block[] {
 // resolution; top (root-relative) drives the page math.
 interface StaticLine { top: number; absTop: number; blockIdx: number }
 
+// ─── A CONTAINER'S ELEMENT CHILDREN ARE NOT LINES (2026-07-17 — the pane's copy of the fix) ─────
+//
+// `range.selectNodeContents(el).getClientRects()` returns, per CSSOM-View, the border box of every
+// element the range SELECTS whose parent it does not — i.e. the range container's own element
+// children — and not only text-line rects. For a `<p>` that is harmless: its element children are
+// inline mark spans whose per-line fragment boxes coincide with the text rects and are eaten by the
+// 3px dedup. For a `<ul>` or a `<blockquote>` it is not.
+//
+// MEASURED in the REAL /snapshot pane (scripts/textrender-probe/panerect.mjs, DocView's own DOM,
+// 8-chapter fixture) against the DOM's own TEXT-NODE rects — a text node has no border box, so its
+// rects are lines by construction and cannot contain a container's box:
+//   529 shipped lines / 529 true lines — the COUNT TELESCOPES, which is why every count- and
+//   height-based check in this file passed — and **24 of them sit exactly 3.000px too high**:
+//   UL 8 · OL 8 · BLOCKQUOTE 8. The first `<ul>`'s raw rects, verbatim:
+//     relTop 0     h 58.219   ← the `<li>`'s BORDER BOX (a 2-line item), admitted as a line
+//     relTop 3     h 23       ← the item's OWN first text rect — DELETED by `top - lastTop <= 3`
+//     relTop 32.109 h 23      ← the item's second line
+//     relTop 62.718 h 87.328  ← a 3-line item's box: over the 80px cut, dropped — right by luck
+// The 3.000px is the half-leading: (lineHeight 29.109 − text 23) / 2 = 3.05. It is not a list
+// constant, which is why `<blockquote>`'s `<p>` box does the identical thing.
+//
+// THE 80px CUT WAS THE ONLY THING STANDING HERE, AND IT IS A COINCIDENCE, NOT A RULE. It admits a
+// container box of ≤80px and drops one over it, so whether this pane paginates correctly depended
+// on how many lines an item happened to wrap to: a 2-line `<li>` (58.219px) broke it, a 3-line one
+// (87.328px) did not. The old comment on that line — "skip tall boxes (nested element border-boxes,
+// not text lines)" — NAMED this exact class while the constant let the short half of it through.
+//
+// THE FIX, and why it is not a copy of the editor's. PaginationExtension asks ProseMirror
+// (`child.isTextblock`) what a textblock is. This pane HAS NO PM TREE — DocView and FullDiffView
+// render plain DOM — so it asks the other authority that is actually present: the LAYOUT ENGINE,
+// via `getComputedStyle().display`. Never a tag name and never a CSS class: either would silently
+// miss the next container the schema grows, which is the whole reason this bug reached three copies.
+// An element with no block-level element child IS a textblock and takes the byte-identical single
+// `selectNodeContents` call it always did — which is what keeps every prose document's breaks
+// bit-for-bit unchanged (breaks.prove.mjs: [2403,4856,7205,9476,…], identical).
+
+// Inline-level per the layout engine's own answer. `contents` and `none` generate no box of their
+// own, so they are not containers whose box could be mistaken for a line either.
+const INLINE_DISPLAYS = new Set(['inline', 'inline-block', 'inline-flex', 'inline-grid', 'inline-table', 'contents', 'none', 'ruby', 'ruby-text', 'ruby-base'])
+// An EMPTY computed display means the element has no resolved box at all (an unrendered subtree —
+// and jsdom, whose UA stylesheet sets no `display` on `<em>`/`<span>`/`<code>`). Treat it as
+// inline: something with no box cannot be a container whose box is mistaken for a line, and the
+// only alternative — descending into it — would fabricate structure that the engine says is absent.
+// This is also what lets the jsdom gate below exercise the REAL predicate: without it, a test that
+// passed there would be asserting a recursion production never performs.
+const isBlockLevel = (el: Element): boolean => {
+  const d = getComputedStyle(el).display
+  return !!d && !INLINE_DISPLAYS.has(d)
+}
+
+/** THE LIVE KNOWN-NEGATIVE (the `__iwOpenGuard` / `__iwTabDocRule` / `__iwReadGuard` contract).
+ *  `window.__iwStaticLineRule = 'range'` restores the PRE-FIX rule verbatim — ONE
+ *  `selectNodeContents` over the whole block, container boxes and all.
+ *
+ *  IT EXISTS BECAUSE THIS BUG IS INVISIBLE TO A RATE. The artifact is a 3.000px error on a ~29px
+ *  line grid, so it moves a page break only when a boundary happens to land within 3px of the
+ *  overflow cliff. MEASURED: with the bug fully restored, `halvesbisect` on a 6k-word / 25-break
+ *  lists fixture still prints "OFFSETS IDENTICAL" — not one break moves. A probe that waited for a
+ *  break to move would therefore certify this bug as fixed while it sat there, which is exactly
+ *  what the pre-existing `+ lists` row did for as long as it existed.
+ *  So `panerect.mjs` measures the ARTIFACT instead — every line's top, against the DOM's own
+ *  text-node rects — and this seam is what lets it prove, against the REAL production path and in
+ *  ONE build, that it can still SEE the bug. A negative that cannot fire is not a negative. */
+const preFixRangeRule = (): boolean =>
+  typeof window !== 'undefined' &&
+  (window as unknown as { __iwStaticLineRule?: string }).__iwStaticLineRule === 'range'
+
+/** The rects that ARE lines for `el`: one range per textblock, recursing through containers.
+ *  EXPORTED AS A TEST SEAM — see staticPagination.container.test.ts. */
+export function staticLineRects(el: HTMLElement, out: DOMRect[] = []): DOMRect[] {
+  if (preFixRangeRule()) { // the known-negative: the pre-fix rule, verbatim
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    out.push(...Array.from(r.getClientRects()))
+    return out
+  }
+  // Fast path AND the correctness-critical one: no element children at all ⇒ nothing but text and
+  // therefore nothing to descend into. Skips a getComputedStyle call for the overwhelming case.
+  const kids = Array.from(el.childNodes)
+  const hasBlockKid = el.children.length > 0 && Array.from(el.children).some(isBlockLevel)
+  if (!hasBlockKid) {
+    // THE TEXTBLOCK — byte-identical to the pre-fix code: ONE range over the whole element.
+    const r = document.createRange()
+    r.selectNodeContents(el)
+    const rects = Array.from(r.getClientRects())
+    if (rects.length) out.push(...rects)
+    else {
+      // An EMPTY textblock (a blank list item, a blank paragraph inside a blockquote) has no text
+      // rect but still occupies a line. Without this it would vanish from the line list and every
+      // break below it would shift — a missing block is not a smaller block.
+      const b = el.getBoundingClientRect()
+      if (b.height >= 1) out.push(b)
+    }
+    return out
+  }
+  // A CONTAINER. Descend into its block-level children; take any run of inline/text children
+  // between them as its own range. The run case cannot arise in DocView (which wraps every block
+  // node in an element) — but "it cannot arise today" is exactly the reasoning that let this rule
+  // rot in three copies, and an anonymous block box has no element to ask, so its lines would
+  // simply be LOST rather than mismeasured.
+  let run: Node[] = []
+  const flushRun = () => {
+    if (!run.length) return
+    const r = document.createRange()
+    r.setStartBefore(run[0])
+    r.setEndAfter(run[run.length - 1])
+    out.push(...Array.from(r.getClientRects()))
+    run = []
+  }
+  for (const n of kids) {
+    if (n.nodeType === 1 && isBlockLevel(n as Element)) {
+      flushRun()
+      staticLineRects(n as HTMLElement, out)
+    } else run.push(n)
+  }
+  flushRun()
+  return out
+}
+
 function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
   const rootTop = root.getBoundingClientRect().top
   const all: Array<{ absTop: number; blockIdx: number }> = []
   blocks.forEach((b, bi) => {
     for (const el of b.els) {
       let rects: DOMRect[] = []
-      try { const r = document.createRange(); r.selectNodeContents(el); rects = Array.from(r.getClientRects()) } catch { /* ignore */ }
+      try { rects = staticLineRects(el) } catch { /* ignore */ }
       if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
         const r = el.getBoundingClientRect()
         if (r.height >= 1) all.push({ absTop: r.top, blockIdx: bi })
         continue
       }
       for (const r of rects) {
-        // skip tall boxes (nested element border-boxes, not text lines) — same 80px filter as the editor
-        if (r.width < 1 || r.height < 1 || r.height > 80) continue
+        // `isLineRect` — the EDITOR's own predicate (lineRects.ts), not a copy of it. The tall-box
+        // cut stays and still means what it always did; it simply no longer has to stand in for a
+        // container rule it was never able to express (it admitted a 58.219px `<li>` box and
+        // dropped an 87.328px one — the same bug, decided by how many lines an item wrapped to).
+        if (!isLineRect(r)) continue
         all.push({ absTop: r.top, blockIdx: bi })
       }
     }
@@ -118,9 +241,31 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
   const lines: StaticLine[] = []
   let lastTop = -1e9
   for (const l of all) {
-    if (l.absTop - lastTop <= 3) continue // dedupe fragments on the same line
+    if (sameLine(l.absTop, lastTop)) continue // dedupe fragments on the same line (the editor's rule)
     lastTop = l.absTop
     lines.push({ top: l.absTop - rootTop, absTop: l.absTop, blockIdx: l.blockIdx })
+  }
+  // PROBE SEAM (the `window.__iwPerf` contract in perflog.ts, one step up): a harness assigns
+  // `window.__iwStaticLinesHook = (root, lines) => {…}` and this hands it the line list this pane
+  // ACTUALLY measured. A single property check otherwise, zero cost.
+  //
+  // WHY THE LINE LIST AND NOT THE BREAKS. The breaks are already in the DOM as `.inkwave-page-gap`
+  // widgets and any probe can walk them — that is what halvesbisect does. But a 3.000px error in
+  // this list only reaches those widgets when a boundary lands within 3px of the overflow cliff, so
+  // reading the gaps measures a coincidence rather than the rule. MEASURED: with the pre-fix rule
+  // restored, halvesbisect moves NOT ONE of 25 breaks on a lists fixture.
+  //
+  // WHY A CALLBACK AND NOT AN ARRAY. It is invoked HERE, still inside the FORCED CANONICAL WINDOW
+  // (paper width, side margins, zoom 1 — see the caller). These tops mean nothing in the pane's
+  // live layout, which wraps at a different width and may carry a fit-capped CSS zoom: comparing
+  // canonical tops against live rects is trap #8, "the verdict is unreadable off-canonical". A
+  // buffer would hand the probe numbers it could only read after the context was restored. A hook
+  // lets the probe's own comparison run in the coordinate system the numbers belong to — and keeps
+  // the probe's logic in the probe.
+  if (typeof window !== 'undefined') {
+    const hook = (window as unknown as { __iwStaticLinesHook?: (r: HTMLElement, l: StaticLine[]) => void }).__iwStaticLinesHook
+    // A probe must never be able to break the pane it measures.
+    if (typeof hook === 'function') { try { hook(root, lines.map((l) => ({ ...l }))) } catch { /* ignore */ } }
   }
   return lines
 }

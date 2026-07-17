@@ -22,12 +22,26 @@ PROBE_PORT=4231 node scripts/textrender-probe/crossdevice.prove.mjs  # canonical
 PROBE_PORT=4231 node scripts/textrender-probe/pagcheck.prove.mjs     # scoped measure == full measure
 EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run against an UNFIXED build:
                                                                      # the probe must REPRODUCE the bug
+
+# The /snapshot PANE's container rule (2026-07-17) — the same bug, the pane's own copy. Runs the
+# KNOWN-NEGATIVE and the shipped rule in ONE pass and requires the negative to FIRE first:
+PROBE_PORT=4231 node scripts/textrender-probe/panerect.mjs
 ```
 
 ## Files
 
 - `probe.mjs` — the perf matrix: {2k,10k,40k words} × {build cold/warm, paint text/rects, map strip}
   + BASELINE A (real SVG-foreignObject bake) + BASELINE B (real WebP encode→decode→blit) + memory.
+- `panerect.mjs` — **`rectdiag.mjs` pointed at the /snapshot pane**, and the gate for
+  `staticPagination.staticLineRects`. Reads the line list PRODUCTION published
+  (`window.__iwStaticLinesHook`) — not a replica of the rule — and compares it against the DOM's own
+  TEXT-NODE rects, which are lines by construction because a text node has no border box. It fires
+  the LIVE KNOWN-NEGATIVE (`window.__iwStaticLineRule = 'range'` ⇒ the pre-fix rule) FIRST and
+  refuses to read the verdict until the negative reproduces the drift.
+  Two design points, each of which a more obvious probe would have got wrong:
+  · **The hook, not a buffer.** It fires inside the pane's FORCED CANONICAL window; those tops mean
+    nothing in the live layout (trap #8), so the truth pass must run in the same coordinate system.
+  · **The artifact, not the rate.** See trap #18 — reading gap offsets cannot see this bug at all.
 - `breaks.prove.mjs` — **the load-bearing one.** Compares the arithmetic model's break positions
   against the LIVE editor's own gap widgets. This is what caught the orphan-snap drift.
 - `fidelity.mjs` — screenshot diff vs the real ProseMirror, with an offset sweep + ink denominator.
@@ -160,3 +174,33 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
     · `strutrule.mjs` — per-family DOM line gap inside the real `.ProseMirror` vs the model's strut,
       scored against the candidate eligibility rule, counting UNSAFE (rule says fine, DOM grows)
       separately from over-defer. The evidence for the mixed-family defer.
+18. **TWO INSTRUMENTS, BOTH BLIND, BOTH GREEN — the pane's copy of the container-box bug
+    (2026-07-17).** The handover said `staticPagination.collectStaticLines` had the identical bug
+    but "cannot bite today". Probed: **the bug is real and it is LIVE** — `/snapshot`'s first
+    snapshot (`ops === null`) renders the rich DocView, so a first version with a list or a
+    blockquote hits it now. Measured in the real pane (`panerect.mjs`): **24 lines sit exactly
+    3.000px too high — UL 8, OL 8, BLOCKQUOTE 8** — while the line COUNT is 529 = 529.
+    Two separate instruments said it was fine, each for its own reason, and either alone would have
+    closed the question:
+    · **The fixture could not fail.** `halvesbisect`'s `+ lists` row used `sentence(9)` — ONE-LINE
+      items. A container box is admitted only under the 80px cut, so only a ~2-line item (58.219px)
+      reproduces it; a 1-line box is 29.109px and a 3-line box is 87.328px (dropped). `listWords` is
+      now a fixture parameter and there is a 2-LINE row. Trap #15, again.
+    · **THE RATE CANNOT SEE IT EVEN THEN, and this is the sharper half.** With the bug FULLY
+      RESTORED via `__iwStaticLineRule='range'`, the 2-line row still prints `OFFSETS IDENTICAL`:
+      not one of 25 breaks moves. A 3.000px error on a ~29px line grid only reaches a gap widget
+      where a boundary lands within 3px of the overflow cliff. **Any probe that reads gap offsets is
+      structurally incapable of gating this rule, at any fixture.** Measure the ARTIFACT — every
+      line's top — not the outcome. Trap #9, one level harder: it is not that the event is rare, it
+      is that the instrument answers a different question.
+    · **And the 80px cut was never a rule.** It admits a ≤80px container box and drops a bigger one,
+      so correctness depended on how many lines an item happened to WRAP TO. Its own comment —
+      "skip tall boxes (nested element border-boxes, not text lines)" — named the exact class it was
+      letting half of through. A constant standing in for a rule is a coincidence with a comment.
+19. **A REPLICA CANNOT PROVE A FIX (2026-07-17).** `panerect.mjs` first re-implemented
+    `collectStaticLines` verbatim in the page. That is enough to prove the SHIPPED RULE WRONG — and
+    it did — but it can never prove a fix, because a replica agrees with whatever it replicates.
+    Two copies of one rule, each self-consistent, is the disease this whole harness exists for. The
+    pane now publishes its measured line list (`window.__iwStaticLinesHook`) and the probe reads
+    THAT. If a probe's verdict would survive the production code being deleted, it is not measuring
+    production.
