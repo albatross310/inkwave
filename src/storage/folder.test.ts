@@ -6,7 +6,7 @@
 // never save to a new file — ever. "The guard that makes saving impossible" is exactly what a
 // safety change ships with when only its safe direction is tested. Both directions are pinned here.
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { readFileArchive } from './folder'
 
 // A minimal File System Access handle. `getFile` is the only member the function touches.

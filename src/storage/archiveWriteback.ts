@@ -89,3 +89,27 @@ export function planWriteback(read: ArchiveRead, local: Snapshot[]): WritebackPl
   // read is a fact we established, unlike an empty guess.
   return { write: true, snapshots: mergeSnapshots(read.snapshots, local) }
 }
+
+// ─── The write PRECONDITION (auditor Finding E, 2026-07-17) ──────────────────────────────────────
+// READ-MERGE-WRITE still has a gap between the read and the write. `planWriteback` above decides
+// WHETHER to write; this decides WHAT THE WRITE ASSUMED, so the server can refuse it if that
+// assumption went stale in flight. Two devices interleaving:
+//
+//     A reads {R} · B reads {R} · A writes {R ∪ localA} · B writes {R ∪ localB}   ← A's rows GONE
+//
+// Both merges are honest and rows are still lost, because each merged against a version that moved.
+// A violated precondition is a FAILED WRITE — which every caller here already handles correctly:
+// nothing is lost, and the next sync re-reads, re-merges and writes the true union. Self-healing,
+// which is why no 'conflict' outcome is needed for correctness.
+//
+// It lives in STORAGE, not in the ledger: "what must still be true for my write to land" is a
+// property of writing to a remote, and the ledger is merely its first caller.
+export type WritePrecondition =
+  /** We read a 404: the file must NOT exist. Graph: `@microsoft.graph.conflictBehavior=fail`. */
+  | { expect: 'absent' }
+  /** We read this exact version: it must be unchanged. Graph: `If-Match: <etag>`. */
+  | { expect: 'unchanged'; etag: string }
+  /** The provider gave no version to pin. Honest, narrow, and the PRE-EXISTING posture — never a
+   *  default. Only a read that genuinely returned no etag may produce it. The 'absent' case never
+   *  degrades to this, which is precisely Finding E. */
+  | { expect: 'any' }

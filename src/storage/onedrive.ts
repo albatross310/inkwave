@@ -13,7 +13,7 @@ import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
 import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
-import { planWriteback, type ArchiveRead } from './archiveWriteback'
+import { planWriteback, type ArchiveRead, type WritePrecondition } from './archiveWriteback'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
@@ -171,14 +171,43 @@ function contentUrl(name: string): string {
     : `${GRAPH}/me/drive/root:/${encodeURIComponent(name)}:/content`
 }
 
+/**
+ * Translate a write precondition into Graph's wire form (Finding E).
+ *
+ * PURE and exported so it can be tested without a Microsoft account — the DECISION is testable even
+ * where the SERVER's honouring of it is not. See the STATED-NOT-PROBED note on `putFile`.
+ *
+ * `conflictBehavior=fail` is a query parameter on a content PUT; `If-Match` is a header. The repo
+ * already uses conflictBehavior (the folder-create at the driveItem endpoint passes it in the BODY
+ * — a different Graph shape, so this is the same idea, not the same call).
+ */
+export function graphWriteOptions(pre: WritePrecondition): { query: string; headers: Record<string, string> } {
+  if (pre.expect === 'absent') return { query: '?@microsoft.graph.conflictBehavior=fail', headers: {} }
+  if (pre.expect === 'unchanged') return { query: '', headers: { 'If-Match': pre.etag } }
+  return { query: '', headers: {} } // no version to pin — the pre-existing, unguarded posture
+}
+
 // PUT the file into the chosen folder (or the OneDrive root). Returns the file's webUrl so the UI
 // can offer "open in OneDrive".
-async function putFile(token: string, name: string, content: string): Promise<string | null> {
-  const res = await fetch(contentUrl(name), {
+//
+// ⚠ STATED, NOT PROBED — and it FAILS SAFE, which is why it ships this way. Neither the query
+// parameter nor the If-Match header has been exercised against real Graph (that needs Peter's
+// account). If either is wrong the write is REFUSED, never mis-applied: a rejected upload is a
+// failed sync that retries, not a lost row. The failure direction is what makes an unprobed API
+// guess acceptable here — the same reasoning CLAUDE.md records for `Graph 404 ⇒ absent`. A wrong
+// guess costs a sync cycle; the bug it prevents costs the rows.
+async function putFile(token: string, name: string, content: string, pre: WritePrecondition): Promise<string | null> {
+  const { query, headers } = graphWriteOptions(pre)
+  const res = await fetch(contentUrl(name) + query, {
     method: 'PUT',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain', ...headers },
     body: content,
   })
+  // 409 (conflictBehavior=fail hit an existing file) and 412 (If-Match failed) are the precondition
+  // doing its job — a real remote we had not reconciled with. Loud, not silent, and never a write.
+  if (res.status === 409 || res.status === 412) {
+    throw new Error(`Graph precondition failed (${res.status}) — the remote moved; retrying next sync`)
+  }
   if (!res.ok) throw new Error(`Graph upload failed (${res.status})`)
   const data = await res.json().catch(() => ({} as { webUrl?: string }))
   return (data as { webUrl?: string }).webUrl ?? null
@@ -191,7 +220,9 @@ async function putFile(token: string, name: string, content: string): Promise<st
 // "I couldn't read it" as "there's nothing there" is precisely the 2026-07-15 blind overwrite.
 
 export type OneDriveReadResult =
-  | { status: 'ok'; text: string }
+  /** `etag` is the version read, for the write's precondition (Finding E). null when Graph sent
+   *  none — stated out loud rather than omitted, so the caller cannot silently write unguarded. */
+  | { status: 'ok'; text: string; etag: string | null }
   | { status: 'absent' }
   | { status: 'error'; reason: string }
 
@@ -229,19 +260,24 @@ export async function readOneDriveText(name: string): Promise<OneDriveReadResult
     const kind = mapGraphReadStatus(res.status)
     if (kind === 'absent') return { status: 'absent' }
     if (kind === 'error') return { status: 'error', reason: `Graph GET ${res.status}` }
-    return { status: 'ok', text: await res.text() }
+    return { status: 'ok', text: await res.text(), etag: res.headers.get('ETag') }
   } catch (e) {
     return { status: 'error', reason: `onedrive read: ${(e as Error)?.message ?? String(e)}` }
   }
 }
 
-/** Write a small file by name into the chosen folder. False on any failure (caller keeps local). */
-export async function writeOneDriveText(name: string, text: string): Promise<boolean> {
+/**
+ * Write a small file by name into the chosen folder, ONLY if `pre` still holds. False on any
+ * failure — including a violated precondition, which is a remote we had not reconciled with
+ * (Finding E). The caller keeps local and the next sync re-reads; nothing is lost either way.
+ * `pre` is REQUIRED: an optional precondition is one a caller forgets, silently.
+ */
+export async function writeOneDriveText(name: string, text: string, pre: WritePrecondition): Promise<boolean> {
   try {
     if (!CLIENT_ID) return false
     const token = await getSilentToken() // inside the try: same F13 hole as the reader had
     if (!token) return false
-    await putFile(token, name, text)
+    await putFile(token, name, text, pre)
     return true
   } catch {
     return false // the caller keeps local; nothing is lost
@@ -511,7 +547,11 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   }
   const bundle = buildExportBundle(doc, merged)
   try {
-    const webUrl = await putFile(token, studioName, composeTraceFile(bundle))
+    // { expect: 'any' } — the .studio keeps its PRE-EXISTING posture, stated rather than defaulted.
+    // Its cross-device race is mitigated differently (the metadata heartbeat + the once-per-session
+    // grow-only merge above), and pinning it is a separate change with its own proof. Finding E is
+    // scoped to the LEDGER, whose file is cheap enough to reconcile on every write.
+    const webUrl = await putFile(token, studioName, composeTraceFile(bundle), { expect: 'any' })
     recordOneDriveWrite(doc.id) // heartbeat baseline: metadata newer than this = another device
     setDocSource(doc.id, 'onedrive')
     void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget

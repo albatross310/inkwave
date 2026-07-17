@@ -12,7 +12,7 @@
 // that turns into a blind overwrite.
 
 import { oneDriveConfigured, readOneDriveText, writeOneDriveText } from '../storage/onedrive'
-import { parseRemoteLedger, syncLedgerMonth, type LedgerRemote, type RemoteRead } from './ledgerSync'
+import { parseRemoteLedger, syncLedgerMonth, type LedgerRemote, type RemoteRead, type WritePrecondition } from './ledgerSync'
 import type { MonthLedger } from './types'
 
 /** The month a ledger file name refers to — `inkwave-ledger-2026-07.json` → `2026-07`. */
@@ -26,10 +26,13 @@ export const oneDriveLedgerRemote: LedgerRemote = {
     const res = await readOneDriveText(file)
     if (res.status === 'absent') return { status: 'absent' }
     if (res.status === 'error') return { status: 'error', reason: res.reason }
-    return parseRemoteLedger(res.text, monthOfFile(file))
+    // Carry the VERSION we read through to the write's precondition (Finding E). parseRemoteLedger
+    // owns the body; the etag is transport, so it is attached here rather than parsed out of JSON.
+    const parsed = parseRemoteLedger(res.text, monthOfFile(file))
+    return parsed.status === 'ok' ? { ...parsed, etag: res.etag } : parsed
   },
-  async write(file: string, ledger: MonthLedger): Promise<boolean> {
-    return writeOneDriveText(file, JSON.stringify(ledger))
+  async write(file: string, ledger: MonthLedger, pre: WritePrecondition): Promise<boolean> {
+    return writeOneDriveText(file, JSON.stringify(ledger), pre)
   },
 }
 
