@@ -1,16 +1,34 @@
-// The per-keystroke cost of session capture — MEASURED, with a proven instrument.
+// THE PER-KEYSTROKE COST OF SESSION CAPTURE — asserted STRUCTURALLY, not by the clock.
 //
 // "Typing performance is sacred" (CLAUDE.md): a productivity tracker that makes typing worse is a
-// failed feature. This file exists so that claim is a number, and so anyone who later adds a doc
-// walk to the capture path finds out here rather than from Peter on a phone.
+// failed feature. This file exists so that claim is GUARDED, and so anyone who later adds a doc walk
+// to the capture path finds out here rather than from Peter on a phone.
 //
-// THE HOUSE DISEASE APPLIES TO BENCHMARKS TOO: a harness that cannot see a cost reports zero, and
-// "0.000ms" looks exactly like success. So every timing here is bracketed by a KNOWN-POSITIVE — the
-// same harness measuring a deliberate O(doc) walk — and the test asserts the harness CAN see that
-// cost before any verdict about the real path is trusted. The bounds are deliberately loose (they
-// must not flake on a busy shared box); they catch a CLASS change (O(steps) → O(doc)), not drift.
+// ─── WHY THERE ARE NO TIMING ASSERTIONS IN THE GATE ANY MORE (2026-07-17) ────────────────────
+// There were, and they were a FLAKE GENERATOR: `record() is O(steps)` passed here and FAILED in the
+// coordinator's gate, and the only difference was load — his box runs seven lanes. A timing
+// assertion fails when the box is busy and passes when it isn't, which teaches everyone to re-run
+// rather than read it. That is worse than no test: a red gate that is not a finding trains people to
+// ignore red gates. (It is the mirror of "a green gate is not a guard".)
+//
+// It is also the SAME failure I had already found and reported one lane over: the browser typing A/B
+// could not see its own known-positive through contention, and I declared it VOID rather than
+// publish its number. The lesson generalises — **a measurement whose verdict depends on who else is
+// running is not a guard, wherever it lives.** Probing it did not save the assertions either: under
+// 8 deliberately-busy cores this box still passed at ratio 4251×, i.e. I could not reproduce the
+// coordinator's failure ON DEMAND — which is exactly the property that makes a flake a flake.
+//
+// So the gate now asserts the STRUCTURE, which is decidable at any load, on any box, in ~10ms:
+// **a keystroke never reaches the document.** Capture can only reach it through `binding.getDoc()`,
+// so that call is the choke point, and counting it is an exact proxy for "no O(doc) work". The
+// numbers still exist — run them deliberately, on a quiet box:
+//
+//     IW_PERF=1 npx vitest run src/productivity/capture.perf.test.ts
+//
+// Last quiet-box reading: record 0.30µs/keystroke, flat 200→40k words, known-positive O(doc) walk
+// 1.97ms (6581×), disabled flag gate 0.07µs.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Fragment, Schema, Slice } from '@tiptap/pm/model'
 import { ReplaceStep } from '@tiptap/pm/transform'
 import type { Step } from '@tiptap/pm/transform'
@@ -35,96 +53,113 @@ function bigDoc(words: number): InkwaveDocument {
   } as InkwaveDocument
 }
 
-/** Median of a timed run — median, not mean: one GC pause must not become "the cost". */
-function timePerOp(iterations: number, fn: (i: number) => void): number {
-  const samples: number[] = []
-  const batch = 200
-  for (let b = 0; b < iterations / batch; b++) {
-    const t0 = performance.now()
-    for (let i = 0; i < batch; i++) fn(b * batch + i)
-    samples.push((performance.now() - t0) / batch)
-  }
-  samples.sort((a, b) => a - b)
-  return samples[Math.floor(samples.length / 2)]
+/** A capture whose every reach for the document is counted. */
+function countingCapture(doc: InkwaveDocument) {
+  let getDocCalls = 0
+  let now = 1_000_000
+  const cap = new SessionCapture({
+    clock: () => (now += 1), // 1ms per keystroke — fast typing, never an idle boundary
+    offsetMin: () => 600,
+    placeFn: () => undefined,
+    sink: () => { /* the write path is not on the keystroke path */ },
+  })
+  const bind = () => cap.bindDoc({ docId: doc.id, getDoc: () => { getDocCalls++; return doc } })
+  return { cap, bind, calls: () => getDocCalls, reset: () => { getDocCalls = 0 } }
 }
 
-describe('per-keystroke cost of session capture', () => {
-  const doc = bigDoc(13_000)
+describe('a keystroke never reaches the document', () => {
+  it('record() NEVER calls getDoc — 5,000 keystrokes, zero reaches', async () => {
+    const h = countingCapture(bigDoc(13_000))
+    await h.bind()
+    h.reset() // the baseline read at bind() is legitimate and counted separately below
 
-  function capture() {
-    let now = 1_000_000
-    const cap = new SessionCapture({
-      clock: () => (now += 1), // 1ms per keystroke — fast typing, never an idle boundary
-      offsetMin: () => 600,
-      placeFn: () => undefined,
-      sink: () => { /* the write path is not on the keystroke path */ },
-    })
-    return cap
+    for (let i = 0; i < 5_000; i++) h.cap.record([insertStep()])
+
+    // THE CLAIM, exactly. `getDoc` is the ONLY route from capture to the document, so zero calls
+    // means zero doc walks — no countWords, no pmToText, no getJSON — regardless of how busy the
+    // machine is. A future edit that "just checks the word count here" fails this line.
+    expect(h.calls()).toBe(0)
+    expect(h.cap.editEvents).toBe(5_000) // ...and it really did process them all
+  })
+
+  it('KNOWN-POSITIVE: closing DOES reach the document — so the counter can see a call', async () => {
+    // Without this, `toBe(0)` above would pass on a broken counter, an unbound capture, or a
+    // record() that silently did nothing. A negative that cannot fail is not a negative.
+    const h = countingCapture(bigDoc(200))
+    await h.bind()
+    h.cap.record([insertStep()])
+    h.reset()
+
+    await h.cap.close('manual')
+    expect(h.calls()).toBeGreaterThan(0)
+  })
+
+  it('the baseline is taken ONCE per document, at bind — not per keystroke', async () => {
+    // This is what makes `words_start` free: the count at the previous close IS the next session's
+    // start, so opening a session costs nothing. If bind ever became per-keystroke work, the whole
+    // design's justification would be gone while every test still passed.
+    const h = countingCapture(bigDoc(13_000))
+    await h.bind()
+    expect(h.calls()).toBe(1)
+
+    for (let i = 0; i < 1_000; i++) h.cap.record([insertStep()])
+    expect(h.calls()).toBe(1) // still one. The document was read once, ever.
+  })
+
+  it('record() allocates no timer per keystroke', async () => {
+    // The idle boundary is found by ONE low-frequency interval, never by a clearTimeout/setTimeout
+    // churn per input. Structural, and load-independent.
+    vi.useFakeTimers()
+    try {
+      const h = countingCapture(bigDoc(200))
+      await h.bind()
+      const before = vi.getTimerCount()
+      for (let i = 0; i < 500; i++) h.cap.record([insertStep()])
+      expect(vi.getTimerCount()).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the DISABLED path is the default, and short-circuits before any of this', () => {
+    expect(prodLedgerEnabled()).toBe(false)
+  })
+})
+
+// ─── The numbers. Deliberate, opt-in, quiet-box only. ────────────────────────
+// Not in the gate: see the header. `IW_PERF=1 npx vitest run src/productivity/capture.perf.test.ts`
+
+describe.skipIf(!process.env.IW_PERF)('MEASURED per-keystroke cost (IW_PERF=1)', () => {
+  /** Median of a timed run — median, not mean: one GC pause must not become "the cost". */
+  function timePerOp(iterations: number, fn: (i: number) => void): number {
+    const samples: number[] = []
+    const batch = 200
+    for (let b = 0; b < iterations / batch; b++) {
+      const t0 = performance.now()
+      for (let i = 0; i < batch; i++) fn(b * batch + i)
+      samples.push((performance.now() - t0) / batch)
+    }
+    samples.sort((a, b) => a - b)
+    return samples[Math.floor(samples.length / 2)]
   }
 
-  it('record() is O(steps) — and the harness PROVES it can see an O(doc) cost', async () => {
-    const cap = capture()
-    await cap.bindDoc({ docId: 'big', getDoc: () => doc })
+  it('reports record() against an O(doc) known-positive', async () => {
+    const doc = bigDoc(13_000)
+    const h = countingCapture(doc)
+    await h.bind()
+    timePerOp(2_000, () => h.cap.record([insertStep()])) // warm: never report the JIT
 
-    const ITER = 20_000
-    // WARM: never report the first pass — it measures JIT, not the code.
-    timePerOp(2_000, () => cap.record([insertStep()]))
-
-    const capturePerKeystroke = timePerOp(ITER, () => cap.record([insertStep()]))
-
-    // THE KNOWN-POSITIVE: the same harness, same loop, measuring what capture DOESN'T do — one
-    // whole-document word count per keystroke. This is the shape of the bug this design avoids
-    // (and exactly what a naive "count words each edit" implementation would cost).
-    const docWalkPerKeystroke = timePerOp(200, () => { countWords(doc.contentJson) })
-
-    // The instrument works: it resolves the O(doc) walk as a large, unmistakable cost. If this
-    // assertion fails, EVERY number in this file is unreadable and the verdict below is void.
-    expect(docWalkPerKeystroke).toBeGreaterThan(0.1)
+    const capture = timePerOp(20_000, () => h.cap.record([insertStep()]))
+    const docWalk = timePerOp(200, () => { countWords(doc.contentJson) })
 
     // eslint-disable-next-line no-console
     console.log(
-      `[ledger perf] capture.record: ${(capturePerKeystroke * 1000).toFixed(2)}µs/keystroke | ` +
-      `known-positive O(doc) walk: ${docWalkPerKeystroke.toFixed(2)}ms/keystroke | ` +
-      `ratio: ${(docWalkPerKeystroke / capturePerKeystroke).toFixed(0)}×`,
+      `[ledger perf] capture.record: ${(capture * 1000).toFixed(2)}µs/keystroke | ` +
+      `known-positive O(doc) walk: ${docWalk.toFixed(2)}ms | ratio: ${(docWalk / capture).toFixed(0)}×`,
     )
-
-    // THE VERDICT: capture must be in a different COST CLASS from a doc walk — orders of magnitude,
-    // not a few percent. A 50× floor is far below the measured ratio and far above any noise.
-    expect(docWalkPerKeystroke / capturePerKeystroke).toBeGreaterThan(50)
-    // And in absolute terms it must be a rounding error against a ~16ms frame.
-    expect(capturePerKeystroke).toBeLessThan(0.05)
-  })
-
-  it('the cost does NOT grow with document size — the O(doc) regression guard', async () => {
-    // If someone later walks the document in record(), this ratio blows up. It is the single
-    // assertion that would catch it.
-    const small = bigDoc(200)
-    const huge = bigDoc(40_000)
-
-    const measure = async (d: InkwaveDocument): Promise<number> => {
-      const cap = capture()
-      await cap.bindDoc({ docId: d.id, getDoc: () => d })
-      timePerOp(2_000, () => cap.record([insertStep()]))
-      return timePerOp(10_000, () => cap.record([insertStep()]))
-    }
-
-    const tSmall = await measure(small)
-    const tHuge = await measure(huge)
-    // eslint-disable-next-line no-console
-    console.log(`[ledger perf] 200 words: ${(tSmall * 1000).toFixed(2)}µs | 40k words: ${(tHuge * 1000).toFixed(2)}µs`)
-
-    // A 200× document must not cost meaningfully more per keystroke. Loose (timer noise at the µs
-    // scale is real), but a doc walk would be ~100×+, not 5×.
-    expect(tHuge).toBeLessThan(Math.max(tSmall * 5, 0.02))
-  })
-
-  it('the DISABLED path is a single cached boolean — the default-off cost', () => {
-    // The gate in onTransaction is `if (prodLedgerEnabled())`. It must not touch localStorage per
-    // keystroke, which is why the flag is cached in a module variable.
-    const t = timePerOp(20_000, () => { prodLedgerEnabled() })
-    // eslint-disable-next-line no-console
-    console.log(`[ledger perf] flag gate (default OFF): ${(t * 1000).toFixed(3)}µs/keystroke`)
-    expect(prodLedgerEnabled()).toBe(false) // default OFF — and the gate short-circuits everything
-    expect(t).toBeLessThan(0.005)
+    // A sanity floor only — the STRUCTURAL guard above is what protects the invariant. This exists
+    // so a run that measured nothing at all is visible rather than silently encouraging.
+    expect(docWalk).toBeGreaterThan(0)
+    expect(capture).toBeGreaterThan(0)
   })
 })
