@@ -12,7 +12,8 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
-import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { planWriteback, type ArchiveRead } from './archiveWriteback'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
@@ -446,6 +447,39 @@ export interface SyncResult { ok: boolean; webUrl: string | null }
  * Sync the single self-contained .trace.json to the chosen OneDrive folder using the existing session
  * (no UI). ok:false if not signed in / the scope isn't consented — call startOneDriveSignIn() first.
  */
+/**
+ * Read the remote .studio's snapshot archive, reporting WHAT HAPPENED.
+ *
+ * This is OneDrive's half of the write-back decision and the only half it owns: mapping Graph's
+ * failure surface into `ArchiveRead`. The safety rule itself lives in `planWriteback`, shared with
+ * every other provider — one rule, one place.
+ *
+ * `mapGraphReadStatus` is reused rather than re-derived: it is this file's own pure, tested
+ * absent-vs-error predicate (404 ⇒ absent; EVERYTHING else ⇒ error, fail-safe by design, so a Graph
+ * status we have never seen refuses the write instead of destroying the archive). The ledger path
+ * below has had that discipline since it was written; the .studio — the thesis — did not.
+ *
+ * A parse failure is an ERROR, not an absence: a truncated or garbled download tells us nothing
+ * about what the file holds, and "I could not decode it" must never license replacing it.
+ */
+async function readRemoteArchive(token: string, name: string): Promise<ArchiveRead> {
+  try {
+    const res = await fetch(contentUrl(name), { headers: { Authorization: `Bearer ${token}` } })
+    const kind = mapGraphReadStatus(res.status)
+    if (kind === 'absent') return { status: 'absent' } // no remote yet → a first upload is safe
+    if (kind === 'error') return { status: 'error', reason: `Graph GET ${res.status}` }
+    const text = await res.text()
+    // An empty body is an established emptiness (a placeholder the OneDrive desktop client created,
+    // or a previous upload that never landed) — nothing there to lose. Treating it as a parse ERROR
+    // would refuse every sync forever, since the merge gate only closes on a write. See folder.ts.
+    if (!text.trim()) return { status: 'absent' }
+    const remote = await parseTraceOffThread(text)
+    return { status: 'ok', snapshots: remote.snapshots ?? [] }
+  } catch (e) {
+    return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }
+  }
+}
+
 export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<SyncResult> {
   if (!CLIENT_ID) return { ok: false, webUrl: null }
   const token = await getSilentToken()
@@ -455,17 +489,25 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   const studioName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
   // GROW-ONLY: union the remote file's snapshots in before overwriting so a short local set can't
   // truncate history — but only ONCE per session (the per-sync GET+parse of a big file adds lag).
+  //
+  // THE READ MUST BE ABLE TO FAIL. This block used to be `if (res.ok) { merge }` wrapped in a
+  // `catch { /* no remote yet → write local as-is */ }` — so a 500, a 429 throttle, an expired
+  // token or a corrupt body all read as "there is nothing there" and the PUT below replaced the
+  // remote archive with the local set. That is the 2026-07-15 collapse (a failure wearing an
+  // absence's clothes) driving the 2026-07-05 truncation (a short local set over a long archive),
+  // in the live sync of Peter's thesis. `planWriteback` is the guard; only 404 means absent.
   let merged = snapshots
   const key = `onedrive:${doc.id}`
   if (needsWritebackMerge(key)) {
-    try {
-      const res = await fetch(contentUrl(studioName), { headers: { Authorization: `Bearer ${token}` } })
-      if (res.ok) {
-        const remote = await parseTraceOffThread(await res.text())
-        if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots)
-        markWritebackMerged(key)
-      }
-    } catch { /* no remote yet → write local as-is; retry the merge next sync */ }
+    const plan = planWriteback(await readRemoteArchive(token, studioName), snapshots)
+    if (!plan.write) {
+      // A refusal is the correct, boring outcome: nothing synced, nothing lost, and the throttled
+      // sync retries (the gate stays OPEN because we never established what the remote holds).
+      console.info(`[inkwave] OneDrive sync skipped: ${plan.reason}`)
+      return { ok: false, webUrl: null }
+    }
+    merged = plan.snapshots
+    markWritebackMerged(key)
   }
   const bundle = buildExportBundle(doc, merged)
   try {
