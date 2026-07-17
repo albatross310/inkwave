@@ -1085,7 +1085,11 @@ function ScrubDebugOverlay({ presenter, dbg, docId, snapCount }: {
       <div style={{ fontWeight: 800, margin: '4px 0 2px', color: '#ffd479' }}>store</div>
       {row('snapThumbs flag', on ? 'ON' : 'OFF', !on)}
       {row('OPFS thumbs', st.loaded ? `${st.entries} · ${(st.bytes / 1e6).toFixed(1)}MB` : 'index loading…', st.entries === 0)}
-      {row('mem bitmaps', `${info.entries} · ${(info.bytes / 1e6).toFixed(1)}MB`, info.entries === 0)}
+      {/* SHOW THE CAP NEXT TO THE NUMBER. `62.9MB and climbing` read as a runaway and cost a
+          whole investigation — it is DESKTOP_BUDGET exactly: 60 MiB is 62.9 decimal MB, and this
+          row prints bytes/1e6. Filling to the cap and holding there is the eviction rule WORKING.
+          Rendered as used/cap so "at the cap" is legible, and only flagged when genuinely OVER. */}
+      {row('mem bitmaps', `${info.entries} · ${(info.bytes / 1e6).toFixed(1)}/${(info.budget / 1e6).toFixed(1)}MB`, info.bytes > info.budget)}
     </div>
   )
 }

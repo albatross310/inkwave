@@ -122,3 +122,40 @@ describe('summariseRecord', () => {
     expect(s.perSec).toBeCloseTo(4) // 2 presents / 0.5s
   })
 })
+
+// ── The eviction rule's SILENT SHORTFALL (2026-07-17) ────────────────────────────────────────
+// Peter's `mem bitmaps 163 · 62.9MB and climbing` was read as a leak for a whole round. It is
+// DESKTOP_BUDGET exactly (60 MiB = 62.9 decimal MB) — the cache filling to the cap and HOLDING.
+// The real defect is that a genuine breach would look identical: `planEviction` walks both passes
+// and then FALLS THROUGH with freed < over, returning a plan that silently under-delivers, and
+// `enforceBudget` additionally refuses to evict anything still attached. These pin the shape of
+// that shortfall so the caller's named `scrub.mem.overBudget` probe can never be quietly dropped.
+describe('planEviction — the shortfall must be a fact the caller can see, not a surprise', () => {
+  const item = (key: string, bytes: number, lastUsed: number, prot = false) => ({ key, bytes, lastUsed, protected: prot })
+
+  it('under-delivers SILENTLY when nothing can cover `over` — the caller must re-check actual bytes', () => {
+    // 3 items x 100 = 300 freed, but 10_000 is asked for. No throw, no signal — just a short plan.
+    const plan = planEviction([item('a', 100, 1), item('b', 100, 2), item('c', 100, 3)], 10_000)
+    const freed = plan.length * 100
+    expect(plan).toHaveLength(3)
+    expect(freed).toBeLessThan(10_000) // the budget stays broken and the plan says nothing about it
+  })
+
+  it('plans PROTECTED entries only after unprotected ones are exhausted', () => {
+    const plan = planEviction([item('prot', 100, 1, true), item('free', 100, 2)], 150)
+    expect(plan[0]).toBe('free') // unprotected first, despite being NEWER
+    expect(plan).toContain('prot') // then protected, to try to reach `over`
+  })
+
+  it('counts bytes from entries the caller may REFUSE to evict (attached) — so the plan over-promises', () => {
+    // enforceBudget skips `attached` entries. planEviction cannot know that and counts them freed.
+    // This is exactly why the caller measures ACTUAL bytes afterwards rather than trusting `freed`.
+    const plan = planEviction([item('attached', 5000, 1, true)], 4000)
+    expect(plan).toEqual(['attached']) // promises 5000 freed…
+    // …but if the caller skips it, 0 comes back and the budget is still broken.
+  })
+
+  it('evicts nothing when already under budget', () => {
+    expect(planEviction([item('a', 100, 1)], 0)).toEqual([])
+  })
+})

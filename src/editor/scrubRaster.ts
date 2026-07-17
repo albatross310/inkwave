@@ -607,6 +607,7 @@ export interface ScrubPaneDebug {
 }
 export interface ScrubDebugInfo {
   entries: number; bytes: number
+  budget: number          // the cap `bytes` is held under — see the overlay's "mem bitmaps" row
   shows: number           // show() calls this burst
   panes: ScrubPaneDebug[]
 }
@@ -712,7 +713,11 @@ const PANE_NAME: ScrubPaneKind[] = ['doc', 'diff', 'map']
 const SRC_NAME: Array<ScrubRecEntry['src']> = ['hit', 'thumb', 'near', 'none']
 
 export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => string | null; getDocId?: () => string | null }): ScrubPresenter {
-  const budget = opts.touch ? TOUCH_BUDGET : DESKTOP_BUDGET
+  // A harness may shrink the budget to force a genuine SHORTFALL — the `scrub.mem.overBudget`
+  // probe below never fires in a healthy tree, and a guard that has never been shown to fire is
+  // decoration. See probe-mem.mjs's POSITIVE cell.
+  const budgetOverride = (typeof window !== 'undefined' && (window as unknown as { __iwMemBudget?: number }).__iwMemBudget) || 0
+  const budget = budgetOverride > 0 ? budgetOverride : (opts.touch ? TOUCH_BUDGET : DESKTOP_BUDGET)
   const dprOf = () => {
     const d = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
     const cap = (typeof window !== 'undefined' && (window as unknown as { __iwRasterDprCap?: number }).__iwRasterDprCap) || RASTER_DPR_CAP
@@ -920,7 +925,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
           canvasW: s.canvas.width, canvasH: s.canvas.height,
         })
       }
-      return { entries: entries.size, bytes, shows: dbgShows, panes }
+      return { entries: entries.size, bytes, budget, shows: dbgShows, panes }
     },
 
     dispose() {
@@ -1199,10 +1204,20 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       protected: (attached.get(e.kind) === e) ||
         (ti >= 0 && Math.abs(order.indexOf(e.snapId) - ti) <= 3),
     }))
+    const before = bytes
     for (const key of planEviction(items, bytes - budget)) {
       const e = entries.get(key)
       if (e && attached.get(e.kind) !== e) evictOne(e)
     }
+    probePerf('scrub.evict', (before - bytes) / 1e6)
+    // NAME THE BOUND. `planEviction` walks both passes and then falls through with `freed < over`
+    // and says NOTHING, and this loop additionally REFUSES to evict anything still attached — so
+    // the plan's own `freed` can promise bytes that never come back. A budget that is silently
+    // exceeded reads exactly like a budget that holds. Measured on ACTUAL bytes after the sweep,
+    // never on the plan's promise: if we could not get under, that is the eviction rule failing
+    // and it must say so by name (the doc/diff bitmaps may retire to the plaintext renderer, but
+    // the MAP keeps its bake permanently — this rule is the long-lived one).
+    if (bytes > budget) probePerf('scrub.mem.overBudget', (bytes - budget) / 1e6)
   }
 
   if (typeof window !== 'undefined') {
