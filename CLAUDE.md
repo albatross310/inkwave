@@ -2014,6 +2014,22 @@ minting a route (`/music` did not survive: Peter, "it should all be in panels").
 inside `LessonNote.anchor` where §1 always said it belonged. The lane's own prediction held verbatim
 ("when the contract gains its variant this is the ONE function that changes" — `session.ts` `#keep`).
 
+**`vercel.json` TAKES NO COMMENTS — a `"//"` key there takes the whole site down (2026-07-17).**
+JSON has no comments, and Vercel validates `vercel.json` against a strict schema **server-side, before
+the build starts**: any unknown property is a hard reject (`headers[0] should NOT have additional
+property "//"`). A `"//"` explaining the probe's COOP/COEP sat in `headers[0]` and failed **every
+deploy for hours** while master stayed green and shipped nothing.
+
+The reason this took hours to find is the lesson: **`pnpm build` never reads `vercel.json`**, so a
+clean-clone reproduction of the build passes with the site utterly broken. I tested the one artifact
+that could not fail and reported the code healthy — a local build is not a deploy, and a green build
+is not a green deploy. Before blaming the platform (or the bill), validate the config the platform
+actually parses: `python3 -c "import json;json.load(open('vercel.json'))"` proves only syntax, NOT the
+schema — the `//` key is *valid JSON*. Only Vercel's schema rejects it, so **the error text from a
+failed deploy is the primary evidence and there is no local substitute.** Get it first; do not infer a
+cause from whatever anomaly you can measure locally (I blamed a deploy-count cap Peter's Pro plan does
+not even have). Rationale for anything in `vercel.json` goes HERE, in CLAUDE.md, where it costs nothing.
+
 **THE WHISPER PROBE — `public/whisper-probe.html`, a STANDALONE static document (2026-07-17).**
 Peter ruled "we'll ship whisper", which settles WHETHER; the probe decides WHICH MODEL and THREADED
 OR NOT on his iPhone 12. It is deliberately NOT a route: COOP/COEP are per-DOCUMENT and this is an
@@ -2589,6 +2605,26 @@ write shim, so metadata can say a PDF exists with no local bytes).
   neighbours.
 
 ## Working model (how these sessions run)
+
+**KEEP AT LEAST 5 AGENTS RUNNING (Peter, 2026-07-17 — a standing floor, not a target).** Whenever
+there is work left on the specs, at least five lanes should be in flight. Peter has asked for this
+repeatedly across sessions ("I want six working all the time", "agents running low", "where did all
+the agents go?") because the bottleneck is his attention, not the machine: a lane that finishes while
+he sleeps costs nothing, and an idle lane costs a night. Treat dropping below five as a bug in the
+session, and refill without being asked.
+
+Two exemptions, and only two:
+- **No work left** that doesn't need him. An idle lane is correct when the remaining items are all
+  blocked on his decisions or his devices.
+- **Blocked on critical feedback from Peter** — a lane waiting on a decision only he can make (a
+  product call, a key, a device test) should not be replaced by a lane inventing an answer. Say it's
+  blocked and on what; do not spawn filler to hit the number.
+
+The floor is five *doing real work*, not five processes. Never spawn a lane to satisfy the count.
+
+**Capacity, learned the hard way:** 13 concurrent lanes OOM'd WSL2 at its 7GB default. `.wslconfig`
+now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the working band is
+5–6. If lanes start dying, suspect memory before suspecting the code.
 
 **NAME THE FEATURE, EVERY TIME (Peter, 2026-07-17 — a standing reporting rule).** He runs many lanes
 at once and intends to keep parallelising aggressively, so a report that says "the model diverges" or

@@ -9,7 +9,6 @@
   ],
   "headers": [
     {
-      "//": "The whisper probe needs SharedArrayBuffer (ORT's WASM threads), which requires cross-origin isolation. COOP/COEP are PER-DOCUMENT and this app is an SPA where a route is not a document — so the probe is a real standalone document under public/ and only IT is isolated. Isolating the app itself would be a much larger decision (it constrains every future cross-origin subresource). NOTE: this grants NO microphone — a latency benchmark does not need one, so `microphone=()` below stays untouched.",
       "source": "/whisper-probe.html",
       "headers": [
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
