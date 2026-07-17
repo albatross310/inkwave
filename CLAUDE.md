@@ -2362,6 +2362,14 @@ as the water slows.
     editor, because that guarantee only holds if the module loaded. The 1200ms reveal cap becomes
     8200ms only when the flag is ON — it would otherwise fire straight through a ~2s loop and undo
     the delay on every load. Flag OFF ⇒ the gate is byte-for-byte the old one.
+  · **PROVED IN A REAL BROWSER, 9/9 — `loopgate.prove.mjs`** (chromium, own ephemeral port): FLAG OFF
+    is the control and nothing changes (reveal 1257ms, the white NEVER appears, no gate event); FLAG
+    ON reaches master on `desk 1920x1080css @dsf1 (dpi 1.00x)` — the rung DETECTED, Peter asked
+    nothing — the gate reads **"one full loop played (wrapped at 1.96s)"** (a REAL wrap, not the cap),
+    the white clears at 1197ms and is GONE at reveal, and the reveal moves **1257ms → 3236ms**: the
+    delay is a measured ~2s, not a hope. It VOIDS rather than passes when the video never becomes
+    master — a bail releases both gates BY DESIGN, so those checks would otherwise go green for
+    exactly the wrong reason.
 - **THE SHORT LINES ARE *NOT* OUT OF SYNC WITH THE WAVES BY CLOCK — the hypothesis is REFUTED, by
   measurement (2026-07-17, `markskew.prove.mjs`).** Peter: "the little short lines… often appear out
   of sync with the waves", both engines. The standing hypothesis was that WAAPI and CSS animations
