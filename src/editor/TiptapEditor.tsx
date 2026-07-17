@@ -21,10 +21,10 @@ import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import {
-  SlotId, BarLayerId, BAR_HANDOFF_MS,
+  SlotId, BarLayerId, BAR_HANDOFF_MS, ROW_SLOTS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
   slotIndexForDigit, hotkeyHintFor,
-  readToolbarConfig, resolveToolbarRow, mayPersistConfig,
+  readToolbarConfig, resolveToolbarRow, mayPersistConfig, mergeRowIntoConfig,
 } from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -457,7 +457,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!mayPersistConfig(toolbarRead)) return
     const updated = {
       ...docRef.current,
-      toolbar: { v: 1 as const, row: newSlots },
+      // mergeRowIntoConfig, not the raw row: `newSlots` can only name buttons THIS build draws, so
+      // writing it verbatim would delete a flagged-off slot from the author's document on the first
+      // drag — the loss carryToolbarConfig refuses at both ends, walking in through the middle.
+      toolbar: mergeRowIntoConfig(docRef.current.toolbar, newSlots),
       updatedAt: new Date().toISOString(),
     }
     docRef.current = updated
@@ -3016,6 +3019,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 while a drag is live so the lifted one passes OVER its neighbours. */}
             {showMainRow && (
             <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'gap-0.5 px-2 py-0.5'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
+              // PHONE AND DESKTOP ARE ONE EXPERIENCE, SO THEY ARE ONE NUMBER (Peter, 2026-07-17:
+              // "there's only 6 slots not 7 which I think is a good number because it fits well on
+              // phone… we want to keep the phone and desktop experience continuous"). The phone
+              // circle size is (100vw − 45px) / (the row + ▲ + ⋮), and index.css used to divide by a
+              // literal 8 — a SECOND copy of ROW_SLOTS, in another language, that no lane would think
+              // to update. The whole justification for six is that it fits the phone, so the phone's
+              // fit must be derived from six rather than agree with it by coincidence.
+              style={{ ['--iw-row-slots' as string]: String(ROW_SLOTS) }}
               onClickCapture={(e) => {
                 // A click synthesised from a just-finished touch-hold drag must not activate the
                 // dropped button (or close the bars) — swallow it here in the capture phase.
