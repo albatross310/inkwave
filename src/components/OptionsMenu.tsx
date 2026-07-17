@@ -5,7 +5,7 @@
 
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listSnapshotMeta } from '../provenance/snapshots'
+import { readSnapshotArchive } from '../provenance/snapshots'
 import { useNavigate } from 'react-router'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMeta, InkwaveDocument } from '../types/document'
@@ -30,8 +30,8 @@ const INK = '#5c2d8a'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
 const PANEL_GAP = 14
 
-type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '' }
+type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov' | 'provunread'
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '', provunread: '' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -242,8 +242,14 @@ export function OptionsMenu({
           try {
             const docId = tabDocId() // THIS tab's document — never whatever another tab last opened
             if (!docId) return
-            const snaps = await listSnapshotMeta(docId)
-            const last = snaps[snaps.length - 1]
+            // 'noprov' says "No snaps or provenance info yet recorded" — TRUE for a new document and
+            // a LIE for a failed read, which is the whole distinction this lane exists for. The
+            // archive read used to answer `[]` for both and this menu told the writer his thesis had
+            // no history. Now the two answers are different, so the two messages are different.
+            // (`catch` alone would be honest but silent: a menu item that does nothing at all.)
+            const r = await readSnapshotArchive(docId)
+            if (r.kind === 'error') { console.error('[inkwave] snapshots menu:', r.error); setModal('provunread'); return }
+            const last = r.snapshots[r.snapshots.length - 1]
             if (last) window.open(`/snapshot?doc=${encodeURIComponent(docId)}&snap=${encodeURIComponent(last.id)}`, '_blank', 'noopener')
             else setModal('noprov')
           } catch { /* no snapshots yet */ }
@@ -349,6 +355,13 @@ export function OptionsMenu({
             <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
               style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#5c2d8a44' }}>
               No snaps or provenance info yet recorded.
+              <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
+            </div>
+          )}
+          {modal === 'provunread' && (
+            <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
+              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#5c2d8a44' }}>
+              Couldn't read this document's history just now — it hasn't been lost. Try again in a moment.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}

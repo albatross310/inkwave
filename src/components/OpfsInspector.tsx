@@ -31,7 +31,7 @@ import { listMeta } from '../storage/indexeddb'
 import { heldDocIds, switchTabToDocument, tabDocId, DOC_LOCK_PREFIX } from '../storage/tabDoc'
 import { listSnapshotMeta } from '../provenance/snapshots'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
-import { listSnapshots } from '../provenance/snapshots'
+import { readSnapshotArchive } from '../provenance/snapshots'
 import type { InkwaveDocument } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -147,7 +147,10 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
       try {
         const metas = await listSnapshotMeta(r.id)
         if (metas.length) setSnapCounts(c => ({ ...c, [r.id]: metas.length }))
-      } catch { /* no snapshots for this doc — fine */ }
+        // No snapshots ⇒ no count shown; an unreadable archive ⇒ also no count, and that is the
+        // right degrade for a per-row decoration in a listing whose job is to show what EXISTS.
+        // The count's absence never licenses a write, and `download` above refuses outright.
+      } catch { /* no snapshots, or the archive would not read — either way, no count */ }
     }
   }, [])
 
@@ -185,8 +188,22 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
     if (!row.doc) return
     setBusy(row.id); setError(null)
     try {
-      const snaps = await listSnapshots(row.id).catch(() => [])
-      const bundle = await buildExportBundleWithPdfs(row.doc, snaps)
+      // NO `.catch(() => [])` HERE — that silently produced a .studio with an EMPTY history from a
+      // failed archive read, which is the one thing the comment above forbids ("a FIRST-CLASS file
+      // (snapshots, receipts…)"), and it did it in the recovery tool, to a writer whose whole reason
+      // for being here is making sure nothing is lost. A bundle that quietly drops the provenance is
+      // worse than no bundle: he would keep it as his proof. Refuse and say so — `downloadRaw` above
+      // is the escape hatch that still gets his bytes out, so refusing costs him nothing.
+      const archive = await readSnapshotArchive(row.id)
+      if (archive.kind === 'error') {
+        setError(
+          `Could not read the history for "${row.title}", so it wasn't downloaded — a copy without ` +
+          `its history would look like proof and wouldn't be. Nothing was changed; try again, or use ` +
+          `"raw" to save the underlying file.`,
+        )
+        return
+      }
+      const bundle = await buildExportBundleWithPdfs(row.doc, archive.snapshots)
       downloadBundle(bundle, bundleFilename(row.doc))
     } catch (err) {
       setError(`Could not download "${row.title}": ${String((err as Error)?.message ?? err)}`)

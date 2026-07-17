@@ -13,6 +13,8 @@ import { normaliseHeaders } from '../email/headers'
 import { stampBundle, upgradeProof } from './ots'
 import { gunzipJsonOffThread } from '../workers/parseClient'
 import { writeOpfsFile } from '../storage/opfsWrite'
+import { isNotFound } from '../storage/notFound'
+import { StorageReadError } from '../storage/opfs'
 
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
@@ -41,7 +43,39 @@ function isGzip(buf: ArrayBuffer): boolean {
   return v[0] === 0x1f && v[1] === 0x8b
 }
 
+// THE ARCHIVE READ. `[]` MEANS "THIS DOCUMENT HAS NO HISTORY" AND MAY MEAN NOTHING ELSE.
+//
+// This function used to end `catch { return [] }`, which is the 2026-07-15 shape (`catch { return
+// null }` erasing the difference between "there is nothing there" and "I could not find out")
+// pointed at the provenance spine itself. Every consumer below reads-then-writes the WHOLE array,
+// so a transient OPFS fault, a corrupt gzip or a worker failure made this happen:
+//
+//     const snaps = await readSnapshotsFile(doc.id)          // ← [] on ANY failure
+//     await writeSnapshotsFile(doc.id, [...snaps, snapshot]) // ← ONE snapshot over the archive
+//
+// Every OTS proof and signed receipt for the document — Peter's evidence that he wrote his thesis
+// himself — replaced by a single snapshot. No race: one failed read did it. `clearAllSnapshotSummaries`
+// was a second vector on the same lie ([] → writes [] over the archive).
+//
+// So the boundary is `storage/notFound.ts`, the same predicate the document body already hangs off:
+// a NotFoundError is the ONE honest `[]` (a new document has no snapshots.json and must still get a
+// blank archive, not an error screen); everything else THROWS and the write paths refuse.
+//
+// A NON-ARRAY parse is a failure, NOT an emptiness, for exactly the reason a corrupt JSON body is:
+// the bytes are still on disk and may be recoverable, and answering `[]` would invite the next
+// snapshot to write over them. Same for a gzip that won't inflate.
+//
+// NB there is deliberately NO `__iwArchiveGuard = 'off'` seam here yet, though `__iwReadGuard`
+// (opfs.ts) and `__iwOpenGuard` (openDoc.ts) both have one. Those exist to let a BROWSER probe
+// destroy data in the same build it then proves fixed, because "a probe that only ever runs against
+// the fixed build cannot tell 'the guard works' from 'the probe cannot see the bug'". This lane
+// proved its guard by source mutation against the real store instead (archiveReadFail.test.ts +
+// openDocArchiveFail.test.ts, each mutant reported), so the seam would have no consumer — and a live
+// off-switch for the provenance archive, with nothing using it, is only a way to turn this off.
+// Add it WITH the probe that needs it, not before.
 async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
+  const path = `documents/${documentId}/snapshots.json`
+  let buf: ArrayBuffer
   try {
     const root = await getRoot()
     let dir: FileSystemDirectoryHandle = root
@@ -49,20 +83,54 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
       dir = await dir.getDirectoryHandle(part)
     }
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
-    const buf  = await file.arrayBuffer()
+    buf = await file.arrayBuffer()
+  } catch (err) {
+    if (isNotFound(err)) return [] // no snapshots.json — the one honest empty archive
+    throw new StorageReadError(path, err)
+  }
+  try {
     // Gzip archives (the normal case) gunzip + JSON.parse OFF-THREAD — a big archive is ~1s of
     // unbreakable main-thread work otherwise, felt as typing/scroll freezes whenever it loads.
     // Legacy uncompressed files fall through to a plain UTF-8 decode inline.
     const parsed = isGzip(buf)
       ? await gunzipJsonOffThread(buf)
       : JSON.parse(new TextDecoder().decode(buf))
-    if (!Array.isArray(parsed)) return []
+    if (!Array.isArray(parsed)) throw new Error('snapshots.json did not contain an array')
     // Normalise legacy 'kick' trigger to 'word-nudge' on read (stored data backward compat)
     return (parsed as Snapshot[]).map((s) =>
       (s.trigger as string) === 'kick' ? { ...s, trigger: 'word-nudge' as const } : s
     )
-  } catch {
-    return []
+  } catch (err) {
+    throw new StorageReadError(path, err)
+  }
+}
+
+/**
+ * The archive read, as an outcome a caller must branch on rather than a value it can mistake for
+ * emptiness — the same shape as `DocRead` in storage/opfs.ts, and deliberately with NO `[]` member
+ * on the failure arm. The whole bug was that `[]` answered two different questions.
+ *
+ * WHY THERE IS NO 'absent' ARM, when DocRead has one. For a DOCUMENT, absent is a real third answer:
+ * it is what makes `newDocument()` legal, so it must stay distinct from `found`. For an ARCHIVE the
+ * two collapse — "no snapshots.json" and "a snapshots.json holding []" mean the identical thing to
+ * every caller ("this document has no history"), and both are safe to append to. Splitting them
+ * would buy nothing and cost a dead branch at every call site, which is its own kind of rot. The
+ * distinction that DOES matter is the one this union keeps: established emptiness vs failed read.
+ */
+export type SnapshotRead =
+  /** The archive, possibly empty — an ESTABLISHED emptiness (new document). Safe to write. */
+  | { kind: 'found'; snapshots: Snapshot[] }
+  /** Could not find out. NEVER write an archive derived from this. */
+  | { kind: 'error'; error: StorageReadError }
+
+/** Read the archive without throwing, for the callers that must tell an empty history from a failed
+ *  read: the open-time ancestry guard above all (openDoc.ts), and every action that would publish or
+ *  overwrite the record. Prefer this to try/catch around listSnapshots — it cannot be forgotten. */
+export async function readSnapshotArchive(documentId: string): Promise<SnapshotRead> {
+  try {
+    return { kind: 'found', snapshots: await readSnapshotsFile(documentId) }
+  } catch (err) {
+    return { kind: 'error', error: err instanceof StorageReadError ? err : new StorageReadError(`documents/${documentId}/snapshots.json`, err) }
   }
 }
 
@@ -78,16 +146,38 @@ const _snapCache = new Map<string, Promise<Snapshot[]>>()
 
 async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
   let p = _snapCache.get(documentId)
-  if (!p) { p = readSnapshotsFromDisk(documentId); _snapCache.set(documentId, p) }
+  if (!p) {
+    p = readSnapshotsFromDisk(documentId)
+    // A FAILED READ MUST NOT BE CACHED. When this cache held `[]` from a failed read, the lie
+    // persisted for the whole session — every later reader was told "no history" long after the
+    // transient fault had passed. Caching the REJECTION instead would be the same mistake wearing
+    // the other hat: one blip and provenance is off until reload. So evict on failure and let the
+    // next reader retry the disk; only a resolved read is worth keeping.
+    p.catch(() => { if (_snapCache.get(documentId) === p) _snapCache.delete(documentId) })
+    _snapCache.set(documentId, p)
+  }
   return (await p).slice()
+}
+
+/** Drop the in-memory archive cache. Tests only — a fresh module normally does this. */
+export function _resetSnapCache(): void {
+  _snapCache.clear()
+  _writeChain.clear()
+  _mergedTargets.clear()
 }
 
 // ── Cache-first, serialised disk writes ────────────────────────────────────────
 // The write-through cache updates SYNCHRONOUSLY (before the disk write lands) and is the in-session
 // authority; the gzip+stringify+write is chained per-document so writes can never land out of order.
-// Grow-only safety: the cache is always a SUPERSET of disk (only intentional deletes shrink it), and
-// every write-back (cloud sync, folder mirror) reads through the cache — so if a deferred disk write
-// fails, disk merely didn't grow (never truncated) and every sync target still gets the full union.
+// Grow-only safety: the cache is a SUPERSET of disk *for every read that succeeded* (only intentional
+// deletes shrink it), and every write-back (cloud sync, folder mirror) reads through the cache — so if
+// a deferred disk write fails, disk merely didn't grow (never truncated) and every sync target still
+// gets the full union.
+//   THE CAVEAT IS LOAD-BEARING, and this comment used to assert the invariant flatly. It was FALSE: a
+// failed read cached `[]`, so the "superset" was a lie for the rest of the session and every sync
+// target got that lie unioned into nothing. The read now throws instead of returning `[]` and a
+// failure is never cached (see readSnapshotsFile) — which is what makes the sentence above true.
+// A comment asserting parity is a reason nobody checks parity; this one earns it or it goes.
 // The per-doc chain also means a deferred open-time restore write and a subsequent snapshot append
 // serialise: disk always converges to the latest cache state.
 const _writeChain = new Map<string, Promise<void>>()
@@ -135,7 +225,19 @@ const _mergedTargets = new Set<string>()
 export const needsWritebackMerge = (targetKey: string): boolean => !_mergedTargets.has(targetKey)
 export const markWritebackMerged = (targetKey: string): void => { _mergedTargets.add(targetKey) }
 
-/** All snapshots for a document, in creation order. */
+/**
+ * All snapshots for a document, in creation order.
+ *
+ * ⚠ THROWS `StorageReadError` if the archive cannot be read — it will not answer `[]` for a failure,
+ * because that answer is what truncated the archive (see readSnapshotsFromDisk). It returns `[]`
+ * only for a document that genuinely has no history.
+ *
+ * PREFER `readSnapshotArchive`, and note that every production caller now uses it: the failure here
+ * is invisible to the compiler, so an unguarded `await listSnapshots(id)` in a click handler is a
+ * button that silently does nothing, and `.catch(() => [])` around it walks the original bug right
+ * back in. The union makes the failure a value you have to look at. This stays exported because it
+ * is the honest primitive and the tests drive it directly.
+ */
 export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
 }
@@ -154,7 +256,9 @@ export function toSnapshotMeta(s: Snapshot): SnapshotMeta {
 }
 
 /** Metadata-only listing for React state. Same cached read as listSnapshots (so the eager
- *  load still warms the scrub cache), but hands back only the lightweight projection. */
+ *  load still warms the scrub cache), but hands back only the lightweight projection.
+ *  ⚠ THROWS on an unreadable archive, exactly like listSnapshots — never `[]`. A caller that
+ *  answers the failure by rendering an empty list has moved the lie from storage into the UI. */
 export async function listSnapshotMeta(documentId: string): Promise<SnapshotMeta[]> {
   return (await readSnapshotsFile(documentId)).map(toSnapshotMeta)
 }

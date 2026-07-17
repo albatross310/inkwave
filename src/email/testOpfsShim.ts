@@ -27,8 +27,22 @@ function notFound(): DOMException {
   return new DOMException('The requested entry could not be found.', 'NotFoundError')
 }
 
+// FAULT INJECTION — the other half of what a storage fake is for. Without it a suite can only test
+// the happy path, and "what happens when the read fails?" is exactly the question behind both
+// data-loss incidents this file's comments are about. A guard that says "a failed read must never be
+// mistaken for an empty one" is untestable unless a read can be made to fail.
+// NotReadableError (not NotFoundError) is the shape that matters: a REAL fault, whose name is not
+// the one honest absence — so isNotFound() must reject it. See storage/notFound.ts.
+let failRead: ((name: string) => boolean) | null = null
+
+/** Make matching reads fail like a transient I/O fault. Pass null to clear. */
+export function failOpfsReads(pred: ((name: string) => boolean) | null): void {
+  failRead = pred
+}
+
 export function resetOpfsShim(): void {
   root = { files: new Map(), dirs: new Map() }
+  failRead = null // a leaked fault would silently break every test after it in the file
 }
 
 function makeFileHandle(dir: Node, name: string) {
@@ -49,6 +63,7 @@ function makeFileHandle(dir: Node, name: string) {
       }
     },
     async getFile() {
+      if (failRead?.(name)) throw new DOMException('A transient I/O failure.', 'NotReadableError')
       const bytes = dir.files.get(name)
       if (!bytes) throw notFound()
       return {
@@ -93,6 +108,14 @@ function makeDirHandle(node: Node) {
     async removeEntry(name: string) {
       node.files.delete(name)
       node.dirs.delete(name)
+    },
+    // `listDocumentIds` iterates `docsDir.keys()`, and without it that call threw into its own
+    // `catch { return [] }` — so every document listing in a test read as "this origin stores
+    // nothing", which is the same silent-emptiness shape this file exists to warn about. An absent
+    // method on a shim is indistinguishable from a feature that never stored anything.
+    async *keys(): AsyncIterableIterator<string> {
+      for (const name of node.dirs.keys()) yield name
+      for (const name of node.files.keys()) yield name
     },
   }
 }
