@@ -301,7 +301,10 @@ function excerptsSection(sessions: SessionRow[], excerpts: SessionExcerpt[]): st
 function goalsSection(docs: WindowDoc[], goals: Record<string, DocGoals>): string {
   const blocks = Object.entries(goals).map(([id, g]) => {
     const doc = docs.find(d => d.doc_id === id)
-    const lines = [`--- ${labelOf(id, doc?.doc_label)} (${doc?.doc_type ?? 'other'}) ---`]
+    // `misc`, not `other`: `other` is a kind we recognise and haven't enumerated; `misc` is an
+    // honest "we don't know". A doc we cannot find in the window is the second (types/document.ts
+    // warns not to collapse them).
+    const lines = [`--- ${labelOf(id, doc?.doc_label)} (${doc?.doc_type ?? 'misc'}) ---`]
     if ((g.goal ?? '').trim()) lines.push(`GOAL: ${g.goal!.trim()}`)
     if ((g.plan ?? '').trim()) lines.push(`PLAN: ${g.plan!.trim()}`)
     if (g.updatedAt) lines.push(`(the writer last revised this on ${g.updatedAt})`)
@@ -319,7 +322,7 @@ function contentSection(docs: WindowDoc[], included: string[], text: Record<stri
     const doc = docs.find(d => d.doc_id === id)
     const body = (text[id] ?? '').trim()
     return [
-      `--- ${labelOf(id, doc?.doc_label)} (${doc?.doc_type ?? 'other'}) ---`,
+      `--- ${labelOf(id, doc?.doc_label)} (${doc?.doc_type ?? 'misc'}) ---`,
       body || '(this document has no text)',
     ].join('\n')
   })

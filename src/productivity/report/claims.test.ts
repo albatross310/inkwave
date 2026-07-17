@@ -242,17 +242,39 @@ describe('§A6.2 — the hedge is the line', () => {
     // If both halves of a pair behaved the same, the hedge would not be the thing being tested.
     const pairs: [string, string][] = [
       ['The break maybe helped.', 'The break helped.'],
-      ['Perhaps the long gap is why the afternoon never got going.',
-        'The long gap is why the afternoon never got going.'],
-      ['The morning session might have driven most of the progress.',
+      ['The morning session maybe drove most of the progress.',
         'The morning session drove most of the progress.'],
       ['You might always write best after a walk.', 'You always write best after a walk.'],
-      ['Possibly the interruption at three cost you the momentum.',
-        'The interruption at three caused you to lose the momentum.'],
+      ['Taking the break early maybe paid off.', 'Taking the break early paid off.'],
+      ['You perhaps lost momentum due to the interruption at three.',
+        'You lost momentum due to the interruption at three.'],
     ]
     for (const [hedged, bare] of pairs) {
       expect(findCausalClaims(hedged), `hedged: ${hedged}`).toEqual([])
       expect(findCausalClaims(bare).length, `bare: ${bare}`).toBeGreaterThan(0)
+    }
+  })
+
+  it('EVERY pair differs ONLY by the hedge — a pair that does not is a blind pair', () => {
+    // The pairs above are only proof if the hedge is the sole variable. A pair like
+    // ["might have DRIVEN…", "DROVE…"] looks like a pair and is not: "driven" matches no marker,
+    // so the hedged half would be quiet with the hedge REMOVED — it tests the verb, not the rule.
+    // (One such pair was live here until this check was written.) So: strip the hedge word from
+    // each hedged sentence and assert the remainder FIRES. If it does not, the pair is blind.
+    const hedgedHalves: [string, RegExp][] = [
+      ['The break maybe helped.', /maybe /],
+      ['The morning session maybe drove most of the progress.', /maybe /],
+      ['You might always write best after a walk.', /might /],
+      ['Taking the break early maybe paid off.', /maybe /],
+      ['You perhaps lost momentum due to the interruption at three.', /perhaps /],
+    ]
+    for (const [hedged, hedge] of hedgedHalves) {
+      const stripped = hedged.replace(hedge, '')
+      expect(hedged, `${hedged} must contain its hedge`).not.toBe(stripped)
+      expect(
+        findCausalClaims(stripped).length,
+        `BLIND PAIR: "${hedged}" is quiet even without its hedge — it proves nothing about the rule`,
+      ).toBeGreaterThan(0)
     }
   })
 
@@ -263,9 +285,59 @@ describe('§A6.2 — the hedge is the line', () => {
     expect(isHedged('You could not find the thread this morning.')).toBe(true)
   })
 
-  it('the honest limit, pinned so nobody mistakes it for a guarantee', () => {
-    // The scan is a marker match, one-directional. A hedge anywhere in the sentence passes it,
-    // including this absurdity. Documented in the module banner; asserted so it stays known.
-    expect(findCausalClaims('The break definitely helped, maybe.')).toEqual([])
+  // ── F18 (2026-07-17): the hedge must GOVERN the claim it exempts ──
+  // The scan was a substring match over the whole SENTENCE, but the argument is about a claim's
+  // MODALITY, and modality belongs to a clause. A hedge in a different clause exempted a
+  // confident claim next to it. Both of these are shapes an Opus narrative produces constantly —
+  // which is exactly why they, and not a curiosity, are what gets pinned.
+  it('F18: FIRES on a claim asserted beside a hedge that governs a DIFFERENT clause', () => {
+    const c = findCausalClaims('Your peak hours are nine to eleven, which suggests protecting them.')
+    expect(c).toHaveLength(1)
+    expect(c[0].marker.toLowerCase()).toBe('peak hours')
+    // The whole sentence is reported — that is what the writer needs to read — but the VERDICT
+    // was reached per clause.
+    expect(c[0].sentence).toContain('which suggests protecting them')
+  })
+
+  it('F18: FIRES on "always … since May" — a MONTH must not hedge anything', () => {
+    // /\bmay\b/i matched the month, so a date silently exempted a rule. Two independent fixes
+    // now cover it (the clause split, and a case-sensitive modal); this asserts the outcome.
+    expect(findCausalClaims('You always write best in the morning, as you have since May.'))
+      .toHaveLength(1)
+  })
+
+  it('F18: the month fix is real — lower-case "may" still hedges, capital "May" never does', () => {
+    // Proves the case-sensitivity is what does it, not the clause split incidentally covering.
+    expect(findCausalClaims('The break may have helped.')).toEqual([])       // modal → hedged
+    expect(findCausalClaims('The break helped in May.')).toHaveLength(1)     // month → no hedge
+  })
+
+  it('F18: a hedge still exempts the claim it DOES govern, clause by clause', () => {
+    // The other direction — the fix must not simply flag everything.
+    expect(findCausalClaims('The break maybe helped, and the afternoon was quiet.')).toEqual([])
+    // ...and a second, unhedged claim in the same sentence is caught on its own merits.
+    expect(findCausalClaims('The break maybe helped, and your peak hours are nine to eleven.'))
+      .toHaveLength(1)
+  })
+
+  it('the honest limits, pinned — and these are the ones you actually hit', () => {
+    // F18's real lesson: a documented limit should be the one people meet. The note used to pin
+    // "the break definitely helped, maybe" — a sentence nobody writes — which read as though that
+    // were the boundary. (That case now FLAGS anyway, via the clause split.)
+    expect(findCausalClaims('The break definitely helped, maybe.')).toHaveLength(1)
+
+    // LIMIT 1 — no marker, no flag. The commonest miss by far: a cause asserted with no causal
+    // word in it. Nothing here can see this, and no marker list would.
+    expect(findCausalClaims('Your best writing came after the walk.')).toEqual([])
+
+    // LIMIT 2 — a hedge anywhere in the claim's OWN clause exempts it, even when it governs some
+    // other part of that clause. The cross-clause case is fixed; this needs a parser, not a regex.
+    expect(findCausalClaims('Maybe you should protect your peak hours which are nine to eleven.'))
+      .toEqual([])
+
+    // LIMIT 3 — punctuation is the clause boundary, so a run-on is one clause and one hedge
+    // covers all of it.
+    expect(findCausalClaims('The break maybe helped and you always write best in the morning.'))
+      .toEqual([])
   })
 })

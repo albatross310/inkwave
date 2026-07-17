@@ -278,6 +278,15 @@ async function openPanel(page, flag) {
       hedged.includes('stating a cause as fact'), false)
     const bare = await readDaily('The break helped.')
     check('...and the SAME claim unhedged IS flagged', bare.includes('stating a cause as fact'), true)
+    // F18 (2026-07-17): the hedge must GOVERN the claim it exempts. Both of these were silently
+    // exempted by a sentence-wide substring match — one by a hedge in another clause, one by a
+    // MONTH NAME. Both are shapes a real narrative produces constantly.
+    const otherClause = await readDaily(
+      'Your peak hours are nine to eleven, which suggests protecting them.')
+    check('F18: a hedge in a DIFFERENT clause does not exempt the claim',
+      otherClause.includes('stating a cause as fact'), true)
+    const month = await readDaily('You always write best in the morning, as you have since May.')
+    check('F18: a MONTH does not hedge anything', month.includes('stating a cause as fact'), true)
     check('...with copy that says hunches are welcome, not that causes are banned',
       bare.includes('Hunches are welcome'), true)
     await panel.locator('text=Week').first().click()

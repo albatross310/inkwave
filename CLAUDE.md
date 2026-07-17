@@ -1130,13 +1130,29 @@ nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3
   GUESS. **He moved the line; he did not delete it:** `"the break helped."` = an assertion one day
   cannot support → still flagged. `"the break maybe helped."` = a hypothesis announced as one → IN,
   and wanted. A guess that announces itself is honest; a guess dressed as a finding is not.
-  `findCausalClaims` now SKIPS any hedged sentence (`isHedged`) and fires only on the unhedged
-  assertion. **This sits INSIDE §A6.2, not against it** — the spec's words are "**Confident** pattern
-  claims… permitted only at weekly+", and hedging removes the confidence; we had been reading a ban
-  on the SUBJECT where the spec bans the CERTAINTY. Suggestions must be TETHERED to the window's own
-  evidence: *"you should take a break every 25 minutes"* is a standard he never set — **a hedge does
-  not launder an invented standard**. Second honest limit, accepted: a hedge anywhere in the sentence
-  passes it ("the break definitely helped, maybe"), pinned by a test so it stays known.
+  `findCausalClaims` SKIPS hedged CLAUSES (`isHedged`) and fires only on the unhedged assertion.
+  **This sits INSIDE §A6.2, not against it** — the spec line, in full (BuildSpec-v0.2 §A6.2 L139,
+  re-verified verbatim; the spec is NOT in this repo): *"Confident pattern claims (breaks help/hurt,
+  best time of day) are permitted only at weekly+ **where there's enough data**."* Hedging removes
+  the confidence; we read a ban on the SUBJECT where it bans the CERTAINTY. Suggestions must be
+  TETHERED to the window's own evidence: *"you should take a break every 25 minutes"* is a standard
+  he never set — **a hedge does not launder an invented standard**.
+- **F18 — THE HEDGE MUST GOVERN THE CLAIM IT EXEMPTS (2026-07-17, auditor).** The scan was a
+  substring match over the whole SENTENCE, but the argument is about a claim's MODALITY, and
+  modality belongs to a CLAUSE. A hedge in a different clause exempted a confident claim beside it:
+  *"Your peak hours are nine to eleven, which suggests protecting them"* went quiet, and so did
+  *"You always write best in the morning, as you have since **May**"* — `/\bmay\b/i` matched the
+  MONTH. Fixed twice over, independently: clause splitting (**punctuation ONLY** — splitting on
+  connectives would destroy the markers, since "which is why" and "because" ARE markers; proved by
+  mutation) and a **case-sensitive** `/\bmay\b/`. **The deeper lesson is about the documented
+  limit:** the old note pinned *"the break definitely helped, maybe"* — a sentence nobody writes —
+  and read as though that were the boundary, while the realistic misses went unpinned. A documented
+  limit should be the one people actually hit. Now pinned, in the order you meet them: (1) no marker,
+  no flag (*"your best writing came after the walk"* — the commonest miss, and no marker list fixes
+  it); (2) a hedge inside the claim's OWN clause exempts it (needs a parser, not a regex); (3) a
+  run-on with no punctuation is one clause. **Tests carry a pair-VALIDITY check**: strip the hedge
+  from each hedged half and it must fire, or the pair is blind and proves nothing — one such blind
+  pair ("might have DRIVEN" vs "DROVE": differed by verb, not hedge) was live until it was written.
 - **FIVE consent tiers** (metadata always · diary notes · **place labels, SEPARATE** · goals+plan ·
   per-document content). Peter split notes from places: one tier by provenance, two very different
   disclosures. Each absence is STATED in the prompt — a model told only what it HAS will fill the
