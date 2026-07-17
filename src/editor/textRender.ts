@@ -356,6 +356,7 @@ export interface BlockCacheStats {
 }
 
 interface CachedBlock {
+  reason: string
   relTops: number[]
   lineHeights: number[]
   startChars: number[]
@@ -451,7 +452,7 @@ export function buildRenderModel(
     runs: InlineRun[], basePx: number, ratio: number, contentWidth: number,
     marginTopPx: number, marginBottomPx: number, blockIdx: number, posBase: number,
     indentPx = 0, marker?: string,
-  ): { ok: boolean; height: number } => {
+  ): { ok: boolean; height: number; reason: string; fontsOk: boolean } => {
     // ── CACHE HIT: re-emit the cached block-relative geometry at THIS block's offsets ──
     // Legal because layoutParagraph took only the block: `top`/`posBase`/`blockIdx`/`marker` never
     // entered the layout, so applying them here reproduces the full build's lines exactly.
@@ -473,7 +474,7 @@ export function buildRenderModel(
             indentPx, marker: k === 0 ? marker : undefined,
           })
         }
-        return { ok: true, height: hit.height }
+        return { ok: true, height: hit.height, reason: hit.reason, fontsOk: true }
       }
       cache.stats.misses++
     }
@@ -482,8 +483,10 @@ export function buildRenderModel(
       type: 'paragraph', runs, baseFontPx: basePx,
       marginTopPx, marginBottomPx, firstLineLeadingPx: 0,
     }
-    if (!blockEligibility(arith, ratio).eligible) return { ok: false, height: 0 }
-    if (!runs.every((r) => r.text === '\n' || r.atomic || fontLoaded(r.fontFamily, r.fontSizePx))) return { ok: false, height: 0 }
+    const elig = blockEligibility(arith, ratio)
+    const fontsOk = runs.every((r) => r.text === '\n' || r.atomic || fontLoaded(r.fontFamily, r.fontSizePx))
+    if (!elig.eligible) return { ok: false, height: 0, reason: elig.reason, fontsOk }
+    if (!fontsOk) return { ok: false, height: 0, reason: elig.reason, fontsOk }
     const lay = layoutParagraph(arith, contentWidth, ratio, measure, EDITOR_WHITE_SPACE)
     const chars = blockChars(runs)
     // ONLY SUCCESSES ARE CACHED, deliberately. `ok:false` turns on eligibility AND `fontLoaded`,
@@ -491,7 +494,7 @@ export function buildRenderModel(
     // would pin a placeholder forever for a block that became renderable; recomputing a miss is
     // cheap and always correct. (A cached TRUE cannot rot the same way: faces load, never unload —
     // and a face that changes ADVANCES is a context change the caller must drop the cache for.)
-    const cb: CachedBlock | null = cache ? { relTops: [], lineHeights: [], startChars: [], endChars: [], segs: [], height: lay.height } : null
+    const cb: CachedBlock | null = cache ? { relTops: [], lineHeights: [], startChars: [], endChars: [], segs: [], height: lay.height, reason: elig.reason } : null
     for (let k = 0; k < lay.lineCount; k++) {
       const sc = lay.breakStartChars[k]
       const ec = k + 1 < lay.lineCount ? lay.breakStartChars[k + 1] : chars.text.length
@@ -514,7 +517,7 @@ export function buildRenderModel(
       cache.map.set(key, cb)
       cache.stats.entries = cache.map.size
     }
-    return { ok: true, height: lay.height }
+    return { ok: true, height: lay.height, reason: elig.reason, fontsOk: true }
   }
 
   // A heading/list run inherits its font from CSS, NOT from marks — so the harvested style supplies
@@ -618,31 +621,24 @@ export function buildRenderModel(
     }
 
     if (node.type.name === 'paragraph') {
+      // ROUTED THROUGH emitTextBlock (2026-07-17). This branch used to carry its OWN COPY of the
+      // layout+emit loop — a second implementation of the same rule, which is the pmToText/textMap
+      // drift trap wearing another hat: headings and list items went through emitTextBlock while
+      // PARAGRAPHS, the bulk of every real document, took a duplicate path. It was found by
+      // measurement, not by reading: the block cache reported 99% reuse and a 1.03x speedup at once,
+      // because it only ever saw 127 of ~380 emits (43 headings + the list items) — the 254
+      // paragraphs bypassed it entirely. Byte-identical by construction: posBase collapses to the
+      // old `offset + 1 + fromChar + sc`, margins are the same (0 / marginBottom), and the caller
+      // still pushes the block and advances `top` exactly as before.
       const runs = sliceRuns(runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch), fromChar)
-      const arith: ArithBlock = {
-        type: 'paragraph', runs, baseFontPx: geom.basePx,
-        marginTopPx: 0, marginBottomPx: marginBottom, firstLineLeadingPx: 0,
-      }
-      const elig = blockEligibility(arith, geom.ratio)
-      const fontsOk = runs.every((r) => r.text === '\n' || r.atomic || fontLoaded(r.fontFamily, r.fontSizePx))
-      if (elig.eligible && fontsOk) {
-        const lay = layoutParagraph(arith, geom.contentWidthPx, geom.ratio, measure, EDITOR_WHITE_SPACE)
-        const chars = blockChars(runs)
-        blocks.push({ kind: 'text', type: 'paragraph', start: offset, end: offset + node.nodeSize, top, height: lay.height })
-        for (let k = 0; k < lay.lineCount; k++) {
-          const sc = lay.breakStartChars[k]
-          const ec = k + 1 < lay.lineCount ? lay.breakStartChars[k + 1] : chars.text.length
-          lines.push({
-            top: top + lay.relTops[k], height: lay.lineHeights[k], blockIdx: bi,
-            pos: offset + 1 + fromChar + sc, startChar: sc, endChar: ec,
-            segs: segsOfLine(runs, chars, sc, ec, measure),
-          })
-        }
-        top += lay.height + marginBottom
-        bump(elig.reason)
+      const r = emitTextBlock(runs, geom.basePx, geom.ratio, geom.contentWidthPx, 0, marginBottom, bi, offset + 1 + fromChar)
+      if (r.ok) {
+        blocks.push({ kind: 'text', type: 'paragraph', start: offset, end: offset + node.nodeSize, top, height: r.height })
+        top += r.height + marginBottom
+        bump(r.reason)
         return
       }
-      bump(fontsOk ? elig.reason : 'font-not-loaded')
+      bump(r.fontsOk ? r.reason : 'font-not-loaded')
       // Ineligible paragraph → placeholder (never guessed text).
       const h = snappedLineHeight(geom.basePx, geom.ratio)
       blocks.push({ kind: 'placeholder', type: 'paragraph', start: offset, end: offset + node.nodeSize, top, height: h, label: 'text (deferred)', estimated: true })

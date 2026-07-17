@@ -856,15 +856,28 @@ export function installTextRenderProbe(editor: Editor): void {
       // break BELOW them across page boundaries — which is exactly the delta the cache must survive.
       const edit = (json: string, v: number): { type: string; content: unknown[] } => {
         const d = JSON.parse(json) as { type: string; content: Array<Record<string, unknown>> }
+        // THE PREDICATE THAT MADE THIS FIXTURE BLIND (fixed 2026-07-17). It required a text leaf
+        // >40 chars — but citation marks FRAGMENT a paragraph into many short leaves, so it
+        // silently found nothing in most blocks: 'changes-everywhere' edited 9 of 326 and reported
+        // 92% reuse where the true answer is ~0%. The metric was a constant and every mode agreed
+        // with every other. Take the LONGEST leaf and count the failures, so a fixture that cannot
+        // bite says so instead of scoring well.
+        let edited = 0, skipped = 0
         const hit = (bi: number) => {
           const b = d.content[bi] as { content?: Array<{ type: string; text?: string }> }
-          if (!b || !Array.isArray(b.content)) return false
-          const leaf = b.content.find((c) => c.type === 'text' && typeof c.text === 'string' && c.text.length > 40)
-          if (!leaf || !leaf.text) return false
+          if (!b || !Array.isArray(b.content)) { skipped++; return false }
+          let leaf: { type: string; text?: string } | null = null
+          for (const c of b.content) {
+            if (c.type !== 'text' || typeof c.text !== 'string') continue
+            if (!leaf || (c.text.length > (leaf.text?.length ?? 0))) leaf = c
+          }
+          if (!leaf || !leaf.text || leaf.text.length < 8) { skipped++; return false }
           const at = Math.floor(leaf.text.length / 2) // MID-paragraph, mid-text-leaf
           leaf.text = leaf.text.slice(0, at) + ` v${v}x ` + leaf.text.slice(at)
+          edited++
           return true
         }
+        void edited; void skipped
         if (o.mode === 'nothing') return d
         if (o.mode === 'everything') { for (let i = 0; i < d.content.length; i++) hit(i) ; return d }
         // realistic: a couple of blocks per version, rotating (a real snapshot diff is tiny)
@@ -950,8 +963,20 @@ export function installTextRenderProbe(editor: Editor): void {
         }
       }
 
+      // WHAT WAS ACTUALLY LAID OUT — without this the reuse rate is unreadable. A block that
+      // PLACEHOLDERS never reaches layoutParagraph, so it is neither reusable nor expensive: a
+      // fixture that silently placeholders half its paragraphs measures a cache on a document that
+      // barely exists, and reports a confident reuse % for it.
+      const probeDoc = nodeFromContentJson(edit(baseStr, 0))
+      const probeModel = probeDoc ? buildRenderModel(probeDoc, g, measure, fontLoaded, buildOpts()) : null
+      const census: Record<string, number> = {}
+      if (probeModel) for (const b of probeModel.blocks) census[b.type + ':' + b.kind] = (census[b.type + ':' + b.kind] ?? 0) + 1
+
       return {
         mode: o.mode, versions, blocks: nBlocks,
+        modelLines: probeModel?.lines.length ?? -1,
+        census,
+        emitCallsPerVersion: ((rows[1]?.hits as number) ?? 0) + ((rows[1]?.misses as number) ?? 0),
         identical, differing, firstDiff,
         byteIdentical: differing === 0,
         parseMsPerVersion: +(parseTotal / versions).toFixed(2),

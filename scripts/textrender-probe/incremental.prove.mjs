@@ -51,7 +51,25 @@ try {
   const doc = buildCitationDoc({ words: 13000, cites: 174, id: 'probe-incremental' })
   await page.evaluate((d) => window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id: d.id, doc: d } })), doc)
   await page.waitForFunction(() => { const p = window.__iwTextRenderProbe; return !!p && p.words() > 10000 }, null, { timeout: 60000 })
-  await page.waitForTimeout(2000)
+
+  // WAIT FOR FONTS **AFTER** THE DOC LANDS, NOT ONLY BEFORE IT (2026-07-17 — this was a live race).
+  // The fixture's citations carry textStyle{fontFamily} marks, so OPENING the document starts NEW
+  // font loads. A block whose face has not arrived fails emitTextBlock's fontLoaded() check and
+  // PLACEHOLDERS instead of laying out — measured 132 of 254 paragraphs, and the count MOVED
+  // between runs on the same fixture (1709 lines → 989). That is not a document, it is a race: it
+  // silently changes what is being measured between the baseline and the comparison, and both
+  // report a confident number. Wait for fonts.ready again, then hold until the model STOPS moving.
+  await page.evaluate(() => document.fonts.ready)
+  await page.waitForFunction(() => {
+    const p = window.__iwTextRenderProbe
+    if (!p) return false
+    const n = p.build().model.lines.length
+    const prev = window.__iwStableLines
+    window.__iwStableLines = n
+    window.__iwStableHits = prev === n ? (window.__iwStableHits || 0) + 1 : 0
+    return (window.__iwStableHits || 0) >= 3 // three consecutive identical builds
+  }, null, { timeout: 60000, polling: 400 })
+  await page.waitForTimeout(500)
 
   const st = await page.evaluate(() => window.__iwTextRenderProbe.selfTest())
   if (!st.fontsReallyLoaded || !st.measureDiscriminates || !st.seesKnownPositive) {
@@ -68,7 +86,12 @@ try {
   // ── THE REAL CASE ───────────────────────────────────────────────────────────────────────────
   console.log(`── realistic: 2 mid-paragraph edits per version, rotating (a real snapshot diff) ──`)
   const r = await run('realistic', true)
-  console.log(`  blocks ${r.blocks} · reuse ${(r.reuseMean * 100).toFixed(1)}% · cache ${r.cacheEntries} entries, ${r.cacheEvicted} evicted`)
+  console.log(`  blocks ${r.blocks} · model ${r.modelLines} lines · emit calls/version ${r.emitCallsPerVersion}`)
+  console.log(`  census ${JSON.stringify(r.census)}`)
+  console.log(`  reuse ${(r.reuseMean * 100).toFixed(1)}% · cache ${r.cacheEntries} entries, ${r.cacheEvicted} evicted`)
+  // A fixture that placeholders most of its paragraphs is not measuring the renderer. SAY SO.
+  const ph = (r.census['paragraph:placeholder'] || 0), tx = (r.census['paragraph:text'] || 0)
+  if (ph > tx * 0.1) console.log(`  ⚠ ${ph} paragraphs PLACEHOLDER vs ${tx} laid out — those blocks never reach layoutParagraph; the reuse % is over a document that barely exists.`)
   console.log(`  per version:  parse ${r.parseMsPerVersion}ms · full ${r.fullMsPerVersion}ms · incremental ${r.incMsPerVersion}ms   (${r.speedup}× on the build)`)
   console.log(`  sample: ${JSON.stringify(r.rows.slice(0, 3))}`)
   check(r.byteIdentical, `incremental == full, BYTE-IDENTICAL at line level (${r.identical}/${VERSIONS})`,
@@ -90,7 +113,14 @@ try {
   console.log(`  nothing-changed  : reuse ${(nothing.reuseMean * 100).toFixed(1)}%  inc ${nothing.incMsPerVersion}ms  (vs full ${nothing.fullMsPerVersion}ms)`)
   console.log(`  changes-everywhere: reuse ${(every.reuseMean * 100).toFixed(1)}%  inc ${every.incMsPerVersion}ms  (vs full ${every.fullMsPerVersion}ms)`)
   check(nothing.reuseMean > 0.99, 'nothing-changed ⇒ ~100% reuse', 'this fixture CANNOT test the delta path — it only proves reuse works')
-  check(every.reuseMean < 0.2, 'changes-everywhere ⇒ ~0% reuse', 'this fixture CANNOT test reuse — it only proves the cache does not falsely hit')
+  // ~20%, NOT ~0%, and the reason is structural rather than a loose threshold: the edit predicate
+  // rewrites the longest TEXT LEAF of a top-level block, and a bulletList's children are listItems —
+  // it has no text leaf of its own to rewrite. So the list items (and any block the predicate skips)
+  // are identical across every version and legitimately reuse. The floor is what the fixture CANNOT
+  // reach, measured, not a number chosen to make the check pass; what carries the claim is the
+  // ORDERING assertion below, which no constant can satisfy.
+  check(every.reuseMean < 0.35, `changes-everywhere ⇒ reuse collapses (${(every.reuseMean * 100).toFixed(1)}%, floor = the list items the predicate cannot rewrite)`,
+    'this fixture CANNOT test reuse — it only proves the cache does not falsely hit')
   check(nothing.byteIdentical && every.byteIdentical, 'both extremes stay byte-identical')
   check(every.reuseMean < r.reuseMean && r.reuseMean < nothing.reuseMean,
     'reuse ORDERS correctly: everything < realistic < nothing', 'a constant reuse rate would mean the metric is blind')
