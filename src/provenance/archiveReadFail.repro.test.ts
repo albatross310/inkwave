@@ -66,7 +66,7 @@ const docOf = (text: string) => ({
 
 describe('REPRO — a failed archive read destroys the provenance history', () => {
   it('the archive survives a HEALTHY read (the known-positive — the harness can build history)', async () => {
-    const { createSnapshotIfChanged, listSnapshots, _resetSnapCache } = await import('./snapshots') as never
+    const { createSnapshotIfChanged, listSnapshots, _resetSnapCache } = await import('./snapshots') as unknown as typeof import('./snapshots') & { _resetSnapCache?: () => void }
     _resetSnapCache?.()
     await createSnapshotIfChanged(docOf('one'), 'manual', [], undefined, true)
     await createSnapshotIfChanged(docOf('two'), 'manual', [], undefined, true)
@@ -79,7 +79,7 @@ describe('REPRO — a failed archive read destroys the provenance history', () =
   // the `.fails` and keep the assertion as the guard it was always meant to be. A skipped test
   // would rot silently; this one cannot.
   it.fails('⚠ LIVE BUG: A FAILED READ TRUNCATES THE ARCHIVE TO ONE SNAPSHOT', async () => {
-    const mod = await import('./snapshots') as never
+    const mod = await import('./snapshots') as unknown as typeof import('./snapshots') & { _resetSnapCache?: () => void }
     const { createSnapshotIfChanged, listSnapshots } = mod
     // Build a real history first.
     await createSnapshotIfChanged(docOf('one'), 'manual', [], undefined, true)
@@ -89,7 +89,7 @@ describe('REPRO — a failed archive read destroys the provenance history', () =
     // A NEW SESSION (fresh module ⇒ empty write-through cache), and the disk read now fails.
     vi.resetModules()
     failArchiveRead = true
-    const m2 = await import('./snapshots') as never
+    const m2 = await import('./snapshots') as unknown as typeof import('./snapshots') & { _resetSnapCache?: () => void }
     // The read answers "no history" instead of failing...
     expect((await m2.listSnapshots('doc-1')).length).toBe(0) // ← the lie
     failArchiveRead = false
@@ -98,7 +98,7 @@ describe('REPRO — a failed archive read destroys the provenance history', () =
     await m2.createSnapshotIfChanged(docOf('three'), 'manual', [], undefined, true)
 
     vi.resetModules()
-    const m3 = await import('./snapshots') as never
+    const m3 = await import('./snapshots') as unknown as typeof import('./snapshots') & { _resetSnapCache?: () => void }
     const survived = await m3.listSnapshots('doc-1')
     // THE ASSERTION THAT SHOULD HOLD, AND DOES NOT ON MASTER: history is grow-only.
     expect(survived.length).toBeGreaterThanOrEqual(3)
