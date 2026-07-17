@@ -171,6 +171,11 @@ export interface ArithBlock {
   type: string          // 'paragraph' | block-atom types ('mathBlock', 'figure', …)
   runs: InlineRun[]     // ordered inline content (paragraph-like blocks)
   baseFontPx: number    // the block element's OWN computed font-size (18 at canonical) — the strut
+  // The strut's FAMILY — the block element's own computed font-family stack, i.e. what a run
+  // inherits when it carries no textStyle:fontFamily mark. OPTIONAL: omit and the mixed-family
+  // check below does not run, which is byte-identical to this engine's behaviour before 2026-07-17.
+  // Supply it and a run whose family differs from the strut's DEFERS — see the note there.
+  baseFontFamily?: string
   marginTopPx: number   // resolved margin-top (0 for paragraphs; used for adjacent-margin collapse)
   marginBottomPx: number// resolved margin-bottom (0.5em → 9px canonical for paragraphs)
   // A reflow-free-measurable BLOCK ATOM (block math, figure) supplies its box here — the block is
@@ -263,6 +268,44 @@ export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible
   // the verifier is unfixably order-dependent, so it defers.
   const sizes = block.runs.filter((r) => !r.atomic && r.text !== '\n').map((r) => r.fontSizePx)
   if (sizes.length && sizes.some((s) => s !== sizes[0])) return { eligible: false, reason: 'mixed-size' }
+  // ── MIXED FAMILY vs THE STRUT is DOM-ONLY too (2026-07-17) ─────────────────────────────────
+  // A line box is not `ratio × size`. It spans from the highest inline-box top to the lowest
+  // bottom over the STRUT (the block element's own font) AND every inline box on the line, each
+  // centring its own (ascent + descent) content area in its own line-height. So a run in a face
+  // whose BASELINE sits differently from the strut's makes the line TALLER — while the wrap, and
+  // therefore every self-consistency check built from it, stays perfect.
+  //
+  // MEASURED in the real editor (strut = EB Garamond, 18px, φ; a span per family inside the real
+  // .ProseMirror; scripts/textrender-probe/strutrule.mjs), line gap vs the model's 29.109375:
+  //     EB Garamond / bold / italic  29.109375  (+0)   ← the strut's own face: the known-negative
+  //     Crimson Pro                  30.109375  (+1)
+  //     Atkinson Hyperlegible        30.109375  (+1)   Bitter, Carlito, Cormorant: +1
+  //     Spectral, Gelasio            30.109375  (+1)
+  //     IM Fell DW Pica              31.109375  (+2)   ← the app's OWN identity serif is the worst
+  // At ~44 lines/page a +1px line is ~1.5 lines of drift per page. This is what made
+  // `mark textStyle:fontFamily` diverge Δ+76 at the FIRST break while claiming full reliability.
+  //
+  // WHY WE DEFER RATHER THAN CORRECT IT. The correction is exactly
+  // `max(strutTop, runTop) + max(strutBot, runBot)`, which needs each face's ascent/descent. The
+  // ONLY metrics canvas exposes are `fontBoundingBoxAscent/Descent`, and Chromium returns them
+  // ROUNDED TO WHOLE PIXELS: EB Garamond and JetBrains Mono BOTH report 18/5 though they are
+  // different faces. Fed those, the formula above mispredicts 6 of 16 measured cases by exactly
+  // 0.5px per line (Crimson Pro: predicts +0.5, the DOM does +1.0) — ~22px, three quarters of a
+  // line, over one page: enough to move a break. The real ascent/descent live in the font file and
+  // in Blink's layout, not in any API this renderer can reach; /snapshot has no `.ProseMirror` to
+  // harvest them from either (ROUND 14). So the height is not computable here, and a height we
+  // cannot compute is one we do not invent — the same answer `mixed-size` and `blockStyle()` give.
+  //
+  // THE PATH BACK TO COVERAGE, measured and left deliberately unbuilt: `(ascent − descent)` is what
+  // decides growth (Gentium Plus has a+d = 27 vs the strut's 23 and does NOT grow — its a−d matches),
+  // and the ROUNDED a−d agreed with the DOM on all 16 cases, over-deferring none. That is an
+  // empirical claim over one palette on one engine, and rounding can hide a sub-pixel difference in
+  // the UNDER-deferring direction — the one that paints wrong words. It needs a certification sweep
+  // of every shipped family on both engines, the same way the fonts themselves were certified.
+  if (block.baseFontFamily !== undefined) {
+    const bad = block.runs.find((r) => !r.atomic && r.text !== '\n' && r.fontFamily !== block.baseFontFamily)
+    if (bad) return { eligible: false, reason: `mixed-family:${primaryFamily(bad.fontFamily)}` }
+  }
   return { eligible: true, reason: block.runs.some((r) => r.atomic) ? 'paragraph:text+math' : 'paragraph:text' }
 }
 

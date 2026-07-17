@@ -169,6 +169,51 @@ function inlineAtomRoots(view: EditorView, child: PMNode, offset: number): Eleme
   return roots
 }
 
+// ─── A CONTAINER'S ELEMENT CHILDREN ARE NOT LINES (2026-07-17 — the list break fix) ───────────
+//
+// `range.selectNodeContents(el).getClientRects()` returns, per spec, the border box of every
+// ELEMENT it fully contains — not only text-line rects. For a `<p>` that is harmless: its only
+// element children are inline mark spans, whose per-line-fragment boxes coincide with the text
+// rects and are eaten by the 3px dedup. For a `<ul>` it is not: each `<li>` contributes ONE rect
+// spanning the WHOLE ITEM, and `keepLineRects` admitted it (a 2-line item's box is 58.2px, under
+// the 80px tall-box cut) AS A LINE.
+//
+// MEASURED in the real editor (scripts/textrender-probe/rectdiag.mjs, canonical 18px, 3-item list):
+//   raw rects 9 = 3 li boxes (h 58.219) + 6 text rects (h 23) — the li box at 725.188 and its own
+//   first text rect at 728.188, exactly **3.000** apart, so `top - lastTop <= 3` DROPS THE ITEM'S
+//   FIRST TEXT LINE and the li's box stands in for it.
+// The count survives (6 kept for 6 lines), which is why every count-based check passed — but the
+// SAMPLE POINT does not. collectLines samples `r.top + r.height/2`; for a text rect that is the
+// line's own middle, for a 58px li box it is **the middle of the ITEM** — i.e. on line 2. So the
+// break attributed to the item's FIRST line resolves, via posAtCoords, to the SECOND line's doc
+// position. MEASURED: the model breaks at 25306 (the item's line 1, which genuinely overflows —
+// used 951.9 + 29.1 > textArea 954.5) while the live editor's gap goes in at 25383, one line later,
+// so the page carries 26.5px MORE than its own text area allows and the gap's declared botMargin
+// (77.6) describes a page that ends 26.5px lower than it says.
+// The mid-line audit could not see it: 25383 IS a line start — just the wrong one. And it only
+// bites items of 2-ish lines: a 1-line item's box centre lands on its only line (right answer by
+// luck) and a 3-line item's box is 87px > the 80px cut (dropped, right answer by the old filter).
+//
+// THE PRINCIPLE — the same one the inline-atom fix above is built on, one level up: a rect may only
+// be admitted if it IS a line. A `<li>`/`<blockquote>` box is a CONTAINER of lines. So rects are
+// collected per TEXTBLOCK, and PM decides what a textblock is (`node.isTextblock`) — never a tag
+// name or a CSS class, which would silently miss the next container node.
+// A block that IS a textblock (paragraph, heading, codeBlock) takes the byte-identical old path by
+// construction, which is what keeps every prose document's breaks bit-for-bit unchanged.
+export function textblockEls(view: EditorView, child: PMNode, offset: number, el: HTMLElement): HTMLElement[] {
+  if (child.isTextblock) return [el] // the overwhelming case — unchanged, one range, as before
+  const out: HTMLElement[] = []
+  child.descendants((node, pos) => {
+    if (!node.isTextblock) return true
+    const d = view.nodeDOM(offset + 1 + pos)
+    if (d && (d as Node).nodeType === 1) out.push(d as HTMLElement)
+    return false // a textblock's interior is its own line collection
+  })
+  // No textblock inside (a container of atoms, or an unmapped subtree) ⇒ fall back to the whole
+  // element rather than lose the block's lines entirely.
+  return out.length ? out : [el]
+}
+
 // The block's line rects, with each inline-atom subtree contributing its single bounding rect.
 // Text between atoms is measured by ranges exactly as before, so rects stay in document order and
 // the 3px same-line dedup downstream is untouched.
@@ -336,7 +381,23 @@ function collectLines(view: EditorView, editorTop: number, scale: number, cache?
     let rects: DOMRect[] = []
     // Inline-atom NodeViews collapse to ONE rect each (see blockLineRects): their interiors are not
     // line starts, and letting them in put page breaks mid-line.
-    try { rects = blockLineRects(el, inlineAtomRoots(view, child, offset)) } catch { /* ignore */ }
+    // Rects come PER TEXTBLOCK (see textblockEls): a container's own element children — a list's
+    // `<li>`, a blockquote's `<p>` — have border boxes that are NOT lines, and admitting one made
+    // its break sample land on a later line. A textblock block resolves to [el] and takes the
+    // identical single-range call it always did.
+    try {
+      const atoms = inlineAtomRoots(view, child, offset)
+      const tbs = textblockEls(view, child, offset, el)
+      if (tbs.length === 1) rects = blockLineRects(tbs[0], atoms)
+      else for (const d of tbs) {
+        const rs = blockLineRects(d, atoms)
+        // An EMPTY textblock (a blank list item) has no text rect but still occupies a line — the
+        // same rule the whole-block `!rects.length` fallback below applies, per textblock. Without
+        // it a blank item would vanish from the line list and every break under it would shift.
+        if (rs.length) rects.push(...rs)
+        else rects.push(d.getBoundingClientRect())
+      }
+    } catch { /* ignore */ }
     if (!rects.length) { // empty block (e.g. a blank paragraph) → one line at the block top
       push((br.top - editorTop - accumAbove(br.top)) / s, br.left + 1, br.top + Math.min(8, br.height / 2))
     } else {

@@ -129,3 +129,34 @@ EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run aga
     fixture puts NodeViews MID-paragraph in MULTI-line paragraphs, and the math formulas are
     deliberately sub/superscript- and fraction-heavy — a plain `x+1` pill has no off-baseline
     interior and reproduces nothing.
+16. **A COUNT THAT AGREES CAN HIDE A SAMPLE POINT THAT DOES NOT (2026-07-17 — the list break bug).**
+    `range.selectNodeContents(el).getClientRects()` returns the border box of every ELEMENT it
+    contains, not only text lines. For a `<ul>` each `<li>` contributed ONE rect spanning the whole
+    item, `keepLineRects` admitted it (58.2px, under the 80px tall-box cut), and it sat exactly
+    **3.000px** above its own first text rect — so the `top - lastTop <= 3` dedup DELETED the item's
+    first real line and the container's box stood in for it. Six rects for six lines: every
+    count-based check passed. But collectLines samples `r.top + r.height/2`, and half of a 58px item
+    box is **line 2** — so the break attributed to the item's first line resolved, via posAtCoords,
+    to the second line's doc position. The page then carried 26.5px more than its own text area.
+    Three instruments were blind to it, each for its own reason, and that is the lesson:
+    · the MID-LINE audit read 0 — 25383 IS a line start, just the wrong one;
+    · `blockGeoCheck` and every height/line-count check agreed — the totals TELESCOPE;
+    · `topdiag.mjs` (model tops vs the DOM's own text rects) read **1483/1483, 0px drift** — the
+      model's geometry was exact all along; the editor's line LIST was not the DOM's text rects.
+    What found it: `rectdiag.mjs`, which stopped comparing derived numbers and printed the RAW rects
+    the editor's own collector receives. When a bug survives every check built from the line list,
+    print what goes INTO the line list.
+17. **THE DIAGNOSTICS THIS ROUND LEFT BEHIND** (not gates — attribution tools; the gates are
+    `textRender.lists.test.ts`, `collectLines.container.test.ts` and `textRender.test.ts`):
+    · `topdiag.mjs`   — model line tops vs the DOM's own text rects, whole document. Answers "is this
+      a GEOMETRY bug at all?" before anyone theorises. It said no, and it was right.
+    · `breakwhere.mjs`— localises the first divergent break to a block, and names which model LINE
+      each side's position points at. That is what separated "broke at a different line" from "broke
+      at the same line and called it something else".
+    · `listdiag.mjs`  — a list's model box + trailing advance vs the live `<ul>`'s own rect and its
+      real gap to the next sibling. The evidence for the margin-collapse fix.
+    · `rectdiag.mjs`  — the raw rects the editor's collector sees for a list, and keepLineRects
+      applied verbatim. The evidence for the container-box fix.
+    · `strutrule.mjs` — per-family DOM line gap inside the real `.ProseMirror` vs the model's strut,
+      scored against the candidate eligibility rule, counting UNSAFE (rule says fine, DOM grows)
+      separately from over-defer. The evidence for the mixed-family defer.

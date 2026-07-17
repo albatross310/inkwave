@@ -396,7 +396,7 @@ export function makeBlockLayoutCache(max = 4000): BlockLayoutCache {
  * insertion (which is exactly the case the cache exists to serve).
  */
 function blockKey(
-  runs: InlineRun[], basePx: number, ratio: number, contentWidth: number,
+  runs: InlineRun[], basePx: number, baseFamily: string, ratio: number, contentWidth: number,
   marginTopPx: number, marginBottomPx: number,
 ): string {
   let h1 = 0x811c9dc5 >>> 0
@@ -409,6 +409,11 @@ function blockKey(
   // against float noise that cannot move a break.
   const num = (n: number) => { const v = Math.round(n * 1024) | 0; byte(v & 255); byte((v >>> 8) & 255); byte((v >>> 16) & 255); byte((v >>> 24) & 255) }
   num(basePx); num(ratio); num(contentWidth); num(marginTopPx); num(marginBottomPx)
+  // The STRUT's family decides eligibility (a run in another face grows the DOM's line box — see
+  // blockEligibility's mixed-family note), so two blocks with identical runs and different struts
+  // are NOT the same layout and must not share a key.
+  for (let i = 0; i < baseFamily.length; i++) byte(baseFamily.charCodeAt(i) & 255)
+  byte(0x1d)
   for (const r of runs) {
     byte(r.atomic ? 1 : 0)
     byte(r.italic ? 1 : 0)
@@ -462,7 +467,7 @@ export function buildRenderModel(
   // Lay out one paragraph-like run set at a given font/width/indent, appending its lines. Shared by
   // paragraphs, headings and list items so the three can never drift apart in how they wrap.
   const emitTextBlock = (
-    runs: InlineRun[], basePx: number, ratio: number, contentWidth: number,
+    runs: InlineRun[], basePx: number, baseFamily: string, ratio: number, contentWidth: number,
     marginTopPx: number, marginBottomPx: number, blockIdx: number, posBase: number,
     indentPx = 0, marker?: string,
   ): { ok: boolean; height: number; reason: string; fontsOk: boolean } => {
@@ -472,7 +477,7 @@ export function buildRenderModel(
     const cache = opts.blockCache
     let key = ''
     if (cache) {
-      key = blockKey(runs, basePx, ratio, contentWidth, marginTopPx, marginBottomPx)
+      key = blockKey(runs, basePx, baseFamily, ratio, contentWidth, marginTopPx, marginBottomPx)
       const hit = cache.map.get(key)
       if (hit) {
         cache.stats.hits++
@@ -493,7 +498,7 @@ export function buildRenderModel(
     }
 
     const arith: ArithBlock = {
-      type: 'paragraph', runs, baseFontPx: basePx,
+      type: 'paragraph', runs, baseFontPx: basePx, baseFontFamily: baseFamily,
       marginTopPx, marginBottomPx, firstLineLeadingPx: 0,
     }
     const elig = blockEligibility(arith, ratio)
@@ -564,7 +569,13 @@ export function buildRenderModel(
       const s = blockStyle(`heading:${lvl}`, geom.basePx)
       if (s) {
         const runs = sliceRuns(styledRuns(node, s), fromChar)
-        const r = emitTextBlock(runs, s.fontSizePx, s.lineHeightRatio, geom.contentWidthPx,
+        // styledRuns re-families EVERY run to the harvested style, so the strut IS that family and
+        // the mixed-family check is a tautology here. That is a real gap, stated: a
+        // textStyle:fontFamily mark INSIDE a heading is overwritten rather than modelled, so a
+        // heading in a picked font is laid out in the h2's own face. Headings are single-line in
+        // practice and the matrix's heading rows are byte-identical, so it is not moving a break
+        // today — but it is a guess, and it should become a defer when a fixture can catch it.
+        const r = emitTextBlock(runs, s.fontSizePx, s.fontFamily, s.lineHeightRatio, geom.contentWidthPx,
           s.marginTopPx, s.marginBottomPx, bi, offset + 1 + fromChar)
         if (r.ok) {
           blocks.push({ kind: 'text', type: 'heading', start: offset, end: offset + node.nodeSize, top, height: r.height })
@@ -584,14 +595,36 @@ export function buildRenderModel(
     }
 
     // ── LIST: ONE block (as the live DOM's <ul>/<ol> is one top-level block), many item lines ──
+    //
+    // ⚠ A LIST'S MARGINS COLLAPSE, AND THAT IS THE WHOLE OF THIS BRANCH'S DIFFICULTY (2026-07-17).
+    // The model used to add one `li > p` margin-bottom after EVERY item, including the last, then the
+    // list's own margin-bottom on top. CSS does not: the last item's paragraph has nothing below it
+    // inside the list — no padding-bottom, no border on the `li` or the `ul` — so its bottom margin
+    // COLLAPSES THROUGH both and merges with the list's own. The gap after a list is
+    // `max(itemMargin, listMargin)`, not their sum.
+    // MEASURED against the live DOM (scripts/textrender-probe/listdiag.mjs, 3-item lists, canonical
+    // 18px): the `ul`'s own rect is `Σ item paragraphs + (n−1) × 4.5`, and the real gap to its next
+    // sibling is 9 — while the model produced `Σ + n × 4.5` and then added 9, i.e. **+4.5px per
+    // list, every list**. Silent: `estimatedBlocks 0`, `reliablePages 55/55` — full reliability
+    // claimed while every break below the first list carried the wrong words. Six lists into a
+    // document that is one 29px line of drift.
+    // So: the item margin is added BETWEEN items (never after the last), and the list's trailing
+    // advance is the COLLAPSE of the last item's margin with the list's own.
     if (node.type.name === 'bulletList' || node.type.name === 'orderedList') {
       const ls = blockStyle(node.type.name, geom.basePx)
       const ip = blockStyle('listItemPara', geom.basePx)
-      if (ls && ip) {
+      // A list's margin-TOP is 0 in this app (measured: Tailwind preflight zeroes it and index.css
+      // sets only margin-bottom). The model never collapses it against the PREVIOUS block's
+      // margin-bottom — it has already committed that margin by the time it gets here — so the
+      // arithmetic is only right while the top margin is 0. Refuse rather than let a future CSS
+      // change move every break below a list with nothing to show for it.
+      if (ls && ip && ls.marginTopPx === 0) {
         const startTop = top
         const startLines = lines.length
         let ok = true
         let idx = 0
+        let emitted = 0            // items actually laid out — the last one's margin does not apply
+        let lastItemMarginPx = 0
         // listItem → its paragraph. Doc positions: list@offset, item@+1, para@+2, text@+3.
         node.forEach((item, itemOff) => {
           if (!ok || done) return
@@ -602,23 +635,43 @@ export function buildRenderModel(
           // item 0, so a window opening mid-list silently rendered the WRONG lines (0/30, at every
           // doc size). Lists straddle page boundaries constantly in real prose.
           if (from > 0 && itemBase + item.nodeSize <= from) return
+          // A listItem may hold a NESTED list (the schema allows `bulletList` inside `listItem`).
+          // The inner `ul` brings its own indent and its own margins, and this branch has no rule
+          // for either — it used to SKIP any non-paragraph child, dropping the nested list's entire
+          // height from the model while still reporting the list laid out and the pages reliable.
+          // A missing block is not a smaller block; it is a wrong document. Defer the whole list.
+          let nested: string | null = null
+          item.forEach((c) => { if (c.type.name !== 'paragraph' && !nested) nested = c.type.name })
+          if (nested) { ok = false; return }
           item.forEach((child, childOff) => {
             if (!ok || child.type.name !== 'paragraph') return
             const paraStart = itemBase + 1 + childOff + 1
             const fc = from > paraStart && from < paraStart + child.content.size ? from - paraStart : 0
             const runs = sliceRuns(runsOfParagraph(child, ip.fontSizePx, citationStyle, bibEpoch), fc)
             const marker = node.type.name === 'orderedList' ? `${idx}.` : '•'
-            const r = emitTextBlock(runs, ip.fontSizePx, ip.lineHeightRatio,
+            // BETWEEN-ITEM margin, applied before this item rather than after the previous one, so
+            // the last item can never contribute one.
+            if (emitted > 0) top += lastItemMarginPx
+            // STRUT = DEFAULT_STACK, not the harvested `ip.fontFamily`. Both name the same FACE (the
+            // harvested string is the COMPUTED form of the editor's own stack); DEFAULT_STACK is the
+            // one an unmarked run in this block actually gets, and the check's whole question is "did
+            // a mark move this run off the strut's face". Comparing against the computed string would
+            // answer "yes" for every list item ever written.
+            const r = emitTextBlock(runs, ip.fontSizePx, DEFAULT_STACK, ip.lineHeightRatio,
               geom.contentWidthPx - ls.indentPx, 0, ip.marginBottomPx, bi,
               paraStart + fc, ls.indentPx, fc === 0 ? marker : undefined) // a continued item has no marker
             if (!r.ok) { ok = false; return }
-            top += r.height + ip.marginBottomPx
+            top += r.height
+            lastItemMarginPx = ip.marginBottomPx
+            emitted++
             if (top >= maxHeight) done = true
           })
         })
         if (ok) {
           blocks.push({ kind: 'text', type: node.type.name, start: offset, end: offset + node.nodeSize, top: startTop, height: top - startTop })
-          top += ls.marginBottomPx
+          // The trailing advance: the last item's margin and the list's own are ADJACENT (nothing
+          // between them), so they collapse to the larger — never sum.
+          top += emitted > 0 ? Math.max(lastItemMarginPx, ls.marginBottomPx) : ls.marginBottomPx
           bump(node.type.name)
           return
         }
@@ -644,7 +697,7 @@ export function buildRenderModel(
       // old `offset + 1 + fromChar + sc`, margins are the same (0 / marginBottom), and the caller
       // still pushes the block and advances `top` exactly as before.
       const runs = sliceRuns(runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch), fromChar)
-      const r = emitTextBlock(runs, geom.basePx, geom.ratio, geom.contentWidthPx, 0, marginBottom, bi, offset + 1 + fromChar)
+      const r = emitTextBlock(runs, geom.basePx, DEFAULT_STACK, geom.ratio, geom.contentWidthPx, 0, marginBottom, bi, offset + 1 + fromChar)
       if (r.ok) {
         blocks.push({ kind: 'text', type: 'paragraph', start: offset, end: offset + node.nodeSize, top, height: r.height })
         top += r.height + marginBottom
