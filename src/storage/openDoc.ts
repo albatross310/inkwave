@@ -190,6 +190,20 @@ async function openInkwaveFileInner(
         // A document with NO config leaves this undefined, so resolveToolbarRow falls through to
         // the writer's OWN order: the thousands of existing documents are untouched.
         ...(incomingToolbar ? { toolbar: incomingToolbar } : {}),
+        // THE HEADERS FOLLOW THE DOC TOO (2026-07-17). `bundle.ts` carries docType/email expressly
+        // "so a recipient of the .studio sees what the draft was addressed to" — and this literal
+        // never read them back, so for every .studio ever sent that sentence was false. Not hashed:
+        // the anchored header claim lives on each snapshot's frozen `email`+`emailHash`, so reading
+        // these changes no hash and cannot alter what verify recomputes or OTS binds.
+        // Read the SAME allow-list mechanism that dropped `toolbar` from every emailed file: an
+        // export field with no matching line HERE is silently discarded, and the local path looks
+        // perfect because the author's own copy never round-trips. Adding a field to bundle.ts
+        // without adding it here ships a lie in a comment.
+        // scasMode/scasSetSize/scasPoolId are ALSO carried and ALSO dropped — deliberately left
+        // alone: unlike these, nothing states they should travel, and the recipient's own SCAS
+        // settings arguably ought to win. That one is Peter's call, not an inference.
+        ...(data.document?.docType ? { docType: data.document.docType } : {}),
+        ...(data.document?.email ? { email: data.document.email } : {}),
         ...(bib?.length ? { bibliography: { source: 'library' as const, entries: bib, generatedAt: now } } : {}),
       })
   // Persist — but a persistence failure must NOT abort the open. The parsed doc is in hand and
