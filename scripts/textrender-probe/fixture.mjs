@@ -49,9 +49,17 @@ function rng(seed = 20260717) {
  *       previews (0.86em italic), the term the chrome composition was NEVER exercising.
  *     • LOCATORS — `locator` attrs ⇒ `esp. pp 2, 4-6` spans (0.95em italic) appear at all.
  *   Without it, `quote` and `esp` are never even harvested and their code paths are unproven.
+ * @param opts.listWords  words per list ITEM. Default 9 — which is ONE LINE at canonical width, so
+ *   every existing probe's document stays byte-identical.
+ *   THE 9-WORD PROBLEM (2026-07-17), the same shape as refVariety's above. The container-box bug
+ *   turns on an item's LINE COUNT: a container box is admitted as a line only when it is under the
+ *   80px cut, so a 2-line `<li>` (58.2px) reproduces it and a 1-line (29.1px) or 3-line (87.3px)
+ *   one CANNOT. Every list fixture here was 9 words, so `halvesbisect`'s `+ lists` row printed a
+ *   confident "OFFSETS IDENTICAL" against a shape structurally incapable of failing — a green tick
+ *   from a document with no way to be wrong. Pass ~22 to get 2-line items.
  */
 export function buildCitationDoc(opts = {}) {
-  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true, maths = 0, refVariety = false } = opts
+  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true, maths = 0, refVariety = false, listWords = 9 } = opts
   const rnd = rng()
   const keys = AUTHORS.map(([fam], i) => `${fam.toLowerCase()}${1990 + (i % 25)}`)
   const usedKeys = keys.slice(0, Math.max(1, Math.min(keys.length, Math.ceil(cites / 2))))
@@ -132,10 +140,10 @@ export function buildCitationDoc(opts = {}) {
       content.push({
         type: 'bulletList',
         content: Array.from({ length: 3 }, () => ({
-          type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: sentence(9) + '.' }] }],
+          type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: sentence(listWords) + '.' }] }],
         })),
       })
-      wordsSoFar += 27
+      wordsSoFar += 3 * listWords
     }
   }
 

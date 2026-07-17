@@ -25,6 +25,22 @@ const SHAPES = [
   ['prose only',               { words: 6000, cites: 0,  marked: 0, lists: false, refList: false, headings: false }],
   ['+ headings',               { words: 6000, cites: 0,  marked: 0, lists: false, refList: false, headings: true }],
   ['+ lists',                  { words: 6000, cites: 0,  marked: 0, lists: true,  refList: false, headings: true }],
+  // THE ROW ABOVE IS STRUCTURALLY BLIND to the container-box bug, and so is this one. Read both
+  // "OFFSETS IDENTICAL"s accordingly — neither is evidence that the pane's line grid is right.
+  //   · The row above uses `listWords: 9` — ONE-LINE items. A container box is admitted as a line
+  //     only when it is under the 80px cut, so only a ~2-line item (58.2px) can even produce the
+  //     artifact; a 1-line box is ~29px, a 3-line box is 87.3px and the cut drops it. Trap #15.
+  //   · This row fixes that — 22 words ⇒ 2-line items, which DO produce the artifact (24 lines
+  //     drift by 3.000px; panerect.mjs measures it) — AND IT STILL PRINTS IDENTICAL. **MEASURED**,
+  //     with the bug fully restored via `__iwStaticLineRule='range'`: not ONE of its 25 breaks
+  //     moves. That is trap #9, and it is the sharper lesson: the artifact is 3.000px on a ~29px
+  //     line grid, so it only reaches a gap widget where a boundary lands within 3px of the
+  //     overflow cliff. This probe reads gap offsets, so it CANNOT be the gate for that rule at any
+  //     fixture — the gate is `panerect.mjs` (the artifact) + `staticPagination.container.test.ts`.
+  // The row is kept because 2-line items are a strictly better list shape for everything else this
+  // probe measures, and because a row that was believed to cover the container rule should stay
+  // here saying, in writing, that it does not.
+  ['+ lists (2-LINE items)',   { words: 6000, cites: 0,  marked: 0, lists: true,  refList: false, headings: true, listWords: 22 }],
   ['+ citations',              { words: 6000, cites: 80, marked: 1, lists: true,  refList: false, headings: true }],
   ['+ refList (thesis shape)', { words: 6000, cites: 80, marked: 1, lists: true,  refList: true,  headings: true }],
   // THESIS SCALE, no refList — isolates whether the CITATION-WIDTH divergence accumulates. The
