@@ -92,7 +92,8 @@ try {
   // A fixture that placeholders most of its paragraphs is not measuring the renderer. SAY SO.
   const ph = (r.census['paragraph:placeholder'] || 0), tx = (r.census['paragraph:text'] || 0)
   if (ph > tx * 0.1) console.log(`  ⚠ ${ph} paragraphs PLACEHOLDER vs ${tx} laid out — those blocks never reach layoutParagraph; the reuse % is over a document that barely exists.`)
-  console.log(`  per version:  parse ${r.parseMsPerVersion}ms · full ${r.fullMsPerVersion}ms · incremental ${r.incMsPerVersion}ms   (${r.speedup}× on the build)`)
+  console.log(`  BUILD per version:  full ${r.fullMsPerVersion}ms → incremental ${r.incMsPerVersion}ms   (${r.speedup}× · reuse ${(r.reuseMean * 100).toFixed(1)}%)`)
+  console.log(`  PARSE per version:  full ${r.parseMsPerVersion}ms → cached ${r.parseIncMsPerVersion}ms   (${r.parseSpeedup}× · reuse ${(r.parseReuseMean * 100).toFixed(1)}%)  cache ${r.parseCacheEntries} entries, ${r.parseCacheEvicted} evicted`)
   console.log(`  sample: ${JSON.stringify(r.rows.slice(0, 3))}`)
   check(r.byteIdentical, `incremental == full, BYTE-IDENTICAL at line level (${r.identical}/${VERSIONS})`,
     r.byteIdentical ? '' : `differing=${r.differing} ${JSON.stringify(r.firstDiff)}`)
@@ -105,6 +106,13 @@ try {
   check(!!p && p.changedOutput, 'poisoning a cached entry CHANGED the output',
     p && p.changedOutput ? '⇒ the hit path really ran; the identical results above are real' : '⇒ THE CACHE IS NEVER READ. Every "identical" above is VACUOUS.')
   check(!!p && p.restoredMatches, 'un-poisoning restores the original output', '⇒ the negative is reversible, not destructive')
+
+  console.log(`\n── POISONED **PARSE** CACHE NEGATIVE: did the parse reuse actually RUN? ──`)
+  const pp = r.parsePoison
+  check(!!pp && pp.swapped, 'two distinct cached nodes were found to swap')
+  check(!!pp && pp.changedDoc, 'swapping a cached parsed Node CHANGED the document',
+    pp && pp.changedDoc ? '⇒ the parse-reuse path really ran' : '⇒ IT SILENTLY FELL BACK TO A FULL PARSE. The parse reuse numbers are vacuous.')
+  check(!!pp && pp.restoredMatches, 'restoring the node restores the document')
 
   // ── THE TWO FIXTURE NEGATIVES ───────────────────────────────────────────────────────────────
   console.log(`\n── FIXTURE NEGATIVES: the metric must move in both directions ──`)
@@ -128,14 +136,13 @@ try {
   // ── THE VERDICT PETER JUDGES ────────────────────────────────────────────────────────────────
   console.log(`\n──────────────────────────────────────────────────────────────`)
   console.log(`THE WIRED COST OF ${VERSIONS} VERSIONS ON /snapshot OPEN (parse + build):`)
-  console.log(`  naive (full build)  : parse ${r.parseSec}s + build ${(r.fullMsPerVersion * VERSIONS / 1000).toFixed(2)}s = ${r.wiredSecFull}s`)
-  console.log(`  incremental         : parse ${r.parseSec}s + build ${r.buildOnlySecInc}s = ${r.wiredSecInc}s`)
-  console.log(`  TARGET              : <1.00s`)
-  console.log(`  build alone         : ${r.buildOnlySecInc}s  ${r.buildOnlySecInc < 1 ? '✓ under' : '✗ over'}`)
-  console.log(`  PARSE FLOOR         : ${r.parseSec}s — a build cache CANNOT touch this.`)
-  console.log(r.wiredSecInc < 1
-    ? `  VERDICT: ${r.wiredSecInc}s — UNDER TARGET. Load it on snapshot-screen open.`
-    : `  VERDICT: ${r.wiredSecInc}s — OVER TARGET. Remaining cost is ${r.parseSec >= r.buildOnlySecInc ? 'dominated by PARSE' : 'dominated by BUILD'}.`)
+  console.log(`  naive          : parse ${r.parseSec}s + build ${(r.fullMsPerVersion * VERSIONS / 1000).toFixed(2)}s = ${r.wiredSecFull}s`)
+  console.log(`  + build cache  : parse ${r.parseSec}s + build ${r.buildOnlySecInc}s = ${r.wiredSecInc}s`)
+  console.log(`  + BOTH caches  : parse ${r.parseIncSec}s + build ${r.buildOnlySecInc}s = ${r.wiredSecBoth}s`)
+  console.log(`  TARGET         : <1.00s`)
+  console.log(r.wiredSecBoth < 1
+    ? `  VERDICT: ${r.wiredSecBoth}s — UNDER TARGET. Peter's "just load it when the snapshots screen loads up" holds.`
+    : `  VERDICT: ${r.wiredSecBoth}s — OVER TARGET (${r.parseIncSec >= r.buildOnlySecInc ? 'PARSE' : 'BUILD'} dominates the remainder).`)
   console.log(`  NB this box is contended — trust the RATIO (${r.speedup}× on the build), not the absolutes.`)
   process.exitCode = failed ? 1 : 0
 } finally {

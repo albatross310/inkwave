@@ -13,7 +13,7 @@ import type { Editor } from '@tiptap/react'
 // The /snapshot seam under test — the standalone schema, imported here so the probe compares it
 // against the LIVE editor's rather than against another copy of itself. `schemaSpec` is shared with
 // the gate-kept unit test so both compare schemas by the SAME definition of "same".
-import { getEditorSchema, nodeFromContentJson, schemaSpec } from './editorSchema'
+import { getEditorSchema, nodeFromContentJson, nodeFromContentJsonCached, makeParseCache, schemaSpec, type ParseCache } from './editorSchema'
 import { makeCanvasMeasure, makeFontLoaded, type Measure } from './arithmeticLayout'
 import {
   buildRenderModel, paintPage, paintMapStrip, canonicalGeomFromSettings,
@@ -896,6 +896,7 @@ export function installTextRenderProbe(editor: Editor): void {
       }
 
       const cache: BlockLayoutCache = makeBlockLayoutCache()
+      const pcache: ParseCache = makeParseCache()
       const baseStr = JSON.stringify(baseJson)
 
       // WARM IN-PAGE BEFORE TIMING — JIT tier-up is worth 291.7 → 81.8ms here and would otherwise be
@@ -910,14 +911,29 @@ export function installTextRenderProbe(editor: Editor): void {
       const rows: Array<Record<string, unknown>> = []
       let identical = 0, differing = 0
       const firstDiff: Array<Record<string, unknown>> = []
-      let parseTotal = 0, fullTotal = 0, incTotal = 0
+      let parseTotal = 0, parseIncTotal = 0, fullTotal = 0, incTotal = 0
 
       for (let v = 0; v < versions; v++) {
         const json = edit(baseStr, v)
+        // FULL parse — the baseline /snapshot pays today.
         const p0 = performance.now()
         const doc = nodeFromContentJson(json)
         const parseMs = performance.now() - p0
         if (!doc) { rows.push({ v, err: 'parse returned null' }); differing++; continue }
+        // CACHED parse — same JSON, block-level reuse.
+        const ph0 = pcache.stats.hits, pm0 = pcache.stats.misses
+        const q0 = performance.now()
+        const cdoc = nodeFromContentJsonCached(json, pcache)
+        const parseIncMs = performance.now() - q0
+        const pHits = pcache.stats.hits - ph0, pMisses = pcache.stats.misses - pm0
+        const pReuse = pHits + pMisses > 0 ? pHits / (pHits + pMisses) : 0
+        if (!cdoc) { rows.push({ v, err: 'cached parse returned null' }); differing++; continue }
+        // THE CACHED PARSE MUST PRODUCE THE SAME DOCUMENT. `.eq()` is REFERENCE-equal on NodeType,
+        // so it can never pass across TWO schema instances — the trap schemaIdentity documents. Here
+        // BOTH sides come from the SAME memoised getEditorSchema(), so it is a valid comparison, and
+        // the model comparison below is the load-bearing one regardless.
+        const docsEq = cdoc.eq(doc)
+        if (!docsEq) { rows.push({ v, err: 'cached parse produced a DIFFERENT document' }); differing++; continue }
 
         const f0 = performance.now()
         const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
@@ -930,12 +946,45 @@ export function installTextRenderProbe(editor: Editor): void {
         const hits = cache.stats.hits - h0, misses = cache.stats.misses - m0
         const reuse = hits + misses > 0 ? hits / (hits + misses) : 0
 
-        const sf = modelSig(full), si = modelSig(inc)
-        if (sf === si) identical++
-        else { differing++; if (firstDiff.length < 3) firstDiff.push({ v, full: sf, inc: si, fullLines: full.lines.length, incLines: inc.lines.length }) }
+        // THE INCREMENTAL BUILD MUST ALSO BE IDENTICAL WHEN FED THE **CACHED-PARSE** DOC — that is
+        // the combination /snapshot would actually run, and reusing Node objects across documents is
+        // exactly where a structure-sharing mistake would surface.
+        const sc = modelSig(buildRenderModel(cdoc, g, measure, fontLoaded, { ...buildOpts(), blockCache: cache }))
 
-        parseTotal += parseMs; fullTotal += fullMs; incTotal += incMs
-        rows.push({ v, parseMs: +parseMs.toFixed(2), fullMs: +fullMs.toFixed(2), incMs: +incMs.toFixed(2), hits, misses, reuse: +reuse.toFixed(3), same: sf === si })
+        const sf = modelSig(full), si = modelSig(inc)
+        if (sf === si && sf === sc) identical++
+        else { differing++; if (firstDiff.length < 3) firstDiff.push({ v, full: sf, inc: si, cachedParse: sc }) }
+
+        parseTotal += parseMs; parseIncTotal += parseIncMs; fullTotal += fullMs; incTotal += incMs
+        rows.push({ v, parseMs: +parseMs.toFixed(2), parseIncMs: +parseIncMs.toFixed(2), pReuse: +pReuse.toFixed(3), fullMs: +fullMs.toFixed(2), incMs: +incMs.toFixed(2), hits, misses, reuse: +reuse.toFixed(3), same: sf === si && sf === sc })
+      }
+
+      // ── THE POISONED **PARSE** CACHE NEGATIVE ───────────────────────────────────────────────
+      // Same instrument, one level down. Swap a cached block's parsed Node for a DIFFERENT one; the
+      // resulting model MUST change. If it doesn't, nodeFromContentJsonCached silently fell back to
+      // a full parse and every parse-reuse number above is measuring nothing.
+      let parsePoison: Record<string, unknown> | null = null
+      if (o.poison) {
+        const j = edit(baseStr, 0)
+        const clean = nodeFromContentJsonCached(j, pcache)
+        const keys = [...pcache.map.keys()]
+        // Find two entries whose nodes differ, and swap one in for the other.
+        let swapped = false, changed = false
+        if (keys.length > 1 && clean) {
+          const kA = keys[0]
+          const a = pcache.map.get(kA)
+          const other = keys.map((k) => pcache.map.get(k)).find((n) => n && a && !n.eq(a))
+          if (a && other) {
+            pcache.map.set(kA, other)
+            const dirty = nodeFromContentJsonCached(j, pcache)
+            changed = !!dirty && !dirty.eq(clean)
+            pcache.map.set(kA, a) // restore
+            const restored = nodeFromContentJsonCached(j, pcache)
+            swapped = true
+            parsePoison = { swapped, changedDoc: changed, restoredMatches: !!restored && restored.eq(clean) }
+          }
+        }
+        if (!parsePoison) parsePoison = { swapped, changedDoc: changed, note: 'could not find two distinct cached nodes' }
       }
 
       // ── THE POISONED-CACHE NEGATIVE ─────────────────────────────────────────────────────────
@@ -980,6 +1029,12 @@ export function installTextRenderProbe(editor: Editor): void {
         identical, differing, firstDiff,
         byteIdentical: differing === 0,
         parseMsPerVersion: +(parseTotal / versions).toFixed(2),
+        parseIncMsPerVersion: +(parseIncTotal / versions).toFixed(2),
+        parseSpeedup: +(parseTotal / Math.max(0.001, parseIncTotal)).toFixed(2),
+        parseReuseMean: +(rows.reduce((a, r) => a + ((r.pReuse as number) ?? 0), 0) / Math.max(1, rows.length)).toFixed(3),
+        parseCacheEntries: pcache.stats.entries, parseCacheEvicted: pcache.stats.evicted,
+        parseIncSec: +(parseIncTotal / 1000).toFixed(2),
+        wiredSecBoth: +((parseIncTotal + incTotal) / 1000).toFixed(2),
         fullMsPerVersion: +(fullTotal / versions).toFixed(2),
         incMsPerVersion: +(incTotal / versions).toFixed(2),
         speedup: +(fullTotal / Math.max(0.001, incTotal)).toFixed(2),
@@ -991,7 +1046,7 @@ export function installTextRenderProbe(editor: Editor): void {
         buildOnlySecInc: +(incTotal / 1000).toFixed(2),
         parseSec: +(parseTotal / 1000).toFixed(2),
         cacheEntries: cache.stats.entries, cacheEvicted: cache.stats.evicted,
-        poison,
+        poison, parsePoison,
         rows: rows.slice(0, 6),
       }
     },
