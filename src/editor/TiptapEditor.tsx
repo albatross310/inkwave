@@ -64,6 +64,8 @@ const ProductivityReportModal = lazy(() =>
 )
 import { prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
+import { ClockMenu } from '../components/ClockMenu'
+import { CountdownOverlay } from '../components/CountdownOverlay'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
@@ -97,28 +99,42 @@ import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/docum
 // ONE reorderable population (2026-07-11, Peter's round 2): the main-row circles AND the
 // ▲-menu overflow — the S style toggle and ⚙ settings are slots too. SLOT_COUNT ride the
 // row; the rest live in the ▲ drop-up (pool minus row). Only ▲ and ⋮ are fixed.
-type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings'
+type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings' | 'clock'
 const SLOT_KEY = 'inkwave-toolbar-slots'
-const SLOT_COUNT = 6
-const DEFAULT_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'style', 'settings']
-const ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page', 'style', 'settings']
+const BASE_SLOT_COUNT = 6
+const BASE_DEFAULT_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'style', 'settings']
+const BASE_ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page', 'style', 'settings']
+
+// The clock (Pomodoro + ledger) is a SLOT like every other — reorderable, and droppable into the ▲
+// overflow — not a button bolted onto the bar. It exists only while `?prodLedger` is on, so the row
+// is 6 for everyone else and there is no width change for a feature they don't have.
+const slotCount = (): number => (prodLedgerEnabled() ? BASE_SLOT_COUNT + 1 : BASE_SLOT_COUNT)
+const defaultSlots = (): SlotId[] => (prodLedgerEnabled() ? [...BASE_DEFAULT_SLOTS, 'clock'] : BASE_DEFAULT_SLOTS)
+const allSlots = (): SlotId[] => (prodLedgerEnabled() ? [...BASE_ALL_SLOTS, 'clock'] : BASE_ALL_SLOTS)
 
 function loadToolbarSlots(): SlotId[] {
+  const count = slotCount()
+  const pool = allSlots() as string[]
   try {
     const raw = localStorage.getItem(SLOT_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as unknown
       if (Array.isArray(parsed)) {
-        // Legacy 4-slot configs (pre style/settings-as-slots) migrate by appending the two
-        // buttons that used to be fixed after the slots — same visual order as before.
-        const slice = parsed.length === 4 ? [...parsed, 'style', 'settings'] : parsed.slice(0, SLOT_COUNT)
-        const valid = slice.length === SLOT_COUNT && slice.every(id => (ALL_SLOTS as string[]).includes(id as string))
-        const unique = new Set(slice).size === SLOT_COUNT
-        if (valid && unique) return slice as SlotId[]
+        // Legacy 4-slot configs (pre style/settings-as-slots) migrate by appending the two buttons
+        // that used to be fixed after the slots — same visual order as before. The clock migrates
+        // the SAME documented way (6 → 7 by appending) when its flag turns on, and is DROPPED again
+        // if the flag goes off, so a stored 7-slot row can't strand an unrenderable id.
+        let next = parsed.filter(id => pool.includes(id as string)) as SlotId[]
+        if (next.length === 4) next = [...next, 'style', 'settings']
+        for (const id of defaultSlots()) if (next.length < count && !next.includes(id)) next.push(id)
+        const slice = next.slice(0, count)
+        const valid = slice.length === count && slice.every(id => pool.includes(id as string))
+        const unique = new Set(slice).size === count
+        if (valid && unique) return slice
       }
     }
   } catch {}
-  return DEFAULT_SLOTS
+  return defaultSlots()
 }
 // ─────────────────────────────────
 
@@ -2577,6 +2593,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         </button>
       )}
       {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+      {id === 'clock' && <ClockMenu />}
     </>
   )
 
@@ -2669,6 +2686,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             />
           )}
         </Scroll>
+
+        {/* The faint desktop countdown. Renders NOTHING unless a block is running and the flag is
+            on; it portals itself to <body>, so despite sitting here in the tree it is never a
+            DESCENDANT of the editor and its per-second write cannot invalidate the page subtree. */}
+        {prodLedgerEnabled() && <CountdownOverlay />}
 
         {/* ReceiptPanel: always in the tree on phone (no !keyboardUp guard) so the panel
             stays mounted during and after async save-version work. The trigger is hidden
@@ -2913,7 +2935,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   </span>
                 </button>
                 {(() => {
-                  const available = ALL_SLOTS.filter(id => !toolbarSlots.includes(id))
+                  const available = allSlots().filter(id => !toolbarSlots.includes(id))
                   return (
                     <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
                       style={{ border: '1px solid rgba(92,45,138,0.75)' }}

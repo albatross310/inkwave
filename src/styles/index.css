@@ -1388,6 +1388,11 @@
 /* ── Chrome (toolbars, popups, pills): "dolphin-back grey" panels with light-grey text. Panels opt in
    with the `iw-nightable` class; scoping the sweeping overrides to it keeps the blast radius small. ── */
 :root { --iw-ink: #5c2d8a; }               /* app ink/purple; lightened inside night chrome */
+/* Text/icons ON an --iw-ink FILL (a filled pill, the Pomodoro's Start). It CANNOT be a literal #fff:
+   --iw-ink is DARK purple in day (white reads) and LIGHT purple in night (white vanishes — measured
+   on the ledger drop-up: white-on-#cbb8f2). Same shape as --iw-newbtn-fg's "darker on its light-blue
+   chip in night". Any new filled control must use this, never a hard-coded white. */
+:root { --iw-on-ink: #ffffff; }
 
 /* Music module (MusicXML path) — the rendered notation's colours. Day values here, night values in
    the night block below. Unlike the charts, these are NOT consumed as var() inside an SVG attribute:
@@ -1408,6 +1413,7 @@
   --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
   --iw-nightable-border: #7c8794;          /* inline-styled control borders (light) */
   --iw-ink: #cbb8f2;                        /* light purple in place of #5c2d8a inline colours */
+  --iw-on-ink: #2c2e35;                     /* text on an --iw-ink fill — dark, because the fill is light */
   --iw-light: #c3a8ef;                      /* lighter purple accent (was #9b5ccc) */
   --iw-verified: #6ee7a0;                    /* verified ✓ box — light green on dark */
   --iw-newbtn-fg: #0c4a6e;                   /* + New text — darker on its light-blue chip in night */
