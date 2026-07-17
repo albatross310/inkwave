@@ -84,9 +84,13 @@ export const MEASURED_COLUMNS: readonly string[] = [
   // §A3.2
   'doc_id', 'doc_label', 'start', 'end', 'active_minutes', 'words_start', 'words_end',
   'words_added', 'words_deleted', 'net_words', 'edit_events', 'break_before_min', 'pomodoro',
-  'doc_type', 'place',
+  'doc_type', 'place', 'entered',
   // §A3.3
   'session_count', 'break_count', 'break_total_min', 'deep_shallow_ratio', 'busiest_hours',
+  // Post-hoc time is TESTIMONY, not measurement — but §A6.4's rule is about ROUND-TRIPPING, and it
+  // bites here for the same reason: it is a number Inkwave holds and sent, so a model handing it
+  // back can only have tidied it. The writer said 45 minutes; 45 is not the model's to revise.
+  'posthoc_minutes', 'posthoc_session_count',
 ]
 
 function norm(s: string): string {

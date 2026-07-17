@@ -27,6 +27,7 @@ import { countSteps } from '../provenance/cadence'
 import { countWords } from '../provenance/snapshots'
 import { pmToText } from '../provenance/bundle'
 import { diffStats, diffWords } from '../provenance/diff'
+import { activityDuring, observedDocType } from './pdfActivity'
 import { currentPlace } from './places'
 import {
   DEFAULT_IDLE_MS,
@@ -336,7 +337,7 @@ export class SessionCapture {
     const stats = base && doc ? wordDiffStats(base.text, end.text) : { added: 0, removed: 0 }
 
     const label = doc && !isLabelSuppressed(d.docId) ? doc.title : undefined
-    const docType = doc ? resolveDocType(doc) : d.docType
+    const declared = doc ? resolveDocType(doc) : d.docType
     // The place label is read at CLOSE, not at open: the writer sets it once ("library") and every
     // session that closes there inherits it. Absent = no place field at all. Never auto-detected.
     const place = d.place ?? this.placeFn()
@@ -350,6 +351,13 @@ export class SessionCapture {
     // recording it at all.
     const closeAt = d.pomodoro ? this.clock() : d.lastEditAt
     const draft = d.pomodoro ? { ...d, activeMs: Math.max(0, closeAt - d.startedAt) } : d
+
+    // WAS THIS BLOCK SPENT IN A PDF? Resolved at CLOSE, never on a keystroke — and only ever where
+    // the answer would otherwise have been `misc`, i.e. where we had already admitted we did not
+    // know. A session with edits, or a document that DECLARED its type, is untouched. See
+    // pdfActivity.ts `observedDocType` for the full rule; the two booleans it reads are the only
+    // thing this feature records about a PDF (never a page, never a position).
+    const docType = observedDocType(declared, d.editEvents, activityDuring(d.startedAt, closeAt))
 
     const row = buildRow(
       { ...draft, docLabel: label, docType, place },

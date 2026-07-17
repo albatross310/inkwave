@@ -27,7 +27,7 @@ function session(over: Partial<SessionRow> = {}): SessionRow {
     session_id: 's-1', doc_id: 'doc-essay', start: '2026-07-06T09:00:00+10:00',
     end: '2026-07-06T10:00:00+10:00', active_minutes: 45, words_start: 0, words_end: 0,
     words_added: 0, words_deleted: 0, net_words: 0, edit_events: 10, break_before_min: 0,
-    pomodoro: false, doc_type: 'essay', ...over,
+    pomodoro: false, doc_type: 'essay', entered: 'timer', ...over,
   }
 }
 

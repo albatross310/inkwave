@@ -265,8 +265,102 @@ export function buildRow(
     break_before_min: prevSessionEndAt === null ? 0 : round1(Math.max(0, d.startedAt - prevSessionEndAt) / 60_000),
     pomodoro: d.pomodoro,
     doc_type: d.docType,
+    // STATED, never left to absence. Everything reaching buildRow came off the timer's own capture.
+    entered: 'timer',
     ...(note ? { note } : {}),
     ...(place ? { place } : {}),
+  }
+}
+
+/**
+ * Did this row's time come from the writer's memory rather than the timer?
+ *
+ * THE ONE PLACE `entered` IS READ, and it asks the POSITIVE question deliberately: "did this row SAY
+ * post-hoc?". A row must CLAIM to be testimony to be treated as testimony. Legacy rows (written
+ * before the field existed) predate the manual add entirely, so they are timer rows as a matter of
+ * history — not because absence defaults to anything. Keeping that reasoning in one named function is
+ * what stops it being silently re-derived as `!row.entered` somewhere else.
+ *
+ * It lives HERE, beside the builders, rather than in `aggregate.ts`, because the panel needs it too
+ * and must not drag the whole rollup layer in to ask a one-field question. `aggregate.ts` re-exports.
+ */
+export function isPostHoc(r: SessionRow): boolean {
+  return r.entered === 'post-hoc'
+}
+
+/**
+ * Split rows by where their time came from. Every consumer that TOTALS anything starts here, so
+ * "measured" and "told to us" cannot be accidentally summed — a caller has to name which population
+ * it wants.
+ *
+ * ⚠ THE DROP-UP'S `daySummary` IS A REAL CALLER, and it is why this is exported rather than kept
+ * private to the aggregates: it sums the day's minutes independently, it reduced over ALL rows, and
+ * it reported 45 remembered minutes to the writer as "focused minutes" while every unit test stayed
+ * green (the tests guard `aggregate.ts`; the panel never calls it). Caught by driving the real UI.
+ * A guard on one implementation of a rule says nothing about the other.
+ */
+export function splitByEntry(rows: readonly SessionRow[]): { measured: SessionRow[]; postHoc: SessionRow[] } {
+  const measured: SessionRow[] = [], postHoc: SessionRow[] = []
+  for (const r of rows) (isPostHoc(r) ? postHoc : measured).push(r)
+  return { measured, postHoc }
+}
+
+/** The most a post-hoc block may claim. Longer is a day, not a session — and a rough number, at that. */
+export const POSTHOC_MAX_MINUTES = 8 * 60
+
+/** What the writer tells us afterwards. Rough duration, rough category — that is the whole form. */
+export interface PostHocEntry {
+  /** Roughly how long. Minutes. */
+  minutes: number
+  /** Roughly what. Their pick, never our guess. */
+  docType: DocType
+  /** Optional — their own words, same class as `note`. Opt-in, omitted when blank. */
+  note?: string
+}
+
+/**
+ * Build a row the writer TOLD us about (§A5's repair tool).
+ *
+ * **DO NOT MAKE HIM PRECISE.** A form demanding start/end times won't get used on a Tuesday, and this
+ * whole feature dies if the ritual becomes data entry. So the input is a rough duration and a rough
+ * category, and we derive the span: it ENDS when he told us and reaches back by the duration he said.
+ * That span is not a measurement and does not pretend to be one — `entered: 'post-hoc'` flags the
+ * entire row as testimony, so every field on it, the span included, is read as his word rather than
+ * ours. It lands in the local day he is standing in, which is the day he means.
+ *
+ * Every MEASURED field is ZERO, deliberately, and that is not missing data — it is the true value.
+ * We did not see him type, so `words_added: 0` is exactly right: nothing was measured. The minutes
+ * live in `active_minutes` and are kept out of the measured bars by `entered`, never by being blank.
+ *
+ * `break_before_min` is 0: a break is a gap between two MEASURED sessions, and we have no idea what
+ * ran before something we never saw.
+ */
+export function buildPostHocRow(
+  entry: PostHocEntry,
+  opts: { sessionId: string; at: number; offsetMin: number },
+): SessionRow {
+  const minutes = round1(Math.max(0, Math.min(entry.minutes, POSTHOC_MAX_MINUTES)))
+  const note = cleanText(entry.note)
+  return {
+    session_id: opts.sessionId,
+    // Not the open document: he is repairing the RECORD, and the work he forgot to time may not have
+    // been in Inkwave at all (a printed article, a library afternoon). Attributing it to whatever
+    // happened to be on screen when he remembered would be a guess wearing a measurement's clothes.
+    doc_id: 'post-hoc',
+    start: isoWithOffset(opts.at - minutes * 60_000, opts.offsetMin),
+    end: isoWithOffset(opts.at, opts.offsetMin),
+    active_minutes: minutes,
+    words_start: 0,
+    words_end: 0,
+    words_added: 0,
+    words_deleted: 0,
+    net_words: 0,
+    edit_events: 0,
+    break_before_min: 0,
+    pomodoro: false,
+    doc_type: entry.docType,
+    entered: 'post-hoc',
+    ...(note ? { note } : {}),
   }
 }
 

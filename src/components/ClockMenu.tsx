@@ -22,15 +22,17 @@ import { isTouchDevice } from '../editor/Scroll'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
-import { annotateRow, loadLedger, saveReflection } from '../productivity/ledgerStore'
+import { addPostHocRow, annotateRow, loadLedger, saveReflection } from '../productivity/ledgerStore'
+import { activePdfs, type PdfReadingState } from '../productivity/pdfActivity'
 import { currentPlace, recentPlaces, setCurrentPlace } from '../productivity/places'
 import { isPaused, type PomodoroConfig } from '../productivity/pomodoro'
 import {
   getPomodoroState, loadPomodoroConfig, pausePomodoro, resumePomodoro, setPomodoroConfig,
   startPomodoro, stopPomodoro, subscribe,
 } from '../productivity/pomodoroStore'
-import { isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection } from '../productivity/sessionLogic'
-import type { Reflection, SessionRow } from '../productivity/types'
+import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry } from '../productivity/sessionLogic'
+import type { DocType, Reflection, SessionRow } from '../productivity/types'
+import { bibProvider } from '../citations/bibProvider'
 import type { DocGoals } from '../types/document'
 import { countdownShown, setCountdownShown } from './CountdownOverlay'
 import { GoalsSection } from './GoalsSection'
@@ -108,9 +110,31 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-// §A3.3's day summary, in the app's voice. Descriptive; never a score.
-function daySummary(rows: SessionRow[]): string {
-  if (rows.length === 0) return 'Nothing recorded yet today. Whenever you start, it will show up here.'
+/**
+ * §A3.3's day summary, in the app's voice. Descriptive; never a score.
+ *
+ * ⚠ THIS IS A SECOND PLACE THE DAY'S MINUTES ARE SUMMED — `aggregate.ts` is the other — and it is
+ * exactly how §A6.1's rule got broken once already. THE BUG, caught live by `pdfposthoc.prove.mjs`
+ * driving the real panel: this function reduced over ALL rows, so the moment the post-hoc add landed,
+ * 45 remembered minutes were reported back to the writer as "focused minutes". Every unit test was
+ * green — they guard `aggregate.ts`, and the drop-up never calls it. **A guard on one implementation
+ * of a rule says nothing about the other.**
+ *
+ * So the split happens HERE too, and the two numbers are spoken as different KINDS of thing. If a
+ * third summariser ever appears, it must do the same — or better, all three should call one rule.
+ */
+function daySummary(allRows: SessionRow[]): string {
+  const { measured: rows, postHoc } = splitByEntry(allRows)
+  const added = Math.round(postHoc.reduce((a, r) => a + r.active_minutes, 0))
+  // §A5's register: stated plainly, neither praised nor apologised for. Adding time you forgot to
+  // track is ordinary record-keeping, so this sentence does not editorialise about it.
+  const addedClause = added > 0 ? ` You also added ${added} minute${added === 1 ? '' : 's'} from memory.` : ''
+
+  if (rows.length === 0) {
+    return added > 0
+      ? `Nothing tracked today —${addedClause.replace(' You also added', ' but you added')}`
+      : 'Nothing recorded yet today. Whenever you start, it will show up here.'
+  }
   const mins = Math.round(rows.reduce((a, r) => a + r.active_minutes, 0))
   const net = rows.reduce((a, r) => a + r.net_words, 0)
   const shape = mins < 25 ? 'A short spell of work' : mins < 90 ? 'A steady stretch' : 'A long day at it'
@@ -118,8 +142,11 @@ function daySummary(rows: SessionRow[]): string {
     net > 0 ? `, and the writing grew by ${net} word${net === 1 ? '' : 's'}` :
     net < 0 ? ', and you cut it back — editing is writing too' :
     ', spent shaping what was already there'
-  return `${shape}: ${mins} focused minute${mins === 1 ? '' : 's'} across ${rows.length} session${rows.length === 1 ? '' : 's'}${words}.`
+  return `${shape}: ${mins} focused minute${mins === 1 ? '' : 's'} across ${rows.length} session${rows.length === 1 ? '' : 's'}${words}.${addedClause}`
 }
+
+/** Test seam — `daySummary` is a pure function and the §A6.1 rule it carries must stay in the gate. */
+export const _daySummaryForTest = daySummary
 
 const WORK_PRESETS = [15, 25, 50]
 const BREAK_PRESETS = [5, 10]
@@ -261,6 +288,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
     >
       <div className="overflow-y-auto">
         <PomodoroHero />
+        <ReadingSection />
         {offerReflection && (
           <ReflectionPrompt
             rows={unreflected}
@@ -336,6 +364,72 @@ function PomodoroHero(): JSX.Element {
   )
 }
 
+// ─── Reading (Peter: "a reading indicator on the ledger, next to a pdf name") ──
+//
+// SHOWS ONLY WHAT WE SAW. A PDF that is open but unscrolled does not appear — that is the honest
+// state, not a detection failure: an open PDF nobody is scrolling is a tab you forgot about, and
+// counting it is exactly how a reading number stops being true. So an empty section reads "no reading
+// right now", never "0 minutes read".
+//
+// NO PROGRESS BAR — considered and rejected (§A3.2). We hold whether you scrolled, never where, so
+// there is nothing to draw a progress bar FROM, and a page-by-page trace of the writer's private PDFs
+// would be a far more sensitive object for no feature gain. If a progress reading ever seems needed,
+// that is Peter's call, not a field to add here.
+
+/** The two live states, in the app's ink. A dot, not a badge — this is a ritual, not a dashboard. */
+function ReadingDot({ state }: { state: PdfReadingState }): JSX.Element {
+  return (
+    <span
+      className="inline-block shrink-0 rounded-full"
+      style={{
+        width: 6, height: 6,
+        background: state === 'annotating' ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-light, #9b5ccc)',
+        opacity: state === 'annotating' ? 0.9 : 0.6,
+      }}
+    />
+  )
+}
+
+function ReadingSection(): JSX.Element | null {
+  // Re-read on a slow beat, and ONLY while the drop-up is open (this component is unmounted
+  // otherwise). The tick rule (`pomodoroStore`) bans a per-SECOND React render inside the editor's
+  // tree; a 5s read of a Map in an open panel is a different order of thing entirely, and the state
+  // it shows genuinely changes on a 5-minute window.
+  const [, bump] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => bump((n) => n + 1), 5_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const pdfs = activePdfs()
+  if (pdfs.length === 0) return null
+
+  return (
+    <Section title="Reading">
+      <ul className="space-y-1.5">
+        {pdfs.map((p) => (
+          <li key={p.citekey} className="flex items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-2">
+              <ReadingDot state={p.state} />
+              <span className="truncate text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{pdfNameOf(p.citekey)}</span>
+            </span>
+            <span className="shrink-0 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+              {p.state === 'annotating' ? 'annotating' : 'reading'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+/** The PDF's name for the indicator — the bibliography's title if it has one, else the citekey. */
+function pdfNameOf(citekey: string): string {
+  const item = bibProvider.get(citekey) as { title?: string } | undefined
+  const t = item?.title?.trim()
+  return t && t.length ? t : citekey
+}
+
 // ─── Today ───────────────────────────────────────────────────────────────────
 
 function TodaySection({ rows, summary, onSaved }: {
@@ -347,11 +441,119 @@ function TodaySection({ rows, summary, onSaved }: {
       <ul className="space-y-2">
         {rows.map((r) => <SessionCard key={r.session_id} row={r} onSaved={onSaved} />)}
       </ul>
+      <PostHocAdd onAdded={onSaved} />
     </Section>
   )
 }
 
+// ─── The post-hoc add (Peter: "a manual add for if you forget to use the timer") ──
+//
+// §A5's register, and it decides every choice below: **a friend letting you correct the record, not a
+// supervisor auditing your timesheet.** So it is COLLAPSED by default (an always-open form is a
+// standing question about what you failed to log), it never nags, and using it is never scolded — the
+// confirmation says what landed and stops talking.
+//
+// **DO NOT MAKE HIM PRECISE.** Rough duration, rough category, done. A form demanding start and end
+// times won't get used on a Tuesday, and this whole feature dies if the ritual becomes data entry.
+// Hence PILLS, not number inputs: every answer is one tap. The note is optional and a skipped note is
+// not a failure.
+//
+// The honesty lives in the ROW (`entered: 'post-hoc'`), not in this form's copy — which is why the
+// form can afford to be this relaxed. See types.ts.
+
+const POSTHOC_MINUTES = [15, 25, 45, 60, 90]
+const POSTHOC_KINDS: Array<{ id: DocType; label: string }> = [
+  { id: 'essay', label: 'writing' },
+  { id: 'reading', label: 'reading' },
+  { id: 'annotating', label: 'annotating' },
+  { id: 'note', label: 'notes' },
+  { id: 'email', label: 'email' },
+  { id: 'other', label: 'something else' },
+]
+
+function PostHocAdd({ onAdded }: { onAdded: () => void }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [minutes, setMinutes] = useState(25)
+  const [kind, setKind] = useState<DocType>('essay')
+  const [note, setNote] = useState('')
+  const [added, setAdded] = useState<number | null>(null)
+
+  const submit = useCallback(async () => {
+    await addPostHocRow({ minutes, docType: kind, note })
+    setAdded(minutes)
+    setOpen(false)
+    setNote('')
+    onAdded()
+    setTimeout(() => setAdded(null), 3200)
+  }, [kind, minutes, note, onAdded])
+
+  if (!open) {
+    return (
+      <div className="mt-3">
+        <button type="button" onClick={() => setOpen(true)}
+          className="text-[11px] underline transition-colors hover:opacity-80"
+          style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}
+        >
+          Add time you didn&rsquo;t track
+        </button>
+        {added !== null && (
+          // States what landed, and that it is his word rather than ours — no praise, no reproach.
+          <p className="mt-1.5 text-[11px]" style={{ color: 'var(--iw-verified, #15803d)' }}>
+            Added {added} minutes from memory. It sits beside your tracked time, not inside it.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-lg px-3 py-2.5" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
+      <p className="mb-2 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        Roughly is fine — we&rsquo;ll mark it as your recollection rather than something we timed.
+      </p>
+
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        {POSTHOC_MINUTES.map((m) => (
+          <Pill key={m} active={minutes === m} onClick={() => setMinutes(m)}>{m}m</Pill>
+        ))}
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        {POSTHOC_KINDS.map((k) => (
+          <Pill key={k.id} active={kind === k.id} onClick={() => setKind(k.id)}>{k.label}</Pill>
+        ))}
+      </div>
+
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        rows={2}
+        placeholder="What was it? (optional)"
+        className="mb-2 w-full resize-y rounded-md px-2 py-1.5 text-[13px]"
+        style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
+      />
+
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => void submit()}
+          className="rounded-full px-4 py-1.5 text-xs transition-all hover:brightness-110 active:scale-[0.98]"
+          // --iw-on-ink, never a literal white: --iw-ink is LIGHT purple in night mode, where white
+          // text on it vanishes. A hard-coded #fff here is a night-mode bug by construction.
+          style={{ background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+        >
+          Add {minutes}m
+        </button>
+        <button type="button" onClick={() => setOpen(false)}
+          className="rounded-full px-3 py-1.5 text-xs transition-colors hover:bg-stone-50"
+          style={{ color: 'var(--iw-pill-fg, #78716c)' }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void }): JSX.Element {
+  const postHoc = isPostHoc(row)
   const [note, setNote] = useState(row.note ?? '')
   const [saved, setSaved] = useState(false)
   useEffect(() => { setNote(row.note ?? '') }, [row.note])
@@ -368,12 +570,19 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
     <li className="rounded-lg px-3 py-2" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
         <span className="truncate text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>
-          {row.doc_label ?? 'A document'}
+          {/* A post-hoc block has no document — `doc_id: 'post-hoc'` — so "A document" would be a
+              small lie. It says what it is. THE FLAG IS THE FEATURE (Peter: "then it's flagged
+              post-hoc"): a remembered block must never be able to pass for a timed one on screen. */}
+          {postHoc ? 'Added from memory' : (row.doc_label ?? 'A document')}
           {row.pomodoro && <span className="ml-1.5 text-[10px]" style={{ color: 'var(--iw-light, #9b5ccc)' }}>●</span>}
         </span>
         <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
-          {timeOf(row.start)}–{timeOf(row.end)} · {Math.round(row.active_minutes)}m
-          {row.net_words !== 0 && ` · ${row.net_words > 0 ? '+' : ''}${row.net_words}w`}
+          {/* No start–end times on a remembered block: we derived that span from a rough duration,
+              so printing "13:15–14:00" would dress testimony up as a measurement. */}
+          {postHoc
+            ? `about ${Math.round(row.active_minutes)}m`
+            : <>{timeOf(row.start)}–{timeOf(row.end)} · {Math.round(row.active_minutes)}m</>}
+          {!postHoc && row.net_words !== 0 && ` · ${row.net_words > 0 ? '+' : ''}${row.net_words}w`}
         </span>
       </div>
       <textarea

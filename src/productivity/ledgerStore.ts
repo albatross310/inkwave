@@ -9,10 +9,11 @@
 // GROW-ONLY (§A9, and the real 2026-07-05 truncation incident in CLAUDE.md): every write reads the
 // target's current rows and UNIONS first. A write can only ever grow the ledger.
 
+import { v4 as uuidv4 } from 'uuid'
 import { readAppJson, writeAppJson } from '../storage/opfs'
 import { stampBundle } from '../provenance/ots'
 import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, mergeReflections } from './ledger'
-import { cleanText } from './sessionLogic'
+import { buildPostHocRow, cleanText, localMonthOf, type PostHocEntry } from './sessionLogic'
 import type { MonthLedger, Reflection, SessionRow } from './types'
 
 const fileFor = (month: string): string => `${ledgerNameFor(month)}.json`
@@ -90,6 +91,26 @@ export function queueRow(month: string, row: SessionRow): void {
       void flushMonth(month)
     }, WRITE_DEBOUNCE_MS),
   )
+}
+
+/**
+ * Add a block the writer TOLD us about (§A5's repair tool — "for if you forget to use the timer").
+ *
+ * Goes through `queueRow`, so it takes the SAME grow-only, read-then-union, re-attested path as a
+ * measured row: it is a real row in the writer's real ledger, inside the day's tamper-evident block.
+ * What makes it different is `entered: 'post-hoc'` on the row itself, not a softer write path — the
+ * flag is the honesty, and a second storage route would be a second rule for one question.
+ *
+ * Flushed immediately rather than left on the 2s debounce: he typed this on purpose and expects to
+ * see it. Returns the row so the caller can show what landed.
+ */
+export async function addPostHocRow(entry: PostHocEntry, opts: { at?: number; offsetMin?: number; sessionId?: string } = {}): Promise<SessionRow> {
+  const at = opts.at ?? Date.now()
+  const offsetMin = opts.offsetMin ?? -new Date().getTimezoneOffset()
+  const row = buildPostHocRow(entry, { sessionId: opts.sessionId ?? uuidv4(), at, offsetMin })
+  queueRow(localMonthOf(row.start), row)
+  await flushLedgerNow()
+  return row
 }
 
 /** Flush every buffered month immediately (save / idle / exit). Resolves when the writes land. */

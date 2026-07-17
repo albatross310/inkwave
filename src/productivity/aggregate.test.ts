@@ -26,6 +26,7 @@ function row(over: Partial<SessionRow> & { start: string }): SessionRow {
     break_before_min: 0,
     pomodoro: false,
     doc_type: 'essay',
+    entered: 'timer',
     ...over,
   }
 }
@@ -188,6 +189,7 @@ function S(over: Partial<SessionRow> = {}): SessionRow {
     break_before_min: 0,
     pomodoro: false,
     doc_type: 'essay',
+    entered: 'timer',
     ...over,
   }
 }

@@ -12,6 +12,7 @@ import { pageOffsetOf } from '../citations/pageOffset'
 import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
 import { isTouchDevice } from '../editor/Scroll'
+import { noteAnnotation, noteScroll } from '../productivity/pdfActivity'
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -630,6 +631,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       }
       setLastPdfPage(citekey, best)
       setLastPdfScroll(citekey, sc.scrollTop) // exact spot, so author-year reopens where you left off
+      // THE READING SIGNAL (ledger §A3.2). Rides THIS reporter — already rAF-coalesced, already
+      // computing scrollTop — rather than adding a listener to a surface CLAUDE.md documents as
+      // supersampled + lazily rendered. noteScroll is one Map write and NEVER touches storage; it
+      // records only THAT we scrolled, never where (no trace — see pdfActivity.ts).
+      noteScroll(citekey)
       // FULLSCREEN WAVE SWAY (Peter, 2026-07-10): while the PDF floats over the water, its scroll
       // drives the editor's --wave-x sway + dash twinkle exactly like editor scrolling does.
       // Scroll.tsx's sway effect folds this absolute top into its base+top formula.
@@ -1407,6 +1413,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     highlightsRef.current = [...highlightsRef.current, hl]
     editNoteIdRef.current = hl.id // redraw auto-enters edit mode on it
     redrawOverlays()
+    noteAnnotation(citekey) // the ledger's annotating signal — see pdfActivity.ts
     void saveHighlights(citekey, highlightsRef.current)
   }
 
@@ -1420,6 +1427,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }))
     highlightsRef.current = [...highlightsRef.current, ...made]
     redrawOverlays()
+    noteAnnotation(citekey) // the ledger's annotating signal — see pdfActivity.ts
     await saveHighlights(citekey, highlightsRef.current)
     if (link) onLinkToCitation?.(info.text, info.groups[0].page)
   }

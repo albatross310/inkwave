@@ -86,6 +86,37 @@ export interface SessionRow {
   pomodoro: boolean
   doc_type: DocType
 
+  /**
+   * HOW THE TIME GOT HERE — measured by the timer, or told to us afterwards (Peter, 2026-07-17:
+   * "we can also add a manual add for if you forget to use the timer. But then it's flagged post-hoc").
+   *
+   * AN EXPLICIT UNION, WRITTEN ON EVERY ROW — never `entered?: 'post-hoc'` with absence meaning
+   * timer. Absence-as-classification is the exact trap `doc_type` just escaped: it defaulted to
+   * 'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was or not. A field
+   * whose commonest value is carried by silence cannot be read as a claim, and this one has to be.
+   *
+   * WHY THIS IS NOT A FOURTH `provenance` TAG, AND THE REASONING IS LOAD-BEARING (§A6.1's three tags
+   * are `measured` / `estimated` / `judged`): **`estimated` means a deterministic rule WE ran that
+   * anyone can recompute.** A post-hoc block is **testimony** — uncheckable, not recomputable. Different
+   * epistemics, so it must not borrow that tag. It is a FLAG ON THE ROW, not a provenance: the row is
+   * still measured-SHAPED (a duration, a category, a day); what differs is the SOURCE OF THE TIME.
+   *
+   * ⚠ IT MUST NEVER MERGE INTO THE MEASURED BARS (§A6.1). The report has to be able to say
+   * "3h40m measured, plus 45m you added from memory". Silently totalling them is the lie. What
+   * ENFORCES it: `aggregate.ts` sums the measured fields from TIMER ROWS ONLY and carries post-hoc
+   * time in its own `posthoc_minutes` column — a different column, so conflation is unrepresentable
+   * rather than merely discouraged.
+   *
+   * IT IS A REPAIR TOOL, NOT AN AUDIT (§A5's register: "a friend letting you correct the record, not
+   * a supervisor auditing your timesheet"). Neither nag it nor scold its use.
+   *
+   * LEGACY ROWS: rows written before this field existed carry no `entered`. They predate the manual
+   * add entirely, so every one of them was timer-entered — that is a fact about history, not a
+   * default. `isPostHoc()` (aggregate.ts) is the ONE place that reads it, and it asks the positive
+   * question ("did this row SAY post-hoc?") so no other code can accidentally re-derive a default.
+   */
+  entered: 'timer' | 'post-hoc'
+
   // ─── User-authored fields (Peter, 2026-07-17) — see LEDGER_PRIVATE_FIELDS ───
   // These two are categorically different from every field above: they are text the WRITER chose to
   // type, not telemetry derived from their editing. They are always optional, always omitted when
@@ -233,6 +264,11 @@ export interface MonthLedger {
 export interface DayAggregate {
   /** Local calendar day, `YYYY-MM-DD` (§A9: store UTC + offset, aggregate in the user's local day). */
   day: string
+  /**
+   * MEASURED minutes — timer rows ONLY. Post-hoc time is NOT in here and must never be added to it;
+   * it has its own column below. §A6.1: "3h40m measured, plus 45m you added from memory" — two
+   * numbers, two columns, so a total that silently merges them cannot be written by accident.
+   */
   active_minutes: number
   session_count: number
   words_added: number
@@ -244,8 +280,20 @@ export interface DayAggregate {
   /** Spec §A3.3's drafting-vs-editing heuristic. MEASURED (a deterministic client-side rule) —
    *  not to be confused with the model's judged `phase`. */
   deep_shallow_ratio: number
-  /** 24 buckets, index = local hour, value = active minutes. */
+  /** 24 buckets, index = local hour, value = active minutes. MEASURED rows only. */
   busiest_hours: number[]
+
+  /**
+   * Minutes the writer ADDED FROM MEMORY (`entered: 'post-hoc'`) — testimony, not measurement.
+   *
+   * A SEPARATE COLUMN, and that is the whole enforcement (§A6.1). Every other number on this
+   * aggregate comes from rows the timer watched; this one comes from the writer telling us
+   * afterwards. They are never summed here, and a consumer that wants a grand total has to write the
+   * addition itself — at which point it is a choice someone made, not a lie the schema told for them.
+   */
+  posthoc_minutes: number
+  /** How many blocks he added from memory. Never added to `session_count`. */
+  posthoc_session_count: number
 }
 
 /** The window a report covers (§A6.2). */
