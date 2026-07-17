@@ -15,6 +15,32 @@
 //
 // TONE (§A5): a ritual, not a dashboard. Sexy here means considered — no red numbers, no scores,
 // no streak-shaming. A quiet day reads as a quiet day.
+//
+// TYPE (Peter, 2026-07-17): "the entire text font of the panel needs to be increased. It's okay if
+// users have to scroll." / "Every font proportionally up." Sizes come from the ONE ramp
+// (`music/typeScale.ts`) — the same one `GoalsSection` below already uses. NOT a second scale: two
+// lanes wrote competing ramps once and that is how this repo forks. A `text-[11px]`/`text-xs` class
+// anywhere in this file is a regression; the steps are SEMANTIC (`TYPE.label` because the thing IS a
+// label), which is what stops the ramp regrowing into nine near-identical sizes.
+//
+// SCROLLING IS NOT A COST TO MINIMISE HERE. The panel is `maxHeight: 72vh` and overflows — that is
+// the accepted trade, not a bug. Do not shrink a step to kill a scrollbar.
+//
+// THE 16px FLOOR — and what is actually true about it (MEASURED, `scripts/cssfloor.prove.mjs`):
+// iOS Safari zooms into any focused control under 16px and STAYS zoomed. But index.css ALREADY
+// floors `input, select, textarea` at `max(16px, 1em) !important` inside
+// `@media (pointer: coarse) and (hover: none)`, and the probe confirms in a real engine that this
+// beats an inline 13px on an iPhone 12 (computed 16px; desktop correctly leaves it 13px). So the
+// 13px inputs these panels shipped were NOT zooming Peter's phone — they were backstopped.
+//
+// The floor stays on the ramp regardless, for reasons the backstop does not cover:
+//  • It is phone-ONLY. Any coarse device the query misses gets the authored size, unfloored.
+//  • It is INVISIBLE HERE. A 13px in this file reads as 13px to everyone; that a stylesheet three
+//    directories away silently rewrites it on one device class is exactly the kind of spooky action
+//    that makes a number untrustworthy. The authored size should BE the shipped size.
+//  • Peter asked for bigger text anyway. 16 is the ramp's floor because it is the ramp's floor.
+// `prodType.test.ts` fails the build if any control here slips under it, and DERIVES the CSS
+// backstop's 16 from this ramp rather than re-typing it.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -32,6 +58,7 @@ import {
 } from '../productivity/pomodoroStore'
 import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry } from '../productivity/sessionLogic'
 import type { DocType, Reflection, SessionRow } from '../productivity/types'
+import { TOUCH_MIN, TYPE } from '../music/typeScale'
 import { bibProvider } from '../citations/bibProvider'
 import type { DocGoals } from '../types/document'
 import { countdownShown, setCountdownShown } from './CountdownOverlay'
@@ -64,8 +91,12 @@ function Pill({ active, onClick, children, title }: {
 }): JSX.Element {
   return (
     <button type="button" onClick={onClick} title={title}
-      className="rounded-full px-2.5 py-1 text-xs transition-colors"
+      className="rounded-full px-3 py-1 transition-colors"
       style={{
+        fontSize: TYPE.meta,
+        // A pill is a tap target, and it is the smallest one here — the HIG floor moves WITH the
+        // ramp rather than being whatever the padding happened to add up to.
+        minHeight: TOUCH_MIN,
         border: '1px solid var(--iw-nightable-border, #e7e5e4)',
         background: active ? 'var(--iw-ink, #5c2d8a)' : 'transparent',
         // NOT #fff: --iw-ink is light purple in night, so white text on it is illegible (measured).
@@ -82,8 +113,8 @@ function Pill({ active, onClick, children, title }: {
 function PrimaryButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <button type="button" onClick={onClick}
-      className="rounded-full px-6 py-2 text-sm transition-all hover:brightness-110 active:scale-[0.98]"
-      style={{ background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: '0 1px 6px rgba(92,45,138,0.28)' }}
+      className="rounded-full px-6 py-2 transition-all hover:brightness-110 active:scale-[0.98]"
+      style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: '0 1px 6px rgba(92,45,138,0.28)' }}
     >
       {children}
     </button>
@@ -93,8 +124,8 @@ function PrimaryButton({ onClick, children }: { onClick: () => void; children: R
 function GhostButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <button type="button" onClick={onClick}
-      className="rounded-full px-5 py-2 text-sm transition-colors hover:bg-stone-50 active:scale-[0.98]"
-      style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+      className="rounded-full px-5 py-2 transition-colors hover:bg-stone-50 active:scale-[0.98]"
+      style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
     >
       {children}
     </button>
@@ -104,7 +135,8 @@ function GhostButton({ onClick, children }: { onClick: () => void; children: Rea
 function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
   return (
     <section className="px-4 py-3" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
-      <h3 className="mb-2 text-[11px] uppercase tracking-wider" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{title}</h3>
+      {/* TYPE.label matches GoalsSection's section heading — the drop-up reads as ONE panel. */}
+      <h3 className="mb-2 uppercase tracking-wider" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #a8a29e)' }}>{title}</h3>
       {children}
     </section>
   )
@@ -300,8 +332,8 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
         <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
         <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setShowSettings((s) => !s)}
-            className="w-full text-left text-xs transition-colors hover:opacity-80"
-            style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}
+            className="w-full text-left transition-colors hover:opacity-80"
+            style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #a8a29e)' }}
           >
             {showSettings ? '▾' : '▸'} Settings — lengths, chime, place, titles
           </button>
@@ -332,8 +364,10 @@ function PomodoroHero(): JSX.Element {
       <div className="relative" style={{ width: 132, height: 132 }}>
         <TimeRing size={132} />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <TimeFace className="tabular-nums" style={{ fontSize: 30, color: 'var(--iw-ink, #5c2d8a)', letterSpacing: '0.01em' }} />
-          <span className="mt-0.5 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{phaseLabel}</span>
+          {/* The countdown IS the title of this panel — the one big thing on screen. It was already
+              30px by eye; now it is 30px because the ramp says so, and it moves if the ramp moves. */}
+          <TimeFace className="tabular-nums" style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #5c2d8a)', letterSpacing: '0.01em' }} />
+          <span className="mt-0.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{phaseLabel}</span>
         </div>
       </div>
 
@@ -357,7 +391,7 @@ function PomodoroHero(): JSX.Element {
             <span key={i} className="inline-block rounded-full"
               style={{ width: 5, height: 5, background: 'var(--iw-light, #9b5ccc)', opacity: 0.75 }} />
           ))}
-          {s.completed > 8 && <span className="text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>+{s.completed - 8}</span>}
+          {s.completed > 8 && <span style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>+{s.completed - 8}</span>}
         </div>
       )}
     </section>
@@ -411,9 +445,9 @@ function ReadingSection(): JSX.Element | null {
           <li key={p.citekey} className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-2">
               <ReadingDot state={p.state} />
-              <span className="truncate text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{pdfNameOf(p.citekey)}</span>
+              <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>{pdfNameOf(p.citekey)}</span>
             </span>
-            <span className="shrink-0 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+            <span className="shrink-0" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
               {p.state === 'annotating' ? 'annotating' : 'reading'}
             </span>
           </li>
@@ -437,7 +471,7 @@ function TodaySection({ rows, summary, onSaved }: {
 }): JSX.Element {
   return (
     <Section title="Today">
-      <p className="mb-3 text-[13px] leading-relaxed" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{summary}</p>
+      <p className="mb-3 leading-relaxed" style={{ fontSize: TYPE.body, color: 'var(--iw-pill-fg, #78716c)' }}>{summary}</p>
       <ul className="space-y-2">
         {rows.map((r) => <SessionCard key={r.session_id} row={r} onSaved={onSaved} />)}
       </ul>
@@ -491,14 +525,14 @@ function PostHocAdd({ onAdded }: { onAdded: () => void }): JSX.Element {
     return (
       <div className="mt-3">
         <button type="button" onClick={() => setOpen(true)}
-          className="text-[11px] underline transition-colors hover:opacity-80"
-          style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}
+          className="underline transition-colors hover:opacity-80"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #a8a29e)' }}
         >
           Add time you didn&rsquo;t track
         </button>
         {added !== null && (
           // States what landed, and that it is his word rather than ours — no praise, no reproach.
-          <p className="mt-1.5 text-[11px]" style={{ color: 'var(--iw-verified, #15803d)' }}>
+          <p className="mt-1.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-verified, #15803d)' }}>
             Added {added} minutes from memory. It sits beside your tracked time, not inside it.
           </p>
         )}
@@ -508,7 +542,7 @@ function PostHocAdd({ onAdded }: { onAdded: () => void }): JSX.Element {
 
   return (
     <div className="mt-3 rounded-lg px-3 py-2.5" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
-      <p className="mb-2 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+      <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
         Roughly is fine — we&rsquo;ll mark it as your recollection rather than something we timed.
       </p>
 
@@ -528,22 +562,23 @@ function PostHocAdd({ onAdded }: { onAdded: () => void }): JSX.Element {
         onChange={(e) => setNote(e.target.value)}
         rows={2}
         placeholder="What was it? (optional)"
-        className="mb-2 w-full resize-y rounded-md px-2 py-1.5 text-[13px]"
-        style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
+        className="mb-2 w-full resize-y rounded-md px-2 py-1.5"
+        // TYPE.body: the writer types INTO this, so it is prose — and ≥16px keeps iOS from zooming.
+        style={{ fontSize: TYPE.body, border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
       />
 
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => void submit()}
-          className="rounded-full px-4 py-1.5 text-xs transition-all hover:brightness-110 active:scale-[0.98]"
+          className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
           // --iw-on-ink, never a literal white: --iw-ink is LIGHT purple in night mode, where white
           // text on it vanishes. A hard-coded #fff here is a night-mode bug by construction.
-          style={{ background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
         >
           Add {minutes}m
         </button>
         <button type="button" onClick={() => setOpen(false)}
-          className="rounded-full px-3 py-1.5 text-xs transition-colors hover:bg-stone-50"
-          style={{ color: 'var(--iw-pill-fg, #78716c)' }}
+          className="rounded-full px-3 py-1.5 transition-colors hover:bg-stone-50"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #78716c)' }}
         >
           Cancel
         </button>
@@ -569,14 +604,14 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
   return (
     <li className="rounded-lg px-3 py-2" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <span className="truncate text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>
+        <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>
           {/* A post-hoc block has no document — `doc_id: 'post-hoc'` — so "A document" would be a
               small lie. It says what it is. THE FLAG IS THE FEATURE (Peter: "then it's flagged
               post-hoc"): a remembered block must never be able to pass for a timed one on screen. */}
           {postHoc ? 'Added from memory' : (row.doc_label ?? 'A document')}
-          {row.pomodoro && <span className="ml-1.5 text-[10px]" style={{ color: 'var(--iw-light, #9b5ccc)' }}>●</span>}
+          {row.pomodoro && <span className="ml-1.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-light, #9b5ccc)' }}>●</span>}
         </span>
-        <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        <span className="shrink-0 tabular-nums" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           {/* No start–end times on a remembered block: we derived that span from a rough duration,
               so printing "13:15–14:00" would dress testimony up as a measurement. */}
           {postHoc
@@ -591,10 +626,10 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
         onBlur={save}
         rows={2}
         placeholder="What did you do in this session? (optional)"
-        className="w-full resize-y rounded-md px-2 py-1.5 text-[13px]"
-        style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
+        className="w-full resize-y rounded-md px-2 py-1.5"
+        style={{ fontSize: TYPE.body, border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
       />
-      {saved && <p className="mt-1 text-[11px]" style={{ color: 'var(--iw-verified, #15803d)' }}>Saved to your ledger.</p>}
+      {saved && <p className="mt-1" style={{ fontSize: TYPE.meta, color: 'var(--iw-verified, #15803d)' }}>Saved to your ledger.</p>}
     </li>
   )
 }
@@ -623,7 +658,7 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
             ['Long every', 'longBreakEvery', EVERY_PRESETS],
           ] as const).map(([label, key, presets]) => (
             <div key={key} className="flex items-center justify-between gap-2">
-              <span className="text-[13px]" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{label}</span>
+              <span style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>{label}</span>
               <div className="flex gap-1.5">
                 {presets.map((v) => (
                   <Pill key={v} active={cfg[key] === v} onClick={() => apply({ ...cfg, [key]: v })}>
@@ -643,16 +678,17 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
               <button type="button"
                 onClick={() => { setChimeVoiceId(v.id); setVoice(v.id); setChimeMuted(false); setMuted(false); previewChime(v.id) }}
                 className="flex min-w-0 flex-1 items-baseline gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-stone-50"
+                style={{ minHeight: TOUCH_MIN }}
               >
-                <span className="text-[13px]" style={{ color: voice === v.id && !muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}>
+                <span style={{ fontSize: TYPE.body, color: voice === v.id && !muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}>
                   {voice === v.id && !muted ? '◉' : '○'} {v.label}
                 </span>
-                <span className="truncate text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>{v.hint}</span>
+                <span className="truncate" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{v.hint}</span>
               </button>
               {/* Preview: a tap is also the gesture iOS needs to unlock audio for the real chime. */}
               <button type="button" onClick={() => previewChime(v.id)} title={`Preview ${v.label}`}
-                className="shrink-0 rounded-full px-2 py-1 text-[11px] transition-colors hover:bg-stone-50"
-                style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+                className="shrink-0 rounded-full px-2 py-1 transition-colors hover:bg-stone-50"
+                style={{ fontSize: TYPE.label, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
               >
                 ▶
               </button>
@@ -660,8 +696,8 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
           ))}
           <li className="pt-1">
             <button type="button" onClick={() => { const m = !muted; setChimeMuted(m); setMuted(m) }}
-              className="rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-stone-50"
-              style={{ color: muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}
+              className="rounded-md px-2 py-1 transition-colors hover:bg-stone-50"
+              style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}
             >
               {muted ? '◉' : '○'} Silent
             </button>
@@ -670,7 +706,7 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
       </Section>
 
       <Section title="Where are you working?">
-        <p className="mb-2 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           Optional. A word you choose — we never read your location.
         </p>
         <input
@@ -678,8 +714,8 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
           onChange={(e) => setPlace(e.target.value)}
           onBlur={() => applyPlace(place)}
           placeholder="library, home, cafe…"
-          className="w-full rounded-md px-2.5 py-1.5 text-[13px]"
-          style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+          className="w-full rounded-md px-2.5 py-1.5"
+          style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
         />
         {recents.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -690,7 +726,7 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
 
       {docs.length > 0 && (
         <Section title="Titles">
-          <p className="mb-2 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+          <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
             Your ledger records each document&rsquo;s title so you can tell sessions apart. If a title is
             private, hide it — future sessions record the work without the name.
           </p>
@@ -701,18 +737,21 @@ function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }
       )}
 
       <Section title="This device">
-        <label className="flex items-center justify-between gap-2 text-[13px]" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+        <label className="flex items-center justify-between gap-2" style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #78716c)' }}>
           Countdown in the corner
+          {/* A checkbox renders no text, so the 16px iOS rule cannot bite it — but it IS a tap
+              target, and at the browser default it is ~13px square. Sized to the ramp's floor. */}
           <input type="checkbox" checked={countdown}
+            style={{ width: TYPE.body, height: TYPE.body }}
             onChange={(e) => { setCountdownShown(e.target.checked); setCountdown(e.target.checked) }} />
         </label>
-        <p className="mt-1 text-[11px]" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        <p className="mt-1" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           {isTouchDevice() ? 'Shown on desktop only — on a phone the corner is your page.' : 'Shows while a block is running. Click it to open this panel.'}
         </p>
         <button type="button"
           onClick={() => { setProdLedgerEnabled(false); location.reload() }}
-          className="mt-3 text-[11px] underline transition-colors hover:opacity-80"
-          style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}
+          className="mt-3 underline transition-colors hover:opacity-80"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #a8a29e)' }}
         >
           Turn off session tracking
         </button>
@@ -725,7 +764,7 @@ function TitleRow({ docId, label }: { docId: string; label?: string }): JSX.Elem
   const [hidden, setHidden] = useState(() => isLabelSuppressed(docId))
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="truncate text-[13px]" style={{ color: hidden ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #5c2d8a)' }}>
+      <span className="truncate" style={{ fontSize: TYPE.body, color: hidden ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #5c2d8a)' }}>
         {hidden ? <em>title hidden</em> : (label ?? <em>untitled</em>)}
       </span>
       <Pill onClick={() => { const next = !hidden; setLabelSuppressed(docId, next); setHidden(next) }}>
