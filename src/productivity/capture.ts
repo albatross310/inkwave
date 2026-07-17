@@ -68,19 +68,25 @@ export function wordDiffStats(prevText: string, nextText: string): { added: numb
 }
 
 /**
- * Default doc_type for the editor's documents.
+ * Default doc_type when the document does not say what it is (Peter, 2026-07-17).
  *
- * JUDGEMENT CALL, flagged deliberately: nothing in the document model distinguishes a `note` from an
- * `essay` today, and inventing a heuristic (length? title?) would be exactly the "vibes-as-numbers"
- * the spec forbids for measured fields. Inkwave's documents ARE prose documents, so 'essay' is the
- * honest default; the email layer sets `docType: 'email'` explicitly and it flows through untouched.
+ * **`misc`, NOT `'essay'` — an honesty fix, not a rename.** It defaulted to 'essay', so every
+ * unclassified session was FILED AS ESSAY WRITING whether it was or not: a guess dressed as a
+ * measurement, in the one field §A6.1 says must be measured. `misc` says the true thing — they were
+ * working; we don't know at what. See DocType's note for why `misc` and `other` are different words.
+ *
+ * The refusal that produced it STANDS: nothing distinguishes a note from an essay, and a rule based
+ * on length or title would be invention. A type is SET, never guessed — by the email layer's
+ * explicit `docType: 'email'`, by the PDF surface's reading/annotating, or by the writer's own
+ * reflection. A window that is mostly `misc` is a finding about OUR instrumentation, never a failing
+ * of the writer's.
  */
-export const DEFAULT_DOC_TYPE: DocType = 'essay'
+export const DEFAULT_DOC_TYPE: DocType = 'misc'
 
 /** Fired when a session closes and its row is queued. detail: { sessionId, month }. */
 export const LEDGER_ROW_EVENT = 'inkwave:ledger-row'
 
-const VALID_DOC_TYPES: readonly string[] = ['note', 'essay', 'email', 'other']
+const VALID_DOC_TYPES: readonly string[] = ['note', 'essay', 'email', 'reading', 'annotating', 'other', 'misc']
 
 /** Read an explicit docType off the document if one is set (the email layer sets it); else default. */
 export function resolveDocType(doc: Pick<InkwaveDocument, 'id'> & { docType?: unknown }): DocType {
@@ -192,12 +198,21 @@ export class SessionCapture {
     if (!this.baselines.has(binding.docId)) this.baselines.set(binding.docId, this.measure(binding.getDoc()))
   }
 
-  /** Start the low-frequency idle watcher. Idempotent. */
+  /**
+   * Start the low-frequency idle watcher. Idempotent.
+   *
+   * **A RUNNING POMODORO SUPPRESSES THE INACTIVITY CLOSE** (Peter, 2026-07-17). §A4 names the
+   * Pomodoro as a boundary source in its own right, and the two rules would otherwise fight: silence
+   * means "gone" only when nobody has claimed the time. Reading a printed article for 25 minutes
+   * produces ZERO events, so the 5-minute rule would kill the session at minute five and throw the
+   * other twenty away. While a block runs, the BLOCK is the boundary — nothing else closes it.
+   */
   startIdleWatch(): void {
     if (this.idleTimer !== null) return
     this.idleTimer = setInterval(() => {
       const d = this.draft
-      if (d && isIdleBoundary(d.lastEditAt, this.clock(), this.idleMs)) void this.close('idle')
+      if (!d || this.pomodoroActive) return
+      if (isIdleBoundary(d.lastEditAt, this.clock(), this.idleMs)) void this.close('idle')
     }, IDLE_CHECK_MS)
   }
 
@@ -223,7 +238,7 @@ export class SessionCapture {
       // throttled (a backgrounded tab) AND the visibility close didn't run. Close it off the input
       // path; the measurement is taken a tick late, so it can absorb this keystroke — a rare,
       // documented drift of a few characters, never a lost session.
-      if (isIdleBoundary(d.lastEditAt, now, this.idleMs)) {
+      if (!this.pomodoroActive && isIdleBoundary(d.lastEditAt, now, this.idleMs)) {
         const stale = d
         this.draft = null
         setTimeout(() => void this.closeDraft(stale, 'idle'), 0)
@@ -235,7 +250,7 @@ export class SessionCapture {
     this.openSession(now)
   }
 
-  private openSession(now: number): void {
+  private openSession(now: number, openedBy: 'edit' | 'timer' = 'edit'): void {
     const b = this.binding!
     const base = this.baselines.get(b.docId)
     this.draft = openDraft({
@@ -248,13 +263,25 @@ export class SessionCapture {
       pomodoro: this.pomodoroActive,
       at: now,
       wordsStart: base ? base.words : 0,
+      // The timer opening a session is not a keystroke — see openDraft.
+      edits: openedBy === 'edit' ? 1 : 0,
     })
   }
 
-  /** Mark that Pomodoro work blocks are running — an explicit boundary (§A4). */
+  /**
+   * A Pomodoro block starts — an explicit boundary (§A4), and THE CLAIM OF WORK.
+   *
+   * PETER, 2026-07-17: "even if you read physical articles you still use the pomodoro timer."
+   * Starting the timer IS the writer saying *count this*. So this OPENS a session immediately
+   * rather than waiting for a keystroke — otherwise 25 minutes of reading a printed article
+   * produces no events, no session, and NO ROW, and the report calls it a thin day. That is the
+   * tracker being wrong about him. The block is measured; only its TYPE is unknown (⇒ `misc`), and
+   * the end-of-stretch reflection is where he names it ("reading Leibniz, printed").
+   */
   async pomodoroStart(): Promise<void> {
     await this.close('pomodoro')
     this.pomodoroActive = true
+    if (this.binding) this.openSession(this.clock(), 'timer')
   }
 
   /** End Pomodoro framing — closes the timed block so it persists with `pomodoro: true`. */
@@ -314,13 +341,23 @@ export class SessionCapture {
     // session that closes there inherits it. Absent = no place field at all. Never auto-detected.
     const place = d.place ?? this.placeFn()
 
+    // WHEN DID IT END, AND HOW MUCH OF IT WAS WORK?
+    // A typing session ends at its LAST EDIT — otherwise every session banks the idle time it took
+    // to notice, and `active_minutes` is the sum of capped inter-edit gaps (see sessionLogic).
+    // A POMODORO block is different in kind: the timer running is the claim, so the block ends when
+    // the block ends and ALL of it is active. Without this a 25-minute silent reading block reports
+    // `active_minutes: 0` — it has no inter-edit gaps to sum — which is the same lie as not
+    // recording it at all.
+    const closeAt = d.pomodoro ? this.clock() : d.lastEditAt
+    const draft = d.pomodoro ? { ...d, activeMs: Math.max(0, closeAt - d.startedAt) } : d
+
     const row = buildRow(
-      { ...d, docLabel: label, docType, place },
-      { at: d.lastEditAt, wordsEnd: end.words, wordsAdded: stats.added, wordsDeleted: stats.removed },
+      { ...draft, docLabel: label, docType, place },
+      { at: closeAt, wordsEnd: end.words, wordsAdded: stats.added, wordsDeleted: stats.removed },
       this.prevSessionEndAt,
       this.offsetMin(),
     )
-    this.prevSessionEndAt = d.lastEditAt
+    this.prevSessionEndAt = closeAt
     // The baseline advances to the close point — the next session starts from here for free.
     this.baselines.set(d.docId, end)
     const month = localMonthOf(row.start)

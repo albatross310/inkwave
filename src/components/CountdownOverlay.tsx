@@ -19,7 +19,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/Scroll'
-import { OPEN_LEDGER_EVENT } from '../productivity/ledgerEvents'
 import { subscribe, getPomodoroState } from '../productivity/pomodoroStore'
 import { TimeFace } from './TimeFace'
 
@@ -46,7 +45,7 @@ export function setCountdownShown(on: boolean): void {
 
 export const COUNTDOWN_TOGGLE_EVENT = 'inkwave:countdown-toggle'
 
-export function CountdownOverlay(): JSX.Element | null {
+export function CountdownOverlay({ onOpen }: { onOpen: () => void }): JSX.Element | null {
   const [, bump] = useState(0)
   const [shown, setShown] = useState(countdownShown)
 
@@ -66,7 +65,7 @@ export function CountdownOverlay(): JSX.Element | null {
   return createPortal(
     <button
       type="button"
-      onClick={() => window.dispatchEvent(new Event(OPEN_LEDGER_EVENT))}
+      onClick={onOpen}
       title="Your ledger — click to open"
       className="iw-no-print fixed z-30 font-serif tabular-nums transition-opacity"
       style={{

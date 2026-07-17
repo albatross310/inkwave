@@ -69,7 +69,14 @@ export function isIdleBoundary(lastEditAt: number, now: number, idleMs: number =
   return now - lastEditAt >= idleMs
 }
 
-/** Open a new draft on its first edit. The first edit contributes no active time (no gap yet). */
+/**
+ * Open a new draft. The opening edit contributes no active time (there is no gap yet).
+ *
+ * `edits` is how many edit events the OPENING itself represents: 1 when a keystroke opened the
+ * session (the ordinary case), and **0 when the TIMER did** — a Pomodoro block opens a session with
+ * no edit behind it (Peter: reading printed paper), and counting a phantom keystroke there would put
+ * a fictional edit_events: 1 on a session in which nothing was typed.
+ */
 export function openDraft(opts: {
   sessionId: string
   docId: string
@@ -78,6 +85,7 @@ export function openDraft(opts: {
   pomodoro: boolean
   at: number
   wordsStart: number
+  edits?: number
 }): SessionDraft {
   return {
     sessionId: opts.sessionId,
@@ -88,7 +96,7 @@ export function openDraft(opts: {
     startedAt: opts.at,
     lastEditAt: opts.at,
     activeMs: 0,
-    editEvents: 1,
+    editEvents: opts.edits ?? 1,
     wordsStart: opts.wordsStart,
   }
 }
@@ -263,10 +271,17 @@ export function buildRow(
 }
 
 /**
- * Is this session worth persisting? A stray keystroke that opens and closes a session is noise, not
- * work. Kept deliberately loose (ANY real edit counts) — §A5's kindness constraint cuts against
- * discarding a writer's thinking-heavy, low-output session.
+ * Is this session worth persisting?
+ *
+ * ANY real edit counts — a thinking-heavy, low-output session is still work, and discarding it is
+ * exactly the judgement §A5 forbids.
+ *
+ * **AND A POMODORO BLOCK COUNTS WITH NO EDITS AT ALL** (Peter, 2026-07-17). This used to be
+ * `editEvents > 0`, which threw away the paper-reading case entirely: reading a printed article for
+ * 25 minutes produces zero events, so the block was measured, closed, and then SILENTLY DROPPED on
+ * its way to the ledger. Starting the timer is the writer saying *count this*; a rule that requires
+ * a keystroke to believe them is the tracker calling a real day thin.
  */
 export function isRecordable(d: SessionDraft): boolean {
-  return d.editEvents > 0
+  return d.editEvents > 0 || d.pomodoro
 }

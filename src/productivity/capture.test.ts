@@ -5,7 +5,7 @@ import type { Step } from '@tiptap/pm/transform'
 import type { InkwaveDocument } from '../types/document'
 import { diffStats, diffWords } from '../provenance/diff'
 import { countWords } from '../provenance/snapshots'
-import { SessionCapture, resolveDocType, setLabelSuppressed, wordDiffStats } from './capture'
+import { IDLE_CHECK_MS, SessionCapture, resolveDocType, setLabelSuppressed, wordDiffStats } from './capture'
 import type { SessionRow } from './types'
 
 // Real PM steps — countSteps() tests `instanceof ReplaceStep`, so a hand-rolled fake would be a
@@ -98,16 +98,16 @@ describe('wordDiffStats — measured, not merely plausible', () => {
 })
 
 describe('resolveDocType', () => {
-  it('defaults to the prose default when the document says nothing', () => {
-    expect(resolveDocType({ id: 'd' })).toBe('essay')
+  it('defaults to misc — an honest unknown, never a guessed type', () => {
+    expect(resolveDocType({ id: 'd' })).toBe('misc')
   })
   it('honours an explicit docType — the email layer sets this (§B2.1)', () => {
     expect(resolveDocType({ id: 'd', docType: 'email' })).toBe('email')
     expect(resolveDocType({ id: 'd', docType: 'note' })).toBe('note')
   })
   it('ignores a bogus docType rather than writing it into the contract', () => {
-    expect(resolveDocType({ id: 'd', docType: 'nonsense' })).toBe('essay')
-    expect(resolveDocType({ id: 'd', docType: 42 })).toBe('essay')
+    expect(resolveDocType({ id: 'd', docType: 'nonsense' })).toBe('misc')
+    expect(resolveDocType({ id: 'd', docType: 42 })).toBe('misc')
   })
 })
 
@@ -178,7 +178,7 @@ describe('session boundaries close a row (§A4)', () => {
     expect(r.words_deleted).toBe(0)
     expect(r.edit_events).toBe(2)
     expect(r.pomodoro).toBe(false)
-    expect(r.doc_type).toBe('essay')
+    expect(r.doc_type).toBe('misc')
     expect(r.start).toBe('2026-07-17T10:00:00.000+10:00')
   })
 
@@ -387,5 +387,87 @@ describe('the ledger holds no prose (§A3.2, §C1.3)', () => {
     for (const word of ['Kierkegaard', 'repetition', 'recollection', 'aesthetic']) {
       expect(blob).not.toContain(word)
     }
+  })
+})
+
+describe('THE PAPER-READING CASE — a silent Pomodoro block is work (Peter, 2026-07-17)', () => {
+  // "even if you read physical articles you still use the pomodoro timer." Starting the timer IS
+  // the claim of work. Reading printed paper produces ZERO app events, so every rule that treats
+  // silence as absence gets this wrong — and the report then calls it a thin day, which is the
+  // tracker being wrong about him.
+
+  it('a 25-minute SILENT block produces ONE 25-minute row — no keystrokes at all', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      await h.bind()
+      h.cap.startIdleWatch()
+      await h.cap.pomodoroStart() // the claim
+
+      // 25 minutes of reading a printed article. Not one event.
+      for (let i = 0; i < 25; i++) {
+        h.advance(MIN)
+        await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS + 100) // let the idle watcher run and look
+      }
+      await h.cap.pomodoroStop()
+
+      expect(h.rows).toHaveLength(1)
+      const r = h.month()
+      expect(r.pomodoro).toBe(true)
+      expect(r.active_minutes).toBe(25) // ← the whole block. Not 0, and not 5.
+      expect(r.doc_type).toBe('misc') // we measured the work; we don't know what it was
+      expect(r.edit_events).toBe(0)
+      expect(r.net_words).toBe(0)
+      h.cap.stopIdleWatch()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('KNOWN-NEGATIVE: without a block, the SAME silence closes at the inactivity boundary', async () => {
+    // Proves the suppression is what produced the row above — not that the watcher never fires.
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      await h.bind()
+      h.cap.record([insertStep(1)])
+      h.cap.startIdleWatch()
+      h.advance(25 * MIN)
+      await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS + 100)
+      expect(h.rows).toHaveLength(1)
+      expect(h.cap.openSessionId).toBeNull() // closed by silence, as it should be
+      expect(h.rows[0].active_minutes).toBe(0) // a lone keystroke banks no inter-edit time
+      h.cap.stopIdleWatch()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a running block SUPPRESSES the idle close even after 25 silent minutes', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = harness()
+      await h.bind()
+      await h.cap.pomodoroStart()
+      h.cap.startIdleWatch()
+      h.advance(25 * MIN)
+      await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS + 100)
+      expect(h.cap.openSessionId).not.toBeNull() // still open — the block is the boundary
+      expect(h.rows).toHaveLength(0)
+      h.cap.stopIdleWatch()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('typing inside a block still counts the WHOLE block, not just the gaps between keys', async () => {
+    const h = harness()
+    await h.bind()
+    await h.cap.pomodoroStart()
+    h.cap.record([insertStep(1)])
+    h.advance(25 * MIN) // he typed once, then read for 25 minutes
+    await h.cap.pomodoroStop()
+    expect(h.month().active_minutes).toBe(25)
+    expect(h.month().edit_events).toBe(1)
   })
 })

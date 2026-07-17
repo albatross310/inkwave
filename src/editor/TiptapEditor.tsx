@@ -69,7 +69,7 @@ const ProductivityReportModal = lazy(() =>
 )
 import { prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
-import { ClockMenu } from '../components/ClockMenu'
+import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
@@ -434,6 +434,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     () => resolveToolbarRow(toolbarRead, readStoredRow()),
   )
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
+  // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
+  // HERE, not in the clock button: the row is SIX (Peter), so `clock` competes and sits in the ▲
+  // overflow by default — its button is frequently unmounted. The slot and the countdown are two
+  // access paths to ONE setter.
+  const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [, setLedgerGoalsTick] = useState(0) // re-render the drop-up after a goals write
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
@@ -2601,7 +2607,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         </button>
       )}
       {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
-      {id === 'clock' && <ClockMenu />}
+      {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
     </>
   )
 
@@ -2697,8 +2703,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         {/* The faint desktop countdown. Renders NOTHING unless a block is running and the flag is
             on; it portals itself to <body>, so despite sitting here in the tree it is never a
-            DESCENDANT of the editor and its per-second write cannot invalidate the page subtree. */}
-        {prodLedgerEnabled() && <CountdownOverlay />}
+            DESCENDANT of the editor and its per-second write cannot invalidate the page subtree.
+            It is the SECOND access path to the ledger — same setter as the toolbar's clock slot. */}
+        {prodLedgerEnabled() && <CountdownOverlay onOpen={() => setLedgerOpen(true)} />}
+        {prodLedgerEnabled() && ledgerOpen && (
+          <LedgerDropUp
+            docId={doc.id}
+            docLabel={doc.title}
+            goals={docRef.current.goals}
+            // §A5b: goals are a DOCUMENT property, so they persist the way every other document
+            // property does — through the editor's own autosave. One writer, no race.
+            onGoalsChange={(g) => {
+              docRef.current = { ...ensureDocFresh(), goals: g }
+              scheduleSave(() => docRef.current, () => { void upsertMeta({ id: docRef.current.id, title: docRef.current.title, updatedAt: docRef.current.updatedAt }) })
+              setLedgerGoalsTick(n => n + 1)
+            }}
+            onClose={() => setLedgerOpen(false)}
+          />
+        )}
 
         {/* ReceiptPanel: always in the tree on phone (no !keyboardUp guard) so the panel
             stays mounted during and after async save-version work. The trigger is hidden
