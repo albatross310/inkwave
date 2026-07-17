@@ -1943,6 +1943,42 @@ as the water slows.
   hold the node: resolve `document.documentElement` at every use, and watch `document` itself
   (never replaced) with a childList observer to catch the swap + re-arm. Same family as
   canvasShapingMatchesEditor: a guard that cannot see its own failure.
+- **THE OVERLAY WAS RED ON A WORKING APP — and that is worse than green on a broken one (2026-07-17,
+  round 3).** A successful run ENDS with the video torn down and `master` cleared, so a completed
+  hand-off displayed the identical red `● CSS WATER (no video)` as a video that never ran at all.
+  Peter read it and reported "the first time the video ran, from then on just the css" — the fix
+  worked, the instrument said otherwise, and two rounds went hunting a phantom. `masterEver` now
+  separates them: `✔ VIDEO RAN, then handed back — HEALTHY` vs a red that means EXACTLY "the video
+  never ran this load". The ▲ alarm also fired on healthy runs twice over: `painted` demanded
+  opacity ≥ 0.9 while `.iw-wave-video-el` fades in over `transition: opacity 0.3s` (~270ms of every
+  successful start — "right before it loads", exactly when he was watching), and the overlay picked
+  the FIRST `video.iw-wave-video-el` (the dying loop, opacity 0, `data-going`) during the 80ms
+  loop→brake swap. A half-faded video IS painting; select `:not([data-going])`. **An alarm that
+  fires on the healthy path trains the one person whose eyes are the ground truth to distrust the
+  instrument.**
+- **THE OVERLAY MUST NAME ITS BUILD.** Peter's three screenshots were read as one healthy run; the
+  `fetch` field said otherwise — `200 / decoded` is round-1 code, `warm 200 → cached` is round-2, and
+  they CANNOT coexist in one build. Two builds, one minute, and no way to tell from the picture. The
+  box now prints `__BUILD_COMMIT__`. Any on-device overlay whose screenshots cross a deploy needs it.
+- **THE HARNESS'S FIRST LOAD WAS ITS ONLY LOAD (`twoload.prove.mjs`).** Every wave-video probe did ONE
+  load in a FRESH context, so nothing could see what a SECOND load changes: `serviceWorker.controller`
+  is NULL on a first load (the SW's cache-first /wave/ handler is not even in the path), Cache Storage
+  and the HTTP cache are empty, and there is no saved document. **A race gives you *sometimes*;
+  works-once-then-never is STATE.** But: **Linux WebKit CANNOT run the warm load at all** — it has no
+  `navigator.storage`, so load 2 reads back the document load 1 created, hits the app's own
+  storage-error page, and renders NO editor surface. The video then bails `load already past drift`
+  because there is no `.iw-wave-anim` surface ANYWHERE, and the probe reported "PETER'S SEQUENCE
+  REPRODUCED" — a fiction; a control with the flag OFF showed the identical dead page. It reports
+  INCONCLUSIVE now. Chromium (which has OPFS) renders warm loads and reaches master on all 3, h264
+  included. **The drift window (hydrated→settle) DOES halve on warm loads** (WebKit av1 3.3s → 1.7s;
+  Chromium 744ms → 427ms) because caching makes everything else faster — a real mechanism by which a
+  slow decode could lose on load 2+ and never on load 1, unreproduced in either engine and left
+  STATED, not probed.
+- **`no-store` IS FAITHFUL TO NOTHING.** The probe server sent it for every asset, so waveVideo's
+  pre-hydration warm fetch warmed precisely nothing and the `<video>` re-downloaded the whole 280KB
+  h264 clip — a "decode timeout" manufactured entirely by the harness. Production serves /wave/
+  cache-first from the SW's Cache Storage (permanent per build id); `server.mjs` now serves /wave/
+  `immutable` (the behavioural equivalent) and everything else no-store.
 - **THE OVERLAY MEASURED THE DECODER AND REPORTED IT AS PIXELS.** `?waveVideo=debug` printed
   "● VIDEO ON SCREEN / advancing YES / VIDEO is master" — all TRUE, all about the decode — while
   the element sat in a display:none subtree painting nothing. Every field was green on a build that

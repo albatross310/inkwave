@@ -344,25 +344,46 @@ function mountOverlay(): void {
     const cs = getComputedStyle(v)
     if (cs.display === 'none') return { ok: false, why: 'display:none' }
     if (cs.visibility !== 'visible') return { ok: false, why: `visibility:${cs.visibility}` }
-    if (+cs.opacity < 0.9) return { ok: false, why: `opacity:${cs.opacity}` }
-    return { ok: true, why: `${Math.round(r.width)}x${Math.round(r.height)}` }
+    // `painted` means PUTS PIXELS ON SCREEN. It demanded opacity >= 0.9, which invented a false
+    // alarm out of a legitimate animation: `.iw-wave-video-el` fades in over `transition: opacity
+    // 0.3s`, so for ~270ms of every successful start — the exact moment Peter watches, "right
+    // before it loads" — a video that WAS painting reported NOT PAINTED. A half-faded video is
+    // painting. Only a fully transparent one is not.
+    if (+cs.opacity <= 0.01) return { ok: false, why: `opacity:${cs.opacity}` }
+    return { ok: true, why: `${Math.round(r.width)}x${Math.round(r.height)} op=${(+cs.opacity).toFixed(2)}` }
   }
   const paint = () => {
-    const v = document.querySelector<HTMLVideoElement>('video.iw-wave-video-el')
+    // THE LIVE ELEMENT, not just the first one. During the loop→brake swap the dying loop is still
+    // in the DOM for 80ms (opacity 0, marked data-going) while the brake plays — picking it made
+    // the overlay cry "NOT PAINTED" in the middle of a perfectly good hand-off.
+    const v = document.querySelector<HTMLVideoElement>('video.iw-wave-video-el:not([data-going])')
+      ?? document.querySelector<HTMLVideoElement>('video.iw-wave-video-el')
     if (v) { diag.ready = v.readyState }
     // NO ANGLE BRACKETS IN ANY OF THESE STRINGS: this box is written with innerHTML, so a literal
     // "<video>" is parsed as a TAG — it swallowed the water-gate and reason lines whole the first
     // time this ran. The instrument must not be able to blank itself.
     const p = v ? painted(v) : { ok: false, why: 'no video element' }
-    // THREE states, not two: master+painted, master+INVISIBLE (the trap), and CSS water.
-    const head = diag.master && p.ok
-      ? '<b style="color:#4ade80">● VIDEO ON SCREEN</b>'
-      : diag.master
-        ? `<b style="color:#fbbf24">▲ VIDEO IS MASTER BUT NOT PAINTED — ${p.why}</b>`
-        : '<b style="color:#f87171">● CSS WATER (no video)</b>'
-    // The water gate itself: if this ever reads NO, hydration was lost and BOTH waters are dead.
+    // ── THE STATE MACHINE (2026-07-17, round 3) ──
+    // The overlay was RED on a working app, and that is worse than green on a broken one: it burns
+    // the trust of the one person whose eyes are the ground truth. Success ENDS with the element
+    // removed and master cleared, so a completed run displayed the same red '● CSS WATER (no
+    // video)' as a video that never ran at all — and Peter, reading it, reported "the first time
+    // the video ran, from then on just the css". The finished state and the never-ran state MUST
+    // NOT look alike. `masterEver` is what tells them apart.
     const gate = document.documentElement.classList.contains('iw-water-ready')
+    const head =
+      diag.master && p.ok ? '<b style="color:#4ade80">● VIDEO ON SCREEN</b>'
+        // Master with no element = mid-swap (loop→brake) or mid-teardown: a transition, not a fault.
+        : diag.master && !v ? '<b style="color:#9ca3af">◌ VIDEO handing over (loop→brake)…</b>'
+          // The REAL alarm, and now it can only mean the real thing: the video is master, the
+          // element is right there, and it is structurally unable to paint.
+          : diag.master ? `<b style="color:#fbbf24">▲ VIDEO IS MASTER BUT NOT PAINTED — ${p.why}</b>`
+            : masterEver ? '<b style="color:#4ade80">✔ VIDEO RAN, then handed back to the CSS water — HEALTHY</b>'
+              // Red means exactly ONE thing now: the video never ran on this load. THIS is the
+              // state worth reporting; `reason` says which exit it took.
+              : '<b style="color:#f87171">● CSS WATER — the video never ran this load</b>'
     box.innerHTML = `${head}
+build     ${__BUILD_COMMIT__}
 flag      ${diag.flag}
 codec     ${diag.codec}   rung ${diag.rung}/${diag.theme}
 clip      ${diag.clip}
