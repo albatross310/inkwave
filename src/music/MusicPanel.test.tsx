@@ -26,6 +26,9 @@ vi.mock('opensheetmusicdisplay', () => ({
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { installOpfsShim, resetOpfsShim } from '../email/testOpfsShim'
+import { SIMPLE_SCALE } from './scoreFixtures'
+import type { InkwaveDocument } from '../types/document'
 import { MusicPanel } from './MusicPanel'
 
 const isTreeCall = (call: unknown[]) => String(call[0]).includes('git/trees')
@@ -90,5 +93,85 @@ describe('MusicPanel — the demo is labelled, never silent', () => {
   it('shows no demo label when it is not a demo (the negative fires)', () => {
     render(<MusicPanel />)
     expect(screen.queryByText(/not a real score/i)).toBeNull()
+  })
+})
+
+
+// ─── THE PRODUCER LINK — the test that would have caught the §B5 gap ─────────────────────────
+//
+// `attach.test.ts` proves attach.ts writes doc.music. It does NOT prove the PANEL calls it — and
+// that was precisely the gap: the mechanism was complete and correct, and nothing invoked it, so no
+// document was ever v:4 while every test stayed green. This drives the real UI: pick a file → the
+// real importMaster → the real updateDocumentMusic → assert the REAL stored document changed.
+
+describe('MusicPanel — importing a score ATTACHES it to the open document (§B5/§B6)', () => {
+  let opfs: typeof import('../storage/opfs')
+  let Panel: typeof import('./MusicPanel').MusicPanel
+
+  const doc = (): InkwaveDocument => ({
+    id: 'essay-1',
+    title: 'On the modulation',
+    contentJson: { type: 'doc', content: [{ type: 'paragraph' }] },
+    createdAt: '2026-07-17T00:00:00.000Z',
+    updatedAt: '2026-07-17T00:00:00.000Z',
+    schemaVersion: '0.1.0',
+    scasLimitN: 'infinite',
+    scasSessionSeed: 'seed',
+  })
+
+  /** A File jsdom can actually read. jsdom's File has no arrayBuffer(); every real browser does, so
+   *  the polyfill restores reality rather than inventing it. */
+  function scoreFile(xml = SIMPLE_SCALE): File {
+    const f = new File([xml], 'scale.musicxml', { type: 'application/xml' })
+    Object.defineProperty(f, 'arrayBuffer', {
+      value: async () => new TextEncoder().encode(xml).buffer,
+    })
+    return f
+  }
+
+  async function found(o: typeof import('../storage/opfs'), id: string) {
+    const r = await o.readDocument(id)
+    if (r.kind !== 'found') throw new Error(`expected document ${id}, got ${r.kind}`)
+    return r.doc
+  }
+
+  beforeEach(async () => {
+    vi.resetModules()
+    resetOpfsShim()
+    installOpfsShim()
+    localStorage.setItem('inkwave:activeDocumentId', 'essay-1')
+    opfs = await import('../storage/opfs')
+    Panel = (await import('./MusicPanel')).MusicPanel
+    await opfs.saveDocument(doc())
+  })
+
+  it('writes the master onto the stored document — id + contentHash, no notation', async () => {
+    const user = userEvent.setup()
+    render(<Panel />)
+
+    await user.upload(screen.getByLabelText(/Import a score/i), scoreFile())
+
+    await waitFor(async () => {
+      const d = await found(opfs, 'essay-1')
+      expect(d.music!.masters).toHaveLength(1)
+    })
+    const d = await found(opfs, 'essay-1')
+    expect(d.music!.masters[0].contentHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(d.music!.annotations).toEqual([])          // §B4's slot, hashed from day one
+    // §B6: the document carries an ADDRESS, never the notation.
+    expect(JSON.stringify(d!.music)).not.toMatch(/<note|score-partwise/i)
+  })
+
+  it('says so rather than silently dropping the score when no document is open', async () => {
+    // Without an essay there is nothing to anchor to. A student who attached a score, saw no error,
+    // and later anchored their work would find the score simply absent from the record.
+    localStorage.removeItem('inkwave:activeDocumentId')
+    vi.resetModules()
+    const Fresh = (await import('./MusicPanel')).MusicPanel
+    const user = userEvent.setup()
+    render(<Fresh />)
+
+    await user.upload(screen.getByLabelText(/Import a score/i), scoreFile())
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/Open a document first/i))
   })
 })
