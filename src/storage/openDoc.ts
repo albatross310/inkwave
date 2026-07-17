@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ExportBundle } from '../provenance/bundle'
 import { parseStudioOffThread } from '../workers/parseClient'
 import { openPerfStart, openPerfStep, openPerfAbort, openPerfDispatched } from './openPerf'
-import { reportOpenError } from './openError'
+import { reportOpenError, reportOpenNotice } from './openError'
 import { saveDocument, loadDocument } from './opfs'
 import { classifyOpen, type OpenVerdict } from './openConflict'
 import { contentHash } from '../provenance/hash'
@@ -124,7 +124,7 @@ async function openInkwaveFileInner(
   // document exactly as it is — and still adopt the sync bindings below, because the right repair
   // for a stale remote file is for this newer document to sync OVER it, which is what happens next.
   if (verdict === 'incoming-stale') {
-    reportOpenError(
+    reportOpenNotice(
       `"${title}" is an older copy of a document you already have — your newer version was kept, ` +
       `so nothing was overwritten. Its history was merged in.`,
     )
@@ -143,7 +143,7 @@ async function openInkwaveFileInner(
     ? baseName
     : baseName.replace(/\.[^.]*$/, '') + '.studio'
   if (forked) {
-    reportOpenError(
+    reportOpenNotice(
       `"${title}" and the copy on this device have both been edited separately, so it opened as a ` +
       `separate copy. Nothing was overwritten — both versions are in Storage (⋮ menu).`,
     )

@@ -372,7 +372,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [keyboardUp, setKeyboardUp] = useState(false)
   // PWA install prompt — captured here so both OptionsMenu and InstallPromptBanner can use it.
   const [installPrompt, setInstallPrompt] = useState<any>(null)
-  const [fileOpenError, setFileOpenError] = useState<string | null>(null)
+  const [fileOpenError, setFileOpenError] = useState<import('../storage/openError').OpenNotice | null>(null)
   // Open failures happen while the initiating editor is UNMOUNTED (open-begin hides the doc), so
   // the message parks in storage/openError and the instance that mounts after the restore shows it.
   useEffect(() => {
@@ -750,13 +750,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         // all then; the notice is only for a private window with nowhere to put the writing.
         void oneDriveAccount().then((acct) => {
           if (acct) { console.info('inkwave: local storage unavailable (private window) — cloud sync is carrying saves'); return }
-          setFileOpenError('This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.')
+          setFileOpenError({ message: 'This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.', kind: 'error' })
         }).catch(() => {
-          setFileOpenError('This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.')
+          setFileOpenError({ message: 'This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.', kind: 'error' })
         })
         return
       }
-      setFileOpenError(`SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`)
+      setFileOpenError({ message: `SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`, kind: 'error' })
     }
     window.addEventListener('inkwave:save-failed', onFail)
     let lastSaved = performance.now()
@@ -2604,10 +2604,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         )}
         {fileOpenError && (
           <div
-            className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif"
-            style={{ background: '#fef2f2', borderBottom: '1px solid #fca5a5', color: '#991b1b' }}
+            // KIND, not one voice for everything: the blind-overwrite guard's messages are GOOD
+            // news ("nothing was overwritten"), and shouting them in the red ⚠ error banner told
+            // the writer their thesis was in trouble at the moment it had just been protected.
+            // The info variant is calm and themed (tokens with day fallbacks); the error variant
+            // keeps its existing red.
+            // `iw-nightable` on the INFO variant only: the night tokens (--iw-ink et al) are scoped
+            // INSIDE that class, so without it these vars would silently resolve to their day
+            // fallbacks on a night background. It also re-surfaces the banner to dolphin grey in
+            // night, which is right. The ERROR variant must keep its red — being alarming is its
+            // job — so it stays outside the themed surface.
+            className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif${fileOpenError.kind === 'info' ? ' iw-nightable' : ''}`}
+            style={fileOpenError.kind === 'info'
+              ? {
+                  background: '#faf7ff', // night: .iw-nightable overrides to dolphin grey
+                  borderBottom: '1px solid var(--iw-nightable-border, #e7e5e4)',
+                  color: 'var(--iw-ink, #5c2d8a)',
+                }
+              : { background: '#fef2f2', borderBottom: '1px solid #fca5a5', color: '#991b1b' }}
           >
-            <span>⚠ {fileOpenError}</span>
+            <span>{fileOpenError.kind === 'info' ? '✓' : '⚠'} {fileOpenError.message}</span>
             <button
               type="button"
               onClick={() => setFileOpenError(null)}

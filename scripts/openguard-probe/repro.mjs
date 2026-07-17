@@ -159,14 +159,25 @@ async function runScenario(browser, guardOff) {
   const survived = joined.includes('NEW ANNOTATIONS')
   const shown = await docText(page)
   const verdict = await page.evaluate(() => window.__iwLastOpenVerdict ?? '(none)')
+  // THE MESSAGE THE WRITER ACTUALLY GETS. The guard's outcomes are good news ("nothing was
+  // overwritten") and went out through the red ⚠ ERROR banner until this was checked — telling
+  // someone their thesis is in trouble at the moment it was protected. Read the DOM, not the intent.
+  const banner = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('div')].find(d =>
+      /older copy|separate copy|SAVING IS FAILING|couldn/i.test(d.textContent || '') && d.className.includes('fixed top-0'))
+    if (!el) return null
+    const cs = getComputedStyle(el)
+    return { text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 90), bg: cs.backgroundColor, alarming: (el.textContent || '').includes('⚠') }
+  })
   const snapshotCount = bundle.snapshots.length
 
   await ctx.close()
   return {
-    survived, verdict, docs: after.length, snapshotCount,
+    survived, verdict, docs: after.length, snapshotCount, banner,
     detail: `verdict=${verdict}; the stale export carried ${snapshotCount} snapshot(s); ` +
       `OPFS holds ${after.length} document(s); "NEW ANNOTATIONS" ${survived ? 'SURVIVED' : 'WAS DESTROYED'}; ` +
-      `the editor shows "${shown.slice(0, 45)}"`,
+      `the editor shows "${shown.slice(0, 45)}"` +
+      (banner ? `\n        banner: ${banner.alarming ? '⚠ ALARMING' : 'calm ✓'} ${banner.bg} — "${banner.text}"` : '\n        banner: (none shown)'),
   }
 }
 
