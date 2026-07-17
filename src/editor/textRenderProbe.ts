@@ -113,6 +113,11 @@ export interface ProbeApi {
    *  itself. Also re-parses the live doc through the standalone schema and asserts PM-level
    *  equality, so the answer covers this document's real citations/math, not just type names. */
   schemaIdentity(): Record<string, unknown>
+  /** THE AUTHORITATIVE LIST of "all text types we currently support" — read from the LIVE editor's
+   *  own schema, never from a hand-kept list in a probe or a doc. Peter's bar is per-type accuracy,
+   *  so the enumeration itself must not be able to drift: a type missing from a hand-list is a type
+   *  silently uncertified, and it would look exactly like a type that passed. */
+  typeCensus(): Record<string, unknown>
   /** THE COST /snapshot's sweep ADDS, which no previous number covers. ROUND 13's 62-82ms/version
    *  was `buildRenderModel` fed `editor.state.doc` — an ALREADY-PARSED node. /snapshot has no
    *  editor, so every version must first be parsed from its contentJson, and that parse is this
@@ -1249,6 +1254,20 @@ export function installTextRenderProbe(editor: Editor): void {
         coverage: base.coverage,
       }
     },
+    typeCensus() {
+      const live = editor.schema
+      const nodes = Object.keys(live.nodes)
+      const marks = Object.keys(live.marks)
+      // Which nodes are leaf atoms (nodeSize 1, no content) vs textblocks vs containers — the
+      // distinction that decides how the model can even address them (see blockFirstLinePos).
+      const kind: Record<string, string> = {}
+      for (const n of nodes) {
+        const t = live.nodes[n]
+        kind[n] = [t.isLeaf ? 'leaf' : '', t.isAtom ? 'atom' : '', t.isTextblock ? 'textblock' : '', t.isInline ? 'inline' : 'block'].filter(Boolean).join('+')
+      }
+      return { nodes, marks, kind, nodeCount: nodes.length, markCount: marks.length }
+    },
+
     schemaIdentity() {
       // ONE description of "same schema", shared with the gate-kept unit test — see schemaSpec's
       // header. Two copies is how one instrument starts certifying a fiction.
