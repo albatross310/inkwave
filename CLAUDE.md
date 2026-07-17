@@ -1965,6 +1965,20 @@ as the water slows.
   hold the node: resolve `document.documentElement` at every use, and watch `document` itself
   (never replaced) with a childList observer to catch the swap + re-arm. Same family as
   canvasShapingMatchesEditor: a guard that cannot see its own failure.
+- **`iw-wave-video-on` IS A PROMISE THAT SOMETHING ELSE IS DRAWING THE WATER — and it outlived the
+  element (2026-07-17, round 4; Peter, live desktop: "after I signed in just now the wave background
+  completely went away", flat teal, document fine).** The class suppresses the CSS water outright
+  (`visibility:hidden` on the wave pseudos AND the twinkle host) with NO dependency on the video
+  existing, so `master` was a LATCH: when a re-render tore the `<video>` out — mounting Clerk at
+  sign-in does exactly that — the CSS water stayed suppressed, the video was gone, and NOTHING drew
+  the water. PROVED by removing the element while master (`master.prove.mjs`): class still set,
+  `::before` visibility:hidden, `master` still true. `guardMaster` now derives it — a childList
+  observer on the host (and its parent) hands the water back the microtask our last live element
+  leaves; `:not([data-going])` makes the legitimate loop→brake swap a non-event. **AND THE ALARM WAS
+  RIGHT ALL ALONG:** round 3 called `master`-with-no-element a benign swap transient and greyed it
+  out — that is EXACTLY this bug's signature, so the instrument would have been blind to the very
+  failure it had been reporting. **Excusing a symptom is not the same as excluding a cause**; exclude
+  the cause (read the LIVE element) and let the alarm keep firing on everything else.
 - **THE OVERLAY WAS RED ON A WORKING APP — and that is worse than green on a broken one (2026-07-17,
   round 3).** A successful run ENDS with the video torn down and `master` cleared, so a completed
   hand-off displayed the identical red `● CSS WATER (no video)` as a video that never ran at all.
