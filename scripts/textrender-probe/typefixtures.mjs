@@ -57,7 +57,15 @@ export function buildTypeDoc({ types = [], words = 13000, id = 'typedoc' } = {})
     if (T.has('strike')) marks.push({ type: 'strike' })
     if (T.has('code')) marks.push({ type: 'code' })
     if (T.has('highlight')) marks.push({ type: 'highlight', attrs: { color: '#fde68a' } })
-    if (T.has('textStyle:fontFamily')) marks.push({ type: 'textStyle', attrs: { fontFamily: 'Georgia, serif' } })
+    // A CERTIFIED, SELF-HOSTED STACK — one of StyleBar's own FONTS entries, i.e. something a user
+    // can actually pick. The first cut used 'Georgia, serif' and every marked block DEFERRED: Georgia
+    // is not shipped (it survives only as a fallback TAIL), so fontLoaded() said false and the model
+    // correctly refused to guess. That is CLAUDE.md's "a font we don't ship" trap, walked into by my
+    // own fixture — it measured the self-healing gate and called it a probe failure.
+    if (T.has('textStyle:fontFamily')) marks.push({ type: 'textStyle', attrs: { fontFamily: "'Crimson Pro', 'Times New Roman', serif" } })
+    // …and the OPPOSITE case, kept deliberately: an UNSHIPPED family MUST defer rather than wrap on
+    // metrics we don't have. That is correct behaviour and worth certifying as such.
+    if (T.has('textStyle:unshippedFont')) marks.push({ type: 'textStyle', attrs: { fontFamily: 'Georgia, serif' } })
     if (T.has('textStyle:fontSize')) marks.push({ type: 'textStyle', attrs: { fontSize: '20px' } })
     if (T.has('scasSlot')) marks.push({ type: 'scasSlot', attrs: {} })
     if (T.has('comment')) marks.push({ type: 'comment', attrs: {} })

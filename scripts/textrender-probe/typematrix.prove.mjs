@@ -68,6 +68,7 @@ const MARKS = [
   ['mark code', ['code']],
   ['mark highlight', ['highlight']],
   ['mark textStyle:fontFamily', ['textStyle:fontFamily']],
+  ['mark textStyle UNSHIPPED font', ['textStyle:unshippedFont']],
   ['mark textStyle:fontSize', ['textStyle:fontSize']],
   ['mark scasSlot', ['scasSlot']],
   ['mark comment', ['comment']],
@@ -98,7 +99,8 @@ const REQUIRE = {
   mathInline: ['mathInline'], mathBlock: ['mathBlock'], referenceList: ['referenceList'],
   bold: ['mark:bold'], italic: ['mark:italic'], underline: ['mark:underline'], strike: ['mark:strike'],
   code: ['mark:code'], highlight: ['mark:highlight'], 'textStyle:fontFamily': ['mark:textStyle'],
-  'textStyle:fontSize': ['mark:textStyle'], scasSlot: ['mark:scasSlot'], comment: ['mark:comment'],
+  'textStyle:fontSize': ['mark:textStyle'], 'textStyle:unshippedFont': ['mark:textStyle'],
+  scasSlot: ['mark:scasSlot'], comment: ['mark:comment'],
   insertion: ['mark:insertion'], deletion: ['mark:deletion'],
 }
 
@@ -109,8 +111,13 @@ async function measure(page, doc, minWords) {
   } catch { return { err: 'doc never loaded (schema rejected it?)' } }
   await page.waitForTimeout(4500)
   const st = await page.evaluate(() => window.__iwTextRenderProbe.selfTest())
-  if (!st.fontsReallyLoaded || !st.seesKnownPositive) return { err: `probe blind (fonts=${st.fontsReallyLoaded} pos=${st.seesKnownPositive})` }
-  return page.evaluate(() => {
+  // `seesKnownPositive` inflates every advance 5% and requires MORE lines. If EVERY block deferred
+  // to a placeholder there is no measured text for the inflation to move — so the gate fails, and
+  // that failure is not a blind probe, it is the model DECLARING it cannot lay this document out.
+  // The first cut printed VOID here and threw away the answer. Distinguish the two: carry the model
+  // state through, and let the caller decide which it is.
+  const blind = !st.fontsReallyLoaded || !st.seesKnownPositive
+  const r = await page.evaluate(() => {
     const p = window.__iwTextRenderProbe
     for (let i = 0; i < 3; i++) p.build() // warm: 12 identical calls go 291.7 → 81.8ms settled
     const { model } = p.build()
@@ -127,9 +134,12 @@ async function measure(page, doc, minWords) {
       mineAt: firstDiv >= 0 ? (mine[firstDiv] ?? null) : null,
       liveAt: firstDiv >= 0 ? (live[firstDiv] ?? null) : null,
       pages: model.pages, est: model.estimatedBlocks, reliablePages: model.reliablePages,
-      breaksReliable: model.breaksReliable, kinds,
+      breaksReliable: model.breaksReliable, kinds, blocks: model.blocks.length,
     }
   })
+  r.blind = blind
+  r.fontsReallyLoaded = st.fontsReallyLoaded
+  return r
 }
 
 const run = async () => {
@@ -158,6 +168,14 @@ const run = async () => {
     const r = await measure(page, doc, Math.min(3000, WORDS * 0.4))
     if (r.err) { console.log(`  ${label.padEnd(28)} VOID — ${r.err}`); rows.push([label, null, 'VOID']); return }
     if (missing.length) { console.log(`  ${label.padEnd(28)} VOID — fixture lacks ${missing.join(',')} (cannot test what isn't there)`); rows.push([label, r, 'VOID']); return }
+    // TOTAL DEFERRAL is an ANSWER, not a void: the model refuses to lay the document out and says so.
+    const totallyDeferred = r.est >= r.blocks * 0.9 && r.reliablePages <= 1
+    if (totallyDeferred) {
+      console.log(`  ${label.padEnd(28)} ⊘ DECLARED-DEFER: ${r.est}/${r.blocks} blocks placeholdered, reliablePages ${r.reliablePages}/${r.pages}`)
+      console.log(`  ${''.padEnd(28)}   the model refuses to lay this out and SAYS SO — accurate-or-honest, not silently wrong`)
+      rows.push([label, r, 'DEFER']); return
+    }
+    if (r.blind) { console.log(`  ${label.padEnd(28)} VOID — probe blind (fonts=${r.fontsReallyLoaded}) and NOT total deferral; unexplained`); rows.push([label, r, 'VOID']); return }
     if (r.liveLen < MIN_BREAKS) { console.log(`  ${label.padEnd(28)} VOID — only ${r.liveLen} live breaks (<${MIN_BREAKS}); too few to land on the type`); rows.push([label, r, 'VOID']); return }
     const same = r.mineLen === r.liveLen && r.firstDiv === -1
     const present = types.map((t) => (REQUIRE[t] ?? []).map((k) => `${k.replace('mark:', '')}×${counts[k] ?? 0}`).join('/')).filter(Boolean).join(' ')
@@ -191,8 +209,13 @@ const run = async () => {
 
   const pass = rows.filter(([, , v]) => v === 'PASS')
   const fail = rows.filter(([, , v]) => v === 'FAIL')
+  const defer = rows.filter(([, , v]) => v === 'DEFER')
   const vd = rows.filter(([, , v]) => v === 'VOID')
-  console.log(`\n══ SUMMARY ══  ${pass.length} identical · ${fail.length} divergent · ${vd.length} void of ${rows.length}`)
+  console.log(`\n══ SUMMARY ══  ${pass.length} identical · ${defer.length} declared-defer · ${fail.length} divergent · ${vd.length} void  (of ${rows.length})`)
+  if (defer.length) {
+    console.log('\n  DECLARED-DEFER — cannot be laid out, and the model says so (Peter\'s "give the reason"):')
+    for (const [l, r] of defer) console.log(`    • ${l.padEnd(26)} ${r.est}/${r.blocks} blocks placeholdered, reliablePages ${r.reliablePages}/${r.pages}`)
+  }
   if (fail.length) {
     console.log('\n  DIVERGENT — each needs a stated reason, per Peter\'s bar:')
     for (const [l, r] of fail) {
