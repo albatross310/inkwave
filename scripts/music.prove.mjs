@@ -204,14 +204,26 @@ try {
   check('the teacher’s mid-lesson mark is attributed AS the teacher’s', teacherBadges > 0, true)
 
   // Provenance: §A2 says the heatmap is stored in the .studio provenance record.
+  // READS THE DOCUMENT, not a private container — and this line IS the §1 fork's retirement.
+  // It used to read `music/<id>/piece.json`, the parallel store `music/store.ts` wrote beside
+  // `documents/`. §1: "the whole thing is bundled in a single .studio file (the Inkwave document
+  // container)". The probe failing here on the migration is the migration being real.
   const hash = await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('music')
-    const pd = await dir.getDirectoryHandle('demo-synthetic')
-    const f = await (await pd.getFileHandle('piece.json')).getFile()
-    const p = JSON.parse(await f.text())
-    return { heatmapHash: p.provenance?.hashes?.heatmap ?? null, entries: p.heatmap?.length ?? 0 }
+    const docs = await root.getDirectoryHandle('documents')
+    const pd = await docs.getDirectoryHandle('demo-synthetic')
+    const f = await (await pd.getFileHandle('current.json')).getFile()
+    const d = JSON.parse(await f.text())
+    return {
+      docType: d.docType,
+      pieceId: d.piece?.id ?? null,
+      docId: d.id,
+      heatmapHash: d.piece?.provenance?.hashes?.heatmap ?? null,
+      entries: d.piece?.heatmap?.length ?? 0,
+    }
   })
+  check('the Piece lives ON its document (docType music)', hash.docType, 'music')
+  check('piece.id === doc.id — one identity', hash.pieceId === hash.docId && hash.docId === 'demo-synthetic', true)
   check('the heatmap is hashed into the provenance record', /^[0-9a-f]{64}$/.test(hash.heatmapHash || ''), true)
   check('…and both marks are KEPT (a record over time, not a current state)', hash.entries >= 2, true)
 

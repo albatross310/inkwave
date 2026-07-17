@@ -8,12 +8,12 @@
 // module contains no OMR of any kind — the CV is barline/whitespace geometry only.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { v4 as uuidv4 } from 'uuid'
 import { capturePage, capturePdf } from './capture'
 import { HeatmapScreen } from './HeatmapScreen'
 import { ScorePage, SYMBOL_GLYPHS, SYMBOL_ORDER, type Tool } from './ScorePage'
-import { assetUrl, listPieceIds, loadPiece, putAsset, savePiece } from './store'
-import { newPiece, type Annotation, type Piece, type PiecePage } from './types'
+import { assetUrl, loadPiece, migrateLegacyPieces, putAsset, savePiece } from './store'
+import { newPieceDocument } from './newPieceDocument'
+import type { Annotation, Piece, PiecePage } from './types'
 import { TYPE } from './typeScale'
 
 const INK_COLOURS = ['#5c2d8a', '#b4342b', '#1d6b3a', '#1a4f8a', '#8a6a1a']
@@ -21,6 +21,8 @@ const STICKY_COLOURS = ['#fff3b0', '#ffd6d6', '#d6f0ff', '#e2ffd6']
 
 /** The demo piece's fixed id — see the load effect. Stable so a reload reopens it, marks and all. */
 const DEMO_ID = 'demo-synthetic'
+/** The probe harness's fixed document (see the load effect). Not a product concept. */
+const HARNESS_ID = 'music-harness'
 
 export function MusicStudio({ demo }: { demo: boolean }) {
   const [piece, setPiece] = useState<Piece | null>(null)
@@ -41,6 +43,9 @@ export function MusicStudio({ demo }: { demo: boolean }) {
   useEffect(() => {
     let dead = false
     void (async () => {
+      // Drain the parallel container this lane used to write (store.ts). Idempotent and one-way; it
+      // does nothing once empty, which is every load after the first.
+      await migrateLegacyPieces().catch(() => [])
       if (demo) {
         // A STABLE id, not a fresh uuid per load. PROVED BY THE LIVE PROBE (music.prove.mjs): with a
         // per-load uuid, reloading the demo minted a NEW piece — so every mark the student had just
@@ -68,14 +73,17 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         if (!dead) { setPiece(full); setBusy(null) }
         return
       }
-      const ids = await listPieceIds()
-      const existing = ids.length ? await loadPiece(ids[0]) : null
-      if (!dead) {
-        setPiece(existing ?? newPiece({
-          id: uuidv4(), title: 'Untitled piece',
-          source: { type: 'photo', captured_via: 'image' },
-        }))
-      }
+      // `listPieceIds()` is GONE — see store.ts. A Piece is a document, so "which piece?" is
+      // answered by "the document you have open", not by listing a private store and taking [0].
+      //
+      // ⚠️ `/music` HAS NO OPEN DOCUMENT, which is exactly why it is not the product surface. Peter
+      // ruled "it should all be in panels": the real entry is the toolbar's music BAR LAYER, opening
+      // the Piece of the active document. This route survives ONLY as the flag-gated probe harness
+      // (`scripts/music.prove.mjs` drives the whole pipeline through it headlessly), so it opens a
+      // fixed well-known document rather than inventing a piece list to replace the one just
+      // deleted. It retires with the layer.
+      const existing = await loadPiece(HARNESS_ID)
+      if (!dead) setPiece(existing ?? newPieceDocument({ title: 'Untitled piece' }).piece!)
     })()
     return () => { dead = true }
   }, [demo])

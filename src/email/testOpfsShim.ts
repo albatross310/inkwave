@@ -23,8 +23,11 @@ let root: Node = { files: new Map(), dirs: new Map() }
 // `newDocument()` mints a blank over a thesis again (the 2026-07-15 loss).
 // Fix the shim, never the predicate. A fake that lies in a different shape than the real thing is
 // not a fake; it is a second implementation with its own bugs.
+// (The music/store.test.ts suite was the first to exercise `readDocument` through this shim — the
+// "this layer runs for the first time" pattern — which is what first proved the NotFoundError NAME,
+// not message, contract end to end.)
 function notFound(): DOMException {
-  return new DOMException('The requested entry could not be found.', 'NotFoundError')
+  return new DOMException('A requested file or directory could not be found.', 'NotFoundError')
 }
 
 // FAULT INJECTION — the other half of what a storage fake is for. Without it a suite can only test
@@ -109,13 +112,27 @@ function makeDirHandle(node: Node) {
       node.files.delete(name)
       node.dirs.delete(name)
     },
-    // `listDocumentIds` iterates `docsDir.keys()`, and without it that call threw into its own
-    // `catch { return [] }` — so every document listing in a test read as "this origin stores
-    // nothing", which is the same silent-emptiness shape this file exists to warn about. An absent
-    // method on a shim is indistinguishable from a feature that never stored anything.
-    async *keys(): AsyncIterableIterator<string> {
+    // ─── Iteration — absent until 2026-07-17, and its absence was invisible ───
+    //
+    // `storage/opfs.ts listDocumentIds` walks `(docsDir as any).keys()` and `music/store.ts`
+    // `legacyPieceIds` walks `entries()`. Both wrap the walk in try/catch → `return []`, so through
+    // a shim with no iterator they reported **"there are no documents"** rather than "I cannot
+    // iterate". A listing that silently answers empty is the same shape as the `text()` note above,
+    // and the same shape as the read bug this whole file now models: an absent method on a shim
+    // looks exactly like a feature that never wrote anything.
+    //
+    // `kind` is what a caller discriminates on (`handle.kind !== 'directory'`), so it is modelled.
+    async *entries(): AsyncGenerator<[string, { kind: 'file' | 'directory' }]> {
+      for (const name of node.dirs.keys()) yield [name, { kind: 'directory' }]
+      for (const name of node.files.keys()) yield [name, { kind: 'file' }]
+    },
+    async *keys(): AsyncGenerator<string> {
       for (const name of node.dirs.keys()) yield name
       for (const name of node.files.keys()) yield name
+    },
+    async *values(): AsyncGenerator<{ kind: 'file' | 'directory' }> {
+      for (const _ of node.dirs.keys()) yield { kind: 'directory' }
+      for (const _ of node.files.keys()) yield { kind: 'file' }
     },
   }
 }

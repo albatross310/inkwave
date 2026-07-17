@@ -1902,6 +1902,47 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
   have caught this: the class was present and the token resolved — it was *correct* and *wrong*.
   Bar thumbnails scale with the ramp (`TYPE.title * 2`); words growing while the music stayed at 34px
   would invert the hierarchy of a screen whose whole subject is the music.
+- **A PIECE IS AN ORDINARY DOCUMENT — the §1 fork is retired (2026-07-17).** `music/store.ts` wrote a
+  PARALLEL container at `music/<pieceId>/piece.json`, beside `documents/<id>/current.json`. §1 says
+  "the whole thing is bundled in a single `.studio` file (the Inkwave document container)" and
+  explicitly not to have a second one; the cost was concrete — a Piece got no edit history, no
+  provenance hashing, no session capture and no cloud sync, because those happen to DOCUMENTS. Now
+  `docType: 'music'` + `piece?: Piece` (the email lane's precedent, verbatim: "An email is an ORDINARY
+  document — that is the whole design"), and **`piece.id === doc.id`**, which keeps the asset paths
+  (`music/<id>/assets/…`) byte-identical across the migration — only the JSON relocates.
+  **`listPieceIds()` IS DELETED and the deletion is the point**: it answered "which piece?" by listing
+  a private store and taking `[0]`, a question a Piece-as-document does not have (the answer is "the
+  document you have open"); keeping it would mean parsing every document on disk to filter by docType.
+  `migrateLegacyPieces()` drains the old container on open — idempotent, one-way, and **the DOCUMENT
+  wins a tie** (a legacy file can only predate this build; the document's copy is what every write
+  since has gone to — the 2026-07-05 truncation shape). ⚠️ `piece` is NOT anchored yet: §A6 says it
+  should be (a **v:5** bundleHash, the `musicHash` v:4 precedent) — batched with the other anchored-hash
+  questions, Peter's call. Declaring the shape now, unwritten, is the MusicXML lane's `annotations: []`
+  move: fix the shape so the anchor lands without a protocol change.
+- **`piece` AND `music` ARE DIFFERENT FIELDS AND BOTH ARE RIGHT — do not merge them.** `music:
+  MusicAttachments` (§B5/§B6) is prose that QUOTES music (an essay with excerpts transcluded);
+  `piece: Piece` (§1) is a document that IS music. A doc may legitimately have both (§A6: "write about
+  the piece in Inkwave and cite bars"). OPEN, for the MusicXML lane: `PieceSource{type:'musicxml',
+  xml_ref}` and `music.masters[]` can name the same bytes — §B6's design is "stored ONCE … deduplicated",
+  so `xml_ref` must REFERENCE a master, not duplicate one. Not guessed at; it is that lane's field.
+- **`readDocument`'s THREE OUTCOMES ARE NOT OPTIONAL, and I wrote the bug it exists to prevent.**
+  `savePiece` first read `loadDocument(id) ?? newPieceDocument()` — so an ERRORED read collapsed to
+  "absent", minted a fresh empty document and blind-overwrote the student's real Piece. That is the
+  2026-07-15 incident reproduced in eleven characters, by someone who had just read its write-up. **The
+  compiler caught it, not care** — which is the whole argument for the union. `loadPiece` THROWS on a
+  failed read rather than returning null for the same reason: absence and ignorance are different
+  answers, and if a read error read as "no piece" the studio would open an empty one over a real one.
+  Both pinned as known-negatives in `store.test.ts` (13 tests).
+- **TWO FIDELITY BUGS IN THE SHARED TEST SHIM (`email/testOpfsShim.ts`), both found by being the first
+  caller.** (1) It threw `new Error('NotFoundError')` — whose `.name` is `'Error'`, while production
+  asks `(err as DOMException)?.name === 'NotFoundError'`. So through the shim **every absent file read
+  as a read FAILURE** and `readDocument` answered `{kind:'error'}` where production answers
+  `{kind:'absent'}`. The message was clearly meant to be the name. Nothing caught it because no test had
+  exercised `readDocument` through the shim. It throws a real `DOMException` now. (2) It had NO
+  `entries()`/`keys()`, and both `storage/opfs.ts listDocumentIds` and `music/store.ts legacyPieceIds`
+  wrap their walk in `catch → return []` — so a shimmed listing answered **"there are no documents"**
+  rather than "I cannot iterate". Same shape as the `text()` note already in that file: **an absent
+  method on a shim looks exactly like a feature that never wrote anything.**
 - NOT BUILT: **OMR (never)**; reference tracks/tap-sync §A4 (step 3 — and the barline refusal above
   makes it load-bearing: the tap is what gives a PHOTO Piece its bar model at all); practice tools
   §A5 (step 4 — and §A5 CANNOT SHIP without editing `vercel.json`'s `Permissions-Policy:
