@@ -47,6 +47,7 @@
 // circular in the other direction. Real calibration needs real ledger rows with the writer's own
 // account of what they were doing. Treat the sweep as a sensitivity analysis, not a recommendation.
 
+import type { DocGoals, Snapshot } from '../types/document'
 import type { DocType, SessionRow } from './types'
 import type { JudgedReport } from './judged'
 
@@ -329,6 +330,10 @@ const DAYS: DayAggregate[] = [
 const SESSIONS: SessionRow[] = [
   { session_id: 's-1', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T09:05:00+10:00', end: '2026-07-06T09:50:00+10:00', active_minutes: 45, words_start: 1200, words_end: 1560, words_added: 400, words_deleted: 40, net_words: 360, edit_events: 210, break_before_min: 0, pomodoro: true, doc_type: 'essay', place: 'library', note: 'Finally got the third step of the argument down.' },
   { session_id: 's-2', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T10:10:00+10:00', end: '2026-07-06T10:40:00+10:00', active_minutes: 30, words_start: 1560, words_end: 1700, words_added: 190, words_deleted: 50, net_words: 140, edit_events: 150, break_before_min: 20, pomodoro: true, doc_type: 'essay', place: 'library', note: 'Tired by the end of this one.' },
+  // s-4 deliberately falls AFTER the last snapshot, so the record has no boundary for it: the
+  // demo must show the honest "the record cannot say what this produced" gap, not only the happy
+  // path. words_added is non-zero on purpose — the gap is in the RECORD, not in the work.
+  { session_id: 's-4', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T16:00:00+10:00', end: '2026-07-06T16:30:00+10:00', active_minutes: 25, words_start: 1700, words_end: 1810, words_added: 130, words_deleted: 20, net_words: 110, edit_events: 88, break_before_min: 320, pomodoro: false, doc_type: 'essay' },
   { session_id: 's-3', doc_id: 'doc-journal', doc_label: 'Journal', start: '2026-07-06T16:30:00+10:00', end: '2026-07-06T16:47:00+10:00', active_minutes: 17, words_start: 0, words_end: 20, words_added: 50, words_deleted: 30, net_words: 20, edit_events: 52, break_before_min: 350, pomodoro: false, doc_type: 'note' },
 ]
 
@@ -369,4 +374,50 @@ export function fixtureWindow(window: 'daily' | 'weekly' | 'monthly'): WindowAgg
     note_digest: NOTE_DIGEST,
     docs: DOCS,
   }
+}
+
+// ─── §A5b demo goals, and the snapshots the ledger+doc combo pairs against ──────────────────
+// WHOLLY INVENTED, like everything else here. Note `doc-journal` deliberately has NO goal: the
+// no-goal branch ("describe, don't push") is the DEFAULT state of every real document today —
+// nothing authors goals yet — so the demo must be able to show it rather than only the happy path.
+
+export const DEMO_GOALS: Record<string, DocGoals> = {
+  'doc-essay': {
+    goal: 'A publishable 6,000-word seminar paper on the excluded middle. Done means the third '
+      + 'objection is answered on its own terms, not restated.',
+    plan: 'Rough: argument skeleton by the 8th, full draft by the 15th, then a week of cutting. '
+      + 'The middle section is the hard part and I keep avoiding it.',
+    updatedAt: '2026-07-01T09:00:00+10:00',
+  },
+}
+
+const demoDoc = (text: string) => ({
+  type: 'doc',
+  content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+})
+
+function demoSnap(id: string, createdAt: string, text: string): Snapshot {
+  return {
+    id,
+    documentId: 'doc-essay',
+    createdAt,
+    trigger: 'paragraph',
+    wordCount: text.split(/\s+/).filter(Boolean).length,
+    contentHash: `demo-${id}`,
+    contentJson: demoDoc(text),
+  } as Snapshot
+}
+
+const ESSAY_V1 = 'The argument so far runs in three steps.'
+const ESSAY_V2 = ESSAY_V1 + ' First, the distinction only does work if the middle case is '
+  + 'genuinely excluded rather than merely unnamed.'
+const ESSAY_V3 = ESSAY_V2 + ' Second, the examples in the literature are all drawn from one side.'
+
+/** Snapshots bracketing the fixture's sessions, so excerptForSession has real boundaries. */
+export const DEMO_SNAPSHOTS: Record<string, Snapshot[]> = {
+  'doc-essay': [
+    demoSnap('d1', '2026-07-06T09:00:00+10:00', ESSAY_V1),   // just before s-1
+    demoSnap('d2', '2026-07-06T09:45:00+10:00', ESSAY_V2),   // inside s-1
+    demoSnap('d3', '2026-07-06T10:35:00+10:00', ESSAY_V3),   // inside s-2
+  ],
 }

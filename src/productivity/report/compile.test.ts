@@ -45,8 +45,12 @@ describe('the payload is an ALLOW-LIST — a field nobody foresaw cannot ride ou
     // Without this, the assertions above would pass on an empty payload — i.e. on a broken
     // compileData — and prove nothing at all.
     const agg = { ...fixtureWindow('daily'), sessions: [rowWithSurprise()] }
-    const { data, notesIncluded } = compileData({ agg, includeNotes: true })
+    // Notes and places are SEPARATE ticks now (Peter, 2026-07-17), so this opts into both.
+    const { data, notesIncluded, placesIncluded } = compileData({
+      agg, includeNotes: true, includePlaces: true,
+    })
     expect(notesIncluded).toBe(true)
+    expect(placesIncluded).toBe(true)
     expect(data).toContain(NOTE)      // the opted-in note arrives...
     expect(data).toContain('library') // ...and the opted-in place
   })
@@ -109,23 +113,61 @@ describe('tier 2 — the writer\'s diary notes and place labels', () => {
     }
   })
 
-  it('is not implied by the content tick — the two tiers are independent', () => {
-    const { data, notesIncluded } = compileData({
+  it('is not implied by the content tick — the tiers are independent', () => {
+    const { data, notesIncluded, placesIncluded } = compileData({
       agg: daily, contentDocIds: ['doc-essay'], contentText: DEMO_TEXT,
     })
     expect(notesIncluded).toBe(false)
+    expect(placesIncluded).toBe(false)
     expect(data).toContain(DEMO_TEXT['doc-essay'])   // tier 3 on...
     expect(data).not.toContain(NOTE)                 // ...tier 2 still off
     expect(data).not.toContain('library')
   })
 
   it('sends them — and only them — on an explicit opt-in', () => {
-    const { data, notesIncluded } = compileData({ agg: daily, includeNotes: true })
+    const { data, notesIncluded, placesIncluded } = compileData({
+      agg: daily, includeNotes: true, includePlaces: true,
+    })
     expect(notesIncluded).toBe(true)
+    expect(placesIncluded).toBe(true)
     expect(data).toContain(NOTE)
     expect(data).toContain('library')
-    expect(data).toContain('THE WRITER\'S OWN NOTES')
+    expect(data).toContain('THE WRITER\'S OWN WORDS')
     expect(data).not.toContain(DEMO_TEXT['doc-essay'])   // tier 3 stays off
+  })
+
+  // ── Peter, 2026-07-17: "separate session notes from places into two tick boxes" ──
+  it('NOTES ONLY: the diary line travels, the place does NOT', () => {
+    const { data, notesIncluded, placesIncluded } = compileData({ agg: daily, includeNotes: true })
+    expect(notesIncluded).toBe(true)
+    expect(placesIncluded).toBe(false)
+    expect(data).toContain(NOTE)
+    expect(data).not.toContain('library')
+    // ...and the payload SAYS the places are absent, so the model can't invent a place claim.
+    expect(data).toContain('did NOT share their place labels')
+  })
+
+  it('PLACES ONLY: the place travels, the diary line does NOT', () => {
+    const { data, notesIncluded, placesIncluded } = compileData({ agg: daily, includePlaces: true })
+    expect(placesIncluded).toBe(true)
+    expect(notesIncluded).toBe(false)
+    expect(data).toContain('library')
+    expect(data).not.toContain(NOTE)
+    expect(data).not.toContain(TIRED)
+    expect(data).toContain('did NOT share their diary notes')
+  })
+
+  it('the two ticks are independent at weekly, through the note_digest carrier', () => {
+    const week = {
+      ...fixtureWindow('weekly'),
+      note_digest: [{ day: '2026-07-06', notes: [NOTE], places: ['library'] }],
+    }
+    const notesOnly = compileData({ agg: week, includeNotes: true })
+    expect(notesOnly.data).toContain(NOTE)
+    expect(notesOnly.data).not.toContain('library')
+    const placesOnly = compileData({ agg: week, includePlaces: true })
+    expect(placesOnly.data).toContain('library')
+    expect(placesOnly.data).not.toContain(NOTE)
   })
 
   it('carries notes at weekly WITHOUT turning the payload into raw session logs', () => {
@@ -141,18 +183,28 @@ describe('tier 2 — the writer\'s diary notes and place labels', () => {
       ...daily,
       sessions: daily.sessions.map(s => ({ ...s, note: undefined, place: undefined })),
     }
-    const { data, notesIncluded } = compileData({ agg: bare, includeNotes: true })
+    const { data, notesIncluded } = compileData({
+      agg: bare, includeNotes: true, includePlaces: true,
+    })
     expect(notesIncluded).toBe(false)
-    expect(data).not.toContain('THE WRITER\'S OWN NOTES')
+    expect(data).not.toContain('THE WRITER\'S OWN WORDS')
   })
 
   it('the fixed prompt only mentions the notes when they are actually there', () => {
-    expect(fixedPrompt({ window: 'daily', contentIncluded: false })).not.toContain('THE WRITER\'S NOTES')
+    expect(fixedPrompt({ window: 'daily', contentIncluded: false }))
+      .not.toContain('THE WRITER\'S OWN WORDS')
     const p = fixedPrompt({ window: 'daily', contentIncluded: false, notesIncluded: true })
-    expect(p).toContain('THE WRITER\'S NOTES')
+    expect(p).toContain('THE WRITER\'S OWN WORDS')
     expect(p).toMatch(/Do not grade a note/i)
-    // §C1.4 — the prompt must not describe the place label as anything but a typed word.
-    expect(p).toMatch(/not read a place label as anything more than a word they typed/i)
+    // Notes without places ⇒ the prompt must SAY the places are absent, not leave it to inference.
+    expect(p).toMatch(/did NOT share their place labels/i)
+  })
+
+  it('§C1.4 — a place label is described as a typed word and never as location', () => {
+    const p = fixedPrompt({ window: 'daily', contentIncluded: false, placesIncluded: true })
+      .replace(/\s+/g, ' ')
+    expect(p).toMatch(/Inkwave has no location data of any kind/i)
+    expect(p).toMatch(/Do not read a label as anything but their own word/i)
   })
 
   it('the allow-list holds: a new ledger field cannot leak by riding along', () => {
@@ -230,11 +282,81 @@ describe('§A7.1.2 — the transparent prompt', () => {
 })
 
 describe('§A6.2 / §A5 — what the fixed prompt commits to', () => {
-  it('forbids cause and pattern claims on the daily window', () => {
-    const p = fixedPrompt({ window: 'daily', contentIncluded: false })
+  // The prompt is hard-wrapped for legibility, so these read it with newlines flattened: the
+  // assertion is about what it COMMITS TO, not where the lines happen to break.
+  const flat = (w: 'daily' | 'weekly' | 'monthly', extra: Partial<Parameters<typeof fixedPrompt>[0]> = {}) =>
+    fixedPrompt({ window: w, contentIncluded: false, ...extra }).replace(/\s+/g, ' ')
+
+  it('permits BRIEF within-day pairings on daily, and forbids explaining them', () => {
+    // Peter, 2026-07-17: "No I want correlations on daily too. Just more brief." The honest form:
+    // what co-occurred TODAY is a true statement about today; why it happened is not knowable
+    // from one day. So the prompt must ASK for the pairing and REFUSE the explanation.
+    const p = flat('daily')
     expect(p).toContain('SINGLE DAY')
-    expect(p).toContain('describe, do not explain')
-    expect(p).toMatch(/do not claim that anything caused/i)
+    expect(p).toMatch(/Say what happened together today, and say it briefly/i)
+    expect(p).toMatch(/Pair things up/i)
+    expect(p).toMatch(/Keep it short — a line or two, not a section/i)
+    // ...and the refusal, unchanged in force:
+    expect(p).toMatch(/What you may NOT do is EXPLAIN it or GENERALISE it/i)
+    expect(p).toMatch(/no causes/i)
+    expect(p).toMatch(/write what happened and leave the cause alone/i)
+    // The old prompt WITHHELD the pairings entirely. That line must be gone, or daily is still
+    // refusing what he asked for while claiming to allow it.
+    expect(p).not.toMatch(/do not name a best or worst time of day\. Do not assert habits/i)
+  })
+
+  it('§A5 IS REVERSED — honest first, and the kind/non-shaming rule is GONE', () => {
+    // This test replaces one that asserted the OPPOSITE. §A5 was reversed 2026-07-17 ("It doesn't
+    // need to be kind. It needs to be honest."), so the old assertions are not merely stale —
+    // passing them would now mean the prompt is wrong.
+    for (const w of ['daily', 'weekly', 'monthly'] as const) {
+      const p = flat(w)
+      expect(p).toContain('TONE — honest first, funny second, kind third')
+      expect(p).toMatch(/Do not be gentle about a bad day\. Name it\./i)
+      expect(p).toMatch(/read like a comedian|like a sharp friend/i)
+      // The superseded rule must not survive anywhere in the text.
+      expect(p).not.toContain('a hard rule, not a preference')
+      expect(p).not.toMatch(/never as a scolding/i)
+    }
+  })
+
+  it('§A5 — the imposed-vs-set distinction is stated, because it is the whole safety argument', () => {
+    for (const w of ['daily', 'weekly', 'monthly'] as const) {
+      const p = flat(w)
+      expect(p).toMatch(/ACCOUNTABILITY and PRODUCTIVITY GUILT/i)
+      expect(p).toMatch(/Accountability is measuring the writer against a goal THEY SET/i)
+      expect(p).toMatch(/Guilt is measuring them against a standard YOU invented/i)
+    }
+  })
+
+  it('§A5 — what stays banned was never about kindness', () => {
+    for (const w of ['daily', 'weekly', 'monthly'] as const) {
+      const p = flat(w)
+      expect(p).toMatch(/Never score, rank or grade the writer/i)
+      expect(p).toMatch(/Never compare them to anyone else/i)
+      expect(p).toMatch(/no hypothetical version of them who would have finished by now/i)
+      // Verdicts on the PERSON — banned regardless of any goal.
+      expect(p).toMatch(/Never call the PERSON lazy, pathetic, disappointing, a waste, or a failure/i)
+      expect(p).toMatch(/Be as rude as you like about a Tuesday\. Never about them\./i)
+    }
+  })
+
+  it('§A5b — NO GOAL ⇒ describe, don\'t push. The absence is STATED, not left to inference', () => {
+    const p = flat('weekly')
+    expect(p).toContain('NO GOALS WERE SHARED — SO YOU HAVE NO STANDARD TO MEASURE AGAINST')
+    expect(p).toMatch(/DESCRIBE, DO NOT PUSH/i)
+    expect(p).toMatch(/Do not invent a standard and hold them to it/i)
+    expect(p).toMatch(/Do not imply a word count should have been higher/i)
+  })
+
+  it('§A5b — WITH a goal, the prompt tells the model to hold them to it', () => {
+    const p = flat('weekly', { goalsIncluded: true })
+    expect(p).toContain('WHAT THE WRITER SAID THEY WERE DOING')
+    expect(p).toMatch(/THIS is what you hold them to — nothing else/i)
+    expect(p).toMatch(/Quote their own words back/i)
+    expect(p).toMatch(/hold them ONLY to what they wrote/i)
+    // ...and the no-goal branch must be GONE, or it contradicts itself in the same payload.
+    expect(p).not.toContain('NO GOALS WERE SHARED')
   })
 
   it('permits pattern claims at weekly and monthly', () => {
@@ -242,24 +364,6 @@ describe('§A6.2 / §A5 — what the fixed prompt commits to', () => {
       const p = fixedPrompt({ window: w, contentIncluded: false })
       expect(p).toMatch(/enough sessions to support genuine pattern claims/i)
       expect(p).not.toContain('SINGLE DAY')
-    }
-  })
-
-  // The prompt is hard-wrapped for legibility, so these read it with newlines flattened: the
-  // assertion is about what it COMMITS TO, not where the lines happen to break.
-  const flat = (w: 'daily' | 'weekly' | 'monthly', notesIncluded = false) =>
-    fixedPrompt({ window: w, contentIncluded: false, notesIncluded }).replace(/\s+/g, ' ')
-
-  it('states the kind, non-shaming rule as a rule, in every window', () => {
-    for (const w of ['daily', 'weekly', 'monthly'] as const) {
-      const p = flat(w)
-      expect(p).toContain('a hard rule, not a preference')
-      expect(p).toMatch(/never as a scolding/i)
-      expect(p).toMatch(/do not score, rank or grade the writer/i)
-      expect(p).toMatch(/a low-output day is a lighter day/i)
-      expect(p).toMatch(/thinking-heavy days with few words are real work/i)
-      // The vocabulary of productivity guilt is named explicitly, not gestured at.
-      expect(p).toMatch(/"only", "just", "failed to", "should have", "fell short"/i)
     }
   })
 

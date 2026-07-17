@@ -39,3 +39,61 @@ export async function loadContent(docIds: string[]): Promise<Record<string, stri
   }
   return out
 }
+
+// ─── The snapshot seam (the ledger+doc combo) ───────────────────────────────────────────────
+// Session→prose pairing reads the provenance spine's snapshots. It is a SEAM rather than a
+// direct `listSnapshots` import for the same reason the aggregate is: the demo must be able to
+// stand in, and nothing here should reach into the archive on its own. Same gate as the text —
+// the caller passes ticked ids only.
+
+import type { DocGoals, Snapshot } from '../types/document'
+
+export type SnapshotSource = (docId: string) => Promise<Snapshot[]>
+
+let snapshots: SnapshotSource | null = null
+
+export function setSnapshotSource(fn: SnapshotSource | null): void { snapshots = fn }
+
+/**
+ * Snapshots for the ticked docs only. A doc that errors or has no source yields `[]`, which
+ * `excerptForSession` reports as `no-snapshots` — an honest gap, never another doc's text.
+ */
+export async function loadSnapshots(docIds: string[]): Promise<Record<string, Snapshot[]>> {
+  const out: Record<string, Snapshot[]> = {}
+  if (!snapshots) return out
+  for (const id of docIds) {
+    try { out[id] = await snapshots(id) } catch { out[id] = [] }
+  }
+  return out
+}
+
+// ─── The goals seam (§A5b) ──────────────────────────────────────────────────────────────────
+// Goals are a DOCUMENT property (types/document.ts DocGoals) and are read here rather than
+// owned. Same gate discipline as the text: the caller passes ticked ids only.
+//
+// ⚠ NOTHING AUTHORS GOALS YET — no editor UI exists (Peter owns that design question). So this
+// source returns null for every document today, and the report takes §A5b's honest branch:
+// no goal ⇒ describe, don't push. That is a correct end state, not a broken one.
+
+export type GoalsSource = (docId: string) => Promise<DocGoals | null>
+
+let goals: GoalsSource | null = null
+
+export function setGoalsSource(fn: GoalsSource | null): void { goals = fn }
+
+/**
+ * Goals for the ticked docs only. A doc with no goal is ABSENT from the result — not present
+ * with an empty goal. The two are different states and only the first is honest about itself:
+ * an empty goal would let the payload claim the writer set one and left it blank.
+ */
+export async function loadGoals(docIds: string[]): Promise<Record<string, DocGoals>> {
+  const out: Record<string, DocGoals> = {}
+  if (!goals) return out
+  for (const id of docIds) {
+    try {
+      const g = await goals(id)
+      if (g && ((g.goal ?? '').trim() || (g.plan ?? '').trim())) out[id] = g
+    } catch { /* a doc whose goal can't be read contributes nothing — never a guess */ }
+  }
+  return out
+}

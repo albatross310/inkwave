@@ -36,19 +36,19 @@ const check = (name, got, want) => {
   console.log(`${ok ? '  PASS' : '  FAIL'}  ${name}${ok ? '' : `\n         got  ${JSON.stringify(got)}\n         want ${JSON.stringify(want)}`}`)
 }
 
-const REPLY = `## Narrative
+const NARRATIVE = `## Narrative
 
 A week with a centre to it. You spent 92 active minutes on the seminar paper on Monday, and
-Wednesday carried the most writing. Thursday you were away from it, and that is fine.
+Wednesday carried the most writing. Thursday you were away from it, and that is fine.`
 
-\`\`\`csv
-day,phase,effort,momentum,note
-2026-07-06,deep,steady,building,"a full morning on the seminar paper"
-2026-07-07,shallow,light,easing,"a short evening, mostly cutting"
-2026-07-08,deep,intense,building,the week's strongest stretch
-2026-07-09,unclear,unclear,holding,a day away from it
-2026-07-10,shallow,steady,easing,editing rather than drafting
-\`\`\``
+const CSV = `day,phase,effort,momentum,character,note
+2026-07-06,deep,steady,building,steady,"a full morning on the seminar paper"
+2026-07-07,shallow,light,easing,grind,"a short evening, mostly cutting"
+2026-07-08,deep,intense,building,breakthrough,the week's strongest stretch
+2026-07-09,unclear,unclear,holding,away,a day away from it
+2026-07-10,shallow,steady,easing,scattered,editing rather than drafting`
+
+const REPLY = NARRATIVE + '\n\n\`\`\`csv\n' + CSV + '\n\`\`\`'
 
 async function openPanel(page, flag) {
   await page.goto(`http://localhost:${PORT}/?prodReport=${flag}`, { waitUntil: 'load' })
@@ -95,19 +95,31 @@ async function openPanel(page, flag) {
     check('demo banner is shown (synthetic data can never pass as measured)',
       (await panel.innerText()).includes('synthetic sample data'), true)
 
-    // Tier 1 baseline + tier 2/3 default OFF, read off the REAL checkboxes.
+    // Every consent tick default OFF, read off the REAL checkboxes. FIVE rows now (Peter split
+    // notes from places, and §A5b added goals) — assert the COUNT too, or a row that silently
+    // vanished would leave this passing.
+    const boxes = await panel.locator('input[type=checkbox]').count()
+    check('five consent rows exist (notes | places | goals | 2 docs)', boxes >= 5, true)
     const ticked = await panel.locator('input[type=checkbox]:checked').count()
-    check('every consent tick starts OFF (tiers 2 and 3)', ticked, 0)
+    check('EVERY consent tick starts OFF', ticked, 0)
 
     // The prompt is VISIBLE before anything is copied (§A7.1.2).
     await panel.locator('text=Show the fixed prompt').click()
     await page.waitForTimeout(250)
     const shown = await panel.locator('pre').first().innerText()
-    check('fixed prompt is shown verbatim, incl. the non-shaming rule',
-      shown.includes('a hard rule, not a preference'), true)
+    // §A5 REVERSED (2026-07-17): honest first, funny second, kind third.
+    check('fixed prompt carries the REVERSED tone rule',
+      shown.includes('TONE — honest first, funny second, kind third'), true)
+    check('...and the superseded kind/non-shaming rule is GONE',
+      shown.includes('a hard rule, not a preference'), false)
+    check('fixed prompt states the imposed-vs-set distinction (§A5\'s whole safety argument)',
+      shown.includes('Accountability is measuring the writer against a goal THEY SET'), true)
+    check('§A5b: with no goals ticked, the prompt says DESCRIBE, DO NOT PUSH',
+      shown.includes('NO GOALS WERE SHARED'), true)
     check('fixed prompt states the weekly pattern-claim licence',
       shown.includes('genuine pattern claims'), true)
-    check('fixed prompt asks for the exact header', shown.includes('day,phase,effort,momentum,note'), true)
+    check('fixed prompt asks for the exact header',
+      shown.includes('day,phase,effort,momentum,character,note'), true)
 
     // ── THE LEAK CHECK, in the real UI ──
     await page.evaluate(() => navigator.clipboard.writeText('').catch(() => {}))
@@ -123,18 +135,111 @@ async function openPanel(page, flag) {
     check('default payload carries NO place label', /\blibrary\b/.test(noTicks), false)
     check('default payload carries NO document text', noTicks.includes('The argument so far runs'), false)
 
-    // Tick tier 2 only.
-    await panel.locator('input[type=checkbox]').first().check()
+    // ── The tier-2 SPLIT, in the real UI (Peter: "separate session notes from places") ──
+    const boxAt = i => panel.locator('input[type=checkbox]').nth(i)   // 0 notes, 1 places, 2 goals
+    await boxAt(0).check()
     await page.waitForTimeout(200)
     const withNotes = await readPayload()
-    check('tier 2 ticked → the diary note travels', withNotes.includes('Finally got the third step'), true)
-    check('tier 2 ticked → the place label travels', withNotes.includes('library'), true)
-    check('tier 2 ticked → document text still does NOT', withNotes.includes('The argument so far runs'), false)
+    check('notes ticked → the diary note travels', withNotes.includes('Finally got the third step'), true)
+    check('notes ticked → the place does NOT (the boxes are independent)',
+      /\blibrary\b/.test(withNotes), false)
+    check('notes ticked → the payload SAYS the places are absent',
+      withNotes.includes('did NOT share their place labels'), true)
+    check('notes ticked → document text still does NOT', withNotes.includes('The argument so far runs'), false)
+
+    await boxAt(0).uncheck()
+    await boxAt(1).check()
+    await page.waitForTimeout(200)
+    const withPlaces = await readPayload()
+    check('places ticked → the place travels', /\blibrary\b/.test(withPlaces), true)
+    check('places ticked → the diary note does NOT',
+      withPlaces.includes('Finally got the third step'), false)
+
+    // ── §A5b goals, in the real UI ──
+    await boxAt(2).check()
+    await page.waitForTimeout(200)
+    const withGoals = await readPayload()
+    check('goals ticked → the writer\'s goal travels',
+      withGoals.includes('publishable 6,000-word seminar paper'), true)
+    check('goals ticked → the prompt now says to hold them to it',
+      withGoals.includes('THIS is what you hold them to'), true)
+    check('goals ticked → the no-goal branch is GONE (no self-contradiction)',
+      withGoals.includes('NO GOALS WERE SHARED'), false)
+    await boxAt(2).uncheck()
+    await boxAt(1).uncheck()
+    await page.waitForTimeout(200)
+
+    // ── THE TYPE RAMP (Peter: "the entire text font of the panel needs to be increased…
+    //    Every font proportionally up"). Read the COMPUTED sizes off the live DOM: a class
+    //    that looks bigger in the source proves nothing about what renders. ──
+    const fonts = await page.evaluate(() => {
+      const p = document.querySelector('[aria-label="Work report"]')
+      const px = el => el ? parseFloat(getComputedStyle(el).fontSize) : 0
+      const bodyP = [...p.querySelectorAll('p')].find(e => e.textContent.includes('Inkwave compiles'))
+      return {
+        root: px(p),
+        body: px(bodyP),
+        minInput: Math.min(...[...p.querySelectorAll('textarea, input[type=text]')].map(px)),
+        title: px([...p.querySelectorAll('div')].find(e => e.textContent === 'How you worked')),
+      }
+    })
+    check('panel root is the 18px ramp anchor', fonts.root, 18)
+    check('body copy scaled up from the old 14px', fonts.body >= 17, true)
+    check('title scaled proportionally, not left behind', fonts.title >= 22, true)
+    // iOS auto-zooms — and STAYS zoomed — on a focused control under 16px.
+    check('every text input clears the 16px iOS floor', fonts.minInput >= 16, true)
+
+    // ── THE LEDGER+DOC COMBO: session → the prose it produced (daily + content ticked) ──
+    await panel.locator('text=Day').first().click()
+    await page.waitForTimeout(700)
+    const docBox = panel.locator('input[type=checkbox]').nth(3)   // first document row
+    await docBox.check()
+    await page.waitForTimeout(250)
+    const daily = await readPayload()
+    // SCOPE TO THE DATA, NOT THE PAYLOAD. Every heading here appears TWICE — the fixed prompt
+    // explains each section and the data carries it — so `payload.includes('WHAT EACH SESSION
+    // PRODUCED')` is true whenever the PROMPT mentions it, feature working or not. Proved: with
+    // the section suppressed, the unscoped checks stayed green and only the scoped ones fired.
+    const dailyData = daily.split('DATA — measured by Inkwave').pop() ?? ''
+    check('daily+content → the payload pairs each session with what it produced',
+      dailyData.includes('WHAT EACH SESSION PRODUCED'), true)
+    // SCOPED to the excerpts section, deliberately: the same sentence also appears in the
+    // DOCUMENT TEXT section, so an unscoped `daily.includes(...)` would pass with the pairing
+    // completely broken — a check that cannot fail. Read only what sits after the section head.
+    // NB the phrase appears TWICE — the fixed PROMPT explains the section, and the DATA carries
+    // it. Splitting on the first occurrence reads the prompt's copy and finds none of the prose;
+    // take the LAST. (Caught by this check failing once it was scoped correctly.)
+    const exSection = dailyData.split('WHAT EACH SESSION PRODUCED')[1] ?? ''
+    check('...carrying the prose the snapshot record says appeared in that session',
+      exSection.includes('the middle case is genuinely excluded'), true)
+    check('...and NOT the text that predates the session (the baseline rule holds live)',
+      exSection.includes('--- s-1') && !exSection.split('--- s-1')[1].split('\n---')[0]
+        .includes('The argument so far runs in three steps.'), true)
+    check('...and a session the record cannot speak for says so, rather than reading as "nothing"',
+      exSection.includes('That is a gap in the record, NOT the writer doing nothing'), true)
+    check('§A6.1 daily+content asks for the quality columns',
+      daily.includes('session_id,phase,effort,insight,quality,note'), true)
+    await docBox.uncheck()
+    await page.waitForTimeout(250)
+    const dailyNoContent = await readPayload()
+    check('§A6.1 daily WITHOUT content does NOT ask for a quality verdict',
+      dailyNoContent.includes('insight,quality'), false)
+    check('...and no excerpt travels without the content tick (§A7.3 gates every word)',
+      (dailyNoContent.split('DATA — measured by Inkwave').pop() ?? '')
+        .includes('WHAT EACH SESSION PRODUCED'), false)
+    await panel.locator('text=Week').first().click()
+    await page.waitForTimeout(700)
+    // A window change RESETS every tick and the compiled payload (consent is given for a payload,
+    // and a new window is a new payload), so the paste boxes only exist once it is recompiled.
+    await readPayload()
 
     // ── Paste-back → parse → merge → graph ──
-    await panel.locator('textarea').last().fill(REPLY)
+    // TWO paste boxes now: [0] the user prompt, [1] the report, [2] the table.
+    const reportBox = () => panel.locator('textarea').nth(1)
+    const tableBox = () => panel.locator('textarea').nth(2)
+    await reportBox().fill(REPLY)
     await page.waitForTimeout(150)
-    await panel.locator('text=Read the reply').click()
+    await panel.locator('text=Read it back').click()
     await page.waitForTimeout(600)
     const txt = await panel.innerText()
     check('narrative rendered and labelled as an assessment',
@@ -149,9 +254,23 @@ async function openPanel(page, flag) {
     check('the 92 in the narrative is NOT flagged (Inkwave sent it)',
       txt.includes("Numbers Inkwave can't confirm"), false)
 
+    // ── The SPLIT paste: narrative in one box, bare CSV in the other (the copy-code button) ──
+    await reportBox().fill(NARRATIVE)
+    await tableBox().fill(CSV)
+    await panel.locator('text=Read it back').click()
+    await page.waitForTimeout(600)
+    const split = await panel.innerText()
+    check('a bare, UNFENCED csv pasted into the table box is read',
+      split.includes("Couldn't read the table"), false)
+    check('...and the split paste still renders the narrative',
+      split.includes('A week with a centre to it'), true)
+    check('...and still merges the judged rows',
+      await panel.locator('[title^="AI assessment:"]').count(), 5)
+
     // ── KNOWN-NEGATIVE: a lying reply must be caught in the real UI ──
-    await panel.locator('textarea').last().fill(REPLY.replace('92 active minutes', '900 active minutes'))
-    await panel.locator('text=Read the reply').click()
+    await tableBox().fill('')
+    await reportBox().fill(REPLY.replace('92 active minutes', '900 active minutes'))
+    await panel.locator('text=Read it back').click()
     await page.waitForTimeout(500)
     const lying = await panel.innerText()
     check('an invented number IS flagged', lying.includes("Numbers Inkwave can't confirm") && lying.includes('900'), true)
@@ -159,8 +278,9 @@ async function openPanel(page, flag) {
     check('...and the measured bar is UNMOVED by the lie (§A6.4)', bars, '92 active minutes (measured)')
 
     // ── KNOWN-NEGATIVE: a wrong-header table must be refused in the real UI ──
-    await panel.locator('textarea').last().fill(REPLY.replace('day,phase,effort,momentum,note', 'day,active_minutes,vibe'))
-    await panel.locator('text=Read the reply').click()
+    await reportBox().fill(
+      REPLY.replace('day,phase,effort,momentum,character,note', 'day,active_minutes,vibe'))
+    await panel.locator('text=Read it back').click()
     await page.waitForTimeout(500)
     const bad = await panel.innerText()
     check('wrong-header table is REFUSED, with the format shown', bad.includes("Couldn't read the table"), true)

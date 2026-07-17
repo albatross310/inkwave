@@ -10,8 +10,8 @@
 //   • The fixtures are wholly invented (see fixtures.ts).
 // Without the flag, loadWindow() returns null and the panel says the ledger isn't wired up yet.
 
-import { setAggregateSource, setContentSource } from './source'
-import { DEMO_TEXT, fixtureWindow } from './fixtures'
+import { setAggregateSource, setContentSource, setGoalsSource, setSnapshotSource } from './source'
+import { DEMO_GOALS, DEMO_SNAPSHOTS, DEMO_TEXT, fixtureWindow } from './fixtures'
 import { prodReportDemo } from './flag'
 
 let installed = false
@@ -21,4 +21,6 @@ export function installProdReportDemo(): void {
   installed = true
   setAggregateSource(async w => fixtureWindow(w))
   setContentSource(async id => DEMO_TEXT[id] ?? '')
+  setSnapshotSource(async id => DEMO_SNAPSHOTS[id] ?? [])
+  setGoalsSource(async id => DEMO_GOALS[id] ?? null)
 }

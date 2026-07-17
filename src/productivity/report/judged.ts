@@ -15,7 +15,8 @@
 
 import type { ReportWindow } from '../types'
 import {
-  EFFORT_VALUES, JUDGED_HEADER, MOMENTUM_VALUES, PHASE_VALUES, headerLine,
+  CHARACTER_VALUES, CONTENT_ONLY_COLUMNS, EFFORT_VALUES, INSIGHT_VALUES, MOMENTUM_VALUES,
+  PHASE_VALUES, QUALITY_VALUES, headerLine, judgedHeader,
 } from './prompt'
 import { candidateCsvBlocks, parseDelimited } from './csv'
 
@@ -25,6 +26,12 @@ export interface JudgedRow {
   phase: typeof PHASE_VALUES[number]
   effort: typeof EFFORT_VALUES[number]
   momentum?: typeof MOMENTUM_VALUES[number]
+  /** Weekly/monthly — what KIND of day it was. Describes the day, never grades the writer (§A5). */
+  character?: typeof CHARACTER_VALUES[number]
+  /** Daily + content only — did the writing MOVE? Ungrounded without prose, hence gated. */
+  insight?: typeof INSIGHT_VALUES[number]
+  /** Daily + content only — the state of the prose the session produced. */
+  quality?: typeof QUALITY_VALUES[number]
   note: string
 }
 
@@ -34,6 +41,7 @@ export type IssueKind =
   | 'no-header'         // a block, but no row matching the expected header
   | 'header-mismatch'   // a header-ish row that is the wrong table
   | 'measured-column'   // §A6.4 — the model tried to hand back measured numbers
+  | 'content-column'    // §A6.1 — judged the WRITING without being sent any
   | 'row-shape'         // wrong number of cells
   | 'unknown-value'     // an enum value we did not offer → coerced to 'unclear'
   | 'unknown-key'       // judged a row we never sent
@@ -105,8 +113,8 @@ interface HeaderFind {
   cells: string[]
 }
 
-function findHeader(rows: string[][], window: ReportWindow): HeaderFind | null {
-  const want = JUDGED_HEADER[window]
+function findHeader(rows: string[][], window: ReportWindow, contentIncluded: boolean): HeaderFind | null {
+  const want = judgedHeader(window, contentIncluded)
   for (let i = 0; i < rows.length; i++) {
     if (sameSet(rows[i].map(norm), want)) return { index: i, cells: rows[i].map(norm) }
   }
@@ -132,13 +140,28 @@ export interface ValidateOpts {
   window: ReportWindow
   /** The keys Inkwave asked about — session ids (daily) or days (weekly/monthly). */
   expectedKeys: string[]
+  /**
+   * Allow a table that is NOT inside a fenced block. Used ONLY by the panel's dedicated
+   * "paste the table" box, because that is what Claude's and ChatGPT's copy-code buttons put on
+   * the clipboard: the CSV alone, no fence. The whole-reply box leaves this OFF — scanning a
+   * whole reply's prose as a table would let a paragraph parse as rows.
+   */
+  allowUnfenced?: boolean
+  /**
+   * Whether document text was in the payload. Decides which header is expected AND whether the
+   * content-only columns are legal at all (§A6.1). Defaults false: the safe direction is to
+   * expect the metadata-only table, so a caller that forgets to pass it REFUSES a quality
+   * verdict rather than accepting an ungrounded one.
+   */
+  contentIncluded?: boolean
 }
 
 /** Validate one already-parsed table. */
 export function validateJudgedRows(rows: string[][], opts: ValidateOpts): JudgedResult {
   const { window, expectedKeys } = opts
+  const contentIncluded = opts.contentIncluded ?? false
   const issues: Issue[] = []
-  const found = findHeader(rows, window)
+  const found = findHeader(rows, window, contentIncluded)
 
   if (!found) {
     // Report the WRONG table distinctly from no table — the writer needs to know which.
@@ -151,11 +174,29 @@ export function validateJudgedRows(rows: string[][], opts: ValidateOpts): Judged
           kind: 'measured-column',
           message: `That table contains measured columns (${measured.join(', ')}). Inkwave keeps `
             + `its own measurements and never takes them back from an AI, so this table was not `
-            + `used. Expected header: ${headerLine(window)}`,
+            + `used. Expected header: ${headerLine(window, contentIncluded)}`,
         })
         return { ok: false, rows: [], issues, foundHeader: cells }
       }
-      const want = JUDGED_HEADER[window]
+      // §A6.1 — the model judged the WRITING when it was sent none. A quality/insight verdict
+      // derived from minutes and word counts is vibes-as-numbers wearing a judged label, and it
+      // is the most tempting failure on this path because it is exactly what was asked for.
+      // Refused, and told WHY — the writer can tick a document and ask again.
+      if (!contentIncluded) {
+        const contentCols = cells.filter(c => (CONTENT_ONLY_COLUMNS as readonly string[]).includes(c))
+        if (contentCols.length) {
+          issues.push({
+            kind: 'content-column',
+            message: `That table judges the writing itself (${contentCols.join(', ')}) — but no `
+              + `document text was sent, so there was nothing to judge it from. Inkwave won't show `
+              + `a verdict on your writing that was guessed from your word counts. Tick a document `
+              + `on the export screen and run it again. Expected header: `
+              + `${headerLine(window, contentIncluded)}`,
+          })
+          return { ok: false, rows: [], issues, foundHeader: cells }
+        }
+      }
+      const want = judgedHeader(window, contentIncluded)
       const missing = want.filter(c => !cells.includes(c))
       const extra = cells.filter(c => !(want as readonly string[]).includes(c))
       issues.push({
@@ -163,13 +204,14 @@ export function validateJudgedRows(rows: string[][], opts: ValidateOpts): Judged
         message: `The table's header didn't match. `
           + (missing.length ? `Missing: ${missing.join(', ')}. ` : '')
           + (extra.length ? `Unexpected: ${extra.join(', ')}. ` : '')
-          + `Expected exactly: ${headerLine(window)}`,
+          + `Expected exactly: ${headerLine(window, contentIncluded)}`,
       })
       return { ok: false, rows: [], issues, foundHeader: cells }
     }
     issues.push({
       kind: 'no-header',
-      message: `Couldn't find the table. Expected a row reading exactly: ${headerLine(window)}`,
+      message: `Couldn't find the table. Expected a row reading exactly: `
+        + `${headerLine(window, contentIncluded)}`,
     })
     return { ok: false, rows: [], issues }
   }
@@ -216,6 +258,10 @@ export function validateJudgedRows(rows: string[][], opts: ValidateOpts): Judged
     }
     if (window !== 'daily') {
       row.momentum = coerce(r[col('momentum')], MOMENTUM_VALUES, 'momentum', key, issues)
+      row.character = coerce(r[col('character')], CHARACTER_VALUES, 'character', key, issues)
+    } else if (contentIncluded) {
+      row.insight = coerce(r[col('insight')], INSIGHT_VALUES, 'insight', key, issues)
+      row.quality = coerce(r[col('quality')], QUALITY_VALUES, 'quality', key, issues)
     }
     out.push(row)
   }
@@ -237,6 +283,12 @@ export function validateJudgedRows(rows: string[][], opts: ValidateOpts): Judged
 export function extractJudged(reply: string, opts: ValidateOpts): JudgedResult {
   const blocks = candidateCsvBlocks(reply)
   if (!blocks.length) {
+    // A bare, unfenced table — what a "copy" button on a code block actually yields. Tried only
+    // when the caller asked for it, and it still has to VALIDATE, so this widens what we look at
+    // and not what we accept.
+    if (opts.allowUnfenced && reply.trim()) {
+      return validateJudgedRows(parseDelimited(reply), opts)
+    }
     return {
       ok: false,
       rows: [],
