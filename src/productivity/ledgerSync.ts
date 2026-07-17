@@ -26,6 +26,7 @@
 import { emptyLedger, ledgerNameFor, mergeLedgers } from './ledger'
 import { loadLedger, mergeIntoLocalLedger } from './ledgerStore'
 import type { MonthLedger } from './types'
+import type { WritePrecondition } from '../storage/archiveWriteback'
 
 export const ledgerFileName = (month: string): string => `${ledgerNameFor(month)}.json`
 
@@ -34,16 +35,38 @@ export const ledgerFileName = (month: string): string => `${ledgerNameFor(month)
  * whole module exists to prevent is treating a failure as an absence.
  */
 export type RemoteRead =
-  | { status: 'ok'; ledger: MonthLedger }
+  /** `etag` is the version we read, for the write's precondition. REQUIRED, not optional: a field
+   *  only some providers write is a field that lies, and its absence here silently downgrades the
+   *  write to unguarded. A provider with no version concept must say `null` out loud. */
+  | { status: 'ok'; ledger: MonthLedger; etag: string | null }
   | { status: 'absent' } // the file genuinely does not exist yet → a first write is safe
   | { status: 'error'; reason: string } // network/auth/parse failed → we know NOTHING → never write
+
+/** Re-exported so a LedgerRemote implementor imports its whole contract from one module. */
+export type { WritePrecondition }
+
+/**
+ * Derive the write's precondition from what we actually read. PURE — this is the whole of Finding
+ * E's fix that can be tested without a Microsoft account, so it is the part that is tested.
+ */
+export function preconditionFor(read: RemoteRead): WritePrecondition {
+  if (read.status === 'absent') return { expect: 'absent' }
+  if (read.status === 'ok' && read.etag) return { expect: 'unchanged', etag: read.etag }
+  // 'error' never reaches a write (syncLedgerMonth returns first); an 'ok' with no etag is a
+  // provider that cannot pin a version — we are no worse off than before, and we say so.
+  return { expect: 'any' }
+}
 
 export interface LedgerRemote {
   /** Provider label, for diagnostics only. */
   readonly name: string
   read(file: string): Promise<RemoteRead>
-  /** Write the merged ledger. Returns false on failure (the caller keeps local; nothing is lost). */
-  write(file: string, ledger: MonthLedger): Promise<boolean>
+  /**
+   * Write the merged ledger, but ONLY if `pre` still holds. Returns false on failure OR on a
+   * violated precondition (the caller keeps local; nothing is lost; the next sync re-reconciles).
+   * `pre` is REQUIRED so a provider cannot quietly write unguarded.
+   */
+  write(file: string, ledger: MonthLedger, pre: WritePrecondition): Promise<boolean>
 }
 
 export type SyncOutcome =
@@ -68,7 +91,10 @@ export function parseRemoteLedger(text: string, month: string): RemoteRead {
   }
   if (!isLedger(raw)) return { status: 'error', reason: 'remote ledger has an unrecognised shape' }
   if (raw.month !== month) return { status: 'error', reason: `remote ledger is for ${raw.month}, not ${month}` }
-  return { status: 'ok', ledger: { v: 1, month, rows: raw.rows.filter((r) => r && r.session_id), attestations: raw.attestations ?? [] } }
+  // `etag: null` EXPLICITLY: this function parses a BODY and knows nothing about transport. The
+  // adapter that made the HTTP call attaches the real version (ledgerRemotes). Saying null out loud
+  // is the point of the field being required — an omitted etag would silently mean "unguarded".
+  return { status: 'ok', etag: null, ledger: { v: 1, month, rows: raw.rows.filter((r) => r && r.session_id), attestations: raw.attestations ?? [] } }
 }
 
 /**
@@ -110,10 +136,13 @@ export async function syncLedgerMonth(remote: LedgerRemote, month: string): Prom
     return { ok: true, action: 'up-to-date', rows: merged.rows.length }
   }
 
-  // 4. WRITE the union out... (a throwing writer is a failed write, not a crash mid-sync)
+  // 4. WRITE the union out, PINNED TO WHAT WE READ (Finding E). If the remote moved under us —
+  // another device wrote between our read and now, or the 404 we saw has since become a real file —
+  // the server refuses and we fall into the failure branch below: nothing lost, retried next sync.
+  // (a throwing writer is a failed write, not a crash mid-sync)
   let wrote = false
   try {
-    wrote = await remote.write(file, merged)
+    wrote = await remote.write(file, merged, preconditionFor(read))
   } catch (e) {
     return { ok: false, reason: `${remote.name}: write threw (${(e as Error)?.message ?? String(e)}) — local rows are unchanged and safe` }
   }

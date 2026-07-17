@@ -7,7 +7,8 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
-import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { planWriteback, type ArchiveRead } from './archiveWriteback'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
 
@@ -319,6 +320,36 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<GDriveFil
 
 /** Download a Drive file's text by id (the app has drive.file access to files it created/opened).
  *  For the grow-only merge paths, which only ever read back our own plain-text .studio uploads. */
+/**
+ * Read the remote .inkwave's snapshot archive, reporting WHAT HAPPENED — Drive's half of the
+ * write-back decision (the rule itself is `planWriteback`, shared with every provider).
+ *
+ * Deliberately NOT built on `downloadGoogleDriveFile`: that returns `string | null`, and a `null`
+ * that means "no token" / "500" / "throttled" / "gone" indifferently is exactly the type-level
+ * ambiguity the 2026-07-15 loss turned on. This is the same call with its answers kept apart.
+ *
+ * `404 ⇒ absent` and everything else ⇒ error, mirroring `mapGraphReadStatus`'s fail-safe rule: a
+ * status we have never seen must refuse the write, never destroy the archive. CLAUDE.md's standing
+ * warning about this adapter — "an absent-vs-error mapping never exercised against the real API is
+ * the guess that becomes a blind overwrite" — is why this maps only the two statuses Drive's REST
+ * contract actually documents, and treats the entire remainder as unknown.
+ */
+async function readDriveArchive(fileId: string): Promise<ArchiveRead> {
+  try {
+    const token = await getDriveToken(false) // silent only — never a popup on a sync path
+    if (!token) return { status: 'error', reason: 'not signed in' }
+    const res = await fetch(`${FILES_API}/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.status === 404) return { status: 'absent' }
+    if (!res.ok) return { status: 'error', reason: `Drive GET ${res.status}` }
+    const text = await res.text()
+    if (!text.trim()) return { status: 'absent' } // established emptiness, not a failure (see folder.ts)
+    const remote = await parseTraceOffThread(text)
+    return { status: 'ok', snapshots: remote.snapshots ?? [] }
+  } catch (e) {
+    return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }
+  }
+}
+
 export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return null
@@ -371,15 +402,24 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   if (!token) return { ok: false, webUrl: null }
   // GROW-ONLY: union the remote file's snapshots in before overwriting (see syncToOneDrive) — but
   // only ONCE per session, so the download+parse of a big file doesn't add per-sync lag.
+  //
+  // THE READ MUST BE ABLE TO FAIL (see archiveWriteback.ts). This block used to lean on
+  // `downloadGoogleDriveFile`, which returns `string | null` — the `catch { return null }` shape
+  // that ate Peter's annotations: a missing token, a 500 and a throttle all arrived as `null`, the
+  // merge was skipped, and the upload below replaced the remote archive with the local set. It was
+  // strictly worse than OneDrive's, too: `markWritebackMerged(key)` ran on the FAILING path, so a
+  // failed read closed the once-per-session gate and the merge never retried.
   let merged = snapshots
   const fileId = driveFileId(doc.id)
   const key = `gdrive:${doc.id}`
   if (fileId && needsWritebackMerge(key)) {
-    try {
-      const text = await downloadGoogleDriveFile(fileId)
-      if (text) { const remote = await parseTraceOffThread(text); if (remote.snapshots?.length) merged = mergeSnapshots(remote.snapshots, snapshots) }
-      markWritebackMerged(key)
-    } catch { /* unreadable → write local as-is; retry next sync */ }
+    const plan = planWriteback(await readDriveArchive(fileId), snapshots)
+    if (!plan.write) {
+      console.info(`[inkwave] Drive sync skipped: ${plan.reason}`)
+      return { ok: false, webUrl: null }
+    }
+    merged = plan.snapshots
+    markWritebackMerged(key)
   }
   const file = composeTraceFile(buildExportBundle(doc, merged))
   try {

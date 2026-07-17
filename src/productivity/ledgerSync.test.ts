@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mapGraphReadStatus } from '../storage/onedrive'
 import { attestLedger, emptyLedger } from './ledger'
 import { _resetLedgerStore, loadLedger } from './ledgerStore'
-import { ledgerFileName, parseRemoteLedger, syncLedgerMonth, type LedgerRemote, type RemoteRead } from './ledgerSync'
+import { ledgerFileName, parseRemoteLedger, syncLedgerMonth, type LedgerRemote, type RemoteRead, type WritePrecondition } from './ledgerSync'
 import type { MonthLedger, SessionRow } from './types'
 
 const MONTH = '2026-07'
@@ -55,12 +55,15 @@ vi.mock('../provenance/ots', () => ({ stampBundle: async () => null, upgradeProo
 /** A scriptable remote that RECORDS every write, so "it never wrote" is assertable. */
 function fakeRemote(read: () => Promise<RemoteRead>, writeOk = true) {
   const writes: MonthLedger[] = []
+  // RECORD the precondition too (Finding E): a correct `preconditionFor` that nothing passes to the
+  // write is decoration. This is what makes "it is wired" an observation rather than an assumption.
+  const pres: WritePrecondition[] = []
   const remote: LedgerRemote = {
     name: 'fake',
     read,
-    async write(_f, l) { writes.push(structuredClone(l)); return writeOk },
+    async write(_f, l, pre) { writes.push(structuredClone(l)); pres.push(pre); return writeOk },
   }
-  return { remote, writes }
+  return { remote, writes, pres }
 }
 
 async function seedLocal(rows: SessionRow[]): Promise<void> {
@@ -101,7 +104,7 @@ describe('parseRemoteLedger — a bad read is an ERROR, never an empty ledger', 
 describe('syncLedgerMonth — READ-MERGE-WRITE', () => {
   it('unions both sides and writes the union', async () => {
     await seedLocal([A, B])
-    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', ledger: await ledgerOf([C]) }))
+    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', etag: 'W/\"e1\"', ledger: await ledgerOf([C]) }))
 
     const out = await syncLedgerMonth(remote, MONTH)
     expect(out).toMatchObject({ ok: true, action: 'wrote', rows: 3 })
@@ -141,7 +144,7 @@ describe('syncLedgerMonth — READ-MERGE-WRITE', () => {
   it('A SHORT LOCAL CANNOT TRUNCATE A LONG REMOTE — grow-only across devices', async () => {
     // The fresh-device case: this browser has one row, the remote has three.
     await seedLocal([A])
-    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', ledger: await ledgerOf([A, B, C]) }))
+    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', etag: 'W/\"e1\"', ledger: await ledgerOf([A, B, C]) }))
 
     const out = await syncLedgerMonth(remote, MONTH)
     expect(out.ok).toBe(true)
@@ -151,16 +154,33 @@ describe('syncLedgerMonth — READ-MERGE-WRITE', () => {
   })
 
   it('an EMPTY local (cleared site data) cannot wipe the remote', async () => {
-    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', ledger: await ledgerOf([A, B, C]) }))
+    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', etag: 'W/\"e1\"', ledger: await ledgerOf([A, B, C]) }))
     const out = await syncLedgerMonth(remote, MONTH)
     expect(out.ok).toBe(true)
     if (writes.length) expect(writes[0].rows).toHaveLength(3)
     expect((await loadLedger(MONTH)).rows).toHaveLength(3)
   })
 
+  // ─── Finding E: the write is PINNED to what the read saw ────────────────────
+  // `precondition.test.ts` proves the RULE; these two prove it is REACHED. A rule nothing passes to
+  // the write is decoration, and that gap is invisible to a unit test of the rule alone.
+  it('pins the write to the VERSION it read (If-Match), so a device that moved under us cannot be clobbered', async () => {
+    await seedLocal([A, B])
+    const { remote, pres } = fakeRemote(async () => ({ status: 'ok', etag: 'W/"e1"', ledger: await ledgerOf([C]) }))
+    await syncLedgerMonth(remote, MONTH)
+    expect(pres).toEqual([{ expect: 'unchanged', etag: 'W/"e1"' }])
+  })
+
+  it('pins a FIRST write to the file still being absent — never a blind create', async () => {
+    await seedLocal([A, B])
+    const { remote, pres } = fakeRemote(async () => ({ status: 'absent' }))
+    await syncLedgerMonth(remote, MONTH)
+    expect(pres).toEqual([{ expect: 'absent' }])
+  })
+
   it('does not touch the remote when nothing changed', async () => {
     await seedLocal([A, B])
-    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', ledger: await ledgerOf([A, B]) }))
+    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', etag: 'W/\"e1\"', ledger: await ledgerOf([A, B]) }))
     const out = await syncLedgerMonth(remote, MONTH)
     expect(out).toMatchObject({ ok: true, action: 'up-to-date', rows: 2 })
     expect(writes).toEqual([]) // a no-op write is a chance to corrupt for nothing
@@ -178,7 +198,7 @@ describe('syncLedgerMonth — READ-MERGE-WRITE', () => {
     await seedLocal([A])
     const anchored = await ledgerOf([C])
     anchored.attestations = anchored.attestations.map((a) => ({ ...a, ots: { status: 'confirmed', bitcoinBlock: 900_001 } as const }))
-    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', ledger: anchored }))
+    const { remote, writes } = fakeRemote(async () => ({ status: 'ok', etag: 'W/\"e1\"', ledger: anchored }))
 
     await syncLedgerMonth(remote, MONTH)
     const day18 = writes[0].attestations.find((a) => a.day === '2026-07-18')
@@ -193,7 +213,7 @@ describe('syncLedgerMonth — READ-MERGE-WRITE', () => {
       const { queueRow, flushLedgerNow } = await import('./ledgerStore')
       queueRow(MONTH, B)
       await flushLedgerNow()
-      return { status: 'ok', ledger: await ledgerOf([C]) }
+      return { status: 'ok', etag: 'W/"e1"', ledger: await ledgerOf([C]) }
     })
 
     await syncLedgerMonth(remote, MONTH)

@@ -7,7 +7,9 @@
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, readStudioFile, gzipStudioText } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
-import { mergeSnapshots, restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
+import { planWriteback, type ArchiveRead } from './archiveWriteback'
+import { isNotFound } from './notFound'
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
@@ -146,6 +148,44 @@ export async function preMergeSaveFile(docId: string): Promise<void> {
   } catch { /* unreadable / new file → the first save retries its own merge */ }
 }
 
+/**
+ * Read the target file's snapshot archive, reporting WHAT HAPPENED — the folder's half of the
+ * write-back decision (the rule itself is `planWriteback`, shared with every provider).
+ *
+ * The absent signal is `isNotFound` — the repo's existing boundary predicate, reused rather than
+ * re-derived, and for its documented reason: it matches the DOMException's `name`, never its
+ * message, so a failure whose text merely mentions NotFoundError cannot be laundered into an
+ * absence. A brand-new target (the writer picked a filename that does not exist yet) is the one
+ * honest absence here; a permission revoke, a lock, a partial read or a corrupt body are not.
+ *
+ * `readStudioFile`, NOT `.text()`: a gzipped target (.studio.gz) decoded as UTF-8 is binary garbage
+ * and parseTrace throws. That is now a refusal rather than a silent truncation — but sniffing is
+ * still what makes the union actually RUN on the common path, so keep it.
+ *
+ * ⚠ THE EMPTY FILE IS AN ABSENCE, AND GETTING THIS WRONG TURNS THE GUARD INTO AN OUTAGE.
+ * `showSaveFilePicker` CREATES the target the moment the writer names it, so the very first save
+ * always reads a 0-byte file — which parses as "not valid JSON", i.e. an error, i.e. refuse. A
+ * guard that cannot tell a new file from a broken one would refuse every first save FOREVER (the
+ * merge gate never closes, so it would refuse on retry too) and the writer could never save at all.
+ * An empty file is a fact we established with nothing in it to lose; a failed read is not.
+ * `folder.test.ts` pins both directions, because "the fix that makes saving impossible" is the
+ * failure mode a safety change is most likely to ship with.
+ */
+export async function readFileArchive(handle: FileSystemFileHandle): Promise<ArchiveRead> {
+  try {
+    const file = await handle.getFile()
+    // Freshly created by the picker, or truncated to nothing: there is no archive here to protect.
+    if (file.size === 0) return { status: 'absent' }
+    const text = await readStudioFile(file)
+    if (!text.trim()) return { status: 'absent' }
+    const existing = await parseTraceOffThread(text)
+    return { status: 'ok', snapshots: existing.snapshots ?? [] }
+  } catch (e) {
+    if (isNotFound(e)) return { status: 'absent' } // the file does not exist yet → a first write is safe
+    return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }
+  }
+}
+
 /** Write the current bundle to the document's chosen file (silent — no prompt). True on success. */
 export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapshot[]): Promise<boolean> {
   const handle = await getSaveFileHandle(doc.id, false)
@@ -154,18 +194,24 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
     // GROW-ONLY: never let a write shrink the file's archived history. Read the file's snapshots and
     // union them in first — but ONLY once per session (reading+parsing a large file on every save is
     // the "occasional typing lag"; after the first union the local set is already the superset).
+    //
+    // THE READ MUST BE ABLE TO FAIL (see archiveWriteback.ts). The comment this replaces named the
+    // exact hazard — "→ the catch below silently skips the merge and writes the LOCAL set as-is. On
+    // a short local set that TRUNCATES the archive — the grow-only invariant's exact data-loss case
+    // (2026-07-05)" — and then fixed only the ONE read failure it had in hand (the gzip sniff),
+    // leaving `catch → write anyway` standing for every other. A permission revoke, a file locked
+    // by another app, a partial read or a genuinely corrupt target all still truncated. The sniff
+    // fix was right; it was an instance, and this is the class.
     let merged = snapshots
     const key = `folder:${doc.id}`
     if (needsWritebackMerge(key)) {
-      try {
-        // readStudioFile, NOT .text(): a gzipped target (.studio.gz) decoded as UTF-8 is binary
-        // garbage → parseTrace throws → the catch below silently skips the merge and writes the
-        // LOCAL set as-is. On a short local set that TRUNCATES the archive — the grow-only
-        // invariant's exact data-loss case (2026-07-05). Sniff-and-gunzip so the union really runs.
-        const existing = await parseTraceOffThread(await readStudioFile(await handle.getFile()))
-        if (existing.snapshots?.length) merged = mergeSnapshots(existing.snapshots, snapshots)
-        markWritebackMerged(key)
-      } catch { /* new / unreadable file → write the local set as-is; retry the merge next save */ }
+      const plan = planWriteback(await readFileArchive(handle), snapshots)
+      if (!plan.write) {
+        console.info(`[inkwave] file save skipped: ${plan.reason}`)
+        return false // the caller keeps local + reports the save failed; nothing is lost
+      }
+      merged = plan.snapshots
+      markWritebackMerged(key)
     }
     // Self-contained write (PDFs embedded) — buildExportBundleWithPdfs reuses a per-PDF base64 cache so
     // it doesn't re-encode unchanged PDFs on every save (the ~20 MB re-encode was the lag). The initial
