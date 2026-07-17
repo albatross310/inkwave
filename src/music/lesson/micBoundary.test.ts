@@ -244,28 +244,51 @@ describe('layer 3 — the lesson path cannot REACH a microphone, transitively', 
   }
 
   it('KNOWN-NEGATIVE: the firebreak FIRES when the lesson imports a mic-capable module', () => {
-    // The real erosion path, simulated exactly: §A5 lands a recorder behind a helper, and the
-    // lesson module imports it. copy.test.ts's grep of lesson/'s OWN files would still pass — this
-    // is the only instrument that sees it.
+    // THE REAL EROSION PATH, SIMULATED WHERE IT WILL ACTUALLY HAPPEN. §A5's practice recordings
+    // land in the media lane (`src/media/` — importMedia/mediaStore are LIVE as of 2026-07-17 and
+    // are that feature's prerequisite), and the lesson panel has every innocent reason to import
+    // from there one day: an attachment, a thumbnail, a type. The moment that lane gains
+    // `getUserMedia`, THIS is the import that hands the lesson path a microphone.
     //
-    // Driven through the SAME reachability + scanner the verdict above uses. A negative proved on a
-    // different code path proves nothing about the path that matters.
-    const fakeRecorder = join(SRC, 'music', 'lesson', '__fake_recorder_fixture.ts')
+    // The fixture is CROSS-DIRECTORY on purpose. A same-directory fixture would have proved only
+    // that the walk resolves './x' — it would not prove the walk LEAVES the lesson module, which is
+    // the entire claim. (copy.test.ts's grep of lesson/'s own files stays green through all of
+    // this, which is why that guard is not the one doing the work here.)
+    const fakeRecorder = join(SRC, 'media', '__fake_recorder_fixture.ts')
     const fakeLessonFile = join(SRC, 'music', 'lesson', '__fake_importer_fixture.ts')
     const { writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs')
     try {
       writeFileSync(fakeRecorder, 'export const open = () => navigator.mediaDevices.getUserMedia({ audio: true })\n')
-      writeFileSync(fakeLessonFile, "import { open } from './__fake_recorder_fixture'\nexport const go = open\n")
+      writeFileSync(fakeLessonFile, "import { open } from '../../media/__fake_recorder_fixture'\nexport const go = open\n")
       const roots = allSourceFiles(join(SRC, 'music', 'lesson'))
       const reach = [...reachableFrom(roots)]
       const capable = reach.filter(isMicCapable).map(rel).filter((f) => f !== PATTERN_CARRIER)
-      expect(capable).toContain('src/music/lesson/__fake_recorder_fixture.ts')
-      // And prove the IMPORT is what carried it — the importer itself names no API.
+      expect(
+        capable,
+        'the walk did not follow lesson/ → src/media/ — the firebreak cannot see the §A5 path',
+      ).toContain('src/media/__fake_recorder_fixture.ts')
+      // And prove the IMPORT is what carried it — the importer itself names no API, so a
+      // file-local grep would call this clean.
       expect(isMicCapable(fakeLessonFile)).toBe(false)
+      // Layer 2 must catch it too, from the other direction: an unlisted mic-capable module.
+      const offenders = allSourceFiles(SRC)
+        .filter((f) => rel(f) !== PATTERN_CARRIER)
+        .filter((f) => !MIC_CAPABLE.some((p) => rel(f).startsWith(p)))
+        .filter(isMicCapable)
+        .map(rel)
+      expect(offenders).toContain('src/media/__fake_recorder_fixture.ts')
     } finally {
       rmSync(fakeRecorder, { force: true })
       rmSync(fakeLessonFile, { force: true })
     }
+  })
+
+  it('the media lane is REACHED by the sweep at all (an unswept lane cannot be judged)', () => {
+    // §A5's recordings will live in `src/media/`. If layer 2's sweep never walks that directory,
+    // "no module outside MIC_CAPABLE reaches for a microphone" would be true of a set that does not
+    // include the one lane most likely to break it — the empty-list probe, one directory over.
+    const swept = allSourceFiles(SRC).map(rel)
+    expect(swept).toContain('src/media/mediaStore.ts')
   })
 
   it('and the firebreak is CLEAN again once the fixture is gone', () => {

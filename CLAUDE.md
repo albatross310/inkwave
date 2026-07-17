@@ -1889,12 +1889,29 @@ DIFFERENT promises. The separation is structural:
    would pass forever once §A5 lands `recording/recorder.ts` and `lesson/` imports it. The walk is
    proved to CROSS a real boundary (`lesson/session.ts` → `../types.ts`) before any "found nothing"
    verdict is read — otherwise it is the empty-list probe.
-**Mention vs use is load-bearing**: `stt.ts` must NAME `webkitSpeechRecognition` to feature-detect it
-(that is the finding), and reading a property captures no audio — only `new` does. The first cut
-matched names broadly and flagged `stt.ts`, i.e. it would have forced the module documenting the
-microphone problem onto the microphone allow-list. `micBoundary.ts` is itself the PATTERN CARRIER
-(it names every API as data), excluded from its own scan and **proved inert** — a test asserts only
-test files import it, the same guard `claims.test.ts` puts on `claimMatchers.ts`.
+**⚠️ MENTION vs USE — A GUARD THAT READS PROSE AS CODE ATTACKS ITS OWN DOCUMENTATION. It bit THREE
+lanes in one round (2026-07-17); if you are writing a source-scanning guard, read this first.**
+This repo's comments must NAME the thing they forbid in order to forbid it, and its `"//"` JSON notes
+explain the very rule they encode — so any guard that greps raw text will fire on the explanation
+rather than the violation, and **the tempting fix is always to delete the sentence**. That is the
+corrosive direction: `claims.test.ts`'s own next test is "comments are stripped — the guard survives
+its own documentation". The three, all real:
+- `micBoundary`'s first cut matched capture-API names broadly and flagged **`stt.ts`** — i.e. it
+  would have forced the module that DOCUMENTS the microphone problem onto the microphone
+  allow-list, making the allow-list mean nothing. Reading `typeof globalThis.webkitSpeechRecognition`
+  captures no audio; only `new` does. Hence `CAPTURE_APIS` (broad — these names have no innocent use)
+  vs `RECOGNISER_APIS` (construction only).
+- **`claims.test.ts`'s carrier check** was a bare `.includes('claimMatchers')` over raw source, so
+  `micBoundary.ts` CITING claimMatchers.ts as the precedent it follows turned the repo-wide suite
+  red. Now strips comments and matches a real IMPORT — with the narrowed check proved to still fire,
+  because a guard you narrow and don't re-prove is how a real hole opens.
+- **`probe.test.ts`** regexed `JSON.stringify(rule)` for `/microphone/` and failed on the vercel
+  rule's OWN comment saying it grants no microphone. Now judges the headers the rule SENDS.
+**THE RULE: judge what the code DOES — an import, a call, a header actually sent — never prose about
+it.** And every such guard needs the pair proved: fires on a real use, silent on a mention.
+`micBoundary.ts` is itself the PATTERN CARRIER (it names every API as data), excluded from its own
+scan and **proved inert** — a test asserts only test files import it, the same guard
+`claims.test.ts` puts on `claimMatchers.ts`.
 **The copy is SCOPED to the screen, deliberately**: "nothing on this screen can reach a microphone",
 never "Inkwave does not record audio" — the app-wide claim EXPIRES when §A5 ships, and an expired
 sentence goes on being read.
@@ -1911,9 +1928,55 @@ the scanner (positive control = a `LeakySession`), the deletion by the session's
 show the lines BEFORE `end()`). (2) The `audio never leaves your device` matcher **could never fire** —
 an affirmative promise phrased as a DENIAL, so `affirmativeOnly()` stripped it and the matcher read an
 empty string, passing vacuously. Now `scope: 'literal'`. **Only the prove-it-first rule caught either.**
-NOT WIRED to a route (no Piece surface consumed yet); `BarOnlyAnchor` in `lesson/types.ts` records the
-one contract ask — §1's `Anchor` union cannot express "bar 24" alone, which is all a student has
-mid-lesson.
+NOT WIRED to a surface yet — the Piece is now a document (`docType:'music'`) and the music BAR is the
+second toolbar layer, so `?lesson` needs a home on it; coordinate with the photo lane rather than
+minting a route (`/music` did not survive: Peter, "it should all be in panels").
+**The `BarOnlyAnchor` ask is ANSWERED and the fork is gone** — `Anchor` gained
+`BarAnchor {kind:'bar', bar_index?, bar_label?}`, `PinnedLessonNote` is retired, and the bar rides
+inside `LessonNote.anchor` where §1 always said it belonged. The lane's own prediction held verbatim
+("when the contract gains its variant this is the ONE function that changes" — `session.ts` `#keep`).
+
+**THE WHISPER PROBE — `public/whisper-probe.html`, a STANDALONE static document (2026-07-17).**
+Peter ruled "we'll ship whisper", which settles WHETHER; the probe decides WHICH MODEL and THREADED
+OR NOT on his iPhone 12. It is deliberately NOT a route: COOP/COEP are per-DOCUMENT and this is an
+SPA, so a route-based probe would measure whichever document you happened to arrive in. `vercel.json`
+grants COOP/COEP to that one path — and **NO microphone: a latency benchmark needs none, so
+`microphone=()` stands untouched**; that change belongs with the capture feature, the copy and
+`/privacy` in ONE commit, which `micBoundary.test.ts`'s binding enforces rather than trusting.
+- **THE CHUNK-SIZE FINDING — a 5s-only probe would have KILLED A WORKING FEATURE.** Whisper's encoder
+  always processes a PADDED 30-SECOND WINDOW, so cost is nearly flat in chunk length. Same model,
+  same run: **RTF 4.97 at 5s vs 0.40 at 30s — a 12× swing from chunk size ALONE.** The first design
+  measured 5s only and would have reported FAIL for everything. That is the MIRROR IMAGE of an
+  overclaim and just as wrong: a confident wrong number that ends a viable path. It measures
+  `CHUNKS = [5, 30]` and the verdict picks the lowest LATENCY among configs that keep up — latency
+  being **chunk duration + inference**, because the student waits for the chunk to FILL before a
+  single sample can be transcribed. Reporting inference alone hides half the wait.
+- **"THREADED" WAS UNINTERPRETABLE UNTIL IT COUNTED WORKERS.** Desktop showed threaded only ~16%
+  faster than single — which could mean threads-don't-help OR numThreads-was-ignored,
+  **indistinguishable by construction** (the bake-counter bug again). ORT builds its pool from Web
+  Workers, so the page counts Worker constructions: PROVED 0 for 1-thread, 7 for threaded. A threaded
+  run that spawned no workers is reported **N/A, never as a number** under a heading that lies.
+  Each config also runs in a FRESH DOCUMENT (reload between) because ORT fixes its thread count at
+  first-session — a one-page comparison would silently run both threaded.
+- **transformers.js is PINNED to the v3 line.** 4.2.0 cannot create an ORT session for these models
+  AT ALL — "TransposeDQWeightsForMatMulNBits Missing required scale", identically across tiny/base
+  and every dtype, which is what ruled out the model and the dtype and left the runtime.
+- **PEAK MEMORY IS NOT MEASURABLE ON iOS SAFARI** (`performance.memory` is Chrome-only;
+  `measureUserAgentSpecificMemory` unimplemented). Rather than print a fabricated figure it leaves a
+  localStorage breadcrumb before each run and reports **DIED** if one never came back — which is what
+  an iOS OOM actually looks like, and is the honest instrument.
+- **THE DESKTOP NUMBERS DO NOT TRANSFER (STATED).** This box is WSL2, memory-capped and shared with
+  other lanes; the same config swung 5765→24871ms between runs. They prove the machinery, nothing
+  more. The sample is whisper.cpp's canonical public-domain JFK clip — clean studio mono, so every
+  number is a **LOWER BOUND**; a real lesson room is harder. One quality signal survives the noise:
+  **tiny mis-transcribes the clip's most famous line** ("asked not"), base gets it right with
+  punctuation — 41MB vs 77MB.
+- `probe.test.ts` guards what nothing else in the gate can see (the probe is plain HTML — invisible
+  to typecheck and vitest): the COOP/COEP rule, the v3 pin, both chunk sizes, the worker control, the
+  runtime `crossOriginIsolated` read, and the absence of a mic.
+- **UNVERIFIED (STATED):** validated on headless Chromium only. iOS Safari + COEP `require-corp` +
+  jsDelivr module import + HF model fetch is unproven — if a subresource lacks CORP it fails on
+  device. It fails LOUDLY (errors are recorded and displayed), so a broken run is legible.
 
 ## Canonical pagination (2026-07-09 — the load-bearing invariant)
 
