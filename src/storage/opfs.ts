@@ -179,6 +179,28 @@ export type DocRead =
   | { kind: 'absent' } // genuinely not on disk — safe to create
   | { kind: 'error'; error: StorageReadError } // could not find out — NEVER write
 
+/**
+ * The RAW bytes of a document's `current.json`, with no parse and no interpretation.
+ *
+ * THE LAST RESORT, and the one that matters most. A document whose JSON will not parse is exactly
+ * the document whose words the writer most needs back — and it is the one case `readDocument`
+ * cannot help with, because there is nothing to return but an error. The bytes are still sitting
+ * on disk with the prose legible inside them. OpfsInspector offers this as "Download raw" so a
+ * corrupt document is a file the writer can salvage by hand (or send to me), rather than a row
+ * that says "unreadable" and offers nothing. A recovery surface that lists the problem and gives
+ * no way out is a dead end at precisely the moment it exists for.
+ */
+export async function readDocumentBytes(documentId: string): Promise<Blob | null> {
+  try {
+    const root = await getRoot()
+    let dir: FileSystemDirectoryHandle = root
+    for (const part of docDir(documentId).split('/')) dir = await dir.getDirectoryHandle(part)
+    return await (await dir.getFileHandle('current.json')).getFile()
+  } catch {
+    return null // nothing readable at any level — the caller shows no button
+  }
+}
+
 /** Read a document. Callers must handle all three outcomes; see DocRead. */
 export async function readDocument(documentId: string): Promise<DocRead> {
   try {

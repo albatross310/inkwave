@@ -160,6 +160,20 @@ export function switchTabToDocument(id: string): void {
 // released automatically when the tab closes or crashes — there is no stale-lock state to garbage
 // collect, and no heartbeat to get wrong. Where it is unavailable the writer is never blocked; we
 // degrade to the old behaviour rather than refuse to open someone's document.
+//
+// AND THAT FALLBACK IS DEAD CODE ON EVERY ENGINE WE SHIP TO — PROBED, 2026-07-17, not assumed
+// (scripts/tabdoc-probe/_locks.mjs, run against all three Playwright engines):
+//   webkit (≈Safari/iOS)  locks=true  refusesSecondTab=true  query()=true
+//   chromium              locks=true  refusesSecondTab=true  query()=true
+//   firefox               locks=true  refusesSecondTab=true  query()=true
+// `refusesSecondTab` is the property this module actually depends on — a second `request(...,
+// {ifAvailable:true})` for a held name resolves with a null lock — and `query()` is what
+// OpfsInspector's "open in another tab" badge reads. This was carried as STATED ("older WebKit may
+// lack Web Locks") until it was measured; it is now PROBED, and the honest conclusion is that the
+// no-locks branch protects nothing real and costs nothing. KEEP IT ANYWAY: it is the difference
+// between an unknown engine degrading to today's behaviour and it locking a writer out of their own
+// document. NB Playwright's Linux WebKit reports OPFS=false — that is a known harness gap
+// (CLAUDE.md), NOT a Safari one, so the full two-tab repro still cannot run on WebKit here.
 
 /**
  * The Web Lock name that means "a live tab is holding this document".

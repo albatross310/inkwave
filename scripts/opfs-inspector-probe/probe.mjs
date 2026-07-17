@@ -49,7 +49,7 @@ if (!bound) { console.error(`FATAL: nothing bound on ${PORT} — build/client mi
 console.log(`server bound on ${PORT}`)
 
 const browser = await chromium.launch({ headless: true })
-const ctx = await browser.newContext()
+const ctx = await browser.newContext({ acceptDownloads: true }) // the corrupt-row raw download is a real file
 const page = await ctx.newPage()
 page.on('pageerror', e => console.log('  [pageerror]', e.message))
 
@@ -78,6 +78,22 @@ try {
     return (await (await fh.getFile()).text()).length
   }, { id: ORPHAN_ID, text: SEED_TEXT })
   check(seeded > 0, 'seeded an orphaned document into OPFS', `${seeded} bytes, no meta entry`)
+
+  // ── 2b. seed a CORRUPT document — bytes on disk, JSON that will not parse ─────
+  // This is the row whose words the writer most needs back, and the one `readDocument` can only
+  // ever answer 'error' for. A recovery panel that lists it and offers nothing is a dead end.
+  const CORRUPT_ID = '99999999-8888-4777-8666-555555555555'
+  const CORRUPT_BYTES = await page.evaluate(async (id) => {
+    const root = await navigator.storage.getDirectory()
+    const docs = await root.getDirectoryHandle('documents', { create: true })
+    const dir = await docs.getDirectoryHandle(id, { create: true })
+    const fh = await dir.getFileHandle('current.json', { create: true })
+    // Truncated JSON — exactly what a half-finished write leaves behind. The prose is still legible.
+    const text = '{"id":"' + id + '","title":"Half-written","contentJson":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"FOXTROT GOLF the corrupt file still holds its words"'
+    const w = await fh.createWritable(); await w.write(text); await w.close()
+    return text.length
+  }, CORRUPT_ID)
+  check(CORRUPT_BYTES > 0, 'seeded a CORRUPT document into OPFS', `${CORRUPT_BYTES} bytes of truncated JSON`)
 
   // Prove the orphan really is invisible to the index — the premise of the whole panel.
   const inIndex = await page.evaluate(async (id) => {
@@ -111,6 +127,26 @@ try {
   check(/Orphaned reading list/.test(rowText), 'the row shows the title')
   check(/\bwords\b/.test(rowText) && /\bB\b|KB|MB/.test(rowText), 'the row shows a word count and a size on disk')
   check(!/delete/i.test(rowText), 'the row offers NO delete action')
+
+  // ── 4b. THE CORRUPT ROW: listed, badged, and RECOVERABLE ─────────────────────
+  const crow = page.locator(`[data-testid="opfs-row"][data-doc-id="${CORRUPT_ID}"]`)
+  await crow.waitFor({ timeout: 10000 }).catch(() => {})
+  check(await crow.count() === 1, 'the inspector LISTS the corrupt document (it does not hide what it cannot parse)')
+  const ctext = (await crow.count()) ? await crow.innerText() : ''
+  check(/unreadable/i.test(ctext), 'the corrupt row is badged "unreadable"')
+  const cbtn = crow.locator('[data-testid="opfs-download"]')
+  check(/Download raw/i.test(await cbtn.innerText().catch(() => '')), 'the corrupt row offers "⤓ Download raw" rather than a dead end')
+  check(await cbtn.isEnabled(), 'the raw-download button is ENABLED — the dead end is gone')
+  // Take the download and prove the WORDS are in it. A button that downloads nothing is the bug.
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    cbtn.click(),
+  ])
+  const stream = await dl.createReadStream()
+  let got = ''
+  for await (const chunk of stream) got += chunk.toString()
+  check(got.includes('FOXTROT GOLF'), 'THE RAW DOWNLOAD CONTAINS THE WRITER\'S WORDS', `${got.length} bytes`)
+  check(/\.json$/.test(dl.suggestedFilename()), 'it downloads as a .json file', dl.suggestedFilename())
 
   // ── 5. theming: both themes must render the panel distinctly ──────────────────
   const bgOf = () => panel.evaluate(el => getComputedStyle(el).backgroundColor)

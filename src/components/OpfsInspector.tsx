@@ -26,7 +26,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listOpfsDocuments } from '../storage/opfs'
+import { listOpfsDocuments, readDocumentBytes } from '../storage/opfs'
 import { listMeta } from '../storage/indexeddb'
 import { heldDocIds, switchTabToDocument, tabDocId, DOC_LOCK_PREFIX } from '../storage/tabDoc'
 import { listSnapshotMeta } from '../provenance/snapshots'
@@ -163,6 +163,24 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
   // self-verifying .studio the Save panel's "⤓ Download a copy" produces. A recovered document
   // must come out as a FIRST-CLASS file (snapshots, receipts, embedded PDFs), not a debug blob:
   // the writer downloading it here is trying to make sure it can never be lost again.
+  // The raw bytes, for a document we could not parse. No bundle, no interpretation — just the file,
+  // so the writer keeps everything that is actually on disk.
+  async function downloadRaw(row: Row) {
+    setBusy(row.id); setError(null)
+    try {
+      const blob = await readDocumentBytes(row.id)
+      if (!blob) { setError(`"${row.title}" could not be read from storage at all.`); return }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `inkwave-unreadable-${row.id}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(`Could not download "${row.title}": ${String((err as Error)?.message ?? err)}`)
+    } finally { setBusy(null) }
+  }
+
   async function download(row: Row) {
     if (!row.doc) return
     setBusy(row.id); setError(null)
@@ -250,8 +268,18 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
                 >
                   {r.isThisTab ? 'Open here' : 'Open'}
                 </RowButton>
-                <RowButton onClick={() => void download(r)} disabled={!r.readable || busy === r.id} testid="opfs-download">
-                  {busy === r.id ? 'Preparing…' : '⤓ Download'}
+                {/* An UNREADABLE document still has its bytes on disk, with the prose legible
+                    inside them — and it is the row whose words the writer most needs back. Offering
+                    nothing here would make the recovery surface a dead end at the exact moment it
+                    exists for. So: the real .studio export when we can parse it, the raw file when
+                    we cannot. */}
+                <RowButton
+                  onClick={() => void (r.readable ? download(r) : downloadRaw(r))}
+                  disabled={busy === r.id}
+                  testid="opfs-download"
+                  title={r.readable ? undefined : 'This document could not be parsed — download the raw file so nothing is lost'}
+                >
+                  {busy === r.id ? 'Preparing…' : r.readable ? '⤓ Download' : '⤓ Download raw'}
                 </RowButton>
               </div>
             </div>
