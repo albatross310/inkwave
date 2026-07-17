@@ -6,12 +6,19 @@
 // their model had misbehaved).
 //
 // HONEST LIMITS — these are heuristics over prose, and they are stated in the panel too:
-//   • findCausalClaims is a marker-word scan. It cannot catch a causal claim made without any
-//     causal word ("your best writing came after the walk"). Since 2026-07-17 it also SKIPS any
-//     sentence carrying a hedge, which adds a second blind spot in the other direction: "the
-//     break definitely helped, maybe" reads as hedged and passes. Both are accepted — the scan is
-//     a flag for the reader's judgement, not a proof, and over-flagging the hunches Peter asked
-//     for would be the worse error.
+//   • findCausalClaims is a marker-word scan over CLAUSES. Its real limits, in the order you
+//     will actually hit them (F18's lesson: a documented limit should be the one people meet,
+//     not a curiosity — the old note pinned "the break definitely helped, maybe", a sentence
+//     nobody writes, and read as though that were the boundary):
+//       1. NO MARKER, NO FLAG. "Your best writing came after the walk" asserts a cause with no
+//          causal word in it. Invisible here, and this is the commonest miss by far.
+//       2. A HEDGE ANYWHERE IN THE CLAIM'S OWN CLAUSE exempts it, even when it governs some
+//          other part of that clause: "Maybe you should protect your peak hours, which are nine
+//          to eleven" asserts the hours inside a hedged clause. Clause splitting fixed the
+//          cross-clause case; the within-clause case needs a parser, not a regex.
+//       3. Punctuation is the clause boundary, so a run-on sentence with no commas is one clause.
+//     All accepted. The scan is a flag for the reader's judgement, not a proof, and over-flagging
+//     the hunches Peter asked for would be the worse error.
 //   • findUnverifiedNumbers only knows the numerals Inkwave actually sent. It cannot check a
 //     number written as a word ("forty minutes") — which the fixed prompt encourages for exactly
 //     the small counts where a numeral would be noise.
@@ -31,9 +38,16 @@
 // of it, and it is the same distinction the prompt now draws.
 //
 // THIS SITS INSIDE §A6.2 RATHER THAN AGAINST IT, which is worth noticing before anyone "fixes" it
-// back: the spec's words are "**Confident** pattern claims (breaks help/hurt, best time of day)
-// are permitted only at weekly+". Hedging removes the confidence. The spec drew this line already;
-// we had been reading it as a ban on the subject rather than on the certainty.
+// back. The spec line, quoted IN FULL and un-ellipsed because it is load-bearing and the spec is
+// not in this repo (Inkwave-Productivity-Email-BuildSpec-v0.2.md, §A6.2, line 139 — re-verified
+// verbatim 2026-07-17):
+//
+//   "Confident *pattern* claims (breaks help/hurt, best time of day) are permitted only at
+//    weekly+ where there's enough data."
+//
+// HEDGING REMOVES THE CONFIDENCE. The spec drew this line already; we had been reading a ban on
+// the SUBJECT where it bans the CERTAINTY — and the trailing clause ("where there's enough data")
+// is why: it is a rule about evidence supporting a claim's strength, not about naming causes.
 
 export interface CausalClaim {
   /** The sentence, trimmed. */
@@ -78,17 +92,52 @@ function sentences(markdown: string): string[] {
  */
 const HEDGE_MARKERS: readonly RegExp[] = [
   /\bmaybe\b/i, /\bperhaps\b/i, /\bpossibly\b/i, /\bpossible\b/i, /\bprobably\b/i,
-  /\bmight\b/i, /\bmay\b/i, /\bcould\b/i, /\bcould'?ve\b/i, /\bseems?\b/i, /\bseemed\b/i,
+  /\bmight\b/i, /\bcould\b/i, /\bcould'?ve\b/i, /\bseems?\b/i, /\bseemed\b/i,
   /\bappears?\b/i, /\blooks like\b/i, /\bfeels like\b/i, /\bsuspect\b/i, /\bguess\b/i,
   /\bhunch\b/i, /\bwonder\b/i, /\bhard to say\b/i, /\bcan'?t tell\b/i, /\bunclear\b/i,
   /\bnot sure\b/i, /\bworth (?:testing|trying|watching)\b/i, /\bone reading\b/i,
   /\barguably\b/i, /\bif anything\b/i, /\bmy sense\b/i, /\btempting to think\b/i,
-  /\bwould'?ve\b/i, /\bimagine\b/i, /\bsuggests?\b/i, /\bmaybe not\b/i,
+  /\bwould'?ve\b/i, /\bimagine\b/i, /\bsuggests?\b/i,
+  // `may` is CASE-SENSITIVE, and that is the entire fix for a real miss (F18, 2026-07-17):
+  // /\bmay\b/i matched the MONTH, so "You always write best in the morning, as you have since
+  // May." was silently exempted by a date. The modal is lower-case in every sentence anyone
+  // writes ("may have", "may well be"); the month is always capitalised. A sentence-initial modal
+  // "May the..." is archaic and does not occur in a work report.
+  /\bmay\b/,
 ]
 
-/** Is this sentence marked as a guess rather than offered as a finding? */
-export function isHedged(sentence: string): boolean {
-  return HEDGE_MARKERS.some(re => re.test(sentence))
+/**
+ * Split a sentence into clauses on PUNCTUATION ONLY.
+ *
+ * Punctuation only, deliberately: the obvious extension is to split on connectives too ("which",
+ * "and", "but"), and it would BREAK THE MARKERS — "which is why" is itself a causal marker, and
+ * "because" is the commonest one. Splitting on either destroys the very thing being looked for
+ * and the scan would go quiet on its own controls. Punctuation cannot collide with a marker, so
+ * it is the granularity that is safe by construction.
+ */
+function clauses(sentence: string): string[] {
+  return sentence.split(/[,;:—–]|\s+-\s+/).map(c => c.trim()).filter(Boolean)
+}
+
+/**
+ * Is this CLAUSE marked as a guess?
+ *
+ * ─── F18: THE HEDGE MUST GOVERN THE CLAIM IT EXEMPTS (2026-07-17) ────────────────────────────
+ * This used to be a substring match over the WHOLE SENTENCE, which is a category error: the
+ * argument is about a claim's MODALITY, and modality belongs to a clause, not to a string. So a
+ * hedge in a *different clause* exempted a perfectly confident claim next to it. The two misses
+ * that made the case, both of which an Opus narrative produces constantly:
+ *
+ *   "Your peak hours are nine to eleven, which suggests protecting them."
+ *      → the claim is asserted; "suggests" hedges the SUGGESTION, not the claim. Now flagged.
+ *   "You always write best in the morning, as you have since May."
+ *      → "always" is asserted; the exemption came from a MONTH NAME. Now flagged (twice over:
+ *        the clause split separates it, and `may` is case-sensitive).
+ *
+ * Exported for tests; `findCausalClaims` consults it per clause, never per sentence.
+ */
+export function isHedged(clause: string): boolean {
+  return HEDGE_MARKERS.some(re => re.test(clause))
 }
 
 /**
@@ -100,11 +149,15 @@ export function isHedged(sentence: string): boolean {
  */
 export function findCausalClaims(markdown: string): CausalClaim[] {
   const out: CausalClaim[] = []
-  for (const s of sentences(markdown)) {
-    if (isHedged(s)) continue
-    for (const re of [...CAUSAL_MARKERS, ...PATTERN_MARKERS]) {
-      const m = re.exec(s)
-      if (m) { out.push({ sentence: s, marker: m[0] }); break }
+  for (const sentence of sentences(markdown)) {
+    // Per CLAUSE (F18): a hedge exempts only the claim it governs. The reported `sentence` stays
+    // the whole sentence — that is what the writer needs to read — but the VERDICT is per clause.
+    for (const clause of clauses(sentence)) {
+      if (isHedged(clause)) continue
+      const hit = [...CAUSAL_MARKERS, ...PATTERN_MARKERS]
+        .map(re => re.exec(clause))
+        .find(Boolean)
+      if (hit) { out.push({ sentence, marker: hit[0] }); break }
     }
   }
   return out

@@ -397,6 +397,21 @@ describe('§A6.2 / §A5 — what the fixed prompt commits to', () => {
     }
   })
 
+  it('reading time is work but NOT words — the report lane owns this rule', () => {
+    // types/document.ts: "READING TIME IS NEVER SUMMED INTO 'WORDS WRITTEN' … the rule is about
+    // NARRATIVE, and it is the report lane's policy." Two doc_type members, not one (Peter,
+    // 2026-07-17: "We can treat inkwave as a pdf reader and track when people have done an
+    // annotation in the last 5 minutes").
+    const p = flat('weekly')
+    expect(p).toContain('KINDS OF WORK — reading is work, and it is not words')
+    expect(p).toMatch(/`reading` means a PDF was open and being read; `annotating` means they were marking one up/i)
+    expect(p).toMatch(/never add them into a total of words written/i)
+    expect(p).toMatch(/two hours ten, of which forty minutes reading/i)
+    // `misc` is an honest unknown, and must not be guessed at or treated as lesser.
+    expect(p).toMatch(/`misc` means Inkwave does not know what the work was/i)
+    expect(p).toMatch(/Do not guess what a `misc` session was, and do not treat it as lesser/i)
+  })
+
   it('tells the model not to hand measured numbers back', () => {
     const p = flat('weekly')
     expect(p).toMatch(/Do not put any measured number in the CSV/i)
