@@ -178,6 +178,17 @@ async function run(clip: Clip): Promise<void> {
   // solely to heal the wipe caused by attaching PRE-hydration; with the barrier there is no wipe,
   // so the interval is gone rather than re-tuned. We become MASTER (hide the CSS water) only once
   // play() RESOLVES, so a decode/autoplay failure always leaves the CSS water visible.
+  // ⚠️ ONE HOST, ONE CLOCK — AND IT MUST STAY THAT WAY (2026-07-17, flagged by fix/wave-desktop-jitter).
+  // `querySelector` + `:not(.iw-wave-covered)` means exactly ONE <video> exists per load: the shell's,
+  // never the covered editor's. That is load-bearing, not incidental. During the load there are TWO
+  // drifting surfaces, and the CSS water solves them by making both adopt ONE literal startTime — the
+  // whole "sibling clock adopt" invariant in Scroll.tsx exists because two copies of this water at
+  // 33-500ms of skew showed doubled lines through the reveal fade. Give the second surface its own
+  // element and you get the identical two-clock shape WITH DECODERS: two `currentTime`s, no shared
+  // timeline, no adopt possible (a media element's clock cannot be assigned like an animation's
+  // startTime). The jitter lane measured what that costs on the CSS side — 43-60px of mark-vs-wave
+  // skew on 4 of 5 clean loads, from two animations resolving their startTime independently. Do not
+  // add a second video without an answer to "which clock, and who slaves to it".
   const host = document.querySelector<HTMLElement>(
     '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .iw-wave-twinkles',
   )
