@@ -115,6 +115,28 @@ async function bootstrap() {
 }
 void bootstrap()
 
+// ─── Blank white until the wave video comes up (Peter, 2026-07-17) ────────────────────────────
+// "we have to just have blank white screen until the video comes up and play the video every time".
+// The CSS water paints from the PRERENDERED `.iw-wave-anim` class (that is the design — it runs
+// from first paint), so with the video flag on a load shows CSS water and then swaps to the video:
+// two waters in one load. `.iw-wave-video-wait` holds the surface white until waveVideo.ts either
+// becomes master or bails.
+//
+// A CLASS ON <html>, exactly like `.iw-water-ready` below and `data-theme` — NOT a node append.
+// Appending anything into React's tree before hydration is the #418 catastrophe this file's other
+// comments document at length; a root className is the shape this app already ships twice.
+//
+// THE TIMEOUT IS NOT THE "papered-over one-shot signal" this codebase warns about — it is an
+// independent liveness backstop for a failure waveVideo.ts CANNOT report, because it IS the
+// failure of that module to load at all (a chunk 404, an offline SW miss, a parse error). That
+// module's own exits are covered by its `endWait()`. What must never happen is a permanent white
+// screen, and the module that would clear it is precisely the one that may be missing. 4s > its
+// 2.5s decode budget, so on any load where waveVideo is alive this never fires.
+function armWaveVideoWait(): void {
+  document.documentElement.classList.add('iw-wave-video-wait')
+  setTimeout(() => document.documentElement.classList.remove('iw-wave-video-wait'), 4000)
+}
+
 // ─── Atomic water reveal ───
 // The water (aqua gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
 // and appears in ONE paint. TWO conditions open the gate (2026-07-10, Peter: "glimmers and short
@@ -205,7 +227,7 @@ void bootstrap()
       // Awaiting it here would deadlock. See src/editor/waveVideo.ts.
       let videoFlag = false
       try { const v = localStorage.getItem('inkwave:waveVideo'); videoFlag = v === '1' || v === 'debug' } catch { /* private mode */ }
-      if (videoFlag) void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {})
+      if (videoFlag) { armWaveVideoWait(); void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {}) }
       const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
       void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
     }
@@ -218,8 +240,10 @@ void bootstrap()
 // attaches post-gate. See src/editor/waveVideo.ts.
 try {
   const wv = localStorage.getItem('inkwave:waveVideo')
-  if ((wv === '1' || wv === 'debug') && document.documentElement.classList.contains('iw-water-ready'))
+  if ((wv === '1' || wv === 'debug') && document.documentElement.classList.contains('iw-water-ready')) {
+    armWaveVideoWait() // the warm path skips the gate above, so it must arm the white itself
     void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo())
+  }
 } catch { /* private mode */ }
 
 // Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are

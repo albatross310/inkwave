@@ -31,18 +31,70 @@
 // entry.client's MutationObserver stamp-guard cannot save it: it watches the ORIGINAL <html>,
 // which React detached. Hence `hydrated()` below — every DOM write waits behind it.
 
-const RUNGS = [
-  { name: 'phone', w: 540, h: 1170 },
-  { name: 'desk', w: 1280, h: 800 },
-] as const
+// ─── THE LADDER: CROP, NEVER RESIZE (2026-07-17 — Peter's ruling, and it is a bug fix) ───────────
+// "render the video at one higher resolution and then crop it to the screen rather than resizing
+// it… preserve dpi rather than the fixed boundaries of the movie".
+//
+// WHY THIS IS NOT A PREFERENCE. The video stands in for the CSS water for the load and HANDS BACK
+// at the coast, so its wave tile must be 140 CSS px at EVERY viewport — that congruence IS the
+// hand-off. `object-fit: cover` scaled the clip to the viewport, so the tile became
+// 140 × max(vw/designW, vh/designH): MEASURED 122.5px at 1100×700 and 157.5px at 1440×900 against
+// the CSS water's unwavering 140.0 — a 12.5% jump at the swap, exactly Peter's live report ("the
+// video resolution and size of the waves does not match that of the background"). Crop measured
+// 140.0 vs 140.0, 0.0% error, at a viewport where cover reads 122.5 (`tilescale.prove.mjs`).
+//
+// THE MECHANISM: the element is sized to the clip's DESIGN CSS BOX (`cssW`×`cssH`, fixed at the
+// top-left) and `object-fit: fill` maps the clip's pixels onto it 1:1. The clip is encoded at
+// `cssW × dsf` — so on a device whose DPR === dsf, one clip pixel is one DEVICE pixel ("preserve
+// dpi"). The VIEWPORT then crops whatever overflows. A design box must therefore COVER the
+// viewport, or there is no pattern to crop from and the surface would show a bare edge.
+//
+// ⚠️ `object-fit: none` is NOT the same fix: it maps 1 video px → 1 CSS px, so a dsf:2 clip would
+// render 2× too big. The trio is: clip @ (design CSS × dsf) + element @ design CSS + `fill`.
+//
+// THE CEILING IS PETER'S ("Why don't we just do full hd. Or even 720p"): the desk rung is FULL HD
+// at dsf 1, chosen over a retina 3840×2160 because he asked for the smaller file and because the
+// water is a gradient + soft 140px lines — and because 1920×1080 (2.07 Mpx) still fits H.264
+// **Level 4.0** (~2.1 Mpx), the iPhone-conservative pin `generate.mjs` has always carried. A 4K
+// clip would force Level 5.1. `wide` (2560×1440) exists because a 1920-wide design box has nothing
+// to crop from on a 2560 desktop; it is DESKTOP-ONLY by construction (`pickRung` partitions on the
+// pointer type), so its Level 5.1 never reaches an iPhone.
+//
+// ABOVE `wide`, pickRung returns null and the CSS water plays — the honest answer, not a stretched
+// clip. A <video> cannot be background-repeated, two tiled videos are two `currentTime`s, and
+// canvas-tiling needs a per-frame JS driver (the one thing this whole unit exists to avoid).
+type Rung = {
+  name: string
+  cssW: number; cssH: number   // the DESIGN CSS box — the element's literal size
+  dsf: number                  // clip pixels per CSS px (clip is cssW*dsf × cssH*dsf)
+  coarse: boolean              // touch rung? (never offered to a mouse, and vice versa)
+}
+const RUNGS: readonly Rung[] = [
+  // Covers every phone CSS viewport in portrait (iPhone 8 375×667 · 12 390×844 · 14 Pro Max 430×932).
+  // dsf 2 is dpi-exact on an iPhone 8 and 0.67× on a DPR-3 phone — soft by Peter's own budget, not
+  // by accident. 880×1912 = 1.68 Mpx, also inside Level 4.0.
+  { name: 'phone', cssW: 440, cssH: 956, dsf: 2, coarse: true },
+  // FULL HD, Peter's word. Covers a desktop CSS viewport up to 1920×1080 at DPR 1.
+  { name: 'desk', cssW: 1920, cssH: 1080, dsf: 1, coarse: false },
+  // The crop headroom a 2560-wide desktop needs. Desktop-only ⇒ H.264 Level 5.1 is safe here.
+  { name: 'wide', cssW: 2560, cssH: 1440, dsf: 1, coarse: false },
+]
 
 // ── On-device diagnostic state (rendered by the overlay under ?waveVideo=debug) ──
 type Diag = {
   flag: string; codec: string; rung: string; theme: string; clip: string
   fetch: string; ready: number; advancing: boolean; master: boolean; reason: string
+  viewport: string; loop: string
 }
-const diag: Diag = { flag: '?', codec: '?', rung: '?', theme: '?', clip: '—', fetch: '—', ready: -1, advancing: false, master: false, reason: 'starting…' }
-const bail = (reason: string) => { diag.reason = reason; diag.master = false }
+const diag: Diag = { flag: '?', codec: '?', rung: '?', theme: '?', clip: '—', fetch: '—', ready: -1, advancing: false, master: false, reason: 'starting…', viewport: '?', loop: 'not started' }
+// EVERY exit runs through here, and that is what makes the two gates below safe to wait on: a bail
+// must ALWAYS hand the water back (drop the white wait → CSS water) and ALWAYS release the reveal
+// (or a failed decode would leave Peter on a white screen with no document).
+const bail = (reason: string) => {
+  diag.reason = reason; diag.master = false
+  endWait()
+  releaseLoop(`released by a bail — no video (${reason.slice(0, 40)})`)
+}
 // PROBE SEAM (same contract as `window.__iwTwkPool`): probes must read this object, never scrape
 // the overlay's rendered HTML — the overlay is a formatted STRING for Peter's phone camera, and a
 // probe that parses it measures the formatting. `masterEver` is the durable fact a 12s sample can
@@ -61,6 +113,80 @@ function flagValue(): string {
   try { return localStorage.getItem('inkwave:waveVideo') ?? '(unset)' } catch { return '(no-storage)' }
 }
 
+// ─── THE DELIBERATE DELAY (Peter: "make it show at least one loop before the file comes up.
+// purposefully delay it. (And use that time to warm up the document)") ───────────────────────────
+//
+// The reveal gate (TiptapEditor) waits on this alongside fonts.ready + the first pagination
+// measure — so "warm up the document" needs no code of its own: the warm-up IS what the load was
+// already doing, and this simply stops the reveal from cutting it short.
+//
+// THE BOUNDARY IS THE VIDEO'S OWN, NOT A TIMER. `releaseAtLoopPoint` watches `currentTime` WRAP —
+// a looping media element's clock running backwards is the loop point, OBSERVED. A
+// `setTimeout(2000)` would be a guess about a decode we do not control, and a measurement whose
+// verdict depends on who else is running is not a guard: on a busy first load the clip starts
+// late, so a timer would release mid-loop and Peter would see exactly the half-loop he asked us
+// to stop showing him.
+//
+// ALWAYS ARRIVES, AND IS ASKABLE (the one-shot-async-signal rule — this module has been bitten by
+// it twice already). Every exit fires it: bail, decode timeout, autoplay refusal, the wrap, the
+// settle, and the cap. A reader that arrives late asks `__iwWaveVideoLoopDone` rather than waiting
+// for an event in the past. If this module never loads at all, nothing here fires — which is why
+// the reader in TiptapEditor carries its own independent cap.
+let loopDone = false
+function releaseLoop(why: string): void {
+  if (loopDone) return
+  loopDone = true
+  diag.loop = why
+  ;(window as unknown as { __iwWaveVideoLoopDone?: boolean }).__iwWaveVideoLoopDone = true
+  window.dispatchEvent(new Event('inkwave:wave-video-loop'))
+}
+
+// Watch for the wrap. rVFC where it exists (it ticks with the DECODER, so it sees the wrap on the
+// frame it happens), else a 40ms poll of the same fact — the poll is what `wireSettle` already
+// uses to find this identical boundary, so this is not a second way of asking one question.
+// The cap is NOT the timer sneaking back in as the release mechanism: a media element genuinely
+// can stall on a dead network, and a load that never reveals the document is a far worse bug than
+// a short loop. It NAMES itself in `diag.loop`, so a capped release can never be read as a real one.
+function releaseAtLoopPoint(video: HTMLVideoElement): void {
+  const start = video.currentTime
+  let last = start
+  const cap = setTimeout(() => releaseLoop(`CAPPED at 6s — no wrap seen (currentTime ${video.currentTime.toFixed(2)})`), 6000)
+  const seen = () => {
+    if (loopDone) return
+    const now = video.currentTime
+    // The wrap: the clock ran backwards. The second arm covers `start` being mid-clip (play() can
+    // resolve a frame or two in) — a full duration's worth of advance is also one whole loop.
+    if (now < last - 0.01 || (video.duration > 0 && now - start >= video.duration - 0.05)) {
+      clearTimeout(cap)
+      releaseLoop(`one full loop played (wrapped at ${last.toFixed(2)}s)`)
+      return
+    }
+    last = now
+    schedule()
+  }
+  type RVFC = { requestVideoFrameCallback?: (cb: () => void) => number }
+  const schedule = () => {
+    const rv = (video as unknown as RVFC).requestVideoFrameCallback
+    if (typeof rv === 'function') rv.call(video, seen)
+    else setTimeout(seen, 40)
+  }
+  schedule()
+}
+
+// ─── BLANK WHITE UNTIL THE VIDEO COMES UP (Peter: "we have to just have blank white screen until
+// the video comes up and play the video every time") ─────────────────────────────────────────────
+// `html.iw-wave-video-wait` whites the surface and hides every water layer, so a load can never
+// show a frame of CSS water that the video is about to replace (the "partial/janky first frame").
+// It is a CLASS ON <html>, set by entry.client BEFORE hydration — the same shape as
+// `.iw-water-ready` and `data-theme`, and deliberately NOT a node append: appending pre-hydration
+// is precisely the bug (React #418 → the whole document re-rendered → the water dead for the
+// session) that the `hydrated()` barrier below exists to prevent.
+//
+// IT MUST NEVER BE PERMANENT. Every exit clears it: the master hand-off swaps it for
+// `.iw-wave-video-on`, and every bail drops it so the CSS water — the fallback at every step —
+// appears. entry.client carries an independent timeout for the case where this module never loads.
+function endWait(): void { document.documentElement.classList.remove('iw-wave-video-wait') }
+
 // AV1 first (av01, ~1/4 the bytes), then H.264 (avc1 — iPhone 8 / A11 have NO AV1). Both in mp4.
 function pickCodec(): 'av1' | 'h264' | null {
   const probe = document.createElement('video')
@@ -71,11 +197,59 @@ function pickCodec(): 'av1' | 'h264' | null {
 }
 
 
-function pickRung(): typeof RUNGS[number] {
-  // Cover-fit means either rung fills any viewport; pick by device class.
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false
-  return coarse || window.innerWidth < 900 ? RUNGS[0] : RUNGS[1]
+// ─── pickRung — PETER NEVER TELLS US HIS RESOLUTION ("inkwave should detect that") ───────────────
+// Exported + PURE so the gate can be tested at every device class without a browser. The old rung
+// choice was `coarse || innerWidth < 900` and nothing else: under cover-fit either clip stretched
+// to fill anything, so the viewport's SIZE genuinely did not matter. Under crop it is the whole
+// question — a design box that does not cover the viewport has no pattern to crop from.
+//
+// THE RULE: the SMALLEST rung of the right device class whose design box covers the viewport in
+// BOTH axes. Smallest-that-covers is what keeps a 1280×800 laptop off `wide`'s bytes. Nothing
+// covers it ⇒ null ⇒ CSS water. It NEVER returns a rung that must be stretched: that is the bug
+// this ladder exists to fix, and silently reintroducing it is worse than not playing at all.
+//
+// `coarse` IS A PARAMETER, not a `matchMedia` read inside the function — and the first reason is a
+// bug these tests caught on their first run: under vitest's node environment there is no `window`,
+// so an internal read returns `false` for every case and the ENTIRE touch half of the suite becomes
+// a silent second copy of the desktop half — passing, and proving nothing. (waveVideo.test.ts's
+// "the stub discriminates" check is what surfaced it.) Second: the device class is an INPUT to this
+// decision, so a function that reaches out for it is not the pure rule it claims to be.
+//
+// THE DEVICE CLASS IS A HARD PARTITION, not a preference. `phone` is captured under the app's PHONE
+// CSS (compact 32px page margins, the ×1.25 font rule, in-flow surfaces) and `desk`/`wide` under
+// desktop CSS. They are pictures of two different waters. So a coarse device is NEVER offered a
+// desk clip — not even a landscape iPad, whose viewport `desk` would happily cover.
+//
+// ⚠️ DPR IS DETECTED AND REPORTED, BUT IT DOES NOT SELECT — and saying so is the honest version.
+// Peter's ask is "detect viewport x DPR at runtime… I shouldn't have to give the res of my
+// desktop", and both halves ARE read at runtime (`planClip` → `diag.viewport`, `dpiRatio`). But
+// selection is a CHOICE, and DPR can only make one where two rungs of the same device class differ
+// in `dsf` — this ladder has no such pair, because Peter's ceiling ("full hd. Or even 720p") is
+// exactly what rules out the retina desk clip that would create one. A `dpr` parameter here would
+// be a number the function reads and cannot act on: an instrument reporting a decision it never
+// makes. WHEN a dsf variant is added, this is the function that gains the argument.
+// What DPR would otherwise be for — refusing a rung delivering under 1 clip px per device px — is
+// deliberately NOT done. A 440-CSS phone at DPR 3 asks 1320 device px of an 880px clip: still a
+// CROP (the tile is 140 CSS px, so the hand-off stays exact) and merely SOFT, which is inside
+// Peter's stated budget. Refusing it would drop every modern iPhone to CSS water — trading a PROVED
+// bug (the 12.5% tile jump) for a guess about crispness nobody has measured on a device.
+//
+// ⚠️ STATED CEILING, found by these tests rather than reasoned about: an iPad in PORTRAIT
+// (820×1180) matches no rung. `phone` (440×956) cannot cover it and the desk clips are landscape —
+// 1080 < 1180, so `desk` fails on HEIGHT even ignoring the partition. It gets CSS water. Deliberate:
+// the alternative is an iPad rung nobody asked for, on a device Peter does not test, for a load
+// animation whose fallback is already correct.
+export function pickRung(vw: number, vh: number, coarse: boolean): Rung | null {
+  const fits = RUNGS.filter((r) => r.coarse === coarse && r.cssW >= vw && r.cssH >= vh)
+  if (!fits.length) return null
+  // Smallest by area — the ladder is ordered, but sort so a future rung cannot be mis-ranked by
+  // where someone happened to paste it.
+  return fits.slice().sort((a, b) => a.cssW * a.cssH - b.cssW * b.cssH)[0]
 }
+
+// The dpi the chosen rung actually delivers, for the overlay. `1` = one clip pixel per device
+// pixel. Reported, never enforced — see the note above.
+function dpiRatio(r: Rung, dpr: number): number { return r.dsf / dpr }
 
 let started = false
 
@@ -132,19 +306,28 @@ export function prepareWaveVideo(): Promise<void> {
   })
 }
 
-type Clip = { loopUrl: string; brakeUrl: string }
+type Clip = { loopUrl: string; brakeUrl: string; rung: Rung }
 
 // DOM-FREE. Everything here is a capability query or a string.
 function planClip(): Clip | null {
   const codec = pickCodec()
   diag.codec = codec ?? 'NONE'
   if (!codec) { bail('no decodable codec (no av01, no avc1) → CSS water'); return null }
-  const rung = pickRung()
+  // Peter never tells us his resolution — we ask the browser, every load.
+  const vw = window.innerWidth, vh = window.innerHeight, dpr = window.devicePixelRatio || 1
+  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false
+  diag.viewport = `${vw}x${vh} dpr${dpr} ${coarse ? 'coarse' : 'fine'}`
+  const rung = pickRung(vw, vh, coarse)
+  if (!rung) {
+    bail(`viewport ${vw}x${vh} (${coarse ? 'coarse' : 'fine'}) is past the ladder → CSS water`)
+    return null
+  }
   const theme = document.documentElement.dataset.theme === 'night' ? 'night' : 'day'
-  diag.rung = rung.name; diag.theme = theme
+  diag.rung = `${rung.name} ${rung.cssW}x${rung.cssH}css @dsf${rung.dsf} (dpi ${dpiRatio(rung, dpr).toFixed(2)}x)`
+  diag.theme = theme
   const base = `/wave/${rung.name}.${theme}.${codec}`
   diag.clip = `${base}.mp4`
-  return { loopUrl: `${base}.mp4`, brakeUrl: `${base}.brake.mp4` }
+  return { loopUrl: `${base}.mp4`, brakeUrl: `${base}.brake.mp4`, rung }
 }
 
 // The warm fetch the SW's /wave/ handler was written to receive ("non-Range GET (our warm fetch…)"):
@@ -166,7 +349,7 @@ async function run(clip: Clip): Promise<void> {
   // when it can Range-request the moov atom; a blob URL cannot be ranged → readyState stuck at 0
   // (Peter's overlay: fetch 200, readyState 0, decode timeout). The SW serves /wave/ cache-first
   // WITH 206 Range, so a direct URL is still one fetch + cached, and iOS can seek the metadata.
-  const video = mkVideo()
+  const video = mkVideo(clip.rung)
   video.loop = true
   video.src = loopUrl
 
@@ -229,10 +412,15 @@ async function run(clip: Clip): Promise<void> {
 
   video.play().then(() => {
     video.style.opacity = '1' // THE loop was invisible: CSS defaults .iw-wave-video-el to opacity 0
+    // ONE swap, this order: -on goes on before -wait comes off, so the white and the video never
+    // both let the CSS water through for a frame. Both are classes on <html> = a single recalc.
     document.documentElement.classList.add('iw-wave-video-on')
+    endWait()
     diag.master = true; masterEver = true
     diag.reason = 'VIDEO is master'
-    wireSettle(video, brakeUrl)
+    diag.loop = 'playing — waiting for the wrap'
+    releaseAtLoopPoint(video) // the document may not reveal until this video has looped once
+    wireSettle(video, brakeUrl, clip.rung)
   }).catch((e) => {
     bail(`autoplay-blocked (${String(e).slice(0, 50)}) → CSS water`)
     teardown(video)
@@ -272,8 +460,15 @@ function guardMaster(host: HTMLElement): void {
   if (host.parentElement) mo.observe(host.parentElement, { childList: true })
 }
 
-function mkVideo(): HTMLVideoElement {
+// THE CROP, in two lines: the element is the clip's DESIGN CSS BOX and nothing else. `object-fit:
+// fill` (index.css) then maps the clip's pixels onto it with no scaling of its own, so a 140px wave
+// tile in the clip is 140 CSS px on screen at EVERY viewport, and the viewport crops the overflow.
+// The size MUST be written here rather than in CSS: it is a per-rung fact, and the whole point of
+// the ladder is that different devices get different design boxes.
+function mkVideo(rung: Rung): HTMLVideoElement {
   const v = document.createElement('video')
+  v.style.width = `${rung.cssW}px`
+  v.style.height = `${rung.cssH}px`
   // iOS inline autoplay REQUIRES muted + playsinline, as BOTH property and attribute.
   v.muted = true; v.defaultMuted = true
   v.autoplay = true; v.preload = 'auto'; v.playsInline = true
@@ -304,12 +499,12 @@ function teardown(v: HTMLVideoElement | null, delay = 0): void {
 }
 
 // ── SETTLE: phase-0 loop→brake swap on the media pipeline, then hand to the CSS water at rest ──
-function wireSettle(loop: HTMLVideoElement, brakeUrl: string): void {
+function wireSettle(loop: HTMLVideoElement, brakeUrl: string, rung: Rung): void {
   let done = false
   // PRELOAD the brake now (direct URL, in-DOM, invisible, guarded) so it's decoded before SETTLE —
   // on iOS a brake created at swap-time would stall exactly like the loop did. Attaching it as a
   // sibling of the loop in the same host means the guard/host logic covers it too.
-  const brake = mkVideo()
+  const brake = mkVideo(rung)
   brake.loop = false
   brake.src = brakeUrl
   brake.style.opacity = '0'
@@ -325,6 +520,11 @@ function wireSettle(loop: HTMLVideoElement, brakeUrl: string): void {
     window.removeEventListener('resize', onAbort)
     document.removeEventListener('visibilitychange', onVis)
     document.documentElement.classList.remove('iw-wave-video-on') // CSS water back (at its own rest)
+    endWait()
+    // The abort paths (open-begin / resize / an error / the tab hiding) land here and can outrun
+    // the wrap. Release, or the reveal gate would sit waiting on a loop from a video we just tore
+    // down — the delay is a courtesy to the animation, never a dependency of the document.
+    releaseLoop('released at settle — the load ended before the wrap')
     diag.master = false; diag.reason = 'handed back to CSS water (rest)'
     loop.style.opacity = '0'
     teardown(loop, fadeMs + 40)
@@ -431,9 +631,12 @@ function mountOverlay(): void {
     box.innerHTML = `${head}
 build     ${__BUILD_COMMIT__}
 flag      ${diag.flag}
-codec     ${diag.codec}   rung ${diag.rung}/${diag.theme}
+viewport  ${diag.viewport}
+codec     ${diag.codec}   theme ${diag.theme}
+rung      ${diag.rung}
 clip      ${diag.clip}
 fetch     ${diag.fetch}
+loop-gate ${diag.loop}
 readyState ${diag.ready} ${diag.ready >= 2 ? '(decoded)' : '(NOT decoded)'}
 advancing ${diag.advancing ? 'YES (real decode)' : 'NO (frozen/none)'}
 painted   ${p.ok ? `YES (${p.why})` : `NO — ${p.why}`}

@@ -1627,7 +1627,38 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // (bulletproof cap; reveal is idempotent).
       revealTimer = setTimeout(reveal, 1500)
     }
-    const cap = setTimeout(finish, 1200)
+    // ── THE DELIBERATE DELAY (Peter, 2026-07-17: "make it show at least one loop before the file
+    // comes up. purposefully delay it. (And use that time to warm up the document)") ────────────
+    // "Warm up the document" needs NO code of its own: fonts.ready, the first pagination measure
+    // and the editor's own mount are ALREADY running through this window. The delay just stops the
+    // reveal cutting them short — the warm-up is what the load was doing anyway, given room.
+    //
+    // THE FLAG IS READ INLINE, never imported from waveVideo: importing a helper to decide whether
+    // to wait would pull the whole video module into the editor bundle on every load and make "off
+    // costs nothing" false (the reason btDebug/textRender read their flags inline, below).
+    // OFF ⇒ `waveLooped` is an already-resolved promise and this gate is byte-for-byte the old one.
+    let waveVideoOn = false
+    try { const v = localStorage.getItem('inkwave:waveVideo'); waveVideoOn = v === '1' || v === 'debug' } catch { /* private mode */ }
+    // ASK, THEN SUBSCRIBE, in ONE synchronous block — the video can loop before we get here, and a
+    // bare addEventListener would then wait for an event already in the past, forever. waveVideo
+    // fires this on EVERY exit (wrap, bail, decode timeout, autoplay refusal, settle), so it is a
+    // signal that always arrives.
+    //
+    // AND IT IS CAPPED HERE, INDEPENDENTLY. That guarantee only holds if the MODULE LOADED — a
+    // chunk 404 or a parse error fires nothing, and the failure mode would be a document that never
+    // appears. The document must never depend on the animation succeeding.
+    const waveLooped: Promise<void> = !waveVideoOn
+      ? Promise.resolve()
+      : new Promise<void>((res) => {
+          if ((window as unknown as { __iwWaveVideoLoopDone?: boolean }).__iwWaveVideoLoopDone) { res(); return }
+          const on = () => { window.removeEventListener('inkwave:wave-video-loop', on); res() }
+          window.addEventListener('inkwave:wave-video-loop', on)
+          setTimeout(() => { console.warn('[inkwave] wave video never reported a loop — revealing anyway'); on() }, 7000)
+        })
+    // The 1200ms safety cap predates the video and would fire straight through a ~2s loop, undoing
+    // the delay on every load. With the video ON it becomes the loop gate's own backstop (7s) plus
+    // the old margin; with it OFF the constant is untouched.
+    const cap = setTimeout(finish, waveVideoOn ? 8200 : 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
     // The pagination extension measures in BOTH page modes now (gap widgets / break markers), so
     // always wait for its first measure — the 1.2s cap covers any mode where it never fires.
@@ -1638,7 +1669,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
             window.addEventListener('inkwave:pagination-ready', on)
           })
-    void Promise.all([fontsReady, paginationReady]).then(() =>
+    void Promise.all([fontsReady, paginationReady, waveLooped]).then(() =>
       requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
     )
     return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }

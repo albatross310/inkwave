@@ -26,11 +26,12 @@
 // instrument cannot recover 140 from the CSS water, nothing it says about the video counts.
 //
 // MODES:
-//   --mode cover  (default) the SHIPPED styling: width:100vw/height:100lvh + object-fit:cover.
-//   --mode crop             Peter's proposal: element sized to the clip's DESIGN CSS box, the
-//                           viewport crops the overflow. Applied at runtime — this probe changes
-//                           no product code, it measures whether the design is sound before anyone
-//                           commits to the bytes.
+//   --mode crop   (default) the SHIPPED styling: element sized to the rung's DESIGN CSS box +
+//                           object-fit:fill (waveVideo.ts + index.css). Injects NOTHING.
+//   --mode cover            the COUNTERFACTUAL: re-creates the RETIRED bug (100vw/100lvh +
+//                           object-fit:cover) at runtime, so the measurement has a known-positive
+//                           to discriminate against. If `cover` does NOT reproduce a mismatch, the
+//                           instrument is blind and `crop`'s 0.0% means nothing.
 //
 // DPI, STATED: today's desk clip is captured at dsf:1, so crop-mode here proves the SCALE invariant
 // only. Peter's "preserve dpi" needs the clip authored at design CSS x DPR (tiles at 140xDPR) with
@@ -45,11 +46,15 @@ const args = process.argv.slice(2)
 const port = Number(args[args.indexOf('--port') + 1]) || 4325
 const W = Number(args[args.indexOf('--width') + 1]) || 1280
 const H = Number(args[args.indexOf('--height') + 1]) || 800
-const MODE = args.indexOf('--mode') >= 0 ? args[args.indexOf('--mode') + 1] : 'cover'
+const MODE = args.indexOf('--mode') >= 0 ? args[args.indexOf('--mode') + 1] : 'crop'
 const BASE = `http://127.0.0.1:${port}`
 
 // The desk clip's capture geometry (generate.mjs LADDER) — its DESIGN CSS box.
-const DESIGN = { w: 1280, h: 800 }
+// The desk rung's DESIGN CSS BOX — must mirror RUNGS in src/editor/waveVideo.ts (`desk`).
+// Was 1280x800 when this probe was written against the cover-fit ladder; the crop ladder raised it
+// to FULL HD (Peter: "Why don't we just do full hd. Or even 720p") because a 1280 design box has
+// nothing to crop from on a 1440- or 1920-wide desktop.
+const DESIGN = { w: 1920, h: 1080 }
 const CSS_TILE = 140 // the known truth: index.css's wave tile, at every viewport
 
 // ── The extractor: autocorrelation of a detrended luminance column ──
@@ -169,13 +174,15 @@ await ctx.addInitScript(() => { try { localStorage.setItem('inkwave:waveVideo', 
 const page = await ctx.newPage()
 await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
 
-if (MODE === 'crop') {
-  // PETER'S PROPOSAL, applied at runtime: size the element to the clip's DESIGN CSS box and let the
-  // viewport crop the overflow. object-fit:fill maps the clip's pixels 1:1 onto that box, so the
-  // tiles land at exactly the CSS px they were authored at — at ANY viewport, which is the point.
-  // (`none` would do the same HERE only because this clip is dsf:1 and intrinsic == design; with a
-  // dsf:2 clip `none` would render 1 video px per CSS px = 2x too big. Hence `fill` + explicit box.)
-  await page.addStyleTag({ content: `.iw-wave-video-el{width:${DESIGN.w}px!important;height:${DESIGN.h}px!important;object-fit:fill!important;}` })
+// ⚠️ THE MODES SWAPPED MEANING WHEN THE CROP SHIPPED (2026-07-17). `crop` WAS the proposal, applied
+// here as a runtime override against a `cover` build; it is now THE SHIPPED STYLING (waveVideo.ts
+// sizes the element to the rung's design box; index.css says object-fit:fill), so `crop` must
+// inject NOTHING — it measures the real thing, which is the only way this probe can ever catch a
+// regression in it. `cover` is now the COUNTERFACTUAL: it re-creates the retired bug so the
+// measurement has a known-positive to discriminate against. A probe that injects the behaviour it
+// claims to verify proves the injection works, not the product.
+if (MODE === 'cover') {
+  await page.addStyleTag({ content: '.iw-wave-video-el{width:100vw!important;height:100lvh!important;object-fit:cover!important;}' })
 }
 
 let master = false
