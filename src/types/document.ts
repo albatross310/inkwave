@@ -160,6 +160,48 @@ export interface MusicAttachments {
 
 export type SchemaVersion = '0.1.0'
 
+// ─── Goals and plan (spec §A5b, 2026-07-17) ───────────────────────────────────
+// Peter: "each doc has the writers goals in it and a rough plan — and the AI's prompts need to
+// include the goals so it can give users a kick up the butt if they're not meeting their goals."
+//
+// WHY THIS LIVES ON THE DOCUMENT, and why that matters more than it looks: §A5b says "stored on
+// the document, like any other content", and it is the DOCUMENT's property — what this document
+// is for. Declared HERE, once, for the same reason `DocType` is (see its note): two lanes writing
+// identical shapes in parallel is not harmless, and the productivity/AI-report lane reads goals
+// rather than owning them.
+//
+// WHAT THEY ARE FOR — the whole of §A5's reversal rests on this type existing. The tone rule was
+// reversed on 2026-07-17 (honest first, funny second, kind third), and the ONLY thing separating
+// that from productivity guilt is the distinction §A5 draws: guilt is a standard IMPOSED on the
+// writer; accountability is a goal the writer SET. "You only managed 200 words, poor effort" is
+// imposed and still banned. "You said you'd finish the lit review by Friday and you've opened it
+// twice" is the writer's own words quoted back, and is the point. So a goal is what gives the
+// report STANDING to push — and §A5b's honesty boundary is the corollary: with no goal set, the
+// report must not invent a standard to measure against. No goal ⇒ describe, don't push.
+//
+// The report path enforces that boundary structurally rather than by asking: goals travel only on
+// their own consent tick, so a model that was sent no goal has nothing to hold the writer to and
+// is told so explicitly (see productivity/report/compile.ts + prompt.ts).
+//
+// ⚠ NOT YET AUTHORABLE. Nothing writes this field: the editor UI for setting a goal is a design
+// question Peter owns and has not answered (raised 2026-07-17). Until it exists, every document's
+// goals are `undefined`, which the report path handles as the honest "no goal ⇒ describe, don't
+// push" case rather than as an error. Do NOT default it to an empty goal — an empty goal and no
+// goal are different states, and only the second is honest about itself.
+export interface DocGoals {
+  /** What this document is for and what "done" looks like. The writer's words, never generated. */
+  goal?: string
+  /**
+   * A rough plan — milestones, rough dates. DELIBERATELY INFORMAL (§A5b: "a plan nobody writes is
+   * worse than a vague one"), so it is free text and not a structured milestone list. Do not
+   * "upgrade" it to a schema of dates without asking: the moment it needs to be filled in
+   * properly, it stops being written at all, and then there is nothing to be accountable to.
+   */
+  plan?: string
+  /** ISO 8601 — when the writer last touched their goal/plan. Display only; never a deadline. */
+  updatedAt?: string
+}
+
 // ─── Primary document model ───────────────────────────────────────────────────
 // Typography (font / size / alignment) is stored per-selection as ProseMirror marks
 // inside contentJson, so it persists with the content — no separate field needed.
@@ -172,6 +214,11 @@ export interface InkwaveDocument {
   updatedAt: string                // ISO 8601
   schemaVersion: SchemaVersion
   scasLimitN: number | 'infinite'  // active SCAS vocabulary cap (Week 2 — old per-paragraph model)
+  /**
+   * §A5b — the writer's goal + rough plan for THIS document. Optional and absent by default; see
+   * DocGoals. Absent ⇒ the AI report describes and does not push (§A5b's honesty boundary).
+   */
+  goals?: DocGoals
   scasSessionSeed: string          // deterministic-per-document ranking seed (Week 2)
 
   // ─── SCAS v2 / provenance spine (M0+) ──────────────────────────────────────

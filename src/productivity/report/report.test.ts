@@ -22,12 +22,12 @@ like. Thursday you didn't write, and Friday was a lighter, editing-shaped day.
 Across the week you tended to do your adding early and your cutting late.
 
 \`\`\`csv
-day,phase,effort,momentum,note
-2026-07-06,deep,steady,building,"a full morning on the seminar paper"
-2026-07-07,shallow,light,easing,"a short evening, mostly cutting"
-2026-07-08,deep,intense,building,the week's strongest stretch
-2026-07-09,unclear,unclear,holding,a day away from it
-2026-07-10,shallow,steady,easing,editing rather than drafting
+day,phase,effort,momentum,character,note
+2026-07-06,deep,steady,building,steady,"a full morning on the seminar paper"
+2026-07-07,shallow,light,easing,grind,"a short evening, mostly cutting"
+2026-07-08,deep,intense,building,breakthrough,the week's strongest stretch
+2026-07-09,unclear,unclear,holding,away,a day away from it
+2026-07-10,shallow,steady,easing,scattered,editing rather than drafting
 \`\`\``
 
 describe('the happy path', () => {
@@ -87,7 +87,7 @@ describe('§A6.4 — the measured numbers are the fixture\'s, not the model\'s',
   })
 
   it('an unjudged row exports as blank, never as zero', () => {
-    const partial = GOOD_REPLY.replace(/2026-07-09,unclear,unclear,holding,a day away from it\n/, '')
+    const partial = GOOD_REPLY.replace(/2026-07-09,unclear,unclear,holding,away,a day away from it\n/, '')
     const parsed = parseReply(partial, { agg: weekly, payload })
     const row = toCsv(parsed.merged!).split('\n').find(l => l.startsWith('2026-07-09'))!
     expect(row.endsWith(',,,,')).toBe(true)
@@ -127,14 +127,14 @@ s-3,shallow,light,a few lines in the journal
 
   it('merges per-session for a daily window', () => {
     const parsed = parseReply(dailyReply, { agg: daily, payload: dailyPayload })
-    expect(parsed.merged!.rows.map(r => r.key)).toEqual(['s-1', 's-2', 's-3'])
+    expect(parsed.merged!.rows.map(r => r.key)).toEqual(['s-1', 's-2', 's-4', 's-3'])
     expect(parsed.merged!.rows[0].measured.active_minutes).toBe(45)
   })
 })
 
 describe('§A9 — graceful failure never loses the writer\'s reply', () => {
   it('keeps the narrative when the table is unreadable', () => {
-    const broken = GOOD_REPLY.replace('day,phase,effort,momentum,note', 'day,vibe')
+    const broken = GOOD_REPLY.replace('day,phase,effort,momentum,character,note', 'day,vibe')
     const parsed = parseReply(broken, { agg: weekly, payload })
     expect(parsed.judged.ok).toBe(false)
     expect(parsed.merged).toBeNull()
@@ -190,7 +190,9 @@ describe('the downloads', () => {
 
 describe('merge', () => {
   it('asks about sessions on daily and days on weekly', () => {
-    expect(expectedKeys(fixtureWindow('daily'))).toEqual(['s-1', 's-2', 's-3'])
+    // s-4 is the fixture's honest-gap session (no snapshot boundary) — it is still a session and
+    // must still be judged, or the model silently stops seeing a quarter of the day.
+    expect(expectedKeys(fixtureWindow('daily'))).toEqual(['s-1', 's-2', 's-4', 's-3'])
     expect(expectedKeys(weekly)).toEqual(['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10'])
   })
 

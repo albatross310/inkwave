@@ -278,11 +278,26 @@ describe('the writer\'s opted-in notes survive the ledger→report seam at EVERY
     it(`carries the note at ${window} when the writer opts in`, async () => {
       await ledgerWithANote()
       const agg = (await M.loadWindowFromLedger(window, '2026-07-17'))!
-      const payload = M.compilePayload({ agg, includeNotes: true })
+      // Notes and places are SEPARATE ticks (Peter, 2026-07-17) — opt into both here; the
+      // independence of the two is pinned in report/compile.test.ts.
+      const payload = M.compilePayload({ agg, includeNotes: true, includePlaces: true })
 
       expect(payload.notesIncluded).toBe(true)
+      expect(payload.placesIncluded).toBe(true)
       expect(payload.data).toContain('Wrote the supervisor note at last.')
       expect(payload.data).toContain('library')
+    })
+
+    it(`carries the note but NOT the place at ${window} with only the notes tick`, async () => {
+      // The seam-level proof of the split: the ledger→report path must honour each tick on its
+      // own, not just the pure compile step.
+      await ledgerWithANote()
+      const agg = (await M.loadWindowFromLedger(window, '2026-07-17'))!
+      const payload = M.compilePayload({ agg, includeNotes: true })
+      expect(payload.notesIncluded).toBe(true)
+      expect(payload.placesIncluded).toBe(false)
+      expect(payload.data).toContain('Wrote the supervisor note at last.')
+      expect(payload.data).not.toContain('library')
     })
 
     it(`does NOT carry the note at ${window} without the opt-in (§A7.3)`, async () => {
@@ -293,7 +308,9 @@ describe('the writer\'s opted-in notes survive the ledger→report seam at EVERY
       const agg = (await M.loadWindowFromLedger(window, '2026-07-17'))!
       const payload = M.compilePayload({ agg })
       expect(payload.notesIncluded).toBe(false)
+      expect(payload.placesIncluded).toBe(false)
       expect(payload.data).not.toContain('Wrote the supervisor note at last.')
+      expect(payload.data).not.toContain('library')
     })
   }
 

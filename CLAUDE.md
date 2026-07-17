@@ -1050,34 +1050,80 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
 
-`src/productivity/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in their own
-AI and pastes the reply back, Inkwave parses + merges + graphs client-side. Inkwave sends nothing; no
-account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) are NOT built.
+`src/productivity/report/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in
+their own AI and pastes the reply back, Inkwave parses + merges + graphs client-side. Inkwave sends
+nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) NOT built.
 
-- **THE RULE (§A6.4): measured numbers never round-trip.** They go OUT (the model can't narrate what
-  it can't see) but must never come BACK — Inkwave graphs its own. Enforced, not just asked for:
-  `judged.ts` REFUSES a judged table carrying any measured column, and `claims.ts` flags narrative
-  numerals absent from the payload. PROBED: empty MEASURED_COLUMNS and a measured table is STILL
-  refused (exact-header rule) — two independent guards; the list supplies the diagnosis.
-- **A prompt is a request, not a guarantee.** §A6.2 (daily = descriptive recap; pattern/causal claims
-  weekly+) and §A5/§C3 (kind, non-shaming) are in the fixed prompt AND enforced client-side:
-  `findCausalClaims` flags cause/pattern markers on DAILY replies. It flags, never rewrites (§A9).
-- **Three consent tiers on the export screen** (Peter, 2026-07-17): session metadata always · place
-  labels + diary notes OPT-IN OFF (they are the writer's prose — without this tier "metadata only"
-  silently means "and what I wrote about my day") · per-document text OPT-IN OFF, per document
-  (§A7.3). **`place` is a word the writer TYPES — no geolocation, no coordinates, no permission
-  prompt. Never write copy implying Inkwave knows where you are (§C1.4).**
-- **The payload is an ALLOW-LIST** (compile.ts names every field that leaves), so a field the ledger
-  gains later cannot leak by riding along — it is simply not emitted until someone picks a tier for
-  it. A deny-list would fail the other way, silently. Tested.
-- **Seams, not forks:** `types.ts` WAS a type-mirror of §A3.2/§A3.3 — the mirrors are GONE (see the
-  integration section below); it is now the real schema, and `source.ts` is the one function
-  `feat/prod-ledger` fills in (via `installSource.ts`); `?prodReport=demo` installs labelled synthetic
-  fixtures so the path is drivable meanwhile. The measured CHART is prod-graphs' — the bars here are
-  an interim read of the same rollups; the judged overlay stays whatever replaces them.
-- `/privacy` has a "Your work report" section naming all three tiers — keep it in sync with the code.
-- 96 tests. Every guard is mutation-proved to FIRE (invert it → tests fail). Watch the vacuous-loop
-  trap: the per-column rejection loop passed on an EMPTY list until a non-empty assertion was added.
+- **⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
+  *"it's too nice and not enough humour… read like a comedian wrote it"* / *"It doesn't need to be
+  kind. It needs to be honest."* Do NOT restore the kind/non-shaming rule from an earlier draft; a
+  test asserts it is GONE. **What makes the reversal safe is §A5's surviving distinction, and it is
+  the whole thing: PRODUCTIVITY GUILT IS A STANDARD IMPOSED ON THE WRITER; ACCOUNTABILITY IS A GOAL
+  THE WRITER SET (§A5b).** "You only managed 200 words, poor effort" is imposed and banned. "You
+  said Friday and you've opened it twice" is his own words quoted back, and is the point.
+- **§A5b GOALS ARE THE PRECONDITION, NOT A FOLLOW-UP.** `DocGoals` on `InkwaveDocument`
+  (types/document.ts — a document property, declared once, the `DocType` precedent). No goal ⇒ the
+  prompt says NO GOALS WERE SHARED / DESCRIBE, DO NOT PUSH. **Structural, not asked:** goals travel
+  only on their own tick, so a model sent none has nothing to hold him to. ⚠ **NOTHING AUTHORS
+  GOALS YET** — no editor UI (Peter's design call, raised). Every doc is `undefined` today, which
+  takes the honest branch. Never default it to an empty goal: empty and absent are different states.
+- **THE GUILT LIST WAS RE-DERIVED, NOT DELETED.** The old prompt banned words ("only", "just",
+  "failed to"…) — most are now exactly right when quoting a missed goal. The rule is about the
+  SUBJECT and the STANDARD, not vocabulary: `claims.ts findPersonVerdicts` flags only what can never
+  be said about a Tuesday (lazy/pathetic/…, plus ranking + comparison to other people); "wasted" is
+  deliberately NOT on it ("you wasted three sessions circling the intro" is about the sessions).
+  Quoted spans are skipped — the narrative may quote his own diary note back.
+- **THE RULE (§A6.4): measured numbers never round-trip.** Out yes (the model can't narrate what it
+  can't see), back never. `judged.ts` REFUSES a judged table carrying any measured column;
+  `claims.ts` flags narrative numerals absent from the payload. PROBED: empty MEASURED_COLUMNS and a
+  measured table is STILL refused (exact-header rule) — two guards; the list supplies the diagnosis.
+- **§A6.1 — "which sessions produced your best content" REQUIRES content.** You cannot judge writing
+  from minutes and word counts; that is vibes-as-numbers wearing a judged label. So `insight`/
+  `quality` (CONTENT_ONLY_COLUMNS) are asked for ONLY when text was sent and **REFUSED** otherwise,
+  with a message saying to tick a document. `contentIncluded` defaults FALSE so a caller that forgets
+  it refuses a guess rather than accepts one. Weekly+ has no quality column at all — the ledger sends
+  `sessions: []` there, so nothing grounds a per-day verdict.
+- **THE LEDGER+DOC COMBO (`report/excerpts.ts`)** — Peter's "structured ledger+doc combo data". Each
+  session paired with the prose it produced, **from the snapshot record, exactly**: baseline = last
+  snapshot ≤ session start, final = last ≤ end, diff the adds. DAILY only (the `sessions: []`
+  contract makes per-session pairing structurally impossible at weekly+, and §A7.3 agrees content
+  belongs on daily). §A7.3 gates every word — ticked docs only. **THE `diffWords` ARTIFACT BIT HERE
+  TOO:** it tokenises [word][trailing-whitespace], so appending re-emits the OLD last token as
+  del+add and a naive `filter(type==='add')` credits the session with the sentence before it
+  (measured — the first cut did exactly that). `capture.ts wordDiffStats` hit the same thing but
+  CANNOT be reused: it normalises for COUNTING (strips punctuation/paragraphs). Same insight, other
+  purpose. Honest limits, all surfaced in the payload: snapshots are event-triggered so a real
+  session may have none (says so — a gap in the RECORD, not the writer doing nothing); pairing is by
+  the writer's LOCAL CLOCK (ordering only, never authority — not a provenance claim); a wide baseline
+  is labelled. The demo carries `s-4` deliberately to SHOW the gap state.
+- **§A6.2 — daily now DESCRIBES co-occurrence, briefly** (Peter: *"I want correlations on daily too.
+  Just more brief"*). The honest form: what co-occurred TODAY is a true statement about today; why it
+  happened is not knowable from one day. So the prompt ASKS for the pairing and REFUSES the
+  explanation; `findCausalClaims` still fires on cause + generalisation only ("after your 3pm break
+  you wrote for forty minutes" trips nothing; "the break helped" does).
+- **FIVE consent tiers** (metadata always · diary notes · **place labels, SEPARATE** · goals+plan ·
+  per-document content). Peter split notes from places: one tier by provenance, two very different
+  disclosures. Each absence is STATED in the prompt — a model told only what it HAS will fill the
+  gap, and "you didn't record where you worked" is a claim we'd be inventing. **`place` is a word the
+  writer TYPES — no geolocation. Never write copy implying otherwise (§C1.4).**
+- **The payload is an ALLOW-LIST** (compile.ts names every field that leaves) so a field the ledger
+  gains later cannot ride out. A deny-list fails the other way, silently. Tested.
+- **TWO PROVIDERS, free on Path 1** (he runs it himself). No Claude-isms: the parser is tested
+  against tagged/untagged/uppercase/tilde/4-backtick fences, prose wrappers, pipe tables, and BARE
+  unfenced CSV (`allowUnfenced` — what a copy-code button yields, used only by the dedicated table
+  box). Path 2 multi-provider is a real cost — NOT built.
+- **The panel type ramp has ONE root** (`PANEL_ROOT_PX = 18`, everything an `em` of it) — Peter:
+  "every font proportionally up", scrolling acceptable. Inputs land ≥16px (the iOS auto-zoom floor).
+- `/privacy` has a "Your work report" section naming the tiers — keep it in sync with the code.
+- ~142 report tests. Every guard mutation-proved to FIRE. `scripts/prodreport.prove.mjs` drives the
+  REAL built app 51/51 (own port 4933). **THREE INSTRUMENT TRAPS caught there, all the house
+  speciality:** (1) it served a STALE `build/` and reported a real feature missing — rebuild before
+  reading a verdict; (2) every section heading appears TWICE (the prompt explains it, the data
+  carries it), so `payload.includes('WHAT EACH SESSION PRODUCED')` is true whenever the PROMPT
+  mentions it — four excerpt checks passed with the feature SUPPRESSED until they were scoped to the
+  data section, proved by suppressing it; (3) the excerpt prose also appears in DOCUMENT TEXT, so an
+  unscoped prose check cannot discriminate either.
+
 ## Productivity layer — P1a-viz: aggregates + graphs (2026-07-17, `feat/prod-graphs`)
 
 The read half of the productivity layer (build-spec §A3.3/§A8, the private Productivity-Email spec —
