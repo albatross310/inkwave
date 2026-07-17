@@ -90,6 +90,47 @@ export function planWriteback(read: ArchiveRead, local: Snapshot[]): WritebackPl
   return { write: true, snapshots: mergeSnapshots(read.snapshots, local) }
 }
 
+/**
+ * The remote parsed — but is it an INKWAVE RECORD? PURE, and the third half of the read (2026-07-17).
+ *
+ * ⚠ PROBED, AND IT WAS A LIVE HOLE IN ALL THREE PROVIDERS. Each one ended its read with:
+ *
+ *     const remote = await parseTraceOffThread(text)
+ *     return { status: 'ok', snapshots: remote.snapshots ?? [] }
+ *
+ * `parseTraceFile` is `JSON.parse` with a marker-anchored slice and NO shape check, so it happily
+ * returns a string, a number, `true`, or an array for a body that is valid JSON and not a record.
+ * `.snapshots` on those is `undefined` ⇒ `?? []` ⇒ **`{ status: 'ok', snapshots: [] }`** — a remote
+ * we never established, reported as an ESTABLISHED EMPTINESS, which is the one answer that licenses
+ * `planWriteback` to overwrite. The whole module exists to keep a failure out of an absence's
+ * clothes and the last line of every adapter handed it a fresh set. (`cloudWriteback.test.ts`
+ * reproduced it: a 200 carrying `"just a string"` PUT the local set over a 4-snapshot archive.)
+ *
+ * `snapshots` being a NON-array is the same hole one field down: `?? []` passes a string straight
+ * through (it is not nullish), `mergeSnapshots` iterates its characters, every one lacks an `id`, and
+ * the union silently comes out as local-only. A truthiness check cannot see that; a type check can.
+ *
+ * THE OUTAGE DIRECTION SETS THE PREDICATE'S FLOOR, and is why this is not "reject anything odd":
+ *   - `snapshots` ABSENT is a real, healthy record — a document that has never been snapshotted, and
+ *     every pre-snapshot-era file. It MUST read as an established emptiness or those files can never
+ *     be synced to again.
+ *   - `snapshots: []` likewise.
+ * So the rule is narrow and structural: an Inkwave record is a non-null, non-array OBJECT, and its
+ * `snapshots` is an array or is not there. Nothing about a legitimate bundle can fail that, and
+ * nothing that fails it can tell us what the remote holds.
+ *
+ * @returns the archive, or `null` meaning "this is not a record" — which every caller must map to
+ *          `error`, never to `absent`. A `null` here is the ONE thing a caller could mistake for
+ *          emptiness, which is why it is not an `ArchiveRead`: the caller has to write the word.
+ */
+export function archiveSnapshotsOf(parsed: unknown): Snapshot[] | null {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const snaps = (parsed as { snapshots?: unknown }).snapshots
+  if (snaps === undefined || snaps === null) return [] // a record with no history — established, safe
+  if (!Array.isArray(snaps)) return null
+  return snaps as Snapshot[]
+}
+
 // ─── The write PRECONDITION (auditor Finding E, 2026-07-17) ──────────────────────────────────────
 // READ-MERGE-WRITE still has a gap between the read and the write. `planWriteback` above decides
 // WHETHER to write; this decides WHAT THE WRITE ASSUMED, so the server can refuse it if that

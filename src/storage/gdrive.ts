@@ -8,7 +8,7 @@ import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
 import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
-import { planWriteback, type ArchiveRead } from './archiveWriteback'
+import { planWriteback, archiveSnapshotsOf, type ArchiveRead } from './archiveWriteback'
 import { setDocSource } from './docSource'
 import { readAppJson, writeAppJson } from './opfs'
 
@@ -250,19 +250,57 @@ export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
 
 /** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
- *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now). */
+ *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now).
+ *
+ * ⚠ THIS FUNCTION WAS THE LAST LIVE INSTANCE OF THE 2026-07-15 SHAPE, AND IT WAS THE WORST PLACED
+ * (found + reproduced 2026-07-17, `cloudWriteback.test.ts`). Auditor B named it in the wrong
+ * function — `syncToGoogleDrive` does NOT do this (probed) — but the finding itself was real, and
+ * it lived here, in the IDLE WARM PASS. It read:
+ *
+ *     const text = await downloadGoogleDriveFile(fileId)   // ← `string | null`: null on 404,
+ *     if (text) { …restore… }                              //   AND on 500 / 429 / 401 / offline
+ *     markWritebackMerged(key)                             // ← RAN ANYWAY
+ *
+ * `downloadGoogleDriveFile` is the exact `catch { return null }` shape archiveWriteback.ts exists to
+ * abolish: it collapses "the file is not there" and "Drive is down" into one word. A 500 in the warm
+ * pass therefore CLOSED the once-per-session merge gate — and because that gate sits UPSTREAM of
+ * `syncToGoogleDrive`'s guard, the next checkpoint skipped `planWriteback` ENTIRELY and PUT the
+ * short local set over the remote archive. **A guarded union that is never reached guards nothing**
+ * (archiveWriteback.ts's own words). Not "it never retries" — it never even asks.
+ *
+ * PROVED: a 4-snapshot remote + a 1-snapshot local + a 500 in the warm pass ⇒ the upload carried
+ * `['s5']`. Four Bitcoin-anchored snapshots, gone, with no failure anywhere the writer could see.
+ * OneDrive's `preMergeRemote` never had it (`if (!res.ok) return` sits BEFORE its mark) — the two
+ * providers had silently drifted, which is this repo's standing wound.
+ *
+ * THE FIX IS TO REUSE THE READ THAT ALREADY REPORTS WHAT HAPPENED. `readDriveArchive` is this
+ * module's own `ArchiveRead` adapter — the same one the sync path trusts. One rule, one read, one
+ * place; a second private read of the same file is how these two drifted apart to begin with.
+ *
+ * AND THE GATE STILL CLOSES ON A GENUINE ABSENCE — this is not "delete the mark". A 404 means there
+ * is nothing to merge, so closing is correct and saves the first sync a pointless second download of
+ * a file that isn't there. Only `error` leaves it open. Guarding loss alone is how a lane ships an
+ * outage. */
 export async function preMergeGDrive(docId: string): Promise<void> {
   const key = `gdrive:${docId}`
   const fileId = driveFileId(docId)
   if (!fileId || !needsWritebackMerge(key)) return
-  try {
-    const text = await downloadGoogleDriveFile(fileId)
-    if (text) {
-      const remote = await parseTraceOffThread(text)
-      if (remote.snapshots?.length) await restoreSnapshotsFromBundle(docId, remote.snapshots)
+  const read = await readDriveArchive(fileId)
+  if (read.status === 'error') {
+    console.info(`[inkwave] Drive warm merge skipped: ${read.reason} — the next sync retries the read`)
+    return // THE LOAD-BEARING LINE: we established nothing, so the gate MUST stay open.
+  }
+  if (read.status === 'ok' && read.snapshots.length) {
+    // A restore failure must not close the gate either: the merge did not happen, so the sync's own
+    // read is still the only thing standing between a short local set and the archive.
+    try {
+      await restoreSnapshotsFromBundle(docId, read.snapshots)
+    } catch (e) {
+      console.info(`[inkwave] Drive warm merge: local restore failed (${String(e)}) — the next sync retries`)
+      return
     }
-    markWritebackMerged(key)
-  } catch { /* unreadable → the first sync retries its own merge */ }
+  }
+  markWritebackMerged(key) // 'absent' or a merged 'ok' — both are facts we established.
 }
 
 /** Cheap remote-file check: validates the silent token and returns the file's link + modified time
@@ -343,20 +381,32 @@ async function readDriveArchive(fileId: string): Promise<ArchiveRead> {
     if (!res.ok) return { status: 'error', reason: `Drive GET ${res.status}` }
     const text = await res.text()
     if (!text.trim()) return { status: 'absent' } // established emptiness, not a failure (see folder.ts)
-    const remote = await parseTraceOffThread(text)
-    return { status: 'ok', snapshots: remote.snapshots ?? [] }
+    const snapshots = archiveSnapshotsOf(await parseTraceOffThread(text)) // parsed ≠ understood
+    if (!snapshots) return { status: 'error', reason: 'the remote file is not an Inkwave record' }
+    return { status: 'ok', snapshots }
   } catch (e) {
     return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }
   }
 }
 
-export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
-  const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
-  if (!token) return null
-  const res = await fetch(`${FILES_API}/${id}?alt=media`, { headers: { Authorization: `Bearer ${token}` } })
-  if (!res.ok) return null
-  return res.text()
-}
+// ─── `downloadGoogleDriveFile` IS GONE (2026-07-17), and its absence is the point ────────────────
+// It was:
+//     export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
+//       const token = await getDriveToken(false); if (!token) return null
+//       const res = await fetch(`${FILES_API}/${id}?alt=media`, …)
+//       if (!res.ok) return null                    // ← 404, 500, 429 and 401: all one word
+//       return res.text()
+//     }
+// `preMergeGDrive` was its only caller, and that call was a live data-loss bug (see above): `null`
+// could not tell "the file is not there" from "Drive is down", so a 500 closed the merge gate and
+// the next sync PUT the short local set over the archive. The fix moved that caller onto
+// `readDriveArchive`, which left this with NO production callers — a `string | null` reader of the
+// archive, still exported, one autocomplete away from the next caller who needs a Drive file. That
+// is not dead code, it is a loaded footgun: the whole of archiveWriteback.ts exists to abolish this
+// exact signature, and leaving it would let the bug back in through the door it came through.
+// `readDriveArchive` (the `ArchiveRead` union) is how you read the archive; `downloadGoogleDriveFileBlob`
+// (below, still live) is how you read RAW BYTES for the opener — where a null honestly means "there
+// is nothing to open" and no archive can be overwritten by the answer.
 
 /** The LIVE change-tag for one file (metadata GET, no body) — the open cache verifies a cached
  *  copy against this when the picker's listing itself came from cache (a stale listing tag must
@@ -425,7 +475,16 @@ export async function syncToGoogleDrive(doc: InkwaveDocument, snapshots: Snapsho
   try {
     const webUrl = await uploadDrive(token, doc.id, gDriveFilename(doc.id) ?? bundleFilename(doc), file)
     setDocSource(doc.id, 'gdrive')
-    if (merged.length > snapshots.length) void restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
+    // NOT `void`ed, and that is load-bearing (2026-07-17). `restoreSnapshotsFromBundle` READS the
+    // local archive, and that read now THROWS on a fault instead of lying `[]` — so `void` on it is
+    // an unhandled rejection escaping a fire-and-forget shortcut, surfacing as an uncaught browser
+    // error at the exact moment storage is already misbehaving. The heal is genuinely best-effort
+    // (the remote already has the union; OPFS catching up is a bonus), so the failure is LOGGED, not
+    // thrown — the same shape `restoreSnapshotsFromBundle`'s own deferDiskWrite arm uses.
+    if (merged.length > snapshots.length) {
+      void restoreSnapshotsFromBundle(doc.id, merged)
+        .catch((err) => console.warn('[inkwave] snapshot heal after sync failed (the remote has the union):', err))
+    }
     return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }

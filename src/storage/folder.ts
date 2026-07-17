@@ -8,7 +8,7 @@ import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundleWithPdfs, bundleFilename, composeTraceFile, readStudioFile, gzipStudioText } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
 import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
-import { planWriteback, type ArchiveRead } from './archiveWriteback'
+import { planWriteback, archiveSnapshotsOf, type ArchiveRead } from './archiveWriteback'
 import { isNotFound } from './notFound'
 
 const DB_NAME = 'inkwave-folder'
@@ -178,8 +178,9 @@ export async function readFileArchive(handle: FileSystemFileHandle): Promise<Arc
     if (file.size === 0) return { status: 'absent' }
     const text = await readStudioFile(file)
     if (!text.trim()) return { status: 'absent' }
-    const existing = await parseTraceOffThread(text)
-    return { status: 'ok', snapshots: existing.snapshots ?? [] }
+    const snapshots = archiveSnapshotsOf(await parseTraceOffThread(text)) // parsed ≠ understood
+    if (!snapshots) return { status: 'error', reason: 'the target file is not an Inkwave record' }
+    return { status: 'ok', snapshots }
   } catch (e) {
     if (isNotFound(e)) return { status: 'absent' } // the file does not exist yet → a first write is safe
     return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }

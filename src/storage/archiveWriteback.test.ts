@@ -14,7 +14,7 @@
 //   (d) merging the wrong way round in a way that loses the remote's rows
 
 import { describe, it, expect } from 'vitest'
-import { planWriteback, type ArchiveRead } from './archiveWriteback'
+import { planWriteback, archiveSnapshotsOf, type ArchiveRead } from './archiveWriteback'
 import type { Snapshot } from '../types/document'
 
 const snap = (id: string, createdAt: string): Snapshot =>
@@ -95,5 +95,57 @@ describe('planWriteback — a failed read is not an empty remote', () => {
     planWriteback({ status: 'ok', snapshots: remote }, local)
     expect(local).toHaveLength(1)
     expect(remote).toHaveLength(3)
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// `archiveSnapshotsOf` — "the body parsed" is not "we know what the remote holds".
+//
+// PROBED (2026-07-17, `cloudWriteback.test.ts`): all three providers ended their read with
+// `remote.snapshots ?? []`, and `parseTraceFile` is JSON.parse with no shape check — so a 200
+// carrying `"just a string"` produced `{ status: 'ok', snapshots: [] }`, the one answer that
+// licenses planWriteback to overwrite, and the local set went over a 4-snapshot archive.
+describe('archiveSnapshotsOf — a parsed body is not an understood body', () => {
+  const S = (id: string) => ({ id, createdAt: '2026-07-17T10:00:00.000Z' }) as unknown as Snapshot
+
+  it('reads the archive out of a real record', () => {
+    expect(archiveSnapshotsOf({ v: 1, snapshots: [S('a'), S('b')] })?.map((s) => s.id)).toEqual(['a', 'b'])
+  })
+
+  // THE OUTAGE DIRECTION, and it sets the predicate's floor: a record that has never been
+  // snapshotted (and every pre-snapshot-era file) MUST read as an established emptiness, or the
+  // guard refuses to sync to it forever.
+  it('an ABSENT snapshots field is an established emptiness, not a refusal', () => {
+    expect(archiveSnapshotsOf({ v: 1, document: {} })).toEqual([])
+    expect(archiveSnapshotsOf({ v: 1, snapshots: null })).toEqual([])
+    expect(archiveSnapshotsOf({ v: 1, snapshots: [] })).toEqual([])
+  })
+
+  // THE LOSS DIRECTION. Each of these is valid JSON that `parseTraceFile` returns happily.
+  it.each([
+    ['a string', '"just a string"'],
+    ['a number', '42'],
+    ['a boolean', 'true'],
+    ['null', 'null'],
+    ['an array', '[1,2,3]'],
+  ])('REFUSES %s — it is not a record, and we established nothing', (_label, json) => {
+    expect(archiveSnapshotsOf(JSON.parse(json))).toBeNull()
+  })
+
+  // The same hole one field down, and `?? []` cannot see it: a string is not nullish, so it passes
+  // through, mergeSnapshots iterates its CHARACTERS, none has an `id`, and the union silently comes
+  // out local-only — a truncation with no error anywhere.
+  it('REFUSES a non-array snapshots field (?? [] passes a string straight through)', () => {
+    expect(archiveSnapshotsOf({ v: 1, snapshots: 'nope' })).toBeNull()
+    expect(archiveSnapshotsOf({ v: 1, snapshots: 7 })).toBeNull()
+    expect(archiveSnapshotsOf({ v: 1, snapshots: { 0: S('a') } })).toBeNull()
+  })
+
+  it('the refusal reaches planWriteback as an ERROR, never an absence (the whole point)', () => {
+    const snaps = archiveSnapshotsOf(JSON.parse('"just a string"'))
+    expect(snaps).toBeNull()
+    // What the adapters now do with it. The mistake it replaces was `{ status:'ok', snapshots: [] }`.
+    const plan = planWriteback({ status: 'error', reason: 'not an Inkwave record' }, [S('local')])
+    expect(plan.write).toBe(false)
   })
 })

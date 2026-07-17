@@ -13,7 +13,7 @@ import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
 import { parseTraceOffThread } from '../workers/parseClient'
 import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
-import { planWriteback, type ArchiveRead, type WritePrecondition } from './archiveWriteback'
+import { planWriteback, archiveSnapshotsOf, type ArchiveRead, type WritePrecondition } from './archiveWriteback'
 import { loadPdf, savePdf } from '../citations/pdfStore'
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { readAppJson, writeAppJson } from './opfs'
@@ -317,19 +317,40 @@ export async function getRemoteFileInfo(doc: InkwaveDocument): Promise<{ webUrl:
 }
 
 /** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
- *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now). */
+ *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now).
+ *
+ * THIS PASS CLOSES THE MERGE GATE, so it is a WRITE-BACK DECISION wearing a cache-warmer's clothes,
+ * and it gets the same read as the sync path. It used to run its own private `fetch` + parse — which
+ * is exactly how Drive's copy of this function drifted into a live data-loss bug (`preMergeGDrive`,
+ * fixed the same day; and it is the `daySummary` story again). The gate sits UPSTREAM of
+ * `syncToOneDrive`'s guard, so closing it on a read we did not establish means `planWriteback` is
+ * never even called and the next checkpoint PUTs the short local set unopposed.
+ *
+ * This copy's `if (!res.ok) return` was already correct for the HTTP arm — but it shared Drive's
+ * second hole: `parseTraceOffThread` returns whatever `JSON.parse` gives, so a 200 carrying valid
+ * non-record JSON left `remote.snapshots` undefined, skipped the restore, and closed the gate
+ * anyway. `readRemoteArchive` + `archiveSnapshotsOf` now decide both arms, in one place, once. */
 export async function preMergeRemote(doc: InkwaveDocument): Promise<void> {
   const key = `onedrive:${doc.id}`
   if (!CLIENT_ID || !needsWritebackMerge(key)) return
   const token = await getSilentToken()
-  if (!token) return
-  try {
-    const res = await fetch(contentUrl(stableFilename(doc)), { headers: { Authorization: `Bearer ${token}` } })
-    if (!res.ok) return
-    const remote = await parseTraceOffThread(await res.text())
-    if (remote.snapshots?.length) await restoreSnapshotsFromBundle(doc.id, remote.snapshots)
-    markWritebackMerged(key)
-  } catch { /* no remote yet → the first sync retries its own merge */ }
+  if (!token) return // no session: nothing established, gate stays open (not an error — just not yet)
+  const read = await readRemoteArchive(token, stableFilename(doc))
+  if (read.status === 'error') {
+    console.info(`[inkwave] OneDrive warm merge skipped: ${read.reason} — the next sync retries the read`)
+    return // THE LOAD-BEARING LINE: we established nothing, so the gate MUST stay open.
+  }
+  if (read.status === 'ok' && read.snapshots.length) {
+    // A restore failure must not close the gate either: the merge did not happen, so the sync's own
+    // read is still the only thing standing between a short local set and the archive.
+    try {
+      await restoreSnapshotsFromBundle(doc.id, read.snapshots)
+    } catch (e) {
+      console.info(`[inkwave] OneDrive warm merge: local restore failed (${String(e)}) — the next sync retries`)
+      return
+    }
+  }
+  markWritebackMerged(key) // 'absent' or a merged 'ok' — both are facts we established.
 }
 
 /** Multi-device guard WITHOUT downloading the file — metadata only, mirroring readLocalHeartbeat's
@@ -509,8 +530,12 @@ async function readRemoteArchive(token: string, name: string): Promise<ArchiveRe
     // or a previous upload that never landed) — nothing there to lose. Treating it as a parse ERROR
     // would refuse every sync forever, since the merge gate only closes on a write. See folder.ts.
     if (!text.trim()) return { status: 'absent' }
-    const remote = await parseTraceOffThread(text)
-    return { status: 'ok', snapshots: remote.snapshots ?? [] }
+    // A body that PARSED is not a body we UNDERSTOOD. `parseTraceFile` is JSON.parse + a marker
+    // slice, so a 200 carrying any valid JSON that is not a record used to arrive here as
+    // `snapshots: []` — an established emptiness we never established. See archiveSnapshotsOf.
+    const snapshots = archiveSnapshotsOf(await parseTraceOffThread(text))
+    if (!snapshots) return { status: 'error', reason: 'the remote file is not an Inkwave record' }
+    return { status: 'ok', snapshots }
   } catch (e) {
     return { status: 'error', reason: `archive read: ${(e as Error)?.message ?? String(e)}` }
   }
@@ -555,7 +580,16 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
     recordOneDriveWrite(doc.id) // heartbeat baseline: metadata newer than this = another device
     setDocSource(doc.id, 'onedrive')
     void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget
-    if (merged.length > snapshots.length) void restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
+    // NOT `void`ed, and that is load-bearing (2026-07-17). `restoreSnapshotsFromBundle` READS the
+    // local archive, and that read now THROWS on a fault instead of lying `[]` — so `void` on it is
+    // an unhandled rejection escaping a fire-and-forget shortcut, surfacing as an uncaught browser
+    // error at the exact moment storage is already misbehaving. The heal is genuinely best-effort
+    // (the remote already has the union; OPFS catching up is a bonus), so the failure is LOGGED, not
+    // thrown — the same shape `restoreSnapshotsFromBundle`'s own deferDiskWrite arm uses.
+    if (merged.length > snapshots.length) {
+      void restoreSnapshotsFromBundle(doc.id, merged)
+        .catch((err) => console.warn('[inkwave] snapshot heal after sync failed (the remote has the union):', err))
+    }
     return { ok: true, webUrl }
   } catch {
     return { ok: false, webUrl: null }

@@ -2100,6 +2100,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function oneDriveWriteNow() {
     oneDriveLastWriteRef.current = Date.now()
     // Same rule as the other silent mirrors: never PUT an archive derived from a failed read.
+    //
+    // ⚠ THIS CHECK IS DEFENCE IN DEPTH, NOT THE LOAD-BEARING GUARD — recorded because it was
+    // claimed to be the latter, and a lane that trusts the wrong line stops guarding the right one.
+    // PROBED + mutation-proved (`storage/cloudLocalRead.test.ts`): the PRE-FIX composition
+    // `listSnapshots(id).then(s => syncToOneDrive(doc, s)).catch(() => {})` ALSO refuses — because
+    // `listSnapshots` now THROWS on a failed read and the fire-and-forget `.catch` swallows the
+    // throw before the sync is ever called. What actually stands between a failed local read and
+    // Peter's archive is `readSnapshotsFromDisk`'s throw (M13: restore its `catch { return [] }`
+    // and cells die). This check earns its place for two OTHER reasons, both worth keeping: it
+    // makes the refusal VISIBLE (a named warning, not a silently swallowed rejection), and the
+    // `SnapshotRead` union is what stops the next edit here writing `.catch(() => [])` — the one
+    // caller shape that still destroys the archive, pinned as a known-negative in that file.
     void readSnapshotArchive(docRef.current.id)
       .then((r) => {
         if (r.kind === 'error') { console.warn('[inkwave] OneDrive mirror skipped — archive unreadable:', r.error); return }
