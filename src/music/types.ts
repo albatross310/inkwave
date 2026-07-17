@@ -399,16 +399,43 @@ export interface Assignment {
 
 // ─── Reference tracks + sync (§1, §A4 — LATER, step 3) ───────────────────────
 
+/**
+ * ONE TAPPED BARLINE — the SPATIAL half of §A4's sync, and the thing that gives a photographed
+ * Piece a bar model at all.
+ *
+ * §A4: "MVP: the student marks barlines by tapping their positions on the photo (robust on any
+ * image)." That is not a fallback — it is load-bearing. `reflow.ts` REFUSES to pre-detect barlines
+ * on a single stave (a note stem is not distinguishable from a barline by geometry alone), so for a
+ * violin or vocal part these taps are the ONLY source of bars, and without them the heatmap has
+ * nothing to colour.
+ *
+ * An anchor marks a barLINE (a boundary), not a bar. Consecutive anchors on the SAME system are what
+ * define a bar — see `sync.ts` `barSpansFromAnchors`, which is also what makes the cursor incapable
+ * of sweeping across a line end.
+ */
 export interface BarlineAnchor {
   page: number
   system: number
   x: number                 // normalised across the page width
-  bar: number
+  /**
+   * The 0-based ORDINAL of the bar this barline OPENS. See BarRef.
+   *
+   * ⚠️ Was `bar: number` — renamed 2026-07-17 to match the ruling this same file makes 300 lines
+   * above. §A4's types were written before it and kept the retired name, which is precisely how a
+   * vocabulary drifts back in: the rule was documented, and the file that documented it still had
+   * two counter-examples in its own tail. A closing barline (the last on a piece) opens no bar and
+   * carries the ordinal one past the final bar.
+   */
+  bar_index: number
 }
 
+/** One tapped beat — the TEMPORAL half (§A4: "the student taps the beat (counts 1-2-3-4) once"). */
 export interface BeatMapEntry {
   time_sec: number
-  bar: number
+  /** 0-based bar ORDINAL. See BarRef. */
+  bar_index: number
+  /** 1-based beat WITHIN the bar, as counted aloud: "1-2-3-4". Musicians count from one, and this
+   *  is a number a human taps rather than a key anything joins on. */
   beat: number
 }
 
