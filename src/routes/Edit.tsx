@@ -25,7 +25,7 @@ import { v4 as uuidv4 } from 'uuid'
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
-import { loadDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
+import { readDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
 import { listMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
 import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock } from '../storage/tabDoc'
@@ -168,22 +168,24 @@ export function Edit() {
           // unload race), so this only ever fires for a genuinely concurrent second tab.
           const mine = await claimDocLock(storedId)
           if (!mine) {
-            const busy = await loadDocument(storedId).catch(() => null)
+            // Only a title for a banner — the one place a failed read may be shrugged off, because
+            // nothing is written on the strength of it.
+            const busy = await readDocument(storedId)
             window.dispatchEvent(new CustomEvent('inkwave:doc-busy', {
-              detail: { id: storedId, title: busy?.title ?? 'That document' },
+              detail: { id: storedId, title: busy.kind === 'found' ? busy.doc.title : 'That document' },
             }))
           } else {
-            // A THROW HERE IS NOT AN ABSENCE. loadDocument now returns null only when the document
-            // genuinely is not on disk, and throws StorageReadError when the read FAILED. Letting a
-            // failure fall through to step 3 is what handed Peter a blank page where his thesis had
-            // been (2026-07-15 11:19:40) and repointed the pointer at the blank — so it propagates
-            // to the catch below, which never creates anything.
-            const loaded = await loadDocument(storedId)
-            if (loaded) {
-              claimTabDoc(loaded.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
-              setDoc(migrateDocument(loaded))
+            const r = await readDocument(storedId)
+            // 'error' is NOT 'absent'. Falling through to step 3 on a failed read is what handed
+            // Peter a blank page where his thesis had been (11:19:40) and repointed the pointer at
+            // it. The compiler now makes ignoring this case impossible to do by accident.
+            if (r.kind === 'error') throw r.error
+            if (r.kind === 'found') {
+              claimTabDoc(r.doc.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
+              setDoc(migrateDocument(r.doc))
               return
             }
+            // 'absent' ⇒ genuinely nothing under this id; fall through and keep looking.
           }
         }
 
@@ -196,18 +198,16 @@ export function Edit() {
           // One unreadable document must not end the search — the NEXT one may be perfectly
           // readable, and opening the writer's real work beats any error screen. But we remember
           // that a read FAILED, because that changes what step 3 is allowed to conclude.
-          let loaded
-          try {
-            loaded = await loadDocument(meta.id)
-          } catch (err) {
+          const r = await readDocument(meta.id)
+          if (r.kind === 'error') {
             sawReadFailure = true
-            console.error('[inkwave] init: could not read an indexed document:', meta.id, err)
+            console.error('[inkwave] init: could not read an indexed document:', meta.id, r.error)
             releaseDocLock(meta.id)
             continue
           }
-          if (loaded) {
-            claimTabDoc(loaded.id)
-            setDoc(migrateDocument(loaded))
+          if (r.kind === 'found') {
+            claimTabDoc(r.doc.id)
+            setDoc(migrateDocument(r.doc))
             return
           }
           releaseDocLock(meta.id) // indexed but not in OPFS — don't sit on a claim we can't use
@@ -271,14 +271,12 @@ export function Edit() {
       // re-reading + JSON.parsing the same (possibly multi-MB) file it just wrote to OPFS. The
       // OPFS read stays as the fallback for any dispatcher that only sends an id.
       if (detail.doc && detail.doc.id === id) { setDoc(migrateDocument(detail.doc)); return }
-      void loadDocument(id).then((loaded) => {
-        if (loaded) setDoc(migrateDocument(loaded))
-        else console.warn('[inkwave] open-doc: document not found in OPFS after import:', id)
-      }).catch((err) => {
-        // loadDocument now THROWS on a read failure rather than answering null (that null was the
-        // 2026-07-15 bug). Nothing to recover here — the dispatcher already holds the parsed doc —
-        // but it must not surface as an unhandled rejection.
-        console.error('[inkwave] open-doc: could not read the imported document:', id, err)
+      void readDocument(id).then((r) => {
+        if (r.kind === 'found') setDoc(migrateDocument(r.doc))
+        // Nothing to recover in either failure: the dispatcher already holds the parsed doc. But
+        // they are still different facts and are still reported as such.
+        else if (r.kind === 'absent') console.warn('[inkwave] open-doc: document not found in OPFS after import:', id)
+        else console.error('[inkwave] open-doc: could not read the imported document:', id, r.error)
       })
     }
     window.addEventListener('inkwave:open-doc', onOpen as EventListener)

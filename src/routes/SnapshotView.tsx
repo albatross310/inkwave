@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
 import { pmToText } from '../provenance/bundle'
-import { loadDocument } from '../storage/opfs'
+import { readDocument } from '../storage/opfs'
 import { VerifyModal } from '../components/VerifyModal'
 import type { InkwaveDocument } from '../types/document'
 import { loadLibrary } from '../citations/library'
@@ -3711,13 +3711,11 @@ export function SnapshotView() {
         type="button"
         onClick={async () => {
           if (!docId) { navigate('/verify'); return }
-          try {
-            const doc = await loadDocument(docId)
-            if (!doc) { navigate('/verify'); return }
-            setVerifyDoc(doc)
-          } catch {
-            navigate('/verify')
-          }
+          // Both failures land on /verify (the no-doc fallback), but they are asked separately —
+          // `readDocument` has no null to conflate them into.
+          const r = await readDocument(docId)
+          if (r.kind !== 'found') { navigate('/verify'); return }
+          setVerifyDoc(r.doc)
         }}
         style={{
           position: 'fixed', zIndex: 56,

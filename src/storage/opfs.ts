@@ -152,11 +152,43 @@ export async function saveDocument(doc: InkwaveDocument): Promise<void> {
 }
 
 /** Load a document from OPFS. Returns null if it doesn't exist. */
-export async function loadDocument(
-  documentId: string,
-): Promise<InkwaveDocument | null> {
-  const root = await getRoot()
-  return readJson<InkwaveDocument>(root, currentPath(documentId))
+/**
+ * The result of trying to read a document. **THERE IS NO `null` MEMBER, AND THAT IS THE POINT.**
+ *
+ * "There is no document here" and "I could not find out" are different facts with opposite
+ * consequences — `absent` means it is safe to create/replace; `error` means NEVER write, because
+ * the writer's work may be sitting right there. `readJson` used to answer `null` to both
+ * (`catch { return null }`), Edit.tsx read that as absence, minted a blank document over the top of
+ * Peter's honours proposal and repointed the active-doc pointer at it (2026-07-15 11:19:40). He
+ * then opened a backup to recover from the blank, and THAT blind-overwrote Wednesday's work.
+ *
+ * **The defect was never a missing log — the TYPE erased the difference**, so every caller was one
+ * honest mistake away from the bug, and the compiler had nothing to say. Throwing instead of
+ * returning null is only half a fix: `await loadDocument(id).catch(() => null)` restores the bug in
+ * eleven characters and still typechecks. (I wrote exactly that line while fixing this.)
+ *
+ * As a discriminated union the compiler forces every caller to say which of the three they mean.
+ * Modelled on the ledger lane's `RemoteRead` (same shape, same reasoning, arrived at independently
+ * for cloud sync). The shared RULE is: **never write to a target you have not just read, and never
+ * treat a failed read as an absent one.** The shared rule is deliberately NOT a shared function — a
+ * ledger is a SET (union it, grow-only), a document body is PROSE (it cannot be unioned; it needs a
+ * staleness check). Making them look interchangeable is how the wrong one gets called.
+ */
+export type DocRead =
+  | { kind: 'found'; doc: InkwaveDocument }
+  | { kind: 'absent' } // genuinely not on disk — safe to create
+  | { kind: 'error'; error: StorageReadError } // could not find out — NEVER write
+
+/** Read a document. Callers must handle all three outcomes; see DocRead. */
+export async function readDocument(documentId: string): Promise<DocRead> {
+  try {
+    const root = await getRoot()
+    const doc = await readJson<InkwaveDocument>(root, currentPath(documentId))
+    return doc ? { kind: 'found', doc } : { kind: 'absent' }
+  } catch (err) {
+    // getRoot() itself throws in a private window — that is emphatically not "you have no work".
+    return { kind: 'error', error: err instanceof StorageReadError ? err : new StorageReadError(currentPath(documentId), err) }
+  }
 }
 
 /** List all document IDs stored in OPFS. */
