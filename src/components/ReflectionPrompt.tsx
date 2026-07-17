@@ -1,0 +1,141 @@
+// §A5b — "what did I actually do?" (Peter, 2026-07-17).
+//
+// ─── THE DESIGN, AND THE BAR ─────────────────────────────────────────────────────────────────
+// THE CHART IS THE RECALL PROMPT. It shows the writer the stretch we MEASURED — an hour here,
+// forty minutes there — and asks them to name it. That is why it fires while the stretch is warm
+// (25 ACTIVE minutes, once, never re-prompted) and not at day's close, when nobody can remember.
+//
+// IT IS ALSO WHAT RESCUES `misc`. Nothing sets a type on an ordinary document, so most measured
+// time is an honest unknown. This is the only place it becomes knowledge — and it becomes knowledge
+// the way it should: the writer says so, rather than a heuristic guessing from length or title.
+//
+// §A5, and every word of copy here is bound by it:
+//   · ALWAYS SKIPPABLE. Skip is a plain, equal button, not a grey escape hatch.
+//   · A SKIPPED REFLECTION IS NOT A FAILURE, and nothing may ever count them.
+//   · NEVER GRADE THE WRITING. We show minutes; we do not show a verdict.
+//   · Ironic-but-warm, per Peter's register — a friend taking the mickey because they're on your
+//     side. The wryness is aimed at the CLOCK, never at the work.
+// THE BAR: would he fill this in on a bad Tuesday? If a line would make him close the panel on a
+// bad day, it is wrong, however clever it is.
+
+import { useMemo, useState } from 'react'
+import { v4 as uuidv4 } from 'uuid'
+import type { DocType, Reflection, SessionRow } from '../productivity/types'
+import { localDayOf } from '../productivity/sessionLogic'
+
+/** What each category is called when we hand it back to the writer. */
+const CATEGORY_LABEL: Record<DocType, string> = {
+  essay: 'the essay',
+  note: 'notes',
+  email: 'email',
+  reading: 'reading',
+  annotating: 'annotating',
+  other: 'other work',
+  // `misc` is the common case and must not read as an accusation ("unclassified", "unknown").
+  // It is OUR ignorance, not his: we measured the time and simply do not know what it was.
+  misc: 'that stretch',
+}
+
+const mins = (rows: SessionRow[]): number => Math.round(rows.reduce((a, r) => a + r.active_minutes, 0))
+
+/**
+ * The measured stretch, per category — the recall prompt itself.
+ * Categories with under a minute are dropped: they are noise, not something to be asked about.
+ */
+export function stretchByCategory(rows: SessionRow[]): Array<{ doc_type: DocType; minutes: number }> {
+  const by = new Map<DocType, SessionRow[]>()
+  for (const r of rows) {
+    const list = by.get(r.doc_type)
+    if (list) list.push(r)
+    else by.set(r.doc_type, [r])
+  }
+  return [...by.entries()]
+    .map(([doc_type, rs]) => ({ doc_type, minutes: mins(rs) }))
+    .filter((c) => c.minutes >= 1)
+    .sort((a, b) => b.minutes - a.minutes)
+}
+
+/** A warm, wry opener that is TRUE on a bad Tuesday as well as a good Friday. */
+function opener(total: number): string {
+  if (total >= 120) return `${total} minutes. Before it all blurs — what was that?`
+  if (total >= 50) return `${total} minutes in. What were you actually doing?`
+  return `${total} focused minutes. What was that, while you remember?`
+}
+
+export function ReflectionPrompt({ rows, onSave, onSkip }: {
+  rows: SessionRow[]
+  onSave: (r: Reflection) => void
+  onSkip: () => void
+}): JSX.Element | null {
+  const cats = useMemo(() => stretchByCategory(rows), [rows])
+  const [text, setText] = useState<Partial<Record<DocType, string>>>({})
+
+  if (!rows.length || !cats.length) return null
+
+  const total = cats.reduce((a, c) => a + c.minutes, 0)
+
+  const save = () => {
+    // A category they said nothing about is ABSENT — never an empty string. Silence is not an answer
+    // we get to record on their behalf.
+    const notes = cats
+      .map((c) => ({ doc_type: c.doc_type, text: (text[c.doc_type] ?? '').trim() }))
+      .filter((n) => n.text.length > 0)
+    const sorted = [...rows].sort((a, b) => (a.start < b.start ? -1 : 1))
+    onSave({
+      reflection_id: uuidv4(),
+      day: localDayOf(sorted[0].start),
+      from: sorted[0].start,
+      to: sorted[sorted.length - 1].end,
+      notes,
+    })
+  }
+
+  return (
+    <section className="px-4 py-3" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
+      <h3 className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        While it&rsquo;s fresh
+      </h3>
+      <p className="mb-2.5 text-[13px] leading-relaxed" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+        {opener(total)}
+      </p>
+
+      <ul className="space-y-2">
+        {cats.map((c) => (
+          <li key={c.doc_type}>
+            <label className="mb-1 flex items-baseline justify-between gap-2">
+              <span className="text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{CATEGORY_LABEL[c.doc_type]}</span>
+              <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+                {c.minutes}m
+              </span>
+            </label>
+            <input
+              value={text[c.doc_type] ?? ''}
+              onChange={(e) => setText((t) => ({ ...t, [c.doc_type]: e.target.value }))}
+              placeholder={c.doc_type === 'misc' ? 'reading Leibniz, on paper…' : 'a line, if you like'}
+              className="w-full rounded-md px-2 py-1.5 text-[13px]"
+              style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+            />
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button" onClick={save}
+          className="rounded-full px-4 py-1.5 text-[13px] transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{ background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+        >
+          Save
+        </button>
+        {/* Skip is a PEER of Save, not a grey escape hatch. It must cost nothing to press. */}
+        <button
+          type="button" onClick={onSkip}
+          className="rounded-full px-4 py-1.5 text-[13px] transition-colors hover:bg-stone-50"
+          style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+        >
+          Not now
+        </button>
+      </div>
+    </section>
+  )
+}

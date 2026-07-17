@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   ACTIVE_GAP_CAP_MS,
+  REFLECT_AFTER_ACTIVE_MS,
+  shouldOfferReflection,
   DEFAULT_IDLE_MS,
   buildRow,
   isIdleBoundary,
@@ -167,5 +169,27 @@ describe('buildRow (§A3.2 schema)', () => {
 describe('isRecordable', () => {
   it('a session with real edits is kept (§A5: a low-output session still counts)', () => {
     expect(isRecordable(draftAt())).toBe(true)
+  })
+})
+
+describe('the reflection prompt fires on ACTIVE minutes, once per stretch (§A5b)', () => {
+  it('offers at 25 ACTIVE minutes, not before', () => {
+    expect(shouldOfferReflection(REFLECT_AFTER_ACTIVE_MS - 1)).toBe(false)
+    expect(shouldOfferReflection(REFLECT_AFTER_ACTIVE_MS)).toBe(true)
+    expect(REFLECT_AFTER_ACTIVE_MS).toBe(25 * 60_000)
+  })
+
+  it('a short spell is never interrupted', () => {
+    expect(shouldOfferReflection(0)).toBe(false)
+    expect(shouldOfferReflection(5 * 60_000)).toBe(false)
+  })
+
+  it('ACTIVE minutes, not wall clock — the distinction is the whole design', () => {
+    // A writer who opens the app at 9am and types for 3 minutes has 3 active minutes, not 60. If
+    // this counted the clock it would be a toll booth on anyone who leaves a tab open.
+    const d = draftAt(T0, 0)
+    recordEdit(d, T0 + 60 * 60_000) // an hour of wall clock, one edit
+    expect(d.activeMs).toBe(ACTIVE_GAP_CAP_MS) // capped: one minute of it was work
+    expect(shouldOfferReflection(d.activeMs)).toBe(false)
   })
 })

@@ -194,31 +194,56 @@ export type OneDriveReadResult =
   | { status: 'absent' }
   | { status: 'error'; reason: string }
 
-/** Read a small file by name from the chosen folder. Never throws; never conflates absent with failed. */
+/**
+ * Map a Graph GET's HTTP status to the union. PURE, exported, and tested — because this one line is
+ * the entire absent-vs-error decision, and F16's lesson is that a perfectly-typed union guards the
+ * CONSUMER while the PRODUCER quietly decides the answer. `404 ⇒ absent` licenses a first write; a
+ * mistake in the other direction (a failure read as "not there") is the 2026-07-15 blind overwrite.
+ *
+ * FAIL-SAFE BY DESIGN: everything that is not exactly 404 is an ERROR. A Graph status we have never
+ * seen makes sync refuse to write, never destroy. That is also why 401/403 are errors and not
+ * "absent" — an expired token means we cannot SEE the file, not that it is gone.
+ */
+export function mapGraphReadStatus(status: number): 'ok' | 'absent' | 'error' {
+  if (status === 404) return 'absent'
+  if (status >= 200 && status < 300) return 'ok'
+  return 'error'
+}
+
+/**
+ * Read a small file by name from the chosen folder.
+ *
+ * NEVER THROWS — and that used to be a lie (auditor F13, 2026-07-17): `getSilentToken()` sat OUTSIDE
+ * the try, so an MSAL failure threw straight through a function whose contract says it returns an
+ * error union. The whole point of the union is that a caller cannot forget the failure case; a
+ * producer that throws instead of returning `error` hands the caller an exception it never wrote a
+ * branch for. Everything fallible is now inside the try.
+ */
 export async function readOneDriveText(name: string): Promise<OneDriveReadResult> {
-  if (!CLIENT_ID) return { status: 'error', reason: 'OneDrive not configured' }
-  const token = await getSilentToken()
-  if (!token) return { status: 'error', reason: 'not signed in' }
   try {
+    if (!CLIENT_ID) return { status: 'error', reason: 'OneDrive not configured' }
+    const token = await getSilentToken()
+    if (!token) return { status: 'error', reason: 'not signed in' }
     const res = await fetch(contentUrl(name), { headers: { Authorization: `Bearer ${token}` } })
-    if (res.status === 404) return { status: 'absent' }
-    if (!res.ok) return { status: 'error', reason: `Graph GET ${res.status}` }
+    const kind = mapGraphReadStatus(res.status)
+    if (kind === 'absent') return { status: 'absent' }
+    if (kind === 'error') return { status: 'error', reason: `Graph GET ${res.status}` }
     return { status: 'ok', text: await res.text() }
   } catch (e) {
-    return { status: 'error', reason: `network: ${(e as Error).message}` }
+    return { status: 'error', reason: `onedrive read: ${(e as Error)?.message ?? String(e)}` }
   }
 }
 
 /** Write a small file by name into the chosen folder. False on any failure (caller keeps local). */
 export async function writeOneDriveText(name: string, text: string): Promise<boolean> {
-  if (!CLIENT_ID) return false
-  const token = await getSilentToken()
-  if (!token) return false
   try {
+    if (!CLIENT_ID) return false
+    const token = await getSilentToken() // inside the try: same F13 hole as the reader had
+    if (!token) return false
     await putFile(token, name, text)
     return true
   } catch {
-    return false
+    return false // the caller keeps local; nothing is lost
   }
 }
 
