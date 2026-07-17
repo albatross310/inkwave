@@ -83,7 +83,42 @@ export type TiptapJSON = JSONContent
 // implementations drift apart (cf. citationText, exported rather than copied). One rule, in the
 // module that owns the ledger.
 
-export type DocType = 'note' | 'essay' | 'email' | 'other'
+/**
+ * What a session was spent doing. The ledger files every row under one of these (§A3.2).
+ *
+ * **`misc` IS THE DEFAULT, AND IT IS THE HONEST ONE** (Peter, 2026-07-17: "if the productivity
+ * tracker doesn't know what they were doing but they were working"). It used to default to
+ * `'essay'`, which meant every unclassified session was COUNTED AS ESSAY WRITING whether it was or
+ * not — a claim dressed as a measurement. This is the same shape the rest of the codebase converged
+ * on today (`found | absent | error`, no null member; StorageReadError; RemoteRead): **absence of
+ * classification must not masquerade as a classification.** A session gets a real type only when
+ * something SETS one — never a guess.
+ *
+ * ⚠ **`misc` IS NOT `other` — do not collapse them.** The next person will want to:
+ *   · `other`  — a real kind we RECOGNISE but have not enumerated. We know what it was.
+ *   · `misc`   — we know they were WORKING; we do not know at what. An honest unknown.
+ * A window that is mostly `misc` is a finding about OUR INSTRUMENTATION, not about the writer, and
+ * must never be reported to them as a failing.
+ *
+ * `reading`/`annotating` are BEHAVIOURAL, not inferential (Peter, 2026-07-17: "pure reading time and
+ * annotating time can be 2 separate things"). They are set by observed EVENTS on the PDF surface —
+ * scroll activity, an annotation in the last 5 minutes — in the same class as the ledger's
+ * inactivity boundary. That is why they are legitimate where a note-vs-essay heuristic (guessing
+ * INTENT from length or title) is not: one is a fact about what happened, the other is a guess about
+ * what it meant. §A6.1 forbids the second, not the first.
+ *
+ * **READING TIME IS NEVER SUMMED INTO "WORDS WRITTEN"** — a report that added them would lie about
+ * both. Reading rows carry no words by construction (nothing was typed), so a sum is safe; the rule
+ * is about NARRATIVE, and it is the report lane's policy.
+ */
+export type DocType =
+  | 'note'
+  | 'essay'
+  | 'email'
+  | 'reading'      // a PDF was open and being scrolled — reading IS work, and it counts
+  | 'annotating'   // an annotation happened in the last 5 minutes (Peter's window)
+  | 'other'        // a kind we recognise but haven't enumerated
+  | 'misc'         // THE DEFAULT: they were working; we don't know at what. Never a guess.
 
 // ─── Email headers (email layer §B2.1) ───────────────────────────────────────
 // An email is an ORDINARY Inkwave document: the BODY is contentJson (so edit history, provenance
@@ -188,9 +223,37 @@ export type SchemaVersion = '0.1.0'
 // goals are `undefined`, which the report path handles as the honest "no goal ⇒ describe, don't
 // push" case rather than as an error. Do NOT default it to an empty goal — an empty goal and no
 // goal are different states, and only the second is honest about itself.
+/**
+ * ONE dated milestone — the TIMELINE (Peter, 2026-07-17: "goals should include a timeline and then
+ * ai can fill in how they actually do").
+ *
+ * WHY THIS EXISTS ALONGSIDE `plan` RATHER THAN REPLACING IT. DocGoals' original note warns: do not
+ * upgrade the plan to a schema of dates, because "the moment it needs to be filled in properly, it
+ * stops being written at all". That warning is RIGHT and `plan` stays free text, untouched. But
+ * Peter asked for a report on "how they meet each of their timed goals" — and a free-text plan
+ * cannot be tracked per-goal, because there is nothing to compare to a date. So the timeline is
+ * ADDITIVE and OPTIONAL: write nothing and the plan behaves exactly as before.
+ *
+ * §A6.4 APPLIES: whether a milestone was MET is a MEASURED comparison of two dates the writer
+ * supplied. It is computed client-side (`productivity/goals.ts` milestoneStatus) and handed to the
+ * model as a VERDICT — never as two dates for a narrator to compare. The model says what it MEANS;
+ * it never decides whether it happened.
+ */
+export interface DocMilestone {
+  id: string
+  /** The writer's words. */
+  text: string
+  /** Local day 'YYYY-MM-DD'. Optional — an undated milestone is still a goal, just not a timed one. */
+  due?: string
+  /** ISO-8601 with offset, set when they tick it off. ABSENT = not done (never `done: false`). */
+  done_at?: string
+}
+
 export interface DocGoals {
   /** What this document is for and what "done" looks like. The writer's words, never generated. */
   goal?: string
+  /** The timeline: dated milestones. Absent/empty ⇒ there is nothing timed to track. */
+  milestones?: DocMilestone[]
   /**
    * A rough plan — milestones, rough dates. DELIBERATELY INFORMAL (§A5b: "a plan nobody writes is
    * worse than a vague one"), so it is free text and not a structured milestone list. Do not

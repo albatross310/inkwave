@@ -22,7 +22,6 @@ import { isTouchDevice } from '../editor/Scroll'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
-import { OPEN_LEDGER_EVENT } from '../productivity/ledgerEvents'
 import { annotateRow, loadLedger } from '../productivity/ledgerStore'
 import { currentPlace, recentPlaces, setCurrentPlace } from '../productivity/places'
 import { isPaused, type PomodoroConfig } from '../productivity/pomodoro'
@@ -32,7 +31,9 @@ import {
 } from '../productivity/pomodoroStore'
 import { isoWithOffset, localDayOf, localMonthOf } from '../productivity/sessionLogic'
 import type { SessionRow } from '../productivity/types'
+import type { DocGoals } from '../types/document'
 import { countdownShown, setCountdownShown } from './CountdownOverlay'
+import { GoalsSection } from './GoalsSection'
 import { TimeFace, TimeRing } from './TimeFace'
 
 const nowIso = (): string => isoWithOffset(Date.now(), -new Date().getTimezoneOffset())
@@ -124,55 +125,48 @@ const BREAK_PRESETS = [5, 10]
 const LONG_PRESETS = [15, 30]
 const EVERY_PRESETS = [3, 4, 5]
 
-export function ClockMenu(): JSX.Element | null {
-  const [open, setOpen] = useState(false)
+/**
+ * The toolbar's clock — A TRIGGER, NEVER AN OWNER.
+ *
+ * The panel's open state is LIFTED to the editor (`ledgerOpen`), and this button only calls the
+ * setter. That is load-bearing now that Peter has ruled the row stays SIX ("it fits well on phone,
+ * and we want to keep the phone and desktop experience continuous"): `clock` competes for a slot and
+ * lands in the ▲ overflow by default, so this component is often NOT MOUNTED. If it owned the state,
+ * the countdown's "click to open" would silently do nothing whenever the clock sat in ▲ — a feature
+ * that vanishes depending on where a button was dragged. Two access paths, one owner.
+ */
+export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element | null {
   const [, bump] = useState(0)
-  const btnRef = useRef<HTMLButtonElement>(null)
-
-  // STATE changes only (start/stop/phase/config) — never the per-second tick.
+  // STATE changes only (start/stop/phase) — never the per-second tick.
   useEffect(() => subscribe(() => bump((n) => n + 1)), [])
-
-  // The countdown overlay asks us to open (Peter: "clicking opens the ledger").
-  useEffect(() => {
-    const on = () => setOpen(true)
-    window.addEventListener(OPEN_LEDGER_EVENT, on)
-    return () => window.removeEventListener(OPEN_LEDGER_EVENT, on)
-  }, [])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
-
-  const state = getPomodoroState()
-  const running = state.phase !== 'idle'
-
   if (!prodLedgerEnabled()) return null
 
+  const running = getPomodoroState().phase !== 'idle'
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        aria-pressed={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
-        title={running ? 'Pomodoro running — your ledger' : 'Pomodoro & your ledger'}
-      >
-        <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
-          <ClockGlyph running={running} />
-        </span>
-      </button>
-      {open && <LedgerDropUp anchor={btnRef.current} onClose={() => setOpen(false)} />}
-    </>
+    <button
+      type="button"
+      aria-pressed={open}
+      // The drop-up finds its anchor by this attribute, so it works from the row OR from ▲.
+      data-iw-ledger-btn=""
+      onClick={onToggle}
+      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+      title={running ? 'Pomodoro running — your ledger' : 'Pomodoro & your ledger'}
+    >
+      <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
+        <ClockGlyph running={running} />
+      </span>
+    </button>
   )
 }
 
 // ─── The drop-up ─────────────────────────────────────────────────────────────
 
-function LedgerDropUp({ anchor, onClose }: { anchor: HTMLElement | null; onClose: () => void }): JSX.Element {
+export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
+  docId: string; docLabel?: string; goals?: DocGoals; onGoalsChange: (g: DocGoals) => void; onClose: () => void
+}): JSX.Element {
+  // Resolve the anchor at open time rather than holding a ref: the trigger may be in the row, in the
+  // ▲ overflow, or not rendered at all (opened from the countdown). Absent → centred.
+  const anchor = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('[data-iw-ledger-btn]')
   const [rows, setRows] = useState<SessionRow[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const month = localMonthOf(nowIso())
@@ -189,6 +183,14 @@ function LedgerDropUp({ anchor, onClose }: { anchor: HTMLElement | null; onClose
     window.addEventListener(LEDGER_ROW_EVENT, on)
     return () => window.removeEventListener(LEDGER_ROW_EVENT, on)
   }, [refresh])
+
+  // Escape closes, wherever the trigger lives.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
 
   // Close on an outside tap — but never on a tap INSIDE the panel (that would eat every control).
   useEffect(() => {
@@ -243,6 +245,7 @@ function LedgerDropUp({ anchor, onClose }: { anchor: HTMLElement | null; onClose
       <div className="overflow-y-auto">
         <PomodoroHero />
         <TodaySection rows={todays} summary={daySummary(todays)} onSaved={refresh} />
+        <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
         <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setShowSettings((s) => !s)}
             className="w-full text-left text-xs transition-colors hover:opacity-80"

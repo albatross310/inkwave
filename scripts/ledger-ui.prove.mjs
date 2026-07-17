@@ -105,12 +105,40 @@ for (const theme of ['day', 'night']) {
     const tag = `${theme}-${phone ? 'phone' : 'desktop'}`
 
     // Open the drop-up from the toolbar's clock button — the real path, not a synthetic mount.
-    const clock = page.locator('button[title*="ledger"]').first()
-    if (!(await clock.count())) fail(`${tag}: no clock button in the toolbar`)
+    // PETER'S RULING: the row stays SIX, so `clock` competes for a slot and lands in the ▲ OVERFLOW
+    // by default. That is why the trigger cannot own the panel's state (it is usually unmounted) —
+    // and why this probe must open ▲ first, exactly as a writer would.
+    let clock = page.locator('button[title*="ledger"]:visible').first()
+    if (!(await clock.count())) {
+      await page.getByTitle('Customise toolbar').click()
+      await sleep(400)
+      clock = page.locator('button[title*="ledger"]:visible').first()
+    }
+    if (!(await clock.count())) fail(`${tag}: no clock button in the toolbar OR the ▲ overflow`)
     await clock.click()
     await sleep(600)
     if (!(await page.locator('.iw-touch-guard').filter({ hasText: 'Today' }).count())) fail(`${tag}: drop-up did not open`)
     await page.screenshot({ path: `${OUT}/ledger-${tag}.png` })
+
+    // §A5b: add a goal with a DATE through the real UI, plus one already overdue, so the
+    // timeline's wry status line is in the shot rather than an empty state.
+    const goalInput = page.getByPlaceholder('finish the lit review…')
+    if (await goalInput.count()) {
+      const iso = (d) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10)
+      for (const [text, due] of [['finish the lit review', iso(-3)], ['draft chapter 3', iso(4)]]) {
+        await goalInput.fill(text)
+        await page.locator('input[type="date"]').first().fill(due)
+        await page.getByTitle('Add goal').click()
+        await sleep(250)
+      }
+      // Tick the overdue one off so 'done — fashionably late' renders too.
+      const done = page.getByTitle('Done').first()
+      if (await done.count()) { await done.click().catch(() => {}); await sleep(250) }
+      await page.getByPlaceholder(/Roughly how this gets done/).fill('lit review, then draft, then panic')
+      await page.getByPlaceholder(/Roughly how this gets done/).blur()
+      await sleep(300)
+      await page.screenshot({ path: `${OUT}/goals-${tag}.png` })
+    }
 
     // ...and with Settings expanded (lengths / chime / place / titles).
     const settings = page.getByText(/Settings — lengths, chime/).first()

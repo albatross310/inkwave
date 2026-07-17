@@ -19,7 +19,7 @@
 // PROVE THE PROBE FIRES BEFORE TRUSTING A PASS. A negative that cannot fail is not a negative, so
 // every positive below is paired with a discriminating negative — see `THE PROBE'S OWN NEGATIVES`.
 // The bug this is really hunting is a SILENT one: if the doc_type never reached the row, every
-// email minute would land under 'essay', the ledger would still look perfectly healthy, and §B1
+// email minute would land under `misc`, the ledger would still look perfectly healthy, and §B1
 // would simply never be true. That failure has no error message, which is this house's disease.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -200,9 +200,13 @@ describe('§B1 — "2h10m writing, of which 40m on email"', () => {
     const [day] = M.aggregateDays(rows)
     expect(day.activeMinutes).toBe(130)          // 2h10m — the spec's sentence, measured
     expect(day.minutesByDocType.email).toBe(40)  // "of which 40m on email"
-    expect(day.minutesByDocType.essay).toBe(90)
+    // The non-email 90 minutes file under `misc`, NOT 'essay' (Peter, 2026-07-17). Nothing sets a
+    // type on an ordinary document, and the old 'essay' default counted every unclassified session
+    // as essay writing whether it was or not. The §B1 SPLIT — the thing this test exists for — is
+    // unchanged; only the honest name of the other side is.
+    expect(day.minutesByDocType.misc).toBe(90)
     // The parts are the whole: nothing invented, nothing lost.
-    expect(day.minutesByDocType.email + day.minutesByDocType.essay).toBe(day.activeMinutes)
+    expect(day.minutesByDocType.email + day.minutesByDocType.misc).toBe(day.activeMinutes)
 
     // And the per-document view the report's tick-box screen reads (§A7.3).
     const w = M.buildWindow('daily', '2026-07-17', rows)
@@ -338,7 +342,7 @@ describe('THE PROBE FIRES (a negative that cannot fail is not a negative)', () =
     // The discriminator. This positive/negative PAIR is what makes the doc_type assertion mean
     // something: a `doc_type` hard-wired to 'email' passes the tests above and fails here; a
     // doc_type that never reads the document (the real bug — every email minute silently filed as
-    // 'essay') passes here and fails above. No constant satisfies both.
+    // the default) passes here and fails above. No constant satisfies both.
     const h = harness()
     h.setDoc(essayDoc(words(10)))
     await h.bind('doc-essay')
@@ -347,7 +351,7 @@ describe('THE PROBE FIRES (a negative that cannot fail is not a negative)', () =
     await h.cap.closeAndFlush('exit')
 
     const rows = (await M.loadLedger('2026-07')).rows
-    expect(rows[0].doc_type).toBe('essay')
+    expect(rows[0].doc_type).toBe('misc') // an unclassified document is an honest unknown
     expect(rows[0].doc_type).not.toBe('email')
 
     const [day] = M.aggregateDays(rows)
