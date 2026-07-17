@@ -65,16 +65,25 @@ function isGzip(buf: ArrayBuffer): boolean {
 // the bytes are still on disk and may be recoverable, and answering `[]` would invite the next
 // snapshot to write over them. Same for a gzip that won't inflate.
 //
-// NB there is deliberately NO `__iwArchiveGuard = 'off'` seam here yet, though `__iwReadGuard`
-// (opfs.ts) and `__iwOpenGuard` (openDoc.ts) both have one. Those exist to let a BROWSER probe
-// destroy data in the same build it then proves fixed, because "a probe that only ever runs against
-// the fixed build cannot tell 'the guard works' from 'the probe cannot see the bug'". This lane
-// proved its guard by source mutation against the real store instead (archiveReadFail.test.ts +
-// openDocArchiveFail.test.ts, each mutant reported), so the seam would have no consumer — and a live
-// off-switch for the provenance archive, with nothing using it, is only a way to turn this off.
-// Add it WITH the probe that needs it, not before.
 async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
   const path = `documents/${documentId}/snapshots.json`
+  // THE LIVE KNOWN-NEGATIVE — `window.__iwArchiveGuard = 'off'` restores the `catch { return [] }`
+  // collapse above, so a browser probe can destroy the archive in the SAME BUILD it then proves
+  // fixed. The precedents are `__iwReadGuard` (opfs.ts) and `__iwOpenGuard` (openDoc.ts) and the
+  // reason is theirs: "a probe that only ever runs against the fixed build cannot tell 'the guard
+  // works' from 'the probe cannot see the bug'".
+  //
+  // THE PREVIOUS LANE DELIBERATELY LEFT THIS OUT, and was right to: it had no probe, and a live
+  // off-switch for the provenance archive with no consumer is only a way to turn provenance off.
+  // It arrives now WITH its consumer — `scripts/archguard-probe/repro.mjs`, which REQUIRES this
+  // cell to truncate a real 4-snapshot archive in real OPFS before it will read the fixed verdict
+  // (it exits 2 if the control fails to reproduce). Do not keep this seam if that probe goes: the
+  // rule the previous lane wrote still binds, in both directions.
+  //
+  // It is checked FIRST, before `isNotFound`, exactly like opfs.ts's — the legacy shape had no
+  // NotFoundError branch at all, so honouring one here would make the control a partial fiction.
+  const legacy = typeof window !== 'undefined'
+    && (window as unknown as { __iwArchiveGuard?: string }).__iwArchiveGuard === 'off'
   let buf: ArrayBuffer
   try {
     const root = await getRoot()
@@ -85,6 +94,7 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
     const file = await (await dir.getFileHandle('snapshots.json')).getFile()
     buf = await file.arrayBuffer()
   } catch (err) {
+    if (legacy) return [] // ← the bug, on demand (see the seam note above)
     if (isNotFound(err)) return [] // no snapshots.json — the one honest empty archive
     throw new StorageReadError(path, err)
   }
@@ -101,6 +111,7 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
       (s.trigger as string) === 'kick' ? { ...s, trigger: 'word-nudge' as const } : s
     )
   } catch (err) {
+    if (legacy) return [] // ← the bug, on demand: a corrupt gzip / non-array parse answered "no history"
     throw new StorageReadError(path, err)
   }
 }

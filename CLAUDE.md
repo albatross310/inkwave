@@ -134,6 +134,29 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   existing snapshots first (`mergeSnapshots` in `provenance/snapshots.ts`) so a short local set
   (fresh login / cleared data / a save racing ahead of restore) can never TRUNCATE the archive.
   This was a real data-loss incident (2026-07-05). `restoreSnapshotsFromBundle` also unions.
+- **THE ARCHIVE READ IS NOW PROVED IN A REAL BROWSER (2026-07-17) — `__iwArchiveGuard` + the probe
+  it was added FOR.** `readSnapshotsFromDisk`'s `catch { return [] }` answered "this document has no
+  history" to a transient fault, and the next write truncated the archive to one snapshot (every OTS
+  proof + signed receipt gone). Fixed earlier that day (`isNotFound ⇒ []`, everything else throws;
+  write paths refuse) and pinned by unit tests on a shim OPFS. **`scripts/archguard-probe/repro.mjs`
+  is the REAL-OPFS half**: it builds a real 4-snapshot history through the real UI, injects a real
+  read fault, and audits the gzip off the disk OUT of the app's own code path (asking the suspect to
+  certify itself is how a probe ends up structurally incapable of seeing its bug). The seam was added
+  WITH it, never before — the previous lane refused to add a live off-switch for provenance with no
+  consumer, and that rule still binds: **if the probe goes, the seam goes.**
+  - **THREE CELLS, and the OUTAGE one runs FIRST** (a new document must still get a blank archive —
+    an established emptiness is not a failed read; and every other cell needs a working first save,
+    so a clamped guard otherwise dies in setup as a bare timeout that reads as flakiness).
+  - **TWO FAULT MODES, and the second is not optional.** The read has TWO catch arms: the open can
+    reject (transient I/O) or the PAYLOAD can be unreadable (corrupt gzip). **MUTATION-PROVED: with
+    only the reject mode, collapsing the parse arm to `return []` left the probe FULLY GREEN** — a
+    cell certifying a line it could not reach. The corrupt-gzip fixture is what kills that mutant.
+  - **The caller guard is NOT the data guard (mutant survived, and it is a true fact not a gap).**
+    Removing `snapshotsForAction`'s error branch loses nothing, because `createSnapshotIfChanged`
+    re-reads and throws by itself. That guard exists to TELL THE WRITER it was cancelled. **The
+    exception is the cloud mirrors** — `syncToOneDrive` takes the array it is handed and never
+    re-reads, so `oneDriveWriteNow`'s local-read check (TiptapEditor.tsx) IS load-bearing and is
+    the one truncation vector still unprobed (it needs a real Graph sign-in).
 - **THE DOCUMENT BODY IS NOW GUARDED TOO (2026-07-17) — the 07-15 incident, and it destroyed real
   thesis work.** The grow-only rule above protected the snapshot ARCHIVE and *nothing protected
   `current.json`*. That asymmetry ate a day of Peter's honours-proposal annotations. TWO silent
