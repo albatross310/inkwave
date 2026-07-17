@@ -43,10 +43,51 @@ async function writeJson(
   }
 }
 
+/**
+ * A read that FAILED — as opposed to a file that is not there.
+ *
+ * THE BUG THIS TYPE EXISTS TO KILL (forensics, 2026-07-15 11:19:40 — Peter's real thesis). This
+ * function used to end `catch { return null }`, which made a transient read failure
+ * INDISTINGUISHABLE FROM "no such document". Edit.tsx answers null by falling through to
+ * `newDocument()` and REPOINTING the active-doc pointer at the blank — so one unlucky read
+ * presented Peter with an empty page where his honours proposal had been (doc `978e0772`,
+ * createdAt == updatedAt, 0 chars). He then opened a `.studio` backup to recover from the blank,
+ * got the stale twin, and THAT blind-overwrote Wednesday's work. The read bug CAUSED the open.
+ *
+ * The defect is not that the error went unlogged — it is that THE TYPE ERASED IT. `null` is the
+ * honest answer to "is there a document here?" and the only answer available to "did the disk just
+ * fail?", and the caller cannot tell which it got. This file already insists that WRITES stay loud
+ * ("autosave failures must stay loud" — saveDocument deliberately throws). The read path was
+ * silent. Same asymmetry as `current.json` being unguarded while snapshots are grow-only.
+ */
+export class StorageReadError extends Error {
+  constructor(public readonly path: string, public readonly cause: unknown) {
+    super(`Could not read ${path}: ${String((cause as Error)?.message ?? cause)}`)
+    this.name = 'StorageReadError'
+  }
+}
+
+/** Genuinely absent — the only failure that legitimately means "there is no such file". */
+function isNotFound(err: unknown): boolean {
+  return (err as DOMException)?.name === 'NotFoundError'
+}
+
+/**
+ * Read a JSON file. Returns null ONLY when the file genuinely does not exist; THROWS
+ * StorageReadError on any other failure (transient I/O, permissions, corrupt JSON).
+ *
+ * Callers must decide deliberately what a failure means for them — the one thing none of them may
+ * do is mistake it for absence.
+ */
 async function readJson<T>(
   root: FileSystemDirectoryHandle,
   filePath: string,
 ): Promise<T | null> {
+  // KNOWN-NEGATIVE seam: `window.__iwReadGuard = 'off'` restores the pre-fix swallow, so the
+  // reproduction can produce the blank-document failure in the SAME build it proves fixed.
+  const legacy = typeof window !== 'undefined'
+    && (window as unknown as { __iwReadGuard?: string }).__iwReadGuard === 'off'
+  let text: string
   try {
     const parts = filePath.split('/')
     const fileName = parts.pop()!
@@ -57,10 +98,20 @@ async function readJson<T>(
     }
     const fileHandle = await dir.getFileHandle(fileName)
     const file = await fileHandle.getFile()
-    const text = await file.text()
+    text = await file.text()
+  } catch (err) {
+    if (legacy) return null
+    if (isNotFound(err)) return null // no such file — the one honest null
+    throw new StorageReadError(filePath, err)
+  }
+  try {
     return JSON.parse(text) as T
-  } catch {
-    return null
+  } catch (err) {
+    if (legacy) return null
+    // A corrupt file is emphatically NOT an absent one: answering null here would send Edit.tsx to
+    // newDocument() and repoint the pointer away from a document whose bytes are still on disk and
+    // may be recoverable (see OpfsInspector).
+    throw new StorageReadError(filePath, err)
   }
 }
 
@@ -122,6 +173,52 @@ export async function listDocumentIds(): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+/** One document as STORAGE actually holds it — see listOpfsDocuments. */
+export interface OpfsDocEntry {
+  id: string
+  /** Bytes of `current.json` on disk. */
+  size: number
+  /** The file's own mtime (ms) — survives even when the JSON is unparseable. */
+  lastModified: number
+  /** Parsed contents, or null when the file is missing/corrupt (the dir still exists). */
+  doc: InkwaveDocument | null
+}
+
+/**
+ * Enumerate `documents/` DIRECTLY — the ground truth of what this origin is storing.
+ *
+ * This deliberately does NOT consult the IndexedDB meta index (`listMeta`). An ORPHANED document
+ * is precisely one that OPFS has and the index does not surface (2026-07-17: one origin-wide
+ * `inkwave:activeDocumentId` pointer let one tab re-point another, stranding the other tab's file
+ * intact-but-unreachable). A recovery listing built from the index could never show it. Reading
+ * the directory is the only way to see what is really there.
+ *
+ * One file read per document: `size`/`lastModified` come from the same File handle as the bytes,
+ * so this costs one pass, not three. Per-document failures degrade to `doc: null` rather than
+ * losing the whole listing — a corrupt file is still a document the writer may want back.
+ */
+export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
+  let docsDir: FileSystemDirectoryHandle
+  try {
+    docsDir = await (await getRoot()).getDirectoryHandle('documents')
+  } catch {
+    return [] // no documents/ yet, or private mode with no OPFS at all
+  }
+  const out: OpfsDocEntry[] = []
+  for (const id of await listDocumentIds()) {
+    try {
+      const dir = await docsDir.getDirectoryHandle(id)
+      const file = await (await dir.getFileHandle('current.json')).getFile()
+      let doc: InkwaveDocument | null = null
+      try { doc = JSON.parse(await file.text()) as InkwaveDocument } catch { /* corrupt — still list it */ }
+      out.push({ id, size: file.size, lastModified: file.lastModified, doc })
+    } catch {
+      out.push({ id, size: 0, lastModified: 0, doc: null }) // dir with no current.json
+    }
+  }
+  return out
 }
 
 // ─── Debounced autosave ───────────────────────────────────────────────────────

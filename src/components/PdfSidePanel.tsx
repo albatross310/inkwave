@@ -20,6 +20,7 @@ import { PdfViewer } from './PdfViewer'
 import { isTouchDevice } from '../editor/Scroll'
 import { pageBoxPx } from '../editor/pageModel'
 import { getPaperSize, getOrientation } from '../editor/pageSettings'
+import { tabDocId } from '../storage/tabDoc'
 
 const INK = '#5c2d8a'
 const MIN_W = 320, MIN_H = 200
@@ -120,7 +121,7 @@ export function PdfSidePanel() {
           // the historical iOS savePdf failure left docs in exactly this state. One targeted
           // OneDrive fetch heals it right here; on failure the reason drives an ACTIONABLE error.
           try {
-            const docId = localStorage.getItem('inkwave:activeDocumentId')
+            const docId = tabDocId() // THIS tab's document (tabDoc.ts) — the sidecar belongs to it
             const item = bibProvider.get(detail.citekey)
             if (docId && item) {
               const r = await fetchSidecarFor(docId, item)
