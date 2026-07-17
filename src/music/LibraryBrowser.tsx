@@ -28,8 +28,10 @@ import {
   type LibraryEntry,
 } from './library'
 import type { MasterMeta } from './master'
+import { type_ } from './typeScale'
 
-const muted = { color: 'var(--iw-pill-fg, #78716c)' }
+// Peter 2026-07-17: every font proportionally up. Sizes from typeScale.ts, never a text-* class.
+const muted = { color: 'var(--iw-pill-fg, #78716c)', ...type_('meta') }
 const ink = { color: 'var(--iw-ink, #5c2d8a)' }
 const border = { border: '1px solid var(--iw-nightable-border, #d6d3d1)' }
 
@@ -89,8 +91,8 @@ export function LibraryBrowser({ onImported, corpus = CORPORA[0] }: LibraryBrows
 
   return (
     <section className="iw-nightable my-3 pt-3" style={{ borderTop: '1px solid var(--iw-nightable-border, #e7e5e4)' }}>
-      <h2 className="font-serif text-sm" style={ink}>{corpus.name}</h2>
-      <p className="text-xs font-serif mb-2" style={muted}>
+      <h2 className="font-serif" style={{ ...ink, ...type_('heading') }}>{corpus.name}</h2>
+      <p className="font-serif mb-2" style={muted}>
         Public-domain scores ({corpus.licence}). Nothing here is in copyright — and Inkwave only
         lists corpora whose licence has been checked.
       </p>
@@ -102,16 +104,16 @@ export function LibraryBrowser({ onImported, corpus = CORPORA[0] }: LibraryBrows
           onChange={e => setQuery(e.target.value)}
           placeholder="Search composer or title"
           aria-label="Search the library"
-          className="text-sm font-serif px-2 py-1 rounded"
-          style={border}
+          className="font-serif px-2 py-1 rounded"
+          style={{ ...border, ...type_('label') }}
         />
         {entries && entries.length > 0 && (
           <select
             value={composer}
             onChange={e => setComposer(e.target.value)}
             aria-label="Filter by composer"
-            className="text-sm font-serif px-2 py-1 rounded"
-            style={border}
+            className="font-serif px-2 py-1 rounded"
+            style={{ ...border, ...type_('label') }}
           >
             <option value="">All composers</option>
             {composers(entries).map(c => <option key={c} value={c}>{c}</option>)}
@@ -119,19 +121,19 @@ export function LibraryBrowser({ onImported, corpus = CORPORA[0] }: LibraryBrows
         )}
       </div>
 
-      {loading && <p className="text-xs font-serif" style={muted}>Opening the library…</p>}
+      {loading && <p className="font-serif" style={muted}>Opening the library…</p>}
 
       {error && (
-        <p role="alert" className="text-xs font-serif my-2" style={{ color: 'var(--iw-badge-ai, #b45309)' }}>{error}</p>
+        <p role="alert" className="font-serif my-2" style={{ color: 'var(--iw-badge-ai, #b45309)', ...type_('meta') }}>{error}</p>
       )}
 
       {entries && !loading && (
-        <p className="text-xs font-serif mb-1" style={muted}>
+        <p className="font-serif mb-1" style={muted}>
           {filtered.length} of {entries.length} scores
         </p>
       )}
 
-      <ul className="text-sm font-serif">
+      <ul className="font-serif" style={type_('body')}>
         {filtered.slice(0, shown).map(entry => (
           <li key={entry.path}>
             <button
@@ -151,15 +153,15 @@ export function LibraryBrowser({ onImported, corpus = CORPORA[0] }: LibraryBrows
       {filtered.length > shown && (
         <button
           onClick={() => setShown(n => n + PAGE)}
-          className="text-xs font-serif mt-2 px-2 py-1 rounded"
-          style={{ ...border, ...ink }}
+          className="font-serif mt-2 px-2 py-1 rounded"
+          style={{ ...border, ...ink, ...type_('label') }}
         >
           Show more
         </button>
       )}
 
       {entries && filtered.length === 0 && !loading && (
-        <p className="text-xs font-serif" style={muted}>No scores match that search.</p>
+        <p className="font-serif" style={muted}>No scores match that search.</p>
       )}
     </section>
   )

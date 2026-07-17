@@ -30,6 +30,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay'
 import { resolveScoreColors } from './theme'
+import { type_ } from './typeScale'
 
 export interface ScoreViewProps {
   /** The MusicXML to render. For an excerpt this is the MASTER's XML — never a copy (§B6). */
@@ -162,7 +163,7 @@ export function ScoreView({
     // reads day values and the notation renders black on a charcoal page (theme.ts, CLAUDE.md).
     <div className="iw-nightable" style={{ background: 'var(--iw-score-paper, #ffffff)' }}>
       {loading && (
-        <p className="text-center text-sm font-serif py-4" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+        <p className="text-center font-serif py-4" style={{ color: 'var(--iw-pill-fg, #78716c)', ...type_('body') }}>
           Engraving the score…
         </p>
       )}
