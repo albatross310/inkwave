@@ -53,9 +53,21 @@ async function inlineGunzipJson(buf: ArrayBuffer): Promise<unknown> {
   // caller's try/catch could never catch it (readSnapshotsFromDisk returns [] on error — it would
   // have waited forever instead). Found 2026-07-17 by the first test that ever read a cold archive:
   // this fallback (the no-Worker path — node/vitest/prerender) had never once been exercised.
-  void w.write(new Uint8Array(buf))
-  void w.close()
-  return JSON.parse(await new Response(ds.readable).text())
+  // ...and MUST NOT be `void`ed either, for the mirror-image reason. On a CORRUPT gzip the writer's
+  // own promises REJECT, and a `void`ed rejection has no handler: it escapes as an unhandled
+  // rejection (vitest fails the run on it; a browser reports it as an uncaught error) even though
+  // the caller's try/catch works perfectly. The readable side is what carries the real failure —
+  // `Response(...).text()` throws the genuine Z_BUF_ERROR/"unexpected end of file" and that is the
+  // error callers must see — so the writer's rejections are the SAME fault arriving twice. Attach a
+  // handler so the duplicate is observed, and let the readable side throw. Swallowing here hides
+  // nothing: a write/close that fails without the readable also failing is not constructible.
+  // Found 2026-07-17 by the first tests that ever read a CORRUPT archive.
+  const wrote = w.write(new Uint8Array(buf)).catch(() => {})
+  const closed = w.close().catch(() => {})
+  const text = await new Response(ds.readable).text()
+  await wrote
+  await closed
+  return JSON.parse(text)
 }
 
 /** gunzip + JSON.parse, off-thread when possible. The buffer is TRANSFERRED (detached). */
