@@ -2593,12 +2593,43 @@ write shim, so metadata can say a PDF exists with no local bytes).
   behind the arrow" — ▲ is the app drawer, not a cupboard ("a toolbar is like your app homepage").
   `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings) — but it is now
   only the writer's DEFAULT for their next new document: **the layout follows the .studio**
-  (`doc.toolbar`, `ToolbarConfig`). Chain: doc config → the writer's own last layout → the
+  (`doc.toolbar`, `ToolbarConfig`) — **which was HALF TRUE until 2026-07-17 and read here as
+  fact.** `doc.toolbar` persisted in local OPFS, so on the authoring machine it looked like a
+  working feature; `ExportBundle.document` is an ALLOW-LIST and never named the field, so every
+  .studio ever emailed, synced or downloaded arrived with the layout STRIPPED. Both halves are wired
+  now (bundle.ts emits · openDoc.ts restores) and `storage/openDoc.toolbar.test.ts` drives the REAL
+  `openInkwaveFile` (drop the restore ⇒ 3 die). The entry below it claimed the feature; nothing
+  could see that the emailed file didn't have it. Chain: doc config → the writer's own last layout → the
   first-run six (page, style, info, settings, media import, review — ALL SIX LIVE since the media lane
   landed 2026-07-17; the `media`→`bib` fallthrough is retired). A received document brings its
   author's layout, which is the feature; it can never hide ▲/⋮ or name a button this build lacks,
-  because every path resolves through `migrateSlots`. NOT anchored — `contentHash` takes contentJson
-  only. Touch: hold-drag reorders the row
+  because every path resolves through `migrateSlots`. **NOT anchored — and that is PROVED now, not
+  asserted** (`editor/toolbarHash.test.ts`, the real createSnapshotIfChanged → gzip → bundle →
+  verifyBundle chain): two documents differing ONLY in their toolbar hash identically (content AND
+  bundle), rearranging mints NO snapshot, the snapshot record has no toolbar key, and a TAMPERED
+  toolbar STILL verifies — the inverse of every other tamper test here, deliberately: a recipient who
+  rearranges the buttons must not be told the writing was altered. It carries a KNOWN-POSITIVE (the
+  same comparison sees a one-word prose change) so "identical" is an observation, not a harness that
+  hashes nothing; the obvious mutant kills 6 of 9. Peter: "keep the toolbar config out of the hash.
+  It doesn't need to be in provenance."
+  **⚠ MIGRATION IS A RENDER RULE — KEEP IT OUT OF THE BYTES.** `migrateSlots` resolves against
+  `livePopulation()`, which is FLAG-SENSITIVE, so migrating on the way IN, OUT, or THROUGH deletes a
+  slot from the AUTHOR'S FILE the first time anyone opens it with a flag off (a `?prodLedger` writer's
+  `clock`, silently, forever). Three sites, three functions, one rule: `carryToolbarConfig` (verbatim
+  order, registered ids only) for in/out; `mergeRowIntoConfig` for the write-back after a drag —
+  it keeps only what the writer COULD NOT have chosen to drop, because the config stores the ROW and
+  drawer membership is DERIVED, so a LIVE slot missing from the new row was demoted deliberately and
+  must not resurrect (both directions mutation-proved). Migration answers "what can THIS build draw?";
+  a document answers "what did the author arrange?".
+  **ONE ROW SIZE:** index.css sized the phone circles at `(100vw − 45px) / 8` — a second copy of
+  ROW_SLOTS (+ ▲ + ⋮) in another language, which no lane changing ROW_SLOTS would open, on the one
+  device the number exists to fit. It now derives from `--iw-row-slots`; the guard reads index.css
+  ITSELF (jsdom does not resolve custom properties from a stylesheet — theme.test.ts's lesson).
+  **`scripts/toolbar.prove.mjs` IS LOAD-FLAKY AND FAILS TOWARD "THE FEATURE IS MISSING"** — under CPU
+  contention it reported `✗ the media-import button renders` + the Alt hints + the drawer remainder,
+  17/26, on UNTOUCHED master and on the branch IDENTICALLY; quiet, the branch is 30/30 three times.
+  It accuses a live feature of being absent (the pdfposthoc "a probe that fails by luck" disease) —
+  wait for the CONTENT, not the clock. Re-run it quiet before reading any verdict off it. Touch: hold-drag reorders the row
   (insertion semantics, FLIP previews) and hold-drag a ▲ entry ONTO a row slot to swap it in;
   desktop keeps HTML5 drag. During any drag the circle discs go opaque
   (`--iw-slot-drag-bg`; night token in the nightable block) so the lifted circle passes OVER
