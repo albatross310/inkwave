@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   ALL_SLOTS, DEFAULT_SLOTS, ROW_SLOTS, SlotId,
   livePopulation, slotIsLive, migrateSlots, overflowSlots, planBarToggle,
   slotIndexForDigit, hotkeyHintFor, SLOT_HOTKEY_MAX,
-  readToolbarConfig, resolveToolbarRow, mayPersistConfig,
+  readToolbarConfig, resolveToolbarRow, mayPersistConfig, carryToolbarConfig, mergeRowIntoConfig,
 } from './toolbarContract'
 import { setProdLedgerEnabled, _resetProdLedgerFlag } from '../productivity/ledgerFlag'
 
@@ -289,5 +290,121 @@ describe('hotkeys — the row IS the speed dial', () => {
     for (const k of ['a', '', 'Enter', '1a', ' ', 'ArrowLeft', '+']) {
       expect(slotIndexForDigit(k), `key=${k}`).toBeNull()
     }
+  })
+})
+
+describe('carryToolbarConfig — what goes INTO a .studio, and comes back out of one', () => {
+  // The rule this block exists for: THE CARRIED CONFIG IS NEVER MIGRATED. Migration is a question
+  // about THIS build ("what can I draw right now?") and it is flag-sensitive; a document is a
+  // record of what the author arranged. Answering the second question with the first deletes a
+  // writer's slot from their own file the first time they open it with a flag off.
+  it('carries the author’s row VERBATIM — order and length untouched', () => {
+    const row: SlotId[] = ['receipt', 'media', 'page']
+    expect(carryToolbarConfig({ v: 1, row })).toEqual({ v: 1, row })
+    // NOT six: carry is not a row. migrateSlots fills to ROW_SLOTS at RENDER time.
+    expect(migrateSlots(row)).toHaveLength(ROW_SLOTS)
+  })
+
+  // THE ONE THAT MATTERS, and it is mutation-proved: swap `carryToolbarConfig` to return
+  // `{ v: 1, row: migrateSlots(cfg.row) }` — the innocent "normalise it once" someone will
+  // reach for — and this test fails while every other test in this file stays green.
+  it('a flagged-OFF slot SURVIVES the round-trip — the file is not edited by a runtime flag', () => {
+    const row: SlotId[] = ['clock', 'page', 'style']
+    expect(slotIsLive('clock')).toBe(false)              // the flag is off in this test
+
+    const carried = carryToolbarConfig({ v: 1, row })
+    expect(carried!.row).toContain('clock' as SlotId)    // the file keeps what the author arranged
+    expect(migrateSlots(carried!.row)).not.toContain('clock' as SlotId) // ...and the ROW does not draw it
+
+    // And with the flag on, the same bytes render it. Nothing was lost in between.
+    setProdLedgerEnabled(true)
+    expect(migrateSlots(carried!.row)).toContain('clock' as SlotId)
+  })
+
+  it('drops junk and duplicates — an id no build ever had is not a lost feature', () => {
+    const carried = carryToolbarConfig({ v: 1, row: ['page', 'wormhole', 'page', 42, null, 'style'] })
+    expect(carried).toEqual({ v: 1, row: ['page', 'style'] })
+  })
+
+  it('absent and unreadable both carry NOTHING — never a repaired guess persisted as the author’s', () => {
+    expect(carryToolbarConfig(undefined)).toBeUndefined()
+    expect(carryToolbarConfig(null)).toBeUndefined()
+    expect(carryToolbarConfig({ v: 2, row: ['page'] })).toBeUndefined()   // a version we cannot read
+    expect(carryToolbarConfig({ v: 1, row: 'page' })).toBeUndefined()     // a shape we cannot read
+    expect(carryToolbarConfig('page,style')).toBeUndefined()
+  })
+
+  it('found reads carry BOTH answers — the migrated row to draw, the verbatim config to store', () => {
+    const read = readToolbarConfig({ v: 1, row: ['clock', 'page'] })
+    expect(read.kind).toBe('found')
+    if (read.kind !== 'found') return
+    expect(read.row).toHaveLength(ROW_SLOTS)             // renderable, filled, flag-resolved
+    expect(read.row).not.toContain('clock' as SlotId)
+    expect(read.config.row).toEqual(['clock', 'page'])   // storable, verbatim
+  })
+})
+
+describe('ONE row size — the phone fit is derived from six, not agreed with it', () => {
+  // Peter: "there's only 6 slots not 7 which I think is a good number because it FITS WELL ON PHONE
+  // … we want to keep the phone and desktop experience continuous." So the phone's circle size is
+  // the row size's consequence. index.css sized the phone circles at `(100vw - 45px) / 8` — a
+  // second copy of ROW_SLOTS (+ ▲ + ⋮), written in another language, which no lane changing
+  // ROW_SLOTS would think to open: the row would grow and every phone circle would silently
+  // mis-size, on the ONE device the number exists to fit.
+  //
+  // Read off index.css ITSELF, not off jsdom, for the reason theme.test.ts records: jsdom does not
+  // resolve custom properties from a stylesheet, so a "the var applies" test reports nothing and
+  // passes. MUTATION-PROVED: restore the literal `/ 8` and this fails.
+  const css = readFileSync(new URL('../styles/index.css', import.meta.url), 'utf8')
+  const phoneRules = css.split('.iw-phone-toolbar').slice(1).map(b => b.slice(0, 200))
+
+  it('the phone toolbar sizes its circles from --iw-row-slots', () => {
+    expect(phoneRules.length).toBeGreaterThan(0)   // VOID rather than pass if the rules move/rename
+    for (const rule of phoneRules) {
+      expect(rule).toContain('var(--iw-row-slots')
+      // The literal the var replaced. `+ 2` is the ▲ drawer and ⋮ — fixed chrome, not slots.
+      expect(rule).not.toMatch(/\/\s*8\s*\)/)
+    }
+  })
+
+  it('the CSS fallback equals ROW_SLOTS — a stale fallback is the same fork, one line down', () => {
+    const fallbacks = [...css.matchAll(/var\(--iw-row-slots,\s*(\d+)\)/g)].map(m => Number(m[1]))
+    expect(fallbacks.length).toBeGreaterThan(0)
+    for (const f of fallbacks) expect(f).toBe(ROW_SLOTS)
+  })
+})
+
+describe('mergeRowIntoConfig — a drag must not delete what the drag could not see', () => {
+  // The third site. `carryToolbarConfig` keeps a flagged-off slot on the way INTO a .studio and on
+  // the way OUT of one; without this, the writer's next drag deletes it from the middle, because the
+  // row the UI hands back has already been migrated against THIS build's live population.
+  it('keeps a flagged-off slot the writer could not have dropped', () => {
+    const before = { v: 1, row: ['clock', 'page', 'style'] }     // authored with ?prodLedger on
+    expect(slotIsLive('clock')).toBe(false)                      // ...now opened with it off
+
+    const after = mergeRowIntoConfig(before, ['page', 'style', 'guide', 'settings', 'media', 'receipt'])
+    expect(after.row).toContain('clock' as SlotId)
+    expect(after.row.slice(0, 6)).toEqual(['page', 'style', 'guide', 'settings', 'media', 'receipt'])
+  })
+
+  // The other half, and the pair is what makes the rule a rule rather than a hoarder: a LIVE slot
+  // the writer moved to the ▲ drawer is a DECISION (the config stores the row; drawer membership is
+  // derived), so it must NOT come back. Mutating the rule to keep everything absent fails this.
+  it('does NOT resurrect a LIVE slot the writer moved to the drawer', () => {
+    const before = { v: 1, row: ['bib', 'page', 'style'] }
+    expect(slotIsLive('bib')).toBe(true)
+
+    const after = mergeRowIntoConfig(before, ['page', 'style', 'guide', 'settings', 'media', 'receipt'])
+    expect(after.row).not.toContain('bib' as SlotId)
+  })
+
+  it('a document with no config just takes the new row', () => {
+    expect(mergeRowIntoConfig(undefined, ['page', 'style'])).toEqual({ v: 1, row: ['page', 'style'] })
+  })
+
+  it('never duplicates a slot that is in both', () => {
+    setProdLedgerEnabled(true)
+    const after = mergeRowIntoConfig({ v: 1, row: ['clock'] }, ['clock', 'page'])
+    expect(after.row).toEqual(['clock', 'page'])
   })
 })

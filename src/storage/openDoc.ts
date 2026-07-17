@@ -18,6 +18,7 @@ import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
 import { restoreSnapshotsFromBundle, listSnapshots } from '../provenance/snapshots'
 import { applyViewSettings } from '../editor/viewSettings'
+import { carryToolbarConfig } from '../editor/toolbarContract'
 import { bibProvider } from '../citations/bibProvider'
 import { loadLibrary, persistLibrary } from '../citations/library'
 import { savePdf, base64ToBlob } from '../citations/pdfStore'
@@ -171,6 +172,7 @@ async function openInkwaveFileInner(
   // document to open is the one ALREADY ON DISK, untouched: same id, same body, same receipts. The
   // file was not useless — its snapshots were merged in above, grow-only, which is pure gain — but
   // its BODY never reaches current.json. Nothing is written here at all.
+  const incomingToolbar = carryToolbarConfig(data.document?.toolbar)
   const keepLocal = verdict === 'incoming-stale' && !!localBefore
   const doc = keepLocal
     ? localBefore!
@@ -179,6 +181,15 @@ async function openInkwaveFileInner(
         schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: uuidv4(),
         // Restore the signed receipt chain from the bundle so the ReceiptPanel shows history.
         ...(data.receipts?.length ? { scasReceipts: data.receipts } : {}),
+        // THE TOOLBAR FOLLOWS THE DOC (Peter, 2026-07-17). The author's layout travels in the
+        // .studio and applies on open — open a score, get music tools. Safe to adopt without asking:
+        // it can only ever name buttons that exist, can never hide ▲/⋮, and is one drag to change
+        // (see editor/toolbarContract.ts; `citationStyle` is the shipped precedent for a document
+        // silently reconfiguring a view on open). VERBATIM, never migrated — migrating here would
+        // bake THIS device's flag state into the file, deleting a slot the author arranged.
+        // A document with NO config leaves this undefined, so resolveToolbarRow falls through to
+        // the writer's OWN order: the thousands of existing documents are untouched.
+        ...(incomingToolbar ? { toolbar: incomingToolbar } : {}),
         ...(bib?.length ? { bibliography: { source: 'library' as const, entries: bib, generatedAt: now } } : {}),
       })
   // Persist — but a persistence failure must NOT abort the open. The parsed doc is in hand and

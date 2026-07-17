@@ -809,12 +809,17 @@
      which justify-between spreads as ~6px gaps on any device (375px phone → 41px circles,
      430px → 48px tablet cap). Both the visible circle AND the button's 44px min-width take the
      same size. Scoped override — desktop keeps the 36px circles + full 44px targets. */
+  /* The divisor is the ROW plus the two fixed circles (▲ drawer, ⋮ menu) — and it comes from
+     ROW_SLOTS (editor/toolbarContract.ts), written onto the bar as --iw-row-slots, NEVER a literal.
+     It was `8` here: a second copy of the row size, in CSS, where the one lane most likely to change
+     ROW_SLOTS would never look. Peter's six is justified BY the phone fit, so the phone fit must be
+     a function of it. The fallback keeps a stylesheet-only render honest at today's six. */
   .iw-phone-toolbar .min-w-\[44px\] {
-    min-width: clamp(36px, calc((100vw - 45px) / 8), 48px);
+    min-width: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
   }
   .iw-phone-toolbar .w-9 {
-    width: clamp(36px, calc((100vw - 45px) / 8), 48px);
-    height: clamp(36px, calc((100vw - 45px) / 8), 48px);
+    width: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
+    height: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
   }
 
   /* While a slot drag is live (touch-hold reorder), every slot circle's disc goes OPAQUE —

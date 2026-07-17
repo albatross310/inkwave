@@ -9,6 +9,28 @@
 // second mechanism must be unrepresentable, not merely discouraged — and pinned by tests that
 // are mutation-proved to FIRE (toolbarContract.test.ts).
 
+// ─── HOW A LANE PLUGS IN (read this; then read the section your change touches) ──────────────
+// Four things exist here and nowhere else. If your lane is about to invent a fifth, it is about to
+// fork one of these:
+//   1. A BUTTON      → add a member to `SlotId` + `ALL_SLOTS`, and a predicate to `SLOT_LIVE`.
+//                      That is the whole registration: the row, the ▲ drawer, drag-to-reorder,
+//                      migration and the positional hotkey all follow. Do not touch ROW_SLOTS, the
+//                      storage key, or `migrateSlots`. Registered ≠ live — a slot whose lane has
+//                      not shipped (`music`) or whose flag is off (`clock`) says so in SLOT_LIVE
+//                      and is invisible everywhere, rather than painting a dead circle.
+//   2. A SECOND BAR  → add a member to `BarLayerId` and render on `active === 'x'`. The exclusion
+//                      Peter asked for is the TYPE (one variable, one id), not a convention.
+//   3. TWO WAYS IN   → a slot is a TRIGGER, never an OWNER. Lift ONE piece of open state and give
+//                      every door the setter (the ◈ ReceiptPanel is the precedent Peter named).
+//   4. A PER-DOC     → `ToolbarConfig` on the .studio. Read with `readToolbarConfig` (found/absent/
+//      LAYOUT          error — never null), render with `resolveToolbarRow`, store/travel with
+//                      `carryToolbarConfig`. It is OUTSIDE the provenance hash and must stay there:
+//                      `toolbarHash.test.ts` PROVES it against the real snapshot + verify chain, so
+//                      the day someone folds it in, the gate says so.
+// THE 2026-07-17 ARRIVALS, and their state: `media` LIVE (photo/audio/video import) · `clock` behind
+// ?prodLedger (the Pomodoro/ledger drop-up; the top-right countdown is its second door) · `music`
+// registered, awaiting its lane, and it owns the music BAR LAYER when it lands.
+//
 // ─── Population 1: the slots (circles) ───────────────────────────────────────
 // ONE population (CLAUDE.md 2026-07-12): the ROW_SLOTS main-row circles + the ▲ drop-up
 // overflow. S (style) and ⚙ (settings) are slots too; only ▲ and ⋮ are fixed.
@@ -316,7 +338,13 @@ export interface ToolbarConfig {
  * type system enforces that they stay different.
  */
 export type ToolbarConfigRead =
-  | { kind: 'found'; row: SlotId[] }
+  /**
+   * `row` is the config MIGRATED for rendering here, now: exactly ROW_SLOTS ids this build can
+   * actually draw, with anything flagged-off dropped. `config` is the SAME config VERBATIM — the
+   * author's order, unmigrated — and the two are different on purpose. See carryToolbarConfig: the
+   * migration is a RENDER-time rule, and baking it into a document is a lossy write.
+   */
+  | { kind: 'found'; row: SlotId[]; config: ToolbarConfig }
   | { kind: 'absent' }                    // no config — a pre-2026-07-17 document, or an uncurated one
   | { kind: 'error'; reason: string }     // present but unreadable — NEVER silently a default
 
@@ -338,7 +366,60 @@ export function readToolbarConfig(raw: unknown): ToolbarConfigRead {
   // or truncated `row` cannot produce an unreachable toolbar, because migrateSlots returns exactly
   // ROW_SLOTS valid unique members from ANY input. ▲ and ⋮ are fixed chrome and are not slots at
   // all, so no config can hide the way back. "A received document locks me out" is unrepresentable.
-  return { kind: 'found', row: migrateSlots(cfg.row) }
+  return { kind: 'found', row: migrateSlots(cfg.row), config: { v: 1, row: registeredOnly(cfg.row) } }
+}
+
+/** Registered ids, in the given order, no duplicates. NOT filtered by liveness — see carryToolbarConfig. */
+function registeredOnly(row: readonly unknown[]): SlotId[] {
+  const known = new Set<string>(ALL_SLOTS)
+  const out: SlotId[] = []
+  for (const raw of row) {
+    if (typeof raw === 'string' && known.has(raw) && !out.includes(raw as SlotId)) out.push(raw as SlotId)
+  }
+  return out
+}
+
+/**
+ * The config as it TRAVELS — written into a .studio, and read back out of one. Verbatim order;
+ * registered ids only; **never migrated**. `undefined` when the raw value is absent or unreadable:
+ * an unreadable config is DROPPED, not repaired, because a toolbar is one drag to fix and a
+ * repaired-from-junk row is a guess we would then persist as if the author had arranged it.
+ *
+ * WHY VERBATIM, AND IT IS THE LOAD-BEARING HALF. `migrateSlots` resolves against `livePopulation()`,
+ * which is FLAG-SENSITIVE. Migrate on the way in or out and a writer who opens their own document
+ * with `?prodLedger` off has `clock` silently deleted from the FILE — permanently, at the next save.
+ * Migration answers "what can THIS build draw right now?"; a document answers "what did the author
+ * arrange?". Those are different questions and only the second belongs in the bytes. Rendering still
+ * goes through migrateSlots on every read (resolveToolbarRow), so a carried id this build cannot
+ * draw is invisible rather than broken — the same partition, one rule, applied at the right end.
+ *
+ * `registeredOnly` is the one filter it does apply: an id no version of Inkwave ever had is not a
+ * lost feature, it is junk, and junk in a document is how a later reader learns to distrust a field.
+ * Liveness is a runtime state; registration is a fact about the build.
+ */
+export function carryToolbarConfig(raw: unknown): ToolbarConfig | undefined {
+  const read = readToolbarConfig(raw)
+  return read.kind === 'found' ? read.config : undefined
+}
+
+/**
+ * The config to WRITE after the writer rearranges their row — the third site, and the one where the
+ * flag-sensitivity closed back in.
+ *
+ * The row the UI hands back is a MIGRATED row: it can only contain what this build draws. Persist it
+ * raw and every drag quietly deletes the author's flagged-off slots from their own document —
+ * `carryToolbarConfig` refuses to lose them on the way in and out, and this would lose them in the
+ * middle. So: the writer's new row, PLUS any registered-but-not-live id their config already had.
+ *
+ * THE RULE THAT MAKES THAT SOUND, and it needs the distinction the config's shape already draws: the
+ * stored config is the ROW; drawer membership is DERIVED (overflowSlots). So a LIVE slot missing from
+ * the new row was moved to the drawer BY THE WRITER — deliberate, and it must not come back. A slot
+ * that was never renderable cannot have been dragged anywhere; its absence is the flag's doing, not a
+ * decision. Keep what they could not have chosen to drop.
+ */
+export function mergeRowIntoConfig(existing: unknown, row: readonly SlotId[]): ToolbarConfig {
+  const kept = carryToolbarConfig(existing)?.row.filter(id => !slotIsLive(id) && !row.includes(id)) ?? []
+  return { v: 1, row: [...row, ...kept] }
 }
 
 /**

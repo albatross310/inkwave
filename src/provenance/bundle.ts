@@ -12,6 +12,7 @@ import { signingPublicKeyHex } from './receipts'
 import { POOL_ID_STATIC } from '../scas/poolId'
 import { deviceId } from '../sync/presence'
 import { collectViewSettings } from '../editor/viewSettings'
+import { carryToolbarConfig, type ToolbarConfig } from '../editor/toolbarContract'
 
 // Render an in-text citation as readable text from the node's OWN attrs only — deterministic and
 // library-independent. pmToText feeds the verifiable bundle header (verify/index.ts recomputes it and
@@ -111,6 +112,16 @@ export interface ExportBundle {
     // `email` + `emailHash`, which is what verify recomputes and what OTS binds.
     docType?: DocType
     email?: EmailHeaders
+    // The author's toolbar layout (Peter, 2026-07-17: "we should encode the toolbar configuration
+    // into a .studio document" — "toolbar follows docs"). Carried here for the same reason
+    // `docType`/`email` are: `document` is an ALLOW-LIST, so a field that is not named does not
+    // travel, and until this line a received .studio arrived with the layout stripped while
+    // `doc.toolbar` sat in local OPFS looking like it worked.
+    // NOT HASHED, and that is the design (see editor/toolbarContract.ts): contentHash takes
+    // contentJson alone and bundleHash folds four explicit arguments, so rearranging your buttons
+    // cannot read as tampering with your thesis. `toolbarHash.test.ts` PROVES that rather than
+    // asserting it in a comment.
+    toolbar?: ToolbarConfig
   }
   snapshots: Snapshot[]       // each with contentJson, contentHash, bundleHash, ots proof, receipts
   receipts: SignedReceipt[]   // the live-composition signed chain (held by the writer)
@@ -178,6 +189,9 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
       scasPoolId: doc.scasPoolId,
       docType: doc.docType,
       email: doc.email,
+      // Verbatim (carryToolbarConfig), never migrated: the flag state of the EXPORTING device must
+      // not decide what the author's document says. See toolbarContract.ts.
+      toolbar: carryToolbarConfig(doc.toolbar),
     },
     snapshots,
     receipts,
