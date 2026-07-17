@@ -8,7 +8,7 @@ import type { ExportBundle } from '../provenance/bundle'
 import { parseStudioOffThread } from '../workers/parseClient'
 import { openPerfStart, openPerfStep, openPerfAbort, openPerfDispatched } from './openPerf'
 import { reportOpenError, reportOpenNotice } from './openError'
-import { saveDocument, loadDocument } from './opfs'
+import { saveDocument, readDocument } from './opfs'
 import { classifyOpen, type OpenVerdict } from './openConflict'
 import { contentHash } from '../provenance/hash'
 import { upsertMeta } from './indexeddb'
@@ -89,13 +89,11 @@ async function openInkwaveFileInner(
   // would blind-overwrite a document that is sitting on disk perfectly intact. The swallowed read
   // would defeat this guard. So a read FAILURE is explicitly not an absence: `readFailed` means
   // "there may well be work here" and it is treated as the most cautious verdict below.
-  let localBefore: Awaited<ReturnType<typeof loadDocument>> = null
-  let readFailed = false
-  try {
-    localBefore = await loadDocument(fileId)
-  } catch (err) {
-    readFailed = true
-    console.error('[inkwave] open: could not read the local copy — refusing to overwrite it:', err)
+  const localRead = await readDocument(fileId)
+  const localBefore = localRead.kind === 'found' ? localRead.doc : null
+  const readFailed = localRead.kind === 'error'
+  if (readFailed) {
+    console.error('[inkwave] open: could not read the local copy — refusing to overwrite it:', localRead.error)
   }
   // THE LIVE KNOWN-NEGATIVE. `window.__iwOpenGuard = 'off'` restores the pre-fix behaviour: adopt
   // the incoming file unconditionally. It exists so the reproduction can re-create the 2026-07-15
