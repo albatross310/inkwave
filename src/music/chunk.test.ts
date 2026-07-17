@@ -36,12 +36,41 @@ const stripComments = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 
 /** Static import/export specifiers (NOT `import(...)`, which is a lazy boundary). */
-function staticSpecifiers(code: string): string[] {
+export function staticSpecifiers(code: string): string[] {
   const src = stripComments(code)
   const out: string[] = []
   // `import ... from 'x'`, `import 'x'`, `export ... from 'x'`
   const re = /(?:^|\n)\s*(?:import|export)\s+(?:[^'"()]*?\s+from\s+)?['"]([^'"]+)['"]/g
-  for (const m of src.matchAll(re)) out.push(m[1])
+  for (const m of src.matchAll(re)) {
+    // ⚠️ SKIP `import type` / `export type` — THEY ARE ERASED AT COMPILE TIME AND SHIP NO BYTES.
+    //
+    // This walker is a cheap PROXY for the real claim ("the editor downloads no music bytes"), and
+    // on a type-only import the proxy was WRONG: it reported a dependency that cannot exist at
+    // runtime. It fired when `types/document.ts` type-imported the §1 `Piece` — the same shape the
+    // file already uses for `ToolbarConfig`, which the walker never saw only because
+    // `editor/toolbarContract` is not under `src/music/`.
+    //
+    // GROUND TRUTH, MEASURED BEFORE LOOSENING THIS: no built chunk outside MusicStudio/demo carries
+    // any music string, and `music.prove.mjs` asserts what the browser ACTUALLY DOWNLOADS to open
+    // `/` — no music chunk, with a void-guard so a blind listener cannot pass it. The bytes were
+    // never there; the proxy was.
+    //
+    // ONLY the STATEMENT form is skipped. `import { type X, y }` is left flagged deliberately: it
+    // can still emit a runtime import, so a walker that skipped it would be guessing. Conservative
+    // in the direction that keeps the guard honest.
+    //
+    // MUTATION-PROVED AFTER LOOSENING, and the first mutant was a DUD worth recording: adding
+    // `import { newPiece }` to `types/document.ts` did NOT fail this guard, which looked exactly
+    // like the walker having gone blind. It had not — that file is reached from the editor ONLY
+    // through type imports, so it is not in the runtime graph at all and a value import inside it
+    // is dead code that ships nothing. The guard was right and the mutant was not a bug. The honest
+    // negative puts the value import in a file the editor actually RUNS (`routes/Edit.tsx`), and
+    // that one FAILS this guard: ['src/music/types.ts'] vs []. A mutation that does not reproduce
+    // a real bug tests nothing — check the mutant misbehaves before concluding the guard is weak.
+    const stmt = m[0]
+    if (/(?:^|\n)\s*(?:import|export)\s+type\s/.test(stmt)) continue
+    out.push(m[1])
+  }
   return out
 }
 
@@ -85,6 +114,41 @@ function staticGraph(entry: string): { files: Set<string>; packages: Set<string>
 const rel = (f: string) => f.replace(`${ROOT}/`, '')
 const musicFiles = (files: Set<string>) =>
   [...files].filter(f => f.startsWith(join(SRC, 'music'))).map(rel).sort()
+
+// ─── guard 0: the WALKER ITSELF ──────────────────────────────────────────────────────────────
+//
+// The walker was loosened to skip `import type` (erased at compile time, ships no bytes — see
+// staticSpecifiers). A loosened guard has to prove it did not go blind: every assertion below this
+// point is worthless if the walker stopped seeing real imports. So the walker is tested directly,
+// which needs no fixture file and no build.
+
+describe('the import walker sees what it must and skips what is erased', () => {
+  it('SEES a value import — the thing every guard below depends on', () => {
+    expect(staticSpecifiers(`import { newPiece } from './music/types'`)).toEqual(['./music/types'])
+    expect(staticSpecifiers(`import './music/side-effect'`)).toEqual(['./music/side-effect'])
+    expect(staticSpecifiers(`export { x } from './music/types'`)).toEqual(['./music/types'])
+    expect(staticSpecifiers(`import Default from './music/types'`)).toEqual(['./music/types'])
+    expect(staticSpecifiers(`import * as m from './music/types'`)).toEqual(['./music/types'])
+  })
+
+  it('SKIPS a type-only import — it is erased and cannot put a byte in a bundle', () => {
+    expect(staticSpecifiers(`import type { Piece } from './music/types'`)).toEqual([])
+    expect(staticSpecifiers(`export type { Piece } from './music/types'`)).toEqual([])
+  })
+
+  it('still flags the INLINE type form — it can emit a runtime import, so do not guess', () => {
+    // `import { type X, y }` keeps a real import for `y`; and even all-type inline specifiers are
+    // config-dependent. The conservative direction is the one that keeps the guard honest.
+    expect(staticSpecifiers(`import { type Piece, newPiece } from './music/types'`))
+      .toEqual(['./music/types'])
+    expect(staticSpecifiers(`import { type Piece } from './music/types'`)).toEqual(['./music/types'])
+  })
+
+  it('is not fooled by the word "type" in a binding name', () => {
+    expect(staticSpecifiers(`import { typeOf } from './music/types'`)).toEqual(['./music/types'])
+    expect(staticSpecifiers(`import type_ from './music/types'`)).toEqual(['./music/types'])
+  })
+})
 
 // ─── guard 1: the static import graph (ALWAYS runs) ──────────────────────────────────────────
 

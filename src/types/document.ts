@@ -115,6 +115,7 @@ export type DocType =
   | 'note'
   | 'essay'
   | 'email'
+  | 'music'        // §1: the document IS a Piece — a score, not prose about one. See `piece` below.
   | 'reading'      // a PDF was open and being scrolled — reading IS work, and it counts
   | 'annotating'   // an annotation happened in the last 5 minutes (Peter's window)
   | 'other'        // a kind we recognise but haven't enumerated
@@ -171,12 +172,18 @@ export interface MusicExcerptRef {
 /**
  * One annotation anchored to a note or measure (§B4).
  *
- * ⚠️ §B4 IS NOT BUILT AND THIS SHAPE IS NOT SETTLED. The `Piece` contract's `MusicXmlAnchor`
- * (`music/types.ts`, owned by the photo lane) declares `measure: number`, but MusicXML bar numbers
- * are STRINGS by spec — a numeric anchor cannot express a '0' pickup or an '8a' repeat ending. That
- * question is with the Piece's owner. Until it resolves, this stays deliberately open: the ARRAY is
- * hashed today (see musicAttachmentsHash) so that populating it later needs no new bundle version,
- * and it is empty today so no anchored hash can be affected by whichever way the anchor lands.
+ * §B4 IS NOT BUILT, but THE ANCHOR QUESTION IS SETTLED (2026-07-17). This file used to record it as
+ * open: `MusicXmlAnchor` declared `measure: number`, and MusicXML bar numbers are STRINGS by spec, so
+ * a numeric anchor cannot express a '0' pickup or an '8a' repeat ending. The Piece's owner ruled —
+ * and the answer was not "make it a string": a printed bar number is also NOT UNIQUE (repeat endings
+ * reuse it, multi-movement files restart at 1), so it cannot be a key at all. `music/types.ts` BarRef
+ * has the full argument. The shape is now `bar_index` (0-based ORDINAL — identical to `parse.ts`
+ * `Measure.index`, so this lane needs no conversion) + `bar_label` (the printed string; display and
+ * citation only, never a key), both optional because they are known at different times.
+ *
+ * This stays deliberately open ANYWAY: the ARRAY is hashed today (see musicAttachmentsHash) so that
+ * populating it later needs no new bundle version, and it is empty today so no anchored hash can be
+ * affected by whatever §B4 records per annotation.
  */
 export interface MusicAnnotationRecord {
   id: string
@@ -271,6 +278,10 @@ export interface DocGoals {
 
 import type { ToolbarConfig } from '../editor/toolbarContract'
 import type { MediaAsset } from '../media/types'
+// §1's Piece — declared by its owner (`src/music/types.ts`, the contract three lanes read) and
+// imported here, exactly as ToolbarConfig is. The shape belongs to the music module; the fact that
+// a DOCUMENT can be one belongs here.
+import type { Piece } from '../music/types'
 
 export interface InkwaveDocument {
   id: string
@@ -341,6 +352,37 @@ export interface InkwaveDocument {
   // Present only once the writer attaches a score. Absent ⇒ the bundle keeps its v:1/v:2/v:3 form,
   // so every document anchored before this feature existed hashes BYTE-IDENTICALLY to before.
   music?: MusicAttachments
+
+  // ─── The Piece (§1) — this document IS a score ───────────────────────────
+  //
+  // ⚠️ `piece` AND `music` ARE DIFFERENT THINGS AND BOTH ARE RIGHT. Read this before merging them:
+  //   · `music: MusicAttachments` (§B5/§B6) — this document is PROSE that quotes music. An essay
+  //     with a MusicXML master attached and bar-range excerpts transcluded into the writing.
+  //   · `piece: Piece` (§1) — this document IS the music. A photographed score with markup, a
+  //     heatmap, lesson notes and a practice record. The prose, if any, is incidental.
+  // An essay about Chopin has `music`; the Chopin the student is learning has `piece`. A document
+  // could legitimately have both (write about the piece you are practising — §A6's "write about the
+  // piece in Inkwave and cite bars"), which is exactly why they are not one field.
+  //
+  // WHY IT LIVES HERE AT ALL, and this RETIRES A FORK I SHIPPED: §1 says "the whole thing … is
+  // bundled in a single `.studio` file (the Inkwave document container)". `music/store.ts` did not
+  // do that — it wrote a PARALLEL container at `music/<pieceId>/piece.json`, a second document store
+  // beside `documents/<id>/current.json`. §1 explicitly says not to have one, and the cost was not
+  // theoretical: a Piece got no edit history, no provenance hashing, no session capture and no cloud
+  // sync, because all of those are things that happen to DOCUMENTS.
+  //
+  // The precedent is the email lane's, verbatim: "An email is an ORDINARY document — that is the
+  // whole design." A Piece is an ordinary document too. `docType: 'music'` + this field; the photo
+  // pages are assets; everything else applies for free rather than because `src/music/` arranges it.
+  //
+  // Absent ⇒ every existing document is byte-identical, as with `email` and `music`.
+  //
+  // ⚠️ OPEN, for the MusicXML lane + coordinator: a `PieceSource {type:'musicxml', xml_ref}` and
+  // `music.masters[]` can both name the same MusicXML bytes. They must not become two copies —
+  // §B6's whole design is "stored ONCE as an embedded source attachment on the document/Piece
+  // (deduplicated)". The seam is that `xml_ref` should REFERENCE a master, not duplicate one.
+  // Unresolved deliberately: it is that lane's field, and guessing is how the dedup silently dies.
+  piece?: Piece
 }
 
 // ─── SCAS engine state (M0) ───────────────────────────────────────────────────
