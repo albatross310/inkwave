@@ -165,6 +165,10 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
   const [window_, setWindow] = useState<ReportWindow>('weekly')
   const [agg, setAgg] = useState<WindowAggregate | null>(null)
   const [loading, setLoading] = useState(true)
+  // A failed ledger read is its OWN state. Collapsing it into `!agg` would say "there's no
+  // work ledger on this device yet" about a ledger that exists and could not be read (auditor,
+  // 2026-07-17) — and letting the throw go unhandled would spin "Reading your ledger…" forever.
+  const [readFailed, setReadFailed] = useState(false)
   const [contentIds, setContentIds] = useState<string[]>([])   // §A7.3 — OFF by default
   // Every consent tick — all OFF by default, all reset when the window changes.
   const [includeNotes, setIncludeNotes] = useState(false)      // tier 2a — diary notes
@@ -193,7 +197,13 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
     setPayload(null)
     setCompiled(null)
     setParsed(null)
-    loadWindow(window_).then(a => { if (live) { setAgg(a); setLoading(false) } })
+    setReadFailed(false)
+    loadWindow(window_)
+      .then(a => { if (live) { setAgg(a); setLoading(false) } })
+      .catch(err => {
+        console.warn('[inkwave] could not read the ledger for this report:', err)
+        if (live) { setReadFailed(true); setLoading(false) }
+      })
     return () => { live = false }
   }, [window_])
 
@@ -286,7 +296,14 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
 
         {loading && <p className="mt-6" style={{ fontSize: FS.body, color: muted }}>Reading your ledger…</p>}
 
-        {!loading && !agg && (
+        {!loading && readFailed && (
+          <p className="mt-6 leading-relaxed" style={{ fontSize: FS.body, color: muted }}>
+            Your work ledger couldn't be read just now, so there's nothing to report on yet. Your
+            records are still on this device — nothing has been changed or lost. Try again in a moment.
+          </p>
+        )}
+
+        {!loading && !readFailed && !agg && (
           <p className="mt-6 leading-relaxed" style={{ fontSize: FS.body, color: muted }}>
             There's no work ledger on this device yet, so there's nothing to report on. The ledger
             records how you worked — minutes, words, breaks — as you write.

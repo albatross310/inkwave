@@ -105,7 +105,18 @@ export function parseRemoteLedger(text: string, month: string): RemoteRead {
  */
 export async function syncLedgerMonth(remote: LedgerRemote, month: string): Promise<SyncOutcome> {
   const file = ledgerFileName(month)
-  const local = await loadLedger(month)
+
+  // THE LOCAL READ CAN FAIL TOO, and it is the same rule pointed the other way (auditor,
+  // 2026-07-17). `loadLedger` now THROWS rather than answering "you have no rows" to a failed OPFS
+  // read — because if it lied, `local` would be empty, the union would be the remote alone, and
+  // step 5 would heal our own disk with it, DESTROYING every row this device had not yet synced.
+  // A sync that cannot read its own ledger has nothing to reconcile with and must not write.
+  let local: MonthLedger
+  try {
+    local = await loadLedger(month)
+  } catch (e) {
+    return { ok: false, reason: `local ledger unreadable (${(e as Error)?.message ?? String(e)}) — not syncing (nothing is lost)` }
+  }
 
   // 1. READ FIRST.
   //

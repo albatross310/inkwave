@@ -46,6 +46,11 @@ const ledgerOf = (rows: SessionRow[]): Promise<MonthLedger> =>
 // REAL ledgerStore chain (queue → merge → attest → write) rather than a fiction.
 const disk = new Map<string, unknown>()
 vi.mock('../storage/opfs', () => ({
+  // MIRROR THE REAL CONTRACT, both halves. `readAppJsonStrict` is what the ledger reads through
+  // (it THROWS on a failed read rather than answering "no rows" — see ledgerStore.readfail.test.ts);
+  // `readAppJson` is the convenience-state reader. A mock that omits one silently hands the module
+  // `undefined`, and every test here then measures the REFUSAL path while reading like a merge test.
+  readAppJsonStrict: async (name: string) => (disk.has(name) ? structuredClone(disk.get(name)) : null),
   readAppJson: async (name: string) => (disk.has(name) ? structuredClone(disk.get(name)) : null),
   writeAppJson: async (name: string, data: unknown) => { disk.set(name, structuredClone(data)) },
 }))
