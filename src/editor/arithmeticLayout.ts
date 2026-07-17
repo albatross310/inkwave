@@ -144,6 +144,12 @@ export interface InlineRun {
   fontWeight: number  // 400 | 700 (synthetic-bold weights collapse to nearest; caller resolves)
   italic: boolean
   atomic?: boolean    // inline atom (math/citation/inline-image NodeView)
+  /** A mark the engine neither models nor has PROVED metric-neutral (see arithMeasure's
+   *  MODELLED_MARKS / METRIC_NEUTRAL_MARKS). Set ⇒ blockEligibility refuses the block. Carried as a
+   *  reason rather than a metric because inventing a metric for an uncertified mark IS the bug this
+   *  guards: `code` renders monospace and was measured in the body font — 47 model pages vs the
+   *  editor's 79, 0/79 break positions matching, `estimatedBlocks 0`, full reliability claimed. */
+  unmodelledMark?: string
   // The run's EFFECTIVE COMPUTED white-space. NOT globally break-spaces inside the editor: the same
   // injected PM sheet flips it per SUBTREE —
   //     .ProseMirror [contenteditable="false"]                      { white-space: normal; }
@@ -237,6 +243,9 @@ export function blockEligibility(block: ArithBlock, _ratio = 1.618, mathEligible
       if (!mathEligible) return { eligible: false, reason: `inline-atom-gated${r.atomType ? ':' + r.atomType : ''}` }
       continue
     }
+    // An unmodelled mark is exactly as unmeasurable as an uncertified font, and defers the same way.
+    // Ordered BEFORE the font check only so the reason names the more specific cause.
+    if (r.unmodelledMark) return { eligible: false, reason: `unmodelled-mark:${r.unmodelledMark}` }
     if (!isCertifiedStack(r.fontFamily)) return { eligible: false, reason: `uncertified:${primaryFamily(r.fontFamily)}` }
     // MIXED WHITE-SPACE: a text run in a different mode than the block wraps by a DIFFERENT rule
     // (hang vs no-hang) on the SAME line — and `normal` additionally COLLAPSES runs of spaces, which
