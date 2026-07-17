@@ -92,6 +92,33 @@ describe('savePiece / loadPiece go through the DOCUMENT store', () => {
     expect(JSON.stringify(after.doc.contentJson)).toContain('my notes')   // NOT clobbered
   })
 
+  it('the document title tracks the Piece title — ONE string, through withPieceTitle', async () => {
+    // savePiece used to answer this inline (`piece.title || doc.title`) while `withPieceTitle` — "the
+    // one function that keeps them so" — sat with zero callers and a DIFFERENT rule for a blank
+    // title. Two rules for one question, the live one undocumented. This pins that the store routes
+    // through the rule rather than carrying a second copy of it.
+    const { store, opfs } = await freshModules()
+    await store.savePiece(aPiece({ title: '  Nocturne, revised  ' }))
+    const read = await opfs.readDocument(ID)
+    if (read.kind !== 'found') throw new Error('setup')
+    expect(read.doc.title).toBe('Nocturne, revised')          // trimmed
+    expect(read.doc.piece?.title).toBe('Nocturne, revised')   // …and the SAME string in both places
+    expect(read.doc.piece?.title).toBe(read.doc.title)
+  })
+
+  it('a Piece saved with a BLANK title reads "Untitled piece" in BOTH places', async () => {
+    // The input the two rules disagreed on. The retired rule kept the OLD doc.title while setting
+    // piece.title = '', so the document list said "Nocturne" and the studio showed a blank field —
+    // two answers to "what is this piece called?".
+    const { store, opfs } = await freshModules()
+    await store.savePiece(aPiece({ title: 'Nocturne' }))
+    await store.savePiece(aPiece({ title: '   ' }))
+    const read = await opfs.readDocument(ID)
+    if (read.kind !== 'found') throw new Error('setup')
+    expect(read.doc.title).toBe('Untitled piece')
+    expect(read.doc.piece?.title).toBe('Untitled piece')
+  })
+
   it('loadPiece returns null for a document that is not a Piece', async () => {
     const { store, opfs } = await freshModules()
     await opfs.saveDocument({
@@ -100,6 +127,36 @@ describe('savePiece / loadPiece go through the DOCUMENT store', () => {
       docType: 'essay',
     })
     expect(await store.loadPiece('essay-1')).toBeNull()
+  })
+
+  it('loadPiece returns null for a music document with NO piece on it', async () => {
+    // `isPieceDocument`'s second half, reached through its live caller: a document that CLAIMS to be
+    // music but carries no Piece is a broken document, not a Piece. Returning `piece!` off it is the
+    // crash; returning null lets the studio mint an honest one.
+    const { store, opfs } = await freshModules()
+    await opfs.saveDocument({
+      id: 'hollow', title: 'Claims to be music', contentJson: { type: 'doc', content: [] },
+      createdAt: 'x', updatedAt: 'x', schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: 's',
+      docType: 'music',
+    })
+    expect(await store.loadPiece('hollow')).toBeNull()
+  })
+
+  it('loadPiece refuses a STRAY piece on a non-music document', async () => {
+    // The `docType === 'music'` half of isPieceDocument, reached through its caller — and the only
+    // case that discriminates there. The other two (essay-with-no-piece, music-with-no-piece) are
+    // masked by loadPiece's own `?? null`: they return null whatever the predicate says, so they pin
+    // the caller's behaviour but NOT the predicate. This one hands loadPiece a document with a real
+    // Piece on it and a docType that forbids reading it — a broken predicate hands the Piece back.
+    const { store, opfs } = await freshModules()
+    const { newPieceDocument } = await import('./newPieceDocument')
+    const stray = newPieceDocument({ title: 'Nocturne' }).piece
+    await opfs.saveDocument({
+      id: 'stray', title: 'An essay', contentJson: { type: 'doc', content: [] },
+      createdAt: 'x', updatedAt: 'x', schemaVersion: '0.1.0', scasLimitN: 'infinite', scasSessionSeed: 's',
+      docType: 'essay', piece: stray,
+    })
+    expect(await store.loadPiece('stray')).toBeNull()
   })
 
   it('loadPiece returns null when the document is genuinely absent', async () => {
@@ -115,19 +172,36 @@ describe('a failed read is NOT an absent one', () => {
     // THE BUG THIS PINS, and it was live in the first version of savePiece: it read
     // `loadDocument(id) ?? newPieceDocument()`, so an ERRORED read collapsed to "absent", minted a
     // fresh empty document and blind-overwrote the student's real Piece. Eleven characters.
-    const { store } = await freshModules()
+    //
+    // ⚠️ WHY THIS TEST LOOKS THE WAY IT DOES, AND WHY IT MUST NOT GO BACK TO A GLOBAL MOCK. It used
+    // to fail the read by mocking `navigator.storage.getDirectory` to reject GLOBALLY — but savePiece
+    // READS *and WRITES* through that one chokepoint, so `rejects.toThrow()` was satisfied by the
+    // WRITE failing, whatever the read did. PROVED (2026-07-17): delete the `if (read.kind ===
+    // 'error') throw` guard — the 07-15 blind-overwrite verbatim — and all 13 tests still passed. The
+    // cell's PASS condition was satisfiable by the very mechanism that disabled the feature, which is
+    // not a control (CLAUDE.md round 12).
+    //
+    // THIS one fails the READ ONLY and leaves every WRITE healthy: a corrupt `current.json` makes
+    // readJson throw StorageReadError (a corrupt file is emphatically NOT an absent one —
+    // storage/opfs.ts), while the shim's writes keep working. Mutant ⇒ blind overwrite, and this test
+    // SEES it; original ⇒ refuses, bytes intact. It DISCRIMINATES rather than merely breaking storage.
+    const { store, write } = await freshModules()
     await store.savePiece(aPiece({ title: 'The real one' }))
 
-    // Now make the READ fail (a private window / quota fault / transient OPFS failure).
-    const dir = await navigator.storage.getDirectory()
-    const spy = vi.spyOn(navigator.storage, 'getDirectory').mockRejectedValue(new Error('opfs is angry'))
+    // Corrupt the body. The READ now fails; writes stay perfectly healthy.
+    await write.writeOpfsFile(['documents', ID, 'current.json'], '{ this is not json')
 
     await expect(store.savePiece(aPiece({ title: 'The replacement' }))).rejects.toThrow()
 
-    // …and the real Piece is untouched.
-    spy.mockRestore()
-    void dir
-    expect((await store.loadPiece(ID))?.title).toBe('The real one')
+    // The unreadable document is left EXACTLY as found — not replaced by a fresh empty one. Assert on
+    // the BYTES, not through loadPiece: loadPiece throws on this document too, so asking it anything
+    // here would be one more cell passing for the wrong reason.
+    const dir = await navigator.storage.getDirectory()
+    const handle = await (await (await dir.getDirectoryHandle('documents')).getDirectoryHandle(ID))
+      .getFileHandle('current.json')
+    const text = await (await handle.getFile()).text()
+    expect(text).not.toContain('The replacement')
+    expect(text).toBe('{ this is not json')
   })
 
   it('KNOWN-NEGATIVE: loadPiece THROWS on a failed read rather than reporting "no piece"', async () => {

@@ -22,7 +22,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { readDocument, saveDocument } from '../storage/opfs'
 import { writeOpfsFile } from '../storage/opfsWrite'
-import { newPieceDocument } from './newPieceDocument'
+import { isPieceDocument, newPieceDocument, withPieceTitle } from './newPieceDocument'
 import type { AssetRef, Piece } from './types'
 
 const ROOT = 'music'
@@ -70,6 +70,12 @@ async function removeFile(path: string[]): Promise<void> {
  * THROWS on a failed read AND on a failed write. A silent save failure is data loss; the editor's
  * autosave follows the same rule ("NEVER swallow a failed autosave"), because a student who keeps
  * annotating a piece that stopped persisting loses the lesson.
+ *
+ * THE TITLE IS `withPieceTitle`'S JOB, not this function's. It used to be done here and inline
+ * (`title: piece.title || doc.title`) while `withPieceTitle` — which documents itself as "the one
+ * function that keeps them so" — sat with zero callers and DIFFERENT semantics for a blank title.
+ * Two rules for one question, the live one undocumented. There is now one rule and it is the one
+ * with the comment on it.
  */
 export async function savePiece(piece: Piece): Promise<void> {
   const read = await readDocument(piece.id)
@@ -78,15 +84,14 @@ export async function savePiece(piece: Piece): Promise<void> {
     throw read.error
   }
   const doc = read.kind === 'found' ? read.doc : newPieceDocument({ title: piece.title })
-  await saveDocument({
+  await saveDocument(withPieceTitle({
     ...doc,
     // `piece.id` is authoritative: the caller holds the Piece, and a fresh document minted above
     // carries its own uuid, which would orphan every asset already written under `piece.id`.
     id: piece.id,
-    title: piece.title || doc.title,
     docType: 'music',
     piece: { ...piece, updated_at: new Date().toISOString() },
-  })
+  }, piece.title))
 }
 
 /**
@@ -101,7 +106,9 @@ export async function loadPiece(pieceId: string): Promise<Piece | null> {
   const read = await readDocument(pieceId)
   if (read.kind === 'error') throw read.error
   if (read.kind === 'absent') return null
-  return read.doc.docType === 'music' ? read.doc.piece ?? null : null
+  // `isPieceDocument` is THE definition of "is this a Piece?" — this function used to inline its own
+  // copy of it, which is how a predicate documented as "the ONE definition" ends up with no callers.
+  return isPieceDocument(read.doc) ? read.doc.piece ?? null : null
 }
 
 // ─── The legacy migration ────────────────────────────────────────────────────

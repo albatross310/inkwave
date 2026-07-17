@@ -12,7 +12,7 @@ import { capturePage, capturePdf } from './capture'
 import { HeatmapScreen } from './HeatmapScreen'
 import { ScorePage, SYMBOL_GLYPHS, SYMBOL_ORDER, type Tool } from './ScorePage'
 import { assetUrl, loadPiece, migrateLegacyPieces, putAsset, savePiece } from './store'
-import { newPieceDocument } from './newPieceDocument'
+import { newPiece } from './types'
 import type { Annotation, Piece, PiecePage } from './types'
 import { TYPE } from './typeScale'
 
@@ -22,7 +22,39 @@ const STICKY_COLOURS = ['#fff3b0', '#ffd6d6', '#d6f0ff', '#e2ffd6']
 /** The demo piece's fixed id — see the load effect. Stable so a reload reopens it, marks and all. */
 const DEMO_ID = 'demo-synthetic'
 /** The probe harness's fixed document (see the load effect). Not a product concept. */
-const HARNESS_ID = 'music-harness'
+export const HARNESS_ID = 'music-harness'
+
+/**
+ * The harness's Piece: the well-known document, or a fresh Piece minted **AT that same id**.
+ *
+ * `listPieceIds()` is GONE — see store.ts. A Piece is a document, so "which piece?" is answered by
+ * "the document you have open", not by listing a private store and taking [0].
+ *
+ * ⚠️ `/music` HAS NO OPEN DOCUMENT, which is exactly why it is not the product surface. Peter ruled
+ * "it should all be in panels": the real entry is the toolbar's music BAR LAYER, opening the Piece of
+ * the active document. This route survives ONLY as the flag-gated probe harness
+ * (`scripts/music.prove.mjs` drives the whole pipeline through it headlessly), so it opens a fixed
+ * well-known document rather than inventing a piece list to replace the one just deleted. It retires
+ * with the layer.
+ *
+ * ⚠️ **THE ID MUST COME FROM THE SAME CONSTANT THE READ USED, and that is the whole point of this
+ * function.** It used to mint `newPieceDocument({ title }).piece!` — a FRESH uuid — while reading
+ * `HARNESS_ID`. The read key and the written key were different BY CONSTRUCTION: `update()` saved the
+ * student's marks under a random id, the next load read HARNESS_ID, missed, and minted another. Work
+ * ORPHANED, and one whole piece LEAKED into OPFS per page load. This is the same bug the live probe
+ * caught on the DEMO branch ten lines up, reintroduced on the other branch of the same `if` — and the
+ * comment above it claimed "it opens a fixed well-known document" the whole time, a parity nobody
+ * checked. It is EXPORTED so its test drives this code rather than a transcription of it: a test that
+ * re-types the effect's body proves only that the tester can copy.
+ */
+export async function loadOrMintHarnessPiece(): Promise<Piece> {
+  const existing = await loadPiece(HARNESS_ID)
+  return existing ?? newPiece({
+    id: HARNESS_ID,
+    title: 'Untitled piece',
+    source: { type: 'photo', captured_via: 'image' },
+  })
+}
 
 export function MusicStudio({ demo }: { demo: boolean }) {
   const [piece, setPiece] = useState<Piece | null>(null)
@@ -73,17 +105,8 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         if (!dead) { setPiece(full); setBusy(null) }
         return
       }
-      // `listPieceIds()` is GONE — see store.ts. A Piece is a document, so "which piece?" is
-      // answered by "the document you have open", not by listing a private store and taking [0].
-      //
-      // ⚠️ `/music` HAS NO OPEN DOCUMENT, which is exactly why it is not the product surface. Peter
-      // ruled "it should all be in panels": the real entry is the toolbar's music BAR LAYER, opening
-      // the Piece of the active document. This route survives ONLY as the flag-gated probe harness
-      // (`scripts/music.prove.mjs` drives the whole pipeline through it headlessly), so it opens a
-      // fixed well-known document rather than inventing a piece list to replace the one just
-      // deleted. It retires with the layer.
-      const existing = await loadPiece(HARNESS_ID)
-      if (!dead) setPiece(existing ?? newPieceDocument({ title: 'Untitled piece' }).piece!)
+      const harness = await loadOrMintHarnessPiece()
+      if (!dead) setPiece(harness)
     })()
     return () => { dead = true }
   }, [demo])

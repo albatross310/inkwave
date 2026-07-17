@@ -51,17 +51,42 @@ export function newPieceDocument(init?: { title?: string; source?: PieceSource }
  * `piece.title`. They are the same string and this is the one function that keeps them so — the
  * email lane needed the identical thing (`ensureDocFresh` was overwriting an email's subject-derived
  * title with the first line of the body) and it was found by a live probe, not a unit test.
+ *
+ * ⚠️ **THAT SENTENCE USED TO BE FALSE TWICE OVER, AND THIS IS THE REPAIR (2026-07-17).**
+ *   1. IT HAD ZERO CALLERS. `savePiece` answered the same question LIVE and inline, with DIFFERENT
+ *      semantics (`piece.title || doc.title` — an empty title fell back to the document's). Two rules
+ *      for one question, and the one that actually ran was the undocumented one. The auditor mutated
+ *      this function to garbage and all 1728 tests stayed green: untouched code that has never run is
+ *      a plan, not a feature. `savePiece` now CALLS it, so the comment is true by construction.
+ *   2. IT DID NOT DO WHAT IT SAID. `title: t || 'Untitled piece'` but `piece: { title: t }` — so on
+ *      an empty title it set `doc.title = 'Untitled piece'` and `piece.title = ''`, making the two
+ *      DISAGREE inside the one function whose entire job is keeping them equal. It refuted itself on
+ *      the only input where the question is interesting.
+ *
+ * THE RULE IS `newPieceDocument`'s, above — normalise ONCE, then use that single string in BOTH
+ * places. A blank title reads 'Untitled piece' everywhere, which is exactly what a brand-new Piece
+ * already gets, so the two paths agree. The discarded rule (fall back to `doc.title`) cannot hold the
+ * invariant at all: it leaves the studio showing a blank title while the document list shows the old
+ * one — two answers to "what is this piece called?", which is the fork this lane exists to retire.
  */
 export function withPieceTitle(doc: InkwaveDocument, title: string): InkwaveDocument {
-  const t = title.trim()
+  const t = title.trim() || 'Untitled piece'
   return {
     ...doc,
-    title: t || 'Untitled piece',
+    title: t,
     ...(doc.piece ? { piece: { ...doc.piece, title: t } } : {}),
   }
 }
 
-/** Is this document a Piece? The ONE definition — absence is not a music document. */
+/**
+ * Is this document a Piece? The ONE definition — absence is not a music document.
+ *
+ * ⚠️ It became the one definition on 2026-07-17. It had ZERO CALLERS while `loadPiece` inlined the
+ * same test (`docType === 'music' ? piece ?? null : null`) — so "the ONE definition" was a claim
+ * about a function nothing called, and the auditor's garbage mutant of it killed no test. `loadPiece`
+ * now calls it. If this predicate is wrong, a test dies; that is the only thing that makes a comment
+ * like the one above worth reading.
+ */
 export function isPieceDocument(doc: Pick<InkwaveDocument, 'docType' | 'piece'>): boolean {
   return doc.docType === 'music' && !!doc.piece
 }
