@@ -25,9 +25,21 @@ applyTheme()
     // in the sharpest form: /snapshot's local-first nav REWRITES THE URL on every scrub step, so a
     // flag read fresh from the URL dies on the first scrub — silently disabling the very feature you
     // came to test, exactly when you started testing it.
-    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug', 'snapBreaks']) {
+    // `prodGraphs`/`prodReport`/`prodLedger`/`music`/`musicXml` — 2026-07-17. These MUST be synced
+    // here and not left to their own modules, and the reason is the chicken-and-egg this codebase
+    // keeps rediscovering: each flag's reader lives INSIDE the lazy chunk the flag gates, so on `/`
+    // nothing calls it, the URL param is seen by nobody, and it's gone by the time you navigate to
+    // the route that would have read it. Peter hit exactly that: `/?prodGraphs=demo` did nothing,
+    // because the only caller of `prodGraphsEnabled()` is /productivity, which he hadn't reached yet.
+    // The feature could not be turned on because the code that reads the switch is behind the switch.
+    // Cost is a URLSearchParams read already being done on this line — not a load-path regression.
+    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug', 'snapBreaks',
+                     'prodGraphs', 'prodReport', 'prodLedger', 'music', 'musicXml']) {
       const v = params.get(f)
       if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
+      // `?prodGraphs=demo` / `?prodReport=demo` / `?music=demo` — on, PLUS a LABELLED synthetic
+      // fixture ledger, so the panel is reviewable before real capture exists. Never silent.
+      else if (v === 'demo') { localStorage.setItem(`inkwave:${f}`, '1'); localStorage.setItem(`inkwave:${f}Demo`, '1') }
       // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
       // Peter tests on an iPhone 8 with no Mac/Web Inspector, and our AV1→H.264→CSS fallback chain
       // is otherwise SILENT and looks identical to the CSS water he's judging).
