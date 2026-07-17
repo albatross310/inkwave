@@ -51,12 +51,35 @@ const seed = ({ json, lib }) => {
   try { Object.defineProperty(navigator, 'storage', { value: shim, configurable: true }) } catch { navigator.storage = shim }
 }
 
+// THE COMMON AXIS: characters of RENDERED TEXT preceding each page-gap widget. Both the editor and
+// the pane emit `.inkwave-page-gap` into their own DOM, so one walk answers both — and a char offset
+// is what a page break IS to a reader ("the page turns after this word"), which a page COUNT is not.
+//
+// WHY THIS EXISTS (2026-07-18): this probe compared page COUNTS. That is the exact defect it was
+// built to hunt — measured elsewhere on this lane, a lists fixture read model 55p / live 55p while
+// the break POSITIONS diverged from break 23 onward. So every Δ0 row this probe ever printed
+// established "the same NUMBER of pages", never "the same words on them", and the snap fix's own
+// verification inherited that. Counts agreeing while positions diverge is precisely how wrong words
+// sit on a right-numbered page.
+// (Inlined below rather than shared: page.evaluate serialises ONE function and cannot reach module
+// scope — a helper here throws ReferenceError in the page, which is a loud failure, not a silent one.)
 const PANE = () => {
   const layer = document.querySelector('.iw-snap-layer-active') || document.querySelector('.iw-snap-layer')
   const root = layer && (layer.querySelector('.ProseMirror') || layer.querySelector('.tiptap-editor'))
   if (!root) return { err: 'no pane root' }
+  const g = (() => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+    const offs = []
+    let chars = 0, n
+    while ((n = w.nextNode())) {
+      if (n.nodeType === 3) chars += n.nodeValue.length
+      else if (n.classList && n.classList.contains('inkwave-page-gap')) offs.push(chars)
+    }
+    return { offs, chars }
+  })()
   const rd = (sel) => { const e = root.querySelector(sel); if (!e) return null; const c = getComputedStyle(e); return `${c.fontSize}/${c.fontWeight}/mt${c.marginTop}/mb${c.marginBottom}/lh${c.lineHeight}/pl${c.paddingInlineStart}` }
   return {
+    gapOffsets: g.offs, textChars: g.chars,
     pages: root.querySelectorAll('.inkwave-page-gap').length + 1,
     chars: (root.textContent || '').length,
     height: Math.round(root.getBoundingClientRect().height),
@@ -105,10 +128,21 @@ const run = async () => {
     // taken on a different fixture, so leaning on it here would be trusting a number from somewhere
     // else. Read the LIVE EDITOR's own gap widgets on THIS fixture, so all three come from one
     // document: model / editor / pane. If model === editor and pane differs, the PANE is the outlier.
-    const editorGaps = await pg2.evaluate(() => {
+    const editor = await pg2.evaluate(() => {
       const pm = document.querySelector('.tiptap-editor')
-      return pm ? pm.querySelectorAll('.inkwave-page-gap').length : -1
+      if (!pm) return { gaps: -1, gapOffsets: [], textChars: 0 }
+      // THE SAME WALK the pane gets — one instrument, two surfaces, so a difference is the surface
+      // and not the measurement.
+      const w = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+      const offs = []
+      let chars = 0, n
+      while ((n = w.nextNode())) {
+        if (n.nodeType === 3) chars += n.nodeValue.length
+        else if (n.classList && n.classList.contains('inkwave-page-gap')) offs.push(chars)
+      }
+      return { gaps: pm.querySelectorAll('.inkwave-page-gap').length, gapOffsets: offs, textChars: chars }
     })
+    const editorGaps = editor.gaps
     const model = await pg2.evaluate(() => {
       for (let i = 0; i < 3; i++) window.__iwTextRenderProbe.build()
       const { model } = window.__iwTextRenderProbe.build()
@@ -123,9 +157,31 @@ const run = async () => {
     const d = model.pages - dom.pages
     const ed = editorGaps >= 0 ? editorGaps + 1 : -1
     const est = Object.entries(model.kinds).filter(([k]) => k.startsWith('placeholder')).map(([k, v]) => `${k.replace('placeholder:', '')}×${v}`).join(' ')
-    console.log(`  ${name.padEnd(26)} ${String(model.pages).padStart(6)} ${String(ed).padStart(6)} ${String(dom.pages).padStart(5)} ${String(d).padStart(4)}   est ${model.est}${est ? ' (' + est + ')' : ''} · DOM ul${dom.uls}/li${dom.lis}/ref${dom.refLists} · ${model.pages === ed ? 'model==EDITOR' : 'model!=EDITOR'}`)
+
+    // ── THE POSITION COMPARISON — the claim counts could never make. ──
+    // The pane's rendered text must be the SAME STREAM as the editor's for offsets to be comparable.
+    // DocView resolves citations with `simpleInText` (not real CSL) and renders NO refList, so on
+    // those fixtures the streams genuinely differ and an offset comparison is meaningless rather
+    // than failing. Say so, don't score it.
+    const eo = editor.gapOffsets, po = dom.gapOffsets
+    const streamsMatch = Math.abs(editor.textChars - dom.textChars) <= 1
+    let posVerdict
+    if (!streamsMatch) {
+      posVerdict = `offsets N/A — pane text ${dom.textChars} vs editor ${editor.textChars} chars (DocView drops the refList / re-formats citations); different streams, not a divergence`
+    } else {
+      let firstDiv = -1
+      for (let i = 0; i < Math.max(eo.length, po.length); i++) if (eo[i] !== po[i]) { firstDiv = i; break }
+      posVerdict = firstDiv === -1 && eo.length === po.length
+        ? `✓ OFFSETS IDENTICAL (${eo.length} breaks)`
+        : `✗ OFFSETS DIVERGE @${firstDiv}/${eo.length}: editor ${eo[firstDiv]} vs pane ${po[firstDiv]} (Δ${(po[firstDiv] ?? 0) - (eo[firstDiv] ?? 0)} chars)`
+    }
+    console.log(`  ${name.padEnd(26)} ${String(model.pages).padStart(6)} ${String(ed).padStart(6)} ${String(dom.pages).padStart(5)} ${String(d).padStart(4)}   est ${model.est}${est ? ' (' + est + ')' : ''} · ${model.pages === ed ? 'model==EDITOR' : 'model!=EDITOR'}`)
+    console.log(`  ${''.padEnd(26)}   ${posVerdict}`)
   }
-  console.log('\n  Δ = canvas − pane. THREE numbers from ONE document: the canvas model, the LIVE EDITOR\'s')
+  console.log('\n  Δ = canvas − pane (PAGE COUNTS — the weak claim, kept only for continuity).')
+  console.log('  READ THE OFFSET LINE INSTEAD: chars-of-text before each gap, editor vs pane, one walk,')
+  console.log('  two surfaces. A page count can agree while the words on those pages differ.')
+  console.log('\n  THREE numbers from ONE document: the canvas model, the LIVE EDITOR\'s')
   console.log('  own gap widgets, and the /snapshot pane\'s. If canvas === EDITOR on every row, the model is')
   console.log('  not the outlier and the PANE paginates the same document differently from the editor —')
   console.log('  which would be a pre-existing /snapshot bug, older than anything on this branch, and the')

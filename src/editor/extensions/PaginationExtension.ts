@@ -393,6 +393,30 @@ function findRefListPos(doc: EditorView['state']['doc']): number {
 // resolves a line's doc position (full: lazy posAtCoords + bake; incremental: baked value or an
 // on-demand clone resolution — a failure there throws INC_BAIL and the caller falls back). ──────
 class IncBail extends Error {}
+// TEST SEAM (2026-07-18 — F19). THIS is the original: the editor's own break rule, the definition
+// of canonical pagination, and until now the ONE copy of three that no test could reach. The other
+// two (arithmeticLayout.paginate, staticPagination.computeBreakPicks) each mirror it, each was
+// pinned against its OWN fixture, and each passed while the pane ran +2 pages for a week — because
+// self-consistency is what the disease preserves.
+//
+// `sig` is already the shared vocabulary: paginate emits the same `at:round(botMargin)|…|pages:N`
+// string "so a prover can compare" (its own header). The seam was designed and never used. Exporting
+// it changes no behaviour — the function is untouched and the live path still calls it directly —
+// and it costs nothing, because PaginationExtension imports cleanly under vitest's node env
+// (PROBED, not assumed: the module was imported in-process and its exports enumerated; the browser
+// dependency is in the VIEW, not the module).
+export function _computeBreaksForTest(
+  lines: MeasuredLine[],
+  blocks: MeasuredBlock[],
+  refListPos: number,
+  pageH: number,
+  topM: number,
+  gapped: boolean,
+  posOf: (l: MeasuredLine) => number,
+): { sig: string } {
+  return { sig: computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf).sig }
+}
+
 function computeBreaks(
   lines: MeasuredLine[],
   blocks: MeasuredBlock[],

@@ -205,6 +205,20 @@ function buildDiffNodes(
 // preserved because the diff runs at the text level. A ProseMirror-aware diff
 // would be needed for mark-level fidelity (future work).
 // onOpClick: called with opIdx when a change span is clicked (reverse hyperlink to right pane).
+// WHITE-SPACE MUST MATCH THE EDITOR (2026-07-18 — a measured /snapshot bug, not a style choice).
+// ProseMirror injects `.ProseMirror { white-space: break-spaces }` from prosemirror-view's own
+// stylesheet, and it injects it ONLY WHEN AN EditorView MOUNTS. /snapshot has no view, so the class
+// is on the element and the RULE IS NOT: measured, the editor's flow computes `break-spaces` and
+// this pane computed `normal`. Those wrap by DIFFERENT RULES — `break-spaces` HANGS a trailing
+// space, `normal` COLLAPSES it — so every page break landed one character apart from the editor's
+// (halvesbisect: editor 2426 vs pane 2425 at the FIRST break, on plain prose, on every shape).
+// Canonical pagination's whole claim is "the same text on page N at every zoom, on phone, and in
+// print"; a pane that mirrors the editor cannot wrap by another rule. blockEligibility already
+// refuses to model anything but `break-spaces` for exactly this reason ("whitespace-unproven").
+// NB the flat branch below has always pinned `pre-wrap` — a THIRD mode. Three surfaces meant to
+// mirror each other, three wrapping rules, none of them checked against another until now.
+const PANE_WHITE_SPACE: React.CSSProperties = { whiteSpace: 'break-spaces' }
+
 function FullDiffView({
   ops, snapshot, onOpClick, onHoverOp,
 }: {
@@ -215,7 +229,7 @@ function FullDiffView({
 }) {
   if (!ops) {
     return (
-      <div className="tiptap-editor ProseMirror">
+      <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
         <DocView doc={snapshot.contentJson} />
       </div>
     )
@@ -231,7 +245,7 @@ function FullDiffView({
   // that combination unrepresentable rather than merely unlikely.
   if (textRenderEnabled()) {
     return (
-      <div className="tiptap-editor ProseMirror">
+      <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
         <RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />
       </div>
     )
