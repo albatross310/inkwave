@@ -2,7 +2,7 @@
 //
 // No timers, no audio, no DOM: `tick(state, now)` is a pure function of the state and the clock, so
 // every transition (including the long-break cadence and pause arithmetic) is unit-testable. The
-// impure shell (an interval, the chime, React state) lives in usePomodoro.ts.
+// impure shell (the interval, the chime, subscribers) lives in pomodoroStore.ts.
 //
 // §A5 — KIND, NON-SHAMING: this timer has no notion of a "failed" or "abandoned" Pomodoro. Stopping
 // early is not recorded as a failure anywhere; `completed` counts only what the writer finished, and

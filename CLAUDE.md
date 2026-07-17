@@ -1184,12 +1184,53 @@ directly.
 
 ## Productivity ledger (P1a-core, 2026-07-17 — `src/productivity/`, flag `inkwave:prodLedger`, DEFAULT OFF)
 
-Session capture + a per-month ledger, per the Productivity/Email build spec §A3–A5. `/ledger` is the
-openable surface (Pomodoro + diary notes). **The schema (`types.ts`) is a CONTRACT** — `feat/prod-graphs`,
+Session capture + a per-month ledger, per the Productivity/Email build spec §A3–A5. **The surface is the
+TOOLBAR'S CLOCK DROP-UP (`components/ClockMenu.tsx`) — `/ledger` the route is GONE** (Peter, 2026-07-17:
+"make the ledger a drop up rather than a new page"; a Pomodoro you must navigate away to reach is not one
+you would use while writing). **The schema (`types.ts`) is a CONTRACT** — `feat/prod-graphs`,
 `feat/prod-ai-report` and the email layer all read `SessionRow`. snake_case is deliberate (it is a CSV/wire
 contract, not repo style); don't "tidy" it. `types.ts` is now the ONE contract file: the AI-report path's
 type-only mirrors were folded in on rebase (its aggregate shapes kept verbatim; its SessionRow/DocType
 mirrors deleted — the real schema supersedes them, and the names matched already).
+
+### The clock UI (2026-07-17 — Peter's UI round)
+
+- **THE CLOCK IS A SLOT, not a button bolted on the bar.** `SlotId` gains `'clock'`; the row is
+  `slotCount()` = 6, or **7 when `?prodLedger` is on** — so a writer without the feature sees no width
+  change at all. It migrates the way CLAUDE.md's own 4→6 note documents (append), and is DROPPED from a
+  stored row if the flag goes off, so a 7-slot config can't strand an unrenderable id. Reorderable +
+  ▲-overflowable like every other slot. PROBED on a 390px iPhone viewport: 7 slots + ▲ + ⋮ FIT.
+- **THE TICK NEVER RENDERS REACT — the whole design.** `pomodoroStore.ts` is a module store with TWO
+  channels: `subscribe` (state: start/pause/phase/config — RARE, React may use it) and `subscribeTick`
+  (the NUMBER, once a second — IMPERATIVE ONLY). `TimeFace`/`TimeRing` write `textContent`/
+  `strokeDashoffset` off the tick; the store's interval exists only while a phase counts down. A
+  `setState` per second inside TiptapEditor's tree would re-render it every second, forever, while
+  someone is typing — the `--wave-x` shape. KEPT IN THE GATE by `components/TimeFace.test.tsx`
+  (mutation-proved: the obvious setState-per-second TimeFace kills 2 tests).
+  **THE IN-BROWSER TYPING A/B IS VOID ON THIS BOX, and the probe says so rather than passing:** a
+  deliberate per-second 40ms main-thread block moved keydown→rAF p95 only 1.20-1.28× — the harness
+  could not see its own known-positive through other agents' concurrent probes (idle p50 wandered
+  4.8→9.2ms between runs), and RUNNING scored *noisier* than the block. Two instrument lessons: a
+  per-second event lands on ~1 of 50 keystrokes so a MEDIAN is structurally blind to it (read the tail);
+  and the first known-positive wrote `--wave-x` per second, which costs nothing because the shipped
+  FIREBREAK prunes exactly that write on a near-empty document. Re-run on a quiet box for a number.
+- **The countdown** (`CountdownOverlay.tsx`): faint grey, top-right, DESKTOP only, only while a block
+  runs (parking 25:00 over the prose forever is noise), click → opens the drop-up. It is PORTALLED TO
+  `document.body` — a SIBLING of the editor, never a descendant — plus `contain: layout style paint`, so
+  its per-second write cannot reach the page subtree BY CONSTRUCTION. PHONE: not rendered (the corner is
+  the writing area there); the drop-up's own face is the phone's countdown.
+- **Chimes are customisable with previews** (`chime.ts`): five SYNTHESISED voices (bell/bowl/glass/wood/
+  harp) — sine partials + slow exponential release, no audio assets on a writing app's load path. A
+  preview plays from a TAP, which is also the gesture iOS needs to unlock the AudioContext for the real
+  chime later. Every voice is gentle by construction: this interrupts someone who is writing.
+- **NIGHT MODE FOUND A REAL BUG — `--iw-on-ink` is new (2026-07-17).** The filled controls (Start, the
+  active preset pills) were `color: #fff` on `background: var(--iw-ink)`. `--iw-ink` is DARK purple in
+  day (white reads) and LIGHT purple in night (#cbb8f2 — white VANISHES). Measured on screenshots, not
+  reasoned about. `--iw-on-ink` (day #fff / night #2c2e35) is the token for text on an ink FILL — same
+  shape as the existing `--iw-newbtn-fg` ("darker on its light-blue chip in night"). **Any new filled
+  control must use it; a literal white on an --iw-ink fill is a night-mode bug by construction.**
+- Lengths are PRESET PILLS (the PageMenu pattern), not bare number inputs. §A5 holds: completed blocks
+  are DOTS, not a number to beat; no red anywhere.
 
 - **The flag is `ledgerFlag.ts` (`?prodLedger=1` / `=off`, sticky), NOT `flag.ts`** — that one is the AI
   report's (`?prodReport`). A `flag.ts`/`flags.ts` pair in one directory is how someone imports the wrong
@@ -2281,8 +2322,8 @@ block; components don't change.
 Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
-ProductivityReportModal, ProductivityPanel (`/productivity`), the Ledger view (`routes/Ledger.tsx`,
-`/ledger`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
+ProductivityReportModal, ProductivityPanel (`/productivity`), the ledger CLOCK DROP-UP
+(`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is gone), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
 document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
 EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
