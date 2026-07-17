@@ -84,7 +84,7 @@
 <button id="run">Run the probe</button>
 <div id="env"></div>
 <table id="results">
-  <thead><tr><th>Config</th><th>Load</th><th>First line</th><th>RTF</th><th>Bytes</th></tr></thead>
+  <thead><tr><th>Config</th><th colspan="4">Realtime factor · latency to first line</th></tr></thead>
   <tbody></tbody>
 </table>
 <div class="note" id="limits"></div>
@@ -101,7 +101,12 @@ const CONFIGS = [
 const STORE = 'iw:whisperProbe:results'
 const CRUMB = 'iw:whisperProbe:running'
 const SAMPLE_RATE = 16000
-const CHUNK_SEC = 5   // the live case: one chunk of lesson audio → one line on the panel
+// TWO chunk sizes, because Whisper's cost is NOT proportional to audio length and a single
+// chunk size bakes in the answer. See the note in loadSample/runConfig: the encoder always
+// processes a padded 30-SECOND window, so a 5s chunk costs almost what a 30s chunk costs. Measuring
+// only 5s would report ~6x worse than the model can do and could FAIL a feature that is actually
+// viable — the mirror image of the overclaim this lane exists to prevent, and just as wrong.
+const CHUNKS = [5, 30]
 
 const $ = (id) => document.getElementById(id)
 const log = (s) => { $('log').textContent += s + '\n'; $('log').scrollTop = 1e9 }
@@ -158,15 +163,34 @@ async function loadSample(seconds) {
     off += 8 + size + (size % 2)
   }
   if (!dataOff) throw new Error('no data chunk in sample.wav')
-  const n = Math.min(dataLen / 2, Math.floor(seconds * SAMPLE_RATE))
-  const out = new Float32Array(n)
-  for (let i = 0; i < n; i++) out[i] = view.getInt16(dataOff + i * 2, true) / 32768
+  const avail = Math.floor(dataLen / 2)
+  const want = Math.floor(seconds * SAMPLE_RATE)
+  const out = new Float32Array(want)
+  // The clip is 11s; a 30s window is built by LOOPING it. Repeated content is fine for a COST
+  // measurement (the encoder does identical work either way) and is stated rather than hidden.
+  for (let i = 0; i < want; i++) out[i] = view.getInt16(dataOff + (i % avail) * 2, true) / 32768
   return out
 }
 
 // ─── One config, in this document ────────────────────────────────────────────
 async function runConfig(cfg) {
   const t = (m) => log(`   ${m}`)
+
+  // ── THE POSITIVE CONTROL FOR THREADS ────────────────────────────────────────
+  // Validating this page on desktop, `tiny · threaded` came out only 16% faster than
+  // `tiny · 1 thread`. That is EXACTLY the reading that cannot be interpreted: either threads
+  // applied and whisper's autoregressive decode is simply sequential (real, and plausible), or
+  // numThreads was silently ignored and both runs were single-threaded. Indistinguishable — which
+  // is the bake-counter failure (116/116 while every lookup missed) in a new costume.
+  //
+  // ORT builds its thread pool out of Web Workers, so COUNTING WORKER CONSTRUCTIONS is a direct,
+  // observable answer. A "threaded" run that spawned no workers is not a threaded run, and this
+  // page will say so instead of printing a number under a heading that lies.
+  let workers = 0
+  const NativeWorker = globalThis.Worker
+  globalThis.Worker = class extends NativeWorker {
+    constructor(...a) { workers++; super(...a) }
+  }
   // PINNED to the v3 line, and NOT a lazy default: 4.2.0's bundled onnxruntime-web cannot create a
   // session for these models at all — "TransposeDQWeightsForMatMulNBits Missing required scale",
   // IDENTICALLY across tiny/base and every dtype, which is what ruled out the model and the dtype
@@ -194,16 +218,25 @@ async function runConfig(cfg) {
   const loadMs = Math.round(performance.now() - tLoad)
   t(`loaded in ${loadMs}ms, ~${(bytes / 1e6).toFixed(1)}MB`)
 
-  const chunk = await loadSample(CHUNK_SEC)
   // Warm-up is deliberately NOT done: the first chunk of a real lesson is a real first chunk, and
   // the student is waiting for it. Measuring the second one would flatter the thing being decided.
-  const t0 = performance.now()
-  const out = await asr(chunk)
-  const firstMs = Math.round(performance.now() - t0)
-  const rtf = firstMs / (CHUNK_SEC * 1000)
-  t(`first line in ${firstMs}ms (RTF ${rtf.toFixed(2)}) → "${(out.text || '').trim().slice(0, 60)}"`)
-
-  return { loadMs, firstMs, rtf, bytes, text: (out.text || '').trim() }
+  const runs = {}
+  let text = ''
+  for (const sec of CHUNKS) {
+    const chunk = await loadSample(sec)
+    const t0 = performance.now()
+    const out = await asr(chunk)
+    const ms = Math.round(performance.now() - t0)
+    // RTF < 1 ⇒ the chunk is transcribed faster than it was spoken ⇒ the panel keeps up forever.
+    // RTF >= 1 ⇒ it falls behind and never recovers. Latency-to-first-line is `ms` itself: how long
+    // the student stares at nothing after their teacher starts a sentence.
+    runs[sec] = { ms, rtf: ms / (sec * 1000) }
+    if (sec === CHUNKS[0]) text = (out.text || '').trim()
+    t(`${sec}s chunk → ${ms}ms (RTF ${(ms / (sec * 1000)).toFixed(2)})`)
+  }
+  globalThis.Worker = NativeWorker
+  t(`workers spawned: ${workers}`)
+  return { loadMs, bytes, workers, runs, text }
 }
 
 // ─── The runner: one config per document, reloading between ──────────────────
@@ -248,49 +281,61 @@ function next(cfg) {
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
+// LATENCY-TO-FIRST-LINE is chunk duration + inference: the student waits for the chunk to FILL
+// before a single sample can be transcribed. Reporting inference alone would hide half the wait.
+const latency = (sec, ms) => sec * 1000 + ms
+const fmt = (ms) => (ms / 1000).toFixed(1) + 's'
+
 function render() {
   const r = results()
   const tb = $('results').querySelector('tbody')
   tb.innerHTML = ''
-  let best = null
+  let best = null   // fastest LATENCY among configs that keep up (RTF < 1)
+
   for (const c of CONFIGS) {
     const v = r[c.id]
     const tr = document.createElement('tr')
-    if (!v) {
-      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="invalid">not run</td>`
-    } else if (v.invalid) {
-      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="invalid">N/A — ${v.invalid}</td>`
-    } else if (v.died) {
-      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="bad"><b>DIED</b> — ran out of memory</td>`
-    } else if (v.error) {
-      tr.innerHTML = `<td>${c.label}</td><td colspan="4" class="bad">error: ${v.error}</td>`
-    } else {
-      const cls = v.rtf < 0.5 ? 'good' : v.rtf < 1 ? 'warn' : 'bad'
+    const cell = (msg, cls) => `<td>${c.label}</td><td colspan="4" class="${cls}">${msg}</td>`
+    if (!v) tr.innerHTML = cell('not run', 'invalid')
+    else if (v.invalid) tr.innerHTML = cell(`N/A — ${v.invalid}`, 'invalid')
+    else if (v.died) tr.innerHTML = cell('<b>DIED</b> — ran out of memory', 'bad')
+    else if (v.error) tr.innerHTML = cell(`error: ${v.error}`, 'bad')
+    else if (c.threads === 0 && !v.workers)
+      tr.innerHTML = cell('N/A — asked for threads, spawned 0 workers: ran single-threaded, so this is not a threaded measurement', 'invalid')
+    else {
+      const parts = []
+      for (const sec of CHUNKS) {
+        const run = v.runs?.[sec]
+        if (!run) { parts.push(`${sec}s: —`); continue }
+        const keeps = run.rtf < 1
+        const cls = keeps ? (run.rtf < 0.6 ? 'good' : 'warn') : 'bad'
+        parts.push(`<span class="${cls}">${sec}s chunk: ${run.rtf.toFixed(2)}× · ${fmt(latency(sec, run.ms))} wait</span>`)
+        if (keeps) {
+          const lat = latency(sec, run.ms)
+          if (!best || lat < best.lat) best = { lat, rtf: run.rtf, sec, label: c.label, model: c.model }
+        }
+      }
       tr.innerHTML =
-        `<td>${c.label}</td><td class="n">${(v.loadMs / 1000).toFixed(1)}s</td>` +
-        `<td class="n ${cls}">${v.firstMs}ms</td><td class="n ${cls}">${v.rtf.toFixed(2)}×</td>` +
-        `<td class="n">${(v.bytes / 1e6).toFixed(0)}MB</td>`
-      if (!best || v.rtf < best.rtf) best = { ...v, label: c.label }
+        `<td>${c.label}<br><span style="opacity:.6;font-size:12px">${(v.bytes / 1e6).toFixed(0)}MB · ${(v.loadMs / 1000).toFixed(0)}s load · ${v.workers} workers</span></td>` +
+        `<td colspan="4">${parts.join('<br>')}</td>`
     }
     tb.appendChild(tr)
   }
 
-  const done = new URLSearchParams(location.search).has('done')
-  if (!done) return
+  if (!new URLSearchParams(location.search).has('done')) return
   const V = $('verdict'), H = $('headline')
   const anyDied = CONFIGS.some((c) => r[c.id]?.died)
   if (!best) {
     V.className = 'fail'; V.textContent = 'FAIL'
-    H.textContent = anyDied ? 'Every config died or errored.' : 'Nothing produced a number.'
-  } else if (best.rtf < 0.5) {
+    H.textContent = anyDied
+      ? 'Ran out of memory. On-device whisper does not fit on this phone.'
+      : 'Nothing keeps up: every config is slower than the audio, so the panel falls behind and never catches up.'
+  } else if (best.lat <= 15000) {
     V.className = 'pass'; V.textContent = 'PASS'
-    H.textContent = `${best.label} — ${best.firstMs}ms per 5s chunk (${best.rtf.toFixed(2)}× realtime). Live transcription keeps up.`
-  } else if (best.rtf < 1) {
-    V.className = 'slow'; V.textContent = 'SLOW'
-    H.textContent = `Best is ${best.label} at ${best.rtf.toFixed(2)}× realtime — keeps up, but with no headroom on a clean clip. A real room is harder.`
+    H.textContent = `${best.label}, ${best.sec}s chunks — a line appears ${fmt(best.lat)} after your teacher speaks (${best.rtf.toFixed(2)}× realtime). Keeps up.`
   } else {
-    V.className = 'fail'; V.textContent = 'FAIL'
-    H.textContent = `Best is ${best.label} at ${best.rtf.toFixed(2)}× realtime — slower than the audio. The panel falls behind and never catches up.`
+    V.className = 'slow'; V.textContent = 'SLOW'
+    H.textContent = `Best is ${best.label} at ${best.sec}s chunks: keeps up (${best.rtf.toFixed(2)}×) but a line takes ${fmt(best.lat)} to appear — too slow to distil from live.`
   }
 }
 
