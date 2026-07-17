@@ -22,6 +22,9 @@ import { useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocType, Reflection, SessionRow } from '../productivity/types'
 import { localDayOf } from '../productivity/sessionLogic'
+// The drop-up's ONE ramp (Peter, 2026-07-17: "every font proportionally up"). This section renders
+// INSIDE `LedgerDropUp`, so a private scale here would be a visible seam mid-panel.
+import { TOUCH_MIN, TYPE } from '../music/typeScale'
 
 /** What each category is called when we hand it back to the writer. */
 const CATEGORY_LABEL: Record<DocType, string> = {
@@ -92,10 +95,10 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
 
   return (
     <section className="px-4 py-3" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
-      <h3 className="mb-1 text-[11px] uppercase tracking-wider" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+      <h3 className="mb-1 uppercase tracking-wider" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #a8a29e)' }}>
         While it&rsquo;s fresh
       </h3>
-      <p className="mb-2.5 text-[13px] leading-relaxed" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+      <p className="mb-2.5 leading-relaxed" style={{ fontSize: TYPE.body, color: 'var(--iw-pill-fg, #78716c)' }}>
         {opener(total)}
       </p>
 
@@ -103,8 +106,8 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
         {cats.map((c) => (
           <li key={c.doc_type}>
             <label className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="text-[13px]" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>{CATEGORY_LABEL[c.doc_type]}</span>
-              <span className="shrink-0 text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #a8a29e)' }}>
+              <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>{CATEGORY_LABEL[c.doc_type]}</span>
+              <span className="shrink-0 tabular-nums" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
                 {c.minutes}m
               </span>
             </label>
@@ -112,8 +115,10 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
               value={text[c.doc_type] ?? ''}
               onChange={(e) => setText((t) => ({ ...t, [c.doc_type]: e.target.value }))}
               placeholder={c.doc_type === 'misc' ? 'reading Leibniz, on paper…' : 'a line, if you like'}
-              className="w-full rounded-md px-2 py-1.5 text-[13px]"
-              style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+              className="w-full rounded-md px-2 py-1.5"
+              // TYPE.body — the writer types INTO this. At the old 13px iOS zoomed on focus and
+              // STAYED zoomed, which on a recall prompt means it happened mid-thought.
+              style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
             />
           </li>
         ))}
@@ -122,16 +127,18 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
       <div className="mt-3 flex items-center gap-2">
         <button
           type="button" onClick={save}
-          className="rounded-full px-4 py-1.5 text-[13px] transition-all hover:brightness-110 active:scale-[0.98]"
-          style={{ background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+          className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
         >
           Save
         </button>
         {/* Skip is a PEER of Save, not a grey escape hatch. It must cost nothing to press. */}
         <button
           type="button" onClick={onSkip}
-          className="rounded-full px-4 py-1.5 text-[13px] transition-colors hover:bg-stone-50"
-          style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+          // Skip stays a PEER of Save — same step on the ramp, same touch target. Making it smaller
+          // would be exactly the grey escape hatch the header forbids.
+          className="rounded-full px-4 py-1.5 transition-colors hover:bg-stone-50"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
         >
           Not now
         </button>
