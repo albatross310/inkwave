@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
-import { listSnapshots, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
+import { readSnapshotArchive, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
 import { pmToText } from '../provenance/bundle'
 import { readDocument } from '../storage/opfs'
 import { VerifyModal } from '../components/VerifyModal'
@@ -2801,7 +2801,7 @@ export function SnapshotView() {
 
   const [allSnapshots, setAllSnapshots] = useState<Snapshot[]>([])
   const allSnapshotsRef = useRef(allSnapshots); allSnapshotsRef.current = allSnapshots
-  const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
+  const [status, setStatus] = useState<'loading' | 'ready' | 'missing' | 'unreadable'>('loading')
   const [libReady, setLibReady] = useState(false)
   const [, setNavDir] = useState<'back' | 'fwd'>('fwd')
   const [genSeed, setGenSeed] = useState(0)   // increment to force-regenerate all summaries
@@ -2894,11 +2894,17 @@ export function SnapshotView() {
     const cur = allSnapshotsRef.current
     if (loadedDocRef.current === docId && cur.some((s) => s.id === snapId)) { setStatus('ready'); return }
     void (async () => {
-      const snaps = await listSnapshots(docId)
+      // 'unreadable' is its OWN status, and both other answers were wrong. A throw would leave this
+      // on 'loading' forever ("Loading…" with nothing coming — the spinner-forever shape). And
+      // 'missing' renders "That snapshot isn't on this device", which on a failed read is a LIE
+      // about the one thing this page exists to show: it would tell Peter his history is gone while
+      // it sits intact on disk. Neither. Say the truth: we couldn't read it, try again.
+      const r = await readSnapshotArchive(docId)
       if (cancelled) return
+      if (r.kind === 'error') { console.error('[inkwave] /snapshot: archive unreadable:', r.error); setStatus('unreadable'); return }
       loadedDocRef.current = docId
-      setAllSnapshots(snaps)
-      setStatus(snaps.some((s) => s.id === snapId) ? 'ready' : 'missing')
+      setAllSnapshots(r.snapshots)
+      setStatus(r.snapshots.some((s) => s.id === snapId) ? 'ready' : 'missing')
     })()
     return () => { cancelled = true }
   }, [docId, snapId])
@@ -2945,8 +2951,15 @@ export function SnapshotView() {
     if (!aiOn) { setIsRegenerating(false); return } // opt-in gate: no text leaves the device
     let cancelled = false
     void (async () => {
-      const snaps = await listSnapshots(docId)
-      if (cancelled || snaps.length < 2) return
+      // Background AI backfill that PATCHES the archive (patchSnapshotDiffSummary → read-modify-
+      // write). It skips on a failed read: nothing here is worth a risk to the record, and the
+      // summaries regenerate for free next time. `setIsRegenerating(false)` so the indicator can't
+      // stick on.
+      const r = await readSnapshotArchive(docId)
+      if (cancelled) return
+      if (r.kind === 'error') { console.warn('[inkwave] diff-summary backfill skipped — archive unreadable:', r.error); setIsRegenerating(false); return }
+      const snaps = r.snapshots
+      if (snaps.length < 2) return
 
       // Fill missing diff summaries. Check .bullets to regenerate old-format records.
       for (let i = 1; i < snaps.length; i++) {
@@ -3667,6 +3680,12 @@ export function SnapshotView() {
         {status === 'missing' && (
           <p className="text-center text-stone-500 mt-20">
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
+          </p>
+        )}
+        {status === 'unreadable' && (
+          <p className="text-center text-stone-500 mt-20">
+            Inkwave couldn't read this document's history just now — this doesn't mean it's gone.
+            Nothing was changed. Reload to try again.
           </p>
         )}
         {snapThumbsDebug() && <ScrubDebugOverlay presenter={presenter} dbg={swDbgRef} docId={docId} snapCount={allSnapshots.length} />}

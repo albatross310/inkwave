@@ -16,7 +16,7 @@ import { withScasDefaults } from '../scas/state'
 import { setOneDriveFilename, adoptOneDriveFile, fetchPdfSidecars, type OneDriveFolder } from './onedrive'
 import { adoptGoogleDriveFile } from './gdrive'
 import { setSaveFileHandle } from './folder'
-import { restoreSnapshotsFromBundle, listSnapshots } from '../provenance/snapshots'
+import { restoreSnapshotsFromBundle, readSnapshotArchive } from '../provenance/snapshots'
 import { applyViewSettings } from '../editor/viewSettings'
 import { carryToolbarConfig } from '../editor/toolbarContract'
 import { bibProvider } from '../citations/bibProvider'
@@ -102,15 +102,27 @@ async function openInkwaveFileInner(
   // fixed build cannot tell "the guard works" from "the probe cannot see the bug"
   // (scripts/openguard-probe/repro.mjs requires this cell to destroy data before reading a verdict).
   const guardOff = (window as unknown as { __iwOpenGuard?: string }).__iwOpenGuard === 'off'
+  // THE ANCESTRY GUARD RUNS ON THE LOCAL ARCHIVE, SO A FAILED ARCHIVE READ DISARMS IT.
+  // This used to be `listSnapshots(fileId).catch(() => [])` — the swallowed read walking back in
+  // through the guard's own front door. With `localSnapshotHashes` empty, `incomingIsPast` is false
+  // for every input: 'incoming-stale' becomes UNREACHABLE (the exact verdict that saved the 07-15
+  // work), and the ambiguous case classifyOpen deliberately answers 'diverged' for silently becomes
+  // 'incoming-newer' ⇒ overwrite. The body read and the archive read are one question — "can I
+  // compare?" — so they get one answer.
+  const archive = await readSnapshotArchive(fileId)
+  const archiveReadFailed = archive.kind === 'error'
+  if (archiveReadFailed) {
+    console.error('[inkwave] open: could not read the local snapshot archive — refusing to compare:', archive.error)
+  }
   const verdict: OpenVerdict = guardOff
     ? 'incoming-newer'
     // Could not read the local copy ⇒ we cannot compare, so we do not get to overwrite. 'diverged'
     // opens the file as a separate document and leaves whatever is on disk untouched.
-    : readFailed ? 'diverged'
+    : readFailed || archiveReadFailed ? 'diverged'
     : classifyOpen({
         localHash: localBefore ? await contentHash(localBefore.contentJson) : null,
         incomingHash: await contentHash(contentJson),
-        localSnapshotHashes: (await listSnapshots(fileId).catch(() => [])).map((s) => s.contentHash),
+        localSnapshotHashes: (archive.kind === 'found' ? archive.snapshots : []).map((s) => s.contentHash),
         incomingSnapshotHashes: (data.snapshots ?? []).map((s) => s.contentHash),
       })
   // Instrument, not logic (the `__iwPerf` pattern): which branch this open took. Without it a probe
@@ -134,7 +146,13 @@ async function openInkwaveFileInner(
   // `readFailed` counts as "there is something here": localBefore is null precisely BECAUSE we
   // could not read it, and forking on `!!localBefore` alone would let that null overwrite the file
   // we failed to read — the swallowed-read bug walking straight back in through this door.
-  const forked = verdict === 'diverged' && (!!localBefore || readFailed)
+  // `archiveReadFailed` counts for the same reason, and ALSO pins the outage direction: forking to a
+  // fresh id means restoreSnapshotsFromBundle below unions into a NEW archive (a guaranteed-clean
+  // NotFound ⇒ []) instead of re-reading the one that just failed and throwing out of openDoc — so a
+  // transient archive fault can never make a file impossible to OPEN. The unreadable archive stays
+  // untouched under its own id. Note a brand-new device is NOT this case: a missing snapshots.json
+  // is a NotFoundError ⇒ 'found' with [], never 'error', so first-open never spuriously forks.
+  const forked = verdict === 'diverged' && (!!localBefore || readFailed || archiveReadFailed)
   const id = forked ? uuidv4() : fileId
 
   // Normalise the filename: always store the .studio extension so the next sync uses it correctly.

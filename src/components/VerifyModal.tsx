@@ -10,7 +10,7 @@ import { computeAnalytics, type Analytics } from '../verify/analytics'
 import { ActivityGraph } from '../verify/ActivityGraph'
 import { signingPublicKeyHex } from '../provenance/receipts'
 import { parseTraceFile, buildExportBundle, type ExportBundle } from '../provenance/bundle'
-import { listSnapshots } from '../provenance/snapshots'
+import { readSnapshotArchive } from '../provenance/snapshots'
 import type { InkwaveDocument } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -58,7 +58,21 @@ export function VerifyModal({
   // Auto-verify the current document immediately on open. Full snapshots are fetched here AT
   // ACTION TIME (cached read) — the editor's React state carries only SnapshotMeta.
   useEffect(() => {
-    void listSnapshots(doc.id).then((snaps) => runBundle(buildExportBundle(doc, snaps)))
+    // A VERDICT IS THE ONE THING THIS MODAL MUST NEVER GUESS. If the archive read fails, the old
+    // `[]` would have built a bundle with NO snapshots and cheerfully verified it — reporting a
+    // clean result over an empty history, which is the exact opposite of what a verifier is for.
+    // Say we could not read it. (No `.catch` existed here either: a throw would spin `busy` forever.)
+    void readSnapshotArchive(doc.id).then((r) => {
+      if (r.kind === 'error') {
+        setBusy(false)
+        setError(
+          "Couldn't read this document's history from local storage, so it can't be verified right " +
+          'now. This does not mean anything is wrong with it — try again in a moment.',
+        )
+        return
+      }
+      return runBundle(buildExportBundle(doc, r.snapshots))
+    })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {

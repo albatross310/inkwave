@@ -37,7 +37,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, listSnapshots, listSnapshotMeta, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
@@ -97,7 +97,7 @@ import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
 import { reportOpenError, takeOpenError } from '../storage/openError'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
-import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
+import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
 
 // No wall-clock resample timer — S_v rotation and receipt signing happen on word nudge only.
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
@@ -1888,7 +1888,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { dom.removeEventListener('keydown', arm); dom.removeEventListener('paste', arm) }
   }, [editor])
 
-  const refreshSnapshots = async (docId: string) => { setSnapshots(await listSnapshotMeta(docId)) }
+  // A failed read must never REPLACE a good list with an empty one — the panel would then assert,
+  // in the UI, the exact lie the storage layer no longer tells. Keep what we have and log.
+  const refreshSnapshots = async (docId: string) => {
+    const r = await readSnapshotArchive(docId)
+    if (r.kind === 'error') { console.warn('[inkwave] snapshot list refresh skipped — archive unreadable:', r.error); return }
+    setSnapshots(r.snapshots.map(toSnapshotMeta))
+  }
 
   // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid snapshot
   // scrubbing is a core feature, so the reviewer never waits for it. The OTS Bitcoin re-check does NOT
@@ -1898,8 +1904,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
-    // listSnapshotMeta reads through the same cache, so this still warms the full list for scrubbing.
-    void listSnapshotMeta(docId).then((s) => { if (!cancelled) setSnapshots(s) })
+    // Reads through the same cache, so this still warms the full list for scrubbing.
+    // THE EAGER LOAD IS WHERE A FAILED READ WOULD BECOME VISIBLE AS A LIE: leave `snapshots` at []
+    // and the receipts panel renders "no snapshots yet" over a full archive — the storage bug's
+    // exact claim, now made by the UI, at the moment the writer opens his thesis. It also had no
+    // `.catch`, so the throw would only ever be an unhandled rejection. Say it plainly instead.
+    void readSnapshotArchive(docId).then((r) => {
+      if (cancelled) return
+      if (r.kind === 'error') {
+        console.error('[inkwave] could not load the snapshot list:', r.error)
+        reportOpenError(
+          "Inkwave couldn't read this document's history just now, so the snapshot list is " +
+          'incomplete. Your history is still on this device and nothing has been changed — reload ' +
+          'to try again.',
+        )
+        return
+      }
+      setSnapshots(r.snapshots.map(toSnapshotMeta))
+    })
     return () => { cancelled = true }
   }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1915,7 +1937,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         await runPeriodRef.current()
         const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
         // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
-        const before = await listSnapshots(docRef.current.id)
+        // THE SILENT-DISABLE SEAM. createSnapshotIfChanged reads the archive itself and now refuses
+        // rather than write over a history it couldn't read — correct, but on its own it would make
+        // provenance stop accruing with nothing but a console warning (enqueueSnapshotWork swallows
+        // the throw). Peter would keep writing, believing he was building his authorship trace, and
+        // find the gap when it was too late to fix. Reading through the guard here means the failure
+        // is SEEN. Typing is untouched either way: this whole queue runs off the typing path.
+        const before = await snapshotsForAction('this snapshot')
+        if (!before) return
         const prevSnap = before[before.length - 1] ?? null
         const snap = await createSnapshotIfChanged(docRef.current, 'word-nudge', [...priorReceiptsRef.current, ...(sessionRef.current?.receipts ?? [])], undefined, false, nudgeWord)
         if (!snap) return
@@ -1938,7 +1967,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function saveVersion() {
     enqueueSnapshotWork(async () => {
       // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
-      const before = await listSnapshots(docRef.current.id)
+      // Guarded for the same reason as the word-nudge path: a "Save version" that silently did
+      // nothing is the worst possible answer at the moment the writer is deliberately marking work.
+      const before = await snapshotsForAction('this version')
+      if (!before) return
       const prevSnap = before[before.length - 1] ?? null
       const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
       if (!snap) return
@@ -1981,11 +2013,39 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     })
   }
 
+  // THE ARCHIVE READ FOR ANY ACTION THAT PUBLISHES OR OVERWRITES THE RECORD.
+  //
+  // `listSnapshots` now THROWS when it cannot read the archive rather than answering `[]` — because
+  // `[]` meant "no history" and every one of these actions would then have written or exported an
+  // empty history over Peter's real one (see provenance/snapshots.ts). But a throw reaching a click
+  // handler is just a button that does nothing, so each action reads through here: on a failure the
+  // action is CANCELLED and says so, instead of quietly shipping a gutted record.
+  //
+  // Cancelling is the safe direction for all of them and none of it touches typing: an export, a
+  // cloud sync and a folder mirror are all re-runnable, and the archive is still on disk. What is
+  // NOT re-runnable is a .studio the writer believes holds his proof, or a OneDrive copy overwritten
+  // with one snapshot. Note this returns `[]` happily for a genuinely new document — an established
+  // emptiness is not a failed read, and first-save must keep working forever.
+  async function snapshotsForAction(action: string): Promise<Snapshot[] | null> {
+    const r = await readSnapshotArchive(docRef.current.id)
+    if (r.kind === 'error') {
+      console.error(`[inkwave] ${action}: could not read the snapshot archive — cancelled:`, r.error)
+      reportOpenError(
+        `Inkwave couldn't read this document's history just now, so ${action} was cancelled rather ` +
+        `than risk writing an incomplete record over it. Your writing and your history are safe on ` +
+        `this device — try again in a moment.`,
+      )
+      return null
+    }
+    return r.snapshots
+  }
+
   // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
   // Uses the async variant so embedded source PDFs travel inside the .studio file.
   async function exportBundle(stripPdfs?: 'all' | 'public', gzip?: boolean) {
     // Full snapshots fetched AT ACTION TIME (cached read) — state holds metadata only.
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the export')
+    if (!snaps) return // a bundle exported from a failed read is a FALSE receipt — never ship one
     const bundle = await buildExportBundleWithPdfs(docRef.current, snaps, stripPdfs)
     const base = bundleFilename(docRef.current)
     const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
@@ -2006,17 +2066,30 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function mirrorIfActive() {
     ensureDocFresh() // mirrors write docRef — never a stale one
     if (folderActiveRef.current) {
-      void listSnapshots(docRef.current.id)
-        .then((snaps) => writeBundleToFile(docRef.current, snaps))
-        // A failed write means permission lapsed — stop claiming "synced" and prompt a reconnect.
-        .then((ok) => { if (ok) { setLastFileSave(Date.now()); setDocSource(docRef.current.id, 'local') } else { folderActiveRef.current = false; setNeedsReconnect(true) } })
-        .catch(() => { folderActiveRef.current = false; setNeedsReconnect(true) })
+      // The archive read is separated from the WRITE deliberately. Both used to land in the same
+      // `.catch`, which would now report a transient archive fault as "your folder permission
+      // lapsed" and drop the link — a wrong story and a needless interruption. A failed read means
+      // only: skip THIS mirror. The link stays live and the next kick mirrors the full archive.
+      void readSnapshotArchive(docRef.current.id)
+        .then((r) => {
+          if (r.kind === 'error') { console.warn('[inkwave] folder mirror skipped — archive unreadable:', r.error); return }
+          return writeBundleToFile(docRef.current, r.snapshots)
+            // A failed write means permission lapsed — stop claiming "synced" and prompt a reconnect.
+            .then((ok) => { if (ok) { setLastFileSave(Date.now()); setDocSource(docRef.current.id, 'local') } else { folderActiveRef.current = false; setNeedsReconnect(true) } })
+            .catch(() => { folderActiveRef.current = false; setNeedsReconnect(true) })
+        })
     }
     if (oneDriveActiveRef.current) scheduleOneDriveSync()
     if (gdriveActiveRef.current) {
-      void listSnapshots(docRef.current.id)
-        .then((snaps) => syncToGoogleDrive(docRef.current, snaps))
-        .then((r) => { if (r.ok) { setLastGdriveSync(Date.now()); setGdriveUrl(r.webUrl) } })
+      // Silent auto-mirror: a failed archive read skips this cycle rather than pushing a short
+      // archive at Drive. `.catch(() => {})` already swallowed sync errors here; the read failure
+      // joins them, but it must never reach syncToGoogleDrive.
+      void readSnapshotArchive(docRef.current.id)
+        .then((r) => {
+          if (r.kind === 'error') { console.warn('[inkwave] Drive mirror skipped — archive unreadable:', r.error); return }
+          return syncToGoogleDrive(docRef.current, r.snapshots)
+            .then((res) => { if (res.ok) { setLastGdriveSync(Date.now()); setGdriveUrl(res.webUrl) } })
+        })
         .catch(() => {})
     }
   }
@@ -2026,9 +2099,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const ONEDRIVE_MIN_INTERVAL = 20_000
   function oneDriveWriteNow() {
     oneDriveLastWriteRef.current = Date.now()
-    void listSnapshots(docRef.current.id)
-      .then((snaps) => syncToOneDrive(docRef.current, snaps))
-      .then((r) => { if (r.ok) { setLastSync(Date.now()); setOneDriveUrl(r.webUrl) } })
+    // Same rule as the other silent mirrors: never PUT an archive derived from a failed read.
+    void readSnapshotArchive(docRef.current.id)
+      .then((r) => {
+        if (r.kind === 'error') { console.warn('[inkwave] OneDrive mirror skipped — archive unreadable:', r.error); return }
+        return syncToOneDrive(docRef.current, r.snapshots)
+          .then((res) => { if (res.ok) { setLastSync(Date.now()); setOneDriveUrl(res.webUrl) } })
+      })
       .catch(() => {})
   }
   function scheduleOneDriveSync() {
@@ -2043,7 +2120,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   async function syncOneDrive() {
     const acct = await oneDriveAccount()
     if (!acct) { await startOneDriveSignIn(); return } // navigates away, comes back signed in
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the sync to OneDrive')
+    if (!snaps) return
     const r = await syncToOneDrive(docRef.current, snaps)
     if (r.ok) {
       oneDriveActiveRef.current = true
@@ -2065,7 +2143,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const wasActive = gdriveActiveRef.current
     const ok = await startGoogleDriveSignIn()
     if (!ok) return
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the sync to Google Drive')
+    if (!snaps) return
     const r = await syncToGoogleDrive(docRef.current, snaps)
     if (r.ok) {
       gdriveActiveRef.current = true
@@ -2098,7 +2177,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setChosenGDriveFolder(folderId || null) // '' = My Drive root
     clearGoogleDriveFile(docRef.current.id)
     setGdriveUrl(null)
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the sync to Google Drive')
+    if (!snaps) return
     const r = await syncToGoogleDrive(docRef.current, snaps)
     if (r.ok) {
       gdriveActiveRef.current = true
@@ -2278,15 +2358,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       setOneDriveAcct(acc)
       if (acc && oneDriveSyncPending()) {
         clearOneDriveSyncPending()
-        void listSnapshots(docRef.current.id)
-          .then((s) => syncToOneDrive(docRef.current, s))
-          .then((r) => {
-            if (r.ok) {
-              setLastSync(Date.now()); setOneDriveUrl(r.webUrl)
-              oneDriveActiveRef.current = true
-              // We just returned from the Microsoft sign-in redirect → open the OneDrive folder picker.
-              setFolderPickerOpen(true)
-            }
+        // The post-sign-in resume sync. Guarded like every other write-back — and this one had no
+        // `.catch` at all, so a throw here would surface only as an unhandled rejection.
+        void snapshotsForAction('the sync to OneDrive')
+          .then((s) => {
+            if (!s) return
+            return syncToOneDrive(docRef.current, s).then((r) => {
+              if (r.ok) {
+                setLastSync(Date.now()); setOneDriveUrl(r.webUrl)
+                oneDriveActiveRef.current = true
+                // We just returned from the Microsoft sign-in redirect → open the OneDrive folder picker.
+                setFolderPickerOpen(true)
+              }
+            })
           })
       } else if (acc && getDocSource(docRef.current.id) === 'onedrive' && oneDriveFilename(docRef.current.id)) {
         // A OneDrive-synced doc loaded (e.g. opened via Upload) → resume syncing it (no Save needed).
@@ -2311,7 +2395,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (!handle) { folderActiveRef.current = false; setFileName(null); return }
       setFileName(handle.name)
     }
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the save')
+    if (!snaps) return
     await writeBundleToFile(docRef.current, snaps)
     setLastFileSave(Date.now())
   }
@@ -2334,7 +2419,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!handle) return
     folderActiveRef.current = true
     setFileName(handle.name)
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the save')
+    if (!snaps) return
     await writeBundleToFile(docRef.current, snaps)
     setLastFileSave(Date.now())
   }
@@ -2369,7 +2455,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     folderActiveRef.current = true
     setNeedsReconnect(false)
     setFileName(h.name)
-    const snaps = await listSnapshots(docRef.current.id)
+    const snaps = await snapshotsForAction('the save')
+    if (!snaps) return
     if (await writeBundleToFile(docRef.current, snaps)) setLastFileSave(Date.now())
   }
   useEffect(() => {
@@ -2458,7 +2545,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // OPFS so future exports include the full receipt history.
       const knownSigs = new Set((docRef.current.scasReceipts ?? []).map((r) => r.signature))
       const knownSessions = new Set((docRef.current.scasReceipts ?? []).map((r) => r.sessionToken))
-      const snaps = await listSnapshots(docId)
+      // THIS PASS DELETES SNAPSHOTS, so it may never run on a view of the archive it isn't sure of.
+      // On a failed read the old `[]` made it a no-op by luck (no candidates ⇒ no badSessions); that
+      // luck is not a guard, and the purge below reasons from ABSENCE ("no good receipt for this
+      // session ⇒ purge it"), which is precisely the reasoning an empty archive corrupts. Bail.
+      const recoverRead = await readSnapshotArchive(docId)
+      if (recoverRead.kind === 'error') {
+        console.warn('[inkwave] receipt recovery skipped — archive unreadable:', recoverRead.error)
+        return
+      }
+      const snaps = recoverRead.snapshots
       // Build a per-session receipt map from all embedded snapshot receipts
       const candidatesBySession = new Map<string, Map<number, import('../types/document').SignedReceipt>>()
       for (const s of snaps) {
@@ -2511,8 +2607,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         const cleanReceipts = (docRef.current.scasReceipts ?? []).filter(
           (r) => !badSessions.has(r.sessionToken),
         )
-        // Remove snapshots that only embed bad-session receipts (so content integrity passes)
-        const snapsAfterRecovery = await listSnapshots(docId)
+        // Remove snapshots that only embed bad-session receipts (so content integrity passes).
+        // Re-read (the recovery above may have appended) — and bail again rather than delete from
+        // a list we couldn't confirm.
+        const afterRead = await readSnapshotArchive(docId)
+        if (afterRead.kind === 'error') {
+          console.warn('[inkwave] receipt purge skipped — archive unreadable:', afterRead.error)
+          return
+        }
+        const snapsAfterRecovery = afterRead.snapshots
         for (const s of snapsAfterRecovery) {
           await new Promise((r) => setTimeout(r, 0)) // slice the rewrite loop too
           const snapReceipts = s.receipts ?? []
