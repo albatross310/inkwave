@@ -2306,6 +2306,100 @@ as the water slows.
   Chromium 744ms → 427ms) because caching makes everything else faster — a real mechanism by which a
   slow decode could lose on load 2+ and never on load 1, unreproduced in either engine and left
   STATED, not probed.
+- **CROP SHIPPED, AND THE LADDER IS NOW VIEWPORT-AWARE (2026-07-17, `feat/wave-rung`) — this
+  supersedes the `object-fit: cover` entry below, which is now ARCHAEOLOGY: read it for the
+  argument, not for what the code does.** `.iw-wave-video-el` is `object-fit: fill` + an element
+  sized inline to the chosen rung's DESIGN CSS BOX; the viewport crops the overflow. MEASURED on the
+  SHIPPED styling (`tilescale.prove.mjs --mode crop`, now the DEFAULT and injecting NOTHING):
+  **140.0 vs 140.0, 0.0% at 1100x700 / 1440x900 / 1920x1080**, with `--mode cover` kept as the
+  COUNTERFACTUAL and proved to still reproduce the bug (116.7 vs 140.0 = 16.6% at 1440x900, 0.1px
+  off the cover model) — without that arm firing, crop's 0.0% would be unreadable.
+  · **THE LADDER (`RUNGS` in waveVideo.ts, mirrored by `LADDER` in generate.mjs):** phone 440x956
+    @dsf2 (880x1912) · desk **1920x1080 @dsf1 — FULL HD, Peter's ceiling** ("Why don't we just do
+    full hd. Or even 720p") · wide 2560x1440 @dsf1. Bytes loop+brake, day: phone av1 102KB / h264
+    520KB · desk 202/860 · wide 365/1476. Full HD was chosen over a retina 3840x2160 on Peter's
+    "smaller file" instruction AND because 2.07 Mpx still fits **H.264 Level 4.0** (~2.1 Mpx), the
+    iPhone-8 pin. VERIFIED with ffprobe, not assumed: phone/desk level=40, wide level=51.
+  · **`pickRung(vw, vh, coarse)` is PURE and EXPORTED**, and `coarse` is a PARAMETER: it read
+    `matchMedia` internally at first, and under vitest's node env there is no `window`, so the whole
+    touch half of the suite silently became a copy of the desktop half — passing, proving nothing.
+    Rule: the SMALLEST rung of the right device class whose design box COVERS the viewport; nothing
+    covers it ⇒ null ⇒ CSS water. It NEVER returns a rung that must be stretched.
+  · **DPR IS DETECTED AND REPORTED BUT DOES NOT SELECT, and that is deliberate.** Peter's ask
+    ("I shouldn't have to give the res of my desktop") is satisfied — `planClip` reads innerWidth/
+    innerHeight/devicePixelRatio every load and the overlay prints them plus the delivered dpi ratio.
+    But DPR can only make a CHOICE where two rungs of one device class differ in `dsf`, and Peter's
+    own ceiling is what rules out the retina desk clip that would create such a pair. A `dpr`
+    parameter would be a number the function reads and cannot act on.
+  · **STATED CEILINGS (found by the tests, not reasoned about):** an iPad in PORTRAIT (820x1180)
+    matches NO rung — phone can't cover it and the desk clips are landscape (1080 < 1180) — so it
+    gets CSS water; a viewport past 2560x1440 likewise. Both pinned by tests so a future rung is a
+    DECISION, not an accident.
+  · **generate.mjs no longer `-vf scale`s.** encW/encH are DERIVED (`vw*dsf`); the old rows captured
+    880x1912 and scaled DOWN to 540x1170, which under `fill` would resize the water again — the same
+    defect moved into the encoder. Capture geometry === encode geometry. `-level:v` is per-rung.
+  · KEPT IN THE GATE by `src/editor/waveVideo.test.ts` (16 tests, ~44ms, no browser) — the browser
+    probe is the truth, not a guard. MUTATION-PROVED, 4 mutants all die: drop the cover test ⇒ 6
+    fail · pick the largest rung ⇒ 2 · drop the coarse partition ⇒ 3 · phone dsf 2→3 (past Level
+    4.0 on a touch device) ⇒ 1.
+- **BLANK WHITE UNTIL THE VIDEO COMES UP + THE DELIBERATE ONE-LOOP DELAY (2026-07-17, Peter).**
+  "we have to just have blank white screen until the video comes up and play the video every time"
+  and "make it show at least one loop before the file comes up. purposefully delay it. (And use that
+  time to warm up the document)".
+  · `html.iw-wave-video-wait` (entry.client, pre-hydration — a CLASS ON <html>, the `.iw-water-ready`
+    shape, NEVER a node append) whites the surface and hides every water layer, so a load can't show
+    CSS water and then swap to the video. waveVideo's `endWait()` clears it on EVERY exit; entry.client
+    carries an INDEPENDENT 4s timeout for the one failure waveVideo cannot report — its own module
+    failing to load (chunk 404 / parse error). White must never be a state you can get stuck in.
+  · **THE LOOP BOUNDARY IS THE VIDEO'S OWN, NOT A TIMER.** `releaseAtLoopPoint` watches `currentTime`
+    WRAP (rVFC where available, else the same 40ms poll `wireSettle` already uses for this identical
+    boundary). A `setTimeout(2000)` would be a guess about a decode we don't control, and on a busy
+    first load it would release mid-loop — exactly the half-loop Peter asked us to stop showing.
+  · The reveal gate (TiptapEditor) waits on `inkwave:wave-video-loop` alongside fonts.ready +
+    the first pagination measure — so **"warm up the document" needed NO code**: the warm-up is what
+    the load already does, given room to finish. ASKABLE (`__iwWaveVideoLoopDone`) + fired on EVERY
+    exit (wrap/bail/decode timeout/autoplay refusal/settle) + capped INDEPENDENTLY at 7s in the
+    editor, because that guarantee only holds if the module loaded. The 1200ms reveal cap becomes
+    8200ms only when the flag is ON — it would otherwise fire straight through a ~2s loop and undo
+    the delay on every load. Flag OFF ⇒ the gate is byte-for-byte the old one.
+  · **PROVED IN A REAL BROWSER, 9/9 — `loopgate.prove.mjs`** (chromium, own ephemeral port): FLAG OFF
+    is the control and nothing changes (reveal 1257ms, the white NEVER appears, no gate event); FLAG
+    ON reaches master on `desk 1920x1080css @dsf1 (dpi 1.00x)` — the rung DETECTED, Peter asked
+    nothing — the gate reads **"one full loop played (wrapped at 1.96s)"** (a REAL wrap, not the cap),
+    the white clears at 1197ms and is GONE at reveal, and the reveal moves **1257ms → 3236ms**: the
+    delay is a measured ~2s, not a hope. It VOIDS rather than passes when the video never becomes
+    master — a bail releases both gates BY DESIGN, so those checks would otherwise go green for
+    exactly the wrong reason.
+- **THE SHORT LINES ARE *NOT* OUT OF SYNC WITH THE WAVES BY CLOCK — the hypothesis is REFUTED, by
+  measurement (2026-07-17, `markskew.prove.mjs`).** Peter: "the little short lines… often appear out
+  of sync with the waves", both engines. The standing hypothesis was that WAAPI and CSS animations
+  run on different clocks. **They do not**: a CSS animation from `getAnimations()` and a WAAPI
+  animation from `element.animate()` both hang off `document.timeline` and `startTime` is ONE
+  coordinate system, so `alignTracks`' congruence is arithmetically sound and a clock DIFFERENCE was
+  never available as an explanation. MEASURED on the CSS water (chromium, 1280x800, 5 clean loads,
+  ~200 tracks/load), each track scored against **its own surface's** drift-l: **mark-vs-its-own-wave
+  0.00px on 4/5 loads, 2.40px on 1/5** (= a 2-frame 33.3ms cross-surface skew, on a 140px-period
+  wave — sub-perceptual, and nothing like "often out of sync"). drift-l vs drift-r on a surface: 0ms,
+  always. The instrument is armed first: a deliberately de-clocked track (400ms → 28.8px) is SEEN.
+  ⇒ **the alignment is excluded as the cause.** What remains is the class CLAUDE.md already records
+  under KNOWN RESIDUALS ("white lines briefly lagging their wave") — real-device raster/compositor
+  scheduling, which a GPU-less WSL headless box structurally cannot see. **This excludes ONE cause;
+  it does not explain the symptom.** Next tool is on-device capture, not another headless probe.
+  · TWO INSTRUMENT BUGS caught in this probe before any verdict was read, both the house speciality:
+    (1) it first asked the page for `.iw-wave-anim` from node after a wait and read `waveAnim: 0` on a
+    healthy app — the drift window is under a second, so a CDP round-trip lands after the COAST and
+    the class is gone (blocking `inkwave:reveal-imminent` does NOT hold it: Scroll.tsx also coasts off
+    its own `revealed` trigger). Sampling moved in-page, every frame, to the coast. (2) It then
+    latched the FIRST complete sample and reported a tidy 0.00px — but only ONE surface had a drift by
+    then, so it was structurally incapable of seeing a two-clock bug. (3) It scored every track
+    against `surfaces[0]`'s drift and reported **13.2px of "mark skew" that was really the
+    CROSS-SURFACE difference** — it recorded each track's surface and then ignored it. A mark can only
+    be in or out of sync with the wave **it is drawn over**.
+  · **A LATENT STRUCTURAL BUG, NAMED NOT FIXED:** `findDrift()` picks ONE surface's drift and
+    `alignTracks` clocks EVERY track to it, including the other surface's. Today that costs 2.4px on
+    1/5 loads because Scroll.tsx's sibling adopt usually makes the two agree — but the marks of surface
+    B are clocked to surface A's wave BY CONSTRUCTION, so the error is exactly whatever the adopt
+    leaves. Peter's call whether to close it.
 - **`object-fit: cover` DESTROYS THE 140px TILE INVARIANT — PROBED, 0.0px off the model at every scale
   (2026-07-17; Peter, live desktop: "the video resolution and size of the waves does not match that of
   the background").** The video only ever stands in for the CSS water during the load and HANDS BACK at

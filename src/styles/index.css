@@ -504,15 +504,23 @@
     position: fixed;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100lvh;
+    /* NO width/height HERE — waveVideo.ts writes the chosen rung's DESIGN CSS BOX inline. It is a
+       per-rung fact, and the ladder's whole purpose is that it differs by device. */
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.3s linear;
-    /* COVER (2026-07-15): one clip fills any viewport — the water is a low-frequency gradient +
-       drifting lines, so cover-scaling a smaller rung up is imperceptible (SSIM ≈ 0.98 measured).
-       This is what lets the ladder be just 2 rungs (phone 540×1170 + desk 1280×800). */
-    object-fit: cover;
+    /* CROP, NEVER RESIZE (2026-07-17 — Peter's ruling; replaces `object-fit: cover`).
+       `fill` + an element sized to the clip's design CSS box = the clip's pixels map 1:1 onto that
+       box, so a 140px wave tile is 140 CSS px at EVERY viewport and the VIEWPORT crops the
+       overflow. That congruence with the CSS water IS the hand-off at the coast.
+       `cover` scaled the clip to the viewport instead: MEASURED tile 122.5px @1100×700 and 157.5px
+       @1440×900 against the CSS water's 140.0 — the 12.5% jump Peter saw live. Crop measures
+       140.0 vs 140.0, 0.0% error (tilescale.prove.mjs).
+       ⚠️ NOT `object-fit: none`: that maps 1 video px → 1 CSS px, so a dsf:2 clip renders 2× too
+       big. The rule is clip @ (design CSS × dsf) + element @ design CSS + `fill`.
+       NB the comment this replaces described `object-fit: fill` as the shipped design — `git log
+       -S"object-fit: fill"` is EMPTY: no commit ever contained it. It was never implemented. */
+    object-fit: fill;
     /* Survives the veil-on host hide below AND the covered-editor twinkle hide — visibility
        (unlike display) lets a child re-assert itself under a hidden ancestor. */
     visibility: visible;
@@ -520,6 +528,27 @@
   html.iw-wave-video-on .inkwave-editor-surface.iw-fill::before,
   html.iw-wave-video-on .inkwave-editor-surface.iw-fill::after,
   html.iw-wave-video-on .inkwave-editor-surface.iw-fill .iw-wave-twinkles {
+    visibility: hidden;
+  }
+
+  /* ─── BLANK WHITE UNTIL THE VIDEO COMES UP ──────────────────────────────────────────────────
+     Peter: "we have to just have blank white screen until the video comes up and play the video
+     every time". Without this the CSS water paints from the prerendered `.iw-wave-anim` class (it
+     runs from first paint, by design) and is then replaced by the video a beat later — two
+     different waters in one load, which IS the "partial/janky first frame" this stops.
+     Set on <html> by entry.client BEFORE hydration (the same shape as .iw-water-ready /
+     data-theme — a class on the root, never a node append; appending pre-hydration IS the #418
+     bug). Cleared by waveVideo.ts on EVERY exit, and by entry.client's own timeout if that module
+     never loads: white must never be a state you can get stuck in.
+     The gradient is overridden too — the surface's aqua is the thing that would otherwise flash.
+     The video lives inside .iw-wave-twinkles and re-asserts `visibility: visible` (see
+     .iw-wave-video-el), so hiding the host here cannot hide the video we are waiting for. */
+  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill {
+    background: #fff;
+  }
+  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill::before,
+  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill::after,
+  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill .iw-wave-twinkles {
     visibility: hidden;
   }
 

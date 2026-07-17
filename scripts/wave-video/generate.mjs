@@ -40,13 +40,31 @@ const ROOT = join(HERE, '..', '..')
 const OUT = join(ROOT, 'public', 'wave')
 const BUILD = join(ROOT, 'build', 'client')
 
-// The ladder — MUST mirror RUNGS in src/editor/waveVideo.ts. Cover-fit (object-fit: cover) means one
-// clip fills any viewport, so just two: a portrait phone rung + a landscape desktop rung. vw/vh/dsf
-// = capture geometry; encW/encH = the encoded resolution (the measured crisp floor); coastT = brake ms.
+// ─── The ladder — MUST mirror RUNGS in src/editor/waveVideo.ts ────────────────────────────────
+// CROP, NEVER RESIZE (2026-07-17, Peter). The old ladder was built for `object-fit: cover`, where
+// one clip stretched to fill any viewport and the capture geometry was free. Under crop the
+// capture geometry IS the contract: the clip plays into an element sized to exactly `vw`x`vh` CSS
+// px, so a wave tile stays 140 CSS px and the viewport crops the overflow. Consequences:
+//
+//   1. `vw`/`vh` are now the DESIGN CSS BOX and must COVER the device class (a design box smaller
+//      than the viewport has no pattern to crop from — a bare edge, worse than the bug we fixed).
+//   2. encW/encH are DERIVED (`vw*dsf`), never independent. The old rows scaled the capture DOWN
+//      to a separate encode size (880x1912 -> 540x1170), which under `fill` would silently resize
+//      the water again — the exact defect, moved one stage upstream. There is no `-vf scale` any
+//      more: capture at the encode resolution and encode those pixels.
+//
+// THE CEILING IS PETER'S: "Why don't we just do full hd. Or even 720p". `desk` is full HD at dsf 1
+// — the smaller file over a retina 3840x2160 — and 1920x1080 (2.07 Mpx) still fits H.264 Level 4.0
+// (~2.1 Mpx), the iPhone-conservative pin below. `wide` exists only because a 1920 design box has
+// nothing to crop from on a 2560 desktop; pickRung partitions on the pointer type, so `wide`'s
+// Level 5.1 can never reach an iPhone. Past `wide`, pickRung returns null -> CSS water.
 const LADDER = [
-  { name: 'phone', vw: 440, vh: 956, dsf: 2, encW: 540, encH: 1170, mobile: true, coastT: 2000 },
-  { name: 'desk', vw: 1280, vh: 800, dsf: 1, encW: 1280, encH: 800, mobile: false, coastT: 2500 },
-]
+  { name: 'phone', vw: 440, vh: 956, dsf: 2, mobile: true, coastT: 2000, level: '4.0' },
+  { name: 'desk', vw: 1920, vh: 1080, dsf: 1, mobile: false, coastT: 2500, level: '4.0' },
+  // Desktop-only by construction (pickRung's coarse partition), so Level 5.1 is safe: no iPhone
+  // ever decodes this clip. 3.69 Mpx — past Level 4.0's ~2.1 Mpx ceiling.
+  { name: 'wide', vw: 2560, vh: 1440, dsf: 1, mobile: false, coastT: 2500, level: '5.1' },
+].map((r) => ({ ...r, encW: r.vw * r.dsf, encH: r.vh * r.dsf }))
 const DT_CONTENT = 16.2 // ms of animation time per video frame (120 per 1944ms tile loop)
 const FPS = 60
 // LOOP LENGTH. 120 = ONE tile loop (k=1, 2.0s): the wave LINES close exactly (the tile is
@@ -155,14 +173,20 @@ async function capture(rung, theme, mode /* 'loop' | 'brake' */, dir) {
 // Encode one frame dir to BOTH codecs. suffix = '' (loop) or '.brake' — the codec sits BEFORE it,
 // so the output is {prefix}.{codec}{suffix}.mp4, matching waveVideo.ts's URL scheme exactly.
 function encode(dir, frames, rung, prefix, suffix) {
-  const S = `scale=${rung.encW}:${rung.encH}:flags=lanczos`
-  const input = ['-framerate', String(FPS), '-i', join(dir, 'f%05d.png'), '-frames:v', String(frames), '-vf', S]
+  // NO `-vf scale` (2026-07-17). The frames are ALREADY captured at encW x encH (= design CSS x
+  // dsf), because under crop any rescale here would resize the water — the very defect
+  // `object-fit: fill` exists to stop, merely moved into the encoder. Capture geometry === encode
+  // geometry, always.
+  const input = ['-framerate', String(FPS), '-i', join(dir, 'f%05d.png'), '-frames:v', String(frames)]
   const av1 = `${prefix}.av1${suffix}.mp4`, h264 = `${prefix}.h264${suffix}.mp4`
   execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libsvtav1', '-crf', CRF_AV1, '-preset', '6', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', av1], { stdio: 'ignore' })
-  // iPhone-8-conservative H.264: Main profile @ Level 4.0 (A11 handles High, but Main is
-  // universally decodable), yuv420p, and +faststart (moov atom at the FRONT — without it, a
-  // Range-less first load never reaches the metadata and readyState sticks at 0).
-  execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libx264', '-preset', 'slow', '-crf', CRF_H264, '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', '4.0', '-movflags', '+faststart', h264], { stdio: 'ignore' })
+  // iPhone-8-conservative H.264: Main profile (A11 handles High, but Main is universally
+  // decodable), yuv420p, +faststart (moov atom at the FRONT — without it a Range-less first load
+  // never reaches the metadata and readyState sticks at 0).
+  // The LEVEL is PER-RUNG now: phone/desk fit 4.0 (~2.1 Mpx) and keep the A11-safe pin; `wide` is
+  // 3.69 Mpx and needs 5.1, which is safe ONLY because pickRung never offers `wide` to a touch
+  // device. Pinning 4.0 on a 2560x1440 stream makes ffmpeg emit a non-conformant file.
+  execFileSync('ffmpeg', ['-y', ...input, '-c:v', 'libx264', '-preset', 'slow', '-crf', CRF_H264, '-pix_fmt', 'yuv420p', '-profile:v', 'main', '-level:v', rung.level, '-movflags', '+faststart', h264], { stdio: 'ignore' })
   console.log(`    → ${prefix.split('/').pop()}.<codec>${suffix}.mp4: av1 ${kb(av1)}KB · h264 ${kb(h264)}KB`)
 }
 
