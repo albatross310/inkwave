@@ -2109,6 +2109,50 @@ as the water slows.
   Chromium 744ms → 427ms) because caching makes everything else faster — a real mechanism by which a
   slow decode could lose on load 2+ and never on load 1, unreproduced in either engine and left
   STATED, not probed.
+- **`object-fit: cover` DESTROYS THE 140px TILE INVARIANT — PROBED, 0.0px off the model at every scale
+  (2026-07-17; Peter, live desktop: "the video resolution and size of the waves does not match that of
+  the background").** The video only ever stands in for the CSS water during the load and HANDS BACK at
+  the coast, so its tile must be 140 CSS px at EVERY viewport — that is what a seamless hand-off IS.
+  `width:100vw; height:100lvh; object-fit:cover` scales the clip to the viewport instead, so the tile is
+  140 × max(vw/1280, vh/800). MEASURED against the CSS water's own tile (`tilescale.prove.mjs`):
+      viewport    cover scale   CSS water     VIDEO water   model    error
+      1100x700       0.875      140.0 ✓        122.5        122.5    0.0px   ✗ 12.5% — jumps
+      1280x800       1.000      140.0 ✓        140.0        140.0    0.0px   ✓ (the rung's own size)
+      1440x900       1.125      140.0 ✓        157.5        157.5    0.0px   ✗ 12.5% — jumps
+  **PETER'S CROP FIX IS PROVED**: element sized to the clip's DESIGN CSS box, viewport crops the
+  overflow ⇒ 140.0 vs 140.0, 0.0% mismatch, at a viewport where cover reads 122.5. ARCHAEOLOGY, and it
+  licenses the change: `git log -S"object-fit: cover"` → ONE commit (6674e43, the original production
+  video); `-S"object-fit: fill"` → **EMPTY, no commit ever contained it**. So index.css:501's comment
+  ("object-fit fill = 1:1 device px at the rung's design scale so wave tiles stay exactly 140 CSS px")
+  describes a design NEVER IMPLEMENTED, and cover's only stated justification is "one clip fills any
+  viewport… lets the ladder be just 2 rungs" — it solved RUNG EXPLOSION, which cropping solves better.
+  **The SSIM ≈ 0.98 that justified it compared the video TO ITSELF SCALED**; it never once compared the
+  video to the CSS water it must match. ⚠️ `object-fit: none` is NOT the fix: it maps 1 video px → 1 CSS
+  px, so a dsf:2 clip renders 2× too big — "preserve dpi" needs clip @ (design CSS × DPR) + element
+  sized to the design box + `fill`. THE CEILING, unowned: a viewport wider than the clip has no pattern
+  to crop from, and periodicity CANNOT rescue it (a <video> cannot be background-repeated; two tiled
+  videos = two `currentTime`s; canvas-tiling needs a per-frame JS driver). BYTES, measured, for a
+  2560×1600@dsf1.5 (3840×2400) desk clip: **AV1 630KB / H.264 2861KB** loop+brake (vs today's 116KB /
+  525KB — 9× pixels → 5.4× bytes). generate.mjs pins `-level:v 4.0` (~2.1M px, iPhone-8-conservative);
+  3840×2400 is 9.2M px ⇒ Level 5.1 — safe for DESK ONLY, since `pickRung` (`coarse || innerWidth < 900`)
+  means an iPhone NEVER decodes the desk clip.
+- **THE TILE-SCALE PROBE'S OWN HISTORY IS THE LESSON — THREE FICTIONS BEFORE A MEASUREMENT.** (1) v1
+  extracted the period from THRESHOLDED PEAKS and doubled the median gap, assuming an even thick/thin
+  pair NEITHER water has. It reported a tidy 24.2% mismatch at 1920×1080 — a perfect confirmation of the
+  hypothesis — then its control, at the rung's own size where cover scale is 1.0 and the two MUST agree,
+  reported 23.8%. **A mismatch that does not move with the cover factor is not measuring the cover
+  factor**; it was a constant extractor offset, reading the CSS water at 130 against a KNOWN 140.
+  (2) It sampled CENTRE columns, which hit the PARCHMENT PAGE (the two waters are necessarily sampled at
+  different load stages, and by the second the document has revealed): scatter 46.9/55.1/66/244.9. The
+  page is centred — sample the EDGES, water at every stage. (3) Autocorrelation suffers OCTAVE ERRORS
+  here: the half-period correlates at ~0.97 of the fundamental (thick and thin lines are similar, and
+  scaling blurs them closer), so peak-picking read [70,70,140,140] and [157.5,315,315,315] — the truth
+  present in both, the median a coin toss. It reported 315 (double the true 157.5) as a confident
+  verdict. Fixed by LINEAR detrend (the 121px moving average was comparable to the 140px period — a
+  high-pass filter sitting on the signal, which is what let r(280) beat r(140)) + NORMALISED correlation
+  + a 0.995 fundamental bar; and octave disagreement across columns now **VOIDS** rather than medians.
+  **AND THE CONTROL AT ONE VIEWPORT CERTIFIED AN INSTRUMENT WRONG AT OTHERS** — it passed at 1280×800
+  and read 315-for-157.5 at 1440×900. A control must span the measurement RANGE, not one point.
 - **`no-store` IS FAITHFUL TO NOTHING.** The probe server sent it for every asset, so waveVideo's
   pre-hydration warm fetch warmed precisely nothing and the `<video>` re-downloaded the whole 280KB
   h264 clip — a "decode timeout" manufactured entirely by the harness. Production serves /wave/
