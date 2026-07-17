@@ -2249,8 +2249,9 @@ write shim, so metadata can say a PDF exists with no local bytes).
   only way in.** Three lanes took toolbar real estate at once (prod-ledger's clock, music's bar,
   the media import), which is this repo's "two implementations of one rule" wound pre-authorised.
   So: a lane registers a button by adding a member to `SlotId` + `ALL_SLOTS` (+ `IMPLEMENTED_SLOTS`
-  when its button actually renders — a registered-but-unbuilt slot must never paint a dead circle,
-  which is live today because Peter's first-run six names `media` before its lane exists), and
+  when its button actually renders — ONE predicate covers both "no lane yet" (`media`) and "behind
+  a default-OFF flag" (`clock` → `prodLedgerEnabled`); a slot that cannot render must never paint a
+  dead circle, nor strand a stored id when a flag goes off), and
   owns the second bar row by adding a member to `BarLayerId`. Nothing else. `migrateSlots` is
   generational (KEEP what is valid in the writer's order, FILL from canonical order, never reset —
   the old `parsed.length === 4` rule stranded every other shape); `planBarToggle` makes Peter's
@@ -2265,7 +2266,13 @@ write shim, so metadata can say a PDF exists with no local bytes).
   Peter 2026-07-17: the row is SIX because "it fits well on phone" and phone/desktop must stay
   continuous; the population grows freely because "it's only 1 extra click to access a button
   behind the arrow" — ▲ is the app drawer, not a cupboard ("a toolbar is like your app homepage").
-  `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings). Touch: hold-drag reorders the row
+  `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings) — but it is now
+  only the writer's DEFAULT for their next new document: **the layout follows the .studio**
+  (`doc.toolbar`, `ToolbarConfig`). Chain: doc config → the writer's own last layout → the
+  first-run six (page, style, info, settings, media import, review). A received document brings its
+  author's layout, which is the feature; it can never hide ▲/⋮ or name a button this build lacks,
+  because every path resolves through `migrateSlots`. NOT anchored — `contentHash` takes contentJson
+  only. Touch: hold-drag reorders the row
   (insertion semantics, FLIP previews) and hold-drag a ▲ entry ONTO a row slot to swap it in;
   desktop keeps HTML5 drag. During any drag the circle discs go opaque
   (`--iw-slot-drag-bg`; night token in the nightable block) so the lifted circle passes OVER

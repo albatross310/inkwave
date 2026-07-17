@@ -164,6 +164,8 @@ export type SchemaVersion = '0.1.0'
 // Typography (font / size / alignment) is stored per-selection as ProseMirror marks
 // inside contentJson, so it persists with the content — no separate field needed.
 
+import type { ToolbarConfig } from '../editor/toolbarContract'
+
 export interface InkwaveDocument {
   id: string
   title: string
@@ -194,6 +196,19 @@ export interface InkwaveDocument {
   // ─── Email layer (§B2.1) ─────────────────────────────────────────────────
   docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
   email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
+
+  // ─── Toolbar layout (2026-07-17) ─────────────────────────────────────────
+  // Peter: "we should encode the toolbar configuration into a .studio document" — the layout is
+  // per-DOCUMENT and task-based (a score gets music tools, an essay gets writing tools) rather
+  // than one global preference. The rules, the shape and the resolution chain all live in
+  // `editor/toolbarContract.ts`; read it before touching this field.
+  //
+  // NOT ANCHORED, and structurally so: `contentHash()` takes contentJson only — never this
+  // document — and `bundleHash()` takes four EXPLICIT hash arguments, so no document field can
+  // ride in. `musicHash.test.ts` already pins the v:1 form against a hand-computed literal, so
+  // any attempt to fold this in fails a test that exists. Rearranging your buttons must never
+  // read as tampering with your thesis. Same class of field as `citationStyle` above.
+  toolbar?: ToolbarConfig
 
   // ─── Attached music (§B5/§B6) ────────────────────────────────────────────
   // Present only once the writer attaches a score. Absent ⇒ the bundle keeps its v:1/v:2/v:3 form,

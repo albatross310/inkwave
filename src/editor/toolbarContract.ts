@@ -155,12 +155,32 @@ export function overflowSlots(row: readonly SlotId[]): SlotId[] {
 
 /** Read + migrate. The ONLY reader of SLOT_KEY. */
 export function loadToolbarSlots(): SlotId[] {
+  return migrateSlots(readStoredRow())
+}
+
+/**
+ * The writer's OWN last layout, raw and unmigrated — `null` when they have none.
+ *
+ * The null is the point, and it is the same distinction `readToolbarConfig` draws: "this writer has
+ * never curated a toolbar" (⇒ Peter's first-run six) is not "this writer's layout is the default
+ * six" (⇒ their choice, which happens to match). Collapsing them would make the first-run fallback
+ * unable to tell a fresh install from a deliberate default — and would silently overwrite the
+ * meaning of an empty OPFS on every read.
+ */
+export function readStoredRow(): SlotId[] | null {
   try {
     const raw = localStorage.getItem(SLOT_KEY)
-    return migrateSlots(raw ? JSON.parse(raw) : null)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? (parsed as SlotId[]) : null
   } catch {
-    return migrateSlots(null)
+    return null
   }
+}
+
+/** Persist the writer's layout as their default for the NEXT new document. */
+export function saveStoredRow(row: readonly SlotId[]): void {
+  try { localStorage.setItem(SLOT_KEY, JSON.stringify(row)) } catch {}
 }
 
 // ─── Population 2: the bar layers (the second toolbar row) ───────────────────

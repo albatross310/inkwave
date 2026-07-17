@@ -21,8 +21,9 @@ import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import {
-  SLOT_KEY, SlotId, BarLayerId, BAR_HANDOFF_MS,
-  loadToolbarSlots, overflowSlots, planBarToggle,
+  SlotId, BarLayerId, BAR_HANDOFF_MS,
+  overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
+  readToolbarConfig, resolveToolbarRow, mayPersistConfig,
 } from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -426,14 +427,34 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [])
 
   // Toolbar customisation slots
-  const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(loadToolbarSlots)
+  // THE LAYOUT FOLLOWS THE DOCUMENT (Peter, 2026-07-17). The chain — doc config → this writer's own
+  // last layout → the first-run six — is `resolveToolbarRow`; it is not re-decided here.
+  const toolbarRead = readToolbarConfig(docRef.current.toolbar)
+  const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(
+    () => resolveToolbarRow(toolbarRead, readStoredRow()),
+  )
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
   function updateSlots(newSlots: SlotId[]) {
     setToolbarSlots(newSlots)
-    try { localStorage.setItem(SLOT_KEY, JSON.stringify(newSlots)) } catch {}
+    // TWO writes, two meanings. The document keeps this layout (open the score again, get the
+    // score's tools); the writer's own storage becomes the default their NEXT new document
+    // inherits, so curating once is not a chore they repeat per file.
+    saveStoredRow(newSlots)
+    // ...but NEVER write back over a config we merely failed to parse. That read-failure-causes-
+    // write shape is 15 July in miniature — the day a null-for-broken read minted a blank document
+    // over real thesis annotations. A broken toolbar loses less, but the shape is the bug.
+    if (!mayPersistConfig(toolbarRead)) return
+    const updated = {
+      ...docRef.current,
+      toolbar: { v: 1 as const, row: newSlots },
+      updatedAt: new Date().toISOString(),
+    }
+    docRef.current = updated
+    onDocChange(updated)
+    scheduleSave(updated)
   }
 
   const dragIdRef = useRef<SlotId | null>(null)

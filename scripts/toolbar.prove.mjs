@@ -121,6 +121,40 @@ for (const theme of ['day', 'night']) {
   await ctx.close()
 }
 
+// ── RECONCILIATION WITH feat/prod-ledger, in the real app ────────────────────
+// The ledger lane landed a row of 6-or-SEVEN (7 only with ?prodLedger). Peter has since re-settled
+// the row at SIX — "it fits well on phone. And we want to keep the phone and desktop experience
+// continuous". So the flag must add the clock to the POPULATION without widening the ROW.
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 })
+  await ctx.addInitScript(() => {
+    localStorage.setItem('inkwave:theme', 'day')
+    localStorage.setItem('inkwave:prodLedger', '1')
+    localStorage.removeItem('inkwave-toolbar-slots')   // a first-run writer, with the flag on
+  })
+  const page = await ctx.newPage()
+  await page.goto(`http://localhost:${PORT}/?prodLedger=1`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.ProseMirror[contenteditable="true"]', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  const s = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('.iw-slot')]
+    const inPopup = (e) => !!e.closest('.absolute.bottom-full')
+    return { row: all.filter(e => !inPopup(e)).length, overflow: all.filter(inPopup).length }
+  })
+  if (s.row + s.overflow === 0) check('[ledger] VOID — .iw-slot matched nothing', false)
+  else {
+    // The ledger lane PROBED that 7 + ▲ + ⋮ fit at 390px. They do — but Peter's ruling is that the
+    // row does not widen for a feature, so the clock competes for a slot like everything else.
+    check('[ledger] ?prodLedger does NOT widen the row — still six at 390px',
+      s.row === 6, `row=${s.row} overflow=${s.overflow}`)
+    check('[ledger] the clock joined the ▲ drawer instead of the row',
+      s.overflow === 2, `overflow=${s.overflow} (page + clock)`)
+  }
+  await page.screenshot({ path: `${OUT}/ledger-390.png` })
+  await ctx.close()
+}
+
 await browser.close()
 cleanup()
 
