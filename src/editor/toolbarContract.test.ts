@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   ALL_SLOTS, DEFAULT_SLOTS, ROW_SLOTS, SlotId,
   livePopulation, slotIsLive, migrateSlots, overflowSlots, planBarToggle,
+  slotIndexForDigit, hotkeyHintFor, SLOT_HOTKEY_MAX,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig,
 } from './toolbarContract'
 import { setProdLedgerEnabled, _resetProdLedgerFlag } from '../productivity/ledgerFlag'
@@ -257,5 +258,36 @@ describe('resolveToolbarRow — the chain, and what a received document may do',
 
   it('a stale global order is migrated too — it is never trusted raw', () => {
     expect(resolveToolbarRow({ kind: 'absent' }, ['bib', 'guide'])).toHaveLength(ROW_SLOTS)
+  })
+})
+
+describe('hotkeys — the row IS the speed dial', () => {
+  it('Alt+1…Alt+6 address the row by position', () => {
+    for (let i = 0; i < ROW_SLOTS; i++) {
+      expect(slotIndexForDigit(String(i + 1))).toBe(i)
+      expect(hotkeyHintFor(i)).toBe(String(i + 1))
+    }
+    expect(SLOT_HOTKEY_MAX).toBe(ROW_SLOTS)
+  })
+
+  // The bindings and the row must not be able to disagree: a 7th digit addressing a 6-slot row is
+  // an out-of-bounds index, and "Alt+7 does nothing" must be a RULE, not an accident of length.
+  it('a digit past the row addresses NOTHING — never an out-of-bounds index', () => {
+    expect(slotIndexForDigit(String(ROW_SLOTS + 1))).toBeNull()
+    expect(slotIndexForDigit('9')).toBeNull()
+    expect(hotkeyHintFor(ROW_SLOTS)).toBeNull()
+    expect(hotkeyHintFor(-1)).toBeNull()
+  })
+
+  // '0' is the ▲ drawer, which is NOT a row slot. Folding it in here would make "Alt+0 is index
+  // -1" a number some caller eventually indexes an array with.
+  it('0 addresses no row slot — the drawer is not a slot', () => {
+    expect(slotIndexForDigit('0')).toBeNull()
+  })
+
+  it('ignores anything that is not a bare digit', () => {
+    for (const k of ['a', '', 'Enter', '1a', ' ', 'ArrowLeft', '+']) {
+      expect(slotIndexForDigit(k), `key=${k}`).toBeNull()
+    }
   })
 })

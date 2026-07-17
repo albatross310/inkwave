@@ -2354,6 +2354,21 @@ write shim, so metadata can say a PDF exists with no local bytes).
   write ONE lifted `receiptOpen`), and it is how the clock's slot and the top-right countdown stay
   one implementation. 26 unit tests, all four mutants proved to die; `scripts/toolbar.prove.mjs`
   drives the real app (row/drawer partition, curated order survives, S↔R exclusion, day+night).
+- **Toolbar hotkeys are POSITIONAL (2026-07-17): Alt+1…Alt+6 = the row, Alt+0 = the ▲ drawer,
+  Mod+, = Settings.** Peter's framing is that the binding IS the feature ("apps are like a learning
+  tool for learning how to do things on hotkeys"), so the hint teaches it: hold Alt on desktop and
+  each circle wears its number (`--iw-hotkey-hint-fg`; the badge sits ON `--iw-ink`, which is LIGHT
+  purple in night, so white would be unreadable — it punches out in the night surface instead).
+  Positional because "a toolbar is like your app homepage": Alt+3 means THE THIRD CIRCLE, so the
+  binding MOVING when you reorder is the design — position is identity on a homescreen.
+  **THE HOTKEY IS THE TAP**: it dispatches the slot's own button `.click()` rather than calling an
+  action, because every slot owns its open state privately — an action registry would be a SECOND
+  way to trigger each slot, and the two would drift the first time a slot changed what its tap
+  does. **NOT Alt+<letter>**: Firefox on Windows/Linux (PETER'S OWN BROWSER) binds Alt+F/E/V/S/B/T/H
+  to the menu bar; Alt+digit is unbound in both engines. ⚠ ReviewBar binds Alt+A/Alt+S/Alt+Arrows
+  and Alt+S is Firefox's History menu — an UNRESOLVED possible collision (its `preventDefault` may
+  or may not claim the key first); a Firefox probe of it was inconclusive because the review layer
+  never armed. Phone renders no hints and binds nothing — it has no Alt and loses nothing.
 - **Toolbar slots are ONE population (2026-07-12):** the 6 main-row circles + the ▲ drop-up
   overflow (S style and ⚙ settings are slots too — CONFIRMED still true; only ▲/⋮ fixed).
   Peter 2026-07-17: the row is SIX because "it fits well on phone" and phone/desktop must stay

@@ -1423,6 +1423,10 @@
   --iw-toggle-on: #8b6fc8;                    /* switch track — on / off in night */
   --iw-toggle-off: #5c6672;
   --iw-slot-drag-bg: #454e59;                 /* opaque slot-circle disc during toolbar drags */
+  /* The Alt-held hotkey hint sits ON --iw-ink, which is a LIGHT purple in night — white text on it
+     is unreadable. The badge's ink is the night surface instead, so the pill reads as a punch-out
+     in both themes rather than a smudge in one. */
+  --iw-hotkey-hint-fg: #3d4550;
   --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
   --iw-badge-manual: #a8b0bc;
   --iw-verify-tick: #4a9d6a;                  /* verify ✓ — muted green (darker than a vivid tick) on dark */

@@ -90,6 +90,44 @@ for (const theme of ['day', 'night']) {
   check(`[${theme}] the ▲ drawer holds the live remainder — no dead circles`,
     slots.overflow === 2, `overflow=${slots.overflow} (page + media)`)
 
+  // ── HOTKEYS: Alt+N must BE the tap, not a second road ────────────────────
+  // The row here is the CURATED order (settings, style, review, …), which is what makes this
+  // discriminating: Alt+2 must hit `style` because style is SECOND — not because style is style.
+  // Position is identity on a homescreen; a per-slot binding would pass a fixed-order check and
+  // fail this one.
+  {
+    await page.keyboard.press('Alt+2'); await page.waitForTimeout(400)
+    const s2 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+2 toggled the SECOND circle (style) — position, not identity`,
+      s2 === 'true', `style aria-pressed=${s2}`)
+
+    // ...and the same key closes it: the hotkey dispatches the button's real click, so it inherits
+    // toggle semantics for free rather than reimplementing them.
+    await page.keyboard.press('Alt+2'); await page.waitForTimeout(400)
+    const s3 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+2 again closed it — the hotkey IS the tap`, s3 === 'false', `aria-pressed=${s3}`)
+
+    // Alt+7 is past a 6-slot row. A no-op is the RULE; the void guard is that Alt+2 above proves
+    // the mechanism works at all, so "nothing happened" here cannot be silent breakage.
+    await page.keyboard.press('Alt+7'); await page.waitForTimeout(250)
+    const s4 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+7 addresses nothing on a six-slot row`, s4 === 'false', `aria-pressed=${s4}`)
+
+    // The hints appear only while Alt is HELD — the moment of intent, and nothing on a phone.
+    await page.keyboard.down('Alt'); await page.waitForTimeout(250)
+    const hints = await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.iw-slot')].filter(e => !e.closest('.absolute.bottom-full'))
+      return row.map(e => e.querySelector('span[aria-hidden="true"][class*="absolute"]')?.textContent ?? null)
+    })
+    check(`[${theme}] holding Alt reveals 1…6 on the row, in order`,
+      JSON.stringify(hints) === JSON.stringify(['1','2','3','4','5','6']), JSON.stringify(hints))
+    const shotAlt = await page.$('.iw-touch-guard.iw-nightable')
+    if (shotAlt) await shotAlt.screenshot({ path: `${OUT}/hotkeys-${theme}.png` })
+    await page.keyboard.up('Alt'); await page.waitForTimeout(250)
+    const after = await page.evaluate(() => [...document.querySelectorAll('.iw-slot span[aria-hidden="true"][class*="absolute"]')].length)
+    check(`[${theme}] releasing Alt hides them again — calm, not loud`, after === 0, `badges=${after}`)
+  }
+
   // ── Screenshots, day AND night ───────────────────────────────────────────
   const footer = await page.$('.iw-touch-guard.iw-nightable')
   if (footer) await footer.screenshot({ path: `${OUT}/toolbar-${theme}.png` })

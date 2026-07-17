@@ -186,6 +186,44 @@ export function saveStoredRow(row: readonly SlotId[]): void {
   try { localStorage.setItem(SLOT_KEY, JSON.stringify(row)) } catch {}
 }
 
+// ─── Hotkeys: the row IS the speed dial ──────────────────────────────────────
+// Peter: "apps are like a learning tool for learning how to do things on hotkeys (and doing them
+// on phone where there are no hotkeys)" — so the BINDING is the feature and the tooltip is only
+// how it is taught.
+//
+// POSITIONAL, not per-slot letters, and the metaphor argues it: "a toolbar is like your app
+// homepage. You define what apps sit on your homepage." Alt+3 means THE THIRD CIRCLE — the same
+// thing your eye means. Position is identity on a homescreen, so the binding moving when you
+// reorder is the design, not a defect: the number you press is the number you see.
+//
+// WHY NOT Alt+<letter>, which is the obvious first idea: Firefox on Windows/Linux — PETER'S OWN
+// BROWSER — binds Alt+F/E/V/S/B/T/H to the menu bar. Alt+digit is unbound in both Chrome and
+// Firefox, so the whole population fits with zero collisions and no chord.
+//
+// THE PHONE LOSES NOTHING: it has no Alt, so it renders no hints and keeps the buttons as the
+// entire interface. This is additive on desktop and invisible everywhere else.
+export const HOTKEY_MOD = 'Alt'
+
+/** Alt+1…Alt+6 address the row by POSITION (1-based). Alt+0 opens the ▲ drawer. */
+export const SLOT_HOTKEY_MAX = ROW_SLOTS
+
+/**
+ * Which row index a digit addresses, or null if that digit addresses nothing.
+ *
+ * Returns null for '0' deliberately — the drawer is not a row slot, and folding it in here would
+ * make "Alt+0 is index -1" a number some caller eventually indexes an array with.
+ */
+export function slotIndexForDigit(digit: string): number | null {
+  if (!/^[1-9]$/.test(digit)) return null
+  const idx = Number(digit) - 1
+  return idx < ROW_SLOTS ? idx : null
+}
+
+/** The hint shown on the circle while Alt is held (desktop only). */
+export function hotkeyHintFor(rowIndex: number): string | null {
+  return rowIndex >= 0 && rowIndex < SLOT_HOTKEY_MAX ? String(rowIndex + 1) : null
+}
+
 // ─── Population 2: the bar layers (the second toolbar row) ───────────────────
 // Peter's word is "mutually exclusive": R and music cannot both own the bar.
 //
