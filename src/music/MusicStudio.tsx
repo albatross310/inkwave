@@ -14,6 +14,7 @@ import { HeatmapScreen } from './HeatmapScreen'
 import { ScorePage, SYMBOL_GLYPHS, SYMBOL_ORDER, type Tool } from './ScorePage'
 import { assetUrl, listPieceIds, loadPiece, putAsset, savePiece } from './store'
 import { newPiece, type Annotation, type Piece, type PiecePage } from './types'
+import { TYPE } from './typeScale'
 
 const INK_COLOURS = ['#5c2d8a', '#b4342b', '#1d6b3a', '#1a4f8a', '#8a6a1a']
 const STICKY_COLOURS = ['#fff3b0', '#ffd6d6', '#d6f0ff', '#e2ffd6']
@@ -150,10 +151,10 @@ export function MusicStudio({ demo }: { demo: boolean }) {
           value={piece.title}
           onChange={e => update({ ...piece, title: e.target.value })}
           className="w-full bg-transparent font-serif outline-none"
-          style={{ fontSize: 22, color: 'var(--iw-ink, #5c2d8a)' }}
+          style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #5c2d8a)' }}
           aria-label="Piece title"
         />
-        <p className="font-serif" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
+        <p className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
           {/* THE TRUE SENTENCE. There is no at-rest encryption in this build — see types.ts. What IS
               true is zero-retention: there is no server, so none of this ever leaves the device. */}
           Stored on your device — we never hold it.
@@ -163,7 +164,7 @@ export function MusicStudio({ demo }: { demo: boolean }) {
       {demo && (
         <p
           className="mb-4 rounded-md p-2 font-serif iw-nightable"
-          style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)', border: '1px dashed var(--iw-nightable-border, rgba(0,0,0,0.14))' }}
+          style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)', border: '1px dashed var(--iw-nightable-border, rgba(0,0,0,0.14))' }}
         >
           Demo — these pages are drawn by Inkwave, not photographed. Nothing here is a real score.
         </p>
@@ -179,7 +180,7 @@ export function MusicStudio({ demo }: { demo: boolean }) {
               onClick={() => setScreen(s)}
               className="rounded-full px-3 py-1 font-serif"
               style={{
-                fontSize: 13,
+                fontSize: TYPE.label,
                 background: screen === s ? 'var(--iw-light, #9b5ccc)' : 'transparent',
                 color: screen === s ? '#fff' : 'var(--iw-ink, #5c2d8a)',
                 border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
@@ -201,7 +202,7 @@ export function MusicStudio({ demo }: { demo: boolean }) {
 
       {screen === 'score' && piece.pages.map((pg, i) => (
         <section key={i} className="mb-8">
-          <h2 className="mb-1 font-serif" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
+          <h2 className="mb-1 font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
             Page {i + 1} · {pg.systems.length} system{pg.systems.length === 1 ? '' : 's'}
             {pg.systems.some(s => s.is_grand_stave) ? ' · grand staves kept together' : ''}
           </h2>
@@ -219,7 +220,7 @@ export function MusicStudio({ demo }: { demo: boolean }) {
               update({ ...piece, pages })
             }}
           />
-          <label className="mt-2 flex items-center gap-2 font-serif" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
+          <label className="mt-2 flex items-center gap-2 font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
             <input
               type="checkbox"
               checked={pg.reflow?.enabled ?? false}
@@ -273,7 +274,7 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
             aria-pressed={tool === t}
             className="h-11 w-11 rounded-full font-serif"
             style={{
-              fontSize: 17,
+              fontSize: TYPE.heading,
               background: tool === t ? 'var(--iw-light, #9b5ccc)' : 'transparent',
               color: tool === t ? '#fff' : 'var(--iw-ink, #5c2d8a)',
             }}
@@ -293,7 +294,7 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
         ))}
         <label
           className="ml-1 flex h-11 cursor-pointer items-center rounded-full px-3 font-serif"
-          style={{ fontSize: 14, color: 'var(--iw-ink, #5c2d8a)' }}
+          style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #5c2d8a)' }}
         >
           + page
           {/* NO `accept` LIST ON TOUCH: unregistered UTIs grey out every file in the iOS picker
@@ -312,7 +313,7 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
                 onClick={() => { setSymbol(s); setPalette(false) }}
                 aria-label={s}
                 className="h-10 w-10 rounded font-serif italic"
-                style={{ fontSize: 16, color: 'var(--iw-ink, #5c2d8a)', fontWeight: 700 }}
+                style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)', fontWeight: 700 }}
               >
                 {SYMBOL_GLYPHS[s]}
               </button>
@@ -332,8 +333,8 @@ function ImportPrompt({ onFiles }: { onFiles: (f: FileList | null) => void }) {
       className="iw-nightable flex cursor-pointer flex-col items-center rounded-lg p-10 text-center font-serif"
       style={{ border: '1px dashed var(--iw-nightable-border, rgba(0,0,0,0.2))', color: 'var(--iw-pill-fg, #78716c)' }}
     >
-      <span style={{ fontSize: 15, color: 'var(--iw-ink, #5c2d8a)' }}>Photograph or import your score</span>
-      <span className="mt-1" style={{ fontSize: 13 }}>Images or a PDF. Inkwave finds the systems and makes room to write.</span>
+      <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>Photograph or import your score</span>
+      <span className="mt-1" style={{ fontSize: TYPE.label }}>Images or a PDF. Inkwave finds the systems and makes room to write.</span>
       {/* `capture` asks the phone for the camera directly (§A1's "camera capture"); on a desktop it
           is ignored and this stays an ordinary file picker. */}
       <input type="file" multiple capture="environment" className="hidden" onChange={e => onFiles(e.target.files)} />
@@ -343,7 +344,7 @@ function ImportPrompt({ onFiles }: { onFiles: (f: FileList | null) => void }) {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <p className="py-10 text-center font-serif" style={{ fontSize: 14, color: 'var(--iw-pill-fg, #78716c)' }}>
+    <p className="py-10 text-center font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
       {children}
     </p>
   )

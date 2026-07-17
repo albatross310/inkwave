@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { buildLayout, gapAt, type Layout } from './reflow'
 import { routeLeader, type Obstacle } from './leader'
 import { isoWithOffset, type Annotation, type AnnotationContent, type Piece, type PiecePage } from './types'
+import { TOUCH_MIN, TYPE } from './typeScale'
 
 export type Tool = 'pan' | 'freehand' | 'highlight' | 'text' | 'sticky' | 'symbol' | 'leader' | 'erase'
 
@@ -362,7 +363,7 @@ export function ScorePage({
               style={{
                 left: `${a.content ? p.x * 100 : 0}%`, top: p.y * pageH,
                 transform: 'translate(-50%,-50%)', color: a.content.colour,
-                fontSize: Math.max(14, a.content.size * (width || 600)), fontStyle: 'italic', fontWeight: 700,
+                fontSize: Math.max(TYPE.meta, a.content.size * (width || 600)), fontStyle: 'italic', fontWeight: 700,
               }}
             >
               {SYMBOL_GLYPHS[a.content.symbol] ?? a.content.symbol}
@@ -385,20 +386,38 @@ function GapBand({ top, height, index, confidence, onResize }: {
 
   return (
     <div
-      className="absolute left-0 w-full iw-nightable"
+      className="absolute left-0 w-full"
       style={{
         top, height,
-        // Faint rules — it should read as room to write, not as an empty error.
-        background:
-          'repeating-linear-gradient(to bottom, transparent, transparent 11px, var(--iw-gap-rule, rgba(92,45,138,0.07)) 11px, var(--iw-gap-rule, rgba(92,45,138,0.07)) 12px)',
+        // ⚠️ DELIBERATELY **NOT** `iw-nightable` — and this is the one panel in the module where the
+        // theming rule is wrong. FOUND BY EYEBALLING IT (Peter's night-mode pass): with the class on,
+        // the gap took the dolphin-grey chrome surface and rendered as a DARK BAND slicing through a
+        // white photograph of a page. It looked like a rendering fault.
+        //
+        // The gap is not chrome. It is PAPER — it is the space the student writes on, inserted into
+        // their own photograph, and the photograph does not have a night mode (we cannot invert a
+        // picture of a page and still call it their score). So the gap matches the paper beside it,
+        // in both themes, because that is what it IS. The theme token exists for the day we support
+        // scanned-on-black or inverted scores; until then it resolves to paper in both.
+        background: 'var(--iw-score-gap, #fdfdfb)',
+        boxShadow: 'inset 0 0 0 9999px transparent',
       }}
     >
+      {/* Faint rules — it should read as room to write, not as an empty error. Painted as a child so
+          they sit ON the paper rather than being composited with a themed surface behind them. */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'repeating-linear-gradient(to bottom, transparent, transparent 11px, var(--iw-gap-rule, rgba(92,45,138,0.10)) 11px, var(--iw-gap-rule, rgba(92,45,138,0.10)) 12px)',
+        }}
+      />
       {/* A boundary the detector was unsure about is SHOWN as unsure rather than applied silently —
           §A1's manual handles exist for exactly these, and a quiet wrong cut is worse than a marked one. */}
       {confidence < 0.5 && (
         <span
-          className="absolute left-1 top-0 text-[10px] font-serif"
-          style={{ color: 'var(--iw-pill-fg, #78716c)' }}
+          className="absolute left-1 top-0 font-serif"
+          style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #78716c)' }}
           title="Inkwave wasn’t sure this is a break between systems — drag to adjust."
         >
           ?
@@ -441,7 +460,7 @@ function StickyNote({ x, y, colour, text, author, onText, onDelete }: {
     <div
       className="absolute iw-nightable iw-touch-guard rounded-md p-1 shadow-sm"
       style={{
-        left: `${x * 100}%`, top: y, width: 132, transform: 'translate(-6px,-6px)',
+        left: `${x * 100}%`, top: y, width: 190, transform: 'translate(-6px,-6px)',
         background: colour, border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
       }}
     >
@@ -452,14 +471,14 @@ function StickyNote({ x, y, colour, text, author, onText, onDelete }: {
         className="w-full resize-none bg-transparent font-serif outline-none"
         // 16px FLOOR: iOS auto-zooms (and stays zoomed) on any control under 16px. CLAUDE.md's iOS
         // invariants — this is a real bug, not a preference.
-        style={{ fontSize: 16, minHeight: 42, color: 'var(--iw-ink, #5c2d8a)' }}
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #5c2d8a)' }}
         rows={2}
       />
       <button
         onClick={onDelete}
         aria-label="Delete note"
-        className="absolute -right-2 -top-2 h-5 w-5 rounded-full text-[11px] leading-none"
-        style={{ background: 'var(--iw-paper, #fcfaf6)', color: 'var(--iw-pill-fg, #78716c)', border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
+        className="absolute -right-2 -top-2 h-6 w-6 rounded-full leading-none"
+        style={{ fontSize: TYPE.meta, background: 'var(--iw-paper, #fcfaf6)', color: 'var(--iw-pill-fg, #78716c)', border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
       >
         ×
       </button>

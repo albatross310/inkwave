@@ -18,6 +18,7 @@ import {
 } from './heatmap'
 import { assetUrl } from './store'
 import type { Author, Piece } from './types'
+import { TOUCH_MIN, TYPE } from './typeScale'
 
 export function HeatmapScreen({ piece, onChange }: {
   piece: Piece
@@ -44,10 +45,10 @@ export function HeatmapScreen({ piece, onChange }: {
   return (
     <div className="mx-auto w-full max-w-3xl pb-32">
       <header className="mb-3">
-        <h2 className="font-serif" style={{ fontSize: 20, color: 'var(--iw-ink, #5c2d8a)' }}>
+        <h2 className="font-serif" style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #5c2d8a)' }}>
           What needs work
         </h2>
-        <p className="font-serif" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
+        <p className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
           {/* The copy must not imply Inkwave has an opinion — §A2's "nothing opaque to defend"
               is a PRODUCT promise, so the screen says whose map this is. */}
           Pick a colour, then sweep across the bars. Your map, your call — Inkwave never marks it for you.
@@ -124,12 +125,12 @@ function BarRow({
       <div
         className="iw-nightable flex items-center gap-2 rounded px-2"
         style={{
-          minHeight: 44,                     // Apple's minimum target; a Pencil sweep still needs it
+          minHeight: TOUCH_MIN,              // a Pencil sweep still needs a fingertip-sized row
           background: fill ? `${fill}55` : 'transparent',
           border: `1px solid ${fill ?? 'var(--iw-nightable-border, rgba(0,0,0,0.12))'}`,
         }}
       >
-        <span className="font-serif tabular-nums" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)', minWidth: 34 }}>
+        <span className="font-serif tabular-nums" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)', minWidth: 34 }}>
           {/* The PRINTED label if the student gave one, else the ordinal — and the ordinal is shown
               1-based because a human counts from one, while `bar_index` stays 0-based internally
               (types.ts, BarRef). Never render a stored key as if it were a printed number. */}
@@ -137,13 +138,13 @@ function BarRow({
         </span>
         <BarThumb piece={piece} bar={bar} />
         {entry?.label && (
-          <span className="font-serif" style={{ fontSize: 12, color: 'var(--iw-ink, #5c2d8a)' }}>{entry.label}</span>
+          <span className="font-serif" style={{ fontSize: TYPE.meta, color: 'var(--iw-ink, #5c2d8a)' }}>{entry.label}</span>
         )}
         {entry?.author === 'teacher' && (
           // §A2: the teacher's marks are a shared lesson artifact — attributed, visibly.
           <span
             className="rounded-full px-1.5 font-serif"
-            style={{ fontSize: 10, background: 'var(--iw-light, #9b5ccc)', color: '#fff' }}
+            style={{ fontSize: TYPE.meta, background: 'var(--iw-light, #9b5ccc)', color: '#fff' }}
             title={`Marked by your teacher, ${new Date(entry.ts).toLocaleString()}`}
           >
             teacher
@@ -154,7 +155,7 @@ function BarRow({
           onPointerDown={e => e.stopPropagation()}   // inspecting is not the start of a sweep
           aria-label={`History for bar ${bar.bar_index + 1}`}
           className="ml-auto font-serif"
-          style={{ fontSize: 12, color: 'var(--iw-pill-fg, #78716c)' }}
+          style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #78716c)' }}
         >
           {historyAt(piece.heatmap, bar.bar_index).length || ''} ⌄
         </button>
@@ -165,7 +166,7 @@ function BarRow({
           {/* §A2: "a timestamped record of how the student saw the piece over time" — so the older
               marks a recolour covered are SHOWN, not silently replaced. */}
           {historyAt(piece.heatmap, bar.bar_index).map(e => (
-            <li key={e.id} className="flex items-center gap-2 py-0.5 font-serif" style={{ fontSize: 12 }}>
+            <li key={e.id} className="flex items-center gap-2 py-0.5 font-serif" style={{ fontSize: TYPE.meta }}>
               <span className="h-3 w-3 rounded-full" style={{ background: e.colour }} />
               <span style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
                 {e.author} · {new Date(e.ts).toLocaleDateString()} {e.label ? `· ${e.label}` : ''}
@@ -181,7 +182,7 @@ function BarRow({
             </li>
           ))}
           {!historyAt(piece.heatmap, bar.bar_index).length && (
-            <li className="font-serif" style={{ fontSize: 12, color: 'var(--iw-pill-fg, #78716c)' }}>Not marked yet.</li>
+            <li className="font-serif" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #78716c)' }}>Not marked yet.</li>
           )}
         </ul>
       )}
@@ -207,11 +208,14 @@ function BarThumb({ piece, bar }: { piece: Piece; bar: BarAddress }) {
   }, [piece.id, ref, url])
 
   const aspect = (piece.pages[bar.page]?.source_width ?? 1) / (piece.pages[bar.page]?.source_height ?? 1)
-  const H = 34
+  // The thumbnail scales WITH the type ramp (Peter: "every font proportionally up"). The words
+  // getting bigger while the music stayed at 34px would have inverted the hierarchy of a screen
+  // whose whole subject IS the music — and the reading distance here is a music stand, not a desk.
+  const H = TYPE.title * 2
   const pageW = H / (bar.region.h / aspect)     // page width in px such that the bar's band is H tall
 
   return (
-    <div ref={attach} className="overflow-hidden rounded" style={{ height: H, width: bar.region.w * pageW, maxWidth: 220, flexShrink: 0 }}>
+    <div ref={attach} className="overflow-hidden rounded" style={{ height: H, width: bar.region.w * pageW, maxWidth: 320, flexShrink: 0 }}>
       {url && (
         <img
           src={url}
@@ -262,7 +266,7 @@ function Toolbar({ colour, setColour, label, setLabel, author, setAuthor }: {
           aria-label="Label for this colour"
           className="iw-nightable rounded px-2 font-serif"
           // 16px FLOOR — iOS auto-zooms (and STAYS zoomed) on any control under 16px.
-          style={{ fontSize: 16, height: 36, width: 150, border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
+          style={{ fontSize: TYPE.body, height: 36, width: 150, border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
         />
         {/* §A2: the teacher recolours mid-lesson ON THE STUDENT'S iPAD. This is the hand-over — it
             is a deliberate, visible switch, because every mark it makes is attributed and
@@ -272,7 +276,7 @@ function Toolbar({ colour, setColour, label, setLabel, author, setAuthor }: {
           aria-pressed={author === 'teacher'}
           className="h-9 rounded-full px-3 font-serif"
           style={{
-            fontSize: 13,
+            fontSize: TYPE.label,
             background: author === 'teacher' ? 'var(--iw-light, #9b5ccc)' : 'transparent',
             color: author === 'teacher' ? '#fff' : 'var(--iw-ink, #5c2d8a)',
             border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
@@ -291,11 +295,11 @@ function NoBars({ piece }: { piece: Piece }) {
   const anyGrand = piece.pages.some(p => p.systems.some(s => s.is_grand_stave))
   return (
     <div className="mx-auto max-w-md py-10 text-center font-serif" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-      <p style={{ fontSize: 15, color: 'var(--iw-ink, #5c2d8a)' }}>No bars to colour yet</p>
+      <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>No bars to colour yet</p>
       {/* HONEST, and specific about WHY — "no bars" on a page full of bars would read as a bug.
           Inkwave finds barlines only where it can be certain (a grand stave's barlines cross between
           the staves; on a single stave a note stem looks the same). Tapping is §A4's own MVP. */}
-      <p className="mt-1" style={{ fontSize: 13 }}>
+      <p className="mt-1" style={{ fontSize: TYPE.label }}>
         {piece.pages.length === 0
           ? 'Add a page of your score first.'
           : anyGrand

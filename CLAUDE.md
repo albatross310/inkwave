@@ -1640,6 +1640,28 @@ costs nothing BY CONSTRUCTION — the editor bundle is untouched.
     lifted, racing the async `savePiece`. It passed for a round, then failed when unrelated rendering
     shifted the timing a few ms — i.e. it would have reported "persistence is broken" about a
     persistence layer that works. It waits for the write now.
+- **TYPE SCALE — `music/typeScale.ts`, ONE ramp, five semantic steps** (Peter 2026-07-17: "Music
+  likewise needs all the fonts increased… **Every font proportionally up**. **It's okay if users have
+  to scroll**"). Before it the module had **NINE nearly-identical sizes** (10,12,13,14,15,16,17,20,22)
+  across TWO vocabularies (inline `fontSize` here, Tailwind `text-xs/sm/xl` in `MusicPanel`/
+  `ScoreView`) — nobody chose nine, they accumulated one component at a time. Scaling by hand makes
+  nine new ones; two lanes doing it independently makes fifteen. Steps are SEMANTIC (`TYPE.label`,
+  because the thing IS a label) — "which number is closest" has no answer, "what is this text for"
+  does. **title 30 / heading 24 / body 20 / label 18 / meta 16.** Every step ≥16, so the iOS
+  auto-zoom trap is unreachable BY CONSTRUCTION rather than by remembering a two-tier rule someone
+  forgets the day they add an input. The ramp is FLATTER than the old one (bottom rises 1.6×, top
+  1.36×) — a real consequence of the floor, and right: hierarchy is carried by weight and colour, and
+  a 10px timestamp was illegible at music-stand distance, which is this module's actual reading
+  distance. ⚠️ **OFFERED TO THE MusicXML LANE as the shared ramp** — it has the same instruction.
+- **NIGHT MODE, EYEBALLED (2026-07-17) — and the theming rule was WRONG in one place.** The reflow
+  GAP BAND carried `iw-nightable`, so it took the dolphin-grey chrome surface and rendered as a DARK
+  BAND slicing through a white photograph of a page; it looked like a rendering fault. **The gap is
+  not chrome — it is PAPER**, the space the student writes on, inserted into their own photograph,
+  and a photograph has no night mode (you cannot invert a picture of a page and still call it their
+  score). It now takes `--iw-score-gap` (paper in both themes). Structural assertions could never
+  have caught this: the class was present and the token resolved — it was *correct* and *wrong*.
+  Bar thumbnails scale with the ramp (`TYPE.title * 2`); words growing while the music stayed at 34px
+  would invert the hierarchy of a screen whose whole subject is the music.
 - NOT BUILT: **OMR (never)**; reference tracks/tap-sync §A4 (step 3 — and the barline refusal above
   makes it load-bearing: the tap is what gives a PHOTO Piece its bar model at all); practice tools
   §A5 (step 4 — and §A5 CANNOT SHIP without editing `vercel.json`'s `Permissions-Policy:

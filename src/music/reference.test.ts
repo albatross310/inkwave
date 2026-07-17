@@ -41,7 +41,9 @@ describe('youtubeIdOf', () => {
 
 describe('the loop driver', () => {
   function fakePlayer(over: Partial<ReferencePlayer> = {}): ReferencePlayer & { t: number } {
-    const p = {
+    // Annotated explicitly: `time: () => p.t` references `p` inside its own initializer, so TS
+    // cannot infer the type without one (TS7022).
+    const p: ReferencePlayer & { t: number } = {
       t: 0,
       kind: 'file' as const,
       time: () => p.t,
