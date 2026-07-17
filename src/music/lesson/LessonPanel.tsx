@@ -16,8 +16,30 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { LessonSession, startSession, type TranscriptLine } from './session'
-import type { Assignment, LessonNote, LessonRecord } from './types'
+import type { Assignment, BarAnchor, LessonNote, LessonRecord } from './types'
 import * as copy from './copy'
+
+/**
+ * What the teacher typed → the note's anchor. §A3's "bar 24 — watch the dynamics".
+ *
+ * EXTRACTED FROM THE HANDLER SO THE GATE CAN HOLD IT (`LessonPanel.bar.test.ts`). It was inline,
+ * and inline meant nothing in the suite could feel it — which is how the bug below stayed live.
+ *
+ * THE VALUE IS A LABEL, KEPT VERBATIM — never coerced through `Number()`. What a teacher says in a
+ * lesson IS a printed bar number, and printed bar numbers are STRINGS by MusicXML spec (see
+ * `music/types.ts` BarRef). The old gate — `const n = Number(bar); n > 0 ? {bar: n} : undefined` —
+ * SILENTLY DROPPED the anchor for exactly the ordinary cases: **'8a' (a repeat ending) → NaN → no
+ * anchor; '0' (a pickup) → not > 0 → no anchor**. The note attached to nothing, no error anywhere.
+ * `Number(x)` here is a plausible "tidy-up"; the test is what stops it coming back.
+ *
+ * `bar_index` — the ordinal JOIN KEY — is deliberately ABSENT: a photo Piece mid-lesson has no bar
+ * model to resolve the label against, and BarRef's rule is to carry what you know, resolve later,
+ * and never fabricate the key. It fills in once barlines are tapped (§A4) or pre-detected.
+ */
+export function barAnchorFromInput(input: string): BarAnchor | undefined {
+  const bar_label = input.trim()
+  return bar_label ? { kind: 'bar', bar_label } : undefined
+}
 
 interface Props {
   /** The §1 Piece this lesson belongs to (§A3 organise-by-piece). */
@@ -160,19 +182,8 @@ function NotesScreen({
   const add = () => {
     if (!text.trim()) return
     // §A3's differentiator: "bar 24 — watch the dynamics" → a LessonNote anchored to bar 24.
-    //
-    // THE TYPED VALUE IS A LABEL, STORED VERBATIM — not coerced through Number(). What a teacher
-    // says in a lesson IS a printed bar number, and printed bar numbers are STRINGS by MusicXML
-    // spec ('0' pickup, '8a' repeat ending) — see music/types.ts BarRef. The old
-    // `Number.isFinite(barNum) && barNum > 0` gate SILENTLY DROPPED the anchor for exactly those:
-    // '8a' → NaN → no anchor; '0' → not > 0 → no anchor. The note attached to nothing, with no
-    // error anywhere, on the two bar numbers a real score is most likely to have.
-    //
-    // `bar_index` (the ordinal join key) stays ABSENT: a photo Piece mid-lesson has no bar model to
-    // resolve the label against, and fabricating the key is the one thing BarRef forbids. It fills
-    // in later, when barlines are tapped (§A4) or pre-detected.
-    const label = bar.trim()
-    session.note(text, label ? { kind: 'bar', bar_label: label } : undefined)
+    // The label rule (and the bug it replaced) lives in `barAnchorFromInput`, above.
+    session.note(text, barAnchorFromInput(bar))
     onNotes(session.notes())
     setText('')
   }
