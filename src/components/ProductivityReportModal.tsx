@@ -467,13 +467,12 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
                 {parsed.causalClaims.length > 0 && (
                   <div className="mt-4 rounded p-3 leading-relaxed" style={{ fontSize: FS.meta, border: `1px dashed ${border}` }}>
                     <div className="font-medium mb-1" style={{ color: ink }}>
-                      Flagged: {parsed.causalClaims.length} line{parsed.causalClaims.length === 1 ? '' : 's'} explaining the day rather than describing it
+                      Flagged: {parsed.causalClaims.length} line{parsed.causalClaims.length === 1 ? '' : 's'} stating a cause as fact
                     </div>
                     <p className="m-0 mb-2" style={{ color: muted }}>
-                      Noticing what happened together today is fair — that's what a daily is for.
-                      But one day can't show <em>why</em>, or whether it ever happens again, so
-                      these are guesses rather than findings. The weekly report is where they get
-                      tested.
+                      Hunches are welcome — "the break maybe helped" is worth having. These read as
+                      settled findings instead, and one day can't settle anything. Take them as
+                      guesses; the weekly report is where a guess gets tested.
                     </p>
                     <ul className="list-disc pl-4 m-0 space-y-1">
                       {parsed.causalClaims.map((c, i) => (

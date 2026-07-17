@@ -7,14 +7,33 @@
 //
 // HONEST LIMITS — these are heuristics over prose, and they are stated in the panel too:
 //   • findCausalClaims is a marker-word scan. It cannot catch a causal claim made without any
-//     causal word ("your best writing came after the walk"), and it will flag a hedged sentence
-//     that merely contains a marker. It is a flag for the reader's judgement, not a proof.
+//     causal word ("your best writing came after the walk"). Since 2026-07-17 it also SKIPS any
+//     sentence carrying a hedge, which adds a second blind spot in the other direction: "the
+//     break definitely helped, maybe" reads as hedged and passes. Both are accepted — the scan is
+//     a flag for the reader's judgement, not a proof, and over-flagging the hunches Peter asked
+//     for would be the worse error.
 //   • findUnverifiedNumbers only knows the numerals Inkwave actually sent. It cannot check a
 //     number written as a word ("forty minutes") — which the fixed prompt encourages for exactly
 //     the small counts where a numeral would be noise.
 // Both are one-directional: a clean result means "nothing detected", never "verified honest".
 
-// ─── §A6.2 — daily must not assert cause or pattern ─────────────────────────────────────────
+// ─── §A6.2 — daily must not ASSERT cause or pattern. A hedged guess is not an assertion. ────
+//
+// PETER MOVED THIS LINE ON 2026-07-17: "I sort of want them to hazard guesses at causality too.
+// They don't have to commit, but something like 'the break maybe helped' or 'you could've taken
+// more breaks' I think would be really helpful."
+//
+// He moved it; he did not delete it. The scan used to fire on causal language as such — which
+// would now flag EXACTLY what he asked for. So the rule is re-derived around the hedge:
+//   "the break helped."        → an assertion from one data point.        FLAGGED.
+//   "the break maybe helped."  → a hypothesis, announced as one.          NOT flagged.
+// A guess that announces itself is honest; a guess dressed as a finding is not. That is the whole
+// of it, and it is the same distinction the prompt now draws.
+//
+// THIS SITS INSIDE §A6.2 RATHER THAN AGAINST IT, which is worth noticing before anyone "fixes" it
+// back: the spec's words are "**Confident** pattern claims (breaks help/hurt, best time of day)
+// are permitted only at weekly+". Hedging removes the confidence. The spec drew this line already;
+// we had been reading it as a ban on the subject rather than on the certainty.
 
 export interface CausalClaim {
   /** The sentence, trimmed. */
@@ -50,12 +69,39 @@ function sentences(markdown: string): string[] {
 }
 
 /**
- * Cause/pattern claims in a narrative. Meaningful only on the DAILY window — at weekly+ these
- * claims are legitimate (§A6.2) and the caller must not run this.
+ * Words that mark a claim as a GUESS. Their presence is what separates a hypothesis the writer
+ * can weigh from a finding they are asked to swallow.
+ *
+ * Scoped deliberately: these are only ever consulted for a sentence in which a causal or pattern
+ * marker ALREADY fired, so an ordinary "could not find the thread" is not at risk of being read
+ * as a hedge — nothing is looking at it.
+ */
+const HEDGE_MARKERS: readonly RegExp[] = [
+  /\bmaybe\b/i, /\bperhaps\b/i, /\bpossibly\b/i, /\bpossible\b/i, /\bprobably\b/i,
+  /\bmight\b/i, /\bmay\b/i, /\bcould\b/i, /\bcould'?ve\b/i, /\bseems?\b/i, /\bseemed\b/i,
+  /\bappears?\b/i, /\blooks like\b/i, /\bfeels like\b/i, /\bsuspect\b/i, /\bguess\b/i,
+  /\bhunch\b/i, /\bwonder\b/i, /\bhard to say\b/i, /\bcan'?t tell\b/i, /\bunclear\b/i,
+  /\bnot sure\b/i, /\bworth (?:testing|trying|watching)\b/i, /\bone reading\b/i,
+  /\barguably\b/i, /\bif anything\b/i, /\bmy sense\b/i, /\btempting to think\b/i,
+  /\bwould'?ve\b/i, /\bimagine\b/i, /\bsuggests?\b/i, /\bmaybe not\b/i,
+]
+
+/** Is this sentence marked as a guess rather than offered as a finding? */
+export function isHedged(sentence: string): boolean {
+  return HEDGE_MARKERS.some(re => re.test(sentence))
+}
+
+/**
+ * UNHEDGED cause/pattern claims in a narrative. Meaningful only on the DAILY window — at weekly+
+ * these claims are legitimate (§A6.2) and the caller must not run this.
+ *
+ * A sentence that carries a causal/pattern marker AND a hedge is a hypothesis: Peter asked for
+ * those explicitly, and flagging them would be flagging the feature.
  */
 export function findCausalClaims(markdown: string): CausalClaim[] {
   const out: CausalClaim[] = []
   for (const s of sentences(markdown)) {
+    if (isHedged(s)) continue
     for (const re of [...CAUSAL_MARKERS, ...PATTERN_MARKERS]) {
       const m = re.exec(s)
       if (m) { out.push({ sentence: s, marker: m[0] }); break }

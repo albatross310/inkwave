@@ -19,12 +19,16 @@ export interface ParsedReply {
   /** Non-null only when a valid judged table was found. */
   merged: MergedReport | null
   /**
-   * §A6.2 — daily only. Empty at weekly+, where pattern claims are legitimate.
+   * §A6.2 — UNHEDGED cause/pattern claims. Daily only; empty at weekly+, where such claims are
+   * legitimate.
    *
-   * NB daily now DESCRIBES co-occurrence deliberately (Peter, 2026-07-17: "I want correlations on
-   * daily too. Just more brief") — the markers still fire only on CAUSE and GENERALISATION, which
-   * one day still cannot support. "After your 3pm break you wrote for forty minutes" trips
-   * nothing; "the break helped" does.
+   * TWO RELAXATIONS, both Peter's, both 2026-07-17 — read them together or this reads as toothless:
+   *   1. daily DESCRIBES co-occurrence ("I want correlations on daily too. Just more brief"), so
+   *      "after your 3pm break you wrote for forty minutes" trips nothing;
+   *   2. daily may HAZARD A GUESS ("they don't have to commit… 'the break maybe helped'"), so a
+   *      hedged sentence trips nothing either.
+   * What still fires is the unhedged assertion — "the break helped" — because that is a finding
+   * one day cannot support. The hedge is the line, not the subject.
    */
   causalClaims: CausalClaim[]
   /** §A5 — sentences that judge the WRITER rather than the week. Every window. */

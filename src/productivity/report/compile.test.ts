@@ -287,22 +287,52 @@ describe('§A6.2 / §A5 — what the fixed prompt commits to', () => {
   const flat = (w: 'daily' | 'weekly' | 'monthly', extra: Partial<Parameters<typeof fixedPrompt>[0]> = {}) =>
     fixedPrompt({ window: w, contentIncluded: false, ...extra }).replace(/\s+/g, ' ')
 
-  it('permits BRIEF within-day pairings on daily, and forbids explaining them', () => {
-    // Peter, 2026-07-17: "No I want correlations on daily too. Just more brief." The honest form:
-    // what co-occurred TODAY is a true statement about today; why it happened is not knowable
-    // from one day. So the prompt must ASK for the pairing and REFUSE the explanation.
+  it('permits within-day pairings on daily', () => {
+    // Peter, 2026-07-17: "No I want correlations on daily too. Just more brief." What co-occurred
+    // TODAY is a true statement about today.
     const p = flat('daily')
     expect(p).toContain('SINGLE DAY')
-    expect(p).toMatch(/Say what happened together today, and say it briefly/i)
+    expect(p).toMatch(/Say what happened together today/i)
     expect(p).toMatch(/Pair things up/i)
-    expect(p).toMatch(/Keep it short — a line or two, not a section/i)
-    // ...and the refusal, unchanged in force:
-    expect(p).toMatch(/What you may NOT do is EXPLAIN it or GENERALISE it/i)
-    expect(p).toMatch(/no causes/i)
-    expect(p).toMatch(/write what happened and leave the cause alone/i)
-    // The old prompt WITHHELD the pairings entirely. That line must be gone, or daily is still
-    // refusing what he asked for while claiming to allow it.
-    expect(p).not.toMatch(/do not name a best or worst time of day\. Do not assert habits/i)
+  })
+
+  it('§A6.2 RELAXED — daily may HAZARD A GUESS, and the hedge is the line', () => {
+    // Peter, 2026-07-17: "I sort of want them to hazard guesses at causality too. They don't have
+    // to commit, but something like 'the break maybe helped' or 'you could've taken more breaks'
+    // I think would be really helpful." He MOVED the line; he did not delete it. This test
+    // replaces one that asserted the OPPOSITE ("no causes"), so passing the old one would now
+    // mean the prompt is refusing the feature.
+    const p = flat('daily')
+    expect(p).toMatch(/Then GUESS AT WHY — and say that you are guessing/i)
+    expect(p).toMatch(/Hazard it\. You do not have to commit/i)
+    expect(p).toContain('THE LINE IS THE HEDGE')
+    // The two forms of his own example, spelled out so the model cannot miss the distinction.
+    expect(p).toMatch(/"The break helped\." — an assertion/i)
+    expect(p).toMatch(/"The break maybe helped\." — a hypothesis, announced as one\. IN, and wanted/i)
+    expect(p).toMatch(/A guess that announces itself is honest\. A guess dressed as a finding is not/i)
+    // The blanket ban must be GONE, or daily still refuses what he asked for.
+    expect(p).not.toMatch(/So no causes \("the break helped"/i)
+  })
+
+  it('§A6.2 — a suggestion must be TETHERED, because a hedge does not launder an invented standard', () => {
+    const p = flat('daily')
+    expect(p).toMatch(/TETHER EVERY SUGGESTION TO WHAT IS IN FRONT OF YOU/i)
+    expect(p).toMatch(/"you should be taking a break every 25 minutes" is a standard the writer never set/i)
+    expect(p).toMatch(/productivity guilt with a hedge in front of it, and hedging does not launder it/i)
+    expect(p).toMatch(/if you cannot point at the evidence in the same sentence, do not say it/i)
+  })
+
+  it('§A6.2 — the daily flag now describes what it actually catches: the UNHEDGED claim', () => {
+    const p = flat('daily')
+    expect(p).toMatch(/scans daily replies for UNHEDGED causal and pattern language/i)
+    expect(p).toMatch(/does not flag a guess you have marked as a guess/i)
+  })
+
+  it('weekly invites hunches too, tethered the same way', () => {
+    const p = flat('weekly')
+    expect(p).toMatch(/Guess out loud here too, and suggest things/i)
+    expect(p).toMatch(/A hunch you have labelled a hunch is welcome at any window/i)
+    expect(p).toMatch(/A suggestion you cannot ground is a standard the writer never set/i)
   })
 
   it('§A5 IS REVERSED — honest first, and the kind/non-shaming rule is GONE', () => {
