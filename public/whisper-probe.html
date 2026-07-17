@@ -93,10 +93,10 @@
 <script type="module">
 // ─── The configs. Each runs in its OWN document (see the header). ────────────
 const CONFIGS = [
-  { id: 'tiny-1',  model: 'Xenova/whisper-tiny.en', threads: 1, label: 'tiny · 1 thread' },
-  { id: 'tiny-n',  model: 'Xenova/whisper-tiny.en', threads: 0, label: 'tiny · threaded' },
-  { id: 'base-1',  model: 'Xenova/whisper-base.en', threads: 1, label: 'base · 1 thread' },
-  { id: 'base-n',  model: 'Xenova/whisper-base.en', threads: 0, label: 'base · threaded' },
+  { id: 'tiny-1',  model: 'onnx-community/whisper-tiny.en', threads: 1, label: 'tiny · 1 thread' },
+  { id: 'tiny-n',  model: 'onnx-community/whisper-tiny.en', threads: 0, label: 'tiny · threaded' },
+  { id: 'base-1',  model: 'onnx-community/whisper-base.en', threads: 1, label: 'base · 1 thread' },
+  { id: 'base-n',  model: 'onnx-community/whisper-base.en', threads: 0, label: 'base · threaded' },
 ]
 const STORE = 'iw:whisperProbe:results'
 const CRUMB = 'iw:whisperProbe:running'
@@ -167,7 +167,11 @@ async function loadSample(seconds) {
 // ─── One config, in this document ────────────────────────────────────────────
 async function runConfig(cfg) {
   const t = (m) => log(`   ${m}`)
-  const { env, pipeline } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0')
+  // PINNED to the v3 line, and NOT a lazy default: 4.2.0's bundled onnxruntime-web cannot create a
+  // session for these models at all — "TransposeDQWeightsForMatMulNBits Missing required scale",
+  // IDENTICALLY across tiny/base and every dtype, which is what ruled out the model and the dtype
+  // and left the runtime. Probed headless before this page was trusted. Re-test on any bump.
+  const { env, pipeline } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.5')
 
   env.allowLocalModels = false
   env.backends.onnx.wasm.proxy = false
