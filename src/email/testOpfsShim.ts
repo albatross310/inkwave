@@ -13,6 +13,20 @@ interface Node { files: Map<string, Uint8Array>; dirs: Map<string, Node> }
 
 let root: Node = { files: new Map(), dirs: new Map() }
 
+// REAL OPFS THROWS A DOMException WHOSE **NAME** IS NotFoundError — `new Error('NotFoundError')`
+// sets the MESSAGE, which is a different thing entirely, and this shim used to do exactly that.
+// It matters far beyond this file: `storage/opfs.ts`'s `isNotFound` (see storage/notFound.ts) is the
+// one line separating "there is no document" from "I could not find out", and 'absent' is the arm
+// that says *safe to write here*. A shim that reports failures in the wrong shape invites someone to
+// loosen that predicate to match — the test auditor demonstrated that exact mutation passing
+// typecheck AND all 1705 tests, at which point every genuine read failure reads as absence and
+// `newDocument()` mints a blank over a thesis again (the 2026-07-15 loss).
+// Fix the shim, never the predicate. A fake that lies in a different shape than the real thing is
+// not a fake; it is a second implementation with its own bugs.
+function notFound(): DOMException {
+  return new DOMException('The requested entry could not be found.', 'NotFoundError')
+}
+
 export function resetOpfsShim(): void {
   root = { files: new Map(), dirs: new Map() }
 }
@@ -36,7 +50,7 @@ function makeFileHandle(dir: Node, name: string) {
     },
     async getFile() {
       const bytes = dir.files.get(name)
-      if (!bytes) throw new Error('NotFoundError')
+      if (!bytes) throw notFound()
       return {
         async arrayBuffer() {
           // A fresh copy with its OWN buffer — a Uint8Array view's .buffer can be larger than the
@@ -63,7 +77,7 @@ function makeDirHandle(node: Node) {
     async getDirectoryHandle(name: string, opts?: { create?: boolean }) {
       let child = node.dirs.get(name)
       if (!child) {
-        if (!opts?.create) throw new Error('NotFoundError')
+        if (!opts?.create) throw notFound()
         child = { files: new Map(), dirs: new Map() }
         node.dirs.set(name, child)
       }
@@ -71,7 +85,7 @@ function makeDirHandle(node: Node) {
     },
     async getFileHandle(name: string, opts?: { create?: boolean }) {
       if (!node.files.has(name)) {
-        if (!opts?.create) throw new Error('NotFoundError')
+        if (!opts?.create) throw notFound()
         node.files.set(name, new Uint8Array(0))
       }
       return makeFileHandle(node, name)

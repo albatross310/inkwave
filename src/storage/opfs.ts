@@ -1,5 +1,9 @@
 import type { InkwaveDocument, TiptapJSON } from '../types/document'
 import { writeOpfsFile } from './opfsWrite'
+// The boundary predicate lives alone and TESTED (notFound.test.ts): it is the single line
+// that separates 'absent' from 'could not find out', and a lenient edit to it makes the whole
+// DocRead union perfectly typed and perfectly wrong. See notFound.ts.
+import { isNotFound } from './notFound'
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
@@ -67,10 +71,6 @@ export class StorageReadError extends Error {
   }
 }
 
-/** Genuinely absent — the only failure that legitimately means "there is no such file". */
-function isNotFound(err: unknown): boolean {
-  return (err as DOMException)?.name === 'NotFoundError'
-}
 
 /**
  * Read a JSON file. Returns null ONLY when the file genuinely does not exist; THROWS
