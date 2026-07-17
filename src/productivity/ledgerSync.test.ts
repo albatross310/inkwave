@@ -28,6 +28,7 @@ function row(id: string, start: string, over: Partial<SessionRow> = {}): Session
     break_before_min: 0,
     pomodoro: false,
     doc_type: 'essay',
+    entered: 'timer',
     ...over,
   }
 }

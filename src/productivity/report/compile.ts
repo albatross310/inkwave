@@ -108,7 +108,7 @@ function dayRows(days: DayAggregate[]): (string | number)[][] {
   return days.map(d => [
     d.day, d.active_minutes, d.session_count, d.words_added, d.words_deleted,
     d.net_words, d.edit_events, d.break_count, d.break_total_min,
-    d.deep_shallow_ratio.toFixed(2),
+    d.deep_shallow_ratio.toFixed(2), d.posthoc_minutes,
   ])
 }
 
@@ -352,11 +352,24 @@ export function compileData(
     '',
     'DAYS',
     '',
+    // `posthoc_minutes` is a SEPARATE COLUMN and the prose below says what it is. The report has to
+    // be able to say "3h40m measured, plus 45m you added from memory"; totalling them silently is
+    // the lie (§A6.1). Naming it here is also what stops the model doing the addition for us — it is
+    // told the two are different KINDS of number, not two parts of one.
     table(
       ['day', 'active_minutes', 'sessions', 'words_added', 'words_deleted', 'net_words',
-        'edit_events', 'breaks', 'break_total_min', 'deep_shallow_ratio'],
+        'edit_events', 'breaks', 'break_total_min', 'deep_shallow_ratio', 'posthoc_minutes'],
       dayRows(agg.days),
     ),
+    '',
+    'ABOUT posthoc_minutes',
+    '',
+    'active_minutes is time Inkwave TIMED. posthoc_minutes is time the writer added afterwards from',
+    'memory, because they forgot to start the timer — their recollection, which nothing can check.',
+    'Never add the two into one total, and never describe posthoc_minutes as measured or tracked. You',
+    'may mention it alongside ("3h40m tracked, plus 45m they added from memory"). Adding time from',
+    'memory is ordinary record-keeping: do not treat it as a lapse, and do not comment on how often',
+    'they use it.',
     '',
     'ACTIVE MINUTES BY LOCAL HOUR',
     '',

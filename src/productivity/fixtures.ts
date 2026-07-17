@@ -201,6 +201,7 @@ export function makeLedger(opts: FixtureOptions = {}): LabelledSession[] {
           break_before_min: round1(breakBefore),
           pomodoro: r() < 0.35,
           doc_type: docType,
+          entered: 'timer',
         },
       })
 
@@ -234,6 +235,7 @@ export function makeLightDay(offset = '+10:00'): SessionRow[] {
     break_before_min: 640,
     pomodoro: false,
     doc_type: 'essay',
+    entered: 'timer',
   }]
 }
 
@@ -318,23 +320,23 @@ function hours(spec: Record<number, number>): number[] {
 }
 
 const DAYS: DayAggregate[] = [
-  { day: '2026-07-06', active_minutes: 92, session_count: 3, words_added: 640, words_deleted: 120, net_words: 520, edit_events: 412, break_count: 2, break_total_min: 25, deep_shallow_ratio: 1.8, busiest_hours: hours({ 9: 45, 10: 30, 16: 17 }) },
-  { day: '2026-07-07', active_minutes: 24, session_count: 1, words_added: 90, words_deleted: 210, net_words: -120, edit_events: 180, break_count: 0, break_total_min: 0, deep_shallow_ratio: 0.4, busiest_hours: hours({ 21: 24 }) },
-  { day: '2026-07-08', active_minutes: 118, session_count: 4, words_added: 810, words_deleted: 95, net_words: 715, edit_events: 530, break_count: 3, break_total_min: 40, deep_shallow_ratio: 2.1, busiest_hours: hours({ 8: 50, 9: 40, 14: 28 }) },
-  { day: '2026-07-09', active_minutes: 0, session_count: 0, words_added: 0, words_deleted: 0, net_words: 0, edit_events: 0, break_count: 0, break_total_min: 0, deep_shallow_ratio: 0, busiest_hours: hours({}) },
-  { day: '2026-07-10', active_minutes: 39, session_count: 2, words_added: 150, words_deleted: 300, net_words: -150, edit_events: 260, break_count: 1, break_total_min: 12, deep_shallow_ratio: 0.5, busiest_hours: hours({ 11: 22, 15: 17 }) },
+  { day: '2026-07-06', active_minutes: 92, session_count: 3, words_added: 640, words_deleted: 120, net_words: 520, edit_events: 412, break_count: 2, break_total_min: 25, deep_shallow_ratio: 1.8, busiest_hours: hours({ 9: 45, 10: 30, 16: 17 }), posthoc_minutes: 0, posthoc_session_count: 0 },
+  { day: '2026-07-07', active_minutes: 24, session_count: 1, words_added: 90, words_deleted: 210, net_words: -120, edit_events: 180, break_count: 0, break_total_min: 0, deep_shallow_ratio: 0.4, busiest_hours: hours({ 21: 24 }), posthoc_minutes: 0, posthoc_session_count: 0 },
+  { day: '2026-07-08', active_minutes: 118, session_count: 4, words_added: 810, words_deleted: 95, net_words: 715, edit_events: 530, break_count: 3, break_total_min: 40, deep_shallow_ratio: 2.1, busiest_hours: hours({ 8: 50, 9: 40, 14: 28 }), posthoc_minutes: 0, posthoc_session_count: 0 },
+  { day: '2026-07-09', active_minutes: 0, session_count: 0, words_added: 0, words_deleted: 0, net_words: 0, edit_events: 0, break_count: 0, break_total_min: 0, deep_shallow_ratio: 0, busiest_hours: hours({}), posthoc_minutes: 0, posthoc_session_count: 0 },
+  { day: '2026-07-10', active_minutes: 39, session_count: 2, words_added: 150, words_deleted: 300, net_words: -150, edit_events: 260, break_count: 1, break_total_min: 12, deep_shallow_ratio: 0.5, busiest_hours: hours({ 11: 22, 15: 17 }), posthoc_minutes: 45, posthoc_session_count: 1 },
 ]
 
 // `note` and `place` are the writer's own words (tier 2) — invented here, and deliberately the
 // kind of thing that must NOT travel without an explicit tick.
 const SESSIONS: SessionRow[] = [
-  { session_id: 's-1', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T09:05:00+10:00', end: '2026-07-06T09:50:00+10:00', active_minutes: 45, words_start: 1200, words_end: 1560, words_added: 400, words_deleted: 40, net_words: 360, edit_events: 210, break_before_min: 0, pomodoro: true, doc_type: 'essay', place: 'library', note: 'Finally got the third step of the argument down.' },
-  { session_id: 's-2', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T10:10:00+10:00', end: '2026-07-06T10:40:00+10:00', active_minutes: 30, words_start: 1560, words_end: 1700, words_added: 190, words_deleted: 50, net_words: 140, edit_events: 150, break_before_min: 20, pomodoro: true, doc_type: 'essay', place: 'library', note: 'Tired by the end of this one.' },
+  { session_id: 's-1', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T09:05:00+10:00', end: '2026-07-06T09:50:00+10:00', active_minutes: 45, words_start: 1200, words_end: 1560, words_added: 400, words_deleted: 40, net_words: 360, edit_events: 210, break_before_min: 0, pomodoro: true, doc_type: 'essay', entered: 'timer', place: 'library', note: 'Finally got the third step of the argument down.' },
+  { session_id: 's-2', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T10:10:00+10:00', end: '2026-07-06T10:40:00+10:00', active_minutes: 30, words_start: 1560, words_end: 1700, words_added: 190, words_deleted: 50, net_words: 140, edit_events: 150, break_before_min: 20, pomodoro: true, doc_type: 'essay', entered: 'timer', place: 'library', note: 'Tired by the end of this one.' },
   // s-4 deliberately falls AFTER the last snapshot, so the record has no boundary for it: the
   // demo must show the honest "the record cannot say what this produced" gap, not only the happy
   // path. words_added is non-zero on purpose — the gap is in the RECORD, not in the work.
-  { session_id: 's-4', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T16:00:00+10:00', end: '2026-07-06T16:30:00+10:00', active_minutes: 25, words_start: 1700, words_end: 1810, words_added: 130, words_deleted: 20, net_words: 110, edit_events: 88, break_before_min: 320, pomodoro: false, doc_type: 'essay' },
-  { session_id: 's-3', doc_id: 'doc-journal', doc_label: 'Journal', start: '2026-07-06T16:30:00+10:00', end: '2026-07-06T16:47:00+10:00', active_minutes: 17, words_start: 0, words_end: 20, words_added: 50, words_deleted: 30, net_words: 20, edit_events: 52, break_before_min: 350, pomodoro: false, doc_type: 'note' },
+  { session_id: 's-4', doc_id: 'doc-essay', doc_label: 'Seminar paper draft', start: '2026-07-06T16:00:00+10:00', end: '2026-07-06T16:30:00+10:00', active_minutes: 25, words_start: 1700, words_end: 1810, words_added: 130, words_deleted: 20, net_words: 110, edit_events: 88, break_before_min: 320, pomodoro: false, doc_type: 'essay', entered: 'timer' },
+  { session_id: 's-3', doc_id: 'doc-journal', doc_label: 'Journal', start: '2026-07-06T16:30:00+10:00', end: '2026-07-06T16:47:00+10:00', active_minutes: 17, words_start: 0, words_end: 20, words_added: 50, words_deleted: 30, net_words: 20, edit_events: 52, break_before_min: 350, pomodoro: false, doc_type: 'note', entered: 'timer' },
 ]
 
 /**

@@ -1398,6 +1398,84 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
 - NOT wired: at-rest ENCRYPTION — the repo has no encryption layer for ANY document (spec §C2 assumes one),
   so the ledger inherits the same posture. Google Drive / local-folder ledger adapters.
 
+### PDF reading/annotating + the post-hoc manual add (2026-07-17, `feat/prod-pdf-posthoc`, `?prodLedger`)
+
+Two things Peter asked for, both DARK behind the ledger flag. **`reading`/`annotating` existed in the
+`DocType` union and NOTHING SET THEM** — declared-but-inert, which was honest (`misc` is the truthful
+answer until something observes otherwise). Now something does.
+
+- **SCROLLING IS THE EVIDENCE, and the third state is the product.** Peter: *"Pdf pure reading time
+  and annotating time can be 2 separate things… track when people have done an annotation in the last
+  5 minutes"* / *"track whether they are scrolling in the pdf… stored client side… a reading indicator
+  on the ledger, next to a pdf name."* `productivity/pdfActivity.ts`: scrolling ⇒ `reading`;
+  annotation within 5 min ⇒ `annotating` (annotation WINS — you scroll while you annotate, and
+  counting both double-counts); **open + no scroll + no annotation ⇒ NOT WORK, never counted.**
+  Without the scroll signal "reading time" means only *a PDF was open*, which counts a tab you forgot
+  about.
+- **IT MAY ONLY EVER REPLACE AN ADMITTED UNKNOWN.** `observedDocType` fires ONLY where `doc_type`
+  would have been `misc` AND `edit_events === 0`. So it cannot make any row less true, a DECLARED
+  type (the email layer's) is never overridden, and **a session with typing is never filed as
+  reading** — which is what makes "reading time is never summed into words written" structural rather
+  than a promise: they are different rows in a different column. No activity ⇒ `misc` STANDS (the
+  block is still measured — starting the timer IS the claim of work; "not reading" and "not a
+  session" are different things, and the four stacked faults the ledger lane fixed stay fixed).
+- **A BOOLEAN, NOT A TRACE (§A3.2).** Exactly TWO NUMBERS per citekey — last scroll, last annotation.
+  No page, no offset, no count, no history. **NO PROGRESS BAR** — considered and REJECTED: a
+  page-by-page reading trace of Peter's private PDFs is a far more sensitive object for no feature
+  gain. If the indicator ever seems to need progress, ask him; don't add the field. Persistence
+  PRUNES on every write, so the store is structurally incapable of becoming a record of which PDFs
+  were opened.
+- **IT RIDES THE EXISTING STREAMS** — `PdfViewer`'s already-rAF-coalesced scroll reporter (which
+  already computes `scrollTop`) and the two annotation-creation sites. No new listener on a surface
+  CLAUDE.md documents as supersampled + lazily rendered. **THE PERF GUARD IS STRUCTURAL, NOT TIMED**,
+  copying the ledger's own rule (*"a measurement whose verdict depends on who else is running is not a
+  guard"*): `localStorage` is the ONLY route from a scroll frame to the disk, so the test COUNTS
+  STORAGE WRITES across a 600-frame burst (expects 0; the debounce timer writes exactly 1). Its
+  known-negative proves the spy can see a write, so `not.toHaveBeenCalled()` is a real observation.
+- **`entered: 'timer' | 'post-hoc'` — an EXPLICIT union on every row, never absence-means-timer**
+  (*"absence-as-classification is the exact trap `misc` just fixed"*). **It is NOT a fourth
+  provenance, and the reasoning is load-bearing: `estimated` means a deterministic rule we ran that
+  anyone can recompute; a post-hoc block is TESTIMONY — uncheckable, not recomputable.** Different
+  epistemics, so it must not borrow that tag. It is a FLAG ON THE ROW; the row is still
+  measured-SHAPED, the SOURCE OF THE TIME differs. Legacy rows carry no `entered` and are timer rows
+  as a matter of HISTORY (they predate the field) — read only through `isPostHoc()`, which asks the
+  POSITIVE question so the reasoning can't be re-derived as `!row.entered` elsewhere.
+- **IT NEVER MERGES INTO THE MEASURED BARS (§A6.1)** — and that is enforced by SEPARATE COLUMNS
+  (`posthoc_minutes`/`posthoc_session_count`), so conflation is unrepresentable rather than merely
+  discouraged. The report must be able to say *"3h40m measured, plus 45m you added from memory"*.
+  Three split sites, each independently mutation-proved (5/2/1 deaths): `dayAggregate`, `aggregateDays`
+  (the charts — no bar may be part-remembered), `windowDocs`.
+- **DO NOT MAKE HIM PRECISE.** Rough duration + rough category, as PILLS — one tap each. A form
+  demanding start/end times won't get used on a Tuesday and the feature dies if the ritual becomes
+  data entry. The span is DERIVED (ends when he told us, reaches back by the duration); `entered`
+  flags the whole row as testimony so the span inherits it, and the card shows **"about 45m"** with NO
+  start–end times — printing "13:15–14:00" would dress testimony up as a measurement. Every measured
+  field is 0, which is the TRUE value, not missing data. **A repair tool, not an audit** (§A5: *"a
+  friend letting you correct the record, not a supervisor auditing your timesheet"*) — collapsed by
+  default, never nags, never scolds; a test sweeps the copy for it.
+- **⚠️ THE BUG THE UNIT TESTS COULD NOT SEE — `daySummary` IS A SECOND IMPLEMENTATION OF "sum the
+  day's minutes".** The drop-up reduced over ALL rows, so the moment a post-hoc block landed it
+  reported 45 REMEMBERED minutes back to Peter as **"focused minutes"** — §A6.1's merge, live on his
+  screen — while `pnpm test` sat at **1762 passed**. Every guard was on `aggregate.ts`, and the panel
+  never calls it. **A guard on one implementation of a rule says nothing about the other.** Found only
+  by `pdfposthoc.prove.mjs` driving the real panel and reading the real screen. FIXED, and KEPT by
+  `components/ClockMenu.test.tsx` (~40ms, no browser, 5 mutants die) — because a browser probe that
+  ran once is not a guard.
+- **`scripts/pdfposthoc.prove.mjs`** (`pnpm prove:pdfposthoc`, own port, headless): 18/18 — the
+  indicator day+night × desktop+phone (incl. **the stale PDF must NOT appear**, the honest third
+  state), and the post-hoc add driven through the real pills. It reads the Add button's **COMPUTED**
+  colours rather than asserting a class, because the night bug CLAUDE.md records in this very panel
+  was structurally perfect and visually invisible: day `#fff` on `#5c2d8a` (Δlum 0.76), night
+  `#2c2e35` on `#cbb8f2` (Δlum 0.57) — `--iw-on-ink` working in both. **A PROBE THAT FAILS BY LUCK is
+  as useless as one that passes by luck:** the first cut slept 700ms and reported "the indicator did
+  not render" about a panel that renders it, sending me hunting a feature bug that did not exist. Wait
+  for the CONTENT, not the clock.
+- STATED, NOT PROBED: the `reading` row has not been driven end-to-end in a REAL browser with a REAL
+  PDF open (the unit-level joint probe `pdfCapture.test.ts` drives the real `SessionCapture` and is
+  mutation-proved both ways — ignore-activity kills 3, hard-wire-`reading` kills 6 — but the
+  `PdfViewer` scroll hook itself is wired-and-typechecked, not browser-exercised). The reading
+  INDICATOR is browser-proved from seeded state.
+
 ## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
 
 Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (Peter's private doc — read it, never copy it
@@ -2442,7 +2520,9 @@ Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, f
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the ledger CLOCK DROP-UP
-(`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is gone), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
+(`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is gone; its READING
+indicator + POST-HOC ADD sections are inside it, screenshotted day+night by
+`scripts/pdfposthoc.prove.mjs`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
 document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
 EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),

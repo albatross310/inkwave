@@ -9,7 +9,7 @@
 // `feat/prod-graphs` owns the CHARTS; this is the data they read.
 
 import { loadLedger } from './ledgerStore'
-import { localDayOf, localHourOf, localMonthOf, monthOf, weekStartOf, weekdayOf } from './sessionLogic'
+import { localDayOf, localHourOf, localMonthOf, monthOf, splitByEntry, weekStartOf, weekdayOf } from './sessionLogic'
 import { phaseMix, type PhaseMix } from './phase'
 import type { DayAggregate, DayNoteDigest, ReportWindow, SessionRow, WindowAggregate, WindowDoc } from './types'
 
@@ -33,8 +33,21 @@ export function deepShallowRatio(rows: readonly SessionRow[]): number {
   return churn === 0 ? 0 : round1(added / churn * 100) / 100
 }
 
-/** Roll one local day's rows up (§A3.3). */
-export function dayAggregate(day: string, rows: readonly SessionRow[]): DayAggregate {
+// The entry-provenance rules live in `sessionLogic.ts` (beside the row builders, so the drop-up can
+// ask a one-field question without importing the whole rollup layer). RE-EXPORTED, never re-declared:
+// two copies of "what counts as measured" is precisely how the two would drift apart.
+export { isPostHoc, splitByEntry } from './sessionLogic'
+
+/**
+ * Roll one local day's rows up (§A3.3).
+ *
+ * EVERY MEASURED FIELD READS `measured` ONLY. Post-hoc rows contribute to `posthoc_minutes` and
+ * `posthoc_session_count` and to nothing else — see DayAggregate's note. This is why the split
+ * happens at the TOP of the function rather than at each `reduce`: a field added later reads
+ * `measured` because that is the variable in scope, so the safe thing is also the easy thing.
+ */
+export function dayAggregate(day: string, allRows: readonly SessionRow[]): DayAggregate {
+  const { measured: rows, postHoc } = splitByEntry(allRows)
   const busiest = new Array<number>(24).fill(0)
   // A session's active minutes are attributed to the hour it STARTED in. That is a convention, and
   // the honest one available: the ledger records when a session ran, not minute-by-minute where the
@@ -57,6 +70,8 @@ export function dayAggregate(day: string, rows: readonly SessionRow[]): DayAggre
     break_total_min: round1(breaks.reduce((a, r) => a + r.break_before_min, 0)),
     deep_shallow_ratio: deepShallowRatio(rows),
     busiest_hours: busiest.map(round1),
+    posthoc_minutes: round1(postHoc.reduce((a, r) => a + r.active_minutes, 0)),
+    posthoc_session_count: postHoc.length,
   }
 }
 
@@ -73,8 +88,16 @@ export function groupByDay(rows: readonly SessionRow[]): Map<string, SessionRow[
   return byDay
 }
 
-/** Per-document totals for the content tick-box screen (§A7.3). Carries no prose. */
-export function windowDocs(rows: readonly SessionRow[]): WindowDoc[] {
+/**
+ * Per-document totals for the content tick-box screen (§A7.3). Carries no prose.
+ *
+ * POST-HOC ROWS ARE EXCLUDED, for two independent reasons and either would do: this screen offers the
+ * writer a choice of DOCUMENTS to send text from, and a block he described from memory has no text to
+ * send (and no document — `doc_id: 'post-hoc'`); and its minutes are testimony, so listing them in a
+ * column of measured per-document minutes is exactly the merge §A6.1 forbids.
+ */
+export function windowDocs(allRows: readonly SessionRow[]): WindowDoc[] {
+  const { measured: rows } = splitByEntry(allRows)
   const byDoc = new Map<string, WindowDoc>()
   for (const r of rows) {
     const cur = byDoc.get(r.doc_id)
@@ -237,10 +260,17 @@ export interface ChartDayAggregate {
   /** 24 buckets, index = local hour, value = active minutes attributed to that hour. */
   hourHistogram: number[]
   pomodoroSessions: number
-  /** Minutes per doc_type — lets "40m on email" be read off the day (§B2.1). */
+  /** Minutes per doc_type — lets "40m on email" be read off the day (§B2.1). MEASURED rows only. */
   minutesByDocType: Record<string, number>
   /** Distinct documents touched. */
   docCount: number
+  /**
+   * Minutes the writer added FROM MEMORY. Never inside `activeMinutes`, never inside a measured bar,
+   * never inside `minutesByDocType` — testimony, not measurement (see SessionRow.entered).
+   */
+  postHocMinutes: number
+  /** Blocks added from memory. Never inside `sessionCount`. */
+  postHocSessions: number
 }
 
 /**
@@ -300,7 +330,13 @@ function breakStats(gaps: number[]): BreakStats {
   }
 }
 
-/** Group ledger rows into per-day aggregates, ascending by day. */
+/**
+ * Group ledger rows into per-day aggregates, ascending by day — the CHARTS' view model.
+ *
+ * Post-hoc rows are split out at the top (see `dayAggregate`'s note) so no BAR on any graph can be
+ * part-measured, part-remembered. `postHocMinutes` rides alongside for a chart that wants to show it
+ * as its own mark — which is a design question for its own lane, not a default this one invents.
+ */
 export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregate[] {
   const byDay = new Map<string, SessionRow[]>()
   for (const s of sessions) {
@@ -311,7 +347,8 @@ export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregat
   }
 
   const out: ChartDayAggregate[] = []
-  for (const [day, rows] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  for (const [day, dayRows] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const { measured: rows, postHoc } = splitByEntry(dayRows)
     const ordered = [...rows].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     const hourHistogram = new Array(24).fill(0)
     const minutesByDocType: Record<string, number> = {}
@@ -345,6 +382,8 @@ export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregat
       pomodoroSessions,
       minutesByDocType,
       docCount: docs.size,
+      postHocMinutes: round1(postHoc.reduce((a, s) => a + s.active_minutes, 0)),
+      postHocSessions: postHoc.length,
     })
   }
   return out

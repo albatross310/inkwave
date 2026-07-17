@@ -18,7 +18,7 @@ const emptyDay: DayAggregate = {
   day: '2026-07-15', activeMinutes: 0, sessionCount: 0, wordsAdded: 0, wordsDeleted: 0, netWords: 0,
   editEvents: 0, breaks: { count: 0, totalMinutes: 0, medianMinutes: 0, longestMinutes: 0 },
   phases: { drafting: 0, editing: 0, unclear: 0, total: 0 }, hourHistogram: new Array(24).fill(0),
-  pomodoroSessions: 0, minutesByDocType: {}, docCount: 0,
+  pomodoroSessions: 0, minutesByDocType: {}, docCount: 0, postHocMinutes: 0, postHocSessions: 0,
 }
 
 // ─── The tone matchers ────────────────────────────────────────────────────────

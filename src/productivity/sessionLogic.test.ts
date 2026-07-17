@@ -111,6 +111,7 @@ describe('buildRow (§A3.2 schema)', () => {
       break_before_min: 10,
       pomodoro: false,
       doc_type: 'essay',
+      entered: 'timer',
     })
   })
 
@@ -154,8 +155,8 @@ describe('buildRow (§A3.2 schema)', () => {
     // The contract, exactly — an extra field here breaks three agents and may breach minimisation.
     expect(keys).toEqual([
       'active_minutes', 'break_before_min', 'doc_id', 'doc_label', 'doc_type', 'edit_events',
-      'end', 'net_words', 'pomodoro', 'session_id', 'start', 'words_added', 'words_deleted',
-      'words_end', 'words_start',
+      'end', 'entered', 'net_words', 'pomodoro', 'session_id', 'start', 'words_added',
+      'words_deleted', 'words_end', 'words_start',
     ])
     const blob = JSON.stringify(row).toLowerCase()
     for (const forbidden of ['lat', 'lon', 'geo', 'ip', 'coord', 'keystroke', 'text', 'content', 'prose']) {
