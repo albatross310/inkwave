@@ -35,6 +35,7 @@ import {
 } from './arithmeticLayout'
 import { citeBox, citeFontKey } from '../citations/citeBox'
 import { blockStyle, type BlockStyle } from './blockStyles'
+import { unmodelledMark } from './arithMeasure'
 import { pageBoxPx } from './pageModel'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
 
@@ -191,6 +192,17 @@ function resolveSizePx(v: unknown, basePx: number): number {
 
 // One text node → an engine run. Mirrors arithMeasure.runOf (same mark resolution) so the two
 // paths can never disagree about what a run IS.
+// ⚠ THIS IS A SECOND COPY of arithMeasure.runOf — see runsOfParagraph below, whose comment claims
+// the two "Mirror … EXACTLY". THEY DID NOT. Fixing the unmodelled-mark hole in arithMeasure alone
+// changed nothing, because buildRenderModel calls THIS one: `code`-marked prose stayed eligible and
+// kept reporting full reliability. The rule that decides which mark is measurable now lives ONCE, in
+// arithMeasure (MODELLED_MARKS / METRIC_NEUTRAL_MARKS), and both copies call it — so a new mark can
+// no longer be handled in one and silently guessed in the other.
+//
+// The same shape has now bitten this project three times: staticPagination claimed "identical policy
+// (and 0.22 constant) to the editor" while carrying a rule the editor had retired; breaks.prove.mjs
+// claimed "byte-identical to the live editor" on a fixture with no citations; this claimed "can never
+// disagree". A COMMENT ASSERTING PARITY IS A REASON NOBODY CHECKS PARITY.
 function runOf(node: PMNode, basePx: number): InlineRun {
   let family = DEFAULT_STACK, size = basePx, weight = 400, italic = false
   for (const m of node.marks || []) {
@@ -201,7 +213,8 @@ function runOf(node: PMNode, basePx: number): InlineRun {
       if (m.attrs.fontSize) size = resolveSizePx(m.attrs.fontSize, basePx)
     }
   }
-  return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic }
+  const bad = unmodelledMark(node)
+  return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic, ...(bad ? { unmodelledMark: bad } : {}) }
 }
 
 // One paragraph's inline content → engine runs. Mirrors arithMeasure.runsOfParagraph EXACTLY (same
