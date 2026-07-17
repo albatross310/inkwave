@@ -1969,7 +1969,7 @@ DIFFERENT promises. The separation is structural:
    verdict is read — otherwise it is the empty-list probe.
 **⚠️ MENTION vs USE — A GUARD THAT READS PROSE AS CODE ATTACKS ITS OWN DOCUMENTATION. It bit THREE
 lanes in one round (2026-07-17); if you are writing a source-scanning guard, read this first.**
-This repo's comments must NAME the thing they forbid in order to forbid it, and its `"//"` JSON notes
+This repo's comments must NAME the thing they forbid in order to forbid it, and its JSON notes
 explain the very rule they encode — so any guard that greps raw text will fire on the explanation
 rather than the violation, and **the tempting fix is always to delete the sentence**. That is the
 corrosive direction: `claims.test.ts`'s own next test is "comments are stripped — the guard survives
