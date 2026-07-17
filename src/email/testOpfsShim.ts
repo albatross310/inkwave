@@ -31,23 +31,6 @@ export function resetOpfsShim(): void {
   root = { files: new Map(), dirs: new Map() }
 }
 
-/**
- * Real OPFS signals a missing entry with a **DOMException whose `.name` is 'NotFoundError'**, and
- * `storage/opfs.ts` discriminates on exactly that (`(err as DOMException)?.name === 'NotFoundError'`)
- * — it is the line that separates 'absent' (safe to write) from 'error' (NEVER write), i.e. the
- * 2026-07-15 data-loss distinction.
- *
- * `new Error('NotFoundError')` sets the MESSAGE, not the NAME, so this shim used to make every
- * absent file look like a READ FAILURE. Nothing noticed while callers only asked "did I get a doc?"
- * — it surfaced the moment a caller handled the three DocRead outcomes separately. A shim that
- * cannot reproduce the one distinction the code exists to draw is a fiction to test against.
- */
-function notFound(): Error {
-  const err = new Error('NotFoundError')
-  err.name = 'NotFoundError'
-  return err
-}
-
 function makeFileHandle(dir: Node, name: string) {
   return {
     async createWritable() {

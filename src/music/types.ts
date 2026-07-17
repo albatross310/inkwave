@@ -516,10 +516,41 @@ export interface PhotoSource {
   pdf_name?: string
 }
 
+/**
+ * A MASTER SCORE ID — `MasterMeta.id` from `music/master.ts`. NOT an `AssetRef`.
+ *
+ * ─── The question the photo lane left open, answered by the lane that owns the field ─────────
+ * `PieceSource.xml_ref` and `music.masters[]` can name the same bytes, and §B6 is explicit that the
+ * MusicXML is "stored ONCE ... deduplicated". So there is only one right answer: **xml_ref names a
+ * master**, and the master store IS the deduplicated store. It is not a copy in the Piece's assets.
+ *
+ * The two stores are genuinely different and neither is wrong:
+ *   AssetRef  → `library/pieces/<pieceId>/assets/<ref>` — PER-PIECE bytes (page photos, recordings).
+ *               Resolved with `getAsset(pieceId, ref)`. Deleting the Piece deletes them.
+ *   MasterRef → `library/scores/<masterId>.musicxml`    — CROSS-DOCUMENT, content-deduplicated.
+ *               Resolved with `loadMasterXml(id)`. Two Pieces of the same public-domain score share
+ *               ONE master (dedup is by contentHash at import), and a master outlives any one Piece —
+ *               which is exactly what makes §B6's "fix the master, every excerpt updates" possible.
+ *
+ * WHY A SEPARATE TYPE AND NOT `AssetRef`: `getAsset(pieceId, ref)` resolves a PER-PIECE path. Hand
+ * it a master id and it returns `null` — which surfaces as "this score has no notation", with no
+ * error, on exactly the Pieces that came in through the MusicXML path. Typing this as `AssetRef`
+ * invites that call. The distinct name is the warning; see `pieceSource.test.ts`, which asserts no
+ * call site ever routes an `xml_ref` through the asset store.
+ *
+ * RESIDUAL, for the contract's owner: both are `string` aliases, so the wrong call still COMPILES.
+ * Branding them (`string & {__brand}`) would make it a type error rather than a test — worth doing,
+ * but `AssetRef` is the photo lane's field and that is their call, not mine.
+ */
+export type MasterRef = string
+
 export interface MusicXmlSource {
   type: 'musicxml'
-  /** The `.musicxml`/`.mxl` master, stored ONCE and deduplicated (§B6). Owned by the MusicXML lane. */
-  xml_ref: AssetRef
+  /**
+   * The `.musicxml`/`.mxl` master, stored ONCE and deduplicated (§B6) — a `MasterMeta.id`, resolved
+   * via `music/master.ts` (`loadMasterXml`), NEVER via `getAsset`. See MasterRef above.
+   */
+  xml_ref: MasterRef
   /** §B7: set when the piece came from a public-domain corpus, so attribution can be rendered.
    *  Licensing discipline is that lane's (verified public-domain corpora only). */
   corpus?: { name: string; id: string; licence: string; attribution: string }
