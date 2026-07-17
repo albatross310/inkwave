@@ -22,18 +22,19 @@ import { isTouchDevice } from '../editor/Scroll'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
-import { annotateRow, loadLedger } from '../productivity/ledgerStore'
+import { annotateRow, loadLedger, saveReflection } from '../productivity/ledgerStore'
 import { currentPlace, recentPlaces, setCurrentPlace } from '../productivity/places'
 import { isPaused, type PomodoroConfig } from '../productivity/pomodoro'
 import {
   getPomodoroState, loadPomodoroConfig, pausePomodoro, resumePomodoro, setPomodoroConfig,
   startPomodoro, stopPomodoro, subscribe,
 } from '../productivity/pomodoroStore'
-import { isoWithOffset, localDayOf, localMonthOf } from '../productivity/sessionLogic'
-import type { SessionRow } from '../productivity/types'
+import { isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection } from '../productivity/sessionLogic'
+import type { Reflection, SessionRow } from '../productivity/types'
 import type { DocGoals } from '../types/document'
 import { countdownShown, setCountdownShown } from './CountdownOverlay'
 import { GoalsSection } from './GoalsSection'
+import { ReflectionPrompt } from './ReflectionPrompt'
 import { TimeFace, TimeRing } from './TimeFace'
 
 const nowIso = (): string => isoWithOffset(Date.now(), -new Date().getTimezoneOffset())
@@ -168,13 +169,16 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
   // ▲ overflow, or not rendered at all (opened from the countdown). Absent → centred.
   const anchor = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('[data-iw-ledger-btn]')
   const [rows, setRows] = useState<SessionRow[]>([])
+  const [reflections, setReflections] = useState<Reflection[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const month = localMonthOf(nowIso())
   const today = localDayOf(nowIso())
   const panelRef = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(async () => {
-    setRows((await loadLedger(month)).rows)
+    const l = await loadLedger(month)
+    setRows(l.rows)
+    setReflections(l.reflections ?? [])
   }, [month])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -205,6 +209,19 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
   }, [anchor, onClose])
 
   const todays = useMemo(() => rows.filter((r) => localDayOf(r.start) === today).reverse(), [rows, today])
+
+  // §A5b — the stretch since the last reflection, and whether to offer one. Rows already reflected
+  // on are those ending at/before the newest reflection's `to`: the writer has spoken for that span,
+  // so it is never raised again. `skipped` holds for THIS panel session only — "not now" means not
+  // now, not never, and it must not be recorded anywhere (a skip is not a datum about him).
+  const [skipped, setSkipped] = useState(false)
+  const unreflected = useMemo(() => {
+    const last = (reflections ?? []).reduce<string>((a, r) => (r.to > a ? r.to : a), '')
+    return rows.filter((r) => localDayOf(r.start) === today && r.end > last)
+  }, [rows, reflections, today])
+  const offerReflection = !skipped && shouldOfferReflection(
+    unreflected.reduce((a, r) => a + r.active_minutes * 60_000, 0),
+  )
   const docs = useMemo(() => {
     const seen = new Map<string, string | undefined>()
     for (const r of rows) if (!seen.has(r.doc_id)) seen.set(r.doc_id, r.doc_label)
@@ -244,6 +261,13 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
     >
       <div className="overflow-y-auto">
         <PomodoroHero />
+        {offerReflection && (
+          <ReflectionPrompt
+            rows={unreflected}
+            onSave={async (r) => { await saveReflection(month, r); void refresh() }}
+            onSkip={() => setSkipped(true)}
+          />
+        )}
         <TodaySection rows={todays} summary={daySummary(todays)} onSaved={refresh} />
         <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
         <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>

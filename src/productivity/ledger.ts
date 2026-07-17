@@ -5,7 +5,7 @@
 
 import { hashCanonical } from '../provenance/hash'
 import type { OtsProofState } from '../types/document'
-import type { LedgerAttestation, MonthLedger, SessionRow } from './types'
+import type { LedgerAttestation, MonthLedger, Reflection, SessionRow } from './types'
 import { localDayOf } from './sessionLogic'
 
 /** The ledger's document name for a local month ('YYYY-MM') — e.g. `inkwave-ledger-2026-07`. */
@@ -65,6 +65,26 @@ function winsOver(next: SessionRow, prev: SessionRow): boolean {
 const annotationScore = (r: SessionRow): number => (r.note ? 1 : 0) + (r.place ? 1 : 0)
 
 /**
+ * Union two reflection sets — GROW-ONLY, keyed by `reflection_id`, exactly like rows.
+ *
+ * Same rule, same reason: two devices, an append-only record, and a write-back that must never
+ * shrink the target. LWW within one id takes the RICHER copy (more categories commented on), so a
+ * plain copy syncing in from another device cannot erase what the writer just wrote — the same
+ * lesson the diary-note tie-break already paid for.
+ */
+export function mergeReflections(a: readonly Reflection[] = [], b: readonly Reflection[] = []): Reflection[] {
+  const byId = new Map<string, Reflection>()
+  for (const r of a) if (r && r.reflection_id) byId.set(r.reflection_id, r)
+  for (const r of b) {
+    if (!r || !r.reflection_id) continue
+    const prev = byId.get(r.reflection_id)
+    if (!prev || (r.notes?.length ?? 0) >= (prev.notes?.length ?? 0)) byId.set(r.reflection_id, r)
+  }
+  return [...byId.values()].sort((x, y) =>
+    x.from < y.from ? -1 : x.from > y.from ? 1 : x.reflection_id < y.reflection_id ? -1 : 1)
+}
+
+/**
  * Union two copies of the SAME month — the write-back path (cloud sync, another device's file).
  *
  * F5 (test auditor, 2026-07-17): this returned `attestations: []`. Harmless only while nothing
@@ -79,7 +99,12 @@ const annotationScore = (r: SessionRow): number => (r.note ? 1 : 0) + (r.place ?
 export async function mergeLedgers(a: MonthLedger, b: MonthLedger): Promise<MonthLedger> {
   const month = a.month || b.month
   const rows = mergeLedgerRows(a.rows, b.rows)
-  return { v: 1, month, rows, attestations: await buildAttestations(month, rows, [...a.attestations, ...b.attestations]) }
+  const reflections = mergeReflections(a.reflections, b.reflections)
+  return {
+    v: 1, month, rows,
+    ...(reflections.length ? { reflections } : {}),
+    attestations: await buildAttestations(month, rows, [...a.attestations, ...b.attestations], reflections),
+  }
 }
 
 // ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
@@ -104,6 +129,7 @@ export async function buildAttestations(
   month: string,
   rows: readonly SessionRow[],
   existing: readonly LedgerAttestation[] = [],
+  reflections: readonly Reflection[] = [],
 ): Promise<LedgerAttestation[]> {
   const byDay = new Map<string, SessionRow[]>()
   for (const r of rows) {
@@ -119,11 +145,26 @@ export async function buildAttestations(
     else priorByDay.set(a.day, [a])
   }
 
+  // A reflection is attested with the day it describes: the writer's account of the work and the
+  // measurement of it are one record, so neither can be edited afterwards without the other noticing.
+  const refByDay = new Map<string, Reflection[]>()
+  for (const r of reflections) {
+    const list = refByDay.get(r.day)
+    if (list) list.push(r)
+    else refByDay.set(r.day, [r])
+  }
+  for (const day of refByDay.keys()) if (!byDay.has(day)) byDay.set(day, [])
+
   const out: LedgerAttestation[] = []
   for (const day of [...byDay.keys()].sort()) {
     const rowHashes = await Promise.all(byDay.get(day)!.map((r) => hashCanonical(r)))
+    const refHashes = await Promise.all((refByDay.get(day) ?? []).map((r) => hashCanonical(r)))
     // Bound to month + day: a block cannot be lifted into another month or another date.
-    const blockHash = await hashCanonical({ v: 1, month, day, rowHashes })
+    // v:1 with no reflections keeps the OLD hash byte-identical, so days attested before
+    // reflections existed still verify.
+    const blockHash = refHashes.length
+      ? await hashCanonical({ v: 2, month, day, rowHashes, refHashes })
+      : await hashCanonical({ v: 1, month, day, rowHashes })
     // Carry a proof ONLY if it attests this exact block; otherwise the day is unstamped again.
     const valid = (priorByDay.get(day) ?? []).filter((p) => p.blockHash === blockHash)
     const best = valid.sort((x, y) => otsRank(y.ots.status) - otsRank(x.ots.status))[0]
@@ -136,7 +177,7 @@ const otsRank = (s: OtsProofState['status']): number => (s === 'confirmed' ? 2 :
 
 /** Rebuild `attestations` from `rows` (preserving still-valid OTS proofs). The write path's last step. */
 export async function attestLedger(l: MonthLedger): Promise<MonthLedger> {
-  return { ...l, attestations: await buildAttestations(l.month, l.rows, l.attestations) }
+  return { ...l, attestations: await buildAttestations(l.month, l.rows, l.attestations, l.reflections ?? []) }
 }
 
 export interface LedgerVerifyReport {
@@ -154,7 +195,7 @@ export interface LedgerVerifyReport {
  * blockHash additionally pins that day's rows to a Bitcoin time (so they cannot be backdated).
  */
 export async function verifyLedger(l: MonthLedger): Promise<LedgerVerifyReport> {
-  const recomputed = await buildAttestations(l.month, l.rows, [])
+  const recomputed = await buildAttestations(l.month, l.rows, [], l.reflections ?? [])
   const badDays: string[] = []
   const missingBlocks: string[] = []
   const storedByDay = new Map(l.attestations.map((a) => [a.day, a]))

@@ -11,9 +11,9 @@
 
 import { readAppJson, writeAppJson } from '../storage/opfs'
 import { stampBundle } from '../provenance/ots'
-import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers } from './ledger'
+import { attestLedger, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, mergeReflections } from './ledger'
 import { cleanText } from './sessionLogic'
-import type { MonthLedger, SessionRow } from './types'
+import type { MonthLedger, Reflection, SessionRow } from './types'
 
 const fileFor = (month: string): string => `${ledgerNameFor(month)}.json`
 
@@ -29,7 +29,12 @@ function isLedger(v: unknown): v is MonthLedger {
 export async function loadLedger(month: string): Promise<MonthLedger> {
   const raw = await readAppJson<MonthLedger>(fileFor(month))
   if (!isLedger(raw)) return emptyLedger(month)
-  return { v: 1, month, rows: raw.rows.filter((r) => r && r.session_id), attestations: raw.attestations ?? [] }
+  return {
+    v: 1, month,
+    rows: raw.rows.filter((r) => r && r.session_id),
+    ...(raw.reflections?.length ? { reflections: raw.reflections.filter((r) => r && r.reflection_id) } : {}),
+    attestations: raw.attestations ?? [],
+  }
 }
 
 // ── Serialised, debounced write path ─────────────────────────────────────────
@@ -177,6 +182,26 @@ function anchorsDiffer(a: MonthLedger, b: MonthLedger): boolean {
     const prev = byDay.get(x.day)
     return !prev || prev.blockHash !== x.blockHash || rank(x.ots.status) > rank(prev.ots.status)
   })
+}
+
+/**
+ * Save the writer's reflection on a stretch. Grow-only, on the same per-month chain as every other
+ * write: read fresh, union by `reflection_id`, re-attest (so their account is inside the day's
+ * tamper-evident block with the measurements it describes), write.
+ */
+export async function saveReflection(month: string, reflection: Reflection): Promise<void> {
+  await flushLedgerNow()
+  const prev = _chain.get(month) ?? Promise.resolve()
+  const next = prev
+    .catch(() => { /* keep the chain alive */ })
+    .then(async () => {
+      const l = await loadLedger(month)
+      const reflections = mergeReflections(l.reflections ?? [], [reflection])
+      await writeAppJson(fileFor(month), await attestLedger({ ...l, reflections }))
+    })
+    .catch((err) => console.warn('[inkwave] reflection write failed:', err))
+  _chain.set(month, next)
+  await next
 }
 
 /** True when rows are waiting to be written (test/diagnostic). */

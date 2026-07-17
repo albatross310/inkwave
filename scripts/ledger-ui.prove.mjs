@@ -61,11 +61,34 @@ async function openApp(browser, { theme, phone }) {
   page.on('pageerror', (e) => console.log('  [pageerror]', String(e).slice(0, 160)))
   await page.addInitScript((t) => {
     localStorage.setItem('inkwave:prodLedger', '1')
+    // Seed a measured stretch so the §A5b reflection prompt is in the shot. Written straight to the
+    // ledger's own OPFS file — the same bytes capture writes, so this is the real surface.
+    window.__iwSeedLedger = true
     localStorage.setItem('inkwave:ledgerPlace', 'library')
     if (t === 'night') localStorage.setItem('inkwave:theme', 'night')
   }, theme)
   await page.goto(URL, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.ProseMirror', { timeout: 45_000 })
+  await page.evaluate(async () => {
+    const day = new Date().toISOString().slice(0, 10)
+    const off = -new Date().getTimezoneOffset()
+    const sign = off < 0 ? '-' : '+'
+    const pad = (n) => String(Math.abs(n)).padStart(2, '0')
+    const tz = `${sign}${pad(Math.trunc(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`
+    const row = (id, from, to, mins, type) => ({
+      session_id: id, doc_id: 'seed', doc_label: 'A document',
+      start: `${day}T${from}.000${tz}`, end: `${day}T${to}.000${tz}`,
+      active_minutes: mins, words_start: 0, words_end: 0, words_added: 0, words_deleted: 0,
+      net_words: 0, edit_events: 0, break_before_min: 0, pomodoro: true, doc_type: type,
+    })
+    const month = day.slice(0, 7)
+    const ledger = { v: 1, month, rows: [row('s1', '09:00:00', '09:50:00', 50, 'misc'), row('s2', '10:00:00', '10:20:00', 20, 'email')], attestations: [] }
+    const root = await navigator.storage.getDirectory()
+    const fh = await root.getFileHandle(`inkwave-ledger-${month}.json`, { create: true })
+    const w = await fh.createWritable()
+    await w.write(JSON.stringify(ledger))
+    await w.close()
+  })
   // The wave load choreography settles; shots taken mid-reveal are unreadable.
   await sleep(3500)
   return { ctx, page }

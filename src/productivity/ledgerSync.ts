@@ -82,7 +82,19 @@ export async function syncLedgerMonth(remote: LedgerRemote, month: string): Prom
   const local = await loadLedger(month)
 
   // 1. READ FIRST.
-  const read = await remote.read(file)
+  //
+  // F16 (auditor, 2026-07-17): **the union guards the CONSUMER, not the PRODUCER.** `RemoteRead` makes
+  // it impossible for ME to forget the failure branch — it cannot make an adapter honour its own
+  // contract. A provider that THROWS (its token call rejects; a bug) hands us an exception this
+  // function never wrote a branch for, and an unhandled rejection is not a safe default in a
+  // function whose next act is a write. So the throw is converted to the answer it should have
+  // been: `error` — which refuses the write. A broken adapter must fail SAFE, not fail open.
+  let read: RemoteRead
+  try {
+    read = await remote.read(file)
+  } catch (e) {
+    return { ok: false, reason: `${remote.name}: read threw (${(e as Error)?.message ?? String(e)}) — not writing (local rows are safe)` }
+  }
   if (read.status === 'error') {
     // THE LOAD-BEARING BRANCH. Do not "recover" by writing local — that is the 2026-07-15 bug.
     return { ok: false, reason: `${remote.name}: ${read.reason} — not writing (local rows are safe)` }
@@ -98,8 +110,14 @@ export async function syncLedgerMonth(remote: LedgerRemote, month: string): Prom
     return { ok: true, action: 'up-to-date', rows: merged.rows.length }
   }
 
-  // 4. WRITE the union out...
-  if (!(await remote.write(file, merged))) {
+  // 4. WRITE the union out... (a throwing writer is a failed write, not a crash mid-sync)
+  let wrote = false
+  try {
+    wrote = await remote.write(file, merged)
+  } catch (e) {
+    return { ok: false, reason: `${remote.name}: write threw (${(e as Error)?.message ?? String(e)}) — local rows are unchanged and safe` }
+  }
+  if (!wrote) {
     return { ok: false, reason: `${remote.name}: write failed — local rows are unchanged and safe` }
   }
 

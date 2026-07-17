@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { attestLedger, buildAttestations, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, verifyLedger } from './ledger'
-import type { MonthLedger, SessionRow } from './types'
+import { attestLedger, buildAttestations, emptyLedger, ledgerNameFor, mergeLedgerRows, mergeLedgers, mergeReflections, verifyLedger } from './ledger'
+import type { MonthLedger, Reflection, SessionRow } from './types'
 
 function row(id: string, start: string, over: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -257,5 +257,70 @@ describe('mergeLedgers — the write-back path (F5: it used to shred every proof
     const merged = await mergeLedgers(emptyLedger('2026-07'), await of([A, B]))
     expect(merged.rows).toHaveLength(2)
     expect(merged.month).toBe('2026-07')
+  })
+})
+
+describe('reflections (§A5b — the writer\'s account of a stretch)', () => {
+  const R = (id: string, over: Partial<Reflection> = {}): Reflection => ({
+    reflection_id: id,
+    day: '2026-07-17',
+    from: '2026-07-17T09:00:00.000+10:00',
+    to: '2026-07-17T10:30:00.000+10:00',
+    notes: [{ doc_type: 'misc', text: 'reading Leibniz, on paper' }],
+    ...over,
+  })
+
+  it('unions grow-only by reflection_id, like rows', () => {
+    const other = R('r2', { from: '2026-07-17T14:00:00.000+10:00' })
+    expect(mergeReflections([R('r1')], [other]).map((r) => r.reflection_id)).toEqual(['r1', 'r2'])
+    expect(mergeReflections([R('r1'), other], [])).toHaveLength(2) // an empty side cannot truncate
+    expect(mergeReflections([], [R('r1')])).toHaveLength(1)
+  })
+
+  it('a PLAIN copy cannot erase a richer one — the diary-note lesson, again', () => {
+    const rich = R('r1', { notes: [{ doc_type: 'misc', text: 'reading Leibniz' }, { doc_type: 'email', text: 'admin' }] })
+    const plain = R('r1', { notes: [] })
+    expect(mergeReflections([plain], [rich])[0].notes).toHaveLength(2)
+    expect(mergeReflections([rich], [plain])[0].notes).toHaveLength(2) // direction must not decide it
+    expect(plain.notes).toHaveLength(0) // the negative is real: the plain copy genuinely lacks them
+  })
+
+  it('drops malformed reflections rather than poisoning the ledger', () => {
+    expect(mergeReflections([R('r1')], [null, undefined, {}] as unknown as Reflection[])).toHaveLength(1)
+  })
+
+  it('is ATTESTED with the day it describes — the account and the measurement are one record', async () => {
+    const l = await attestLedger({ v: 1, month: '2026-07', rows: [A, B], reflections: [R('r1')], attestations: [] })
+    expect((await verifyLedger(l)).ok).toBe(true)
+
+    // Editing the writer's account after the fact breaks the day's block, exactly as editing a row does.
+    const tampered: MonthLedger = {
+      ...l,
+      reflections: [R('r1', { notes: [{ doc_type: 'misc', text: 'something I never wrote' }] })],
+    }
+    const rep = await verifyLedger(tampered)
+    expect(rep.ok).toBe(false)
+    expect(rep.badDays).toContain('2026-07-17')
+  })
+
+  it('a day with NO reflections hashes BYTE-IDENTICALLY to before they existed', async () => {
+    // v:1 is preserved when there are none, so every day attested (and Bitcoin-anchored) before
+    // reflections shipped still verifies. A schema addition must not silently invalidate old proofs.
+    const before = await buildAttestations('2026-07', [A, B])
+    const after = await buildAttestations('2026-07', [A, B], [], [])
+    expect(after[0].blockHash).toBe(before[0].blockHash)
+  })
+
+  it('a reflection CHANGES the block hash (so the guard above is not vacuous)', async () => {
+    const plain = await buildAttestations('2026-07', [A, B])
+    const withRef = await buildAttestations('2026-07', [A, B], [], [R('r1')])
+    expect(withRef[0].blockHash).not.toBe(plain[0].blockHash)
+  })
+
+  it('mergeLedgers carries reflections through the write-back', async () => {
+    const local: MonthLedger = { v: 1, month: '2026-07', rows: [A], reflections: [R('r1')], attestations: [] }
+    const remote: MonthLedger = { v: 1, month: '2026-07', rows: [C], reflections: [R('r2', { day: '2026-07-18' })], attestations: [] }
+    const merged = await mergeLedgers(remote, local)
+    expect(merged.reflections?.map((r) => r.reflection_id).sort()).toEqual(['r1', 'r2'])
   })
 })

@@ -5,6 +5,7 @@
 // about what sync REFUSES to do.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mapGraphReadStatus } from '../storage/onedrive'
 import { attestLedger, emptyLedger } from './ledger'
 import { _resetLedgerStore, loadLedger } from './ledgerStore'
 import { ledgerFileName, parseRemoteLedger, syncLedgerMonth, type LedgerRemote, type RemoteRead } from './ledgerSync'
@@ -209,5 +210,79 @@ describe('the ledger file is its own file, not part of the .studio', () => {
   it('an empty ledger round-trips through the remote parser', () => {
     const res = parseRemoteLedger(JSON.stringify(emptyLedger(MONTH)), MONTH)
     expect(res.status).toBe('ok')
+  })
+})
+
+describe('the boundary predicate (auditor F13/F16 — the PRODUCER decides absent vs error)', () => {
+  // F16: a perfectly-typed union guards the CONSUMER. It cannot make the adapter honour its own
+  // contract — and `mapGraphReadStatus` is the entire absent-vs-error decision, in one line, which
+  // nothing tested. The lenient-predicate bug the auditor planted elsewhere lives exactly here.
+
+  it('404 — and ONLY 404 — is absent', () => {
+    expect(mapGraphReadStatus(404)).toBe('absent')
+    for (const s of [200, 201, 204, 301, 400, 401, 403, 409, 429, 500, 502, 503]) {
+      expect(mapGraphReadStatus(s)).not.toBe('absent')
+    }
+  })
+
+  it('2xx is ok', () => {
+    for (const s of [200, 201, 204, 299]) expect(mapGraphReadStatus(s)).toBe('ok')
+  })
+
+  it('AUTH failures are errors, NOT absent — the sharpest case', () => {
+    // An expired token means we cannot SEE the file, not that it is gone. Read as `absent`, the
+    // next sync would "helpfully" write this device's ledger over a remote it never read: the
+    // 2026-07-15 blind overwrite, arriving through a lenient predicate rather than a missing branch.
+    expect(mapGraphReadStatus(401)).toBe('error')
+    expect(mapGraphReadStatus(403)).toBe('error')
+  })
+
+  it('an UNKNOWN status fails safe (error ⇒ refuse to write), never open', () => {
+    for (const s of [0, 418, 451, 599]) expect(mapGraphReadStatus(s)).toBe('error')
+  })
+})
+
+describe('a PRODUCER that breaks its contract must fail safe (F16)', () => {
+  it('a remote whose read() THROWS writes NOTHING', async () => {
+    // The union cannot stop an adapter throwing (readOneDriveText did exactly this until F13: its
+    // getSilentToken sat outside the try). An exception must not become an unhandled rejection in a
+    // function whose next act is a write.
+    await seedLocal([A])
+    const writes: MonthLedger[] = []
+    const remote: LedgerRemote = {
+      name: 'broken',
+      read: async () => { throw new Error('token exploded') },
+      write: async (_f, l) => { writes.push(l); return true },
+    }
+    const out = await syncLedgerMonth(remote, MONTH)
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.reason).toContain('read threw')
+    expect(writes).toEqual([]) // ← the point: a broken adapter cannot cause a blind overwrite
+    expect((await loadLedger(MONTH)).rows).toHaveLength(1) // local untouched
+  })
+
+  it('a remote whose write() THROWS leaves local intact and reports it', async () => {
+    await seedLocal([A, B])
+    const remote: LedgerRemote = {
+      name: 'broken',
+      read: async () => ({ status: 'absent' }),
+      write: async () => { throw new Error('upload exploded') },
+    }
+    const out = await syncLedgerMonth(remote, MONTH)
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.reason).toContain('write threw')
+    expect((await loadLedger(MONTH)).rows).toHaveLength(2)
+  })
+
+  it('KNOWN-POSITIVE: a WORKING remote still writes — the refusals above are not "never writes"', async () => {
+    await seedLocal([A, B])
+    const writes: MonthLedger[] = []
+    const remote: LedgerRemote = {
+      name: 'fine',
+      read: async () => ({ status: 'absent' }),
+      write: async (_f, l) => { writes.push(l); return true },
+    }
+    expect((await syncLedgerMonth(remote, MONTH)).ok).toBe(true)
+    expect(writes).toHaveLength(1)
   })
 })

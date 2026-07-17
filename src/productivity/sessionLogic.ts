@@ -285,3 +285,31 @@ export function buildRow(
 export function isRecordable(d: SessionDraft): boolean {
   return d.editEvents > 0 || d.pomodoro
 }
+
+
+// ─── The reflection prompt (§A5b — "what did I actually do?") ────────────────
+
+/**
+ * Active minutes that must accrue before the writer is asked to reflect.
+ *
+ * 25, and every part of that number is a decision:
+ *   · NOT per Pomodoro block — a toll booth every 25 minutes of clock time kills the ritual it is
+ *     meant to be. This counts ACTIVE minutes, which accrue slower than the clock.
+ *   · NOT at day's close — you cannot remember by then, and the chart only works as a recall prompt
+ *     while the stretch is still warm.
+ *   · Once per stretch, never re-prompted, always skippable. A skipped reflection is not a failure
+ *     and nothing anywhere may treat it as one.
+ * The bar for all of it: would he fill this in on a bad Tuesday?
+ */
+export const REFLECT_AFTER_ACTIVE_MS = 25 * 60_000
+
+/**
+ * Should we offer the reflection now? PURE.
+ *
+ * `activeMsSinceLastReflection` is summed from the rows written since the last one. Asking is
+ * OFFERING — this returns true at most once per stretch because accepting or skipping resets the
+ * accumulator (the caller marks the stretch), never because we track whether they complied.
+ */
+export function shouldOfferReflection(activeMsSinceLastReflection: number): boolean {
+  return activeMsSinceLastReflection >= REFLECT_AFTER_ACTIVE_MS
+}

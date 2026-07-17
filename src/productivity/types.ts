@@ -180,11 +180,45 @@ export interface LedgerAttestation {
  * 2026-07-05 data-loss incident where a snapshot write-back truncated the archive; the ledger
  * inherits that invariant deliberately.
  */
+/**
+ * The writer's reflection on a STRETCH of work — "what did I actually do?" (Peter, 2026-07-17).
+ *
+ * WHY THIS IS ITS OWN OBJECT AND NOT A FIELD ON A ROW. A reflection is not a property of one
+ * session: it is about a SPAN across many rows, and the writer thinks in CATEGORIES ("an hour on
+ * the essay, forty minutes reading"), not in session ids they have never seen. `note?` on the row
+ * asked the wrong question — it made them annotate an accounting artefact.
+ *
+ * IT IS ALSO WHAT RESCUES `misc`. Nothing sets a type on an ordinary document, so most rows are an
+ * honest unknown; this is where the writer NAMES them, after the fact, from memory, while it is
+ * fresh. The chart is the recall prompt — the measured stretch is shown, and they say what it was.
+ *
+ * §A5: ALWAYS SKIPPABLE, never re-prompted, and no reflection is a failure. The bar for every word
+ * of copy around it: would he fill this in on a bad Tuesday?
+ */
+export interface Reflection {
+  reflection_id: string
+  /** Local day 'YYYY-MM-DD' the stretch falls in. */
+  day: string
+  /** The stretch it reflects on — ISO-8601 with local offset, like every other time here. */
+  from: string
+  to: string
+  /**
+   * One line per category the writer chose to comment on. A category they said nothing about is
+   * ABSENT — never an empty string. Their words; never generated, never graded.
+   */
+  notes: Array<{ doc_type: DocType; text: string }>
+}
+
 export interface MonthLedger {
   v: 1
   /** 'YYYY-MM' — the calendar month this ledger covers. */
   month: string
   rows: SessionRow[]
+  /**
+   * The writer's own prose about their stretches (§A7.3 tier 2 — its own consent tick, off by
+   * default). Append-only and merged grow-only by `reflection_id`, exactly like rows.
+   */
+  reflections?: Reflection[]
   /** Recomputed deterministically from `rows` on every write; existing OTS proofs are preserved. */
   attestations: LedgerAttestation[]
 }
