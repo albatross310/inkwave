@@ -2606,6 +2606,30 @@ write shim, so metadata can say a PDF exists with no local bytes).
 
 ## Working model (how these sessions run)
 
+**`/root/dev/iw-master` IS A SHARED CHECKOUT. NEVER `git add -A` THERE (2026-07-17).** With 5–6 lanes
+running, that checkout is a contended resource: other agents check their branches out in it and leave
+work uncommitted in the tree. Both failure modes bit in one minute of one session:
+- `git add -A` swept **1,276 lines of four other lanes' in-progress work** (waveVideo, goals,
+  archiveWriteback, folder, onedrive) into a commit about a JSON key. Caught only because the gate
+  went red on a stranger's unused import — i.e. **caught by luck, by an error in someone else's file.**
+- Two commits landed on **`feat/prod-goals` instead of master**, because the tree had been switched
+  underneath by the lane working there. `git status -sb` was never run; master was assumed.
+
+The rules, in order of how much they'd have saved:
+1. **`git status -sb` before every commit or push.** Never assume the branch. The checkout you started
+   on is not the checkout you're standing in.
+2. **Add named paths, never `-A`.** `git add CLAUDE.md`, not `git add -A`.
+3. **Don't `stash` there** — you are stashing someone else's live work and popping it back blind.
+4. **To ship, use your own worktree**, not the shared one:
+   `git worktree add --detach /tmp/shipdesk origin/master` → cherry-pick → `pnpm install
+   --frozen-lockfile` → gate → `git push origin HEAD:master`. A fresh worktree has no `node_modules`,
+   so its first gate fails on that and it means nothing; install first.
+
+The deeper rule: **the gate protects master, not your teammates.** It would have happily shipped a
+commit that stole four lanes' work, because that commit was green. Nothing but this discipline stands
+between a parallel session and a lane silently losing its night's work — the same loss the OPFS bugs
+caused Peter, from the other direction.
+
 **KEEP AT LEAST 5 AGENTS RUNNING (Peter, 2026-07-17 — a standing floor, not a target).** Whenever
 there is work left on the specs, at least five lanes should be in flight. Peter has asked for this
 repeatedly across sessions ("I want six working all the time", "agents running low", "where did all
