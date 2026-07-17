@@ -1099,11 +1099,20 @@ nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3
   session may have none (says so — a gap in the RECORD, not the writer doing nothing); pairing is by
   the writer's LOCAL CLOCK (ordering only, never authority — not a provenance claim); a wide baseline
   is labelled. The demo carries `s-4` deliberately to SHOW the gap state.
-- **§A6.2 — daily now DESCRIBES co-occurrence, briefly** (Peter: *"I want correlations on daily too.
-  Just more brief"*). The honest form: what co-occurred TODAY is a true statement about today; why it
-  happened is not knowable from one day. So the prompt ASKS for the pairing and REFUSES the
-  explanation; `findCausalClaims` still fires on cause + generalisation only ("after your 3pm break
-  you wrote for forty minutes" trips nothing; "the break helped" does).
+- **§A6.2 — THE HEDGE IS THE LINE (Peter relaxed this TWICE, both 2026-07-17 — read them together
+  or the rule reads as toothless).** (1) *"I want correlations on daily too. Just more brief"* ⇒
+  daily DESCRIBES co-occurrence. (2) *"I sort of want them to hazard guesses at causality too. They
+  don't have to commit… 'the break maybe helped' or 'you could've taken more breaks'"* ⇒ daily may
+  GUESS. **He moved the line; he did not delete it:** `"the break helped."` = an assertion one day
+  cannot support → still flagged. `"the break maybe helped."` = a hypothesis announced as one → IN,
+  and wanted. A guess that announces itself is honest; a guess dressed as a finding is not.
+  `findCausalClaims` now SKIPS any hedged sentence (`isHedged`) and fires only on the unhedged
+  assertion. **This sits INSIDE §A6.2, not against it** — the spec's words are "**Confident** pattern
+  claims… permitted only at weekly+", and hedging removes the confidence; we had been reading a ban
+  on the SUBJECT where the spec bans the CERTAINTY. Suggestions must be TETHERED to the window's own
+  evidence: *"you should take a break every 25 minutes"* is a standard he never set — **a hedge does
+  not launder an invented standard**. Second honest limit, accepted: a hedge anywhere in the sentence
+  passes it ("the break definitely helped, maybe"), pinned by a test so it stays known.
 - **FIVE consent tiers** (metadata always · diary notes · **place labels, SEPARATE** · goals+plan ·
   per-document content). Peter split notes from places: one tier by provenance, two very different
   disclosures. Each absence is STATED in the prompt — a model told only what it HAS will fill the

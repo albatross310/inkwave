@@ -116,6 +116,11 @@ async function openPanel(page, flag) {
       shown.includes('Accountability is measuring the writer against a goal THEY SET'), true)
     check('§A5b: with no goals ticked, the prompt says DESCRIBE, DO NOT PUSH',
       shown.includes('NO GOALS WERE SHARED'), true)
+    // §A6.2 RELAXED (Peter, 2026-07-17): hazard guesses, don't commit. The hedge is the line.
+    check('weekly prompt invites hunches, tethered to the window\'s evidence',
+      shown.includes('Guess out loud here too, and suggest things'), true)
+    check('...and refuses a suggestion it cannot ground (a hedge does not launder a standard)',
+      shown.includes('A suggestion you cannot ground is a standard the writer never set'), true)
     check('fixed prompt states the weekly pattern-claim licence',
       shown.includes('genuine pattern claims'), true)
     check('fixed prompt asks for the exact header',
@@ -253,6 +258,34 @@ async function openPanel(page, flag) {
       await panel.locator('[title$="active minutes (measured)"]').count(), 5)
     check('the 92 in the narrative is NOT flagged (Inkwave sent it)',
       txt.includes("Numbers Inkwave can't confirm"), false)
+
+    // ── §A6.2, THE MOVED LINE, in the real UI. The pair is the point: the same claim hedged and
+    //    unhedged must come out differently on the DAILY window, or the hedge is doing nothing. ──
+    await panel.locator('text=Day').first().click()
+    await page.waitForTimeout(700)
+    await readPayload()
+    const dailyCsv = 'session_id,phase,effort,note\ns-1,deep,steady,a settled opening stretch\n'
+      + 's-2,mixed,steady,slower\ns-4,unclear,unclear,no record\ns-3,shallow,light,a few lines'
+    const dailyReply = h => `## Narrative\n\nA steady morning. ${h}\n\n\`\`\`csv\n${dailyCsv}\n\`\`\``
+    const readDaily = async h => {
+      await panel.locator('textarea').nth(1).fill(dailyReply(h))
+      await panel.locator('text=Read it back').click()
+      await page.waitForTimeout(500)
+      return panel.innerText()
+    }
+    const hedged = await readDaily('The break maybe helped, and you could have taken more breaks.')
+    check('a HEDGED guess is NOT flagged — it is what Peter asked for',
+      hedged.includes('stating a cause as fact'), false)
+    const bare = await readDaily('The break helped.')
+    check('...and the SAME claim unhedged IS flagged', bare.includes('stating a cause as fact'), true)
+    check('...with copy that says hunches are welcome, not that causes are banned',
+      bare.includes('Hunches are welcome'), true)
+    await panel.locator('text=Week').first().click()
+    await page.waitForTimeout(700)
+    await readPayload()
+    await reportBox().fill(REPLY)
+    await panel.locator('text=Read it back').click()
+    await page.waitForTimeout(500)
 
     // ── The SPLIT paste: narrative in one box, bare CSV in the other (the copy-code button) ──
     await reportBox().fill(NARRATIVE)

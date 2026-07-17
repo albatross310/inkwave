@@ -4,10 +4,12 @@
 // look like "working" from one side only. Every describe below has both halves.
 
 import { describe, expect, it } from 'vitest'
-import { findCausalClaims, findPersonVerdicts, findUnverifiedNumbers, numbersIn } from './claims'
+import {
+  findCausalClaims, findPersonVerdicts, findUnverifiedNumbers, isHedged, numbersIn,
+} from './claims'
 
 describe('§A6.2 — cause and pattern claims on a daily report', () => {
-  it('FIRES on causal claims', () => {
+  it('FIRES on UNHEDGED causal assertions', () => {
     const cases = [
       'You wrote more in the afternoon because you took a proper break at lunch.',
       'The long gap led to a slower start after it.',
@@ -16,6 +18,7 @@ describe('§A6.2 — cause and pattern claims on a daily report', () => {
       'The morning session drove most of today\'s progress.',
       'You lost momentum due to the interruption at three.',
       'Therefore the shorter sessions suited you better.',
+      'The break helped.',
     ]
     for (const c of cases) {
       expect(findCausalClaims(c), c).toHaveLength(1)
@@ -206,5 +209,63 @@ describe('§A6.2 — the relaxed daily still separates describing from explainin
       'You always write longest right after a break.',
     ]
     for (const c of banned) expect(findCausalClaims(c).length, c).toBeGreaterThan(0)
+  })
+})
+
+
+// ─── PETER MOVED THE LINE (2026-07-17) ──────────────────────────────────────────────────────
+// "I sort of want them to hazard guesses at causality too. They don't have to commit, but
+// something like 'the break maybe helped' or 'you could've taken more breaks' I think would be
+// really helpful."
+//
+// He moved it; he did not delete it. The scan used to fire on causal language AS SUCH, so it
+// would now flag exactly the hunches he asked for. These pin the re-derivation in both
+// directions — and the pairs matter more than either half: the same claim, hedged and unhedged,
+// must come out differently, or the hedge is not what is doing the work.
+describe('§A6.2 — the hedge is the line', () => {
+  it('STAYS QUIET on the hedged guesses Peter asked for BY NAME', () => {
+    const wanted = [
+      'The break maybe helped.',
+      "You could've taken more breaks.",
+      'You could have taken more breaks — you worked four hours straight and the last hour produced nothing.',
+      'My guess is the first session was the one that mattered and the rest was tidying.',
+      'Perhaps the long gap is why the afternoon never got going.',
+      'It seems like the break gave you the thread back, though one day cannot say.',
+      'The morning session might have driven most of the progress.',
+      'Possibly the interruption at three cost you the momentum.',
+      'Hard to say, but the walk probably helped.',
+    ]
+    for (const c of wanted) expect(findCausalClaims(c), c).toEqual([])
+  })
+
+  it('STILL FIRES on the same claim with the hedge removed — the PAIRS are the proof', () => {
+    // If both halves of a pair behaved the same, the hedge would not be the thing being tested.
+    const pairs: [string, string][] = [
+      ['The break maybe helped.', 'The break helped.'],
+      ['Perhaps the long gap is why the afternoon never got going.',
+        'The long gap is why the afternoon never got going.'],
+      ['The morning session might have driven most of the progress.',
+        'The morning session drove most of the progress.'],
+      ['You might always write best after a walk.', 'You always write best after a walk.'],
+      ['Possibly the interruption at three cost you the momentum.',
+        'The interruption at three caused you to lose the momentum.'],
+    ]
+    for (const [hedged, bare] of pairs) {
+      expect(findCausalClaims(hedged), `hedged: ${hedged}`).toEqual([])
+      expect(findCausalClaims(bare).length, `bare: ${bare}`).toBeGreaterThan(0)
+    }
+  })
+
+  it('isHedged only ever looks at sentences a marker already fired on', () => {
+    // "could not find the thread" is ordinary narration containing a hedge word. It carries no
+    // causal marker, so nothing flags it either way — the hedge list never gets a vote on it.
+    expect(findCausalClaims('You could not find the thread this morning.')).toEqual([])
+    expect(isHedged('You could not find the thread this morning.')).toBe(true)
+  })
+
+  it('the honest limit, pinned so nobody mistakes it for a guarantee', () => {
+    // The scan is a marker match, one-directional. A hedge anywhere in the sentence passes it,
+    // including this absurdity. Documented in the module banner; asserted so it stays known.
+    expect(findCausalClaims('The break definitely helped, maybe.')).toEqual([])
   })
 })
