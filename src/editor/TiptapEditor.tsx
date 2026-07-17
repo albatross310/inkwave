@@ -20,6 +20,11 @@ import { Scroll, isTouchDevice } from './Scroll'
 import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
+import {
+  SlotId, BarLayerId, BAR_HANDOFF_MS,
+  overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
+  readToolbarConfig, resolveToolbarRow, mayPersistConfig,
+} from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
@@ -96,47 +101,12 @@ import type { SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/docum
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
 
 // ─── Toolbar slot customisation ───
-// ONE reorderable population (2026-07-11, Peter's round 2): the main-row circles AND the
-// ▲-menu overflow — the S style toggle and ⚙ settings are slots too. SLOT_COUNT ride the
-// row; the rest live in the ▲ drop-up (pool minus row). Only ▲ and ⋮ are fixed.
-type SlotId = 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings' | 'clock'
-const SLOT_KEY = 'inkwave-toolbar-slots'
-const BASE_SLOT_COUNT = 6
-const BASE_DEFAULT_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'style', 'settings']
-const BASE_ALL_SLOTS: SlotId[] = ['bib', 'guide', 'math', 'receipt', 'page', 'style', 'settings']
-
-// The clock (Pomodoro + ledger) is a SLOT like every other — reorderable, and droppable into the ▲
-// overflow — not a button bolted onto the bar. It exists only while `?prodLedger` is on, so the row
-// is 6 for everyone else and there is no width change for a feature they don't have.
-const slotCount = (): number => (prodLedgerEnabled() ? BASE_SLOT_COUNT + 1 : BASE_SLOT_COUNT)
-const defaultSlots = (): SlotId[] => (prodLedgerEnabled() ? [...BASE_DEFAULT_SLOTS, 'clock'] : BASE_DEFAULT_SLOTS)
-const allSlots = (): SlotId[] => (prodLedgerEnabled() ? [...BASE_ALL_SLOTS, 'clock'] : BASE_ALL_SLOTS)
-
-function loadToolbarSlots(): SlotId[] {
-  const count = slotCount()
-  const pool = allSlots() as string[]
-  try {
-    const raw = localStorage.getItem(SLOT_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as unknown
-      if (Array.isArray(parsed)) {
-        // Legacy 4-slot configs (pre style/settings-as-slots) migrate by appending the two buttons
-        // that used to be fixed after the slots — same visual order as before. The clock migrates
-        // the SAME documented way (6 → 7 by appending) when its flag turns on, and is DROPPED again
-        // if the flag goes off, so a stored 7-slot row can't strand an unrenderable id.
-        let next = parsed.filter(id => pool.includes(id as string)) as SlotId[]
-        if (next.length === 4) next = [...next, 'style', 'settings']
-        for (const id of defaultSlots()) if (next.length < count && !next.includes(id)) next.push(id)
-        const slice = next.slice(0, count)
-        const valid = slice.length === count && slice.every(id => pool.includes(id as string))
-        const unique = new Set(slice).size === count
-        if (valid && unique) return slice
-      }
-    }
-  } catch {}
-  return defaultSlots()
-}
-// ─────────────────────────────────
+// The population, the row size, the migration and the bar-layer exclusion all live in ONE place:
+// `editor/toolbarContract.ts`. They are NOT re-declared here. Three lanes take toolbar real
+// estate at once (feat/prod-ledger, feat/music-piece-photo, feat/music-musicxml) and this
+// codebase's recurring wound is two implementations of one rule — so a lane registers a button by
+// adding a member to SlotId + ALL_SLOTS there, and gets the row, the ▲ overflow, the drag-to-swap
+// and the migration for free. Read that file before adding anything to this one.
 
 interface TiptapEditorProps {
   doc: InkwaveDocument
@@ -360,7 +330,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [paperRight, setPaperRight] = useState(0)
   // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
   const [receiptOpen, setReceiptOpen] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)   // review layer: sticky-note comments + track changes
+  // THE SECOND TOOLBAR LAYER — ONE variable, holding ONE id (see toolbarContract.ts). Peter's word
+  // is "mutually exclusive": R and the music bar cannot both own the bar. This was two booleans =
+  // four states, one of them illegal ("both open") and prevented only by the discipline of a
+  // hand-written function; a third layer would have made that four illegal states out of eight.
+  // Now two-at-once is not prevented — it is unrepresentable. A lane owns the bar by adding a
+  // member to BarLayerId and rendering on `activeBar === 'x'`.
+  const [activeBar, setActiveBar] = useState<BarLayerId | null>(null)
+  const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
   // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1, Path 1).
@@ -450,14 +427,34 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [])
 
   // Toolbar customisation slots
-  const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(loadToolbarSlots)
+  // THE LAYOUT FOLLOWS THE DOCUMENT (Peter, 2026-07-17). The chain — doc config → this writer's own
+  // last layout → the first-run six — is `resolveToolbarRow`; it is not re-decided here.
+  const toolbarRead = readToolbarConfig(docRef.current.toolbar)
+  const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(
+    () => resolveToolbarRow(toolbarRead, readStoredRow()),
+  )
   const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
 
   function updateSlots(newSlots: SlotId[]) {
     setToolbarSlots(newSlots)
-    try { localStorage.setItem(SLOT_KEY, JSON.stringify(newSlots)) } catch {}
+    // TWO writes, two meanings. The document keeps this layout (open the score again, get the
+    // score's tools); the writer's own storage becomes the default their NEXT new document
+    // inherits, so curating once is not a chore they repeat per file.
+    saveStoredRow(newSlots)
+    // ...but NEVER write back over a config we merely failed to parse. That read-failure-causes-
+    // write shape is 15 July in miniature — the day a null-for-broken read minted a blank document
+    // over real thesis annotations. A broken toolbar loses less, but the shape is the bug.
+    if (!mayPersistConfig(toolbarRead)) return
+    const updated = {
+      ...docRef.current,
+      toolbar: { v: 1 as const, row: newSlots },
+      updatedAt: new Date().toISOString(),
+    }
+    docRef.current = updated
+    onDocChange(updated)
+    scheduleSave(updated)
   }
 
   const dragIdRef = useRef<SlotId | null>(null)
@@ -689,8 +686,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [toolbarPickerOpen])
 
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
-  const [styleBarOpen, setStyleBarOpen] = useState(false)
+  const styleBarOpen = activeBar === 'style'
   const styleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Close ONE layer, and only if it is the one open — the dismiss paths below (water click, the
+  // style bar's own idle timer, the ▲ picker) each mean "retract the style bar", never "retract
+  // whatever happens to be open". Closing blind here would let the water-click dismiss silently
+  // swallow the review bar.
+  function closeBarLayer(which: BarLayerId) {
+    setActiveBar(a => (a === which ? null : a))
+    if (which === 'style') clearStyleTimer()
+  }
 
   // Clicking the WATER (surface outside the paper), a page GAP, or anywhere non-interactive on the
   // page dismisses the floating style bar (Peter, 2026-07-09: it only auto-hid via its timer).
@@ -700,8 +706,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       const t = e.target as HTMLElement | null
       if (!t || !t.closest('.inkwave-editor-surface')) return          // footer/panels/portals: not ours
       if (t.closest('.ProseMirror, .scas-cycle-card, button, [role="menu"], [role="dialog"], input, select')) return
-      setStyleBarOpen(false)
-      clearStyleTimer()
+      closeBarLayer('style')
       const ed = editorRef.current
       if (ed && !ed.state.selection.empty) {
         ed.chain().setTextSelection(ed.state.selection.head).run()     // collapse → selection bar retracts
@@ -729,22 +734,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const t = setTimeout(() => setNotesReady(true), 260)
     return () => clearTimeout(t)
   }, [reviewOpen])
-  function toggleBar(which: 'style' | 'review') {
+  // The exclusion RULE is pure and lives in toolbarContract.ts (planBarToggle, swept over every
+  // (active, which) pair by its tests). This function is only its hands: it does the timing, the
+  // sequence guard and the style bar's idle timer. Adding a layer changes NOTHING here.
+  function toggleBar(which: BarLayerId) {
     const seq = ++barSeqRef.current
     markBarsAnimating()
-    if (which === 'review') {
-      if (reviewOpen) { setReviewOpen(false); return }
-      if (styleBarOpen) {
-        setStyleBarOpen(false); clearStyleTimer()
-        setTimeout(() => { if (barSeqRef.current === seq) setReviewOpen(true) }, 240)
-      } else setReviewOpen(true)
-    } else {
-      if (styleBarOpen) { setStyleBarOpen(false); clearStyleTimer(); return }
-      if (reviewOpen) {
-        setReviewOpen(false)
-        setTimeout(() => { if (barSeqRef.current === seq) { setStyleBarOpen(true); armStyleTimer() } }, 240)
-      } else { setStyleBarOpen(true); armStyleTimer() }
+    const plan = planBarToggle(activeBar, which)
+    const land = (id: BarLayerId | null) => {
+      setActiveBar(id)
+      if (id === 'style') armStyleTimer()
+      else clearStyleTimer()
     }
+    if (!plan.handoff) { land(plan.open); return }
+    // A different layer is open: it must fully retreat before this one rises (Peter, 2026-07-10 —
+    // pressing S then R had the style bar riding the review bar). The seq guard is what stops a
+    // fast double-tap landing a stale open on top of a newer one.
+    setActiveBar(null)
+    clearStyleTimer()
+    setTimeout(() => { if (barSeqRef.current === seq) land(plan.open) }, BAR_HANDOFF_MS)
   }
 
   // SILENT-SAVE-FAILURE GUARD (2026-07-10: two hours of edits died silently — the save-failed
@@ -795,7 +803,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
-    styleTimerRef.current = setTimeout(() => setStyleBarOpen(false), 5000)
+    styleTimerRef.current = setTimeout(() => closeBarLayer('style'), 5000)
   }
   function clearStyleTimer() {
     if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }
@@ -2918,13 +2926,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 const b = (e.target as HTMLElement).closest('button')
                 if (!b) return
                 if (b.dataset.iwBar) return // S/R toggles own their sequencing (toggleBar) — don't pre-close
-                setStyleBarOpen(false); clearStyleTimer()
-                setReviewOpen(false)
+                setActiveBar(null); clearStyleTimer()
               }}>
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
-                  onClick={() => { setToolbarPickerOpen(o => !o); setStyleBarOpen(false); clearStyleTimer() }}
+                  onClick={() => { setToolbarPickerOpen(o => !o); closeBarLayer('style') }}
                   className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
                   title="Customise toolbar"
                 >
@@ -2935,7 +2942,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   </span>
                 </button>
                 {(() => {
-                  const available = allSlots().filter(id => !toolbarSlots.includes(id))
+                  const available = overflowSlots(toolbarSlots)
                   return (
                     <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
                       style={{ border: '1px solid rgba(92,45,138,0.75)' }}

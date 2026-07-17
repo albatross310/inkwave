@@ -229,7 +229,10 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   zoom = pinch → the font-reflow pipeline (Scroll.tsx touch handlers); browser-native zoom is
   suppressed app-wide on phone (universal `touch-action: pan-x pan-y` — NB touch-action does NOT
   inherit, hence the `*` rule — + gesture*/two-finger-touchmove preventDefault + 16px input floor).
-- **Review layer (IN PROGRESS, branch `feat/review`).** Peter's spec: live suggestion mode (track
+- **Review layer — MERGED AND LIVE ON MASTER (probed 2026-07-17: `origin/feat/review` is an
+  ancestor of `origin/master`, ZERO commits ahead; ReviewBar.tsx and the R button ship on master).
+  This entry said "IN PROGRESS, unmerged" long after it landed** — a lane that refactors "under"
+  it on that basis is reasoning from archaeology. Peter's spec: live suggestion mode (track
   changes on every keystroke, behind a toggle so normal typing is unaffected), comments as sticky
   notes over the wave (not a panel), triggered from the **R** button in the footer toolbar, review
   nav (←/→ + Alt+A accept / Alt+S discard), named annotation sets via a drop-up.
@@ -2302,9 +2305,34 @@ write shim, so metadata can say a PDF exists with no local bytes).
   Page/Guide/Math all carry the class) while the editor owns focus; real form fields
   (input/textarea/select/contenteditable) are exempt. New footer drop-ups MUST carry
   `iw-touch-guard` or their taps will retract the keyboard.
+- **THE TOOLBAR CONTRACT IS `editor/toolbarContract.ts` (2026-07-17) — ONE file, and it is the
+  only way in.** Three lanes took toolbar real estate at once (prod-ledger's clock, music's bar,
+  the media import), which is this repo's "two implementations of one rule" wound pre-authorised.
+  So: a lane registers a button by adding a member to `SlotId` + `ALL_SLOTS` (+ `IMPLEMENTED_SLOTS`
+  when its button actually renders — ONE predicate covers both "no lane yet" (`media`) and "behind
+  a default-OFF flag" (`clock` → `prodLedgerEnabled`); a slot that cannot render must never paint a
+  dead circle, nor strand a stored id when a flag goes off), and
+  owns the second bar row by adding a member to `BarLayerId`. Nothing else. `migrateSlots` is
+  generational (KEEP what is valid in the writer's order, FILL from canonical order, never reset —
+  the old `parsed.length === 4` rule stranded every other shape); `planBarToggle` makes Peter's
+  "mutually exclusive" STRUCTURAL — the shipped two booleans were four states with one illegal,
+  prevented only by one hand-written function. **A SLOT IS A TRIGGER, NEVER AN OWNER**: the ◈
+  ReceiptPanel is the precedent Peter named for two access paths (its own button + the ▲ entry
+  write ONE lifted `receiptOpen`), and it is how the clock's slot and the top-right countdown stay
+  one implementation. 26 unit tests, all four mutants proved to die; `scripts/toolbar.prove.mjs`
+  drives the real app (row/drawer partition, curated order survives, S↔R exclusion, day+night).
 - **Toolbar slots are ONE population (2026-07-12):** the 6 main-row circles + the ▲ drop-up
-  overflow (S style and ⚙ settings are slots too; only ▲/⋮ fixed). `inkwave-toolbar-slots`
-  stores 6 (legacy 4 migrates by appending style,settings). Touch: hold-drag reorders the row
+  overflow (S style and ⚙ settings are slots too — CONFIRMED still true; only ▲/⋮ fixed).
+  Peter 2026-07-17: the row is SIX because "it fits well on phone" and phone/desktop must stay
+  continuous; the population grows freely because "it's only 1 extra click to access a button
+  behind the arrow" — ▲ is the app drawer, not a cupboard ("a toolbar is like your app homepage").
+  `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings) — but it is now
+  only the writer's DEFAULT for their next new document: **the layout follows the .studio**
+  (`doc.toolbar`, `ToolbarConfig`). Chain: doc config → the writer's own last layout → the
+  first-run six (page, style, info, settings, media import, review). A received document brings its
+  author's layout, which is the feature; it can never hide ▲/⋮ or name a button this build lacks,
+  because every path resolves through `migrateSlots`. NOT anchored — `contentHash` takes contentJson
+  only. Touch: hold-drag reorders the row
   (insertion semantics, FLIP previews) and hold-drag a ▲ entry ONTO a row slot to swap it in;
   desktop keeps HTML5 drag. During any drag the circle discs go opaque
   (`--iw-slot-drag-bg`; night token in the nightable block) so the lifted circle passes OVER
