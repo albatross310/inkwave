@@ -17,8 +17,8 @@ import { getEditorSchema, nodeFromContentJson, schemaSpec } from './editorSchema
 import { makeCanvasMeasure, makeFontLoaded, type Measure } from './arithmeticLayout'
 import {
   buildRenderModel, paintPage, paintMapStrip, canonicalGeomFromSettings,
-  pageContainingPos, anchorPosOfPage,
-  type RenderGeom, type RenderModel,
+  pageContainingPos, anchorPosOfPage, makeBlockLayoutCache,
+  type RenderGeom, type RenderModel, type BlockLayoutCache,
 } from './textRender'
 // The citeBox cache key MUST be the same one PaginationExtension's DOM canonical measure harvested
 // under (it calls harvestCiteBoxes(doc, …, getCitationStyle(), bibProvider.getVersion(), 18)) — a
@@ -167,6 +167,11 @@ export interface ProbeApi {
   modelMem(n: number): Record<string, unknown>
   /** WHOLE-DOCUMENT + memory proof at real session scale (N versions through the store). */
   storeProof(versions: number, touch: boolean): Record<string, unknown>
+  /** THE INCREMENTAL PROOF: incremental == full byte-identical, with the reuse rate BESIDE the
+   *  timing, and a poisoned-cache negative that proves the reuse path actually ran. */
+  incProof(o: { versions: number; mode: 'realistic' | 'nothing' | 'everything'; poison?: boolean }): Record<string, unknown>
+  /** Debug seam: does a JSON round-trip through the standalone schema preserve the model? */
+  roundTripCensus(): Record<string, unknown>
   /** THE CRUX: can a page be laid out from its own break position, WITHOUT the prefix? */
   windowProof(): Record<string, unknown>
   /** WINDOW MODE as BUILT: exact vs the full model, and actually O(window) not O(tail). */
@@ -799,6 +804,168 @@ export function installTextRenderProbe(editor: Editor): void {
     // rather than asserting it: (a) every cached version has an origin for EVERY page (a short
     // pageTop array = pages that render blank — the exact bug the first pixel diff caught), and
     // (b) what N versions actually cost, with eviction NAMED when coverage gets bounded.
+    roundTripCensus() {
+      harvestNow()
+      const g = liveGeom()
+      const live = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
+      const json = editor.state.doc.toJSON()
+      const parsed = nodeFromContentJson(json)
+      const rt = parsed ? buildRenderModel(parsed, g, measure, fontLoaded, buildOpts()) : null
+      const cen = (m: RenderModel) => { const c: Record<string, number> = {}; for (const b of m.blocks) c[b.type + ':' + b.kind] = (c[b.type + ':' + b.kind] ?? 0) + 1; return c }
+      return {
+        liveBlocks: live.blocks.length, liveLines: live.lines.length, liveCensus: cen(live),
+        parsedOk: !!parsed,
+        rtBlocks: rt?.blocks.length ?? -1, rtLines: rt?.lines.length ?? -1, rtCensus: rt ? cen(rt) : null,
+        jsonTopLevel: (json as { content?: unknown[] }).content?.length ?? -1,
+        docChildCount: editor.state.doc.childCount,
+        parsedChildCount: parsed?.childCount ?? -1,
+      }
+    },
+
+    // ── THE INCREMENTAL PROOF ────────────────────────────────────────────────────────────────
+    // Peter: "if we can get it under 1s we can just load it when the snapshots screen loads up."
+    //
+    // WHAT MUST BE TRUE AT ONCE, or the number is worthless:
+    //  (1) incremental == full, BYTE-IDENTICAL. An incremental build that is subtly wrong paints the
+    //      right words on the WRONG PAGE and looks completely fine. Compared at LINE level (top/pos/
+    //      startChar/endChar/height per line), not just the table's page starts — a drift inside a
+    //      page that happens not to move a break would pass a starts-only check.
+    //  (2) THE REUSE RATE BESIDE THE TIMING. 82ms → 8ms at 0% reuse means something else happened.
+    //  (3) THE POISONED-CACHE NEGATIVE. If a corrupted entry does NOT change the output, the hit path
+    //      never ran and every "identical" above is VACUOUS — the build silently fell back to full.
+    //      This is the trace-the-pass instrument: it proves the thing being measured is the thing.
+    //  (4) BOTH FIXTURE NEGATIVES. `nothing` (100% reuse) cannot test the DELTA path; `everything`
+    //      (0% reuse) cannot test REUSE. Only `realistic` exercises both, so only it can be believed
+    //      — and the other two prove the metric moves in the right directions rather than being a
+    //      constant.
+    incProof(o) {
+      harvestNow()
+      const g = liveGeom()
+      const versions = o.versions
+      const baseJson = editor.state.doc.toJSON() as { type: string; content: unknown[] }
+      const nBlocks = baseJson.content.length
+
+      // ── VERSION SEQUENCE ────────────────────────────────────────────────────────────────────
+      // Edits land MID-PARAGRAPH (never at a block boundary) so a change cannot be mistaken for a
+      // block insertion, and they rotate through the document so successive versions shift every
+      // break BELOW them across page boundaries — which is exactly the delta the cache must survive.
+      const edit = (json: string, v: number): { type: string; content: unknown[] } => {
+        const d = JSON.parse(json) as { type: string; content: Array<Record<string, unknown>> }
+        const hit = (bi: number) => {
+          const b = d.content[bi] as { content?: Array<{ type: string; text?: string }> }
+          if (!b || !Array.isArray(b.content)) return false
+          const leaf = b.content.find((c) => c.type === 'text' && typeof c.text === 'string' && c.text.length > 40)
+          if (!leaf || !leaf.text) return false
+          const at = Math.floor(leaf.text.length / 2) // MID-paragraph, mid-text-leaf
+          leaf.text = leaf.text.slice(0, at) + ` v${v}x ` + leaf.text.slice(at)
+          return true
+        }
+        if (o.mode === 'nothing') return d
+        if (o.mode === 'everything') { for (let i = 0; i < d.content.length; i++) hit(i) ; return d }
+        // realistic: a couple of blocks per version, rotating (a real snapshot diff is tiny)
+        hit((v * 7) % nBlocks); hit((v * 13 + 3) % nBlocks)
+        return d
+      }
+
+      // Line-level signature. FNV-1a over every line's geometry AND doc position.
+      const modelSig = (m: RenderModel): string => {
+        let h = 0x811c9dc5 >>> 0
+        const num = (n: number) => { const v = Math.round(n * 64) | 0; for (let i = 0; i < 4; i++) h = Math.imul(h ^ ((v >>> (i * 8)) & 255), 0x01000193) >>> 0 }
+        for (const l of m.lines) { num(l.top); num(l.pos); num(l.startChar); num(l.endChar); num(l.height); num(l.blockIdx) }
+        num(m.pages)
+        for (const t of m.pageTop) num(t)
+        return `${h.toString(36)}:${m.lines.length}:${m.pages}`
+      }
+
+      const cache: BlockLayoutCache = makeBlockLayoutCache()
+      const baseStr = JSON.stringify(baseJson)
+
+      // WARM IN-PAGE BEFORE TIMING — JIT tier-up is worth 291.7 → 81.8ms here and would otherwise be
+      // attributed to whichever build ran first (which is always `full`, flattering the cache ~3×).
+      // The warmup uses a THROWAWAY cache so it cannot seed the measured one.
+      const warmCache = makeBlockLayoutCache()
+      for (let i = 0; i < 6; i++) {
+        const d = nodeFromContentJson(edit(baseStr, 900 + i))
+        if (d) { buildRenderModel(d, g, measure, fontLoaded, buildOpts()); buildRenderModel(d, g, measure, fontLoaded, { ...buildOpts(), blockCache: warmCache }) }
+      }
+
+      const rows: Array<Record<string, unknown>> = []
+      let identical = 0, differing = 0
+      const firstDiff: Array<Record<string, unknown>> = []
+      let parseTotal = 0, fullTotal = 0, incTotal = 0
+
+      for (let v = 0; v < versions; v++) {
+        const json = edit(baseStr, v)
+        const p0 = performance.now()
+        const doc = nodeFromContentJson(json)
+        const parseMs = performance.now() - p0
+        if (!doc) { rows.push({ v, err: 'parse returned null' }); differing++; continue }
+
+        const f0 = performance.now()
+        const full = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
+        const fullMs = performance.now() - f0
+
+        const h0 = cache.stats.hits, m0 = cache.stats.misses
+        const i0 = performance.now()
+        const inc = buildRenderModel(doc, g, measure, fontLoaded, { ...buildOpts(), blockCache: cache })
+        const incMs = performance.now() - i0
+        const hits = cache.stats.hits - h0, misses = cache.stats.misses - m0
+        const reuse = hits + misses > 0 ? hits / (hits + misses) : 0
+
+        const sf = modelSig(full), si = modelSig(inc)
+        if (sf === si) identical++
+        else { differing++; if (firstDiff.length < 3) firstDiff.push({ v, full: sf, inc: si, fullLines: full.lines.length, incLines: inc.lines.length }) }
+
+        parseTotal += parseMs; fullTotal += fullMs; incTotal += incMs
+        rows.push({ v, parseMs: +parseMs.toFixed(2), fullMs: +fullMs.toFixed(2), incMs: +incMs.toFixed(2), hits, misses, reuse: +reuse.toFixed(3), same: sf === si })
+      }
+
+      // ── THE POISONED-CACHE NEGATIVE ─────────────────────────────────────────────────────────
+      // Corrupt ONE live entry's geometry, rebuild, and require the output to CHANGE. If it does
+      // not, the hit path never ran — the build silently did a full layout and every `same: true`
+      // above proved nothing at all.
+      let poison: Record<string, unknown> | null = null
+      if (o.poison) {
+        const doc = nodeFromContentJson(edit(baseStr, 0))
+        if (doc) {
+          const clean = modelSig(buildRenderModel(doc, g, measure, fontLoaded, { ...buildOpts(), blockCache: cache }))
+          const k = [...cache.map.keys()].find((key) => (cache.map.get(key)?.relTops.length ?? 0) > 0)
+          const entry = k ? cache.map.get(k) : undefined
+          if (entry) {
+            const was = entry.relTops[0]
+            entry.relTops[0] = was + 999 // a shift no real layout could produce
+            const dirty = modelSig(buildRenderModel(doc, g, measure, fontLoaded, { ...buildOpts(), blockCache: cache }))
+            entry.relTops[0] = was
+            const restored = modelSig(buildRenderModel(doc, g, measure, fontLoaded, { ...buildOpts(), blockCache: cache }))
+            poison = {
+              poisonedEntryFound: true, changedOutput: clean !== dirty, restoredMatches: clean === restored,
+              clean, dirty, restored,
+            }
+          } else poison = { poisonedEntryFound: false }
+        }
+      }
+
+      return {
+        mode: o.mode, versions, blocks: nBlocks,
+        identical, differing, firstDiff,
+        byteIdentical: differing === 0,
+        parseMsPerVersion: +(parseTotal / versions).toFixed(2),
+        fullMsPerVersion: +(fullTotal / versions).toFixed(2),
+        incMsPerVersion: +(incTotal / versions).toFixed(2),
+        speedup: +(fullTotal / Math.max(0.001, incTotal)).toFixed(2),
+        reuseMean: +(rows.reduce((a, r) => a + ((r.reuse as number) ?? 0), 0) / Math.max(1, rows.length)).toFixed(3),
+        // THE HONEST WIRED TOTAL: /snapshot must PARSE before it can build. A build cache cannot
+        // touch that cost, so quoting the build alone would understate the thing Peter judges.
+        wiredSecFull: +(((parseTotal + fullTotal)) / 1000).toFixed(2),
+        wiredSecInc: +(((parseTotal + incTotal)) / 1000).toFixed(2),
+        buildOnlySecInc: +(incTotal / 1000).toFixed(2),
+        parseSec: +(parseTotal / 1000).toFixed(2),
+        cacheEntries: cache.stats.entries, cacheEvicted: cache.stats.evicted,
+        poison,
+        rows: rows.slice(0, 6),
+      }
+    },
+
     storeProof(versions, touch) {
       harvestNow()
       const g = liveGeom()
