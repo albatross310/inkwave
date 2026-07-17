@@ -87,8 +87,12 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
       setError('Open a document first — a score attaches to the writing it is about.')
       return
     }
-    const updated = await updateDocumentMusic(docId, apply)
-    if (!updated) setError('Your document could not be found, so the score wasn’t attached to it.')
+    const r = await updateDocumentMusic(docId, apply)
+    // All three outcomes, said out loud. "Couldn't read your document" and "you have no document"
+    // are different facts, and telling a student the second when the first is true is how they come
+    // to believe their essay is gone.
+    if (r.kind === 'absent') setError('Your document could not be found, so the score wasn’t attached to it.')
+    else if (r.kind === 'error') setError(`Your document couldn’t be read, so the score wasn’t attached. Nothing was changed. (${r.error.message})`)
   }
 
   const addExcerpt = async (tx: Transclusion) => {

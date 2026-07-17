@@ -129,6 +129,12 @@ describe('MusicPanel — importing a score ATTACHES it to the open document (§B
     return f
   }
 
+  async function found(o: typeof import('../storage/opfs'), id: string) {
+    const r = await o.readDocument(id)
+    if (r.kind !== 'found') throw new Error(`expected document ${id}, got ${r.kind}`)
+    return r.doc
+  }
+
   beforeEach(async () => {
     vi.resetModules()
     resetOpfsShim()
@@ -146,12 +152,12 @@ describe('MusicPanel — importing a score ATTACHES it to the open document (§B
     await user.upload(screen.getByLabelText(/Import a score/i), scoreFile())
 
     await waitFor(async () => {
-      const d = await opfs.loadDocument('essay-1')
-      expect(d!.music!.masters).toHaveLength(1)
+      const d = await found(opfs, 'essay-1')
+      expect(d.music!.masters).toHaveLength(1)
     })
-    const d = await opfs.loadDocument('essay-1')
-    expect(d!.music!.masters[0].contentHash).toMatch(/^[0-9a-f]{64}$/)
-    expect(d!.music!.annotations).toEqual([])          // §B4's slot, hashed from day one
+    const d = await found(opfs, 'essay-1')
+    expect(d.music!.masters[0].contentHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(d.music!.annotations).toEqual([])          // §B4's slot, hashed from day one
     // §B6: the document carries an ADDRESS, never the notation.
     expect(JSON.stringify(d!.music)).not.toMatch(/<note|score-partwise/i)
   })

@@ -45,6 +45,15 @@ const meta = (over: Partial<MasterMeta> = {}): MasterMeta => ({
   ...over,
 })
 
+
+/** Read a document that MUST exist. `readDocument` returns a DocRead union — collapsing it with a
+ *  bare `!` would make an 'error' read look identical to a missing field and fail somewhere else. */
+async function found(opfs: typeof import('../storage/opfs'), id: string) {
+  const r = await opfs.readDocument(id)
+  if (r.kind !== 'found') throw new Error(`expected document ${id}, got ${r.kind}`)
+  return r.doc
+}
+
 const CONTENT: TiptapJSON = {
   type: 'doc',
   content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Bars 2-3 modulate.' }] }],
@@ -185,9 +194,9 @@ describe('THE GAP IS CLOSED — the producer really makes a document v:4', () =>
     await opfs.saveDocument(doc())
     await attachMod.updateDocumentMusic('essay-1', m => attachMaster(m, meta()))
 
-    const reloaded = await opfs.loadDocument('essay-1')
-    expect(reloaded!.music!.masters[0]).toMatchObject({ id: 'mx_1', contentHash: 'a'.repeat(64) })
-    expect(reloaded!.music!.annotations).toEqual([]) // §B4's slot, hashed from day one
+    const reloaded = await found(opfs, 'essay-1')
+    expect(reloaded.music!.masters[0]).toMatchObject({ id: 'mx_1', contentHash: 'a'.repeat(64) })
+    expect(reloaded.music!.annotations).toEqual([]) // §B4's slot, hashed from day one
   })
 
   it('an attached document snapshots as v:4 and ANCHORS the notation', async () => {
@@ -199,7 +208,7 @@ describe('THE GAP IS CLOSED — the producer really makes a document v:4', () =>
 
     const tx = makeTransclusion('mx_1', '2', '3')
     await attachMod.updateDocumentMusic('essay-1', m => attachExcerpt(attachMaster(m, meta()), tx))
-    const updated = (await opfs.loadDocument('essay-1'))!
+    const updated = await found(opfs, 'essay-1')
 
     const snap = (await snapshots.createSnapshotIfChanged(updated, 'manual', [], undefined, true))!
     expect(snap.musicHash).toMatch(/^[0-9a-f]{64}$/)
@@ -213,7 +222,7 @@ describe('THE GAP IS CLOSED — the producer really makes a document v:4', () =>
   it('a document with no score attached still snapshots as v:1 (no regression)', async () => {
     const { bundleHash } = await import('../provenance/hash')
     await opfs.saveDocument(doc({ id: 'plain' }))
-    const snap = (await snapshots.createSnapshotIfChanged((await opfs.loadDocument('plain'))!, 'manual', [], undefined, true))!
+    const snap = (await snapshots.createSnapshotIfChanged(await found(opfs, 'plain'), 'manual', [], undefined, true))!
     expect(snap.musicHash).toBeUndefined()
     expect(snap.bundleHash).toBe(await bundleHash(snap.contentHash, []))
   })
@@ -226,8 +235,8 @@ describe('THE GAP IS CLOSED — the producer really makes a document v:4', () =>
     await attachMod.updateDocumentMusic('essay-1', m => attachMaster(m, meta()))
     await attachMod.updateDocumentMusic('essay-1', m => detachMaster(m, 'mx_1'))
 
-    const reloaded = await opfs.loadDocument('essay-1')
-    expect('music' in reloaded!).toBe(false)
+    const reloaded = await found(opfs, 'essay-1')
+    expect('music' in reloaded).toBe(false)
   })
 
   it('touches ONLY music — it never clobbers what the writer typed', async () => {
@@ -242,14 +251,18 @@ describe('THE GAP IS CLOSED — the producer really makes a document v:4', () =>
 
     await attachMod.updateDocumentMusic('essay-1', m => attachMaster(m, meta()))
 
-    const reloaded = await opfs.loadDocument('essay-1')
-    expect(reloaded!.contentJson).toEqual(typed)   // the later text survived
-    expect(reloaded!.title).toBe('Renamed')
-    expect(reloaded!.music!.masters).toHaveLength(1)
+    const reloaded = await found(opfs, 'essay-1')
+    expect(reloaded.contentJson).toEqual(typed)   // the later text survived
+    expect(reloaded.title).toBe('Renamed')
+    expect(reloaded.music!.masters).toHaveLength(1)
   })
 
   it('reports a missing document rather than dropping the attachment silently', async () => {
-    expect(await attachMod.updateDocumentMusic('no-such-doc', m => attachMaster(m, meta()))).toBeNull()
+    // 'absent' — genuinely no such document. Distinct from 'error' (could not find out), which must
+    // never be reported as absence: telling a student their essay doesn't exist when the read merely
+    // failed is how they conclude their work is gone.
+    expect(await attachMod.updateDocumentMusic('no-such-doc', m => attachMaster(m, meta())))
+      .toEqual({ kind: 'absent' })
   })
 
   it('activeDocumentId reads the editor’s key, and is null when there is none', () => {

@@ -107,25 +107,39 @@ export function unusedMasters(music: MusicAttachments): MusicMasterRef[] {
 }
 
 /**
- * Apply a change to the ACTIVE document's music and persist it.
+ * The outcome of attaching. A discriminated union, mirroring `storage/opfs`'s own `DocRead`, and for
+ * the same reason: **"could not find out" is not "not there"**. An earlier version of this function
+ * returned `InkwaveDocument | null` and collapsed those two — so a failed read in a private window
+ * reported "no document" and the student was told their essay didn't exist. The compiler now forces
+ * every caller to say which one it means.
+ */
+export type AttachResult =
+  | { kind: 'saved'; doc: InkwaveDocument }
+  | { kind: 'absent' }                      // genuinely no such document
+  | { kind: 'error'; error: Error }         // the read failed — NOTHING was written
+
+/**
+ * Apply a change to a document's music and persist it.
  *
  * Read-modify-write against OPFS on purpose: the editor owns `contentJson` and may be saving it
  * concurrently, so we re-read immediately before writing and touch ONLY `music`. Holding a document
  * in memory here and writing it back whole would clobber whatever the writer typed while the score
- * panel was open — the same class of bug as the snapshot truncation incident (CLAUDE.md: write-backs
- * must never assume they hold the newest copy).
+ * panel was open — the same class of bug as the snapshot truncation incident (CLAUDE.md: a write-back
+ * must never assume it holds the newest copy).
  *
- * Returns the updated document, or null when there is no active document to attach to (the student
- * opened /music without ever having opened the editor) — the caller must SAY so rather than silently
- * dropping the attachment on the floor.
+ * And it obeys `DocRead`'s rule literally: **never write to a target you have not just read.** On a
+ * read error we return `{kind:'error'}` and write NOTHING — writing a document we failed to read
+ * would replace an essay we could not see with one carrying only the fields we happened to hold.
  */
 export async function updateDocumentMusic(
   documentId: string,
   apply: (music: MusicAttachments) => MusicAttachments,
-): Promise<InkwaveDocument | null> {
-  const { loadDocument, saveDocument } = await import('../storage/opfs')
-  const doc = await loadDocument(documentId)
-  if (!doc) return null
+): Promise<AttachResult> {
+  const { readDocument, saveDocument } = await import('../storage/opfs')
+  const read = await readDocument(documentId)
+  if (read.kind === 'absent') return { kind: 'absent' }
+  if (read.kind === 'error') return { kind: 'error', error: read.error }
+  const doc = read.doc
 
   const next = apply(musicOf(doc))
   // Drop the key entirely when nothing is attached, so a document that never carried a score — or
@@ -137,7 +151,7 @@ export async function updateDocumentMusic(
     : { ...doc, music: next }
 
   await saveDocument(updated)
-  return updated
+  return { kind: 'saved', doc: updated }
 }
 
 /** The document the writer currently has open. Mirrors `storage/openDoc.ts`'s key. */
