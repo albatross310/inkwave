@@ -11,6 +11,7 @@ import { importMaster, listMasters, loadMasterXml, type MasterMeta } from './mas
 import { parseMusicXml } from './parse'
 import { makeTransclusion, resolveTransclusion, type ResolvedExcerpt, type Transclusion } from './transclusion'
 import { ScorePlayer } from './player'
+import { activeDocumentId, attachExcerpt, attachMaster, updateDocumentMusic } from './attach'
 import { SIMPLE_SCALE } from './scoreFixtures'
 import type { Score } from './score'
 
@@ -23,6 +24,8 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [excerpts, setExcerpts] = useState<ResolvedExcerpt[]>([])
   const [showLibrary, setShowLibrary] = useState(false)
+  // Which essay these excerpts attach to (§B5/§B6). Read once — the writer's open document.
+  const [docId] = useState<string | null>(() => activeDocumentId())
 
   const refresh = useCallback(async () => {
     try { setMasters(await listMasters()) } catch { /* no OPFS → the list stays empty */ }
@@ -48,6 +51,11 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
       const xml = await loadMasterXml(meta.id)
       if (!xml) throw new Error('The score was imported but could not be read back.')
       setActive({ meta, xml, score: parseMusicXml(xml) })
+      // ATTACH TO THE DOCUMENT (§B5) — and note this call is the whole point of the lane's own
+      // gap: the attach originally lived ONLY in openMaster, so importing a file (the PRIMARY
+      // path) stored the master, rendered it, and silently anchored NOTHING. Every route that
+      // brings a master into view must attach it; MusicPanel.test.tsx drives THIS one.
+      await attach(m => attachMaster(m, meta))
       if (deduped) setError(`You already had “${meta.title || meta.fileName}” — opening your copy.`)
     } catch (e) {
       // Loud, specific, and actionable — never a silent empty view.
@@ -62,15 +70,33 @@ export function MusicPanel({ demo = false }: { demo?: boolean }) {
       if (!xml) throw new Error(`“${meta.title || meta.fileName}” is listed but missing on this device.`)
       setActive({ meta, xml, score: parseMusicXml(xml) })
       setExcerpts([])
+      // ATTACH TO THE DOCUMENT (§B5). Re-attaching an id REFRESHES its contentHash, which is how a
+      // corrected score reaches the anchored record. Without this write nothing is ever v:4 and the
+      // whole §B5 path is unreachable — the gap this producer exists to close.
+      await attach(m => attachMaster(m, meta))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That score could not be opened.')
     }
   }
 
+  /** Apply a change to the open essay's attached music, and say so when there is no essay. */
+  const attach = async (apply: Parameters<typeof updateDocumentMusic>[1]) => {
+    if (!docId) {
+      // Never silently drop the attachment: without a document there is nothing to anchor to, and a
+      // student who then anchored their essay would find the score simply absent from the record.
+      setError('Open a document first — a score attaches to the writing it is about.')
+      return
+    }
+    const updated = await updateDocumentMusic(docId, apply)
+    if (!updated) setError('Your document could not be found, so the score wasn’t attached to it.')
+  }
+
   const addExcerpt = async (tx: Transclusion) => {
     try {
-      setExcerpts(prev => [...prev, ...[]]) // keep referential churn obvious
+      // Resolve FIRST: an excerpt that cannot render (bad bar range, ambiguous number) must never
+      // reach the document, or the anchored record would assert bars that don't resolve.
       const resolved = await resolveTransclusion(tx)
+      await attach(m => attachExcerpt(m, tx))
       setExcerpts(prev => [...prev, resolved])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That excerpt could not be inserted.')
