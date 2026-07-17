@@ -270,6 +270,7 @@ export interface DocGoals {
 // inside contentJson, so it persists with the content — no separate field needed.
 
 import type { ToolbarConfig } from '../editor/toolbarContract'
+import type { MediaAsset } from '../media/types'
 
 export interface InkwaveDocument {
   id: string
@@ -306,6 +307,22 @@ export interface InkwaveDocument {
   // ─── Email layer (§B2.1) ─────────────────────────────────────────────────
   docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
   email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
+
+  // ─── Imported media (2026-07-17) ─────────────────────────────────────────
+  // Peter: "a photo import button (which has photo or audio or video)" — general, into any
+  // document. REFERENCES ONLY: the bytes live in OPFS (`library/media/`), exactly as an embedded
+  // source PDF's do (`pdfName` above). A .studio that inlined a 20MB video would re-break every
+  // load-performance rule the PDF precedent exists to keep.
+  //
+  // ⚠ NOT ANCHORED YET, AND THAT IS AN OPEN RULING, NOT A DECISION MADE HERE. `bundleHash` is v:1
+  // /v:2/v:3/v:4 (content · bib · email · music) and this adds no version, so a media asset is
+  // currently OUTSIDE what Bitcoin commits to — the PDF precedent (bytes unanchored) rather than
+  // the music precedent (masters anchored by {id, contentHash} in v:4). That is defensible while
+  // media is a reference the prose does not depend on, and it stops being defensible the moment a
+  // photo is part of the argument. Do not fold it into a bundle version without Peter's ruling —
+  // and note `musicHash.test.ts` pins v:1 against a hand-computed literal, so an attempt to
+  // sneak it in fails a test that already exists.
+  media?: MediaAsset[]
 
   // ─── Toolbar layout (2026-07-17) ─────────────────────────────────────────
   // Peter: "we should encode the toolbar configuration into a .studio document" — the layout is

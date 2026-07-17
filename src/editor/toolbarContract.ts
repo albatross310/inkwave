@@ -87,8 +87,11 @@ const SLOT_LIVE: Record<SlotId, () => boolean> = {
   settings: () => true,
   // feat/prod-ledger — the Pomodoro/ledger drop-up. Default OFF; the countdown is the other door.
   clock: prodLedgerEnabled,
+  // LIVE 2026-07-17 — the media-import lane landed, and this is the one line that made it appear
+  // (row, ▲ drawer, drag-to-swap and migration all followed). It is now in Peter's first-run six
+  // for real, so no first-run writer falls through to `bib` any more.
+  media: () => true,
   // Registered, not yet built. Flip to `() => true` in the same line the button starts rendering.
-  media: () => false,   // awaiting the media-import lane (photo/audio/video) — Peter's six names it
   music: () => false,   // awaiting feat/music-piece-photo
 }
 

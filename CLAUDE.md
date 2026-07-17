@@ -211,6 +211,30 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   (slow, often blocked, and the one PDF path through our server) — sources embed files only;
   legacy `pdfUrl` metadata is inert. Haiku page-offset
   detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
+- **Media import (2026-07-17, `src/media/`, LIVE — no flag).** Peter's "photo import button (which
+  has photo or audio or video)" — GENERAL, into any document, and the prerequisite for the music
+  lane's "turn this photo into a piece" and §A5's practice recordings. `mediaStore.ts` REUSES
+  `writeOpfsFile` + `blobToBase64`/`base64ToBlob` from `citations/pdfStore` rather than copying them
+  (a copy would re-acquire both bugs those primitives exist to fix — WebKit has NO createWritable and
+  savePdf threw on iOS until the worker shim; the hand-rolled btoa was a 20MB main-thread stall per
+  save). Bytes in OPFS `library/media/<id>.<ext>`; the document carries only `media?: MediaAsset[]` —
+  a .studio that inlined a 20MB video would re-break every load-performance rule the PDF precedent
+  exists to keep. **ONE importer** (`importMedia`): Peter's two paths (media import → music bar →
+  label it; music panel → import directly) CONVERGE on it, so the second is a CALLER of the first,
+  never a parallel road — the music lane has no file input, no OPFS write and no size rule of its own.
+  REFUSES rather than guesses: an unknown MIME is never stored as a photo (a file the writer could
+  never open again), an oversized file is NAMED not truncated (the email lane's rule), and a failed
+  write yields NO asset — a reference without bytes is the shape of every "the file is gone" bug here.
+  **⚠ A PHOTO LIVES IN A DOCUMENT; IT DOES NOT BECOME ONE** — this AGREES with the music lane ("§1
+  says the Piece IS a `.studio`") rather than competing: import makes an ASSET, and "turn this photo
+  into a piece" READS one to produce a `docType:'music'` document. Every inline image minting its own
+  .studio is the parallel-container mistake that lane just deleted.
+  **⚠ TWO OPEN RULINGS, Peter's, deliberately not guessed:** (1) media is NOT anchored — `bundleHash`
+  is v:1/v:2/v:3/v:4 and this adds no version, so it takes the PDF precedent (bytes unanchored), not
+  the music one (masters anchored by {id,contentHash}). Defensible while media is a reference the
+  prose does not depend on; NOT once a photo is part of the argument. (2) There is no `Image` node in
+  the schema and no `@tiptap/extension-image`, so a photo cannot yet be placed IN the prose — adding
+  one touches `pmToText` → `contentHash` → Bitcoin, i.e. ruling (1) again.
 - **Editor chrome.** `Scroll.tsx` — the fixed full-region scroll container is opt-in via the `fill`
   prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make
   it fixed there or it covers the diff panel). Solid styled scrollbar + inset `::before` so the fixed
@@ -2338,7 +2362,8 @@ write shim, so metadata can say a PDF exists with no local bytes).
   `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings) — but it is now
   only the writer's DEFAULT for their next new document: **the layout follows the .studio**
   (`doc.toolbar`, `ToolbarConfig`). Chain: doc config → the writer's own last layout → the
-  first-run six (page, style, info, settings, media import, review). A received document brings its
+  first-run six (page, style, info, settings, media import, review — ALL SIX LIVE since the media lane
+  landed 2026-07-17; the `media`→`bib` fallthrough is retired). A received document brings its
   author's layout, which is the feature; it can never hide ▲/⋮ or name a button this build lacks,
   because every path resolves through `migrateSlots`. NOT anchored — `contentHash` takes contentJson
   only. Touch: hold-drag reorders the row
@@ -2438,7 +2463,9 @@ block; components don't change.
    `border-stone*`, `hover:bg-stone-50/100`, inputs/selects, and any `[class*="5c2d8a"]`/`[class*="9b5ccc"]`
    arbitrary purple class. So plain Tailwind utility panels theme themselves once they have `iw-nightable`.
 
-Panels already migrated: CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
+Panels already migrated: MediaMenu (`components/MediaMenu.tsx` — the toolbar's media-import slot:
+photo/audio/video; PORTALED, so it carries `iw-touch-guard` + `iw-nightable` itself rather than
+inheriting them), CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
 ProductivityReportModal, ProductivityPanel (`/productivity`), the ledger CLOCK DROP-UP

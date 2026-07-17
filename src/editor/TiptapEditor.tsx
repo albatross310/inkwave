@@ -69,6 +69,7 @@ const ProductivityReportModal = lazy(() =>
 )
 import { prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
+import { MediaMenu } from '../components/MediaMenu'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { PageMenu } from '../components/PageMenu'
@@ -2607,6 +2608,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         </button>
       )}
       {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+      {id === 'media' && (
+        <MediaMenu
+          assets={doc.media ?? []}
+          onImported={(asset) => {
+            // The bytes are already in OPFS; this records the REFERENCE on the document. Same
+            // write shape as a header edit (EmailComposePanel): docRef first, then onDocChange,
+            // then scheduleSave — nothing else saves it, because the editor's own update handler
+            // never fires for a change the writer made outside the contenteditable.
+            const updated = {
+              ...docRef.current,
+              media: [...(docRef.current.media ?? []), asset],
+              updatedAt: new Date().toISOString(),
+            }
+            docRef.current = updated
+            onDocChange(updated)
+            scheduleSave(updated)
+          }}
+        />
+      )}
       {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
     </>
   )
