@@ -85,31 +85,47 @@ for (const theme of ['day', 'night']) {
   const orderHeld = Object.entries(EXPECT_PREFIX).every(([i, g]) => slots.glyphs[+i] === g)
   check(`[${theme}] the curated order SURVIVED the migration (append, never reset)`,
     orderHeld, `row glyphs=${JSON.stringify(slots.glyphs)} — a reset would read ["\u201f",...]`)
-  // REGISTERED ≠ BUILT: media/music/clock are registered for their lanes but render nothing yet,
-  // so the drawer holds only the live remainder (page). A dead circle would show up here.
+  // REGISTERED ≠ LIVE: music/clock are registered for their lanes but render nothing yet, so the
+  // drawer holds only the live remainder. A dead circle would show up here.
   check(`[${theme}] the ▲ drawer holds the live remainder — no dead circles`,
-    slots.overflow === 1, `overflow=${slots.overflow}`)
+    slots.overflow === 2, `overflow=${slots.overflow} (page + media)`)
 
-  // ── The bar layers: mutual exclusion, in the DOM ─────────────────────────
-  const styleBtn = await page.$('[data-iw-bar="style"]')
-  const reviewBtn = await page.$('[data-iw-bar="review"]')
-  check(`[${theme}] both bar-layer triggers are in the row`, !!styleBtn && !!reviewBtn)
+  // ── HOTKEYS: Alt+N must BE the tap, not a second road ────────────────────
+  // The row here is the CURATED order (settings, style, review, …), which is what makes this
+  // discriminating: Alt+2 must hit `style` because style is SECOND — not because style is style.
+  // Position is identity on a homescreen; a per-slot binding would pass a fixed-order check and
+  // fail this one.
+  {
+    await page.keyboard.press('Alt+2'); await page.waitForTimeout(400)
+    const s2 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+2 toggled the SECOND circle (style) — position, not identity`,
+      s2 === 'true', `style aria-pressed=${s2}`)
 
-  if (styleBtn && reviewBtn) {
-    await styleBtn.click(); await page.waitForTimeout(500)
-    const afterStyle = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
-    check(`[${theme}] tapping S opens the style layer`, afterStyle === 'true', `aria-pressed=${afterStyle}`)
+    // ...and the same key closes it: the hotkey dispatches the button's real click, so it inherits
+    // toggle semantics for free rather than reimplementing them.
+    await page.keyboard.press('Alt+2'); await page.waitForTimeout(400)
+    const s3 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+2 again closed it — the hotkey IS the tap`, s3 === 'false', `aria-pressed=${s3}`)
 
-    // THE INVARIANT: R while S is open must leave exactly ONE layer owning the bar.
-    await reviewBtn.click(); await page.waitForTimeout(700)
-    const both = await page.evaluate(() => ({
-      style: document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'),
-      reviewLit: !!document.querySelector('[data-iw-bar="review"]')?.className.match(/5c2d8a/),
-    }))
-    check(`[${theme}] S closed when R took the bar — never both`,
-      both.style === 'false' && both.reviewLit, JSON.stringify(both))
+    // Alt+7 is past a 6-slot row. A no-op is the RULE; the void guard is that Alt+2 above proves
+    // the mechanism works at all, so "nothing happened" here cannot be silent breakage.
+    await page.keyboard.press('Alt+7'); await page.waitForTimeout(250)
+    const s4 = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] Alt+7 addresses nothing on a six-slot row`, s4 === 'false', `aria-pressed=${s4}`)
 
-    await reviewBtn.click(); await page.waitForTimeout(400)
+    // The hints appear only while Alt is HELD — the moment of intent, and nothing on a phone.
+    await page.keyboard.down('Alt'); await page.waitForTimeout(250)
+    const hints = await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.iw-slot')].filter(e => !e.closest('.absolute.bottom-full'))
+      return row.map(e => e.querySelector('span[aria-hidden="true"][class*="absolute"]')?.textContent ?? null)
+    })
+    check(`[${theme}] holding Alt reveals 1…6 on the row, in order`,
+      JSON.stringify(hints) === JSON.stringify(['1','2','3','4','5','6']), JSON.stringify(hints))
+    const shotAlt = await page.$('.iw-touch-guard.iw-nightable')
+    if (shotAlt) await shotAlt.screenshot({ path: `${OUT}/hotkeys-${theme}.png` })
+    await page.keyboard.up('Alt'); await page.waitForTimeout(250)
+    const after = await page.evaluate(() => [...document.querySelectorAll('.iw-slot span[aria-hidden="true"][class*="absolute"]')].length)
+    check(`[${theme}] releasing Alt hides them again — calm, not loud`, after === 0, `badges=${after}`)
   }
 
   // ── Screenshots, day AND night ───────────────────────────────────────────
@@ -149,9 +165,79 @@ for (const theme of ['day', 'night']) {
     check('[ledger] ?prodLedger does NOT widen the row — still six at 390px',
       s.row === 6, `row=${s.row} overflow=${s.overflow}`)
     check('[ledger] the clock joined the ▲ drawer instead of the row',
-      s.overflow === 2, `overflow=${s.overflow} (page + clock)`)
+      s.overflow === 3, `overflow=${s.overflow} (page + clock + media)`)
   }
   await page.screenshot({ path: `${OUT}/ledger-390.png` })
+  await ctx.close()
+}
+
+
+// ── MEDIA IMPORT, day and night ──────────────────────────────────────────────
+// A FIRST-RUN writer (no stored row), because that is who has media in the row: Peter's first-run
+// six names it. The curated-row cases above deliberately do NOT — the first cut of this block ran
+// there, found the button in the CLOSED ▲ drawer, and failed as though the feature were missing.
+for (const theme of ['day', 'night']) {
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 }, deviceScaleFactor: 2 })
+  await ctx.addInitScript(t => {
+    localStorage.setItem('inkwave:theme', t)
+    localStorage.removeItem('inkwave-toolbar-slots')
+  }, theme)
+  const page = await ctx.newPage()
+  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.ProseMirror[contenteditable="true"]', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  // MEDIA IMPORT — the lane landed, so the button must actually be there and open a real drop-up.
+  const mediaBtn = await page.$('[title="Import a photo, audio or video"]')
+  check(`[${theme}] the media-import button renders`, !!mediaBtn)
+  if (mediaBtn) {
+    await mediaBtn.click(); await page.waitForTimeout(350)
+    const menu = await page.evaluate(() => {
+      // It is PORTALED to body, so it must carry the guard classes itself — a nested panel
+      // inherits them via closest(), a portaled one cannot.
+      const p = [...document.querySelectorAll('.iw-touch-guard.iw-nightable')]
+        .find(e => e.textContent?.includes('Photo') && e.textContent?.includes('Audio'))
+      if (!p) return null
+      const cs = getComputedStyle(p)
+      const smallest = Math.min(...[...p.querySelectorAll('button, div')]
+        .map(e => parseFloat(getComputedStyle(e).fontSize)).filter(n => n > 0))
+      return { guard: p.classList.contains('iw-touch-guard'), night: p.classList.contains('iw-nightable'), bg: cs.backgroundColor, smallest }
+    })
+    check(`[${theme}] the drop-up carries iw-touch-guard (iOS keyboard) + iw-nightable`,
+      !!menu && menu.guard && menu.night, JSON.stringify(menu))
+    // iOS auto-zooms (and STAYS zoomed) on controls under 16px. Going up is free; below is a trap.
+    check(`[${theme}] nothing in the drop-up drops below the 16px iOS floor`,
+      !!menu && menu.smallest >= 16, `smallest=${menu?.smallest}px`)
+    const shot = await page.$('.iw-touch-guard.iw-nightable.fixed')
+    if (shot) await shot.screenshot({ path: `${OUT}/media-${theme}.png` })
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.mouse.click(5, 5)
+    await page.waitForTimeout(250)
+  }
+
+  // ── The bar layers: mutual exclusion, in the DOM ─────────────────────────
+  const styleBtn = await page.$('[data-iw-bar="style"]')
+  const reviewBtn = await page.$('[data-iw-bar="review"]')
+  check(`[${theme}] both bar-layer triggers are in the row`, !!styleBtn && !!reviewBtn)
+
+  if (styleBtn && reviewBtn) {
+    await styleBtn.click(); await page.waitForTimeout(500)
+    const afterStyle = await page.evaluate(() => document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'))
+    check(`[${theme}] tapping S opens the style layer`, afterStyle === 'true', `aria-pressed=${afterStyle}`)
+
+    // THE INVARIANT: R while S is open must leave exactly ONE layer owning the bar.
+    await reviewBtn.click(); await page.waitForTimeout(700)
+    const both = await page.evaluate(() => ({
+      style: document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'),
+      reviewLit: !!document.querySelector('[data-iw-bar="review"]')?.className.match(/5c2d8a/),
+    }))
+    check(`[${theme}] S closed when R took the bar — never both`,
+      both.style === 'false' && both.reviewLit, JSON.stringify(both))
+
+    await reviewBtn.click(); await page.waitForTimeout(400)
+  }
+
+
   await ctx.close()
 }
 

@@ -2,15 +2,17 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   ALL_SLOTS, DEFAULT_SLOTS, ROW_SLOTS, SlotId,
   livePopulation, slotIsLive, migrateSlots, overflowSlots, planBarToggle,
+  slotIndexForDigit, hotkeyHintFor, SLOT_HOTKEY_MAX,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig,
 } from './toolbarContract'
 import { setProdLedgerEnabled, _resetProdLedgerFlag } from '../productivity/ledgerFlag'
 
 afterEach(() => { setProdLedgerEnabled(false); _resetProdLedgerFlag() })
 
-// The six a writer with NOTHING gets: Peter's first-run list, with `media` falling through to the
-// next canonical member until its lane lands (see SLOT_LIVE).
-const FIRST_RUN: SlotId[] = ['page', 'style', 'guide', 'settings', 'receipt', 'bib']
+// The six a writer with NOTHING gets — Peter's first-run list, VERBATIM and complete since the
+// media lane landed (2026-07-17). It was ['…', 'receipt', 'bib'] while `media` fell through to the
+// next canonical member; that stopgap is gone, so this now equals DEFAULT_SLOTS exactly.
+const FIRST_RUN: SlotId[] = ['page', 'style', 'guide', 'settings', 'media', 'receipt']
 
 // The contract's keepers. A green gate is not a guard (CLAUDE.md): every negative below was
 // checked to FIRE before it was trusted — see the mutation notes on each block.
@@ -48,7 +50,7 @@ describe('migrateSlots — the row, from any stored vintage', () => {
   // none may appear in the ▲ drawer either, which would be a button that does nothing.
   it('a registered-but-NOT-LIVE slot NEVER renders — not in the row, not in ▲', () => {
     const row = migrateSlots(null)
-    for (const id of ['media', 'music', 'clock'] as SlotId[]) {
+    for (const id of ['music', 'clock'] as SlotId[]) {
       expect(ALL_SLOTS, `${id} must be registered`).toContain(id)
       expect(slotIsLive(id), `${id} is not live yet`).toBe(false)
       expect(row, `${id} must not reach the row`).not.toContain(id)
@@ -90,9 +92,15 @@ describe('migrateSlots — the row, from any stored vintage', () => {
     expect(after.slice(0, 5)).toEqual(['bib', 'guide', 'math', 'receipt', 'style'])
   })
 
-  it('media is in Peter’s first-run six, and falls through until its lane lands', () => {
+  // The gate OPENED for real — this is the case that proves it is a seam and not a permanent
+  // off-switch: media went live by flipping one predicate, and the first-run six became Peter's
+  // list verbatim with no other edit.
+  it('media is LIVE and sits in Peter’s first-run six itself — the fallthrough is retired', () => {
     expect(DEFAULT_SLOTS).toContain('media' as SlotId)
-    expect(migrateSlots(null)).toEqual(FIRST_RUN)   // six REAL buttons, no gap where media will go
+    expect(slotIsLive('media')).toBe(true)
+    expect(migrateSlots(null)).toEqual(FIRST_RUN)
+    expect(migrateSlots(null)).toContain('media' as SlotId)
+    expect(FIRST_RUN).toEqual([...DEFAULT_SLOTS])   // no fallthrough left to diverge them
   })
 
   // HEALING, not resetting. The shipped rule returned DEFAULT_SLOTS for any of these — throwing
@@ -191,7 +199,7 @@ describe('readToolbarConfig — absent is not error, and neither is null', () =>
   // A .studio authored on a build where music/media shipped, opened on one where they have not:
   // the unbuilt buttons must drop out, and the row must still be six real ones.
   it('a config naming buttons this build does not have still yields a full, real row', () => {
-    const read = readToolbarConfig({ v: 1, row: ['music', 'media', 'clock', 'bib'] })
+    const read = readToolbarConfig({ v: 1, row: ['music', 'clock', 'bib'] })
     if (read.kind !== 'found') throw new Error('expected found')
     expect(read.row).toHaveLength(ROW_SLOTS)
     expect(read.row[0]).toBe('bib')
@@ -250,5 +258,36 @@ describe('resolveToolbarRow — the chain, and what a received document may do',
 
   it('a stale global order is migrated too — it is never trusted raw', () => {
     expect(resolveToolbarRow({ kind: 'absent' }, ['bib', 'guide'])).toHaveLength(ROW_SLOTS)
+  })
+})
+
+describe('hotkeys — the row IS the speed dial', () => {
+  it('Alt+1…Alt+6 address the row by position', () => {
+    for (let i = 0; i < ROW_SLOTS; i++) {
+      expect(slotIndexForDigit(String(i + 1))).toBe(i)
+      expect(hotkeyHintFor(i)).toBe(String(i + 1))
+    }
+    expect(SLOT_HOTKEY_MAX).toBe(ROW_SLOTS)
+  })
+
+  // The bindings and the row must not be able to disagree: a 7th digit addressing a 6-slot row is
+  // an out-of-bounds index, and "Alt+7 does nothing" must be a RULE, not an accident of length.
+  it('a digit past the row addresses NOTHING — never an out-of-bounds index', () => {
+    expect(slotIndexForDigit(String(ROW_SLOTS + 1))).toBeNull()
+    expect(slotIndexForDigit('9')).toBeNull()
+    expect(hotkeyHintFor(ROW_SLOTS)).toBeNull()
+    expect(hotkeyHintFor(-1)).toBeNull()
+  })
+
+  // '0' is the ▲ drawer, which is NOT a row slot. Folding it in here would make "Alt+0 is index
+  // -1" a number some caller eventually indexes an array with.
+  it('0 addresses no row slot — the drawer is not a slot', () => {
+    expect(slotIndexForDigit('0')).toBeNull()
+  })
+
+  it('ignores anything that is not a bare digit', () => {
+    for (const k of ['a', '', 'Enter', '1a', ' ', 'ArrowLeft', '+']) {
+      expect(slotIndexForDigit(k), `key=${k}`).toBeNull()
+    }
   })
 })

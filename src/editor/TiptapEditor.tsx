@@ -23,6 +23,7 @@ import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import {
   SlotId, BarLayerId, BAR_HANDOFF_MS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
+  slotIndexForDigit, hotkeyHintFor,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig,
 } from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
@@ -69,6 +70,7 @@ const ProductivityReportModal = lazy(() =>
 )
 import { prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
+import { MediaMenu } from '../components/MediaMenu'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { PageMenu } from '../components/PageMenu'
@@ -463,6 +465,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     scheduleSave(updated)
   }
 
+  const toolbarSlotsRef = useRef<SlotId[]>(toolbarSlots)
+  useEffect(() => { toolbarSlotsRef.current = toolbarSlots }, [toolbarSlots])
+
   const dragIdRef = useRef<SlotId | null>(null)
 
   // ─── Phone: touch-hold drag-to-reorder for the row's slot circles ──────────
@@ -475,6 +480,63 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // it doesn't inherit), and the post-drop synthetic click is swallowed.
   const HOLD_MS = 400
   const slotElsRef = useRef<(HTMLDivElement | null)[]>([])
+
+  // ─── Hotkeys: Alt+1…6 = the row, Alt+0 = the ▲ drawer, Mod+, = Settings ────
+  // THE HOTKEY IS THE TAP. It dispatches the slot's OWN button click rather than calling the
+  // slot's action, and that is deliberate: every slot owns its open state privately (GuideMenu,
+  // PageMenu, MediaMenu, SettingsMenu, ClockSlotButton all differ), so an "action registry" would
+  // mean a SECOND way to trigger each one — two roads that drift the first time a slot changes
+  // what its tap does. Routing through the real button makes divergence unrepresentable: the
+  // keyboard and the finger are the same event, by construction.
+  // `altHeld` shows the hints. It flips only on Alt's own down/up — never per keystroke — and the
+  // ref guard stops key-repeat from setting state 30×/second while Alt is held.
+  const [altHeld, setAltHeld] = useState(false)
+  const altHeldRef = useRef(false)
+  useEffect(() => {
+    if (isTouchDevice()) return   // no Alt on a phone; render no hints and bind nothing
+    const setAlt = (v: boolean) => {
+      if (altHeldRef.current === v) return
+      altHeldRef.current = v
+      setAltHeld(v)
+    }
+    const clickSlot = (el: HTMLElement | null | undefined) => {
+      const btn = el?.querySelector('button')
+      if (btn) { btn.click(); return true }
+      return false
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey) setAlt(true)
+      // ⌘,/Ctrl, — the idiomatic preferences key on macOS, and unbound in browsers elsewhere.
+      if ((e.metaKey || e.ctrlKey) && e.key === ',' && !e.altKey) {
+        const idx = toolbarSlotsRef.current.indexOf('settings')
+        // Settings may live in the ▲ drawer; its button is still in the DOM there, so the
+        // shortcut works from either home. That is the point of one population.
+        const el = idx >= 0 ? slotElsRef.current[idx] : document.querySelector<HTMLElement>('.iw-slot [title="Settings"]')?.parentElement
+        if (clickSlot(el ?? undefined)) e.preventDefault()
+        return
+      }
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return
+      if (e.key === '0') {
+        const btn = toolbarPickerRef.current?.querySelector('button')
+        if (btn) { e.preventDefault(); btn.click() }
+        return
+      }
+      const idx = slotIndexForDigit(e.key)
+      if (idx === null) return
+      if (clickSlot(slotElsRef.current[idx])) e.preventDefault()
+    }
+    const onKeyUp = (e: KeyboardEvent) => { if (!e.altKey) setAlt(false) }
+    // Alt+Tab away with Alt down and the keyup never arrives — the hints would latch on forever.
+    const onBlur = () => setAlt(false)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
   const slotDragRef = useRef<{
     fromIdx: number
     startX: number
@@ -2607,6 +2669,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         </button>
       )}
       {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+      {id === 'media' && (
+        <MediaMenu
+          assets={doc.media ?? []}
+          onImported={(asset) => {
+            // The bytes are already in OPFS; this records the REFERENCE on the document. Same
+            // write shape as a header edit (EmailComposePanel): docRef first, then onDocChange,
+            // then scheduleSave — nothing else saves it, because the editor's own update handler
+            // never fires for a change the writer made outside the contenteditable.
+            const updated = {
+              ...docRef.current,
+              media: [...(docRef.current.media ?? []), asset],
+              updatedAt: new Date().toISOString(),
+            }
+            docRef.current = updated
+            onDocChange(updated)
+            scheduleSave(updated)
+          }}
+        />
+      )}
       {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
     </>
   )
@@ -3039,7 +3120,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}
               {toolbarSlots.map((slotId, slotIdx) => (
                 <div key={slotId}
-                  className="iw-slot"
+                  className="iw-slot relative"
                   ref={el => { slotElsRef.current[slotIdx] = el }}
                   draggable={!isTouch}
                   onDragStart={() => { dragIdRef.current = slotId }}
@@ -3078,6 +3159,25 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   })() : undefined}
                 >
                   {renderSlotButton(slotId, true)}
+                  {/* HOTKEY TEACHING — the hint appears only while Alt is held, which is the
+                      moment of intent: reach for the modifier and the row tells you its numbers.
+                      Calm, not loud (Peter: "sexy = considered"), and desktop-only — a phone has
+                      no Alt, renders nothing, and loses nothing. Pointer-events-none so it can
+                      never eat the tap it is advertising. */}
+                  {altHeld && !isTouch && hotkeyHintFor(slotIdx) && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute pointer-events-none flex items-center justify-center rounded-full"
+                      style={{
+                        top: -1, right: -1, width: 15, height: 15, fontSize: 10, lineHeight: 1,
+                        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+                        background: 'var(--iw-ink, #5c2d8a)',
+                        color: 'var(--iw-hotkey-hint-fg, #fff)',
+                      }}
+                    >
+                      {hotkeyHintFor(slotIdx)}
+                    </span>
+                  )}
                 </div>
               ))}
               <OptionsMenu
