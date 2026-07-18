@@ -2,17 +2,21 @@
 //
 // THE PRODUCTIVITY-LAYER FLAG DEFAULTS — mutation-proved.
 //
-// After 2026-07-18 the two lanes in flag.ts have DIFFERENT defaults, and both matter:
+// After 2026-07-18 BOTH lanes in flag.ts are default-ON, and each is mutation-proved both ways:
 //   • prodReport (P1c AI report)  — GRADUATED to default-ON. Finished, backend-free.
-//   • prodGraphs (P1a-viz)        — STILL default-OFF. Its only caller is the `/productivity` ROUTE,
-//                                   and Peter's ethos is "no routes, all panels"; graduating it would
-//                                   ship a route. This file GUARDS that it did NOT get graduated by
-//                                   accident when prodReport did.
+//   • prodGraphs (P1a-viz)        — GRADUATED to default-ON (feat/prodgraphs-panel). The charts are a
+//                                   portalled panel off the clock drop-up now, not the `/productivity`
+//                                   route (retired), so "no routes, all panels" is satisfied and the
+//                                   finished charts ship live. This file GUARDS the new default and
+//                                   that OFF is a STICKY '0' (not an absence — with the default ON,
+//                                   removeItem would silently re-enable it).
 //
-// Mutations checked to kill a test:
-//   • report reader `!== '0'` → `=== '1'`  ⇒ "prodReport is ON by default" fails.
-//   • report off-path `setItem('0')` → `removeItem` ⇒ "off is sticky" fails.
-//   • graphs reader `=== '1'` → `!== '0'`  ⇒ "prodGraphs stays OFF" fails.
+// Mutations checked to kill a test (proven by hand, both directions):
+//   • report reader  `!== '0'` → `=== '1'`  ⇒ "prodReport is ON by default" fails.
+//   • report off-path `setItem('0')` → `removeItem` ⇒ "report off is sticky" fails.
+//   • graphs reader  `!== '0'` → `=== '1'`  ⇒ "prodGraphs is ON by default" fails.
+//   • graphs default `true` → `false` in graphFlags() ⇒ "prodGraphs is ON by default" fails.
+//   • graphs off-path `setItem('0')` → `removeItem` ⇒ "graphs off is sticky" fails.
 //
 // jsdom so localStorage/location exist (node has neither).
 
@@ -60,15 +64,39 @@ describe('prodReport — DEFAULT ON (graduated 2026-07-18)', () => {
   })
 })
 
-describe('prodGraphs — STILL DEFAULT OFF (a route, not a panel)', () => {
-  it('is OFF with no flag set — NOT graduated alongside prodReport', () => {
-    // Mutant: reader `!== \'0\'` (the on-default) ⇒ this dies. Guards the route from shipping live.
-    expect(prodGraphsEnabled()).toBe(false)
-    expect(prodGraphsDemo()).toBe(false)
+describe('prodGraphs — DEFAULT ON (graduated 2026-07-18, a panel now)', () => {
+  it('is ON with no flag set', () => {
+    // Mutants: reader `=== \'1\'`, or the graphFlags() default `false`, ⇒ this dies.
+    expect(prodGraphsEnabled()).toBe(true)
+    expect(prodGraphsDemo()).toBe(false) // demo is a separate, still-off flag
   })
 
-  it('KNOWN-POSITIVE: ?prodGraphs=1 still turns it on, so the OFF above is a real default not a stuck flag', () => {
+  it('?prodGraphs=off disables it and writes a sticky \'0\'', () => {
+    window.history.replaceState({}, '', '/?prodGraphs=off')
+    expect(prodGraphsEnabled()).toBe(false)
+    // Mutant: off-path `removeItem` instead of setItem(\'0\') ⇒ this dies (an absence re-enables it).
+    expect(localStorage.getItem('inkwave:prodGraphs')).toBe('0')
+  })
+
+  it('a sticky \'0\' survives a reload (mutant removeItem ⇒ dies here too)', () => {
+    window.history.replaceState({}, '', '/?prodGraphs=off')
+    expect(prodGraphsEnabled()).toBe(false)
+    __resetFlagsForTest() // fresh load, URL param gone
+    window.history.replaceState({}, '', '/')
+    expect(prodGraphsEnabled()).toBe(false)
+  })
+
+  it('KNOWN-POSITIVE: ?prodGraphs=1 clears a prior opt-out, so OFF is a real state not a stuck flag', () => {
+    window.history.replaceState({}, '', '/?prodGraphs=off')
+    expect(prodGraphsEnabled()).toBe(false)
+    __resetFlagsForTest()
     window.history.replaceState({}, '', '/?prodGraphs=1')
     expect(prodGraphsEnabled()).toBe(true)
+  })
+
+  it('?prodGraphs=demo turns it on plus demo mode', () => {
+    window.history.replaceState({}, '', '/?prodGraphs=demo')
+    expect(prodGraphsEnabled()).toBe(true)
+    expect(prodGraphsDemo()).toBe(true)
   })
 })

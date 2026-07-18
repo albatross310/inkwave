@@ -68,7 +68,14 @@ import { VerifyModal } from '../components/VerifyModal'
 const ProductivityReportModal = lazy(() =>
   import('../components/ProductivityReportModal').then(m => ({ default: m.ProductivityReportModal })),
 )
-import { prodReportDemo, prodReportEnabled } from '../productivity/flag'
+// The measured writing-charts panel (P1a-viz). LAZY for the same reason the report modal is: its
+// charts + fixtures must never ride the editor's eager graph (`scripts/prodLoadPath.prove.mjs`). The
+// trigger lives in the clock drop-up (ClockMenu), which is eager — but that button only calls a
+// callback, so no chart code reaches this chunk.
+const ProductivityGraphsPanel = lazy(() =>
+  import('../components/ProductivityGraphsPanel').then(m => ({ default: m.ProductivityGraphsPanel })),
+)
+import { prodGraphsEnabled, prodReportDemo, prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
@@ -451,6 +458,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // ONE state (a slot is a trigger, never an owner). Stable so ReflectionAutoOpen's listener never
   // re-subscribes per render.
   const openLedger = useCallback(() => setLedgerOpen(true), [])
+  // The measured-charts panel (P1a-viz), opened FROM the clock drop-up. Its own lifted state — a
+  // second surface, one owner — following the ReceiptPanel precedent Peter named.
+  const [graphsOpen, setGraphsOpen] = useState(false)
   const [, setLedgerGoalsTick] = useState(0) // re-render the drop-up after a goals write
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
@@ -2990,8 +3000,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               scheduleSave(() => docRef.current, () => { void upsertMeta({ id: docRef.current.id, title: docRef.current.title, updatedAt: docRef.current.updatedAt }) })
               setLedgerGoalsTick(n => n + 1)
             }}
+            // The charts live behind their own default-ON flag; offer the button only when it's on.
+            // Opening the charts closes the drop-up (the charts are a full modal over the same surface).
+            onOpenGraphs={prodGraphsEnabled() ? () => { setLedgerOpen(false); setGraphsOpen(true) } : undefined}
             onClose={() => setLedgerOpen(false)}
           />
+        )}
+        {graphsOpen && (
+          // fallback={null}: the writer opened a modal; a flash of placeholder chrome is worse than
+          // the modal appearing when its chunk lands (same choice as the report modal below).
+          <Suspense fallback={null}>
+            <ProductivityGraphsPanel onClose={() => setGraphsOpen(false)} />
+          </Suspense>
         )}
 
         {/* ReceiptPanel: always in the tree on phone (no !keyboardUp guard) so the panel

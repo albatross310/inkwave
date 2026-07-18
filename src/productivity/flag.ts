@@ -6,10 +6,14 @@
 //   • `prodReport` — DEFAULT ON (Peter, 2026-07-18: "take all the flags off … for everything";
 //     CLAUDE.md "STOP FLAGGING EVERYTHING"). The free paste-back report (§A7.1 Path 1) is finished
 //     and usable without a backend, so a writer sees it. `?prodReport=off` is a sticky opt-out.
-//   • `prodGraphs` — STILL DEFAULT OFF, deliberately. It is not a panel: `prodGraphsEnabled()`'s only
-//     caller is the `/productivity` ROUTE, and Peter's ethos is "no routes, all panels" (the /music
-//     and /ledger routes were both retired for exactly this reason). Graduating it would ship a route
-//     to every writer. Left gated pending a separate panel-ification lane; do NOT flip it here.
+//   • `prodGraphs` — DEFAULT ON (2026-07-18, feat/prodgraphs-panel). It USED to be default OFF for one
+//     reason only: its sole caller was the `/productivity` ROUTE, and Peter's ethos is "no routes, all
+//     panels" (the /music and /ledger routes were both retired for exactly this reason), so shipping it
+//     meant shipping a route. That reason is GONE — the charts are now a portalled night-mode PANEL
+//     reachable from the clock drop-up (the ledger surface), the `/productivity` route is retired, and
+//     `prodGraphsEnabled()` is read on `/` to decide whether the drop-up offers the charts button. A
+//     finished, backend-free measured-charts view over the writer's own ledger, so a writer sees it.
+//     `?prodGraphs=off` is a sticky opt-out.
 //
 // ─── LOAD-PATH COST: ~760 B gzip, NOT ZERO. THE CLAIM HERE USED TO BE FALSE. ─────────────────────
 // This comment previously read "off-by-default also means ZERO load-path cost for everyone else …
@@ -32,10 +36,10 @@
 // disabled snapThumbs exactly when it was being used (CLAUDE.md, snapThumbs round 8, bug 2).
 // Resolve ONCE per load, persist, then read from storage. Don't reintroduce that bug.
 //
-//   prodGraphs (default OFF)      prodReport (default ON)
-//   ?prodGraphs=1     on          ?prodReport=off   off (sticky, writes '0')
-//   ?prodGraphs=demo  on + demo   ?prodReport=1     on (clears a prior opt-out)
-//   ?prodGraphs=off   clears      ?prodReport=demo  on + demo
+//   prodGraphs (default ON)             prodReport (default ON)
+//   ?prodGraphs=off   off (sticky '0')  ?prodReport=off   off (sticky, writes '0')
+//   ?prodGraphs=1     on (clears '0')   ?prodReport=1     on (clears a prior opt-out)
+//   ?prodGraphs=demo  on + demo         ?prodReport=demo  on + demo
 //
 // `demo` renders from a LABELLED synthetic fixture ledger — which is why no fixture in this repo may
 // ever contain real writing: demo mode puts fixture data on screen. It is never silent.
@@ -69,12 +73,12 @@ function resolve(param: string, key: string, demoKey: string, defaultOn: boolean
 // ─── graphs (P1a-viz) ────────────────────────────────────────────────────────
 let _graphs: Pair | null = null
 function graphFlags(): Pair {
-  // DEFAULT OFF — a route, not a panel (see the header). Do not graduate here.
-  if (!_graphs) _graphs = resolve('prodGraphs', 'inkwave:prodGraphs', 'inkwave:prodGraphsDemo', false)
+  // DEFAULT ON — a panel now, not a route (see the header). `?prodGraphs=off` is a sticky '0'.
+  if (!_graphs) _graphs = resolve('prodGraphs', 'inkwave:prodGraphs', 'inkwave:prodGraphsDemo', true)
   return _graphs
 }
 
-/** Whether the productivity panel is available at all. Default OFF. */
+/** Whether the productivity charts panel is available at all. Default ON. */
 export function prodGraphsEnabled(): boolean {
   const w = typeof window !== 'undefined' ? (window as unknown as { __iwProdGraphs?: boolean }) : null
   if (w && typeof w.__iwProdGraphs === 'boolean') return w.__iwProdGraphs

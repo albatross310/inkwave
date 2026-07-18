@@ -242,8 +242,11 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
 
 // ─── The drop-up ─────────────────────────────────────────────────────────────
 
-export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
-  docId: string; docLabel?: string; goals?: DocGoals; onGoalsChange: (g: DocGoals) => void; onClose: () => void
+export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onClose }: {
+  docId: string; docLabel?: string; goals?: DocGoals; onGoalsChange: (g: DocGoals) => void
+  /** Open the measured writing-charts panel (P1a-viz). Absent when `?prodGraphs=off` — no button. */
+  onOpenGraphs?: () => void
+  onClose: () => void
 }): JSX.Element {
   // Resolve the anchor at open time rather than holding a ref: the trigger may be in the row, in the
   // ▲ overflow, or not rendered at all (opened from the countdown). Absent → centred.
@@ -349,6 +352,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
           />
         )}
         <TodaySection rows={todays} summary={daySummary(todays)} onSaved={refresh} />
+        {onOpenGraphs && <GraphsLink onOpen={onOpenGraphs} />}
         <ReflectionJournal reflections={reflections} />
         <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
         <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
@@ -497,6 +501,28 @@ function TodaySection({ rows, summary, onSaved }: {
         {rows.map((r) => <SessionCard key={r.session_id} row={r} onSaved={onSaved} />)}
       </ul>
       <PostHocAdd onAdded={onSaved} />
+    </Section>
+  )
+}
+
+// ─── The charts entry (P1a-viz) ───────────────────────────────────────────────
+//
+// The measured writing-charts panel used to be the `/productivity` ROUTE; Peter's "no routes, all
+// panels" retired it, and the ledger drop-up — the productivity surface — is where the charts belong.
+// This is only a TRIGGER: it calls the lifted opener the editor passed down and imports NO chart code,
+// which is what keeps ClockMenu (eager) off the charts lane's load path.
+function GraphsLink({ onOpen }: { onOpen: () => void }): JSX.Element {
+  return (
+    <Section title="Your writing">
+      <button type="button" onClick={onOpen}
+        className="w-full text-left transition-colors hover:opacity-80"
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #5c2d8a)' }}
+      >
+        See it in charts — time, words and patterns →
+      </button>
+      <p className="mt-1" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        Your own measured record, day by day. Nothing leaves this device.
+      </p>
     </Section>
   )
 }

@@ -30,7 +30,9 @@ applyTheme()
     // keeps rediscovering: each flag's reader lives INSIDE the lazy chunk the flag gates, so on `/`
     // nothing calls it, the URL param is seen by nobody, and it's gone by the time you navigate to
     // the route that would have read it. Peter hit exactly that: `/?prodGraphs=demo` did nothing,
-    // because the only caller of `prodGraphsEnabled()` is /productivity, which he hadn't reached yet.
+    // because the only caller of `prodGraphsEnabled()` used to be the /productivity route, which he
+    // hadn't reached yet. (`prodGraphs` is now read on `/` by the clock drop-up too, but this boot
+    // sync still owns the sticky `=off`/`=demo` writes so a URL param can never be missed.)
     // The feature could not be turned on because the code that reads the switch is behind the switch.
     // Cost is a URLSearchParams read already being done on this line — not a load-path regression.
     for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug', 'snapBreaks',
