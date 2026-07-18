@@ -8,6 +8,7 @@ import type { CSLItem, IwCitationMeta } from '../types/document'
 import { bibProvider } from './bibProvider'
 
 import { writeOpfsFile } from '../storage/opfsWrite'
+import { isNotFound } from '../storage/notFound'
 
 const DIR = 'library'
 const FILE = 'citations.json'
@@ -21,16 +22,35 @@ async function getDir(create: boolean): Promise<FileSystemDirectoryHandle | null
   }
 }
 
+/**
+ * Read the persisted library — returning [] ONLY for a genuine ABSENCE, and THROWING on any other
+ * failure (auditor, 2026-07-18). The old body ended `catch { return [] }` (and `Array.isArray? …
+ * : []`), so a transient OPFS fault, a corrupt/half-synced file, or a mid-read failure all answered
+ * "the library is empty" — indistinguishable from a first-time user who has none. Since `writeFile`
+ * is a blind whole-file replace, the next `addToLibrary` (the browser extension re-flushes its
+ * queue on every visit, no user action) then wrote the near-empty in-memory set OVER the real one.
+ * That is the 2026-07-15 collapse in the bibliography. `absent` and `error` are different answers
+ * with opposite consequences, so they must be different outcomes: NotFound ⇒ [] (safe to write),
+ * everything else ⇒ throw (the caller must NOT overwrite a library it could not read).
+ */
 async function readFile(): Promise<CSLItem[]> {
+  let dir: FileSystemDirectoryHandle
   try {
-    const dir = await getDir(false)
-    if (!dir) return []
-    const file = await (await dir.getFileHandle(FILE)).getFile()
-    const parsed = JSON.parse(await file.text())
-    return Array.isArray(parsed) ? (parsed as CSLItem[]) : []
-  } catch {
-    return []
+    dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(DIR, { create: false })
+  } catch (e) {
+    if (isNotFound(e)) return [] // no library directory yet — a genuine first-use absence
+    throw e // OPFS unavailable / transient — we do NOT know what is on disk; never write over it
   }
+  let text: string
+  try {
+    text = await (await dir.getFileHandle(FILE)).getFile().then((f) => f.text())
+  } catch (e) {
+    if (isNotFound(e)) return [] // directory exists but no file yet — still a genuine absence
+    throw e
+  }
+  const parsed = JSON.parse(text) // a corrupt/truncated file THROWS here → error, never "empty"
+  if (!Array.isArray(parsed)) throw new Error('library file is not a JSON array')
+  return parsed as CSLItem[]
 }
 
 async function writeFile(items: CSLItem[]): Promise<void> {
@@ -73,6 +93,13 @@ let _libStarted = false
 let _libResolve: (() => void) | null = null
 let _libReady: Promise<void> = new Promise<void>((r) => { _libResolve = r })
 
+// TRUE once a hydration attempt FAILED to read the disk (as opposed to reading an empty/absent one).
+// `persistLibrary` refuses while this holds: we do not know what the file contains, and the writer's
+// real library may be sitting in it, so blind-overwriting it with the in-memory set is the wipe this
+// module now exists to prevent. A later SUCCESSFUL read clears it. Starts false — a fresh page that
+// has not yet tried to read has nothing on disk it could be shadowing (bibProvider is empty too).
+let _libUnreadable = false
+
 /**
  * Resolves once the initial library hydration attempt has COMPLETED (success or failure).
  *
@@ -87,6 +114,7 @@ export function libraryReady(): Promise<void> {
 /** Test seam: forget the latch (module state outlives a vitest file otherwise). */
 export function _resetLibraryReady(): void {
   _libStarted = false
+  _libUnreadable = false
   _libReady = new Promise<void>((r) => { _libResolve = r })
 }
 
@@ -94,21 +122,33 @@ export function _resetLibraryReady(): void {
 export async function loadLibrary(): Promise<void> {
   _libStarted = true
   try {
-    const items = await readFile()
+    const items = await readFile() // throws on a real read failure; [] ONLY on a genuine absence
     if (items.length) bibProvider.setEntries(items, 'library')
+    _libUnreadable = false // a completed, SUCCESSFUL read (even an empty one) — persist is safe now
+  } catch {
+    // We could NOT read the library — do not hydrate (leave bibProvider as-is), and BLOCK persists
+    // so the next mutation cannot blind-overwrite a disk we never saw. The 2026-07-15 rule, applied
+    // to the bibliography. The change stays in memory; a later successful load re-enables writes.
+    _libUnreadable = true
   } finally {
-    // ALWAYS latch — a completed ATTEMPT, not a successful one. NB readFile() swallows its own
-    // OPFS errors and returns [], so it cannot throw; this `finally` guards the OTHER failure
-    // (setEntries throwing on malformed data). That distinction was found by mutation testing: a
-    // test that made the OPFS READ throw passed against a mutant with no `finally` at all, because
-    // the read never throws — the test was measuring nothing. The guard is real; aim at the path
-    // that can actually reach it.
+    // ALWAYS latch — a completed ATTEMPT, success OR failure. Both the read-failure branch above and
+    // a `setEntries` throw on malformed data land here, so a builder waiting on `libraryReady()` is
+    // never stranded by either. (Formerly this comment claimed readFile could not throw; the
+    // auditor's absent-vs-error fix makes it throw on a real fault, which is exactly the point.)
     _libResolve?.()
   }
 }
 
 /** Write the current in-memory library to OPFS. */
 export async function persistLibrary(): Promise<void> {
+  if (_libUnreadable) {
+    // The last hydration FAILED to read the disk, so we do not know what the library file holds —
+    // and the writer's real sources may be in it. Writing the in-memory set now would blind-
+    // overwrite them (the 2026-07-15 collapse). Keep the change in memory and refuse the write; a
+    // later successful loadLibrary() clears the flag and the next persist writes correctly.
+    console.warn('[inkwave] library not persisted — it could not be read this session; not overwriting it')
+    return
+  }
   await writeFile(bibProvider.getAll())
 }
 
