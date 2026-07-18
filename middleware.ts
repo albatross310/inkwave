@@ -37,7 +37,13 @@ function csp(nonce: string): string {
     // (where no middleware runs) — the exact "discover it in production" trap. NOTE the scores
     // themselves come ONLY from the verified public-domain allowlist in music/library.ts; this
     // directive permits the host, it does not decide what may be fetched from it.
-    "connect-src 'self' https://clerk.iwzero.me https://clerk.inkwave.studio https://api.stripe.com https://m.stripe.com https://m.stripe.network https://r.stripe.com https://q.stripe.com https://accounts.google.com https://apis.google.com https://www.googleapis.com https://content.googleapis.com https://www.gstatic.com https://*.clerk.accounts.dev https://*.clerk.com https://clerk-telemetry.com https://api.datamuse.com https://mempool.space https://blockstream.info https://login.microsoftonline.com https://graph.microsoft.com https://fonts.googleapis.com https://fonts.gstatic.com https://api.crossref.org https://export.arxiv.org https://eutils.ncbi.nlm.nih.gov https://openlibrary.org https://api.github.com https://raw.githubusercontent.com",
+    // OneDrive: Graph's `/content` endpoint 302-redirects the file bytes to the account's storage
+    // host, which connect-src must ALSO allow or the redirect hop is blocked and the read fails as a
+    // NetworkError — which the archive-read guard (correctly) treats as "unreadable, do not write",
+    // so sync sticks on "pending" and the picker hangs forever (found live 2026-07-18 on Peter's
+    // Honours Proposal). `*.microsoftpersonalcontent.com` = personal OneDrive (the observed host),
+    // `*.sharepoint.com` = OneDrive-for-Business, `*.files.1drv.com` = legacy personal download.
+    "connect-src 'self' https://clerk.iwzero.me https://clerk.inkwave.studio https://api.stripe.com https://m.stripe.com https://m.stripe.network https://r.stripe.com https://q.stripe.com https://accounts.google.com https://apis.google.com https://www.googleapis.com https://content.googleapis.com https://www.gstatic.com https://*.clerk.accounts.dev https://*.clerk.com https://clerk-telemetry.com https://api.datamuse.com https://mempool.space https://blockstream.info https://login.microsoftonline.com https://graph.microsoft.com https://*.microsoftpersonalcontent.com https://*.sharepoint.com https://*.files.1drv.com https://fonts.googleapis.com https://fonts.gstatic.com https://api.crossref.org https://export.arxiv.org https://eutils.ncbi.nlm.nih.gov https://openlibrary.org https://api.github.com https://raw.githubusercontent.com",
     "img-src 'self' data: https:",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
