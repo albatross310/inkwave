@@ -3197,7 +3197,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 pointerEvents: activeBar === 'music' ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
-                {activeBar === 'music' && <MusicBar phone={isTouch} />}
+                {activeBar === 'music' && <MusicBar phone={isTouch} documentId={doc.id} />}
               </div>
             )}
 

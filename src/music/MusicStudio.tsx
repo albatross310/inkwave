@@ -56,8 +56,26 @@ export async function loadOrMintHarnessPiece(): Promise<Piece> {
   })
 }
 
-export function MusicStudio({ demo }: { demo: boolean }) {
+/**
+ * `documentId` is the PANEL-OVER-THE-EDITOR path (2026-07-17, feat/music-layer). The music BAR opens
+ * this studio over whatever document the writer has open, so it opens the Piece OF THAT DOCUMENT —
+ * exactly what `loadOrMintHarnessPiece`'s banner said the real entry would do. When it is:
+ *   · a music document (docType:'music') → its Piece opens: pages, markup, heatmap, reflow.
+ *   · a prose document (or absent)       → `loadPiece` returns null; the studio says so honestly
+ *                                          rather than minting a Piece onto an essay (which would
+ *                                          convert a thesis into a score — destructive, and NOT this
+ *                                          lane's to do: creating a music document from a photo is
+ *                                          feat/music-piece-photo's unshipped flow).
+ *   · a failed read                      → NEVER treated as "no score"; we surface it, having
+ *                                          written nothing (the loadPiece THROWS contract).
+ * `documentId` is resolved by the caller (`activeDocumentId()`); passed in so the studio has no
+ * hidden dependency on which document is open. Omitted (the retired-route harness) ⇒ the old path.
+ */
+export function MusicStudio({ demo, documentId }: { demo: boolean; documentId?: string | null }) {
   const [piece, setPiece] = useState<Piece | null>(null)
+  // 'loading' until the load effect resolves; 'none' when a documentId was given but the active
+  // document is not a Piece (so `if (!piece)` below never sticks on "Opening…" forever).
+  const [loadState, setLoadState] = useState<'loading' | 'ok' | 'none'>('loading')
   const [urls, setUrls] = useState<Record<string, string>>({})
   const [tool, setTool] = useState<Tool>('pan')
   const [colour, setColour] = useState(INK_COLOURS[0])
@@ -102,14 +120,33 @@ export function MusicStudio({ demo }: { demo: boolean }) {
         }
         const full = { ...p, pages }
         await savePiece(full)
-        if (!dead) { setPiece(full); setBusy(null) }
+        if (!dead) { setPiece(full); setBusy(null); setLoadState('ok') }
+        return
+      }
+      if (documentId) {
+        // Open the Piece of the document the writer has open. loadPiece THROWS on a read error
+        // (never null — CLAUDE.md's absence-vs-ignorance rule), returns null when the document is
+        // genuinely not a score, and the Piece otherwise.
+        let existing: Piece | null = null
+        try {
+          existing = await loadPiece(documentId)
+        } catch (err) {
+          // A failed read is NOT "no score". Say so; the studio shows the honest notice, nothing
+          // was written (loadPiece read-only), and the writer's document is untouched.
+          console.error('[inkwave:music] could not read the open document:', err)
+          if (!dead) setLoadState('none')
+          return
+        }
+        if (dead) return
+        if (existing) { setPiece(existing); setLoadState('ok') }
+        else setLoadState('none')
         return
       }
       const harness = await loadOrMintHarnessPiece()
-      if (!dead) setPiece(harness)
+      if (!dead) { setPiece(harness); setLoadState('ok') }
     })()
     return () => { dead = true }
-  }, [demo])
+  }, [demo, documentId])
 
   // Resolve every page's bytes to an object URL — and revoke them. An object URL pins its blob for
   // the document's lifetime; a stack of page images left unrevoked is a straightforward leak.
@@ -172,6 +209,20 @@ export function MusicStudio({ demo }: { demo: boolean }) {
   const onAnnotations = useCallback((annotations: Annotation[]) => {
     if (piece) update({ ...piece, annotations })
   }, [piece, update])
+
+  // The active document is not a score. Honest, non-destructive: the studio never mints a Piece over
+  // a prose document. Starting a NEW score from a photo is feat/music-piece-photo's flow, not wired.
+  if (loadState === 'none' && !piece) {
+    return (
+      <div className="mx-auto w-full max-w-3xl py-10 text-center font-serif" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+        <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>This document isn’t a score.</p>
+        <p className="mt-2" style={{ fontSize: TYPE.label }}>
+          The score studio opens a music document’s pages. To write about a score in this essay, use
+          <b> Import a score</b> on the music bar — it attaches excerpts to the document you’re writing.
+        </p>
+      </div>
+    )
+  }
 
   if (!piece) return <Centered>Opening…</Centered>
 

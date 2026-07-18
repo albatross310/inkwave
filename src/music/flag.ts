@@ -9,9 +9,10 @@
 //   ?music=demo  on + a synthetic, LABELLED demo piece (no real score — see fixtures.ts)
 //   ?music=off   clears
 //
-// OFF COSTS NOTHING BY CONSTRUCTION, not merely by measurement: the whole module sits behind a lazy
-// import (`routes/Music.tsx`), so with the flag off nothing here is fetched or parsed and the editor
-// bundle is untouched. CLAUDE.md: load performance is sacred.
+// OFF COSTS NOTHING BY CONSTRUCTION, not merely by measurement: the heavy panels sit behind a lazy
+// import (`components/MusicBar.tsx`'s `lazy(() => import(...))`, itself behind the editor's own
+// dynamic import — the `/music` route was retired 2026-07-18), so with the flag off nothing here is
+// fetched or parsed and the editor bundle is untouched. CLAUDE.md: load performance is sacred.
 
 type Pair = { on: boolean; demo: boolean }
 

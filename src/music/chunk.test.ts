@@ -165,15 +165,18 @@ describe('the editor bundle is untouched by the music module', () => {
   })
 
   it('reaches ONLY the cheap flag from the editor — never the panel, studio or OSMD', () => {
-    // THE TOOLBAR'S MUSIC SLOT (feat/toolbar-wire, 2026-07-17) reads `musicEnabled()` to decide
-    // whether the ♪ slot is live, exactly as it reads `prodLedgerEnabled()` for the clock. That flag
-    // lives under src/music/, so the editor now statically reaches `src/music/flag.ts` — and ONLY it.
-    // This is the SAME architecture the /music route relies on below ("statically reaches ONLY the
-    // flags"): flag.ts is a leaf with zero imports and a few hundred bytes; the heavy dependency
-    // (OSMD, the panel, the studio, the detector) sits past a lazy boundary and is unreachable here.
-    // The guard is an EXACT allow-list, not a relaxation: any heavier music file (MusicPanel,
-    // ScoreView, MusicStudio, …) reached from the editor lengthens this array and FAILS, and the
-    // load-bearing OSMD guards below are untouched.
+    // THE TOOLBAR'S MUSIC SLOT reads `musicEnabled()` (via editor/toolbarContract) to decide whether
+    // the ♪ slot is live, exactly as it reads `prodLedgerEnabled()` for the clock. That flag lives
+    // under src/music/, so the editor statically reaches `src/music/flag.ts` — and ONLY it. flag.ts is
+    // a leaf with zero imports and a few hundred bytes.
+    //
+    // NB the MUSIC BAR itself (components/MusicBar.tsx, feat/music-layer 2026-07-18 — the `/music`
+    // route was retired) reads the two demo flags + the type ramp AND `lazy(() => import(...))`s the
+    // two heavy panels, but it sits BEHIND the dynamic TiptapEditor import (routes/Edit.tsx loads the
+    // editor with `import()`), so NONE of MusicBar's imports enter the editor's static graph. That
+    // laziness is instead guarded directly on MusicBar below ("the music BAR defers its panels") and
+    // by the real built chunks (guard 2). Here the exact allow-list stays a single leaf: any heavier
+    // music file reached from the editor's STATIC path lengthens this array and FAILS.
     const { files } = staticGraph(EDITOR_ENTRY)
     expect(musicFiles(files)).toEqual(['src/music/flag.ts'])
   })
@@ -193,16 +196,15 @@ describe('the editor bundle is untouched by the music module', () => {
   })
 })
 
-describe('the /music route pays for nothing until the flag is on', () => {
-  const MUSIC_ENTRY = join(APP, 'routes/music.tsx')
+describe('the music BAR defers its panels — the surface is a panel over the editor, not a route', () => {
+  // `/music` was retired 2026-07-18 (feat/music-layer): the music module opens from the toolbar's ♪
+  // BAR LAYER as a panel over the editor. `components/MusicBar.tsx` is the new lazy boundary — it is
+  // statically imported by TiptapEditor, so if it statically imported a heavy panel, the whole music
+  // chunk would land in the editor's load. It must `lazy(() => import(...))` both panels.
+  const BAR = join(SRC, 'components/MusicBar.tsx')
 
-  it('statically reaches ONLY the flags — everything else is behind the lazy boundary', () => {
-    // The flags themselves must be static: they decide whether to import the rest, so they cannot
-    // sit behind the thing they gate. They are a few hundred bytes each. Everything expensive — the
-    // panel, the parser, OSMD, and the photo path's detector — must sit past `lazy(() => import())`.
-    const { files, packages } = staticGraph(MUSIC_ENTRY)
-    expect(musicFiles(files)).toEqual(['src/music/flag.ts', 'src/music/xmlFlag.ts'])
-    expect([...packages]).not.toContain('opensheetmusicdisplay')
+  it('has a music bar to check (pointed at something real)', () => {
+    expect(existsSync(BAR)).toBe(true)
   })
 
   it('DEFERS the import — a separate chunk is not evidence of laziness', () => {
@@ -216,7 +218,7 @@ describe('the /music route pays for nothing until the flag is on', () => {
     // `lazy(() => import(...))` is different in kind: the import lives inside a THUNK React does not
     // call until the component renders. So the test is not "is there an import()?" but "is every
     // import() inside an arrow".
-    const code = readFileSync(join(SRC, 'routes/Music.tsx'), 'utf8')
+    const code = readFileSync(BAR, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
     for (const m of code.matchAll(/import\s*\(\s*['"]\.\.\/music\/[^'"]+['"]\s*\)/g)) {
       const before = code.slice(0, m.index)
@@ -227,8 +229,8 @@ describe('the /music route pays for nothing until the flag is on', () => {
 
   it('keeps the two paths in SEPARATE chunks — neither pays for the other', () => {
     // The photo path must not ship OSMD (338 kB gzip) and the MusicXML path must not ship the
-    // reflow detector. One route, two lazy imports.
-    const code = readFileSync(join(SRC, 'routes/Music.tsx'), 'utf8')
+    // reflow detector. One bar, two lazy imports.
+    const code = readFileSync(BAR, 'utf8')
     const dyn = dynamicSpecifiers(code)
     expect(dyn).toContain('../music/MusicStudio')
     expect(dyn).toContain('../music/MusicPanel')
@@ -237,7 +239,7 @@ describe('the /music route pays for nothing until the flag is on', () => {
   })
 
   it('loads the panel through a dynamic import', () => {
-    const code = readFileSync(join(SRC, 'routes/Music.tsx'), 'utf8')
+    const code = readFileSync(BAR, 'utf8')
     expect(dynamicSpecifiers(code)).toContain('../music/MusicPanel')
     // ...and NOT statically, which is the one-character mistake this whole file exists to catch.
     expect(staticSpecifiers(code)).not.toContain('../music/MusicPanel')
@@ -288,18 +290,12 @@ describe.skipIf(!built)('the built chunks (verified against real build output)',
   })
 
   it('keeps OSMD out of the entry chunk', () => {
-    // The entry is the file every visitor loads. OSMD in here = 338 kB on every first paint.
+    // The entry is the file every visitor loads. OSMD in here = 338 kB on every first paint. This is
+    // the load-bearing guard now that the music surface opens from the editor's own toolbar (there is
+    // no separate `/music` route chunk any more — MusicBar is small and rides the editor graph, its
+    // heavy panels sit in their own lazy chunks).
     const entries = chunks().filter(f => /^(index|entry|root)-/.test(f))
     expect(entries.length).toBeGreaterThan(0)
     for (const e of entries) expect(containsOsmd(e)).toBe(false)
-  })
-
-  it('leaves the /music route stub tiny', () => {
-    const stub = chunks().find(f => /^music-/.test(f))
-    expect(stub).toBeDefined()
-    // The stub is the flag + the lazy() call. Measured at ~2 kB raw / 1 kB gzip; 20 kB is a ceiling
-    // that would only be crossed by something being imported that shouldn't be.
-    const bytes = readFileSync(join(ASSETS, stub!)).byteLength
-    expect(bytes).toBeLessThan(20_000)
   })
 })
