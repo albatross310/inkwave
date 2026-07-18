@@ -12,18 +12,35 @@
 // So the suite is MUTATION-PROVED: a classifier hard-wired to either verdict must fail the other's
 // test. A `expect(x).toBe(true)` suite that a constant `() => true` passes proves nothing.
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { probeStorageUnavailable } from './probeStorage'
 
-const origStorage = Object.getOwnPropertyDescriptor(navigator, 'storage')
+// MOCK ISOLATION — NO navigator.storage MOCK MAY SURVIVE A TEST.
+//
+// These tests install fake `navigator.storage.getDirectory`s that RESOLVE, REJECT, or are ABSENT to
+// exercise the probe. A leaked reject-mock is not a cosmetic tidiness issue: another suite's
+// "brand-new document opens normally" reads the same storage surface, and a getDirectory that
+// rejects makes a genuine document look like it is in a private window — the exact scary-lie inverse,
+// surfacing as a red test instead of the UI. (openDocArchiveFail.test.ts reinstalls its own OPFS
+// shim per test, so it is defended anyway — but "the next suite happens to override it" is not
+// isolation. This file leaves `navigator` EXACTLY as it found it, per test.)
+//
+// Restore the EXACT pre-test own-descriptor: if there was none (jsdom has no navigator.storage), the
+// own property we added must be DELETED, not overwritten with `undefined` — leaving an own
+// `storage: undefined` behind is itself a mutation that outlives the file.
+let prevDesc: PropertyDescriptor | undefined
+
+beforeEach(() => {
+  prevDesc = Object.getOwnPropertyDescriptor(navigator, 'storage')
+})
 
 function setStorage(value: unknown): void {
   Object.defineProperty(navigator, 'storage', { value, configurable: true, writable: true })
 }
 
 afterEach(() => {
-  if (origStorage) Object.defineProperty(navigator, 'storage', origStorage)
-  else setStorage(undefined)
+  if (prevDesc) Object.defineProperty(navigator, 'storage', prevDesc)
+  else delete (navigator as { storage?: unknown }).storage // remove the own prop we added
   vi.restoreAllMocks()
 })
 
