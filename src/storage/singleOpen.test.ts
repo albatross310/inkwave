@@ -14,7 +14,9 @@
 //        ⇒ "a forced surrender does NOT flush" fails.
 //   · make takeOverHere skip the steal
 //        ⇒ "a degraded take-over (no bus) still steals" and "a dead holder is taken over after the
-//           ack timeout" fail.
+//           ack timeout + grace expiry" fail.
+//   · delete the phase-2 post-steal GRACE wait in takeOverHere (the auditor's race, back)
+//        ⇒ "a LIVE slow-flusher past the ack timeout: the taker reads AFTER the holder freezes" fails.
 
 import { describe, it, expect } from 'vitest'
 import { installHolder, takeOverHere, requestSwitch, type Wiring, type Channel, type SingleOpenMessage } from './singleOpen'
@@ -50,6 +52,7 @@ function makeWiring(log: string[], over: Partial<Wiring> = {}): Wiring {
     focusSelf: () => { log.push('focus') },
     emitSurrendered: (id) => { log.push('surrendered:' + id) },
     ackTimeoutMs: 1000,
+    graceMs: 50, // short so the dead-holder rescue tests don't crawl; the race test overrides it
     setTimer: (fn, ms) => { const t = setTimeout(fn, ms); return () => clearTimeout(t) },
     ...over,
   }
@@ -124,12 +127,45 @@ describe('the single-open take-over handshake', () => {
     expect(log).toContain('steal:W')
   })
 
-  it('a dead holder is taken over after the ack timeout (rescue path)', async () => {
+  it('a dead holder is taken over after the ack timeout + grace expiry (rescue path)', async () => {
     const bus = makeBus()
     const log: string[] = []
-    // A bus exists but NOBODY is holding 'D', so no ack ever comes — the taker must time out and
-    // steal anyway, or the writer could never reopen a document a crashed tab left locked.
-    await takeOverHere('D', makeWiring(log, { makeChannel: bus.makeChannel, ackTimeoutMs: 20 }))
+    // A bus exists but NOBODY is holding 'D', so no ack ever comes — the taker times out, steals, and
+    // the post-steal grace EXPIRES (no late surrendered), then the rescue proceeds. Without this the
+    // writer could never reopen a document a crashed tab left locked.
+    await takeOverHere('D', makeWiring(log, { makeChannel: bus.makeChannel, ackTimeoutMs: 20, graceMs: 20 }))
     expect(log).toContain('steal:D')
+  })
+
+  // THE AUDITOR'S RACE (reproduced, then closed). The ack timer fires while a LIVE holder is still
+  // inside an in-flight flush — before it freezes. Without the post-steal grace the taker resolves at
+  // the timeout and the caller READS the body while the holder's write is still in flight; the
+  // holder's write then lands after the read and the caller's later save overwrites it. The
+  // singleOpen mutant that reintroduces the bug (delete the phase-2 grace wait) kills THIS test.
+  it('a LIVE slow-flusher past the ack timeout: the taker reads AFTER the holder freezes', async () => {
+    const bus = makeBus()
+    const log: string[] = []
+    let releaseFlush = () => {}
+    const flushGate = new Promise<void>((r) => { releaseFlush = r })
+    // The holder's flush is still IN FLIGHT when the ack timer fires — the contended-disk case.
+    installHolder('X', makeWiring(log, {
+      makeChannel: bus.makeChannel,
+      flush: async () => { log.push('flush-start'); await flushGate; log.push('flush-end'); return true },
+    }))
+    // ackTimeout (20ms) is shorter than the gated flush; grace (500ms) outlasts the released flush.
+    // The caller "reads" the body the instant takeOverHere resolves — modelled as the 'read:X' mark.
+    const taker = takeOverHere('X', makeWiring(log, { makeChannel: bus.makeChannel, ackTimeoutMs: 20, graceMs: 500 }))
+      .then(() => log.push('read:X'))
+    // Let the ack timer fire while the flush is still gated (holder unfrozen, write in flight).
+    await new Promise((r) => setTimeout(r, 60))
+    // Mid-flight: the taker must be parked in the grace, not resolved — and nothing frozen yet.
+    expect(log).not.toContain('read:X')
+    expect(log).not.toContain('freeze:X')
+    // The slow write lands: flush completes, the holder freezes and posts the late surrendered.
+    releaseFlush()
+    await taker
+    // THE INVARIANT: the caller reads only AFTER the holder froze — no in-flight write can overwrite.
+    expect(log).toContain('freeze:X')
+    expect(log.indexOf('freeze:X')).toBeLessThan(log.indexOf('read:X'))
   })
 })

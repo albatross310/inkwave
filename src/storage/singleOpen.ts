@@ -60,6 +60,15 @@ export interface Wiring {
   emitSurrendered: (id: string) => void
   /** How long the taker waits for the surrender ack before falling back to a rescue steal. */
   ackTimeoutMs: number
+  /**
+   * After an ack TIMEOUT, how long the taker keeps listening (post-steal, before it reads the body)
+   * for a LATE `surrendered` ack. Closes the narrow race where a LIVE holder is still inside its
+   * flush when the ack timer fires: a slow-flusher posts `surrendered` once its flush completes and
+   * it freezes, so waiting for it means the caller reads AFTER the holder's freeze — no late-write
+   * overwrite. A genuinely dead holder never posts, the grace expires, and the rescue proceeds. Kept
+   * short: it only ever delays the (rare) dead-holder-with-a-bus rescue.
+   */
+  graceMs: number
   /** setTimeout seam; returns a cancel fn. */
   setTimer: (fn: () => void, ms: number) => () => void
 }
@@ -94,6 +103,7 @@ export function defaultWiring(): Wiring {
       try { window.dispatchEvent(new CustomEvent('inkwave:doc-surrendered', { detail: { id } })) } catch { /* no window */ }
     },
     ackTimeoutMs: 2500,
+    graceMs: 1500,
     setTimer: (fn, ms) => { const t = setTimeout(fn, ms); return () => clearTimeout(t) },
   }
 }
@@ -159,25 +169,64 @@ export function requestSwitch(id: string, w: Wiring = defaultWiring()): void {
 }
 
 /**
- * "Take over here" — the safe handoff. Posts a take-over, WAITS for the holder's surrender ack (so
- * the loser has frozen before we do anything), then physically steals the lock. On ack-timeout (a
- * dead/hung holder, or no bus) it steals anyway as a rescue — never leaving the writer unable to open
- * their own document. Resolves once this tab holds the lock and it is safe to open + write `id`.
+ * "Take over here" — the safe handoff. Posts a take-over and WAITS for the holder's surrender ack (so
+ * the loser has frozen before we do anything), then physically steals the lock. Resolves once this
+ * tab holds the lock and it is safe for the caller to read + write `id`.
+ *
+ * THE ACK-TIMEOUT RACE (auditor, reproduced) and why the post-steal GRACE closes it. The ack timer
+ * can fire while a LIVE holder is still inside `await flush()` — before it reaches its freeze. Steal-
+ * and-return-immediately then lets the caller READ the body while the holder is still UNFROZEN with an
+ * in-flight `saveDocument` that can land AFTER the read; the caller's later save would overwrite the
+ * holder's flushed final keystrokes — the exact overwrite this mechanism exists to prevent. The steal
+ * itself cannot force an early freeze: the holder's onLockLost fires `surrender(false)`, but its
+ * `if (surrendered) return` guard is already tripped by the in-progress `surrender(true)`, so the
+ * freeze only happens when that in-flight flush completes. So after a timeout we STEAL, then wait a
+ * brief grace for the LATE `surrendered` a live slow-flusher posts once it finishes flushing and
+ * freezes — guaranteeing the caller reads AFTER the freeze. A genuinely dead holder never posts; the
+ * grace expires and the rescue proceeds exactly as before. Degraded (no bus): steal only, as before.
  */
 export async function takeOverHere(id: string, w: Wiring = defaultWiring()): Promise<void> {
   const ch = w.makeChannel()
-  if (ch) {
-    await new Promise<void>((resolve) => {
-      let done = false
-      const finish = () => { if (done) return; done = true; cancel(); resolve() }
-      // Listen BEFORE posting so a fast synchronous ack can't be missed.
-      ch.onMessage((msg) => { if (msg.id === id && msg.type === 'surrendered') finish() })
-      const cancel = w.setTimer(finish, w.ackTimeoutMs) // degraded: proceed without an ack
-      ch.post({ type: 'take-over', id })
-    })
+  if (!ch) { await w.steal(id); return } // no bus — nothing to coordinate with; rescue steal
+
+  // ONE persistent listener for the whole handoff: `acked` records a `surrendered` whenever it lands,
+  // and `onAck` wakes whichever phase is currently waiting. Recording it even when no phase waits
+  // closes the gap where the late ack arrives DURING the steal (between the two waits below).
+  let acked = false
+  let onAck: (() => void) | null = null
+  ch.onMessage((msg) => {
+    if (msg.id === id && msg.type === 'surrendered') { acked = true; onAck?.() }
+  })
+
+  // Phase 1 — post the take-over, await the ack or the ack timeout.
+  await new Promise<void>((resolve) => {
+    if (acked) { resolve(); return }
+    let done = false
+    const finish = () => { if (done) return; done = true; cancel(); onAck = null; resolve() }
+    onAck = finish
+    const cancel = w.setTimer(finish, w.ackTimeoutMs)
+    ch.post({ type: 'take-over', id })
+  })
+
+  if (acked) {
+    // The holder froze + flushed before acking — safe to take the lock and let the caller read.
     ch.close()
+    await w.steal(id)
+    return
   }
-  // Physically own the lock. After a graceful ack the loser is already frozen; after a timeout this
-  // is the rescue steal (and tabDoc's onDocLockLost freezes the loser if it is still alive).
+
+  // Phase 2 — TIMED OUT. Steal to take physical ownership, then (unless the late ack already arrived
+  // during the steal) wait a brief grace for it, so a live slow-flusher's freeze precedes the caller's
+  // read. A dead holder never posts; the grace expires and the rescue proceeds.
   await w.steal(id)
+  if (!acked) {
+    await new Promise<void>((resolve) => {
+      if (acked) { resolve(); return }
+      let done = false
+      const finish = () => { if (done) return; done = true; cancel(); onAck = null; resolve() }
+      onAck = finish
+      const cancel = w.setTimer(finish, w.graceMs)
+    })
+  }
+  ch.close()
 }
