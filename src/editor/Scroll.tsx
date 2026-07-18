@@ -1144,32 +1144,62 @@ export function Scroll({
     const el = surfaceRef.current
     if (!el || !startedHiddenRef.current) return
     armLoadWatchdog()
+    // SIBLING CLOCK ADOPT — the REFERENCE is the first-mounted surface, and it is NEVER rewritten
+    // (2026-07-18 desync fix). The reference is whatever surface mounted first (the loading shell);
+    // waveTwinkle.findDrift resolves the SAME surface (first host), so trackT0 — the marks' clock —
+    // is read from a startTime nothing here touches. Every LATER surface (the covered editor) adopts
+    // the reference; that keeps both waves in phase AND keeps the marks on every surface's crest,
+    // because a mark clocked to the reference rides an adopter whose wave now equals the reference.
+    //
+    // WHY THE OLD `sibling != null` GATE FAILED (measured, markskew.prove.mjs + diag-trace): the
+    // covered editor routinely mounts ~150-250ms BEFORE the shell's drift commits its startTime — so
+    // at the covered editor's mount NO sibling was resolved yet, the gate skipped adoption ENTIRELY,
+    // registered no retry, and the two drifts then resolved independently 150-250ms (10-18px) apart,
+    // FOREVER. Peter's "the little short lines often appear out of sync with the waves" is exactly
+    // that: the covered surface's wave off the shell's, and — since the marks share the shell-clocked
+    // trackT0 — the covered surface's marks off their own crest by the same amount. The fix is to
+    // WAIT for the reference to resolve rather than give up: adopt on retry until it lands.
+    const isReference = driftSurfaces.size === 0
     driftSurfaces.add(el)
-    let sibling: number | null = null
-    for (const s of driftSurfaces) {
-      if (s === el || !s.isConnected) continue
-      try {
-        const a = s.getAnimations({ subtree: true })
-          .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
-        if (typeof a?.startTime === 'number') { sibling = a.startTime as number; break }
-      } catch { /* getAnimations unavailable */ }
-    }
-    if (sibling != null) {
-      const sib = sibling
-      try {
-        for (const a of el.getAnimations({ subtree: true })) {
-          const n = (a as CSSAnimation).animationName ?? ''
-          if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
-            try { a.startTime = sib } catch { /* pending write below re-asserts */ }
-            // STICKY (2026-07-11 live tick/doubling round): a write to a PLAY-PENDING CSS
-            // animation is CLOBBERED when the pending start resolves (measured: the covered
-            // editor kept its own natural start, 33ms-500ms out of phase with the shell —
-            // doubled lines through the reveal fade and marks off their crests after it).
-            // Re-assert at ready, when the write sticks.
-            void a.ready.then(() => { try { if (a.startTime !== sib) a.startTime = sib } catch { /* detached */ } }).catch(() => { /* cancelled */ })
-          }
+    if (!isReference) {
+      // Copy the reference surface's resolved drift-l startTime onto THIS surface's drifts. Returns
+      // false while the reference is still pending — the caller retries until it resolves.
+      const adopt = (): boolean => {
+        let refSt: number | null = null
+        for (const s of driftSurfaces) {
+          if (s === el || !s.isConnected) continue
+          try {
+            const a = s.getAnimations({ subtree: true })
+              .find((x) => (x as CSSAnimation).animationName === 'iw-wave-drift-l')
+            if (typeof a?.startTime === 'number') { refSt = a.startTime as number; break }
+          } catch { /* getAnimations unavailable */ }
         }
-      } catch { /* getAnimations unavailable */ }
+        if (refSt == null) return false
+        const sib = refSt
+        try {
+          for (const a of el.getAnimations({ subtree: true })) {
+            const n = (a as CSSAnimation).animationName ?? ''
+            if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
+              try { a.startTime = sib } catch { /* pending write below re-asserts */ }
+              // STICKY (2026-07-11): a write to a PLAY-PENDING CSS animation is CLOBBERED when the
+              // pending start resolves — re-assert at `ready`, when the write sticks.
+              void a.ready.then(() => { try { if (a.startTime !== sib) a.startTime = sib } catch { /* detached */ } }).catch(() => { /* cancelled */ })
+            }
+          }
+        } catch { /* getAnimations unavailable */ }
+        return true
+      }
+      if (!adopt()) {
+        // The reference has not committed its startTime yet — retry each frame until it does (capped,
+        // so a reference that never resolves cannot spin forever). This is the whole fix: the old
+        // code had no retry, so a covered editor that mounted first simply never adopted.
+        let tries = 0
+        const kick = (): void => {
+          if (!el.isConnected || tries++ > 240) return
+          if (!adopt()) requestAnimationFrame(kick)
+        }
+        requestAnimationFrame(kick)
+      }
     }
     return () => {
       driftSurfaces.delete(el)
