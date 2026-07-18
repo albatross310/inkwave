@@ -125,11 +125,20 @@ export const CAMERA_CAPABLE: readonly string[] = Object.freeze(['src/media/camer
 
 /**
  * The AUDIO-SPECIFIC apparatus — naming any of these is reaching for a MICROPHONE, not a camera, so
- * a camera-declared file may not name them and stay exempt. `getUserMedia` is deliberately NOT here:
- * it is the ambiguous one, which is the whole reason a camera needs an explicit declaration.
+ * a camera-declared file may not name them and stay exempt.
+ *
+ * The BARE `getUserMedia` token is deliberately NOT here: it is camera-or-mic, the ambiguous one,
+ * which is the whole reason a camera needs an explicit declaration. But `audio: true` in a
+ * constraints object is NOT ambiguous — it IS a microphone request — so the LITERAL is caught. Its
+ * absence was a real hole (auditor A, 2026-07-18, PROBED on the real sweep): with the exemption but
+ * without this alternative, flipping `camera.ts`'s `audio: false` to `audio: true` opened the
+ * microphone and every mic-boundary test still passed, because `isCameraOnly` never read the
+ * constraint. `microphone=()` in the header denied the track regardless — but that coupled the
+ * source firebreak to the platform header, and the two layers must hold independently. This closes
+ * the literal case (a dynamic constraints object is still only caught by the header, unchanged).
  */
 export const AUDIO_ONLY_PATTERN = new RegExp(
-  `\\b(MediaRecorder|createMediaStreamSource|AudioWorkletNode)\\b|\\bnew\\s+(?:${RECOGNISER_APIS.join('|')})\\b`,
+  `\\b(MediaRecorder|createMediaStreamSource|AudioWorkletNode)\\b|\\bnew\\s+(?:${RECOGNISER_APIS.join('|')})\\b|\\baudio\\s*:\\s*true\\b`,
 )
 
 /**

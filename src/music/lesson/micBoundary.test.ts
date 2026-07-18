@@ -264,6 +264,21 @@ describe('the camera exemption is real, discriminates, and cannot hide a microph
     }
   })
 
+  it('KNOWN-NEGATIVE: a camera file that REQUESTS audio in its constraints is NOT exempt', () => {
+    // getUserMedia({audio:true}) IS a microphone — the most DIRECT smuggle, and the one the bare-token
+    // exemption missed until AUDIO_ONLY_PATTERN gained `audio:true` (auditor A, PROBED on the real
+    // sweep: flipping camera.ts audio:false→audio:true opened the mic with every test still green,
+    // because isCameraOnly never read the constraint). The literal is not ambiguous, so it is caught.
+    expect(
+      isCameraOnly(CAMERA_FILE, 'navigator.mediaDevices.getUserMedia({ video: true, audio: true })'),
+      'a camera file requesting audio:true slipped through the exemption',
+    ).toBe(false)
+    // …and the honest video-only form is STILL exempt — the fix must not break the feature it guards.
+    expect(
+      isCameraOnly(CAMERA_FILE, 'navigator.mediaDevices.getUserMedia({ video: true, audio: false })'),
+    ).toBe(true)
+  })
+
   it('the exemption is by DECLARATION — an undeclared file naming getUserMedia stays flagged', () => {
     // A random module cannot claim to be a camera. Only paths in CAMERA_CAPABLE are exempt; the mic
     // guarantee for everyone else is unchanged.
