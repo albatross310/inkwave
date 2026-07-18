@@ -1,4 +1,9 @@
-// TEXT-RENDER PROBE SURFACE (flag `inkwave:textRender`, default OFF).
+// TEXT-RENDER PROBE SURFACE — MEASUREMENT ONLY, armed by the FRESH `?textRender` URL param.
+//
+// NOT gated on textRenderEnabled(): that flag graduated to DEFAULT ON (2026-07-18 — the rich
+// /snapshot pane ships live), so gating this 1477-line harness on it would install it for every
+// writer. TiptapEditor arms it instead on `?textRender` being present in the URL at mount — which
+// only the .prove.mjs scripts navigate to — so a normal load of `/` never fetches this chunk.
 //
 // The whole point of this round is an HONEST measurement, and this codebase has been burned five
 // times by results proven in a context production never uses (a plain-div wrap harness; a ligatures-
@@ -7,7 +12,7 @@
 // is measured HERE — inside the running app, against the LIVE editor's document, with the REAL
 // shipped fonts at the REAL device DPR — not in a harness that reimplements the context.
 //
-// Loaded by a flag-gated dynamic import from TiptapEditor, so it costs nothing when off.
+// Loaded by a dynamic import from TiptapEditor, so it costs nothing when unarmed.
 
 import type { Editor } from '@tiptap/react'
 // The /snapshot seam under test — the standalone schema, imported here so the probe compares it

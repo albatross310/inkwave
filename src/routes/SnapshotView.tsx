@@ -234,10 +234,11 @@ function FullDiffView({
       </div>
     )
   }
-  // RICH PAGES FOR EVERY VERSION (2026-07-17, flag `inkwave:textRender`, DEFAULT OFF). Below this
-  // line is the FLAT transcript: one pre-wrap span of `pmToText`, which is what 115 of 116 versions
-  // have rendered. RichDiffView projects the same ops back onto the PM tree (provenance/textMap.ts)
-  // so the pane shows real headings/lists/citations with the diff marks intact.
+  // RICH PAGES FOR EVERY VERSION (flag `inkwave:textRender`, DEFAULT ON since 2026-07-18). Below this
+  // line is the legacy FLAT transcript: one pre-wrap span of `pmToText`, which is what 115 of 116
+  // versions rendered before this graduated. It survives ONLY behind the sticky `?textRender=off`
+  // opt-out. RichDiffView projects the same ops back onto the PM tree (provenance/textMap.ts) so the
+  // pane shows real headings/lists/citations with the diff marks intact.
   //
   // GATED ON textRenderEnabled(), DELIBERATELY — not on a flag of its own. The canvas renderer and
   // this DOM landing must move TOGETHER: a rich canvas frame settling onto a flat pane (or the

@@ -17,7 +17,6 @@ import { syncReviewVisibilityStyles } from './review/reviewState'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
-import { textRenderEnabled } from './textRenderFlag'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import {
@@ -1732,12 +1731,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { cancelled = true }
   }, [])
 
-  // ── textRender probe surface (flag `inkwave:textRender`, default OFF) ─────────────────────────
+  // ── textRender probe surface — MEASUREMENT ONLY, never a user feature ─────────────────────────
   // The plaintext page renderer is measured IN THE REAL APP — live doc, real shipped fonts, real
   // DPR — never a harness that reimplements the context (the trap that has burned this codebase
-  // five times). Dynamic import ⇒ the module stays out of the bundle entirely when the flag is off.
+  // five times). This is a 1477-line probe that installs window.__iwTextRenderProbe and walks the
+  // doc; it must NEVER install for a real writer.
+  //
+  // It is DELIBERATELY NOT gated on textRenderEnabled(): that flag is now DEFAULT ON (the rich
+  // /snapshot pane ships live), so gating the probe on it would hand every writer the harness. It
+  // arms instead on the FRESH `?textRender` URL param — what every .prove.mjs navigates to (and only
+  // them) — so a normal load of `/` never pays for the chunk. Dynamic import ⇒ out of the bundle
+  // entirely when unarmed.
   useEffect(() => {
-    if (!editor || !textRenderEnabled()) return
+    if (!editor) return
+    let armed = false
+    try { const p = new URLSearchParams(window.location.search); armed = p.has('textRender') && p.get('textRender') !== 'off' } catch { armed = false }
+    if (!armed) return
     let cancelled = false
     void import('./textRenderProbe').then((m) => { if (!cancelled) m.installTextRenderProbe(editor) })
     return () => {
