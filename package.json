@@ -14,6 +14,7 @@
     "prove:schema": "node scripts/textrender-probe/schemaIdentity.prove.mjs",
     "prove:mount": "node scripts/textrender-probe/mountcount.prove.mjs",
     "prove:breaks": "node scripts/textrender-probe/breaks.prove.mjs",
+    "prove:arith": "node scripts/textrender-probe/arith.prove.mjs",
     "prove:snapsweep": "node scripts/textrender-probe/snapsweep.prove.mjs",
     "prove:editor": "pnpm prove:schema && pnpm prove:mount && pnpm prove:breaks",
     "prove:pdfposthoc": "node scripts/pdfposthoc.prove.mjs"

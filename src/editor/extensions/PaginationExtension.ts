@@ -53,12 +53,19 @@ export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chun
 let _arithLayoutFlag: boolean | null = null
 function arithLayoutOn(): boolean {
   if (_arithLayoutFlag !== null) return _arithLayoutFlag
-  // DEFAULT OFF (2026-07-15): reverted from default-on. The arith greedy wrap DIVERGES from the DOM
-  // canonical measure on REAL eligible prose — deterministic, ~1 break in 20 (arith fits ~2 more
-  // words on a borderline line; measured on the real Honours prose fixture). Docs that are FULLY
-  // eligible (plain prose, no citations/lists/rules) would get wrong breaks vs canonical/print.
-  // Root-cause the wrap first (engine measureText-vs-browser edge, or wire-in param mismatch);
-  // until it's byte-identical on real prose this stays opt-in via ?arithLayout.
+  // DEFAULT OFF (2026-07-15): reverted from default-on for a deterministic wrap divergence from the
+  // DOM canonical measure on REAL eligible prose (~1 break in 20 — arith fit ~2 more words on a
+  // borderline line). ⚠ THAT RATIONALE IS NOW STALE: the LU-quantisation wrap fix (88ebf39) landed
+  // the DAY AFTER this revert and addresses exactly that class (canvas measureText ran ~0.01px WIDER
+  // than the browser's 1/64px grid-accumulated width, flipping a boundary word — see luFloor in
+  // arithmeticLayout.ts). RE-MEASURED 2026-07-18 (scripts/textrender-probe/arith.prove.mjs, the real
+  // wired whole-doc arith path, __iwPagArith confirmed engaged): BYTE-IDENTICAL to the DOM canonical
+  // measure across 4k/6k/8k-word fully-eligible prose incl. hyphenated compounds (15/23/31 breaks,
+  // 0 divergences). So the wrap root-cause appears CLOSED on Chromium.
+  // STILL OFF, and the remaining blocker is honest: canonical breaks are a CROSS-DEVICE invariant and
+  // arith.prove.mjs is Chromium-only — graduation needs a WebKit pass on Peter's device class (the
+  // same bar the font certification carries) + a scoped-arith (desktop typing) A/B. Until then, opt-in
+  // via ?arithLayout. DO NOT flip the default on the Chromium proof alone.
   try { _arithLayoutFlag = typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithLayout') === '1' } catch { _arithLayoutFlag = false }
   return _arithLayoutFlag
 }
