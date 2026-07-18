@@ -25,11 +25,13 @@ import { v4 as uuidv4 } from 'uuid'
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
-import { readDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
-import { listMeta } from '../storage/indexeddb'
+import { readDocument, saveDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
+import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
-import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock } from '../storage/tabDoc'
+import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock, switchTabToDocument, isExplicitDocIntent } from '../storage/tabDoc'
+import { installHolder, requestSwitch, takeOverHere } from '../storage/singleOpen'
 import { StorageUnavailable } from '../components/StorageUnavailable'
+import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -49,10 +51,37 @@ function migrateDocument(doc: InkwaveDocument): InkwaveDocument {
   return withScasDefaults(Object.assign({ scasLimitN: 'infinite', scasSessionSeed: uuidv4() }, doc))
 }
 
+// "Open a copy" — clone a held document under a NEW id so the original can never diverge. The copy
+// carries the prose and everything that makes it usable (bibliography, headers, media refs, toolbar),
+// but DELIBERATELY drops the identity-bound provenance: the signed receipt chain, the SCAS engine
+// state and green anchors attest the ORIGINAL document's history, and carrying them to a fresh id
+// would let a copy masquerade as the thing it was cloned from. A new id also means no snapshot
+// archive and no cloud binding travel with it — exactly the isolation "no divergence" requires.
+function cloneForCopy(base: InkwaveDocument): InkwaveDocument {
+  const now = new Date().toISOString()
+  const { scasReceipts: _r, scasState: _s, scasGreenAnchors: _g, ...rest } = base
+  void _r; void _s; void _g
+  return migrateDocument(withScasDefaults({
+    ...rest,
+    id: uuidv4(),
+    title: `${base.title || 'Untitled'} (copy)`,
+    createdAt: now,
+    updatedAt: now,
+    scasSessionSeed: uuidv4(),
+  }))
+}
+
 export function Edit() {
   const [doc, setDoc] = useState<InkwaveDocument | null>(null)
   // A read FAILED (not "there is nothing here"). Never null-and-blank: see the catch in init().
   const [loadError, setLoadError] = useState<StorageReadError | null>(null)
+  // This tab tried to open a document another window on this device already holds. We do NOT open it
+  // (two writers on one file blind-overwrite each other); we show the choose-how-to-continue screen.
+  const [blocked, setBlocked] = useState<{ id: string; title: string } | null>(null)
+  // This tab HELD a document and another window took it over. Its writes are already frozen at the
+  // storage funnel; this flag surfaces the read-only banner so the writer isn't confused by an editor
+  // that silently stopped saving.
+  const [surrendered, setSurrendered] = useState(false)
   // The editor component, held in state once its chunk resolves (see the double-mount note at
   // the top of the file). null until then — the loading shell covers either way.
   const [EditorComp, setEditorComp] = useState<typeof import('../editor/TiptapEditor').TiptapEditor | null>(null)
@@ -158,22 +187,30 @@ export function Edit() {
         //    identity is authoritative and the URL is not: OneDrive's sign-in redirect returns to a
         //    bare `/`, so a tab must be able to remember its document with no help from the URL.
         //    This is what stops another tab's document switch from re-pointing this tab on reload.
-        const { id: storedId } = resolveTabDocId()
+        const { id: storedId, source } = resolveTabDocId()
         if (storedId) {
           // ONE LIVE TAB PER DOCUMENT (tabDoc.ts): two tabs on one file blind-autosave over each
           // other and one tab's words are destroyed — `saveDocument` writes the whole file with no
           // union and no generation check. So if another LIVE tab is already editing this document,
-          // this tab does NOT open it; it starts a document of its own below and says so. A plain
-          // reload re-claims normally (the lock follows the page, and claimDocLock retries past the
-          // unload race), so this only ever fires for a genuinely concurrent second tab.
+          // this tab does NOT open it. A plain reload re-claims normally (the lock follows the page,
+          // and claimDocLock retries past the unload race), so this only ever fires for a genuinely
+          // concurrent second tab.
           const mine = await claimDocLock(storedId)
           if (!mine) {
-            // Only a title for a banner — the one place a failed read may be shrugged off, because
-            // nothing is written on the strength of it.
-            const busy = await readDocument(storedId)
-            window.dispatchEvent(new CustomEvent('inkwave:doc-busy', {
-              detail: { id: storedId, title: busy.kind === 'found' ? busy.doc.title : 'That document' },
-            }))
+            // WHO GETS THE BLOCKED SCREEN. Only an EXPLICIT request for this document — a `?doc=`
+            // link/bookmark, or this tab's own remembered identity — earns the choose-how screen: the
+            // writer meant THIS document, so silently opening a different one would be the wrong-doc
+            // switch this whole mechanism exists to stop. A brand-new tab that merely inherited the
+            // origin-wide last-doc hint had no opinion about this file, so it falls through to open
+            // the next document no live tab holds (never block a fresh tab on a doc it didn't choose).
+            if (isExplicitDocIntent(source)) {
+              // Only a title for a banner — the one place a failed read may be shrugged off, because
+              // nothing is written on the strength of it.
+              const busy = await readDocument(storedId)
+              setBlocked({ id: storedId, title: busy.kind === 'found' ? busy.doc.title : 'This document' })
+              return
+            }
+            // last-hint: fall through to step 2 (walk to the next document no live tab holds).
           } else {
             const r = await readDocument(storedId)
             // 'error' is NOT 'absent'. Falling through to step 3 on a failed read is what handed
@@ -241,6 +278,49 @@ export function Edit() {
     setDoc(updated)
   }
 
+  // SINGLE-OPEN, holder side: while this tab holds a document, listen for another window on this
+  // device asking to switch to it or take it over. installHolder also arms the freeze-on-steal
+  // backstop. Re-runs on every document this tab comes to hold — a normal open, a take-over, a copy.
+  useEffect(() => {
+    if (!doc?.id) return
+    return installHolder(doc.id)
+  }, [doc?.id])
+
+  // SINGLE-OPEN, loser side: another window took this document over. The write freeze already
+  // stopped this tab persisting (storage/opfs.ts); reflect it so the writer sees read-only rather
+  // than an editor that silently drops their keystrokes.
+  useEffect(() => {
+    const onSurrendered = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      if (id && id === doc?.id) setSurrendered(true)
+    }
+    window.addEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
+    return () => window.removeEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
+  }, [doc?.id])
+
+  // "Open a copy" — clone the held document under a new id and switch this tab to it (claim + reload).
+  // The original is never touched; the reload lands cleanly on the copy (which no tab holds).
+  async function handleOpenCopy(sourceId: string) {
+    const r = await readDocument(sourceId)
+    const copy = r.kind === 'found' ? cloneForCopy(r.doc) : newDocument()
+    await saveDocument(copy)
+    await upsertMeta({ id: copy.id, title: copy.title, updatedAt: copy.updatedAt })
+    switchTabToDocument(copy.id)
+  }
+
+  // "Take over here" — the safe handshake: the holder freezes + flushes and ACKs BEFORE this returns
+  // (storage/singleOpen.ts), and only then does this tab read the freshest body and open it in place.
+  // No reload, so the stolen lock this tab now holds is kept.
+  async function handleTakeOver(id: string) {
+    await takeOverHere(id)
+    const r = await readDocument(id)
+    if (r.kind === 'error') throw r.error
+    if (r.kind === 'absent') throw new Error('the document could not be found after taking over')
+    claimTabDoc(r.doc.id)
+    setDoc(migrateDocument(r.doc))
+    setBlocked(null)
+  }
+
   // OPEN CHOREOGRAPHY: the instant an open starts, hide the current page (doc → null renders the
   // waves-only loading shell, drift running) for the WHOLE load; the new doc then reveals
   // atomically via the normal settled gate. A failed open restores the stashed doc — never a
@@ -306,6 +386,19 @@ export function Edit() {
     )
   }
 
+  // This document is open in another window on this device. Offer the three ways forward rather than
+  // silently opening something else (see init()).
+  if (blocked) {
+    return (
+      <DocumentOpenElsewhere
+        title={blocked.title}
+        onSwitch={() => requestSwitch(blocked.id)}
+        onOpenCopy={() => handleOpenCopy(blocked.id)}
+        onTakeOver={() => handleTakeOver(blocked.id)}
+      />
+    )
+  }
+
   return (
     <>
       {doc && EditorComp && (
@@ -316,6 +409,7 @@ export function Edit() {
           <EmptyEditorSurface />
         </Scroll>
       )}
+      {surrendered && <SurrenderedBanner onReload={() => window.location.reload()} />}
     </>
   )
 }

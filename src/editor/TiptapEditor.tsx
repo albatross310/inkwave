@@ -882,6 +882,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { window.removeEventListener('inkwave:save-failed', onFail); window.removeEventListener('inkwave:doc-saved', onSaved); clearInterval(watchdog) }
   }, [])
 
+  // SINGLE-OPEN: another window on this device took this document over. The write freeze
+  // (storage/opfs.ts) already stops the bytes; making the editor non-editable stops the writer typing
+  // into a document that no longer accepts their edits — the confusing "I typed and it vanished" case
+  // Edit.tsx's read-only banner explains. Belt-and-braces to the storage freeze, never a substitute.
+  useEffect(() => {
+    const onSurrendered = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id
+      if (id && id === docRef.current.id) editorRef.current?.setEditable(false)
+    }
+    window.addEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
+    return () => window.removeEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
+  }, [])
+
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
     styleTimerRef.current = setTimeout(() => closeBarLayer('style'), 5000)

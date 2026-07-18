@@ -172,7 +172,66 @@ function requestPersistence(): void {
   try { void navigator.storage?.persist?.() } catch { /* unsupported */ }
 }
 
+// ─── The single-open write freeze (the anti-overwrite invariant) ───────────────
+//
+// THE ONE THING THIS APP MUST NEVER DO (2026-07-15, twice, on Peter's real thesis): let two writers
+// on ONE document race and blind-overwrite each other. `saveDocument` is the whole-file replace with
+// no union and no generation check — it is THE loss vector every guard in this file circles. The
+// single-open lock (storage/tabDoc.ts + storage/singleOpen.ts) makes at most one live tab hold a
+// document, and its "Take over here" handoff transfers that hold to a second tab. The handoff is only
+// safe if the LOSING tab genuinely stops writing BEFORE the winning tab starts — otherwise the take-
+// over reproduces the exact overwrite it exists to prevent.
+//
+// This freeze is that stop, and it lives HERE, at the single write funnel, on purpose: a UI that goes
+// read-only is a promise; a `saveDocument` that refuses is a guarantee. When a tab surrenders a
+// document (Web Locks stolen, or a BroadcastChannel take-over), `freezeDocWrites(id)` is called and
+// from that instant NOTHING can persist a new body for that id from this tab. The winning tab only
+// begins after it has the surrender ACK, so "loser stopped before winner started" is enforced at the
+// bytes, not asserted in a comment.
+const frozenDocIds = new Set<string>()
+
+/** Thrown by `saveDocument` for a document this tab has surrendered. Distinct so the autosave beat
+ *  can tell an INTENTIONAL read-only refusal from a genuine storage failure and stay quiet. */
+export class DocWriteFrozenError extends Error {
+  constructor(public readonly documentId: string) {
+    super(`Refusing to write ${documentId}: this document is open in another window (read-only here).`)
+    this.name = 'DocWriteFrozenError'
+  }
+}
+
+/**
+ * Stop this tab persisting a new body for `id`. Idempotent. Called when this tab loses the document's
+ * single-open lock — surrendering it to another tab that is taking over. It ALSO drops any debounced
+ * save already queued for `id`, so a beat armed a moment before the surrender cannot fire past it.
+ */
+export function freezeDocWrites(id: string): void {
+  frozenDocIds.add(id)
+  // A save queued for exactly this document must not slip through after the freeze. A beat for a
+  // DIFFERENT document (none, in practice — a tab edits one doc — but be exact) is left alone.
+  if (saveTimer !== null && pendingDoc !== null) {
+    const queuedId = typeof pendingDoc === 'function' ? pendingDoc().id : pendingDoc.id
+    if (queuedId === id) { clearTimeout(saveTimer); saveTimer = null; pendingDoc = null; pendingOnSaved = undefined }
+  }
+}
+
+/** Undo a freeze (the document is this tab's to write again). Used by tests and by "Open a copy",
+ *  which changes the id anyway; the original id may be reclaimed later by a fresh open/reload. */
+export function unfreezeDocWrites(id: string): void {
+  frozenDocIds.delete(id)
+}
+
+/** Whether this tab is currently refusing to write `id`. */
+export function isDocWriteFrozen(id: string): boolean {
+  return frozenDocIds.has(id)
+}
+
 export async function saveDocument(doc: InkwaveDocument): Promise<void> {
+  // THE INVARIANT, enforced at the funnel: a surrendered document is read-only here, no exceptions.
+  // Throwing (not silently dropping) keeps this loud for any DIRECT caller (snapshots, cloud, music)
+  // — none should reach a surrendered body; if one does, that is a bug worth a stack trace. The
+  // autosave beat below catches this specific error and stays quiet, because there the refusal is
+  // the intended read-only behaviour, not a failure to surface.
+  if (frozenDocIds.has(doc.id)) throw new DocWriteFrozenError(doc.id)
   requestPersistence() // Safari evicts un-persisted storage after 7 days of non-use
   const root = await getRoot()
   const write = await writeJson(root, currentPath(doc.id))
@@ -338,6 +397,11 @@ export function scheduleSave(
   doc: InkwaveDocument | (() => InkwaveDocument),
   onSaved?: () => void,
 ): void {
+  // A surrendered document is read-only here (see freezeDocWrites). Drop the beat silently when we
+  // can tell cheaply — a plain doc carries its id. A thunk is NOT evaluated just to check (that is
+  // the expensive per-keystroke serialize this path exists to defer); its beat reaches saveDocument,
+  // which throws DocWriteFrozenError, which the beat's catch treats as the intended quiet refusal.
+  if (typeof doc !== 'function' && frozenDocIds.has(doc.id)) return
   pendingDoc = doc
   pendingOnSaved = onSaved
   deferSince = 0
@@ -361,7 +425,11 @@ export function scheduleSave(
       onSaved?.()
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('inkwave:doc-saved'))
     } catch (err) {
-      // NEVER swallow a failed autosave (iOS quota/handle errors) — the writer must not keep
+      // A surrendered document refusing to write is INTENDED read-only behaviour, not a failure to
+      // shout about — the tab already shows it is open elsewhere. Firing save-failed here would alarm
+      // the writer about the very thing they just chose ("Take over here" from the other window).
+      if (err instanceof DocWriteFrozenError) return
+      // NEVER swallow a genuinely failed autosave (iOS quota/handle errors) — the writer must not keep
       // typing into a document that stopped persisting. UI listens on this event.
       console.error('[inkwave] autosave failed:', err)
       window.dispatchEvent(new CustomEvent('inkwave:save-failed', { detail: { error: String((err as Error)?.message ?? err) } }))

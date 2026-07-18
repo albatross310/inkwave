@@ -42,6 +42,17 @@ const URL_PARAM = 'doc'
 export type DocIdSource = 'url' | 'tab' | 'last-hint' | 'none'
 
 /**
+ * Did the writer EXPLICITLY ask for this document, or did a brand-new tab merely inherit the
+ * origin-wide last-doc hint? Only an explicit open — a `?doc=` link/bookmark ('url') or this tab's
+ * own remembered identity ('tab') — earns the "open in another window" screen when the document is
+ * held elsewhere. A hint-only tab had no opinion about THIS file, so it should fall through to the
+ * next document no live tab holds, never be blocked on one it didn't choose.
+ */
+export function isExplicitDocIntent(source: DocIdSource): boolean {
+  return source === 'url' || source === 'tab'
+}
+
+/**
  * THE LIVE KNOWN-NEGATIVE. `window.__iwTabDocRule = 'shared'` restores the OLD behaviour — one
  * origin-wide pointer, no per-tab identity, no document claim.
  *
@@ -193,12 +204,21 @@ export const docLockName = (id: string): string => `${DOC_LOCK_PREFIX}${id}`
 type LockManagerLike = {
   request: (
     name: string,
-    opts: { ifAvailable?: boolean },
+    opts: { ifAvailable?: boolean; steal?: boolean },
     fn: (lock: unknown) => Promise<void> | void,
   ) => Promise<unknown>
 }
 
 const held = new Map<string, () => void>() // docId → release this tab's claim
+
+// STOLEN-LOCK NOTIFICATION. When another tab performs "Take over here", it STEALS this document's Web
+// Lock (stealDocLock below). The Web Locks spec resolves that by REJECTING the outgoing holder's
+// request promise with an AbortError — so a steal is observable HERE, with no polling. singleOpen.ts
+// registers a handler that freezes this tab's writes on that signal, which is the belt-and-braces
+// backstop to the BroadcastChannel take-over handshake (and the ONLY signal on the degraded path
+// where BroadcastChannel is unavailable). One callback, set once; never product-critical if unset.
+let lostLockCb: ((id: string) => void) | null = null
+export function onDocLockLost(cb: (id: string) => void): void { lostLockCb = cb }
 
 function lockManager(): LockManagerLike | null {
   try {
@@ -210,18 +230,58 @@ function lockManager(): LockManagerLike | null {
 function tryClaimOnce(locks: LockManagerLike, id: string): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false
+    let granted = false // did WE ever hold this lock? (distinguishes a steal from a request failure)
     const done = (v: boolean) => { if (!settled) { settled = true; resolve(v) } }
     void locks
       .request(docLockName(id), { ifAvailable: true }, (lock) => {
         if (!lock) { done(false); return } // another LIVE tab holds this document
         // The callback's promise IS the lock's lifetime, so keep it pending: the claim lasts until
         // releaseDocLock() resolves it, or until this page goes away and the browser drops it.
+        granted = true
         return new Promise<void>((release) => {
           held.set(id, () => { held.delete(id); release() })
           done(true)
         })
       })
-      // A LockManager failure must never stand between the writer and their document.
+      // A rejection AFTER we were granted the lock is a STEAL (another tab took over): drop our
+      // bookkeeping and notify. A rejection BEFORE we were granted is a LockManager failure, and that
+      // must never stand between the writer and their document — resolve as "yours" and carry on.
+      .catch(() => {
+        if (granted) { held.delete(id); lostLockCb?.(id) }
+        done(true)
+      })
+  })
+}
+
+/**
+ * STEAL `id`'s lock for THIS tab — the mechanism behind "Take over here". Resolves true once this
+ * tab holds it. The steal forcibly preempts the current holder, whose own request promise then
+ * rejects (see tryClaimOnce) — so the loser learns it lost even with no BroadcastChannel.
+ *
+ * CORRECTNESS NOTE: a steal alone does NOT order the handoff — this tab holds the lock the instant it
+ * resolves, while the loser's rejection is delivered a task later. singleOpen.ts therefore waits for
+ * the loser's surrender ACK (BroadcastChannel) BEFORE it lets the editor write, and only steals to
+ * take physical ownership of the lock. On the degraded (no-BroadcastChannel) path there is no ACK to
+ * wait on and the rejection-driven freeze is the whole handoff; that path is a rescue from a possibly
+ * dead tab, not the common case.
+ */
+export async function stealDocLock(id: string): Promise<boolean> {
+  if (typeof window === 'undefined') return true
+  if (legacySharedRule()) return true
+  const locks = lockManager()
+  if (!locks) return true // no Web Locks — nothing to steal; the caller proceeds (degraded)
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const done = (v: boolean) => { if (!settled) { settled = true; resolve(v) } }
+    void locks
+      .request(docLockName(id), { steal: true }, () =>
+        new Promise<void>((release) => {
+          held.set(id, () => { held.delete(id); release() })
+          done(true)
+        }),
+      )
+      // Even a failed steal must not block the writer — the take-over screen has no better fallback
+      // than to let them proceed, and a document they cannot open is its own disaster.
       .catch(() => done(true))
   })
 }
