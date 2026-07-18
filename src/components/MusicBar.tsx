@@ -27,6 +27,9 @@ import { createPortal } from 'react-dom'
 import { musicDemo } from '../music/flag'
 import { musicXmlDemo } from '../music/xmlFlag'
 import { TYPE } from '../music/typeScale'
+// TYPE-ONLY: erased at compile time, so it ships no bytes into the editor's static graph (chunk.test.ts
+// skips `import type`). The value pipeline that turns a photo into a Piece lives in the lazy studio.
+import type { MediaAsset } from '../media/types'
 
 // ─── The lazy panels ─────────────────────────────────────────────────────────
 // TWO separate `import()`s = two separate chunks. Merging them (a single wrapper module that
@@ -43,6 +46,10 @@ interface MusicBarProps {
    *  panel attaches excerpts to it. Passed in (not read from localStorage here) so the bar has no
    *  static dependency on `music/attach.ts` — which would leak into the editor's static graph. */
   documentId?: string | null
+  /** The open document's imported media (`doc.media`). The studio offers "make this a music score"
+   *  on any PHOTO here when the document is not itself a score — the photo→Piece creation flow. Data
+   *  only, no import weight; the conversion pipeline is dynamic inside the studio. */
+  mediaAssets?: readonly MediaAsset[]
 }
 
 /** A bar button: a pill on the ramp, ≥44px touch, that opens a panel. */
@@ -63,7 +70,7 @@ function BarButton({ label, onClick }: { label: string; onClick: () => void }): 
   )
 }
 
-export function MusicBar({ phone, documentId }: MusicBarProps): JSX.Element {
+export function MusicBar({ phone, documentId, mediaAssets }: MusicBarProps): JSX.Element {
   const [view, setView] = useState<View | null>(null)
 
   return (
@@ -93,7 +100,7 @@ export function MusicBar({ phone, documentId }: MusicBarProps): JSX.Element {
           not ship. It returns as a real button when its lane lands. */}
 
       {view && (
-        <MusicPanelOverlay view={view} phone={phone} documentId={documentId} onClose={() => setView(null)} />
+        <MusicPanelOverlay view={view} phone={phone} documentId={documentId} mediaAssets={mediaAssets} onClose={() => setView(null)} />
       )}
     </div>
   )
@@ -104,8 +111,8 @@ export function MusicBar({ phone, documentId }: MusicBarProps): JSX.Element {
 // TiptapEditor's collapse animation, so the panel must escape that clip. A sibling of the editor,
 // never a descendant, so it does not sit inside the editor's PM subtree.
 
-function MusicPanelOverlay({ view, phone, documentId, onClose }: {
-  view: View; phone?: boolean; documentId?: string | null; onClose: () => void
+function MusicPanelOverlay({ view, phone, documentId, mediaAssets, onClose }: {
+  view: View; phone?: boolean; documentId?: string | null; mediaAssets?: readonly MediaAsset[]; onClose: () => void
 }): JSX.Element | null {
   if (typeof document === 'undefined') return null // prerender guard — the editor is client-only
 
@@ -150,7 +157,7 @@ function MusicPanelOverlay({ view, phone, documentId, onClose }: {
         <div className="flex-1 overflow-auto p-4">
           <Suspense fallback={<Loading />}>
             {view === 'studio'
-              ? <MusicStudio demo={musicDemo()} documentId={documentId ?? null} />
+              ? <MusicStudio demo={musicDemo()} documentId={documentId ?? null} mediaAssets={mediaAssets} />
               : <MusicPanel demo={musicXmlDemo()} />}
           </Suspense>
         </div>

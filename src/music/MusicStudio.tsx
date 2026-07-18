@@ -9,11 +9,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { capturePage, capturePdf } from './capture'
+import { createPieceFromPhoto } from './fromPhoto'
 import { HeatmapScreen } from './HeatmapScreen'
 import { ScorePage, SYMBOL_GLYPHS, SYMBOL_ORDER, type Tool } from './ScorePage'
 import { assetUrl, loadPiece, migrateLegacyPieces, putAsset, savePiece } from './store'
 import { newPiece } from './types'
 import type { Annotation, Piece, PiecePage } from './types'
+import type { MediaAsset } from '../media/types'
+import { mb } from '../media/mediaStore'
 import { TYPE } from './typeScale'
 
 const INK_COLOURS = ['#5c2d8a', '#b4342b', '#1d6b3a', '#1a4f8a', '#8a6a1a']
@@ -61,17 +64,22 @@ export async function loadOrMintHarnessPiece(): Promise<Piece> {
  * this studio over whatever document the writer has open, so it opens the Piece OF THAT DOCUMENT —
  * exactly what `loadOrMintHarnessPiece`'s banner said the real entry would do. When it is:
  *   · a music document (docType:'music') → its Piece opens: pages, markup, heatmap, reflow.
- *   · a prose document (or absent)       → `loadPiece` returns null; the studio says so honestly
- *                                          rather than minting a Piece onto an essay (which would
- *                                          convert a thesis into a score — destructive, and NOT this
- *                                          lane's to do: creating a music document from a photo is
- *                                          feat/music-piece-photo's unshipped flow).
+ *   · a prose document (or absent)       → `loadPiece` returns null; the studio does NOT mint a Piece
+ *                                          onto the essay (that would convert a thesis into a score).
+ *                                          Instead, if the document has imported PHOTOS (`mediaAssets`),
+ *                                          it offers "make this a music score" — the photo→Piece flow
+ *                                          (`fromPhoto.ts`), which creates a SEPARATE `docType:'music'`
+ *                                          document and opens it here. No photos ⇒ the honest notice.
  *   · a failed read                      → NEVER treated as "no score"; we surface it, having
  *                                          written nothing (the loadPiece THROWS contract).
  * `documentId` is resolved by the caller (`activeDocumentId()`); passed in so the studio has no
  * hidden dependency on which document is open. Omitted (the retired-route harness) ⇒ the old path.
+ * `mediaAssets` is the open document's `doc.media`, forwarded by the music bar — the studio reads the
+ * photos to convert but never the byte store directly.
  */
-export function MusicStudio({ demo, documentId }: { demo: boolean; documentId?: string | null }) {
+export function MusicStudio({ demo, documentId, mediaAssets }: {
+  demo: boolean; documentId?: string | null; mediaAssets?: readonly MediaAsset[]
+}) {
   const [piece, setPiece] = useState<Piece | null>(null)
   // 'loading' until the load effect resolves; 'none' when a documentId was given but the active
   // document is not a Piece (so `if (!piece)` below never sticks on "Opening…" forever).
@@ -210,16 +218,28 @@ export function MusicStudio({ demo, documentId }: { demo: boolean; documentId?: 
     if (piece) update({ ...piece, annotations })
   }, [piece, update])
 
-  // The active document is not a score. Honest, non-destructive: the studio never mints a Piece over
-  // a prose document. Starting a NEW score from a photo is feat/music-piece-photo's flow, not wired.
+  // The active document is not a score. Honest, non-destructive: the studio never mints a Piece OVER
+  // a prose document. But if the writer has imported PHOTOS, it offers to turn one into a NEW score
+  // (fromPhoto.ts) — a separate docType:'music' document, opened here on success. The essay is untouched.
   if (loadState === 'none' && !piece) {
+    const photos = (mediaAssets ?? []).filter(a => a.kind === 'photo')
     return (
-      <div className="mx-auto w-full max-w-3xl py-10 text-center font-serif" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-        <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>This document isn’t a score.</p>
-        <p className="mt-2" style={{ fontSize: TYPE.label }}>
-          The score studio opens a music document’s pages. To write about a score in this essay, use
-          <b> Import a score</b> on the music bar — it attaches excerpts to the document you’re writing.
-        </p>
+      <div className="mx-auto w-full max-w-3xl py-8 font-serif" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+        {photos.length > 0 ? (
+          <PhotoToScore
+            photos={photos}
+            onCreated={p => { setPiece(p); setLoadState('ok') }}
+          />
+        ) : (
+          <div className="text-center">
+            <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>This document isn’t a score.</p>
+            <p className="mt-2" style={{ fontSize: TYPE.label }}>
+              To make one, import a <b>Photo</b> of a score with the media button on the toolbar, then come
+              back here — you’ll be offered “make this a music score”. To write ABOUT a published score
+              instead, use <b>Import a score</b> on the music bar (it attaches excerpts to this essay).
+            </p>
+          </div>
+        )}
       </div>
     )
   }
@@ -403,6 +423,80 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Photo → score (the creation flow) ───────────────────────────────────────
+//
+// The writer imported a photo of a score (the media button) and opened the studio on that document.
+// It is not itself a score, so here is the turn: pick a photo, and Inkwave runs it through the
+// capture→detect→reflow pipeline and creates a NEW music document from it. Its own busy/error state
+// so a slow capture (a big phone photo is tens of ms of canvas work) shows progress, and a refusal
+// (missing bytes, an unreadable image) is the writer's to see — never a silent blank score.
+
+function PhotoToScore({ photos, onCreated }: {
+  photos: MediaAsset[]
+  onCreated: (piece: Piece) => void
+}) {
+  const [converting, setConverting] = useState<string | null>(null) // the asset id being converted
+  const [error, setError] = useState<string | null>(null)
+
+  async function convert(asset: MediaAsset) {
+    setConverting(asset.id)
+    setError(null)
+    const res = await createPieceFromPhoto(asset)
+    setConverting(null)
+    if (!res.ok) { setError(res.reason); return }
+    onCreated(res.piece)
+  }
+
+  return (
+    <div>
+      <p className="text-center" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #5c2d8a)' }}>
+        Turn a photo into a score
+      </p>
+      <p className="mt-1 mb-5 text-center" style={{ fontSize: TYPE.label }}>
+        Inkwave finds the systems and makes room to write. Your essay stays as it is — the score becomes
+        its own document.
+      </p>
+
+      <ul className="flex flex-col gap-2">
+        {photos.map(asset => (
+          <li
+            key={asset.id}
+            className="iw-nightable flex items-center gap-3 rounded-lg p-3"
+            style={{ border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
+          >
+            <span aria-hidden="true" style={{ fontSize: TYPE.heading, color: 'var(--iw-light, #9b5ccc)' }}>❐</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #5c2d8a)' }}>
+                {asset.name}
+              </span>
+              <span className="block" style={{ fontSize: TYPE.meta }}>{mb(asset.size)}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => convert(asset)}
+              disabled={converting !== null}
+              className="rounded-full px-4 disabled:opacity-50"
+              style={{
+                minHeight: 44,
+                fontSize: TYPE.label,
+                color: '#fff',
+                background: 'var(--iw-light, #9b5ccc)',
+              }}
+            >
+              {converting === asset.id ? 'Reading the score…' : 'Make this a music score'}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {error && (
+        // The failure is the writer's to see, not the console's — the storage rule from 15 July.
+        <p className="mt-4 text-center" style={{ fontSize: TYPE.label, color: '#b45309' }}>{error}</p>
+      )}
     </div>
   )
 }
