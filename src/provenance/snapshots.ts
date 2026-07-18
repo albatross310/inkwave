@@ -176,6 +176,26 @@ export function _resetSnapCache(): void {
   _mergedTargets.clear()
 }
 
+/**
+ * Await every queued snapshot write to LAND. Tests only.
+ *
+ * The open path restores with `deferDiskWrite: true` — a fire-and-forget write on `_writeChain`
+ * that outlives the call that queued it (`restoreSnapshotsFromBundle` → `void write.catch(...)`).
+ * A test that swaps its in-memory OPFS root between cases (installOpfsShim) must first let those
+ * writes DRAIN, or the previous case's deferred write resolves `getDirectory()` against the NEXT
+ * case's fresh root and materialises a stray document in a disk that should have been clean. A
+ * fixed `setTimeout` cannot bound an off-thread gzip under CPU load; this awaits the actual chain.
+ * Loops because a chain can enqueue a successor while we await the first.
+ */
+export async function _drainSnapshotWrites(): Promise<void> {
+  for (let pass = 0; pass < 5; pass++) {
+    const pending = [..._writeChain.values()]
+    if (pending.length === 0) return
+    await Promise.allSettled(pending)
+    if ([..._writeChain.values()].every((p) => pending.includes(p))) return // nothing new enqueued
+  }
+}
+
 // ── Cache-first, serialised disk writes ────────────────────────────────────────
 // The write-through cache updates SYNCHRONOUSLY (before the disk write lands) and is the in-session
 // authority; the gzip+stringify+write is chained per-document so writes can never land out of order.

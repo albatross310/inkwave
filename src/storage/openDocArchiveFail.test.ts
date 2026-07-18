@@ -16,7 +16,7 @@
 // These drive the REAL openDoc against the REAL snapshot store on an in-memory OPFS, with the
 // archive read made to fail the way a transient fault does (testOpfsShim's failOpfsReads).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installOpfsShim, resetOpfsShim, failOpfsReads } from '../email/testOpfsShim'
 import type { ExportBundle } from '../provenance/bundle'
 
@@ -47,13 +47,21 @@ const docWith = (text: string) => ({
   contentJson: para(text),
 }) as never
 
+// DRAIN the previous test's deferred writes DETERMINISTICALLY — never on a wall-clock guess.
+// openDoc restores with `deferDiskWrite: true` (fire-and-forget on the per-doc write chain), and
+// writeOpfsFile resolves its root at WRITE time — so a late write lands in whatever root is installed
+// when it runs. Reset the shim while one is pending and the previous test's forked document
+// materialises inside this test's clean disk (a stray uuid in a listing that should have held one id;
+// PROVED to flake ~30-60% under CPU load with the old `setTimeout(10)`, which cannot bound an
+// off-thread gzip under contention). We `await import` the CURRENT snapshots instance because a
+// mid-test `vi.resetModules()` gives openDoc a FRESH snapshots dep, and the deferred write lands on
+// THAT instance's chain — which the registry still holds here, before the next beforeEach resets it.
+afterEach(async () => {
+  const live = await import('../provenance/snapshots')
+  await live._drainSnapshotWrites()
+})
+
 beforeEach(async () => {
-  // Let the PREVIOUS test's deferred snapshot writes land first. openDoc restores with
-  // `deferDiskWrite: true` (fire-and-forget on the per-doc write chain), and writeOpfsFile resolves
-  // its root at WRITE time — so a late write lands in whatever root is installed when it runs. Reset
-  // without this and the previous test's forked document materialises inside this test's clean disk.
-  // (Cost me a real off-by-one here: a stray uuid doc in a listing that should have held one id.)
-  await new Promise((r) => setTimeout(r, 10))
   vi.resetModules(); resetOpfsShim(); installOpfsShim(); localStorage.clear()
   openDoc = await import('./openDoc'); opfs = await import('./opfs')
   snapshots = await import('../provenance/snapshots')
