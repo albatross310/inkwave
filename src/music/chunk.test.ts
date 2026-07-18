@@ -164,9 +164,18 @@ describe('the editor bundle is untouched by the music module', () => {
     expect([...files].some(f => f.includes('/editor/'))).toBe(true) // and reached the editor
   })
 
-  it('reaches NO music module from the editor', () => {
+  it('reaches ONLY the cheap flag from the editor — never the panel, studio or OSMD', () => {
+    // THE TOOLBAR'S MUSIC SLOT (feat/toolbar-wire, 2026-07-17) reads `musicEnabled()` to decide
+    // whether the ♪ slot is live, exactly as it reads `prodLedgerEnabled()` for the clock. That flag
+    // lives under src/music/, so the editor now statically reaches `src/music/flag.ts` — and ONLY it.
+    // This is the SAME architecture the /music route relies on below ("statically reaches ONLY the
+    // flags"): flag.ts is a leaf with zero imports and a few hundred bytes; the heavy dependency
+    // (OSMD, the panel, the studio, the detector) sits past a lazy boundary and is unreachable here.
+    // The guard is an EXACT allow-list, not a relaxation: any heavier music file (MusicPanel,
+    // ScoreView, MusicStudio, …) reached from the editor lengthens this array and FAILS, and the
+    // load-bearing OSMD guards below are untouched.
     const { files } = staticGraph(EDITOR_ENTRY)
-    expect(musicFiles(files)).toEqual([])
+    expect(musicFiles(files)).toEqual(['src/music/flag.ts'])
   })
 
   it('never pulls opensheetmusicdisplay into the editor', () => {

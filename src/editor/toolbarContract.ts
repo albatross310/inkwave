@@ -39,6 +39,7 @@
 // touch the row size, the storage key, or the migration — and it MUST NOT add itself to
 // DEFAULT_SLOTS (see below).
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
+import { musicEnabled } from '../music/flag'
 
 export type SlotId =
   | 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings'
@@ -113,8 +114,14 @@ const SLOT_LIVE: Record<SlotId, () => boolean> = {
   // (row, ▲ drawer, drag-to-swap and migration all followed). It is now in Peter's first-run six
   // for real, so no first-run writer falls through to `bib` any more.
   media: () => true,
-  // Registered, not yet built. Flip to `() => true` in the same line the button starts rendering.
-  music: () => false,   // awaiting feat/music-piece-photo
+  // feat/music-piece-photo — the music BAR trigger (opens the [turn this photo into a piece] /
+  // [add youtube/mp3] second-bar layer). Behind the SAME default-OFF flag the music module already
+  // ships behind (`?music`, src/music/flag.ts), so the LIVE toolbar is BYTE-UNCHANGED for every real
+  // writer: the slot appears only when the music module is on, exactly as `clock` appears only with
+  // `?prodLedger`. The toolbar owns the SHELL and this trigger; the music lane fills the bar's body
+  // (components/MusicBar.tsx is the labelled seam it replaces). When the music panel is real, this
+  // flag is what turns both on together.
+  music: musicEnabled,
 }
 
 /** Is this slot renderable right now? The ONE definition of "shows up". */

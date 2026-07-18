@@ -58,3 +58,10 @@ export function musicDemo(): boolean {
 
 /** Tests only: forget the resolved flags so a suite can re-resolve them. */
 export function __resetMusicFlagForTest(): void { _flags = null }
+
+/**
+ * Tests only: force the on-flag without a URL/localStorage/window (node env). Mirrors
+ * ledgerFlag.setProdLedgerEnabled so the toolbar's music slot can be toggled the same way the
+ * clock's is. Leaves `demo` as it was.
+ */
+export function setMusicEnabledForTest(on: boolean): void { _flags = { on, demo: _flags?.demo ?? false } }

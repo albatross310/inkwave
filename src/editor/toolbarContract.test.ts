@@ -7,8 +7,14 @@ import {
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, carryToolbarConfig, mergeRowIntoConfig,
 } from './toolbarContract'
 import { setProdLedgerEnabled, _resetProdLedgerFlag } from '../productivity/ledgerFlag'
+// The music slot rides the music module's OWN default-OFF flag (`?music`, src/music/flag.ts),
+// toggled in node the same module-level way the clock's is.
+import { setMusicEnabledForTest, __resetMusicFlagForTest } from '../music/flag'
 
-afterEach(() => { setProdLedgerEnabled(false); _resetProdLedgerFlag() })
+afterEach(() => {
+  setProdLedgerEnabled(false); _resetProdLedgerFlag()
+  __resetMusicFlagForTest()
+})
 
 // The six a writer with NOTHING gets — Peter's first-run list, VERBATIM and complete since the
 // media lane landed (2026-07-17). It was ['…', 'receipt', 'bib'] while `media` fell through to the
@@ -91,6 +97,34 @@ describe('migrateSlots — the row, from any stored vintage', () => {
     expect(after).not.toContain('clock' as SlotId)
     expect(after).toHaveLength(ROW_SLOTS)          // healed, not reset
     expect(after.slice(0, 5)).toEqual(['bib', 'guide', 'math', 'receipt', 'style'])
+  })
+
+  // The music slot is the clock's twin: registered, and live ONLY behind its lane's default-OFF
+  // flag — so the LIVE toolbar is byte-unchanged for a writer who has never turned music on. This
+  // is what keeps the blast radius zero. Mutation-proved: reverting SLOT_LIVE.music to `() => false`
+  // fails the `?music` half; hard-wiring it to `() => true` fails the default-OFF half.
+  it('the music slot joins the population with ?music and LEAVES when it goes off', () => {
+    expect(slotIsLive('music')).toBe(false)                 // default OFF — invisible on the live toolbar
+    expect(livePopulation()).not.toContain('music' as SlotId)
+    expect(overflowSlots(migrateSlots(null))).not.toContain('music' as SlotId)
+
+    setMusicEnabledForTest(true)
+    expect(slotIsLive('music')).toBe(true)
+    expect(livePopulation()).toContain('music' as SlotId)
+    // Not in DEFAULT_SLOTS, so it lands in the ▲ drawer by default rather than widening the row.
+    expect(migrateSlots(null)).toHaveLength(ROW_SLOTS)
+    expect(migrateSlots(null)).not.toContain('music' as SlotId)
+    expect(overflowSlots(migrateSlots(null))).toContain('music' as SlotId)
+    // A writer who promotes it keeps it, without the row growing.
+    const promoted = migrateSlots(['music', 'bib', 'guide', 'math', 'receipt', 'style'])
+    expect(promoted[0]).toBe('music')
+    expect(promoted).toHaveLength(ROW_SLOTS)
+
+    // The flag goes off: a STORED music slot must not strand an unrenderable id.
+    setMusicEnabledForTest(false)
+    const after = migrateSlots(['music', 'bib', 'guide', 'math', 'receipt', 'style'])
+    expect(after).not.toContain('music' as SlotId)
+    expect(after).toHaveLength(ROW_SLOTS)
   })
 
   // The gate OPENED for real — this is the case that proves it is a seam and not a permanent

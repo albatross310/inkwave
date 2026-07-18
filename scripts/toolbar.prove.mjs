@@ -241,6 +241,64 @@ for (const theme of ['day', 'night']) {
   await ctx.close()
 }
 
+// ── MUSIC BAR (feat/toolbar-wire) — the ♪ slot opens the music second-bar layer ──────────────
+// Behind the SAME default-OFF flag the music module ships behind (`?music`), so it is invisible on
+// the live toolbar until then — proved by the default cases above (drawer holds only page+media, no
+// music). Here the flag is ON and the writer has curated music INTO the row, so the trigger is a
+// real row circle. The music lane fills the bar's body; this proves the SHELL — the door and the
+// exclusion — which is what this lane owns.
+for (const theme of ['day', 'night']) {
+  const MUSIC_ROW = ['music', 'page', 'style', 'guide', 'settings', 'media']
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 }, deviceScaleFactor: 2 })
+  await ctx.addInitScript(([t, row]) => {
+    localStorage.setItem('inkwave:theme', t)
+    localStorage.setItem('inkwave:music', '1')                 // ?music resolves to this (music/flag.ts)
+    localStorage.setItem('inkwave-toolbar-slots', JSON.stringify(row))
+  }, [theme, MUSIC_ROW])
+  const page = await ctx.newPage()
+  await page.goto(`http://localhost:${PORT}/?music=1`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.ProseMirror[contenteditable="true"]', { timeout: 30000 })
+  await page.waitForTimeout(1200)
+
+  const musicBtn = await page.$('[data-iw-bar="music"]')
+  check(`[${theme}] the ♪ music trigger renders when ?music is on`, !!musicBtn)
+  if (musicBtn) {
+    await musicBtn.click(); await page.waitForTimeout(500)
+    const opened = await page.evaluate(() => {
+      const pressed = document.querySelector('[data-iw-bar="music"]')?.getAttribute('aria-pressed')
+      // The stub bar carries the mandatory night classes and its labelled body.
+      const bar = [...document.querySelectorAll('.iw-touch-guard.iw-nightable')]
+        .find(e => e.textContent?.includes('Turn photo into a piece'))
+      return { pressed, hasBar: !!bar, night: bar?.classList.contains('iw-nightable') ?? false,
+               guard: bar?.classList.contains('iw-touch-guard') ?? false }
+    })
+    check(`[${theme}] tapping ♪ opens the music bar layer (aria-pressed + labelled body)`,
+      opened.pressed === 'true' && opened.hasBar, JSON.stringify(opened))
+    check(`[${theme}] the music bar carries iw-nightable + iw-touch-guard`,
+      opened.night && opened.guard, JSON.stringify(opened))
+
+    // Screenshot the music bar itself, while it is the open layer (before the exclusion test below).
+    const barShot = await page.evaluateHandle(() =>
+      [...document.querySelectorAll('.iw-touch-guard.iw-nightable')].find(e => e.textContent?.includes('Turn photo into a piece')))
+    if (barShot) { try { await barShot.asElement()?.screenshot({ path: `${OUT}/music-bar-${theme}.png` }) } catch {} }
+
+    // MUTUAL EXCLUSION by the TYPE: open S, then ♪ — exactly one layer ends up owning the bar.
+    const styleBtn = await page.$('[data-iw-bar="style"]')
+    if (styleBtn) {
+      await styleBtn.click(); await page.waitForTimeout(600)   // S takes it (music had it) — handoff
+      const midway = await page.evaluate(() => ({
+        style: document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'),
+        music: document.querySelector('[data-iw-bar="music"]')?.getAttribute('aria-pressed'),
+      }))
+      check(`[${theme}] S took the bar from ♪ — never both open`,
+        midway.style === 'true' && midway.music === 'false', JSON.stringify(midway))
+    }
+    const shot = await page.$('.iw-touch-guard.iw-nightable')
+    if (shot) await shot.screenshot({ path: `${OUT}/music-${theme}.png` })
+  }
+  await ctx.close()
+}
+
 await browser.close()
 cleanup()
 

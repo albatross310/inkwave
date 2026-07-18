@@ -73,6 +73,8 @@ import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
+import { MusicBar } from '../components/MusicBar'
+import { musicEnabled } from '../music/flag'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
@@ -2838,6 +2840,22 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         />
       )}
       {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
+      {id === 'music' && (
+        // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts): this opens the music BAR layer;
+        // it does not own music. `data-iw-bar="music"` marks it so the row's onClickCapture leaves
+        // its own toggle sequencing (toggleBar) alone. Mutually exclusive with S and R by the TYPE
+        // (planBarToggle) — never by this button remembering to close them.
+        <button
+          type="button"
+          aria-pressed={activeBar === 'music'}
+          data-iw-bar="music"
+          onClick={() => toggleBar('music')}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${activeBar === 'music' ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+          title="Music — turn a photo into a piece"
+        >
+          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">♪</span>
+        </button>
+      )}
     </>
   )
 
@@ -3152,6 +3170,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
                 {reviewOpen && <ReviewBar editor={editor} phone={isTouch} />}
+              </div>
+            )}
+
+            {/* Music row — the second-bar layer the music slot opens. Same collapse animation as
+                the style/review rows; MUTUALLY EXCLUSIVE with them by the TYPE (activeBar holds ONE
+                id — toolbarContract.ts). This lane owns the SHELL; components/MusicBar.tsx is the
+                clearly-labelled STUB the music lane (feat/music-piece-photo) fills. Gated on the
+                music flag so it is byte-invisible on the live toolbar until that lane ships. */}
+            {musicEnabled() && (
+              <div style={{
+                overflow: 'hidden',
+                maxHeight: activeBar === 'music' ? '60px' : '0',
+                opacity: activeBar === 'music' ? 1 : 0,
+                pointerEvents: activeBar === 'music' ? 'auto' : 'none',
+                transition: 'max-height 220ms ease, opacity 160ms ease',
+              }}>
+                {activeBar === 'music' && <MusicBar phone={isTouch} />}
               </div>
             )}
 
