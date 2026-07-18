@@ -31,6 +31,8 @@ const CATEGORY_LABEL: Record<DocType, string> = {
   essay: 'the essay',
   note: 'notes',
   email: 'email',
+  // A `music` document IS a Piece (§1) — a photographed score the writer is working on, not prose.
+  music: 'the score',
   reading: 'reading',
   annotating: 'annotating',
   other: 'other work',
