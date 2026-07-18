@@ -90,12 +90,13 @@ describe('a received .studio brings its author’s layout', () => {
   })
 
   it('a flagged-OFF slot survives the open — this device’s flags do not edit the author’s file', async () => {
-    // `clock` is not live without ?prodLedger. Migrating on the way IN would delete it from the
-    // document permanently at the next save; it is dropped at RENDER time instead, where the
-    // decision is reversible. (toolbarContract.test.ts mutation-proves the rule; this proves the
-    // real open path takes it.)
-    const doc = await openAndRead(bundleWith({ v: 1, row: ['clock', 'page'] }))
-    expect(doc?.toolbar?.row).toContain('clock' as SlotId)
+    // `music` is not live without ?music. (Was `clock`, until ?prodLedger graduated to default-ON on
+    // 2026-07-18 and the clock became a live slot.) Migrating on the way IN would delete a flag-off
+    // slot from the document permanently at the next save; it is dropped at RENDER time instead,
+    // where the decision is reversible. (toolbarContract.test.ts mutation-proves the rule; this
+    // proves the real open path takes it.)
+    const doc = await openAndRead(bundleWith({ v: 1, row: ['music', 'page'] }))
+    expect(doc?.toolbar?.row).toContain('music' as SlotId)
   })
 
   it('an UNREADABLE config opens a working document carrying none — never a repaired guess', async () => {

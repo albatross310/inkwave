@@ -121,7 +121,11 @@ describe('a keystroke never reaches the document', () => {
     }
   })
 
-  it('the DISABLED path is the default, and short-circuits before any of this', () => {
+  it('with no browser storage (SSR/prerender/node) the gate is OFF — capture never runs there', () => {
+    // The browser default is now ON (2026-07-18 graduation; mutation-proved in ledgerFlag.test.ts).
+    // But where there is no writer typing — prerender, SSR, this node test — the gate must stay OFF
+    // so capture cannot run on the load path. `prodLedgerEnabled()` reads that fallback here because
+    // node has no localStorage. If a future edit made the no-storage fallback default-on, this fires.
     expect(prodLedgerEnabled()).toBe(false)
   })
 })

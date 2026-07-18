@@ -1,9 +1,15 @@
-// Productivity-layer feature flags — ALL DEFAULT OFF.
+// Productivity-layer feature flags.
 //
-// Two independent lanes ship dark and land separately, so they get independent flags: the measured
-// graphs (`prodGraphs`, P1a-viz) and the AI report that overlays them (`prodReport`, P1c). The
-// ledger that feeds both (`feat/prod-ledger`) lands separately again. Nothing here reaches a writer
-// until the pieces agree.
+// Two independent lanes: the AI work report (`prodReport`, P1c) and the measured graphs
+// (`prodGraphs`, P1a-viz).
+//
+//   • `prodReport` — DEFAULT ON (Peter, 2026-07-18: "take all the flags off … for everything";
+//     CLAUDE.md "STOP FLAGGING EVERYTHING"). The free paste-back report (§A7.1 Path 1) is finished
+//     and usable without a backend, so a writer sees it. `?prodReport=off` is a sticky opt-out.
+//   • `prodGraphs` — STILL DEFAULT OFF, deliberately. It is not a panel: `prodGraphsEnabled()`'s only
+//     caller is the `/productivity` ROUTE, and Peter's ethos is "no routes, all panels" (the /music
+//     and /ledger routes were both retired for exactly this reason). Graduating it would ship a route
+//     to every writer. Left gated pending a separate panel-ification lane; do NOT flip it here.
 //
 // ─── LOAD-PATH COST: ~760 B gzip, NOT ZERO. THE CLAIM HERE USED TO BE FALSE. ─────────────────────
 // This comment previously read "off-by-default also means ZERO load-path cost for everyone else …
@@ -15,37 +21,37 @@
 // `if (reportFlag) …` are RENDER and RUNTIME guards; NEITHER CAN STOP THE BUNDLER. The imports are
 // dynamic now and the probe fails the build if they regress.
 //
-// What remains is this module (407 B) + auth/config (353 B), and it is IRREDUCIBLE: to know whether
-// to offer the report at all, the editor must READ the flag, so the reader itself is on the load
-// path. That is the honest number. Do not restore the word ZERO — replacing one false claim with a
-// tidier false claim is the same defect.
-//
-// RULE FOR ANY FUTURE LANE HERE: a separate chunk file is NOT evidence of laziness. fixtures.ts had
-// its OWN chunk the whole time and was still statically imported, hence still fetched. Verify in
-// `react-router build` output (NOT `vite build` — it exits 0 and writes nothing), against the
-// EAGER-IN-EFFECT set: routes/Edit.tsx fires `import('../editor/TiptapEditor')` at module scope on
-// every load, so the editor chunk counts as load path even though the import is dynamic.
+// With prodReport now DEFAULT ON, one thing changed: the demo import in TiptapEditor is gated on
+// DEMO MODE (`prodReportDemo()`), not on the report flag — otherwise the demo/fixtures chunk would be
+// fetched at runtime for every writer even though installProdReportDemo() no-ops outside demo mode.
+// The heavy modal stays lazily imported, so the STATIC eager set (what prodLoadPath.prove.mjs
+// measures) is unchanged.
 //
 // STICKY URL FLAGS (the `?auth` / `?snapThumbs` pattern, and the round-8 lesson behind it): a flag
 // read fresh from the URL DIES the moment any local-first navigation rewrites it — which silently
 // disabled snapThumbs exactly when it was being used (CLAUDE.md, snapThumbs round 8, bug 2).
 // Resolve ONCE per load, persist, then read from storage. Don't reintroduce that bug.
 //
-//   ?prodGraphs=1     on          ?prodReport=1     on
-//   ?prodGraphs=demo  on + demo   ?prodReport=demo  on + demo
-//   ?prodGraphs=off   clears      ?prodReport=off   clears
+//   prodGraphs (default OFF)      prodReport (default ON)
+//   ?prodGraphs=1     on          ?prodReport=off   off (sticky, writes '0')
+//   ?prodGraphs=demo  on + demo   ?prodReport=1     on (clears a prior opt-out)
+//   ?prodGraphs=off   clears      ?prodReport=demo  on + demo
 //
 // `demo` renders from a LABELLED synthetic fixture ledger — which is why no fixture in this repo may
 // ever contain real writing: demo mode puts fixture data on screen. It is never silent.
 
 type Pair = { on: boolean; demo: boolean }
 
-function resolve(param: string, key: string, demoKey: string): Pair {
-  let on = false, demo = false
+// `defaultOn` inverts the reader and the off-path: an off-by-default flag is present-means-on
+// (`=== '1'`, `off` → absence); an on-by-default flag is absent-means-on (`!== '0'`, `off` → a
+// STICKY '0', because with the default ON removeItem would silently re-enable it).
+function resolve(param: string, key: string, demoKey: string, defaultOn: boolean): Pair {
+  let on = defaultOn, demo = false
   try {
     const p = new URLSearchParams(window.location.search).get(param)
     if (p === 'off') {
-      window.localStorage.removeItem(key)
+      if (defaultOn) window.localStorage.setItem(key, '0') // explicit, sticky opt-out
+      else window.localStorage.removeItem(key)
       window.localStorage.removeItem(demoKey)
     } else if (p === 'demo') {
       window.localStorage.setItem(key, '1')
@@ -54,16 +60,17 @@ function resolve(param: string, key: string, demoKey: string): Pair {
       window.localStorage.setItem(key, '1')
       window.localStorage.removeItem(demoKey)
     }
-    on = window.localStorage.getItem(key) === '1'
+    on = defaultOn ? window.localStorage.getItem(key) !== '0' : window.localStorage.getItem(key) === '1'
     demo = window.localStorage.getItem(demoKey) === '1'
-  } catch { /* SSR/prerender or private mode → stays off */ }
+  } catch { /* SSR/prerender or private mode → stays at defaultOn */ }
   return { on, demo }
 }
 
 // ─── graphs (P1a-viz) ────────────────────────────────────────────────────────
 let _graphs: Pair | null = null
 function graphFlags(): Pair {
-  if (!_graphs) _graphs = resolve('prodGraphs', 'inkwave:prodGraphs', 'inkwave:prodGraphsDemo')
+  // DEFAULT OFF — a route, not a panel (see the header). Do not graduate here.
+  if (!_graphs) _graphs = resolve('prodGraphs', 'inkwave:prodGraphs', 'inkwave:prodGraphsDemo', false)
   return _graphs
 }
 
@@ -84,7 +91,8 @@ export function prodGraphsDemo(): boolean {
 // ─── AI report (P1c) ─────────────────────────────────────────────────────────
 let _report: Pair | null = null
 function reportFlags(): Pair {
-  if (!_report) _report = resolve('prodReport', 'inkwave:prodReport', 'inkwave:prodReportDemo')
+  // DEFAULT ON (2026-07-18) — finished, backend-free paste-back report.
+  if (!_report) _report = resolve('prodReport', 'inkwave:prodReport', 'inkwave:prodReportDemo', true)
   return _report
 }
 
@@ -92,6 +100,15 @@ export function prodReportEnabled(): boolean { return reportFlags().on }
 
 /** `?prodReport=demo` — synthetic ledger data, labelled as such in the panel. Never silent. */
 export function prodReportDemo(): boolean { return reportFlags().demo }
+
+/** The escape hatch: `false` writes a STICKY '0' (not an absence), matching `?prodReport=off`. */
+export function setProdReportEnabled(on: boolean): void {
+  try {
+    window.localStorage.setItem('inkwave:prodReport', on ? '1' : '0')
+    if (!on) window.localStorage.removeItem('inkwave:prodReportDemo')
+  } catch { /* private mode — flag stays session-only via _report */ }
+  _report = { on, demo: on ? (_report?.demo ?? false) : false }
+}
 
 // ─── test hooks ──────────────────────────────────────────────────────────────
 /** Tests only: forget the resolved flags so a suite can re-resolve them. */

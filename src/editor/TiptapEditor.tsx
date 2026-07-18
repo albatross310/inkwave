@@ -68,7 +68,7 @@ import { VerifyModal } from '../components/VerifyModal'
 const ProductivityReportModal = lazy(() =>
   import('../components/ProductivityReportModal').then(m => ({ default: m.ProductivityReportModal })),
 )
-import { prodReportEnabled } from '../productivity/flag'
+import { prodReportDemo, prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
@@ -345,16 +345,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
   const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
-  // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1, Path 1).
+  // The free paste-back work report (§A7.1, Path 1) — now DEFAULT ON (`?prodReport=off` to disable).
   const [reportOpen, setReportOpen] = useState(false)
   const reportFlag = prodReportEnabled()
   // Dynamic: demo.ts statically pulls fixtures.ts (2.8KB gzip of synthetic prose that ONLY
-  // `?prodReport=demo` ever reads). As a static import it rode into the editor chunk and was
-  // preloaded from home-*.js for every writer, flag off.
+  // `?prodReport=demo` ever reads). Gated on DEMO MODE, not on `reportFlag` — with the report now
+  // on by default, gating on the flag would fetch the demo/fixtures chunk for EVERY writer even
+  // though installProdReportDemo() no-ops unless demo mode. Demo implies the flag, so this loses
+  // nothing.
+  const reportDemo = prodReportDemo()
   useEffect(() => {
-    if (!reportFlag) return
+    if (!reportDemo) return
     void import('../productivity/demo').then(m => m.installProdReportDemo())
-  }, [reportFlag])
+  }, [reportDemo])
   const [lineHeight, setLineHeight_] = useState(getLineHeight)
   // PageMenu sets line height; listen for the settings-changed event to sync the CSS var.
   useEffect(() => {
