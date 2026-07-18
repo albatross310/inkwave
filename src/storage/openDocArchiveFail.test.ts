@@ -21,7 +21,12 @@ import { installOpfsShim, resetOpfsShim, failOpfsReads } from '../email/testOpfs
 import type { ExportBundle } from '../provenance/bundle'
 
 const parsed = vi.hoisted(() => ({ current: null as unknown as ExportBundle }))
-vi.mock('../workers/parseClient', () => ({ parseStudioOffThread: async () => parsed.current }))
+// Partial mock: keep the REAL gunzip/gzip off-thread helpers (they degrade inline under vitest,
+// which is the path the snapshot write chain now takes), override only the .studio parse.
+vi.mock('../workers/parseClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../workers/parseClient')>()),
+  parseStudioOffThread: async () => parsed.current,
+}))
 vi.mock('./onedrive', () => ({ setOneDriveFilename: () => {}, adoptOneDriveFile: () => {}, fetchPdfSidecars: async () => {} }))
 vi.mock('./gdrive', () => ({ adoptGoogleDriveFile: () => {} }))
 vi.mock('./folder', () => ({ setSaveFileHandle: async () => {} }))

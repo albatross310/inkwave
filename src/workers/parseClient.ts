@@ -35,7 +35,7 @@ function getWorker(): Worker | null {
   }
 }
 
-function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'parseTrace'; text: string } | { kind: 'parseStudio'; buf: ArrayBuffer } | { kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }, transfer: Transferable[]): Promise<unknown> | null {
+function call(msg: { kind: 'gunzipJson'; buf: ArrayBuffer } | { kind: 'gzipJson'; payload: unknown } | { kind: 'parseTrace'; text: string } | { kind: 'parseStudio'; buf: ArrayBuffer } | { kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }, transfer: Transferable[]): Promise<unknown> | null {
   const w = getWorker()
   if (!w) return null
   const id = ++seq
@@ -76,6 +76,41 @@ export async function gunzipJsonOffThread(buf: ArrayBuffer): Promise<unknown> {
   if (p) { try { return await p } catch { /* worker died mid-flight; buf is gone — rethrow below */ } }
   if (!p) return inlineGunzipJson(buf)
   throw new Error('parse worker failed')
+}
+
+// The COMPRESS side of the WRITE path — the sibling gunzipJsonOffThread never had (the read was
+// already off-thread; the compress was not). The snapshot archive embeds the whole document per
+// snapshot, so JSON.stringify + gzip of the WHOLE archive is O(N×doc) and used to run on the main
+// thread at every checkpoint, stalling keystrokes ~1s on a large thesis. Now the stringify, the
+// UTF-8 encode and the gzip all run in the worker; the main thread pays only the structured-clone
+// of the value on the way IN.
+async function inlineGzipJson(value: unknown): Promise<Uint8Array> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value))
+  const cs = new CompressionStream('gzip')
+  const w = cs.writable.getWriter()
+  // Same discipline as inlineGunzipJson: attach handlers, never `void`. On valid bytes the writer
+  // never rejects, but an unhandled rejection is never propagated; the readable side carries any
+  // genuine failure to the caller's try/catch.
+  const wrote = w.write(bytes).catch(() => {})
+  const closed = w.close().catch(() => {})
+  const out = await new Response(cs.readable).arrayBuffer()
+  await wrote
+  await closed
+  return new Uint8Array(out)
+}
+
+/** JSON.stringify + gzip, off-thread when possible. Returns the gzip bytes ready for writeOpfsFile.
+ *
+ *  Unlike gunzipJsonOffThread this can retry inline after a worker death: the payload is an OBJECT,
+ *  structured-CLONED into the worker (not transferred), so the caller's copy is still intact when the
+ *  worker dies mid-flight — the same robustness parseStudioOffThread has, for the same reason. */
+export async function gzipJsonOffThread(value: unknown): Promise<Uint8Array> {
+  const p = call({ kind: 'gzipJson', payload: value }, [])
+  if (p) {
+    try { return new Uint8Array(await p as ArrayBuffer) }
+    catch { /* worker died — value is still ours (cloned, not transferred); retry inline below */ }
+  }
+  return inlineGzipJson(value)
 }
 
 /** Raw .studio bytes → bundle, off-thread when possible: gunzip-sniff + decode + JSON.parse all in

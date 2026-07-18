@@ -7,6 +7,7 @@ import { parseTraceFile, parseStudioBuffer } from '../provenance/traceParse'
 
 type Req =
   | { id: number; kind: 'gunzipJson'; buf: ArrayBuffer }
+  | { id: number; kind: 'gzipJson'; payload: unknown }
   | { id: number; kind: 'parseTrace'; text: string }
   | { id: number; kind: 'parseStudio'; buf: ArrayBuffer }
   | { id: number; kind: 'opfsWrite'; path: string[]; bytes: ArrayBuffer }
@@ -18,6 +19,28 @@ async function gunzipJson(buf: ArrayBuffer): Promise<unknown> {
   void w.write(buf)
   void w.close()
   return JSON.parse(await new Response(ds.readable).text())
+}
+
+// The COMPRESS sibling of gunzipJson, and the reason this worker earns its keep on the WRITE path.
+// A snapshot embeds the whole document body, so the archive is N snapshots × the whole thesis, and
+// `JSON.stringify(archive)` + `TextEncoder.encode` + gzip are O(archive) — ~1s of unbreakable
+// main-thread work at every checkpoint on a large doc. Peter typed through a snapshot and felt the
+// keystroke thread stall. Here the main thread pays only the structured-clone of the payload IN, and
+// the compressed bytes are TRANSFERRED back — the stringify, encode and gzip all run off-thread.
+// Returns an ArrayBuffer (uniquely, among this worker's ops — see the transfer test in onmessage).
+async function gzipJson(payload: unknown): Promise<ArrayBuffer> {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload))
+  const cs = new CompressionStream('gzip')
+  const w = cs.writable.getWriter()
+  // Attach handlers — do NOT `void` (the inlineGunzipJson lesson, parseClient.ts): on valid bytes
+  // these never reject, but a `void`ed rejection escapes as an unhandled rejection. The readable
+  // side is what carries any genuine failure to the caller.
+  const wrote = w.write(bytes).catch(() => {})
+  const closed = w.close().catch(() => {})
+  const out = await new Response(cs.readable).arrayBuffer()
+  await wrote
+  await closed
+  return out
 }
 
 // iOS Safari has no createWritable on OPFS handles — writes must go through a (worker-only)
@@ -55,10 +78,15 @@ self.onmessage = (e: MessageEvent<Req>) => {
   void (async () => {
     try {
       const ok = m.kind === 'gunzipJson' ? await gunzipJson(m.buf)
+        : m.kind === 'gzipJson' ? await gzipJson(m.payload)
         : m.kind === 'opfsWrite' ? await opfsWrite(m.path, m.bytes)
         : m.kind === 'parseStudio' ? await parseStudioBuffer(m.buf)
         : parseTraceFile(m.text)
-      ;(self as unknown as Worker).postMessage({ id: m.id, ok } satisfies Res)
+      // gzipJson is the only op that returns an ArrayBuffer — TRANSFER it back (detach) so the
+      // compressed archive is not re-copied by structured clone. Every other op returns a parsed
+      // object / bundle / boolean, which is not transferable, hence the instanceof gate.
+      const transfer = ok instanceof ArrayBuffer ? [ok] : []
+      ;(self as unknown as Worker).postMessage({ id: m.id, ok } satisfies Res, transfer)
     } catch (err) {
       ;(self as unknown as Worker).postMessage({ id: m.id, err: String((err as Error)?.message ?? err) } satisfies Res)
     }

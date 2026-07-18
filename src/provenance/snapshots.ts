@@ -11,7 +11,7 @@ import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt, TiptapJSON
 import { contentHash, bundleHash, bibliographyHash, emailHeadersHash, musicAttachmentsHash } from './hash'
 import { normaliseHeaders } from '../email/headers'
 import { stampBundle, upgradeProof } from './ots'
-import { gunzipJsonOffThread } from '../workers/parseClient'
+import { gunzipJsonOffThread, gzipJsonOffThread } from '../workers/parseClient'
 import { writeOpfsFile } from '../storage/opfsWrite'
 import { isNotFound } from '../storage/notFound'
 import { StorageReadError } from '../storage/opfs'
@@ -20,22 +20,21 @@ async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
 }
 
-// ── Gzip helpers (CompressionStream, available in all target browsers) ────────
+// ── Gzip (CompressionStream, available in all target browsers) ────────────────
 // Snapshots JSON is highly repetitive (same contentJson structure, receipt fields)
 // and compresses ~75%, keeping storage manageable as the snapshot list grows.
 // Capability floor: CompressionStream is iOS/Safari 16.4+. Older WebKit can't write the gzip
 // archive, so createSnapshotIfChanged degrades to a no-op (warn once) instead of throwing on the
 // first resolved kick — writing keeps working, provenance is disabled. entry.client shows a banner.
+//
+// THE COMPRESS RUNS OFF-THREAD (gzipJsonOffThread, workers/parseClient.ts). Every snapshot embeds
+// the whole document body, so the archive is N × the whole thesis and JSON.stringify + gzip of it
+// is O(N×doc) — it used to run on the main thread inside queueSnapshotsWrite, stalling keystrokes
+// ~1s per checkpoint on a large doc (Peter's report). The READ was already off-thread
+// (gunzipJsonOffThread); this is the missing sibling. Falls back inline where there is no Worker
+// (node/vitest/prerender). "We should be able to make snapshots while continuing to type."
 const hasCompressionStream = typeof CompressionStream !== 'undefined'
 let warnedNoCompression = false
-async function gzipEncode(json: string): Promise<Uint8Array> {
-  const bytes = new TextEncoder().encode(json)
-  const cs    = new CompressionStream('gzip')
-  const w     = cs.writable.getWriter()
-  void w.write(bytes)
-  void w.close()
-  return new Uint8Array(await new Response(cs.readable).arrayBuffer())
-}
 
 // Detect gzip by magic bytes 0x1f 0x8b.
 function isGzip(buf: ArrayBuffer): boolean {
@@ -197,8 +196,11 @@ function queueSnapshotsWrite(documentId: string, snaps: Snapshot[]): Promise<voi
   _snapCache.set(documentId, Promise.resolve(copy)) // write-through FIRST — readers see it immediately
   const prev = _writeChain.get(documentId) ?? Promise.resolve()
   const next = prev.catch(() => { /* keep the chain alive after a failed predecessor */ }).then(async () => {
-    // writeOpfsFile works on iOS too (no createWritable there — worker sync-access fallback).
-    await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipEncode(JSON.stringify(copy)))
+    // The compress (stringify + gzip of the WHOLE archive) runs OFF-THREAD — see the gzip note above.
+    // It stays INSIDE the per-doc chain, after `prev`, so the write-through cache set above remains
+    // the synchronous in-session authority and disk writes still land in order (the grow-only
+    // invariant depends on that ordering). writeOpfsFile works on iOS too (worker sync-access).
+    await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipJsonOffThread(copy))
   })
   _writeChain.set(documentId, next)
   return next
