@@ -101,6 +101,50 @@ export const MIC_PATTERN = new RegExp(
 export const MIC_CAPABLE: readonly string[] = Object.freeze([])
 
 /**
+ * ─── THE CAMERA IS NOT THE MICROPHONE, AND getUserMedia IS BOTH ──────────────────────────────
+ *
+ * `getUserMedia` opens EITHER a camera or a microphone — the constraints object decides, and a
+ * source scan cannot read it. So a module that opens the CAMERA (`{video:true}`) names the exact
+ * same identifier a module that opens the MICROPHONE (`{audio:true}`) does. Dropping `getUserMedia`
+ * from `CAPTURE_APIS` to let a camera through would open a hole for `getUserMedia({audio:true})`, so
+ * it stays. Instead, a camera module is DECLARED here by path.
+ *
+ * The microphone guarantee does NOT weaken by one bit:
+ *   · `Permissions-Policy: microphone=()` (vercel.json) blocks the audio track at the PLATFORM for
+ *     the whole origin, so even a camera module that mistakenly asked for `{audio:true}` gets no
+ *     microphone. The camera got `camera=(self)`; the mic header is untouched.
+ *   · A camera-declared file is exempt ONLY for `getUserMedia`. If it ALSO names an audio-specific
+ *     API — `MediaRecorder`, the Web Audio graph, a recogniser — it is STILL flagged, because that
+ *     is reaching past a camera. `isCameraOnly` enforces exactly that.
+ *
+ * So this is additive: the mic sweep still SEES `getUserMedia` everywhere; it simply no longer
+ * mistakes the declared camera module for a microphone. A microphone hidden in an undeclared file,
+ * or an audio API smuggled into the camera module, is caught as before.
+ */
+export const CAMERA_CAPABLE: readonly string[] = Object.freeze(['src/media/camera.ts'])
+
+/**
+ * The AUDIO-SPECIFIC apparatus — naming any of these is reaching for a MICROPHONE, not a camera, so
+ * a camera-declared file may not name them and stay exempt. `getUserMedia` is deliberately NOT here:
+ * it is the ambiguous one, which is the whole reason a camera needs an explicit declaration.
+ */
+export const AUDIO_ONLY_PATTERN = new RegExp(
+  `\\b(MediaRecorder|createMediaStreamSource|AudioWorkletNode)\\b|\\bnew\\s+(?:${RECOGNISER_APIS.join('|')})\\b`,
+)
+
+/**
+ * Is this file's `MIC_PATTERN` match attributable ONLY to a permitted CAMERA use? True iff the file
+ * is camera-declared AND its code names no audio-specific API. `code` should already have comments
+ * stripped (a camera module may DISCUSS the microphone — this one's neighbours do).
+ */
+export function isCameraOnly(relPath: string, code: string): boolean {
+  const declared = CAMERA_CAPABLE.some(
+    (p) => relPath === p || (p.endsWith('/') && relPath.startsWith(p)),
+  )
+  return declared && !AUDIO_ONLY_PATTERN.test(code)
+}
+
+/**
  * Modules that may NEVER reach a microphone, transitively — the firebreak's protected side.
  *
  * If whisper-WASM ever lands ON the lesson path, this entry does not get quietly deleted: the

@@ -11,6 +11,8 @@ import { v4 as uuidv4 } from 'uuid'
 import { importMedia, mb, MEDIA_LIMIT_BYTES } from '../media/mediaStore'
 import type { MediaAsset, MediaKind } from '../media/types'
 import { isTouchDevice } from '../editor/Scroll'
+import { cameraSupported } from '../media/camera'
+import { CameraCapturePopup } from './CameraCapturePopup'
 
 const INK = 'var(--iw-ink, #5c2d8a)'
 
@@ -35,7 +37,35 @@ export function MediaMenu({ assets, onImported }: {
   const fileRef = useRef<HTMLInputElement>(null)
   const pendingKind = useRef<MediaKind | null>(null)
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
+  // The webcam-capture popup (Peter's laptop webcam). Its anchor is captured at open time so it
+  // survives this drop-up closing underneath it.
+  const [camera, setCamera] = useState<{ left: number; bottom: number } | null>(null)
   const isTouch = isTouchDevice()
+
+  // ─── Where the Photo button leads ─────────────────────────────────────────────────────────────
+  // On a laptop/desktop with a camera, Photo opens the WEBCAM popup — the whole point of this lane.
+  // On touch (phone/tablet) the native `image/*` file picker already offers the OS camera (front/
+  // back, the full camera app), which is a better path than a getUserMedia preview, so Photo keeps
+  // the file input there. Not a gate against the feature — a route to the better native surface.
+  // If the camera can't open once inside the popup, it degrades to this same file picker (no dead end).
+  function openPhoto() {
+    if (cameraSupported() && !isTouch) {
+      const r = btnRef.current?.getBoundingClientRect()
+      if (r) {
+        setCamera({ left: r.left + r.width / 2, bottom: window.innerHeight - r.top + 8 })
+        setOpen(false)
+        return
+      }
+    }
+    openFilePicker('photo')
+  }
+
+  function openFilePicker(kind: MediaKind) {
+    const accept = KINDS.find((k) => k.kind === kind)?.accept ?? 'image/*'
+    pendingKind.current = kind
+    fileRef.current?.setAttribute('accept', accept)
+    fileRef.current?.click()
+  }
 
   useEffect(() => {
     if (!open) { setError(null); return }
@@ -85,7 +115,7 @@ export function MediaMenu({ assets, onImported }: {
           key={k.kind}
           type="button"
           disabled={busy !== null}
-          onClick={() => { pendingKind.current = k.kind; fileRef.current?.setAttribute('accept', k.accept); fileRef.current?.click() }}
+          onClick={() => { k.kind === 'photo' ? openPhoto() : openFilePicker(k.kind) }}
           className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-stone-50 disabled:opacity-50 text-left"
           style={{ color: INK, minHeight: 44 }}
         >
@@ -120,6 +150,14 @@ export function MediaMenu({ assets, onImported }: {
           these are wildcard `image/*` groups, which iOS resolves to the right picker source. */}
       <input ref={fileRef} type="file" className="hidden" onChange={onFile} />
       {open && createPortal(panel, document.body)}
+      {camera && (
+        <CameraCapturePopup
+          anchor={camera}
+          onImported={(asset) => { onImported(asset); setCamera(null) }}
+          onClose={() => setCamera(null)}
+          onUseFile={() => { setCamera(null); openFilePicker('photo') }}
+        />
+      )}
     </div>
   )
 }

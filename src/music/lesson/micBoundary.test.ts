@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { MIC_CAPABLE, MIC_FORBIDDEN, MIC_PATTERN, PATTERN_CARRIER, micPolicyAllows } from './micBoundary'
+import { CAMERA_CAPABLE, MIC_CAPABLE, MIC_FORBIDDEN, MIC_PATTERN, PATTERN_CARRIER, isCameraOnly, micPolicyAllows } from './micBoundary'
 import * as copy from './copy'
 
 // The firebreak under test (micBoundary.ts has the argument). Three layers:
@@ -210,6 +210,10 @@ describe('layer 2 — only allow-listed modules may name a capture API', () => {
     const offenders = files
       .filter((f) => rel(f) !== PATTERN_CARRIER) // the carrier names every API in order to forbid them
       .filter((f) => !MIC_CAPABLE.some((prefix) => rel(f).startsWith(prefix)))
+      // A CAMERA module names `getUserMedia` too (camera-or-mic), so it matches MIC_PATTERN — but it
+      // reaches for a camera, not a microphone (see isCameraOnly / CAMERA_CAPABLE). It is exempt ONLY
+      // while it names no audio-specific API; the mic guarantee is held by the untouched header.
+      .filter((f) => !isCameraOnly(rel(f), stripComments(readFileSync(f, 'utf8'))))
       .filter(isMicCapable)
       .map(rel)
     expect(
@@ -223,6 +227,55 @@ describe('layer 2 — only allow-listed modules may name a capture API', () => {
   it('MIC_CAPABLE is empty today — nothing in Inkwave opens a microphone', () => {
     // Not a tautology: the sweep above is what makes this a measurement rather than a declaration.
     expect(MIC_CAPABLE).toEqual([])
+  })
+})
+
+// ─── 2b. The camera exemption — getUserMedia for a CAMERA, and the mic held intact ────────────
+
+describe('the camera exemption is real, discriminates, and cannot hide a microphone', () => {
+  const CAMERA_FILE = 'src/media/camera.ts'
+  const codeOf = (rel: string) => stripComments(readFileSync(join(REPO, rel), 'utf8'))
+
+  it('the declared camera module exists and names getUserMedia (so the exemption has a subject)', () => {
+    expect(CAMERA_CAPABLE).toContain(CAMERA_FILE)
+    expect(existsSync(join(REPO, CAMERA_FILE)), 'the declared camera module is missing').toBe(true)
+    // If it did not match MIC_PATTERN, the exemption would be exempting nothing — a decoration.
+    expect(MIC_RE.test(codeOf(CAMERA_FILE)), 'camera.ts no longer names a capture API').toBe(true)
+  })
+
+  it('camera.ts is treated as camera-only (it names no audio-specific API)', () => {
+    expect(isCameraOnly(CAMERA_FILE, codeOf(CAMERA_FILE))).toBe(true)
+  })
+
+  it('KNOWN-NEGATIVE: a camera-declared file that ALSO names an audio API is NOT exempt', () => {
+    // The exemption covers getUserMedia ONLY. Smuggling a microphone into the camera module — a
+    // MediaRecorder, a Web Audio graph, a recogniser — must NOT be laundered by the declaration.
+    // If it were, "the camera is exempt" would silently mean "any capture API in camera.ts is exempt".
+    for (const audio of [
+      'const r = new MediaRecorder(stream)',
+      'ctx.createMediaStreamSource(stream)',
+      'const n = new AudioWorkletNode(ctx, "x")',
+      'const s = new webkitSpeechRecognition()',
+    ]) {
+      expect(
+        isCameraOnly(CAMERA_FILE, `navigator.mediaDevices.getUserMedia({video:true})\n${audio}`),
+        `an audio API (${audio}) leaked through the camera exemption`,
+      ).toBe(false)
+    }
+  })
+
+  it('the exemption is by DECLARATION — an undeclared file naming getUserMedia stays flagged', () => {
+    // A random module cannot claim to be a camera. Only paths in CAMERA_CAPABLE are exempt; the mic
+    // guarantee for everyone else is unchanged.
+    expect(isCameraOnly('src/components/SomethingElse.tsx', 'navigator.mediaDevices.getUserMedia({video:true})')).toBe(false)
+    expect(isCameraOnly('src/media/notcamera.ts', 'navigator.mediaDevices.getUserMedia({audio:true})')).toBe(false)
+  })
+
+  it('the mic firebreak still SEES camera.ts (exemption is a filter on the sweep, not blindness)', () => {
+    // isMicCapable — the raw scanner — must still fire on camera.ts. The exemption lives in the
+    // OFFENDER filter, so the scanner keeps its eyes; a future audio API added here would be caught
+    // by the known-negative above. If the scanner itself went blind, that safety net would be gone.
+    expect(isMicCapable(join(REPO, CAMERA_FILE))).toBe(true)
   })
 })
 
@@ -270,10 +323,13 @@ describe('layer 3 — the lesson path cannot REACH a microphone, transitively', 
       // And prove the IMPORT is what carried it — the importer itself names no API, so a
       // file-local grep would call this clean.
       expect(isMicCapable(fakeLessonFile)).toBe(false)
-      // Layer 2 must catch it too, from the other direction: an unlisted mic-capable module.
+      // Layer 2 must catch it too, from the other direction: an unlisted mic-capable module. The
+      // camera exclusion (same as the main sweep) must NOT rescue it — the fixture is not the
+      // declared camera module and asks for `{audio:true}`.
       const offenders = allSourceFiles(SRC)
         .filter((f) => rel(f) !== PATTERN_CARRIER)
         .filter((f) => !MIC_CAPABLE.some((p) => rel(f).startsWith(p)))
+        .filter((f) => !isCameraOnly(rel(f), stripComments(readFileSync(f, 'utf8'))))
         .filter(isMicCapable)
         .map(rel)
       expect(offenders).toContain('src/media/__fake_recorder_fixture.ts')
