@@ -2839,6 +2839,15 @@ The floor is five *doing real work*, not five processes. Never spawn a lane to s
 now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the working band is
 5–6. If lanes start dying, suspect memory before suspecting the code.
 
+**STOP FLAGGING EVERYTHING — FINISHED FEATURES SHIP LIVE (Peter, 2026-07-18 — reverses the earlier default).** For most of this project the reflex was "build behind a default-OFF flag" — safe while a feature was half-built, but it hardened into gating *everything*, so Peter kept finding completed, tested features invisible unless he typed `?music`/`?prodLedger` into the URL. His words: *"Stop flagging everything"* and *"take all the flags off for music and everything."* New default:
+
+- **A finished, tested feature SHIPS LIVE — no flag.** Don't reflexively wrap new work in a default-OFF flag; the default is that a writer sees it.
+- **A flag is now the EXCEPTION and must earn itself** — only for work genuinely not ready (incomplete, experimental, blocked on an external dependency). It's a temporary scaffold, not a home: it comes with a plan to graduate, and the report says WHY it's not live and WHAT closes the gap.
+- **Graduating ≠ flipping a switch on a stub.** Turn a flag on only when the thing behind it is real. `musicEnabled()`=true over a placeholder panel ships a stub to every writer — worse than the flag.
+- **Genuinely-unfinished stay gated for now** (2026-07-18): the experimental scrub renderer (`?textRender`), the wave video (`?waveVideo`, unresolved desync), the parked arithmetic layout (`?arithLayout`), email send (`?email`, blocked on Google verification). Name the reason when you touch them.
+
+The old blanket "**All flags stay default OFF**" line elsewhere in this file is superseded by this.
+
 **NAME THE FEATURE, EVERY TIME (Peter, 2026-07-17 — a standing reporting rule).** He runs many lanes
 at once and intends to keep parallelising aggressively, so a report that says "the model diverges" or
 "the signature was stale" is unreadable: he cannot know which of a dozen in-flight features it means.
