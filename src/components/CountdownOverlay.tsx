@@ -72,23 +72,17 @@ export function CountdownOverlay({ onOpen }: { onOpen: () => void }): JSX.Elemen
       style={{
         top: 10,
         right: 14,
-        // Faint grey, per Peter.
+        // Faint grey, per Peter — and correct in BOTH themes now.
         //
-        // ⚠ THIS TOKEN DOES NOT RESOLVE, AND THE COMMENT THAT USED TO SIT HERE WAS WRONG. It claimed
-        // "a token so night mode lightens it rather than leaving it invisible charcoal-on-charcoal".
-        // MEASURED (headless Chromium, real built stylesheet, `data-theme="night"`): this element is
-        // portalled to `document.body`, and the night palette is scoped to
-        // `:root[data-theme="night"] .iw-nightable` — NOT to :root (see music/theme.test.ts, which
-        // records that scoping as load-bearing). With no `.iw-nightable` ancestor the var falls back
-        // to its DAY value: rgb(168,162,158) at night, where the intended token is rgb(223,227,233).
-        // So the countdown renders its day grey on the charcoal page — dimmer than designed. Legible,
-        // not invisible, which is why nobody caught it.
-        //
-        // NOT FIXED HERE, deliberately: the obvious fix (add `iw-nightable`) ALSO applies that block's
-        // `background-color: #454e59 !important`, which beats the inline `background: none` below and
-        // puts a grey box over the prose. The real fix is a :root-level token for chrome that lives
-        // outside a nightable surface — a theming decision, and Peter checks night mode personally.
-        color: 'var(--iw-pill-fg, #a8a29e)',
+        // This element is portalled to `document.body`, OUTSIDE any `.iw-nightable` surface, and the
+        // night palette's greys (`--iw-pill-fg` etc.) are scoped to `:root[data-theme="night"]
+        // .iw-nightable`. With no nightable ancestor those fall back to their DAY value — the bug a
+        // prior lane measured and left: day-grey (rgb 168,162,158) on the charcoal page. The fix is a
+        // dedicated CHROME token defined at :root in both themes (index.css, UNSCOPED, so this portal
+        // reaches it): day #a8a29e / night #dfe3e9. NOT `iw-nightable` on the element — that block also
+        // forces `background-color: #454e59 !important`, which would beat the inline `background: none`
+        // and drop a grey box over the prose. Text-colour token only; the box stays transparent.
+        color: 'var(--iw-countdown-fg, #a8a29e)',
         opacity: 0.55,
         // The ramp's floor (Peter: "every font proportionally up"). Desktop-only — `isTouchDevice()`
         // returns null above — so the iOS rule never binds here; it is on the ramp because a

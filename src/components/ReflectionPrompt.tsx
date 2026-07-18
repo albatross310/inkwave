@@ -26,8 +26,10 @@ import { localDayOf } from '../productivity/sessionLogic'
 // INSIDE `LedgerDropUp`, so a private scale here would be a visible seam mid-panel.
 import { TOUCH_MIN, TYPE } from '../music/typeScale'
 
-/** What each category is called when we hand it back to the writer. */
-const CATEGORY_LABEL: Record<DocType, string> = {
+/** What each category is called when we hand it back to the writer. Exported so the read-back
+ *  journal (`ReflectionJournal`) names categories the SAME way it does here — one label table, so
+ *  "reading" in the prompt and "reading" in the journal can never drift. */
+export const CATEGORY_LABEL: Record<DocType, string> = {
   essay: 'the essay',
   note: 'notes',
   email: 'email',
@@ -78,6 +80,10 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
   if (!rows.length || !cats.length) return null
 
   const total = cats.reduce((a, c) => a + c.minutes, 0)
+  // The bar chart's scale — the biggest stretch fills the track, the rest read against it. Peter's
+  // "show the simple bar chart of each of these categories": a category IS its measured minutes, so
+  // the bar is the thing being commented on, drawn beside the box the comment goes in.
+  const maxMinutes = Math.max(1, ...cats.map((c) => c.minutes))
 
   const save = () => {
     // A category they said nothing about is ABSENT — never an empty string. Silence is not an answer
@@ -113,6 +119,13 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
                 {c.minutes}m
               </span>
             </label>
+            {/* The simple bar chart (Peter). Calm, no red: the track is the panel's own hairline, the
+                fill the light accent — a measure, never a score. Proportional to the day's biggest
+                stretch so the categories read against each other at a glance. */}
+            <div className="mb-1.5 h-2 w-full overflow-hidden rounded-full" style={{ background: 'var(--iw-nightable-border, #f0eeec)' }}>
+              <div className="h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${Math.round((c.minutes / maxMinutes) * 100)}%`, minWidth: 4, background: 'var(--iw-light, #9b5ccc)', opacity: 0.75 }} />
+            </div>
             <input
               value={text[c.doc_type] ?? ''}
               onChange={(e) => setText((t) => ({ ...t, [c.doc_type]: e.target.value }))}

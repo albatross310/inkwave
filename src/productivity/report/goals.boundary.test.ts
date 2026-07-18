@@ -180,6 +180,61 @@ describe('§A5b tier 2c — goals reach the AI only on their own tick', () => {
   })
 })
 
+// ─── §A5b — THE DATED TIMELINE (the "kick up the butt") ────────────────────────────────────────
+// The milestones were authored (GoalsSection) and stored on the document, then SILENTLY DROPPED in
+// compile.ts's goalsSection before the model ever saw them — so the report could not hold the writer
+// to a single deadline. These pin that the milestone TEXT and Inkwave's OWN verdict (§A6.4 — never
+// two dates for the model to compare) reach the payload. Break the emission and the text vanishes.
+
+const M_MISSED = 'Finish-the-lit-review-Frobnitz'
+const M_UPCOMING = 'Draft-chapter-two-Grumbo'
+const M_MET = 'Outline-done-Wibble'
+
+/** A goal carrying three milestones whose verdicts are DETERMINISTIC regardless of the run day:
+ *  a long-past undated-done one (MISSED), a far-future one (not yet due), and a done-before-due one. */
+function goalsWithTimeline(agg: WindowAggregate): Record<string, DocGoals> {
+  return {
+    [agg.docs[0].doc_id]: {
+      goal: GOAL,
+      milestones: [
+        { id: 'm1', text: M_MISSED, due: '2020-01-01' },                                     // past, not done ⇒ MISSED
+        { id: 'm2', text: M_UPCOMING, due: '2099-12-31' },                                    // far future ⇒ not yet due
+        { id: 'm3', text: M_MET, due: '2099-12-31', done_at: '2026-07-06T09:00:00+10:00' },   // done before due ⇒ MET
+      ],
+    },
+  }
+}
+
+describe('§A5b — the dated timeline reaches the model as text + Inkwave\'s verdict', () => {
+  it('carries every milestone\'s text (the silent drop was the bug)', () => {
+    const agg = daily()
+    const { text, goalsIncluded } = compilePayload({ agg, goals: goalsWithTimeline(agg) })
+    expect(goalsIncluded).toBe(true)
+    expect(text).toContain(M_MISSED)
+    expect(text).toContain(M_UPCOMING)
+    expect(text).toContain(M_MET)
+  })
+
+  it('hands the model a COMPUTED verdict, not two dates to judge (§A6.4)', () => {
+    const agg = daily()
+    const { text } = compilePayload({ agg, goals: goalsWithTimeline(agg) })
+    expect(text).toContain('MISSED')
+    expect(text).toContain('not yet due')
+    expect(text).toContain('MET')
+    // ...and it tells the model the verdict is Inkwave's, so it reports rather than recomputes.
+    expect(text).toMatch(/Inkwave computed each verdict/i)
+  })
+
+  it('KNOWN-NEGATIVE: a goal with NO milestones carries no timeline block', () => {
+    // Proves the assertions above are reading the milestones, not some always-present prose: the same
+    // call with goal+plan and no milestones must NOT emit the MILESTONES block.
+    const agg = daily()
+    const { text } = compilePayload({ agg, goals: goalsFor(agg) })
+    expect(text).not.toContain('MILESTONES (')
+    expect(text).not.toContain(M_MISSED)
+  })
+})
+
 // ─── THE PAIRS ARE REAL ───────────────────────────────────────────────────────────────────────
 
 describe('the boundary discriminates — off and on are not the same payload', () => {

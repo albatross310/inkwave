@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -75,6 +75,7 @@ import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { MusicBar } from '../components/MusicBar'
 import { musicEnabled } from '../music/flag'
+import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
@@ -443,6 +444,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // overflow by default — its button is frequently unmounted. The slot and the countdown are two
   // access paths to ONE setter.
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  // Stable opener — the countdown, the clock slot AND the end-of-session reflection watcher all set
+  // ONE state (a slot is a trigger, never an owner). Stable so ReflectionAutoOpen's listener never
+  // re-subscribes per render.
+  const openLedger = useCallback(() => setLedgerOpen(true), [])
   const [, setLedgerGoalsTick] = useState(0) // re-render the drop-up after a goals write
   const [oppsOpen, setOppsOpen] = useState(false)
   const toolbarPickerRef = useRef<HTMLDivElement>(null)
@@ -2953,7 +2958,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             on; it portals itself to <body>, so despite sitting here in the tree it is never a
             DESCENDANT of the editor and its per-second write cannot invalidate the page subtree.
             It is the SECOND access path to the ledger — same setter as the toolbar's clock slot. */}
-        {prodLedgerEnabled() && <CountdownOverlay onOpen={() => setLedgerOpen(true)} />}
+        {prodLedgerEnabled() && <CountdownOverlay onOpen={openLedger} />}
+        {/* At the end of a longer session, surface the reflection (Peter). Null render; opens the
+            drop-up only when a reflection is genuinely due. Same setter as the countdown/clock. */}
+        {prodLedgerEnabled() && <ReflectionAutoOpen onDue={openLedger} />}
         {prodLedgerEnabled() && ledgerOpen && (
           <LedgerDropUp
             docId={doc.id}

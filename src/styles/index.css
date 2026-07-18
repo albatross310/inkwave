@@ -1428,6 +1428,16 @@
    chip in night". Any new filled control must use this, never a hard-coded white. */
 :root { --iw-on-ink: #ffffff; }
 
+/* The corner countdown (CountdownOverlay) is PORTALLED to <body>, OUTSIDE any .iw-nightable surface.
+   A token defined only inside that scope (like --iw-pill-fg) falls back to its DAY value on the night
+   page — day-grey on charcoal, the bug a prior lane recorded but left. So this chrome token is defined
+   at :root in BOTH themes (the night rule is UNSCOPED, not under .iw-nightable) so the portalled
+   overlay resolves it. Faint grey either way; the overlay's own opacity:0.55 keeps it quiet. Kept OUT
+   of .iw-nightable deliberately — that block forces a background-color, which would drop a grey box
+   over the prose. */
+:root { --iw-countdown-fg: #a8a29e; }
+:root[data-theme="night"] { --iw-countdown-fg: #dfe3e9; }
+
 /* Music module (MusicXML path) — the rendered notation's colours. Day values here, night values in
    the night block below. Unlike the charts, these are NOT consumed as var() inside an SVG attribute:
    OSMD generates the notation SVG and only accepts concrete colour strings, so src/music/theme.ts

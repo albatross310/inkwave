@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { DocGoals, DocMilestone } from '../types/document'
 import {
-  addMilestone, milestoneStatus, removeMilestone, setPlan, toggleMilestone, updateMilestone,
+  addMilestone, milestoneStatus, removeMilestone, setGoal, setPlan, toggleMilestone, updateMilestone,
   type GoalStatus,
 } from '../productivity/goals'
 import { isoWithOffset, localDayOf } from '../productivity/sessionLogic'
@@ -77,8 +77,10 @@ export function GoalsSection({ goals: g, docLabel, onChange }: {
 }): JSX.Element {
   const [text, setText] = useState('')
   const [due, setDue] = useState('')
+  const [goalText, setGoalText] = useState(g?.goal ?? '')
   const [plan, setPlanText] = useState(g?.plan ?? '')
 
+  useEffect(() => { setGoalText(g?.goal ?? '') }, [g?.goal])
   useEffect(() => { setPlanText(g?.plan ?? '') }, [g?.plan])
 
   const add = useCallback(() => {
@@ -97,6 +99,20 @@ export function GoalsSection({ goals: g, docLabel, onChange }: {
         <h3 className="mb-2 uppercase tracking-wider" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           Goals — {docLabel ?? 'this document'}
         </h3>
+
+        {/* The OVERARCHING goal — what this is for, what "done" looks like (§A5b DocGoals.goal). It is
+            the standing the report pushes FROM: the milestones are its timeline, this is the thing they
+            add up to. Authored here (setGoal) because nothing did — it was stored on the document and
+            never written, so every report saw plan+milestones but no goal to hold the writer to. */}
+        <textarea
+          value={goalText}
+          onChange={(e) => setGoalText(e.target.value)}
+          onBlur={() => onChange(setGoal(g, goalText, nowIso()))}
+          rows={2}
+          placeholder="What's this document for — and what does 'done' look like?"
+          className="mb-2.5 w-full resize-y rounded-md px-2 py-1.5"
+          style={{ fontSize: TYPE.body, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+        />
 
         {goals.length === 0 && (
           // The empty state OFFERS. It does not nag: with nothing set there is nothing to be late

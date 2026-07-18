@@ -56,13 +56,14 @@ import {
   getPomodoroState, loadPomodoroConfig, pausePomodoro, resumePomodoro, setPomodoroConfig,
   startPomodoro, stopPomodoro, subscribe,
 } from '../productivity/pomodoroStore'
-import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry } from '../productivity/sessionLogic'
+import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry, unreflectedRows } from '../productivity/sessionLogic'
 import type { DocType, Reflection, SessionRow } from '../productivity/types'
 import { TOUCH_MIN, TYPE } from '../music/typeScale'
 import { bibProvider } from '../citations/bibProvider'
 import type { DocGoals } from '../types/document'
 import { countdownShown, setCountdownShown } from './CountdownOverlay'
 import { GoalsSection } from './GoalsSection'
+import { ReflectionJournal } from './ReflectionJournal'
 import { ReflectionPrompt } from './ReflectionPrompt'
 import { TimeFace, TimeRing } from './TimeFace'
 
@@ -75,11 +76,22 @@ const timeOf = (iso: string): string => iso.slice(11, 16)
 function ClockGlyph({ running }: { running: boolean }): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden
-      stroke="currentColor" strokeWidth={running ? 2 : 1.6} strokeLinecap="round">
-      {/* Hands only — the button's own border circle is the bezel. */}
-      <line x1="12" y1="12" x2="12" y2="6.6" />
-      <line x1="12" y1="12" x2="15.8" y2="13.8" />
-      <circle cx="12" cy="12" r="1.05" fill="currentColor" stroke="none" />
+      stroke="currentColor" strokeWidth={running ? 1.9 : 1.6} strokeLinecap="round" strokeLinejoin="round">
+      {/* A DIAL, not two bare strokes (Peter, 2026-07-17: "a new clock symbol… that looks more like a
+          clock"). Four hour ticks at 12/3/6/9 read as a clock face even at 17px; the button's own
+          border circle is the bezel. currentColor throughout, so it inverts with the button in night. */}
+      <g strokeWidth={1.3}>
+        <line x1="12" y1="3.7" x2="12" y2="5.3" />
+        <line x1="20.3" y1="12" x2="18.7" y2="12" />
+        <line x1="12" y1="20.3" x2="12" y2="18.7" />
+        <line x1="3.7" y1="12" x2="5.3" y2="12" />
+      </g>
+      {/* Hands in clearly DIFFERENT directions read as a clock; two hands in one quadrant read as a
+          tick/arrow (the old glyph's problem). Hour hand straight up (12), minute hand to the
+          lower-right (~4 o'clock) — the canonical clock-icon pose. */}
+      <line x1="12" y1="12" x2="12" y2="7.5" />
+      <line x1="12" y1="12" x2="16.4" y2="14.2" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
     </svg>
   )
 }
@@ -91,17 +103,21 @@ function Pill({ active, onClick, children, title }: {
 }): JSX.Element {
   return (
     <button type="button" onClick={onClick} title={title}
-      className="rounded-full px-3 py-1 transition-colors"
+      className="rounded-full px-3 py-1 transition-all active:scale-[0.97]"
       style={{
         fontSize: TYPE.meta,
         // A pill is a tap target, and it is the smallest one here — the HIG floor moves WITH the
         // ramp rather than being whatever the padding happened to add up to.
         minHeight: TOUCH_MIN,
+        // A selected pill reads as chosen, not just tinted: medium weight + a soft purple lift. The
+        // shadow tint works in both themes (the ink shifts, the shadow stays its family).
+        fontWeight: active ? 500 : 400,
         border: '1px solid var(--iw-nightable-border, #e7e5e4)',
         background: active ? 'var(--iw-ink, #5c2d8a)' : 'transparent',
         // NOT #fff: --iw-ink is light purple in night, so white text on it is illegible (measured).
         color: active ? 'var(--iw-on-ink, #fff)' : 'var(--iw-pill-fg, #78716c)',
         borderColor: active ? 'var(--iw-ink, #5c2d8a)' : undefined,
+        boxShadow: active ? '0 1px 5px rgba(92,45,138,0.25)' : 'none',
       }}
     >
       {children}
@@ -113,8 +129,11 @@ function Pill({ active, onClick, children, title }: {
 function PrimaryButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <button type="button" onClick={onClick}
-      className="rounded-full px-6 py-2 transition-all hover:brightness-110 active:scale-[0.98]"
-      style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: '0 1px 6px rgba(92,45,138,0.28)' }}
+      // The one button that should feel good (§A5's "sexy" = considered): an inset top highlight gives
+      // it a little dimension, a soft purple cast lifts it off the panel, and it rises a hair on hover
+      // and presses back on click. Nothing loud — the app's whole argument is calm.
+      className="rounded-full px-6 py-2 transition-all hover:brightness-[1.07] hover:-translate-y-px active:translate-y-0 active:scale-[0.98]"
+      style={{ fontSize: TYPE.label, fontWeight: 500, letterSpacing: '0.01em', minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 10px rgba(92,45,138,0.30)' }}
     >
       {children}
     </button>
@@ -124,8 +143,10 @@ function PrimaryButton({ onClick, children }: { onClick: () => void; children: R
 function GhostButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <button type="button" onClick={onClick}
-      className="rounded-full px-5 py-2 transition-colors hover:bg-stone-50 active:scale-[0.98]"
-      style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+      // The quiet sibling of PrimaryButton — same lift-on-hover motion, no fill. hover:bg-stone-50 is
+      // remapped to a dark hover in the night block, so it themes for free.
+      className="rounded-full px-5 py-2 transition-all hover:bg-stone-50 hover:-translate-y-px active:translate-y-0 active:scale-[0.98]"
+      style={{ fontSize: TYPE.label, fontWeight: 500, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
     >
       {children}
     </button>
@@ -274,10 +295,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
   // so it is never raised again. `skipped` holds for THIS panel session only — "not now" means not
   // now, not never, and it must not be recorded anywhere (a skip is not a datum about him).
   const [skipped, setSkipped] = useState(false)
-  const unreflected = useMemo(() => {
-    const last = (reflections ?? []).reduce<string>((a, r) => (r.to > a ? r.to : a), '')
-    return rows.filter((r) => localDayOf(r.start) === today && r.end > last)
-  }, [rows, reflections, today])
+  // ONE rule for "unreflected", shared with the session-close watcher (sessionLogic.unreflectedRows)
+  // so the panel that SHOWS the prompt and the trigger that OPENS to it can never disagree.
+  const unreflected = useMemo(() => unreflectedRows(rows, reflections ?? [], today), [rows, reflections, today])
   const offerReflection = !skipped && shouldOfferReflection(
     unreflected.reduce((a, r) => a + r.active_minutes * 60_000, 0),
   )
@@ -329,6 +349,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onClose }: {
           />
         )}
         <TodaySection rows={todays} summary={daySummary(todays)} onSaved={refresh} />
+        <ReflectionJournal reflections={reflections} />
         <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
         <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setShowSettings((s) => !s)}

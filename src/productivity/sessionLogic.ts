@@ -11,7 +11,7 @@
 // document cannot change while nobody is editing it. So the word count at the previous close is the
 // word count at the next open, and a keystroke costs O(steps). See capture.ts for the baseline.
 
-import type { DocType, SessionRow } from './types'
+import type { DocType, Reflection, SessionRow } from './types'
 
 /** Inactivity gap that closes a session (§A4 default 5 min). */
 export const DEFAULT_IDLE_MS = 5 * 60_000
@@ -406,4 +406,27 @@ export const REFLECT_AFTER_ACTIVE_MS = 25 * 60_000
  */
 export function shouldOfferReflection(activeMsSinceLastReflection: number): boolean {
   return activeMsSinceLastReflection >= REFLECT_AFTER_ACTIVE_MS
+}
+
+/**
+ * The rows a reflection has not yet spoken for, for the given local day. PURE.
+ *
+ * Extracted so the drop-up (which SHOWS the prompt) and the session-close watcher (which OPENS the
+ * panel to it) read ONE rule — two copies of "what counts as unreflected" is exactly how the two
+ * would drift. A row is spoken-for when it ends at/before the newest reflection's `to`.
+ */
+export function unreflectedRows(rows: SessionRow[], reflections: Reflection[], todayLocal: string): SessionRow[] {
+  const last = reflections.reduce<string>((a, r) => (r.to > a ? r.to : a), '')
+  return rows.filter((r) => localDayOf(r.start) === todayLocal && r.end > last)
+}
+
+/**
+ * Whether a longer session has closed with enough UNREFLECTED active time to be worth asking about
+ * (Peter, 2026-07-17: "at the end of every longer session"). PURE; the caller supplies today's local
+ * day. This is the gate the session-close watcher uses to decide whether to surface the reflection —
+ * so it opens the panel only for a stretch actually worth reflecting on, never on every row.
+ */
+export function reflectionDue(rows: SessionRow[], reflections: Reflection[], todayLocal: string): boolean {
+  const activeMs = unreflectedRows(rows, reflections, todayLocal).reduce((a, r) => a + r.active_minutes * 60_000, 0)
+  return shouldOfferReflection(activeMs)
 }

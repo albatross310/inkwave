@@ -35,6 +35,8 @@
 
 import type { DocGoals } from '../../types/document'
 import type { DayAggregate, SessionRow, WindowAggregate, WindowDoc } from '../types'
+import { milestoneStatus, type GoalStatus } from '../goals'
+import { isoWithOffset, localDayOf } from '../sessionLogic'
 import { assemblePrompt, fixedPrompt } from './prompt'
 import { BASELINE_WARN_MIN, type SessionExcerpt } from './excerpts'
 
@@ -298,7 +300,26 @@ function excerptsSection(sessions: SessionRow[], excerpts: SessionExcerpt[]): st
  * the entire legitimacy of §A5's reversed tone rests on the model quoting the writer's OWN
  * standard back at them, and a goal we paraphrased is no longer theirs.
  */
-function goalsSection(docs: WindowDoc[], goals: Record<string, DocGoals>): string {
+/**
+ * §A6.4 — Inkwave computes whether a dated milestone was MET (a comparison of two dates the writer
+ * supplied); the model is handed the VERDICT, never the raw dates to compare. "Did I hit my
+ * deadline" is exactly the claim an LLM must not silently re-derive. The due date rides along as
+ * context (it is the writer's own datum), but the met/missed judgement is Inkwave's.
+ */
+function milestoneVerdict(status: GoalStatus, days?: number): string {
+  const d = Math.abs(days ?? 0)
+  const day = (n: number) => `${n} day${n === 1 ? '' : 's'}`
+  switch (status) {
+    case 'met': return 'MET (done on or before the date)'
+    case 'met-late': return 'MET BUT LATE (done, after the date the writer set)'
+    case 'missed': return `MISSED (${day(d)} past the date, still not done)`
+    case 'due-today': return 'DUE TODAY (not yet done)'
+    case 'upcoming': return `not yet due (${day(d)} to go)`
+    case 'undated': return 'no date set'
+  }
+}
+
+function goalsSection(docs: WindowDoc[], goals: Record<string, DocGoals>, today: string): string {
   const blocks = Object.entries(goals).map(([id, g]) => {
     const doc = docs.find(d => d.doc_id === id)
     // `misc`, not `other`: `other` is a kind we recognise and haven't enumerated; `misc` is an
@@ -307,6 +328,18 @@ function goalsSection(docs: WindowDoc[], goals: Record<string, DocGoals>): strin
     const lines = [`--- ${labelOf(id, doc?.doc_label)} (${doc?.doc_type ?? 'misc'}) ---`]
     if ((g.goal ?? '').trim()) lines.push(`GOAL: ${g.goal!.trim()}`)
     if ((g.plan ?? '').trim()) lines.push(`PLAN: ${g.plan!.trim()}`)
+    // THE TIMELINE (Peter, 2026-07-17: "goals should include a timeline and then ai can fill in how
+    // they actually do" — the "kick up the butt" is impossible without this reaching the model). It
+    // was authored and stored on the document and SILENTLY DROPPED here before the model saw it.
+    const ms = (g.milestones ?? []).filter(m => (m.text ?? '').trim())
+    if (ms.length) {
+      lines.push('MILESTONES (the writer\'s timeline — Inkwave computed each verdict; report against it, do not re-judge the dates yourself):')
+      for (const m of ms) {
+        const { status, days_remaining } = milestoneStatus(m, today)
+        const due = m.due ? ` [due ${m.due}]` : ''
+        lines.push(`  • ${m.text!.trim()}${due} — ${milestoneVerdict(status, days_remaining)}`)
+      }
+    }
     if (g.updatedAt) lines.push(`(the writer last revised this on ${g.updatedAt})`)
     return lines.join('\n')
   })
@@ -418,7 +451,11 @@ export function compileData(
     Object.entries(opts.goals ?? {}).filter(([id]) => inWindow.has(id)),
   )
   const goalsIncluded = Object.keys(goals).length > 0
-  if (goalsIncluded) parts.push('', goalsSection(agg.docs, goals))
+  // `today` is the writer's LOCAL day now — the report is compiled at request time, and milestone
+  // verdicts are "as of today". Computed once so every milestone in the payload judges against the
+  // same day.
+  const today = localDayOf(isoWithOffset(Date.now(), -new Date().getTimezoneOffset()))
+  if (goalsIncluded) parts.push('', goalsSection(agg.docs, goals, today))
 
   // THE LEDGER+DOC COMBO — only where it can be honest. Two independent conditions, and both are
   // structural rather than stylistic:

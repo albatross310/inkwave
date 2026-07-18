@@ -3,6 +3,8 @@ import {
   ACTIVE_GAP_CAP_MS,
   REFLECT_AFTER_ACTIVE_MS,
   shouldOfferReflection,
+  reflectionDue,
+  unreflectedRows,
   DEFAULT_IDLE_MS,
   buildRow,
   isIdleBoundary,
@@ -13,6 +15,7 @@ import {
   openDraft,
   recordEdit,
 } from './sessionLogic'
+import type { Reflection, SessionRow } from './types'
 
 const T0 = Date.UTC(2026, 6, 17, 0, 0, 0) // 2026-07-17T00:00:00Z → 10:00 in Brisbane (+600)
 const BNE = 600
@@ -192,5 +195,55 @@ describe('the reflection prompt fires on ACTIVE minutes, once per stretch (§A5b
     recordEdit(d, T0 + 60 * 60_000) // an hour of wall clock, one edit
     expect(d.activeMs).toBe(ACTIVE_GAP_CAP_MS) // capped: one minute of it was work
     expect(shouldOfferReflection(d.activeMs)).toBe(false)
+  })
+})
+
+// ─── reflectionDue / unreflectedRows — the session-close gate (§A5b) ─────────────────────────────
+// Peter: "at the end of every longer session." The watcher (ReflectionAutoOpen) reads THIS rule to
+// decide whether a closed session is worth surfacing the reflection for, and the drop-up reads the
+// same `unreflectedRows` to decide what to show — one rule, so opening and showing cannot disagree.
+describe('reflectionDue / unreflectedRows — the end-of-longer-session gate', () => {
+  const TODAY = '2026-07-17'
+  const row = (over: Partial<SessionRow> = {}): SessionRow => ({
+    session_id: `s-${Math.random().toString(36).slice(2, 8)}`,
+    doc_id: 'doc-1', doc_label: 'Paper',
+    start: `${TODAY}T09:00:00+10:00`, end: `${TODAY}T09:40:00+10:00`,
+    active_minutes: 40, words_start: 0, words_end: 100,
+    words_added: 100, words_deleted: 0, net_words: 100,
+    edit_events: 50, break_before_min: 0, pomodoro: true, doc_type: 'essay',
+    entered: 'timer', ...over,
+  })
+  const reflectedTo = (to: string): Reflection =>
+    ({ reflection_id: 'r1', day: TODAY, from: `${TODAY}T00:00:00+10:00`, to, notes: [{ doc_type: 'essay', text: 'x' }] })
+
+  it('a longer unreflected stretch today IS due', () => {
+    expect(reflectionDue([row({ active_minutes: 40 })], [], TODAY)).toBe(true)
+  })
+
+  it('a short stretch is NOT due', () => {
+    expect(reflectionDue([row({ active_minutes: 10 })], [], TODAY)).toBe(false)
+  })
+
+  it('a stretch already spoken for by a later reflection does NOT re-trigger', () => {
+    const r = row({ end: `${TODAY}T09:40:00+10:00`, active_minutes: 40 })
+    expect(reflectionDue([r], [reflectedTo(`${TODAY}T09:40:00+10:00`)], TODAY)).toBe(false)
+  })
+
+  it('NEW work after the last reflection re-triggers (every longer session, not just the first)', () => {
+    const done = row({ end: `${TODAY}T09:40:00+10:00`, active_minutes: 40 })
+    const fresh = row({ start: `${TODAY}T10:00:00+10:00`, end: `${TODAY}T10:40:00+10:00`, active_minutes: 40 })
+    expect(reflectionDue([done, fresh], [reflectedTo(`${TODAY}T09:40:00+10:00`)], TODAY)).toBe(true)
+  })
+
+  it('another day\'s rows do not count toward today', () => {
+    const yesterday = row({ start: '2026-07-16T09:00:00+10:00', end: '2026-07-16T09:40:00+10:00', active_minutes: 40 })
+    expect(unreflectedRows([yesterday], [], TODAY)).toHaveLength(0)
+    expect(reflectionDue([yesterday], [], TODAY)).toBe(false)
+  })
+
+  it('post-hoc rows (0 measured active minutes) never make a reflection due', () => {
+    // A remembered block carries 0 active_minutes, so it cannot inflate the gate — else "add time you
+    // forgot" would pop the reflection at you (§A5: never nag).
+    expect(reflectionDue([row({ entered: 'post-hoc', active_minutes: 0 })], [], TODAY)).toBe(false)
   })
 })

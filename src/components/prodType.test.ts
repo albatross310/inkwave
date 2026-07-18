@@ -134,10 +134,12 @@ describe('every typed control in the productivity panels clears 16px', () => {
     // failure this repo has already been bitten by. These counts are deliberately brittle: adding a
     // control should make you look at this file.
     expect(controlsIn('ClockMenu.tsx').map((c) => c.tag)).toEqual(['textarea', 'textarea', 'input', 'input'])
-    expect(controlsIn('GoalsSection.tsx').map((c) => c.tag)).toEqual(['input', 'input', 'textarea', 'input', 'input'])
+    // GoalsSection leads with the overarching-goal textarea (setGoal), then the add-milestone
+    // text+date inputs, the rough-plan textarea, and the GoalRow edit text+date inputs.
+    expect(controlsIn('GoalsSection.tsx').map((c) => c.tag)).toEqual(['textarea', 'input', 'input', 'textarea', 'input', 'input'])
     expect(controlsIn('ReflectionPrompt.tsx').map((c) => c.tag)).toEqual(['input'])
     // One checkbox is exempt; everything else is a typed control and must be checked.
-    expect(typedControls()).toHaveLength(9)
+    expect(typedControls()).toHaveLength(10)
   })
 
   it('authors a fontSize on every typed control', () => {
