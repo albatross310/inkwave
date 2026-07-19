@@ -1,13 +1,23 @@
 // MUSIC MODULE PROVER (2026-07-17) — drives the REAL built app.
 //
-// WHY THIS EXISTS: a flag-gated feature that silently does nothing looks exactly like a feature that
-// works (CLAUDE.md's house disease — the gate that returned false for months). Unit tests prove the
-// detector's geometry against synthetic buffers; they cannot prove that the route mounts, that the
-// chunk is really absent when the flag is off, that OPFS persistence round-trips, or that pdf.js and
-// canvas behave in a browser. Those are the claims here.
+// ⚠️ STRANDED 2026-07-19 by the route retirement — MUST BE RE-HOMED ONTO THE BAR before it runs.
+// Every navigation below goes to `/music`, `/music?music=1`, `/music?music=demo` — the route was
+// RETIRED (feat/music-layer, 2026-07-18). Those URLs now fall through the catch-all to the editor,
+// so this probe's `waitForSelector('section h2')` will TIME OUT, not fail cleanly. It has NOT been
+// deleted because its full-pipeline claims (capture→detect→reflow→markup→persist→heatmap, the
+// teacher-attribution mark, the provenance hash on the .studio) are not covered anywhere else.
 //
-// Every claim is paired with a KNOWN-NEGATIVE that must reproduce the OPPOSITE result in the same
-// run — a probe that only ever sees the happy path is an instrument that cannot fail.
+// THE NEW ENTRY IS PROVEN (scripts/_grad_check.mjs, 2026-07-19 — both checks PASS): open `/?music=demo`,
+// wait for `.ProseMirror[contenteditable="true"]`, click `[data-iw-bar="music"]` (seed
+// `inkwave-toolbar-slots` with 'music' so the ♪ slot is in the row, or open the ▲ drawer), then click
+// `text=Score studio`. The DEMO studio renders inside a PORTALLED dialog over the editor — the same
+// `section h2` (× 2, "3 systems" + "2 systems"), `section img`, `[role="tab"]`, `[aria-label^="History
+// for bar"]` selectors below all still resolve (they are global). TWO things change and are why this
+// is a re-home, not a find-replace: (1) each `page.reload()` CLOSES the dialog, so re-open the bar +
+// Score studio after every reload; (2) section 1's flag-gate checks (the `/music` "isn't switched on"
+// stub, and studio-chunk-on-flag) are OBSOLETE — the module GRADUATED to default ON (2026-07-18) and
+// the studio chunk is now lazy behind the "Score studio" button, not behind a route. Replace them with
+// a click-to-load lazy check (music/chunk.test.ts already guards the static graph).
 //
 //   node scripts/music.prove.mjs [port]     (default 4941 — OUR port; never pkill another's server)
 import { chromium } from '@playwright/test'

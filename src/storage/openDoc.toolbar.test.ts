@@ -90,11 +90,13 @@ describe('a received .studio brings its author’s layout', () => {
   })
 
   it('a flagged-OFF slot survives the open — this device’s flags do not edit the author’s file', async () => {
-    // `music` is not live without ?music. (Was `clock`, until ?prodLedger graduated to default-ON on
-    // 2026-07-18 and the clock became a live slot.) Migrating on the way IN would delete a flag-off
+    // `music` GRADUATED to default-ON (2026-07-18), so to make it a flag-OFF slot again this device
+    // must opt out explicitly (`?music=off` ⇒ a sticky '0'). With music off HERE, an author's config
+    // that names it must still survive verbatim: migrating on the way IN would delete the flag-off
     // slot from the document permanently at the next save; it is dropped at RENDER time instead,
     // where the decision is reversible. (toolbarContract.test.ts mutation-proves the rule; this
     // proves the real open path takes it.)
+    localStorage.setItem('inkwave:music', '0')      // this device has music OFF
     const doc = await openAndRead(bundleWith({ v: 1, row: ['music', 'page'] }))
     expect(doc?.toolbar?.row).toContain('music' as SlotId)
   })
