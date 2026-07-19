@@ -38,12 +38,18 @@ function flags(): { on: boolean; debug: boolean } {
   if (_flags) return _flags
   let on = false, debug = false
   try {
+    // The DEBUG overlay is SESSION-scoped, not persistent (2026-07-19). A `?snapThumbs=debug` used to
+    // write localStorage and then haunt EVERY later /snapshot visit forever — Peter hit exactly that.
+    // sessionStorage still survives /snapshot's in-session URL rewrites (the round-8 reason it can't
+    // be URL-fresh), but it's gone on a new browser session and never sticks. Purge the old
+    // persistent flag on every load so no stale one lingers.
+    window.localStorage.removeItem(DEBUG_FLAG)
     const p = new URLSearchParams(window.location.search).get('snapThumbs')
-    if (p === 'off') { window.localStorage.removeItem(FLAG); window.localStorage.removeItem(DEBUG_FLAG) }
-    else if (p === 'debug') { window.localStorage.setItem(FLAG, '1'); window.localStorage.setItem(DEBUG_FLAG, '1') }
-    else if (p === '1') window.localStorage.setItem(FLAG, '1')
+    if (p === 'off') { window.localStorage.removeItem(FLAG); window.sessionStorage.removeItem(DEBUG_FLAG) }
+    else if (p === 'debug') { window.localStorage.setItem(FLAG, '1'); window.sessionStorage.setItem(DEBUG_FLAG, '1') }
+    else if (p === '1') { window.localStorage.setItem(FLAG, '1'); window.sessionStorage.removeItem(DEBUG_FLAG) }
     on = window.localStorage.getItem(FLAG) === '1'
-    debug = window.localStorage.getItem(DEBUG_FLAG) === '1'
+    debug = window.sessionStorage.getItem(DEBUG_FLAG) === '1'
   } catch { /* no storage → stays off */ }
   _flags = { on, debug }
   return _flags
