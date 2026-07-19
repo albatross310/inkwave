@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionRow } from './types'
 
-const annotate = vi.fn(async () => true)
+const annotate = vi.fn(async (_month: string, _sessionId: string, _patch: { note?: string }) => true)
 let rows: SessionRow[] = []
 
 vi.mock('./ledgerStore', () => ({
