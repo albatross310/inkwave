@@ -157,15 +157,23 @@ function strike(ac: AudioContext, voice: ChimeVoice, freq: number, startAt: numb
   }
 }
 
-function playVoice(voice: ChimeVoice, kind: 'work-end' | 'break-end'): void {
+/** How far apart repeated strikes of a phase-end chime fall (seconds). */
+const REPEAT_GAP_S = 1.8
+
+function playVoice(voice: ChimeVoice, kind: 'work-end' | 'break-end', repeats = 1): void {
   const ac = audio()
   if (!ac) return
   try {
     void ac.resume?.() // a tab that has been idle suspends the context; no-op when running
-    const t = ac.currentTime + 0.02
     const [a, b] = kind === 'work-end' ? voice.notes.work : voice.notes.rest
-    strike(ac, voice, a, t, voice.level)
-    strike(ac, voice, b, t + voice.spacing, voice.level * 0.75)
+    // Schedule EVERY repeat up front on the AudioContext's own clock. Once queued they play at the
+    // exact times even if the JS main thread is throttled (a backgrounded tab) — the chime does not
+    // depend on setTimeout firing on time, which it will not while the tab is asleep.
+    for (let i = 0; i < Math.max(1, repeats); i++) {
+      const t = ac.currentTime + 0.02 + i * REPEAT_GAP_S
+      strike(ac, voice, a, t, voice.level)
+      strike(ac, voice, b, t + voice.spacing, voice.level * 0.75)
+    }
   } catch { /* audio blocked — the visible phase change is still the real signal */ }
 }
 
@@ -177,6 +185,19 @@ export function playChime(kind: 'work-end' | 'break-end' = 'work-end'): void {
   if (chimeMuted()) return
   const voice = CHIME_VOICES.find((v) => v.id === chimeVoiceId()) ?? CHIME_VOICES[0]
   playVoice(voice, kind)
+}
+
+/**
+ * The end-of-timer chime, REPEATED (Peter, 2026-07-18: "Chimes REPEAT on end of timer").
+ *
+ * A single gentle chime is easy to miss when you have wandered off — which is exactly when the block
+ * ends. So the phase-end plays a few times, spaced calmly. It is still gentle by construction (the
+ * same struck-object voices); repetition, not volume, is what makes it hard to miss.
+ */
+export function playChimeEnd(kind: 'work-end' | 'break-end' = 'work-end', repeats = 3): void {
+  if (chimeMuted()) return
+  const voice = CHIME_VOICES.find((v) => v.id === chimeVoiceId()) ?? CHIME_VOICES[0]
+  playVoice(voice, kind, repeats)
 }
 
 /**

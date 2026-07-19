@@ -82,6 +82,7 @@ import { CountdownOverlay } from '../components/CountdownOverlay'
 import { MusicBar } from '../components/MusicBar'
 import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
+import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
@@ -2997,6 +2998,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {/* At the end of a longer session, surface the reflection (Peter). Null render; opens the
             drop-up only when a reflection is genuinely due. Same setter as the countdown/clock. */}
         {prodLedgerEnabled() && <ReflectionAutoOpen onDue={openLedger} />}
+        {/* When a Start-work block ends, open the drop-up so it can ask for the block summary. Null
+            render; the drop-up lands on the work view because a summary is pending. */}
+        {prodLedgerEnabled() && <WorkSummaryAutoOpen onDue={openLedger} />}
         {prodLedgerEnabled() && ledgerOpen && (
           <LedgerDropUp
             docId={doc.id}
@@ -3012,6 +3016,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // The charts live behind their own default-ON flag; offer the button only when it's on.
             // Opening the charts closes the drop-up (the charts are a full modal over the same surface).
             onOpenGraphs={prodGraphsEnabled() ? () => { setLedgerOpen(false); setGraphsOpen(true) } : undefined}
+            // Reporting — the AI work report (P1c). Same lift: offer only behind its flag, and opening
+            // it closes the drop-up (a full modal over the same surface).
+            onOpenReport={reportFlag ? () => { setLedgerOpen(false); setReportOpen(true) } : undefined}
             onClose={() => setLedgerOpen(false)}
           />
         )}

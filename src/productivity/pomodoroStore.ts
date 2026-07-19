@@ -17,7 +17,8 @@
 // The machine itself stays PURE in pomodoro.ts; this is only its clock and its subscribers.
 
 import { getCapture } from './capture'
-import { playChime } from './chime'
+import { playChimeEnd } from './chime'
+import { fireTimerEndNotification } from './notify'
 import {
   DEFAULT_POMODORO_CONFIG,
   initialPomodoro,
@@ -115,7 +116,13 @@ function onTick(): void {
   const r = tick(state, now)
   if (r.elapsed) {
     state = r.state
-    playChime(r.elapsed === 'work' ? 'work-end' : 'break-end')
+    // REPEAT the chime AND fire a visible OS notification (Peter, 2026-07-18) — the block ends when
+    // the writer may well have wandered off, so it must surface even in another tab or OS app. Both
+    // degrade gracefully (chime silent if muted/blocked; notification → in-page toast if denied).
+    // `tick` only ever elapses a running phase — never 'idle' — so this narrowing is sound.
+    const ended = r.elapsed as 'work' | 'break' | 'long-break'
+    playChimeEnd(ended === 'work' ? 'work-end' : 'break-end')
+    fireTimerEndNotification(ended)
     // A work block ending is a session boundary (§A4): close it so the row lands with
     // pomodoro: true, and let the next block open a fresh session on the next keystroke.
     void getCapture().close('pomodoro')
@@ -124,6 +131,18 @@ function onTick(): void {
     return
   }
   emitTick() // the ordinary case: only the NUMBER moved — no state change, no React
+}
+
+// BACKGROUNDED-TAB ACCURACY (Peter, 2026-07-18: "comes up whatever tab or wherever you are").
+// A hidden tab THROTTLES setInterval to as little as once a minute, so the tick that detects the
+// deadline can land up to ~a minute late — but the phase transition is anchored to `endsAt` (a stored
+// timestamp), NOT to the interval firing, so it is always CORRECT, only possibly late. Returning to
+// the tab reconciles immediately: a visibilitychange runs one tick synchronously, so the moment the
+// writer looks back the overdue transition (chime + notification + close) fires at once.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') onTick()
+  })
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────

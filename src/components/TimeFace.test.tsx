@@ -21,7 +21,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../productivity/capture', () => ({
   getCapture: () => ({ close: async () => {}, pomodoroStart: async () => {}, pomodoroStop: async () => {} }),
 }))
-vi.mock('../productivity/chime', () => ({ playChime: () => {} }))
+vi.mock('../productivity/chime', () => ({ playChime: () => {}, playChimeEnd: () => {} }))
+vi.mock('../productivity/notify', () => ({ fireTimerEndNotification: () => {} }))
 
 // @testing-library/react only auto-cleans with globals:true, which this repo does not set — without
 // this every test silently measures the PREVIOUS test's still-mounted components (CLAUDE.md).

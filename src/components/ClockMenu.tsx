@@ -50,12 +50,13 @@ import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, se
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
 import { addPostHocRow, annotateRow, loadLedger, saveReflection } from '../productivity/ledgerStore'
 import { activePdfs, type PdfReadingState } from '../productivity/pdfActivity'
-import { currentPlace, recentPlaces, setCurrentPlace } from '../productivity/places'
-import { isPaused, type PomodoroConfig } from '../productivity/pomodoro'
+import { currentPlace, recentPlaces } from '../productivity/places'
+import { isPaused, sanitiseConfig, type PomodoroConfig } from '../productivity/pomodoro'
 import {
   getPomodoroState, loadPomodoroConfig, pausePomodoro, resumePomodoro, setPomodoroConfig,
-  startPomodoro, stopPomodoro, subscribe,
+  stopPomodoro, subscribe,
 } from '../productivity/pomodoroStore'
+import { dismissSummary, pendingSummary, startWork, submitSummary, WORK_SUMMARY_EVENT, type PendingSummary } from '../productivity/workSession'
 import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry, unreflectedRows } from '../productivity/sessionLogic'
 import type { DocType, Reflection, SessionRow } from '../productivity/types'
 import { TOUCH_MIN, TYPE } from '../music/typeScale'
@@ -201,10 +202,16 @@ function daySummary(allRows: SessionRow[]): string {
 /** Test seam — `daySummary` is a pure function and the §A6.1 rule it carries must stay in the gate. */
 export const _daySummaryForTest = daySummary
 
-const WORK_PRESETS = [15, 25, 50]
-const BREAK_PRESETS = [5, 10]
-const LONG_PRESETS = [15, 30]
-const EVERY_PRESETS = [3, 4, 5]
+// The timer lengths, edited AS NUMBER INPUTS (Peter, 2026-07-18: "all customisable JUST BY CLICKING
+// THE TIMER, as a NUMBER INPUT, not the purple selectables"). Each field carries its own sane bounds
+// — the same clamp sanitiseConfig applies, surfaced here as the input's min/max so the browser guides
+// the writer rather than silently correcting them afterwards. `unit` labels what the number means.
+const LENGTH_FIELDS: Array<{ key: keyof PomodoroConfig; label: string; min: number; max: number; unit: string }> = [
+  { key: 'workMin', label: 'Work', min: 1, max: 180, unit: 'min' },
+  { key: 'breakMin', label: 'Break', min: 1, max: 60, unit: 'min' },
+  { key: 'longBreakMin', label: 'Long break', min: 1, max: 120, unit: 'min' },
+  { key: 'longBreakEvery', label: 'Long break every', min: 1, max: 12, unit: 'blocks' },
+]
 
 /**
  * The toolbar's clock — A TRIGGER, NEVER AN OWNER.
@@ -240,12 +247,28 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
   )
 }
 
-// ─── The drop-up ─────────────────────────────────────────────────────────────
+// ─── The nav shell (Peter, 2026-07-18) ───────────────────────────────────────
+//
+// "The clock button opens a panel with FIVE buttons (more to add later)." So this is a NAV SHELL, not
+// one long scroll: a home screen of buttons, and each opens its own view. It reuses the existing
+// pieces UNCHANGED behind those buttons — the pomodoro, the goals section, the report, the charts, the
+// ledger — rather than reimplementing any of them (a second copy of any of these is the failure).
+//
+// The five, designed so a sixth is one array entry:
+//   1. Start / stop work  → WorkView (the pomodoro + the WHERE/WHAT start flow + the end summary)
+//   2. Goals              → GoalsSection
+//   3. Reporting          → the AI report modal (a lifted opener; closes this panel)
+//   4. Progress tracking  → the charts modal (a lifted opener; closes this panel)
+//   5. Manage projects    → ProjectsView (today's sessions, notes, reading, reflections, titles)
 
-export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onClose }: {
+type NavView = 'home' | 'work' | 'goals' | 'projects'
+
+export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onOpenReport, onClose }: {
   docId: string; docLabel?: string; goals?: DocGoals; onGoalsChange: (g: DocGoals) => void
   /** Open the measured writing-charts panel (P1a-viz). Absent when `?prodGraphs=off` — no button. */
   onOpenGraphs?: () => void
+  /** Open the AI work-report modal (P1c). Absent when `?prodReport=off` — no button. */
+  onOpenReport?: () => void
   onClose: () => void
 }): JSX.Element {
   // Resolve the anchor at open time rather than holding a ref: the trigger may be in the row, in the
@@ -253,10 +276,15 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onC
   const anchor = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('[data-iw-ledger-btn]')
   const [rows, setRows] = useState<SessionRow[]>([])
   const [reflections, setReflections] = useState<Reflection[]>([])
-  const [showSettings, setShowSettings] = useState(false)
   const month = localMonthOf(nowIso())
   const today = localDayOf(nowIso())
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // WHERE TO LAND. A pending end-of-block summary, or a running timer, both belong in the work view —
+  // opening from the countdown of a running block should show the timer, not a menu. Otherwise home.
+  const [view, setView] = useState<NavView>(() =>
+    pendingSummary() || getPomodoroState().phase !== 'idle' ? 'work' : 'home',
+  )
 
   const refresh = useCallback(async () => {
     const l = await loadLedger(month)
@@ -271,13 +299,22 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onC
     return () => window.removeEventListener(LEDGER_ROW_EVENT, on)
   }, [refresh])
 
-  // Escape closes, wherever the trigger lives.
+  // A summary falling due while the panel is already open pulls us to the work view to ask for it.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const on = () => setView('work')
+    window.addEventListener(WORK_SUMMARY_EVENT, on)
+    return () => window.removeEventListener(WORK_SUMMARY_EVENT, on)
+  }, [])
+
+  // Escape: step back to home from a sub-view, or close from home.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setView((v) => { if (v === 'home') onClose(); return 'home' })
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
-
 
   // Close on an outside tap — but never on a tap INSIDE the panel (that would eat every control).
   useEffect(() => {
@@ -293,13 +330,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onC
 
   const todays = useMemo(() => rows.filter((r) => localDayOf(r.start) === today).reverse(), [rows, today])
 
-  // §A5b — the stretch since the last reflection, and whether to offer one. Rows already reflected
-  // on are those ending at/before the newest reflection's `to`: the writer has spoken for that span,
-  // so it is never raised again. `skipped` holds for THIS panel session only — "not now" means not
-  // now, not never, and it must not be recorded anywhere (a skip is not a datum about him).
+  // §A5b — the stretch since the last reflection, and whether to offer one. `skipped` holds for THIS
+  // panel session only — "not now" means not now, not never, and it must not be recorded anywhere.
   const [skipped, setSkipped] = useState(false)
-  // ONE rule for "unreflected", shared with the session-close watcher (sessionLogic.unreflectedRows)
-  // so the panel that SHOWS the prompt and the trigger that OPENS to it can never disagree.
   const unreflected = useMemo(() => unreflectedRows(rows, reflections ?? [], today), [rows, reflections, today])
   const offerReflection = !skipped && shouldOfferReflection(
     unreflected.reduce((a, r) => a + r.active_minutes * 60_000, 0),
@@ -326,6 +359,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onC
         }
       })()
 
+  const title =
+    view === 'work' ? 'Work' : view === 'goals' ? 'Goals' : view === 'projects' ? 'Your ledger' : null
+
   return createPortal(
     <div
       ref={panelRef}
@@ -341,73 +377,217 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onC
         border: '1px solid var(--iw-nightable-border, #ece9e6)',
       }}
     >
+      {/* The header: a back affordance on a sub-view + the view's name. This is the one nav chrome;
+          the views below never draw their own. Home shows no header (its buttons ARE the surface). */}
+      {title !== null && (
+        <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
+          <button type="button" onClick={() => setView('home')} aria-label="Back"
+            className="flex items-center justify-center rounded-full transition-colors hover:bg-stone-50"
+            style={{ minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, fontSize: TYPE.heading, color: 'var(--iw-ink, #5c2d8a)' }}
+          >
+            ‹
+          </button>
+          <span className="flex-1" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>{title}</span>
+        </div>
+      )}
+
       <div className="overflow-y-auto">
-        <PomodoroHero />
-        <ReadingSection />
-        {offerReflection && (
-          <ReflectionPrompt
-            rows={unreflected}
-            onSave={async (r) => { await saveReflection(month, r); void refresh() }}
-            onSkip={() => setSkipped(true)}
+        {view === 'home' && (
+          <HomeView
+            onNavigate={setView}
+            onOpenGraphs={onOpenGraphs}
+            onOpenReport={onOpenReport}
+            reflection={offerReflection ? (
+              <ReflectionPrompt
+                rows={unreflected}
+                onSave={async (r) => { await saveReflection(month, r); void refresh() }}
+                onSkip={() => setSkipped(true)}
+              />
+            ) : null}
           />
         )}
-        <TodaySection rows={todays} summary={daySummary(todays)} onSaved={refresh} />
-        {onOpenGraphs && <GraphsLink onOpen={onOpenGraphs} />}
-        <ReflectionJournal reflections={reflections} />
-        <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />
-        <div className="px-4 py-2" style={{ borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
-          <button type="button" onClick={() => setShowSettings((s) => !s)}
-            className="w-full text-left transition-colors hover:opacity-80"
-            style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #a8a29e)' }}
-          >
-            {showSettings ? '▾' : '▸'} Settings — lengths, chime, place, titles
-          </button>
-        </div>
-        {showSettings && <SettingsSections docs={docs} />}
+        {view === 'work' && <WorkView onSummarised={refresh} />}
+        {view === 'goals' && <GoalsSection goals={goals} docLabel={docLabel} onChange={onGoalsChange} />}
+        {view === 'projects' && (
+          <ProjectsView rows={todays} reflections={reflections} docs={docs} onSaved={refresh} />
+        )}
       </div>
     </div>,
     document.body,
   )
 }
 
-// ─── The hero: ring, face, and the one good button ───────────────────────────
+// ─── Home: the five nav buttons (extensible — a sixth is one entry) ───────────
 
-function PomodoroHero(): JSX.Element {
+/** One tappable nav row: a drawn glyph, a label and a one-line description. */
+function NavRow({ glyph, label, desc, accent, onClick }: {
+  glyph: React.ReactNode; label: string; desc: string; accent?: boolean; onClick: () => void
+}): JSX.Element {
+  return (
+    <button type="button" onClick={onClick}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-stone-50"
+      style={{ minHeight: TOUCH_MIN, borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}
+    >
+      <span className="flex shrink-0 items-center justify-center rounded-full"
+        style={{ width: 38, height: 38, border: '1.5px solid var(--iw-ink, #5c2d8a)', color: 'var(--iw-ink, #5c2d8a)' }}
+      >
+        {glyph}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate" style={{ fontSize: TYPE.body, fontWeight: accent ? 500 : 400, color: 'var(--iw-ink, #5c2d8a)' }}>{label}</span>
+        <span className="block truncate" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{desc}</span>
+      </span>
+      <span className="shrink-0" style={{ fontSize: TYPE.body, color: 'var(--iw-pill-fg, #a8a29e)' }}>›</span>
+    </button>
+  )
+}
+
+function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
+  onNavigate: (v: NavView) => void
+  onOpenGraphs?: () => void
+  onOpenReport?: () => void
+  reflection: React.ReactNode
+}): JSX.Element {
+  // The running-timer strip: state changes only (never the tick), so this re-renders on start/stop.
+  const [, bump] = useState(0)
+  useEffect(() => subscribe(() => bump((n) => n + 1)), [])
+  const running = getPomodoroState().phase !== 'idle'
+
+  return (
+    <div className="pb-2">
+      {/* A quiet header + the running-timer glance, so opening from a running block shows its state. */}
+      <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #5c2d8a)' }}>Your writing time</span>
+        {running && (
+          <button type="button" onClick={() => onNavigate('work')}
+            className="flex items-center gap-1.5 rounded-full px-3 transition-colors hover:opacity-80"
+            style={{ minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+          >
+            <TimeFace className="tabular-nums" style={{ fontSize: TYPE.label }} />
+          </button>
+        )}
+      </div>
+
+      {reflection}
+
+      <div className="mt-1">
+        <NavRow accent glyph={<ClockGlyph running={running} />} label={running ? 'Work in progress' : 'Start / stop work'}
+          desc={running ? 'Your block is running — pause, stop or summarise' : 'A focused block, with a gentle timer'}
+          onClick={() => onNavigate('work')} />
+        <NavRow glyph={<GoalGlyph />} label="Goals" desc="What you’re aiming for, and by when"
+          onClick={() => onNavigate('goals')} />
+        {onOpenReport && (
+          <NavRow glyph={<ReportGlyph />} label="Reporting"
+            desc="A prompt for your own AI — and its coaching back" onClick={onOpenReport} />
+        )}
+        {onOpenGraphs && (
+          <NavRow glyph={<ChartGlyph />} label="Progress tracking"
+            desc="Your time, words and patterns, in charts" onClick={onOpenGraphs} />
+        )}
+        <NavRow glyph={<LedgerGlyph />} label="Manage projects"
+          desc="Today’s sessions, notes and document titles" onClick={() => onNavigate('projects')} />
+      </div>
+    </div>
+  )
+}
+
+// ─── Small drawn glyphs (thin ink strokes, currentColor — invert in night) ────
+
+function GoalGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+function ReportGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M6 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20V3.5Z" /><path d="M14 3.5V8h4" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="15.5" x2="13" y2="15.5" />
+    </svg>
+  )
+}
+function ChartGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="4" y1="20" x2="20" y2="20" /><rect x="6" y="11" width="3" height="6" /><rect x="11" y="7" width="3" height="10" /><rect x="16" y="13" width="3" height="4" />
+    </svg>
+  )
+}
+function LedgerGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="5" y="4" width="14" height="16" rx="1.5" /><line x1="8.5" y1="8" x2="15.5" y2="8" /><line x1="8.5" y1="12" x2="15.5" y2="12" /><line x1="8.5" y1="16" x2="12.5" y2="16" />
+    </svg>
+  )
+}
+
+// ─── Work: the pomodoro + the start flow + the end-of-block summary ───────────
+
+function WorkView({ onSummarised }: { onSummarised: () => void }): JSX.Element {
   const [, bump] = useState(0)
   useEffect(() => subscribe(() => bump((n) => n + 1)), [])
   const s = getPomodoroState()
   const paused = isPaused(s)
+  const idle = s.phase === 'idle'
+
+  // Two mutually-exclusive overlays over the timer: the start flow (idle, before a block) and the
+  // lengths editor (click the timer). A summary offer sits ABOVE the timer when a block just ended.
+  const [flowOpen, setFlowOpen] = useState(false)
+  const [editLengths, setEditLengths] = useState(false)
+  const [summary, setSummary] = useState<PendingSummary | null>(() => pendingSummary())
+  useEffect(() => {
+    const on = () => setSummary(pendingSummary())
+    window.addEventListener(WORK_SUMMARY_EVENT, on)
+    return () => window.removeEventListener(WORK_SUMMARY_EVENT, on)
+  }, [])
 
   const phaseLabel =
-    s.phase === 'idle' ? 'Ready when you are'
+    idle ? 'Ready when you are'
     : paused ? 'Paused'
     : s.phase === 'work' ? 'Writing'
     : s.phase === 'break' ? 'Break' : 'Long break'
 
   return (
-    <section className="flex flex-col items-center px-4 pb-4 pt-5">
-      <div className="relative" style={{ width: 132, height: 132 }}>
+    <section className="flex flex-col items-center px-4 pb-4 pt-4">
+      {summary && (
+        <SummaryPrompt
+          pending={summary}
+          onDone={() => { setSummary(null); onSummarised() }}
+        />
+      )}
+
+      {/* Click the timer to edit the lengths as number inputs (Peter's spec). The whole ring+face is
+          the target so it reads as "tap the clock". */}
+      <button type="button" onClick={() => { setEditLengths((v) => !v); setFlowOpen(false) }}
+        aria-label="Edit timer lengths"
+        className="relative transition-transform active:scale-[0.99]" style={{ width: 132, height: 132 }}>
         <TimeRing size={132} />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          {/* The countdown IS the title of this panel — the one big thing on screen. It was already
-              30px by eye; now it is 30px because the ramp says so, and it moves if the ramp moves. */}
           <TimeFace className="tabular-nums" style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #5c2d8a)', letterSpacing: '0.01em' }} />
           <span className="mt-0.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{phaseLabel}</span>
         </div>
-      </div>
+      </button>
 
-      <div className="mt-4 flex gap-2">
-        {s.phase === 'idle' ? (
-          <PrimaryButton onClick={startPomodoro}>Start</PrimaryButton>
-        ) : (
-          <>
-            {paused
-              ? <PrimaryButton onClick={resumePomodoro}>Resume</PrimaryButton>
-              : <GhostButton onClick={pausePomodoro}>Pause</GhostButton>}
-            <GhostButton onClick={stopPomodoro}>Stop</GhostButton>
-          </>
-        )}
-      </div>
+      {editLengths ? (
+        <LengthsEditor onClose={() => setEditLengths(false)} />
+      ) : flowOpen ? (
+        <StartWorkFlow onStart={() => setFlowOpen(false)} onCancel={() => setFlowOpen(false)} />
+      ) : (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          {idle ? (
+            <PrimaryButton onClick={() => setFlowOpen(true)}>Start work</PrimaryButton>
+          ) : (
+            <>
+              {paused
+                ? <PrimaryButton onClick={resumePomodoro}>Resume</PrimaryButton>
+                : <GhostButton onClick={pausePomodoro}>Pause</GhostButton>}
+              <GhostButton onClick={stopPomodoro}>Stop</GhostButton>
+            </>
+          )}
+          <GhostButton onClick={() => setEditLengths(true)}>Lengths</GhostButton>
+        </div>
+      )}
 
       {s.completed > 0 && (
         // Reward showing up, not output (§A5). Dots, not a number to beat.
@@ -419,7 +599,196 @@ function PomodoroHero(): JSX.Element {
           {s.completed > 8 && <span style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>+{s.completed - 8}</span>}
         </div>
       )}
+
+      {/* The chime lives with the timer it belongs to — a dropdown, not a wall of preview buttons. */}
+      <ChimeSelect />
     </section>
+  )
+}
+
+// ─── The start-work flow: WHERE, WHAT, and an optional length ─────────────────
+
+function StartWorkFlow({ onStart, onCancel }: { onStart: () => void; onCancel: () => void }): JSX.Element {
+  const [place, setPlace] = useState(() => currentPlace() ?? '')
+  const [intention, setIntention] = useState('')
+  const [workMin, setWorkMin] = useState<number>(() => loadPomodoroConfig().workMin)
+  const recents = recentPlaces()
+
+  const go = useCallback(() => {
+    startWork({
+      place: place.trim() || undefined,
+      intention: intention.trim() || undefined,
+      workMin,
+    })
+    onStart()
+  }, [place, intention, workMin, onStart])
+
+  return (
+    <div className="mt-4 w-full rounded-lg px-3 py-3" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
+      {/* WHERE — reuses the typed place label (never geolocation). Opt-in: blank is fine. */}
+      <label className="mb-1 block" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        Where are you working? <span style={{ opacity: 0.7 }}>(optional)</span>
+      </label>
+      <input
+        value={place}
+        onChange={(e) => setPlace(e.target.value)}
+        placeholder="library, home, cafe…"
+        className="w-full rounded-md px-2.5 py-1.5"
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+      />
+      {recents.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {recents.map((p) => <Pill key={p} active={p === place.trim()} onClick={() => setPlace(p)}>{p}</Pill>)}
+        </div>
+      )}
+
+      {/* WHAT — the intention. Held as context for the end-of-block summary, never as a measurement. */}
+      <label className="mb-1 mt-3 block" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
+        What are you going to do?
+      </label>
+      <textarea
+        value={intention}
+        onChange={(e) => setIntention(e.target.value)}
+        rows={2}
+        placeholder="draft the intro, read Leibniz, tidy the argument…"
+        className="w-full resize-y rounded-md px-2 py-1.5"
+        style={{ fontSize: TYPE.body, border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
+      />
+
+      {/* Optionally set the block length for THIS block — a number input, not a preset chip. */}
+      <div className="mt-3 flex items-center gap-2">
+        <label style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>Block length</label>
+        <input
+          type="number" min={1} max={180} value={workMin}
+          onChange={(e) => setWorkMin(sanitiseConfig({ workMin: Number(e.target.value) }).workMin)}
+          className="w-16 rounded-md px-2 py-1 text-right tabular-nums"
+          style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+        />
+        <span style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>min</span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <PrimaryButton onClick={go}>Start</PrimaryButton>
+        <button type="button" onClick={onCancel}
+          className="rounded-full px-3 py-1.5 transition-colors hover:bg-stone-50"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #78716c)' }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── The end-of-block summary (lands as the ledger row's note, §A5) ───────────
+
+function SummaryPrompt({ pending, onDone }: { pending: PendingSummary; onDone: () => void }): JSX.Element {
+  const [text, setText] = useState('')
+  return (
+    <div className="mb-4 w-full rounded-lg px-3 py-3" style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'var(--iw-slot-drag-bg, #faf8ff)' }}>
+      <p className="mb-1" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #5c2d8a)' }}>Block done — what did you do?</p>
+      {pending.intention && (
+        <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
+          You set out to: {pending.intention}
+        </p>
+      )}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        placeholder="A line is plenty — it lands in this session’s ledger note."
+        className="mb-2 w-full resize-y rounded-md px-2 py-1.5"
+        style={{ fontSize: TYPE.body, border: '1px solid var(--iw-nightable-border, #f0eeec)', background: 'transparent' }}
+      />
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => { void submitSummary(text); onDone() }}
+          className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)' }}
+        >
+          Save
+        </button>
+        <button type="button" onClick={() => { dismissSummary(); onDone() }}
+          className="rounded-full px-3 py-1.5 transition-colors hover:bg-stone-50"
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #78716c)' }}
+        >
+          Not now
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Lengths, as NUMBER INPUTS (Peter: "not the purple selectables") ──────────
+
+function LengthsEditor({ onClose }: { onClose: () => void }): JSX.Element {
+  const [cfg, setCfg] = useState<PomodoroConfig>(loadPomodoroConfig)
+  const apply = (next: PomodoroConfig) => { setCfg(next); setPomodoroConfig(next) }
+
+  return (
+    <div className="mt-4 w-full rounded-lg px-3 py-2.5" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
+      <div className="space-y-2">
+        {LENGTH_FIELDS.map((f) => (
+          <div key={f.key} className="flex items-center justify-between gap-2">
+            <label style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>{f.label}</label>
+            <span className="flex items-center gap-1.5">
+              <input
+                type="number" min={f.min} max={f.max} value={cfg[f.key]}
+                // Clamp on change through the SAME sanitiser the store uses, so what the input shows
+                // and what the timer runs cannot disagree; an empty/garbage value falls back sanely.
+                onChange={(e) => apply(sanitiseConfig({ ...cfg, [f.key]: Number(e.target.value) }))}
+                className="w-16 rounded-md px-2 py-1 text-right tabular-nums"
+                style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
+              />
+              <span className="w-12" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{f.unit}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={onClose}
+        className="mt-2 transition-colors hover:opacity-80"
+        style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, color: 'var(--iw-pill-fg, #a8a29e)' }}
+      >
+        Done
+      </button>
+    </div>
+  )
+}
+
+// ─── Chime, as a DROPDOWN (Peter: "should just be a DROP DOWN") ───────────────
+
+function ChimeSelect(): JSX.Element {
+  const [voice, setVoice] = useState(chimeVoiceId)
+  const [muted, setMuted] = useState(chimeMuted)
+  // 'silent' is a value of the same dropdown, not a separate toggle — the spec asks for the five
+  // voices plus Silent in one dropdown.
+  const value = muted ? 'silent' : voice
+  const onPick = (v: string) => {
+    if (v === 'silent') { setChimeMuted(true); setMuted(true); return }
+    setChimeMuted(false); setMuted(false)
+    setChimeVoiceId(v); setVoice(v)
+    previewChime(v) // the pick is also the tap iOS needs to unlock audio for the real chime
+  }
+  return (
+    <div className="mt-4 flex w-full items-center gap-2">
+      <label style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>Chime</label>
+      <select
+        value={value}
+        onChange={(e) => onPick(e.target.value)}
+        className="flex-1 rounded-md px-2 py-1.5"
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent', color: 'var(--iw-ink, #5c2d8a)' }}
+      >
+        {CHIME_VOICES.map((v) => <option key={v.id} value={v.id}>{v.label} — {v.hint}</option>)}
+        <option value="silent">Silent</option>
+      </select>
+      {/* Preview affordance — a tap unlocks iOS audio and plays the current choice. Disabled on Silent. */}
+      <button type="button" onClick={() => value !== 'silent' && previewChime(value)}
+        title="Preview" disabled={value === 'silent'}
+        className="shrink-0 rounded-full px-3 transition-colors hover:bg-stone-50 disabled:opacity-40"
+        style={{ fontSize: TYPE.label, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
+      >
+        ▶
+      </button>
+    </div>
   )
 }
 
@@ -501,28 +870,6 @@ function TodaySection({ rows, summary, onSaved }: {
         {rows.map((r) => <SessionCard key={r.session_id} row={r} onSaved={onSaved} />)}
       </ul>
       <PostHocAdd onAdded={onSaved} />
-    </Section>
-  )
-}
-
-// ─── The charts entry (P1a-viz) ───────────────────────────────────────────────
-//
-// The measured writing-charts panel used to be the `/productivity` ROUTE; Peter's "no routes, all
-// panels" retired it, and the ledger drop-up — the productivity surface — is where the charts belong.
-// This is only a TRIGGER: it calls the lifted opener the editor passed down and imports NO chart code,
-// which is what keeps ClockMenu (eager) off the charts lane's load path.
-function GraphsLink({ onOpen }: { onOpen: () => void }): JSX.Element {
-  return (
-    <Section title="Your writing">
-      <button type="button" onClick={onOpen}
-        className="w-full text-left transition-colors hover:opacity-80"
-        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #5c2d8a)' }}
-      >
-        See it in charts — time, words and patterns →
-      </button>
-      <p className="mt-1" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
-        Your own measured record, day by day. Nothing leaves this device.
-      </p>
     </Section>
   )
 }
@@ -681,95 +1028,23 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
   )
 }
 
-// ─── Settings ────────────────────────────────────────────────────────────────
+// ─── Manage projects: the ledger (today's sessions, reading, reflections, titles) ──
+//
+// This is the "Manage projects — opens/manages the ledger" view. It is the OLD drop-up's ledger
+// content — today's sessions, the reading indicator, the reflection journal, the per-document title
+// controls — now behind its own nav button rather than stacked under the timer. Nothing here is a
+// second implementation of the ledger; it renders the same pieces.
 
-function SettingsSections({ docs }: { docs: Array<{ id: string; label?: string }> }): JSX.Element {
-  const [cfg, setCfg] = useState<PomodoroConfig>(loadPomodoroConfig)
-  const [voice, setVoice] = useState(chimeVoiceId)
-  const [muted, setMuted] = useState(chimeMuted)
-  const [place, setPlace] = useState(() => currentPlace() ?? '')
-  const [recents, setRecents] = useState<string[]>(recentPlaces)
+function ProjectsView({ rows, reflections, docs, onSaved }: {
+  rows: SessionRow[]; reflections: Reflection[]; docs: Array<{ id: string; label?: string }>; onSaved: () => void
+}): JSX.Element {
   const [countdown, setCountdown] = useState(countdownShown)
-
-  const apply = (next: PomodoroConfig) => { setCfg(next); setPomodoroConfig(next) }
-  const applyPlace = (label: string) => { setCurrentPlace(label); setPlace(label); setRecents(recentPlaces()) }
 
   return (
     <>
-      <Section title="Lengths">
-        <div className="space-y-2">
-          {([
-            ['Work', 'workMin', WORK_PRESETS],
-            ['Break', 'breakMin', BREAK_PRESETS],
-            ['Long break', 'longBreakMin', LONG_PRESETS],
-            ['Long every', 'longBreakEvery', EVERY_PRESETS],
-          ] as const).map(([label, key, presets]) => (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <span style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>{label}</span>
-              <div className="flex gap-1.5">
-                {presets.map((v) => (
-                  <Pill key={v} active={cfg[key] === v} onClick={() => apply({ ...cfg, [key]: v })}>
-                    {v}{key === 'longBreakEvery' ? '' : 'm'}
-                  </Pill>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Chime">
-        <ul className="space-y-1">
-          {CHIME_VOICES.map((v) => (
-            <li key={v.id} className="flex items-center justify-between gap-2">
-              <button type="button"
-                onClick={() => { setChimeVoiceId(v.id); setVoice(v.id); setChimeMuted(false); setMuted(false); previewChime(v.id) }}
-                className="flex min-w-0 flex-1 items-baseline gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-stone-50"
-                style={{ minHeight: TOUCH_MIN }}
-              >
-                <span style={{ fontSize: TYPE.body, color: voice === v.id && !muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}>
-                  {voice === v.id && !muted ? '◉' : '○'} {v.label}
-                </span>
-                <span className="truncate" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{v.hint}</span>
-              </button>
-              {/* Preview: a tap is also the gesture iOS needs to unlock audio for the real chime. */}
-              <button type="button" onClick={() => previewChime(v.id)} title={`Preview ${v.label}`}
-                className="shrink-0 rounded-full px-2 py-1 transition-colors hover:bg-stone-50"
-                style={{ fontSize: TYPE.label, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
-              >
-                ▶
-              </button>
-            </li>
-          ))}
-          <li className="pt-1">
-            <button type="button" onClick={() => { const m = !muted; setChimeMuted(m); setMuted(m) }}
-              className="rounded-md px-2 py-1 transition-colors hover:bg-stone-50"
-              style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: muted ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-pill-fg, #78716c)' }}
-            >
-              {muted ? '◉' : '○'} Silent
-            </button>
-          </li>
-        </ul>
-      </Section>
-
-      <Section title="Where are you working?">
-        <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
-          Optional. A word you choose — we never read your location.
-        </p>
-        <input
-          value={place}
-          onChange={(e) => setPlace(e.target.value)}
-          onBlur={() => applyPlace(place)}
-          placeholder="library, home, cafe…"
-          className="w-full rounded-md px-2.5 py-1.5"
-          style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent' }}
-        />
-        {recents.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {recents.map((p) => <Pill key={p} active={p === place} onClick={() => applyPlace(p)}>{p}</Pill>)}
-          </div>
-        )}
-      </Section>
+      <ReadingSection />
+      <TodaySection rows={rows} summary={daySummary(rows)} onSaved={onSaved} />
+      <ReflectionJournal reflections={reflections} />
 
       {docs.length > 0 && (
         <Section title="Titles">

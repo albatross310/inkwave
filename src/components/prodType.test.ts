@@ -133,13 +133,19 @@ describe('every typed control in the productivity panels clears 16px', () => {
     // Without this, every assertion below could pass by iterating an empty list — the vacuous-guard
     // failure this repo has already been bitten by. These counts are deliberately brittle: adding a
     // control should make you look at this file.
-    expect(controlsIn('ClockMenu.tsx').map((c) => c.tag)).toEqual(['textarea', 'textarea', 'input', 'input'])
+    // The nav-shell drop-up (2026-07-18): the start-work flow's place input + intention textarea +
+    // block-length number input; the summary textarea; the lengths-editor number input; the chime
+    // <select>; then the post-hoc note textarea and the session-card note textarea; and finally the
+    // exempt countdown checkbox in the projects view.
+    expect(controlsIn('ClockMenu.tsx').map((c) => c.tag)).toEqual(
+      ['input', 'textarea', 'input', 'textarea', 'input', 'select', 'textarea', 'textarea', 'input'])
     // GoalsSection leads with the overarching-goal textarea (setGoal), then the add-milestone
     // text+date inputs, the rough-plan textarea, and the GoalRow edit text+date inputs.
     expect(controlsIn('GoalsSection.tsx').map((c) => c.tag)).toEqual(['textarea', 'input', 'input', 'textarea', 'input', 'input'])
     expect(controlsIn('ReflectionPrompt.tsx').map((c) => c.tag)).toEqual(['input'])
-    // One checkbox is exempt; everything else is a typed control and must be checked.
-    expect(typedControls()).toHaveLength(10)
+    // One checkbox (the countdown toggle) is exempt; everything else is a typed control (8 in
+    // ClockMenu + 6 in GoalsSection + 1 in ReflectionPrompt) and must clear 16px.
+    expect(typedControls()).toHaveLength(15)
   })
 
   it('authors a fontSize on every typed control', () => {
