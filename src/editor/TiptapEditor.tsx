@@ -37,7 +37,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, deleteSnapshot, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
@@ -2682,12 +2682,40 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           console.warn('[inkwave] receipt purge skipped — archive unreadable:', afterRead.error)
           return
         }
-        const snapsAfterRecovery = afterRead.snapshots
-        for (const s of snapsAfterRecovery) {
-          await new Promise((r) => setTimeout(r, 0)) // slice the rewrite loop too
-          const snapReceipts = s.receipts ?? []
-          const allBad = snapReceipts.length > 0 && snapReceipts.every((r) => badSessions.has(r.sessionToken))
-          if (allBad) await deleteSnapshot(docId, s.id)
+        // ⚠ THIS LOOP USED TO `deleteSnapshot` EVERY SNAPSHOT WHOSE RECEIPTS WERE ALL "BAD", AND IT
+        // DESTROYED PETER'S HISTORY — 79 Bitcoin-anchored snapshots down to 4, twice, reproduced in a
+        // clean browser here (79 → 78 → 76 → 73, a few seconds after load, one per yielded tick).
+        //
+        // THE CAUSE IS THE PREMISE, NOT THE LOOP. A chain that fails `verifyChain` has NOT been shown
+        // to be forged — it has been shown to be unverifiable BY THIS BUILD, WITH THIS KEY. And the
+        // commonest reason is completely innocent: `signingPublicKeyHex()` (provenance/receipts.ts)
+        // returns the DEV key under `import.meta.env.DEV`, so every document signed by the production
+        // service fails every chain the moment it is opened on localhost. Peter develops on localhost
+        // and opens his real thesis there. Every receipt-bearing snapshot was therefore "bad" and was
+        // deleted; the survivors were exactly the receipt-less ones (`snapReceipts.length > 0` spares
+        // them), which is why the count always settled on the same small number.
+        // A rotated key, an older bundle, a partial receipt set or a future key-id would each do the
+        // same thing to a real user in production.
+        //
+        // THE RULE, and it is this project's own, one level along: a failed READ is not an empty
+        // archive (readSnapshotsFromDisk), a failed read is not an absent document (opfs.ts) — and a
+        // failed VERIFICATION is not a forged snapshot. None of those may be answered with deletion.
+        // Provenance is append-only; the writer's evidence is not ours to discard to make a check go
+        // green. The receipt chain is reported as unverified (the ReceiptPanel already surfaces chain
+        // status), and the snapshots STAY. Nothing here may delete provenance again — if a genuine
+        // forgery case ever needs handling, it belongs behind an explicit writer-initiated action,
+        // never an automatic background sweep.
+        const unverifiable = afterRead.snapshots.filter((s) => {
+          const rs = s.receipts ?? []
+          return rs.length > 0 && rs.every((r) => badSessions.has(r.sessionToken))
+        })
+        if (unverifiable.length) {
+          console.warn(
+            `[inkwave] ${unverifiable.length} snapshot(s) carry receipts this build cannot verify ` +
+            `(${badSessions.size} session(s)). They are KEPT — an unverifiable chain is not a forged ` +
+            `one, and the commonest cause is a signing-key mismatch (e.g. a production-signed ` +
+            `document opened against the dev key on localhost).`,
+          )
         }
         const updated: InkwaveDocument = { ...docRef.current, scasReceipts: cleanReceipts }
         docRef.current = updated
