@@ -211,23 +211,80 @@ export async function _drainSnapshotWrites(): Promise<void> {
 // The per-doc chain also means a deferred open-time restore write and a subsequent snapshot append
 // serialise: disk always converges to the latest cache state.
 const _writeChain = new Map<string, Promise<void>>()
-function queueSnapshotsWrite(documentId: string, snaps: Snapshot[]): Promise<void> {
+/**
+ * Byte length this tab last WROTE for a document's archive. The archive being a different size than
+ * we left it is proof another tab (or window, or the open-time restore in another context) has
+ * written since — the cheap trigger for the re-read below. A file's `size` comes from its metadata,
+ * so this costs no gunzip and no parse in the overwhelmingly common single-tab case.
+ */
+const _lastWrittenSize = new Map<string, number>()
+
+/** Current byte length of the archive, or null if it cannot be determined (absent, or any fault). */
+async function archiveSizeOnDisk(documentId: string): Promise<number | null> {
+  try {
+    let dir: FileSystemDirectoryHandle = await getRoot()
+    for (const part of `documents/${documentId}`.split('/')) dir = await dir.getDirectoryHandle(part)
+    return (await (await dir.getFileHandle('snapshots.json')).getFile()).size
+  } catch {
+    return null // absent (new doc) or unreadable — the caller re-reads rather than assuming
+  }
+}
+
+/**
+ * @param opts.allowShrink  This write is an INTENTIONAL removal (`deleteSnapshot`) and must be
+ *   allowed to make the archive smaller. Everything else is append/update and is merged grow-only
+ *   against disk first. Default false, so a new write path cannot silently gain the power to
+ *   truncate — it has to ask for it.
+ */
+function queueSnapshotsWrite(documentId: string, snaps: Snapshot[], opts: { allowShrink?: boolean } = {}): Promise<void> {
   const copy = snaps.slice()
   _snapCache.set(documentId, Promise.resolve(copy)) // write-through FIRST — readers see it immediately
   const prev = _writeChain.get(documentId) ?? Promise.resolve()
   const next = prev.catch(() => { /* keep the chain alive after a failed predecessor */ }).then(async () => {
+    let out = copy
+    // ── THE STALE-CACHE GUARD (2026-08-20) ────────────────────────────────────────────────────
+    // `_snapCache` is MODULE state, so it is per TAB, and everything above treats it as the
+    // in-session authority. Across two tabs that is false: a tab that loaded when the archive held
+    // 4 snapshots keeps `cache = 4` for its whole life, and if another tab then grows the archive to
+    // 79 this one still unions against its own stale 4 and writes that over the top. Peter lost 79
+    // snapshots to exactly this, twice, in one session — his count fell back to 4 while he worked
+    // and /snapshot then said the history "isn't on this device".
+    // `mergeSnapshots` did not catch it because it guards against a SHORT read; this read is not
+    // short, it is STALE — it succeeds and returns a confidently outdated answer. Same family as the
+    // 2026-07-15 and archiveReadFail bugs, one question further along: not "could I read it" but
+    // "is what I read still current".
+    // The check is a SIZE comparison, not a re-read: if the file is exactly the length we last wrote,
+    // no one else has touched it and the outgoing set is already a superset. Only a surprise triggers
+    // the gunzip, so the single-tab path pays one metadata read.
+    if (!opts.allowShrink) {
+      const size = await archiveSizeOnDisk(documentId)
+      const untouched = size !== null && size === _lastWrittenSize.get(documentId)
+      if (!untouched) {
+        // Someone else wrote (or we have never written this file). Union against DISK, not cache.
+        // A genuine read failure THROWS here and the write is abandoned — deliberately: losing one
+        // new snapshot is recoverable, overwriting an archive we could not read is not. That is the
+        // same rule readSnapshotsFromDisk already enforces for its own callers.
+        const onDisk = await readSnapshotsFromDisk(documentId)
+        if (onDisk.length) {
+          out = mergeSnapshots(onDisk, copy) // outgoing wins id clashes ⇒ OTS/summary updates survive
+          _snapCache.set(documentId, Promise.resolve(out.slice())) // this tab is now current again
+        }
+      }
+    }
     // The compress (stringify + gzip of the WHOLE archive) runs OFF-THREAD — see the gzip note above.
     // It stays INSIDE the per-doc chain, after `prev`, so the write-through cache set above remains
     // the synchronous in-session authority and disk writes still land in order (the grow-only
     // invariant depends on that ordering). writeOpfsFile works on iOS too (worker sync-access).
-    await writeOpfsFile(['documents', documentId, 'snapshots.json'], await gzipJsonOffThread(copy))
+    const bytes = await gzipJsonOffThread(out)
+    await writeOpfsFile(['documents', documentId, 'snapshots.json'], bytes)
+    _lastWrittenSize.set(documentId, bytes.byteLength)
   })
   _writeChain.set(documentId, next)
   return next
 }
 
-async function writeSnapshotsFile(documentId: string, snaps: Snapshot[]): Promise<void> {
-  await queueSnapshotsWrite(documentId, snaps)
+async function writeSnapshotsFile(documentId: string, snaps: Snapshot[], opts: { allowShrink?: boolean } = {}): Promise<void> {
+  await queueSnapshotsWrite(documentId, snaps, opts)
 }
 
 /** Union two snapshot lists by id — GROW-ONLY. Provenance history is append-only, so no write-back
@@ -301,7 +358,8 @@ export async function deleteSnapshot(documentId: string, snapId: string): Promis
   const snaps = await readSnapshotsFile(documentId)
   const filtered = snaps.filter((s) => s.id !== snapId)
   if (filtered.length === snaps.length) return // already gone
-  await writeSnapshotsFile(documentId, filtered)
+  // The ONE write that is allowed to shrink the archive: the writer asked for this snapshot to go.
+  await writeSnapshotsFile(documentId, filtered, { allowShrink: true })
 }
 
 /**
