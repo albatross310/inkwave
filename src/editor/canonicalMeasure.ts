@@ -19,6 +19,8 @@ export interface StyleLike {
   removeProperty(name: string): string
 }
 export interface ElementLike { style: StyleLike }
+/** Real DOM elements have this; unit-test fakes for every OTHER target don't need to. */
+export interface ClassListLike { classList?: { toggle(name: string, force?: boolean): boolean } }
 
 export interface CanonicalTargets {
   /** The mm-width parchment div (sheet.parentElement in Scroll.tsx) — phone renders it fluid. */
@@ -26,7 +28,7 @@ export interface CanonicalTargets {
   /** .scroll-paper — its side padding IS the text margin (phone renders a slim 1.25rem). */
   sheet?: ElementLike | null
   /** .inkwave-editor-surface — carries --iw-editor-zoom (Ctrl+wheel / pinch) and --iw-magnify. */
-  surface?: ElementLike | null
+  surface?: (ElementLike & ClassListLike) | null
   /** .ProseMirror (view.dom) — the font-size target. */
   editor?: ElementLike | null
 }
@@ -57,6 +59,24 @@ export function forceCanonicalContext(targets: CanonicalTargets, geom: Canonical
   set(targets.sheet, 'padding-right', `${geom.sideMarginPx}px`)
   set(targets.surface, '--iw-editor-zoom', '1')
   set(targets.surface, '--iw-magnify', '1') // canonical implies scale=1 (hybrid-zoom branches)
+  // ⚠ 2026-08-20 — THE `iw-magnified` CLASS GATES --iw-magnify'S CSS EFFECT AND IS A SEPARATE PIECE
+  // OF STATE (index.css: `.iw-magnified .iw-magnify-box > div { transform: scale(var(--iw-magnify)) }`
+  // — gated on the class, deliberately, so scale=1 renders with NO transform at all rather than a
+  // no-op scale(1), which would still open a new containing-block/stacking-context). Scroll.tsx's own
+  // `apply()` keeps class and variable in lockstep — but ONLY on its OWN writes. The reveal chain
+  // mounts THREE separate `<Scroll fill>` instances in sequence (LoadingVeil, Edit.tsx's shell,
+  // TiptapEditor's real editor) and each one's layoutEffect cleanup unconditionally strips the class
+  // from ITS OWN surface node on teardown — reproduced live: the class can end up removed with
+  // nothing re-adding it, while THIS function's restore (below) puts the CSS VARIABLE back exactly
+  // right regardless, since it never touched the class at all. The visible result: every number is
+  // correct (0.5695, matching the fit-to-width ratio) and the page simply never visually shrinks —
+  // "the zoom snap doesn't work" from the outside. Fixed HERE rather than chasing the exact mount
+  // that drops the class: this module runs on every pagination pass (load, every edit needing
+  // re-measure — frequent), so keeping the class synced to the variable on every force AND every
+  // restore self-heals the visible state regardless of what caused the drift, without polluting the
+  // pure capture/set/restore contract for callers that pass a non-DOM fake (ClassListLike is optional
+  // and duck-typed; a fake target with no classList is untouched, so existing unit tests are unaffected).
+  targets.surface?.classList?.toggle('iw-magnified', false) // canonical window: always scale=1, never magnified
   set(targets.editor, 'font-size', CANONICAL_FONT_SIZE)
   // LIVE-REFLOW WINDOW invariant (Peter's lazy off-screen pinch, 2026-07-10): if a zoom gesture's
   // content-visibility window were ever active during a measure, skipped blocks would report
@@ -74,5 +94,11 @@ export function forceCanonicalContext(targets: CanonicalTargets, geom: Canonical
       if (value) el.style.setProperty(prop, value)
       else el.style.removeProperty(prop)
     }
+    // Restore the class to match whatever --iw-magnify was actually put back to (its captured
+    // value, or removed entirely — either way this reads it back off the style rather than
+    // re-deriving from `saved`, so it's correct regardless of restore order). See the force-time
+    // comment above for why this class needs restoring at all.
+    const v = parseFloat(targets.surface?.style.getPropertyValue('--iw-magnify') || '') || 1
+    targets.surface?.classList?.toggle('iw-magnified', v !== 1)
   }
 }

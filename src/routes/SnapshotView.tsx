@@ -3593,7 +3593,7 @@ export function SnapshotView() {
             ? 'Dotted line snaps just above the biggest change in each snapshot — click to keep it centred on the same words'
             : 'Dotted line stays centred on the same words — click to snap it above the biggest change'}
         >
-          {isPhone ? (lineMode === 'longest' ? '⇥ bgst Δ' : '↔ centred') : (lineMode === 'longest' ? '⇥ biggest change' : '↔ centred line')}
+          {isPhone ? (lineMode === 'longest' ? 'bgst Δ' : 'centred') : (lineMode === 'longest' ? 'biggest change' : 'centred line')}
         </button>
         {docId && aiOn && (
           <button
@@ -3667,7 +3667,7 @@ export function SnapshotView() {
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.16)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.08)')}
         >
-          {isPhone ? '← edit' : '← editor'}
+          {isPhone ? 'edit' : 'editor'}
         </button>
         </div>
       </div>

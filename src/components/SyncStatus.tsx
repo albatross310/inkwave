@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
+import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -75,7 +76,12 @@ export function SyncStatus({
         // Match the footer toolbar's baseline (room-bottom + 28*zoom). Use transform:scale (NOT css
         // `zoom`) for size — css `zoom` also multiplies the bottom offset, so with a bottom-docked panel
         // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
-        bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom + 10)}px`} + var(--iw-pdf-room-bottom, 0px))`,
+        // ⚠ 2026-08-20: bottom-edge matching was never the right rule — two pills of DIFFERENT
+        // heights sharing a bottom edge have different midlines. Both side pills now derive this from
+        // `sidePillBottom()` so their MIDLINES land on the toolbar's; see components/sidePill.ts.
+        bottom: hideTrigger
+          ? 'calc(env(safe-area-inset-bottom) + 80px + var(--iw-pdf-room-bottom, 0px))'
+          : sidePillBottom(zoom),
         padding: hideTrigger ? '0 1rem' : '0 10px',
         transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
         transformOrigin: 'bottom right',
@@ -153,8 +159,55 @@ export function SyncStatus({
           title={tooltip}
           className={`iw-nightable ${compact || pdfOpen
             ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
-            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors text-right leading-tight text-sm px-2.5 py-1 max-w-[8.5rem] max-lg:px-2 max-lg:max-w-[6rem]'}`}
-          style={{ color: synced ? 'var(--iw-pill-fg, #6b7280)' : '#b45309', border: compact ? `1px solid ${INK}66` : undefined }}
+            // max-w narrowed 8.5rem → 7.5rem → 5.6rem (Peter, 2026-08-20: "a bit narrower", then
+            // "take 25% off the left of the rh pill"). It is RIGHT-anchored, so trimming its max-width
+            // takes the space off its LEFT edge, which is what was asked. The label already wraps by
+            // design, so this just wraps a little sooner. flex/items-center pair with minHeight below.
+            // max-w 5.6rem → 7rem: the label is one size bigger now (see fontSize below) and shed its
+            // "a", and it must fit on ONE line — a second line would break the shared height the two
+            // side pills now hold.
+            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center justify-end text-right leading-tight whitespace-nowrap px-2.5 py-1 max-w-[7rem] max-lg:px-2 max-lg:max-w-[7rem]'}`}
+          style={{
+            // PURPLE, matching the snaps pill opposite (Peter, 2026-08-20). Both now read from the
+            // same `--iw-pill-fg` token, so the pair stays matched through a night-mode switch instead
+            // of one being a hard-coded amber. NB this drops the amber "needs attention" tint the
+            // unsynced state used to carry — the ⚠ glyph in those labels is what signals it now.
+            color: 'var(--iw-pill-fg, #5c2d8a)',
+            // Purple outline (Peter, 2026-08-20) matching the footer toolbar pill and the snaps pill
+            // on the opposite side — the same token, so night mode remaps all three together rather
+            // than leaving this one a hard-coded day colour.
+            border: compact
+              ? `1px solid ${INK}66`
+              : '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
+            // ⚠ 2026-08-20 (Peter: "align at horizontal axis, move lower") — narrowing the pill above
+            // makes longer labels ("Reconnect to keep saving") wrap to 2 lines while short ones
+            // ("Save to a folder") stay on 1, so this button's own height VARIES by label — a fixed
+            // `bottom` offset alone can only truly center ONE of those states against the toolbar, not
+            // both (a taller 2-line box sitting on the same bottom edge as a shorter 1-line box has a
+            // HIGHER centre, purely from its own extra height — that's what "still higher" was, not
+            // the bottom offset itself, which already matches the toolbar's). Fixed at the root instead
+            // of chasing another magic offset: pin this button's own (pre-transform) height to the
+            // toolbar pill's LIVE height via --iw-toolbar-h (TiptapEditor.tsx; already includes the
+            // ×1.12 desktop scale, so divide it back out before this button applies that SAME scale
+            // itself, or it would double-apply) and centre the label vertically inside that fixed
+            // height — so 1-line and 2-line states both render at the toolbar's own height and their
+            // centres align by construction, not by a tuned constant.
+            // ONE SHARED HEIGHT with the snaps pill on the other side (Peter, 2026-08-20: "make the
+            // left and right pill the same height, ie make the right one a lot lower"). This used to
+            // be `min-height: var(--iw-toolbar-h)` — matching the TOOLBAR's height, which measured 56px
+            // against the snaps pill's 30.8px, i.e. nearly double. A fixed height (not min-height) is
+            // what makes "the same" enforceable: the label wraps to two lines and would otherwise size
+            // the box itself. See components/sidePill.ts for why 30px clears the wrapped text.
+            ...(compact || pdfOpen ? {} : {
+              height: SIDE_PILL_H,
+              // ONE SIZE SHARED WITH THE SNAPS PILL (Peter: "make it same font size as on the left and
+              // shrink the left pill text if you have to"). 12px is the meeting point — this pill came
+              // UP from the 10px it was shrunk to, the snaps pill comes DOWN from 14px (text-sm), and
+              // at 12px "Save to folder" still fits one line inside the 7rem cap above.
+              fontSize: SIDE_PILL_FONT,
+              lineHeight: 1.1,
+            }),
+          }}
         >
           {compact || pdfOpen ? '☁' : label}
         </button>

@@ -20,7 +20,24 @@ export function isTouchDevice(): boolean {
 // Trackpad ctrl-pinch fine-deltas: multiplier on the fractional step per 100px of deltaY. A
 // discrete mouse-wheel notch (|ΔY| ≥ 100) is ALWAYS exactly one 1.08 step — this only speeds up
 // the sub-notch accumulation, capped at one step per event.
-const TRACKPAD_ZOOM_SENSITIVITY = 2
+// 2026-08-20 (Peter, real Mac trackpad: "takes way too much movement to zoom even one step") — the
+// commit itself is a hard Math.trunc() with ZERO visual feedback below a whole step (applyFrame /
+// applyMagnifyFrame), so at the old value of 2 a real trackpad's small per-event deltas needed many
+// accumulated events before ANYTHING moved, which read as "nothing happens" rather than "zooming,
+// slowly". Raised 2 → 4; still capped at one committed step per event so a single frame can never
+// leap multiple lattice steps. See FIRST_STEP_BONUS below for the other half of the fix — a
+// head-start on the very first commit of a gesture, so the initial response doesn't need a full
+// step's worth of accumulated movement either.
+const TRACKPAD_ZOOM_SENSITIVITY = 4
+// One-time bonus added to the FIRST wheel event of a fresh gesture (latch.isIdle()), on top of its
+// own normal contribution — makes the first commit land sooner than steady-state cadence would, so
+// the very start of a zoom gesture reacts immediately rather than needing to "warm up" the
+// accumulator from zero. Purely additive; steady-state per-step distance (TRACKPAD_ZOOM_SENSITIVITY
+// above) is unchanged once a gesture is under way. 0.5 → 0.92 (Peter, still felt slow to start):
+// at 0.92 almost any nonzero first tick — even a very light touch — crosses the 1.0 commit threshold
+// on its own; it doesn't reach 1.0 by itself only so a literal zero-delta event can't spuriously
+// commit a step.
+const FIRST_STEP_BONUS = 0.92
 // Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(RATIO)).
 // 1 = the pinched distance ratio maps 1:1 onto the zoom ratio; higher = fewer centimetres of
 // pinch per step. Steps still commit whole on the shared zoomStep lattice. Raised 1.75 → 2.5
@@ -317,6 +334,15 @@ export function Scroll({
       // the gesture path (holdWavesFor 350 per step + 800 at settle); a clamp from an ordinary
       // reflow is genuine content motion the sway SHOULD follow. Just track the height.
       if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
+      // SELF-HEAL (2026-08-20) — belt-and-braces alongside canonicalMeasure.ts's own restore fix and
+      // the className-keyed effect below (THAT one is the actual root-cause fix — see its comment for
+      // the full story: React overwrites this element's whole `class` attribute on every wave-reveal
+      // state change, silently wiping the imperatively-added `iw-magnified`). `--iw-magnify` and that
+      // class are two independently-mutable pieces of state `apply()` keeps in lockstep on ITS OWN
+      // writes only; this RO fires on every paper reflow (pagination, typing, the height write two
+      // lines up) — far more often than any OTHER path to the same desync needs to be invisible for —
+      // so re-asserting both together here is a standing correction, not specific to one cause.
+      if (el) { el.style.setProperty('--iw-magnify', String(s)); el.classList.toggle('iw-magnified', s !== 1) }
     }) : null
     if (paper && roPaper) roPaper.observe(paper)
     // Settings change: recompute the fit cap for the new page width, and re-apply AFTER React's own
@@ -678,6 +704,9 @@ export function Scroll({
       // own side margins, and the parts of gaps/bottom margins beyond the lines); x INSIDE
       // them → font zoom (text, bottom margins, gap regions within the column's x-range).
       // y never enters the test. Latched per gesture — see zoomZone.ts.
+      // isIdle() must be read BEFORE resolve() — resolve() itself latches a mode on its first
+      // call, so this is the only point that can still see "no gesture in progress yet".
+      const freshGesture = latch.isIdle()
       const mode = latch.resolve(
         () => (hybrid && isWaterAtX(el, e.clientX) ? 'water' : 'text'),
         e.deltaY > 0,
@@ -689,8 +718,14 @@ export function Scroll({
       // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fine-delta fraction (Peter: raise it "quite a
       // bit") — a discrete notch stays exactly one step; retune the constant, not the formula.
       const mag = Math.abs(e.deltaY)
-      const stepDelta = (e.deltaY < 0 ? 1 : -1)
-        * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
+      const dir = e.deltaY < 0 ? 1 : -1
+      let stepDelta = dir * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
+      // FIRST-STEP HEAD START (Peter: "make the first step a bit shorter than the others") — a
+      // one-time bonus on the gesture's very first event, on top of its own normal contribution,
+      // so the first commit doesn't need to "warm up" the accumulator from a cold start the way
+      // steady-state cadence does. Applied AFTER the mode is decided (mode doesn't affect which
+      // accumulator gets it) and only ever once per gesture (freshGesture is captured pre-resolve).
+      if (freshGesture) stepDelta += dir * FIRST_STEP_BONUS
       if (mode === 'water') {
         mSteps += stepDelta
       } else {
@@ -956,6 +991,33 @@ export function Scroll({
       if (d < 8) return // fingers (nearly) touching — the ratio is degenerate noise
       steps += (Math.log(d / pinchDist) / Math.log(ZOOM_STEP_RATIO)) * PINCH_ZOOM_SENSITIVITY
       pinchDist = d
+      // PAN-WHILE-PINCHING (2026-08-20, Peter: "it doesn't work if the average centrepoint of your
+      // two fingers zooming is panning at the same time"). Before this, the two fingers' MIDPOINT
+      // was captured once at touchstart and never touched again — pinchDist (the SEPARATION) was
+      // the only thing this handler ever updated. e.preventDefault() above unconditionally blocks
+      // the browser's own native two-finger pan/scroll (deliberately — we're replacing its pinch),
+      // so a real-world gesture that pinches AND drags at once had its drag half go nowhere: the
+      // zoom ratio kept working (distance-based, translation-invariant), but the content refused to
+      // follow the fingers moving together, which reads as "doesn't work" even though it's really
+      // "only half the gesture is implemented". Fix: track the midpoint's OWN frame-to-frame
+      // movement and apply it as a direct, additive scroll offset — independent of the zoom-step
+      // commit path below (that only fires when a LATTICE step crosses, i.e. rarely; this must
+      // track every touchmove or the pan reads as sticky/laggy). Phone is never CSS-scaled
+      // (hybrid = fill && !phone in magnify.ts), so a screen-pixel delta maps 1:1 to a scroll-pixel
+      // delta with no unscale conversion needed. VERTICAL goes through getScrollTop/setScrollTop —
+      // NOT el.scrollTop directly — because on phone scrolling is the WINDOW (window.scrollY /
+      // window.scrollTo), not the surface div (el.scrollHeight === el.clientHeight there; the
+      // surface is never itself the scroller), and setScrollTop also records guardScrollTop so the
+      // zoom guard loop recognises this as OUR write, not a user scroll to rebase against. pinchX/Y
+      // then update to the CURRENT midpoint (was stale at the touchstart position) so the anchor
+      // fallback re-pick (line ~584) and the zoom-commit anchor also track where the fingers
+      // actually are now, not where they started.
+      const curMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      const curMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      const dx = curMidX - pinchX, dy = curMidY - pinchY
+      if (dx) el.scrollLeft -= dx // horizontal has no phone/window equivalent — phone content is edge-to-edge
+      if (dy) setScrollTop(getScrollTop() - dy)
+      pinchX = curMidX; pinchY = curMidY
       if (!raf) raf = requestAnimationFrame(applyFrame) // live commit — one visible-window reflow per frame
     }
     const onTouchEnd = (e: TouchEvent) => {
@@ -1132,6 +1194,32 @@ export function Scroll({
   // while the drift/coast animations own the wave position.
   const waveModeRef = useRef(waveMode)
   waveModeRef.current = waveMode
+
+  // ⚠ 2026-08-20 — THE ACTUAL ROOT CAUSE of the fit-to-width "zoom snap" bug (found after three
+  // earlier band-aids — canonicalMeasure's restore, roPaper's self-heal, a 600ms delayed self-heal —
+  // ALL failed to close it, which was the tell that something OUTSIDE that effect's own lifecycle was
+  // the culprit). The surface's className below is a JSX TEMPLATE STRING keyed on `phone`/`fill`/
+  // `covered`/`waveMode`: `${waveMode === 'anim' ? ' iw-wave-anim' : ...}` etc. `waveMode` is REACT
+  // STATE that walks 'anim' → 'coast' → 'off' over the SEVERAL-SECOND wave reveal sequence, and
+  // `covered` flips too — EVERY one of those transitions makes React compute a NEW className string
+  // and write the WHOLE `class` attribute to the DOM. React has no idea the OTHER layoutEffect above
+  // also imperatively added `iw-magnified` outside its own bookkeeping, so that write silently
+  // replaces the entire class list — including `iw-magnified` — with whatever the template currently
+  // says, which never includes it. Traced live: the class is correctly present within the first
+  // ~1.3s of load, and gone again by t=4000ms with nothing in the OTHER effect having touched it
+  // since — exactly consistent with a wave-state transition overwriting the attribute later in the
+  // reveal, well past every earlier self-heal's timing window.
+  // FIX: re-assert both the class and the variable every time React is about to write a NEW
+  // className for this exact reason — a layoutEffect keyed on the template's own inputs runs AFTER
+  // React's commit (so it sees the fresh class string) but BEFORE paint (so the repair is invisible).
+  useLayoutEffect(() => {
+    const el = surfaceRef.current
+    if (!el || !hybrid) return
+    const s = getMagnify()
+    el.style.setProperty('--iw-magnify', String(s))
+    el.classList.toggle('iw-magnified', s !== 1)
+  }, [hybrid, phone, fill, covered, waveMode])
+
   // SIBLING CLOCK ADOPT (the one cross-surface sync the tiles need). Two overlapping surfaces
   // (the loading shell + the editor beneath it) each carry their own CSS drift; a surface that
   // mounts MID-LOAD starts its animation at its own recalc, out of phase with the shell's — the

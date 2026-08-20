@@ -1355,10 +1355,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // or load-choreography activity now pushes the warm-up back; a zoom during the cold
           // window stays CORRECT — onZoomStep measures a miss live in the same task.
           let quietUntil = 0
+          // Raw timestamp of the last real user input, kept alongside `quietUntil` rather than
+          // derived from it: quietUntil is a POLICY (a 1500ms hold tuned for the full-lattice sweep),
+          // and the early warm needs the underlying FACT so it can apply its own, much shorter hold.
+          let lastInputAt = 0
           const bumpQuiet = (ms: number) => {
             quietUntil = Math.max(quietUntil, performance.now() + ms)
           }
           const onPreActivity = () => {
+            lastInputAt = performance.now()
             bumpQuiet(1500)
             // CANCEL the zoom-scoped warm on any input (round-4, Peter: "scrolling is jittery"):
             // each warm step is a full-document hypothetical reflow — running them under a
@@ -1442,6 +1447,68 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               if (!preRaf) preRaf = requestAnimationFrame(precomputeTick)
             }, delay)
           }
+          // EARLY WARM (2026-08-20, Peter: "are we warm loading the first few levels of zoom in and
+          // out... it feels slow coz its lagging, not the actual distance"). The full-lattice
+          // precompute above is correctly gated behind `preBusy()`'s `quietUntil` — and EVERY
+          // reveal-chain event (open-begin / reveal-imminent / editor-revealed) bumps that gate by
+          // another 3000ms (onPreChoreo above), so the FULL warm genuinely cannot start until
+          // several seconds after the page is already visible and interactive. A writer who opens a
+          // document and reaches for zoom immediately — an entirely ordinary thing to do — hits a
+          // stone-cold cache: the first notch is a synchronous, full-document hypothetical reflow
+          // measured live (onZoomStep's miss path), which is exactly what reads as "laggy" rather
+          // than "needs more finger travel" — the two are easy to conflate from the outside, which
+          // is why TRACKPAD_ZOOM_SENSITIVITY/FIRST_STEP_BONUS alone couldn't fully fix the feel.
+          // This does NOT touch quietUntil or preBusy — it is a SEPARATE, RADIUS-2 warm (current
+          // step ±2, at most 5 hypothetical reflows total, paced one per frame exactly like
+          // precomputeTick) fired once, a short beat after the editor is actually revealed, so it
+          // lands well before the full-lattice gate would even consider starting. Still defers
+          // behind a genuine gesture/edit in progress (never the reveal-chain's own 3s hold) — it
+          // only skips the PART of preBusy that exists to protect the reveal's OWN visual settling
+          // from a much bigger full-lattice sweep; 5 steps is cheap enough not to need that.
+          let earlyWarmDone = false
+          const earlyWarmTick = (remaining: number[]) => {
+            if (destroyed || !gapped || phoneLike() || earlyWarmDone) return
+            if (remaining.length === 0) { earlyWarmDone = true; return }
+            // Defer while anything real is happening. __iwZoomHold covers an IN-FLIGHT zoom gesture
+            // (warming mid-gesture would add a hypothetical reflow to the very frames that must stay
+            // responsive); the debounces cover typing; and `lastInputAt` covers scrolling/pointer
+            // work, which nothing else here would catch. 250ms is deliberately much shorter than the
+            // full-lattice precompute's 1500ms `quietUntil` bump — that gate is tuned to keep a
+            // ~20-step sweep away from the reveal choreography entirely, whereas this warm needs to
+            // resume promptly between a writer's interactions to be ready before their next zoom.
+            const busy = (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
+              || editDebounce !== undefined || bibDebounce !== undefined
+              || document.visibilityState === 'hidden'
+              || performance.now() - lastInputAt < 250
+            if (busy) { setTimeout(() => earlyWarmTick(remaining), 300); return }
+            const [k, ...rest] = remaining
+            if (!stepCache.has(k)) measureStep(k)
+            requestAnimationFrame(() => earlyWarmTick(rest))
+          }
+          const onEarlyWarm = () => {
+            if (earlyWarmDone) return
+            window.removeEventListener('inkwave:editor-revealed', onEarlyWarm)
+            // WHOLE LATTICE, nearest-first (2026-08-20, round 2 — Peter: "goes like three zooms then
+            // stops then another three. so maybe we need to warm load more"). This was radius 2 (five
+            // steps: k0, k0±1, k0±2), and that symptom is precisely what a five-step cache produces:
+            // the first few notches present instantly off the warm cache, then the gesture walks off
+            // its edge into cold steps that each cost a synchronous full-document hypothetical reflow
+            // (onZoomStep's miss path), stalls, and only recovers once the post-settle zoom window
+            // (ZOOM_WARM_RADIUS, also 5) warms the next few — hence "another three". The lattice is
+            // only ~20 steps end to end, so warming all of it removes the cliff entirely rather than
+            // moving it a few notches further out. Cost is bounded and paced: one hypothetical reflow
+            // per frame, each deferred by the busy check above, so it yields to the writer throughout
+            // and never lands a burst on the reveal choreography.
+            const k0 = currentStep()
+            const steps: number[] = []
+            for (let d = 0; d <= ZOOM_STEP_MAX - ZOOM_STEP_MIN; d++) {
+              for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
+                if (k >= ZOOM_STEP_MIN && k <= ZOOM_STEP_MAX && !steps.includes(k)) steps.push(k)
+              }
+            }
+            setTimeout(() => earlyWarmTick(steps), 400)
+          }
+          window.addEventListener('inkwave:editor-revealed', onEarlyWarm)
 
           // Latch + announce the FIRST successful measure — the editor's one-paint reveal gate
           // (TiptapEditor `settled`) waits for it so text and page marks appear together. Plus the
@@ -1989,6 +2056,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.removeEventListener('inkwave:measure-now', measureNowCb)
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
               window.removeEventListener('inkwave:arith-exit', onArithExit)
+              window.removeEventListener('inkwave:editor-revealed', onEarlyWarm)
               PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)

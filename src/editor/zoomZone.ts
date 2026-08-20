@@ -63,6 +63,13 @@ export function createZoomLatch(host: () => HTMLElement | null) {
   }
   return {
     /**
+     * True when no gesture is currently latched (the NEXT `resolve()` call will be a fresh
+     * gesture's first event). Callers that want to know "is this the very start of a gesture" —
+     * e.g. to give the first committed zoom step a head start — must read this BEFORE calling
+     * `resolve()`, since `resolve()` itself latches a mode on its first call.
+     */
+    isIdle(): boolean { return mode === null },
+    /**
      * Resolve the mode for one zoom event: the latched mode while a gesture is live, else
      * `compute()` fresh (and latch it). Re-arms the 0.5s cooldown and keeps the host's
      * zoom-cursor classes in sync (`zoomOut` = this event's direction).

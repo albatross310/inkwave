@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
+import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 
 
 // ── Bitcoin coin icon ─────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ function computeVersionLabel(snap: SnapshotMeta, groups: SnapshotGroup<SnapshotM
 }
 
 export function ReceiptPanel({
+  documentId,
   snapshots,
   onCheckBitcoin,
   onSaveVersion,
@@ -68,6 +70,22 @@ export function ReceiptPanel({
   onOpened,
   hideTrigger,
 }: {
+  /**
+   * The id of the document CURRENTLY OPEN — which is the key the snapshot archive is stored under
+   * (`readSnapshotArchive(documentId)`), and therefore the only id that can open one of these rows.
+   *
+   * ⚠ 2026-08-20 — NOT `snapshot.documentId`, which is what this panel's links used to use and is a
+   * different thing: that field records the id the snapshot was WRITTEN under, on whatever machine
+   * wrote it. The two diverge the moment a `.studio` is opened and its history restored under a
+   * different local id than the records carry (`storage/openConflict.ts` `diverged` opens the file
+   * as a separate document with a fresh id; a file authored on another machine is the ordinary case).
+   * The archive then lives under the LOCAL id while every record still names the ORIGINAL one, so a
+   * link built from the record pointed at an id with no archive and /snapshot answered "That snapshot
+   * isn't on this device" — about history sitting intact on disk. Peter hit exactly this moving from
+   * Windows to Mac: the ⋮ menu's link (built from the live doc id, OptionsMenu.tsx) opened fine while
+   * this panel's rows did not, which is the diagnostic signature of the two ids disagreeing.
+   */
+  documentId: string
   // Metadata only (the snapshot memory diet) — the panel renders labels/OTS/summaries and must
   // never hold full contentJson/receipts in React state. Heavy actions fetch via listSnapshots.
   snapshots: SnapshotMeta[]
@@ -145,9 +163,13 @@ export function ReceiptPanel({
         className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
         style={{
           color: 'var(--iw-ink, #5c2d8a)',
-          // Match the toolbar baseline (room-bottom + 28*zoom); transform:scale for size (see SyncStatus
-          // — css `zoom` multiplied the offset, lifting the pill by room-bottom*zoom when a panel opened).
-          bottom: `calc(${hideTrigger ? 'env(safe-area-inset-bottom) + 80px' : `${Math.round(28 * zoom + 10)}px`} + var(--iw-pdf-room-bottom, 0px))`,
+          // MIDLINE-matched to the toolbar and to the sync pill opposite (2026-08-20) — this used to be
+          // `28*zoom + 10`, a bottom-edge offset with a stray +10 that put this pill 10px above the
+          // sync pill's baseline and neither on the toolbar's centre. transform:scale for size (see
+          // SyncStatus — css `zoom` multiplied the offset, lifting the pill when a panel opened).
+          bottom: hideTrigger
+            ? 'calc(env(safe-area-inset-bottom) + 80px + var(--iw-pdf-room-bottom, 0px))'
+            : sidePillBottom(zoom),
           padding: hideTrigger ? '0 1rem' : '0 10px',
           transition: 'bottom 0.18s ease',
           transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
@@ -159,7 +181,14 @@ export function ReceiptPanel({
             type="button"
             onClick={() => setOpen(!open)}
             className={`iw-nightable ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}
-            style={{ border: `1px solid rgba(92, 45, 138, 0.75)`, borderRadius: compact ? 9999 : 12, color: 'var(--iw-pill-fg, #5c2d8a)' }}
+            style={{
+              border: `1px solid rgba(92, 45, 138, 0.75)`,
+              borderRadius: compact ? 9999 : 12,
+              color: 'var(--iw-pill-fg, #5c2d8a)',
+              // Shared with the sync pill opposite so the pair reads as a matched set — see
+              // components/sidePill.ts. Natural height here was ~27.5px, so this grows it ~2.5px.
+              ...(compact ? {} : { height: SIDE_PILL_H, display: 'flex', alignItems: 'center', fontSize: SIDE_PILL_FONT }),
+            }}
             title="Provenance record (held by you)"
           >
             {compact ? '◈' : (
@@ -250,7 +279,7 @@ export function ReceiptPanel({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => window.open(`/snapshot?doc=${encodeURIComponent(s.documentId)}&snap=${encodeURIComponent(s.id)}`, '_blank', 'noopener')}
+                  onClick={() => window.open(`/snapshot?doc=${encodeURIComponent(documentId)}&snap=${encodeURIComponent(s.id)}`, '_blank', 'noopener')}
                   className="w-full px-2.5 py-1 flex flex-col items-start text-left hover:bg-stone-50"
                   style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
                   title={s.summary ?? `bundle ${s.bundleHash}`}

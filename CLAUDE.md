@@ -210,6 +210,36 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   loses data in all 3 cells (identity / two-tab clobber / OAuth round-trip), fixed loses none:
   `scripts/tabdoc-probe/repro.mjs`. **NB this is NOT what caused the 07-15 loss** (forensics refuted
   it: an opened file, not a pointer race) — it is a separate, real, reproduced class.
+- **Single-open lock — a proper UI in front of the Web-Locks mechanism above (2026-07-18, `6c7feea`
+  + `4beee0e`).** The per-tab identity work above stops two tabs blind-autosaving over each other, but
+  silently: "a tab that finds its document held takes one of its own." This adds the writer-facing
+  half, keyed by document id, same-device, IN FRONT OF that existing per-tab isolation (kept as
+  backstop, not replaced). Opening a document another window on this device already holds no longer
+  silently opens something else — it shows "This document is open in another window" with three
+  actions: **[Switch to it]** (BroadcastChannel focus), **[Open a copy]** (clone under a new id), and
+  **[Take over here]** (safe handoff).
+  - **The take-over is the whole mechanism, and it is enforced at the bytes, not asserted.** The
+    losing tab must STOP WRITING before the winning tab starts: a write freeze at the `saveDocument`
+    funnel (`storage/opfs.ts`) refuses a surrendered document, and the handshake
+    (`storage/singleOpen.ts`) has the holder flush→freeze→ACK while the taker awaits that ack before
+    stealing the Web Lock and writing. A Web Lock steal alone freezes the loser
+    (`tabDoc.onDocLockLost`) on the no-BroadcastChannel path; a stale lock from a crashed tab
+    auto-releases so a writer is never locked out of their own document; an ack-timeout rescue steal
+    covers a hung holder. Cross-device is untouched (cloud merge owns that); degrades gracefully with
+    no Web Locks / private windows / no BroadcastChannel — never a hard dead-end.
+  - **`4beee0e` closed a real overwrite vector the auditor found and reproduced same-day**: the
+    ack timer (2500ms) could fire while a LIVE holder was still inside `await flush()`, before it
+    reached its freeze — the taker would then steal and the caller could read the body while the
+    holder's in-flight `saveDocument` was still pending, and that write landing after the read let a
+    later save overwrite the holder's flushed final keystrokes (the exact overwrite this mechanism
+    exists to prevent). Fix: after an ack TIMEOUT, steal, then wait a brief grace (1500ms default) for
+    a LATE `surrendered` — a live slow-flusher posts it once its flush completes and freezes, so the
+    caller reads AFTER the freeze; a genuinely dead holder never posts and the grace just expires.
+  - Mutation-proved (no browser): the write freeze (`opfs.freeze.test.ts`), handshake ordering +
+    freeze-on-steal (`singleOpen.test.ts`), the second-tab block + steal notification via an
+    in-process fake `LockManager` (`tabDoc.locks.test.ts`), the UI wiring
+    (`DocumentOpenElsewhere.test.tsx`), and the ack-timeout race fix itself (a gated in-flight flush
+    with `ackTimeoutMs < flush` proves the taker now reads after freeze).
 - **Unsynced-work notice (2026-07-17, Peter's ask).** `editor/unsyncedWatch.ts` — PURE rule
   (`shouldWarnUnsynced` + reducer), `components/UnsyncedNotice.tsx` is only its face. Fires after 5
   minutes of unsynced WORK; never while sync is active; never again once waved away (the anti-nag
@@ -479,6 +509,13 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
       our params), so a flag read fresh from the URL DIED on the first scrub — silently disabling
       thumbnails AND the overlay exactly when you started using them. Flags now resolve ONCE per
       load into localStorage (the `?auth` pattern): ?snapThumbs=1 | debug | off.
+      **⚠ CORRECTED 2026-07-19 (`dd4cbe5`) — `debug` specifically should NOT have been in that
+      localStorage set.** Peter set `?snapThumbs=debug` once for this scrub work, and it then wrote
+      localStorage and showed the diagnostic overlay on EVERY later `/snapshot` visit forever — a
+      debugging aid that outlived its session. Fixed: the DEBUG flag now lives in `sessionStorage`
+      (still survives in-session scrub URL rewrites, per this ROUND-8 fix, but gone on a new
+      session), any stale PERSISTENT debug flag is purged on load, and `?snapThumbs=1` clears debug.
+      The feature flag itself (`?snapThumbs=1`/`off`) stays persistent — only `debug` changed.
   (3) COLD CACHE was the rest of it — his flag was OFF and nothing was baked, so show() had nothing
       to show. THE SWEEP (Peter: "yes add the sweep") now bakes the library in idle: it drives ONE
       extra hidden warm DocLayer at a time (opacity 0.001, the same keep-alive machinery) →
@@ -1098,11 +1135,34 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     that already carried the class — a path the editor never takes): a blind counter with a green
     negative. Observe attributes; drive negatives through the real mechanism.
 
-## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT OFF)
+  ROUND 15 (2026-07-18, `ef96306` — **GRADUATED TO DEFAULT ON, the flag mentioned throughout ROUND
+  14 above is now stale.** "the fast scrub rich text" ships live). Peter: *"unblock textRender"* /
+  "STOP FLAGGING EVERYTHING" (below). `/snapshot`'s doc pane now renders RICH formatted pages
+  (`RichDiffView`) for EVERY version instead of the flat pre-wrap transcript 115 of 116 versions used
+  to show. Readiness gates, all run against the real built app before flipping the default:
+  `breaks.prove.mjs` IDENTICAL BREAKS true; `typematrix.prove.mjs` (per-type, offsets not counts) —
+  paragraph/heading/lists/citation/refList/hardBreak/marks IDENTICAL, math/code/font-family/full-set
+  DECLARED-DEFER (refuse + say so), taskList/blockquote/codeBlock/hr/mathBlock diverge but DECLARE low
+  reliability rather than silently misreporting — Peter's bar ("accurate across all text types, or
+  give the reason") is met; `panecontent.prove.mjs` — the normal (no `?textRender`) path now renders
+  rich and paginates byte-identically to the first-version rich render, closing the round-11 "two
+  rules, one pane" divergence. `textRenderFlag.ts` reader flipped to `!== '0'` (absent-means-on);
+  `?textRender=off` a sticky `'0'`. The 1477-line measurement PROBE stays decoupled from the flag
+  (it used to share it, which would have installed the harness for every writer on default-ON) — it
+  now arms only on the fresh `?textRender` URL param, which is what `.prove.mjs` scripts navigate to
+  and nobody else. Mutation-proved default both ways.
+
+## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)
 
 `src/productivity/report/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in
 their own AI and pastes the reply back, Inkwave parses + merges + graphs client-side. Inkwave sends
 nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3 (BYO-key) NOT built.
+
+**GRADUATED (2026-07-18, `77b8564`)** — Peter: *"take all the flags off for music and everything"*
+(see "STOP FLAGGING EVERYTHING" below). `prodReportEnabled` (`flag.ts`) reader flipped to `!== '0'`
+(on unless explicitly off); `?prodReport=off` writes a sticky `'0'`. The heavy modal stays a dynamic
+import; its demo-fixtures import is now gated on demo MODE, not the flag, so a real writer's session
+never fetches the fixtures chunk.
 
 - **⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
   *"it's too nice and not enough humour… read like a comedian wrote it"* / *"It doesn't need to be
@@ -1208,10 +1268,14 @@ below)**, `aggregate.ts` (pure day/week/month rollups, now sharing one module wi
 window builder), `phase.ts` (the deep-vs-shallow rule), `judged.ts` (the
 AI seam + the honesty gate), `summary.ts` (the copy), `charts/` (hand-rolled SVG — NO chart
 dependency; follows `src/verify/ActivityGraph.tsx`), `ProductivityPanel.tsx`, `fixtures.ts`.
-Route `/productivity`, flag `inkwave:prodGraphs` DEFAULT OFF (`?prodGraphs=1` / `=demo` / `=off`,
-sticky, the `?auth` pattern). Off costs nothing BY CONSTRUCTION: the whole lane sits behind a lazy
-import (`Report-*.js`, 21kB/7kB gzip) and the route stub is 2kB. Nothing reads the `.studio` or walks
-the doc; aggregation is pure and runs on mount, never on the load path.
+~~Route `/productivity`~~ **RETIRED 2026-07-18 (`92425e0`) — panel-ified.** The charts moved from a
+route to a portalled night-mode panel opened from the clock drop-up (see the restructured clock UI
+below); the route is gone and a catch-all redirects stale bookmarks to the editor. Flag
+`inkwave:prodGraphs` (`?prodGraphs=1` / `=demo` / `=off`, sticky, the `?auth` pattern) **graduated
+DEFAULT OFF → DEFAULT ON in the same commit** — its only caller had been the now-retired route, and
+once it was a panel the "no routes, all panels" ethos applied and it shipped live too. The heavy
+chart code stays a lazy import off the editor's own load path either way (`Report-*.js`, 21kB/7kB
+gzip). Nothing reads the `.studio` or walks the doc; aggregation is pure and runs on mount.
 
 **THE HEURISTIC DEVIATES FROM THE SPEC'S EXAMPLE, AND THE MEASUREMENT IS WHY.** §A3.3 offers "high
 add-to-delete ratio + long sessions → drafting; high delete + short → editing" as an `e.g.`. Scored
@@ -1303,7 +1367,7 @@ its own failure. PRE-EXISTING, NOT THIS LANE'S: `vite preview` throws React hydr
 recovery failure entry.client.tsx:100 documents), so the screenshot probe asserts the theme attribute
 directly.
 
-## Productivity ledger (P1a-core, 2026-07-17 — `src/productivity/`, flag `inkwave:prodLedger`, DEFAULT OFF)
+## Productivity ledger (P1a-core, 2026-07-17 — `src/productivity/`, flag `inkwave:prodLedger`, DEFAULT ON since 2026-07-18)
 
 Session capture + a per-month ledger, per the Productivity/Email build spec §A3–A5. **The surface is the
 TOOLBAR'S CLOCK DROP-UP (`components/ClockMenu.tsx`) — `/ledger` the route is GONE** (Peter, 2026-07-17:
@@ -1350,8 +1414,42 @@ mirrors deleted — the real schema supersedes them, and the names matched alrea
   reasoned about. `--iw-on-ink` (day #fff / night #2c2e35) is the token for text on an ink FILL — same
   shape as the existing `--iw-newbtn-fg` ("darker on its light-blue chip in night"). **Any new filled
   control must use it; a literal white on an --iw-ink fill is a night-mode bug by construction.**
-- Lengths are PRESET PILLS (the PageMenu pattern), not bare number inputs. §A5 holds: completed blocks
-  are DOTS, not a number to beat; no red anywhere.
+- ~~Lengths are PRESET PILLS~~ **SUPERSEDED 2026-07-19 (`f8dd8aa`) — now NUMBER INPUTS**, edited by
+  clicking the timer directly, clamped through the same sanitiser the store uses (see the nav-shell
+  restructure below). §A5 still holds: completed blocks are DOTS, not a number to beat; no red anywhere.
+
+- **`prodLedgerEnabled` GRADUATED DEFAULT ON (2026-07-18, `77b8564`)** — Peter: *"take all the flags
+  off for music and everything"* (see "STOP FLAGGING EVERYTHING" below). Reader is `!== '0'` (on
+  unless explicitly off); `?prodLedger=off` / `setProdLedgerEnabled(false)` write a sticky `'0'`.
+  Session capture, the clock drop-up, countdown overlay, ledger, goals and reflection now all ship
+  live. SSR/prerender/node keep the OFF fallback so capture never runs off the keystroke path. The
+  slot-count note two bullets up ("7 when `?prodLedger` is on") is therefore now the DEFAULT shape,
+  not the exception — the clock slot is live for every writer out of the box.
+
+### The clock panel — restructured into a 5-button nav shell (2026-07-19, `f8dd8aa`)
+
+**Supersedes the flat drop-up described below where they conflict.** Peter's spec: the clock button
+opens a panel with **five nav buttons** — Start/stop work, Goals, Reporting, Progress tracking,
+Manage projects — laid out so a sixth is one array entry away. `LedgerDropUp` is now a home screen of
+nav rows + per-view sub-panels, wiring the EXISTING pieces behind them (pomodoro, `GoalsSection`, the
+AI report modal, the charts modal, the ledger) — never a second copy of any of them.
+
+- **Start-work flow:** Start work → **WHERE** (typed place, reuses `places.ts`) + **WHAT** (intention)
+  + optional block length → runs the pomodoro → at the end, a SUMMARY prompt lands as the ledger row's
+  note via the existing `annotateRow` path. `workSession.ts` claims only the pomodoro row that started
+  at/after the Start action (never a prior session's flush) — mutation-proved.
+- **Chime is now a DROPDOWN** — the five synthesised voices plus **Silent** in one `<select>`, with a
+  preview affordance (supersedes any earlier "customisable with previews" bullet below where it implied
+  a picker grid rather than a dropdown).
+- **Repeat + OS notification on timer end:** `playChimeEnd` repeats the chime on the audio clock
+  (throttle-proof); `notify.ts` fires a Web Notification (permission requested lazily on the first
+  Start-work gesture) and degrades to the in-page toast if denied. A `visibilitychange` reconcile fires
+  the overdue transition the moment the tab returns (covers the tab-was-backgrounded-through-the-ding
+  case a plain timer callback would miss).
+
+Blast radius: LIVE, default-on (the whole productivity suite graduated the day before). Browser-probed
+headless in Chromium, day+night: 5 nav buttons, the WHERE/WHAT/block-length flow, the chime dropdown,
+the 4 number-inputs on tapping the timer.
 
 - **The flag is `ledgerFlag.ts` (`?prodLedger=1` / `=off`, sticky), NOT `flag.ts`** — that one is the AI
   report's (`?prodReport`). A `flag.ts`/`flags.ts` pair in one directory is how someone imports the wrong
@@ -1661,7 +1759,10 @@ a REPO-WIDE sweep of string literals + JSX text across `src/` + `extension-src/`
 
 P1a-core (ledger), P1a-viz (graphs), P1b (email) and P1c (AI report) were built in parallel and are
 now ONE layer. What was decided on the merge, and what the merge FOUND. **All flags stay default OFF**
-(`prodGraphs`, `prodReport`, `prodLedger`, `email`) — verified, not assumed.
+(`prodGraphs`, `prodReport`, `prodLedger`, `email`) — verified, not assumed **as of this 2026-07-17
+merge only.** Three of the four graduated to DEFAULT ON the following day under "STOP FLAGGING
+EVERYTHING" (`prodLedger`/`prodReport` in `77b8564`, `prodGraphs` in `92425e0`) — see each lane's own
+section above for the current status. `email` remains DEFAULT OFF (blocked on Google verification).
 
 - **ONE SCHEMA: `productivity/types.ts`.** prod-graphs' `ledger.ts` was an explicit placeholder mirror
   of §A3.2 ("THE LEDGER SEAM: a one-line import swap when feat/prod-ledger lands") — retired exactly
@@ -1716,12 +1817,51 @@ this for the same reason, and its comment about `_snapCache` is the other half o
 `testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
 arrayBuffer, and its absence surfaced only as an empty ledger.
 
-## Music module — photo score + reflow + markup (2026-07-17, `src/music/`, flag `?music`, DEFAULT OFF)
+## Music module — photo score + reflow + markup (2026-07-17, `src/music/`, flag `?music`, DEFAULT ON since 2026-07-19)
 
 Spec: `Inkwave-Music-Module-BuildSpec-v0.1.md` §A1/§A2 (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
-into the repo). Build order step 1 of 7. `/music` is the surface; the studio, the detector, pdf.js and
-all canvas work sit behind a lazy import (`MusicStudio` 29kB/11.3kB gzip; route stub 2.3kB) so OFF
-costs nothing BY CONSTRUCTION — the editor bundle is untouched.
+into the repo). Build order step 1 of 7. All canvas work sits behind a lazy import (`MusicStudio`
+29kB/11.3kB gzip) so the flag being ON costs nothing on the editor's own load path BY CONSTRUCTION.
+
+**⚠ SUPERSEDES THE PARAGRAPH ABOVE — `/music` IS GONE, AND THE MODULE IS LIVE (2026-07-18/19).**
+Peter: *"music as a LAYER over the editor … no /music doesn't survive. it should all be in panels."*
+`33013fa` retired the route (`routes/Music.tsx` + `app/routes/music.tsx` deleted; a stale bookmark
+falls through the catch-all to the editor). The module is now reached from the toolbar's **♪ bar**
+(`components/MusicBar.tsx`): "Import a score" opens `MusicPanel` (MusicXML import/play/excerpt-attach)
+and "Score studio" opens `MusicStudio` (photo/markup/heatmap), both as **portalled panels over the
+open editor** — `lazy(() => import(...))`, two separate chunks behind the editor's own dynamic import,
+so the editor's static graph stays untouched. `MusicStudio` takes `documentId`: over an open document
+it loads THAT document's Piece; on a prose document (no Piece) it says so honestly rather than minting
+one over an essay. `3eaa098` (2026-07-19) then graduated `musicEnabled()` itself to **DEFAULT ON**
+(`!== '0'`; `?music=off` persists a sticky `'0'` opt-out) — both halves of the module were judged real
+(the ♪ bar reaches a live studio/panel, and photo→Piece creation below means the studio opens an
+actual score, not just the demo harness), so per the "STOP FLAGGING EVERYTHING" rule below it ships.
+The ♪ slot itself stays in the ▲ drawer, not the main row. Heavy chunks remain lazy — confirmed
+browser-verified: default ON with no URL param, the OSMD/heavy-music chunk is NOT fetched on `/`.
+
+**"Make this a music score" (2026-07-18, `50fc8b7`).** The media-import photo button wires straight
+into `MusicStudio` via `store.ts savePiece` + `newPieceDocument` — a photo LIVES IN a document and
+*becomes* its own `docType:'music'` `.studio` (it does not convert the essay you imported it from).
+This is what let the graduation above claim the studio reaches a REAL score.
+
+**Webcam capture in media import (2026-07-18, `4f963c5` + `bbe87a0`).** Peter: *"the photo button
+isn't working with my laptop's webcam (which it should)."* The Photo button previously only opened a
+file dialog (`<input accept="image/*">` has no camera on desktop). On laptop/desktop it now opens a
+webcam-capture POPUP (live preview → Take photo → video frame → canvas → JPEG blob), through the SAME
+`importMedia` path a file import uses — no second media store. Touch devices keep the native
+`image/*` picker (it already offers the OS camera). Required `vercel.json`'s `Permissions-Policy` to
+grant `camera=(self)` (was `camera=()`, disabling the camera at the HTTP header for every origin) —
+the exact mirror of the microphone firebreak's line; `microphone=()`/`geolocation=()`/`payment=…` are
+untouched, only `camera` changes, to the narrowest grant that works. `camera.ts` is the ONLY module
+allowed to name `getUserMedia`, and only because it names no audio-specific API — the mic firebreak
+(`music/lesson/micBoundary.ts`) gained a `CAMERA_CAPABLE` exemption for it, but `add2487` (same day)
+closed a real gap: the exemption's `AUDIO_ONLY_PATTERN` didn't read the *constraints*, so a
+`camera.ts` edited to pass `audio:true` would have opened a microphone through the "camera" file
+without tripping the sweep (not a live breach — `microphone=()` still denied the track at the
+platform — but the source firebreak wasn't independently holding). Fixed: `\baudio\s*:\s*true\b` now
+trips the pattern; a bare, ambiguous `getUserMedia` token stays exempt. The camera releases every
+track the instant capture completes or the popup closes (mutation-proved). Captured photos stay
+LOCAL (OPFS) — no network, no upload; provenance-untouched (media on `doc.media`, the PDF precedent).
 
 - **⚠️ NO OMR, EVER (§0, repeatedly).** The CV is barline/whitespace GEOMETRY only: row darkness,
   longest horizontal run, longest vertical run. Nothing recognises a note, and nothing may. The score
@@ -2531,6 +2671,20 @@ as the water slows.
 
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
 
+**ONE CAUSE OF "SHORT LINES OUT OF SYNC" CLOSED (2026-07-18, `a11bd94`) — narrower than the residual
+below, do not conflate them.** Root cause: the covered editor surface routinely mounts ~150-250ms
+BEFORE the loading shell's drift animation commits its `startTime`, so the sibling-clock adopt's
+`sibling != null` gate found nothing yet, skipped adoption, and never retried — the two surfaces'
+drifts then resolved independently 10-25px apart FOREVER, and since the marks share ONE clock
+(stamped from the first host's drift), that divergence threw the OTHER surface's marks off their own
+crest by the identical amount. Fix: the reference surface (first-mounted) is never rewritten; every
+later surface waits for it to resolve and adopts it, retrying each frame until it commits. PROVED
+(`markskew.prove.mjs`, armed known-negative seen at 28.8px): before, surface-vs-surface drift up to
+25px; after, 0.00px across 10/10 clean loads, Chromium. This is the default CSS-water path (flag
+off) — it improves what everyone gets today and the video's fallback, but it does NOT resolve the
+on-device raster-scheduling residual below (a GPU-less box structurally cannot see that class), so
+`?waveVideo` stays default OFF regardless.
+
 KNOWN RESIDUALS (Peter's live verdict, 2026-07-12, build 72783da — "workable on the whole"):
 no consistent tick remains, but inconsistent performance artifacts persist, worst on PHONE then
 Chrome: occasional blue flash; white lines briefly lagging their wave. Probes pass 9/9 — these
@@ -2679,6 +2833,18 @@ write shim, so metadata can say a PDF exists with no local bytes).
   follow-up: per-run canvas advances + greedy breaking feeding computeBreaks as a third
   acquisition path, DOM full measure as idle verifier, pagCheck as prover, gated on
   document.fonts.ready + certified fonts only.
+- **`?arithLayout`'s parked rationale was STALE — corrected 2026-07-18 (`96b0edb`), flag still OFF.**
+  The reflow-free canvas-advance pagination engine was parked 2026-07-15 for a ~1-break-in-20 wrap
+  divergence from the DOM canonical measure. That rationale no longer holds: the LU-quantisation wrap
+  fix (`88ebf39`) landed the day AFTER the revert and addresses exactly that divergence class — but
+  nobody flipped the flag back on, and the stale comment kept blaming a bug that was already fixed.
+  `scripts/textrender-probe/arith.prove.mjs` (`pnpm prove:arith`) is the new graduation keeper: drives
+  the real wired whole-doc arith path and checks its canonical breaks are byte-identical to the DOM
+  canonical measure — 0 divergences across 4k/6k/8k fully-eligible prose (15/23/31 breaks) incl.
+  hyphenated compounds. **Flag stays DEFAULT OFF regardless** — the actual remaining blocker is a
+  WebKit cross-device pass (the probe above is Chromium-only, and canonical breaks are a cross-device
+  invariant) plus a scoped-arith desktop-typing A/B. Do not flip it on the Chromium proof alone. No
+  runtime change from this commit: comment + new script + one package.json line only.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
@@ -2844,7 +3010,12 @@ now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the
 - **A finished, tested feature SHIPS LIVE — no flag.** Don't reflexively wrap new work in a default-OFF flag; the default is that a writer sees it.
 - **A flag is now the EXCEPTION and must earn itself** — only for work genuinely not ready (incomplete, experimental, blocked on an external dependency). It's a temporary scaffold, not a home: it comes with a plan to graduate, and the report says WHY it's not live and WHAT closes the gap.
 - **Graduating ≠ flipping a switch on a stub.** Turn a flag on only when the thing behind it is real. `musicEnabled()`=true over a placeholder panel ships a stub to every writer — worse than the flag.
-- **Genuinely-unfinished stay gated for now** (2026-07-18): the experimental scrub renderer (`?textRender`), the wave video (`?waveVideo`, unresolved desync), the parked arithmetic layout (`?arithLayout`), email send (`?email`, blocked on Google verification). Name the reason when you touch them.
+- **Genuinely-unfinished stay gated for now** (updated 2026-07-19): the wave video (`?waveVideo`,
+  unresolved desync), the parked arithmetic layout (`?arithLayout`, held on a WebKit cross-device
+  pass), email send (`?email`, blocked on Google verification). Name the reason when you touch them.
+  ~~The experimental scrub renderer (`?textRender`)~~ **GRADUATED 2026-07-18 (`ef96306`)** — see the
+  "graduate textRender to default-ON" entry in round 14/15 of the canonical-pagination section below;
+  it no longer belongs on this still-gated list.
 
 The old blanket "**All flags stay default OFF**" line elsewhere in this file is superseded by this.
 
@@ -2942,15 +3113,17 @@ photo/audio/video; PORTALED, so it carries `iw-touch-guard` + `iw-nightable` its
 inheriting them), CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
 OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
 VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
-ProductivityReportModal, ProductivityPanel (`/productivity`), the ledger CLOCK DROP-UP
-(`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is gone; its READING
-indicator + POST-HOC ADD sections are inside it, screenshotted day+night by
+ProductivityReportModal, ProductivityPanel (`/productivity` the route is GONE since 2026-07-18 —
+panel-ified, opened from the clock drop-up), the ledger CLOCK DROP-UP restructured 2026-07-19 into a
+5-button nav shell (`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is
+gone; its READING indicator + POST-HOC ADD sections are inside it, screenshotted day+night by
 `scripts/pdfposthoc.prove.mjs`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
 document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
 EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
 `?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
-MusicPanel + ScoreView (`/music?musicXml=1`, DEFAULT OFF — the MusicXML path), the music studio
-(`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
+MusicPanel + ScoreView (opened via the toolbar's ♪ bar as "Import a score" — the `/music` route and
+its `?musicXml=1` param are GONE since 2026-07-18; the music module itself is DEFAULT ON since
+2026-07-19), the music studio (`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
 `music/ScorePage.tsx` gap bands + sticky notes, `music/HeatmapScreen.tsx` bar rows + its palette
 drop-up). When you add a panel, add it here too.
 

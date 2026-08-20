@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
+import { TOOLBAR_BOTTOM_PX } from '../components/sidePill'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 import { buildEditorExtensions } from './extensions/editorExtensions'
@@ -20,7 +21,7 @@ import { Scroll, isTouchDevice } from './Scroll'
 import { createDock } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
 import {
-  SlotId, BarLayerId, BAR_HANDOFF_MS, ROW_SLOTS,
+  SlotId, BarLayerId, BAR_HANDOFF_MS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
   slotIndexForDigit, hotkeyHintFor,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, mergeRowIntoConfig,
@@ -119,6 +120,17 @@ import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../t
 // codebase's recurring wound is two implementations of one rule — so a lane registers a button by
 // adding a member to SlotId + ALL_SLOTS there, and gets the row, the ▲ overflow, the drag-to-swap
 // and the migration for free. Read that file before adding anything to this one.
+
+/**
+ * Visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills that
+ * share its band — SyncStatus (`right:0`, ~138px painted: max-w-7.5rem + padding, ×1.12 scale) and
+ * ReceiptPanel's snaps pill (`left:0`, ~96px painted). Sized to the larger of the two plus a ~12px
+ * gap. All three are independently `position: fixed` with no awareness of each other, so without
+ * this reserve the centred toolbar grows straight into the sync pill on a narrow window (measured:
+ * collision begins at ~650px viewport width). See the `--iw-bar-budget` comment on the pill's style
+ * for why this must be ONE number shared with the per-circle shrink clamp in index.css.
+ */
+const TOOLBAR_SIDE_RESERVE_PX = 140
 
 interface TiptapEditorProps {
   doc: InkwaveDocument
@@ -3034,6 +3046,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             stays mounted during and after async save-version work. The trigger is hidden
             on touch (lives in toolbar) and when keyboard is up (visually inaccessible). */}
         <ReceiptPanel
+          documentId={doc.id}
           snapshots={snapshots}
           onCheckBitcoin={checkBitcoin}
           onOpened={runOtsSweep}
@@ -3077,7 +3090,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             }
             return fileName ? (
               <SyncStatus compact={isTouch}
-                label={lastFileSave ? '✓ Synced to folder' : '🗀 Sync pending'}
+                label={lastFileSave ? '✓ Synced to folder' : 'Sync pending'}
                 synced={!!lastFileSave}
                 path={fileName}
                 lastSync={lastFileSave}
@@ -3087,7 +3100,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 {...syncProps}
               />
             ) : (
-              <SyncStatus compact={isTouch} label="🗀 Save to a folder" synced={false} onClick={() => void saveToFile()} {...syncProps} />
+              <SyncStatus compact={isTouch} label="Save to folder" synced={false} onClick={() => void saveToFile()} {...syncProps} />
             )
           }
           // Google Drive (Firefox/Safari) takes the indicator once the writer has connected it.
@@ -3164,7 +3177,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           style={{
             // Phone: the safe-area padding melts away as the keyboard overlap grows (max() keeps the
             // slide continuous) so the bar sits truly flush on the keyboard's top edge.
-            paddingBottom: isTouch ? 'max(0px, calc(env(safe-area-inset-bottom) - var(--iw-kb-offset, 0px)))' : `${28 * zoom}px`,
+            paddingBottom: isTouch ? 'max(0px, calc(env(safe-area-inset-bottom) - var(--iw-kb-offset, 0px)))' : `${TOOLBAR_BOTTOM_PX * zoom}px`,
             // Landscape phones (viewport-fit=cover): keep the docked bar clear of the notch/home-bar
             // side insets, matching the bottom inset above. Zero in portrait / on desktop.
             paddingLeft: isTouch ? 'env(safe-area-inset-left)' : undefined,
@@ -3188,6 +3201,34 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             ref={footerRef}
             className={`iw-nightable iw-touch-guard pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             style={{
+              // ── THE SIDE-PILL COLLISION, AND THE ONE BUDGET THAT PREVENTS IT (2026-08-20) ──
+              // MEASURED (viewport sweep, real browser): the footer pill is CENTRED (its wrapper is
+              // `fixed left-0 right-0 flex justify-center`) while the sync pill (SyncStatus, `right:0`)
+              // and the snaps pill (ReceiptPanel, `left:0`) are EDGE-anchored — three independently
+              // positioned fixed elements sharing one band, with nothing making them aware of each
+              // other. At ≥700px they never touch, which is why every earlier attempt (tested at
+              // 900–2000px) "passed" while Peter's screenshots still showed the sync pill sitting on
+              // top of the toolbar's right edge: he runs a ~600px-wide window (half-screen on a
+              // Retina Mac). Overlap begins at ~650px and worsens below it.
+              // TWO EARLIER FIXES FAILED FOR THE OPPOSITE REASONS, and both lessons are baked in here:
+              //   1. A bare `maxWidth: 58vw` on this box alone → the box shrank but the CIRCLES did
+              //      not (their clamp keys off a different budget), so the row overflowed its own
+              //      rounded border: "the right button is falling off".
+              //   2. Removing the cap entirely → nothing bounded the centred pill at all, so at a
+              //      narrow window it simply grew into the sync pill again.
+              // So: ONE number, `--iw-bar-budget`, is the maximum width the toolbar may occupy, and
+              // BOTH constraints derive from it — this box's max-width (below) and the per-circle
+              // shrink clamp in index.css (`.iw-desktop-toolbar`, which inherits the var from here).
+              // They cannot disagree, because there is only one of them.
+              // The reserve is per SIDE and is measured, not guessed: the sync pill is ~138px visual
+              // (max-w-7.5rem + padding, ×1.12) and the snaps pill ~96px; 160px covers the larger plus
+              // a ~12px breathing gap. Divided by the transform scale below, because max-width is a
+              // LAYOUT property while the collision happens in VISUAL px — a 421px layout pill paints
+              // 471px wide at ×1.12, and it is the painted box that hits the sync pill.
+              ...(isTouch ? {} : {
+                ['--iw-bar-budget' as string]: `calc((100vw - ${TOOLBAR_SIDE_RESERVE_PX * 2}px) / ${(zoom * 1.12).toFixed(4)})`,
+                maxWidth: 'var(--iw-bar-budget)',
+              }),
               border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
@@ -3211,6 +3252,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 opacity: styleBarExpanded ? 1 : 0,
                 pointerEvents: styleBarExpanded ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
+                // ⚠ A COLLAPSED ROW STILL HAS A WIDTH (2026-08-20 — the real cause of the toolbar's
+                // proportions repeatedly looking "wrong again"). `max-height: 0` hides this row but
+                // does NOT remove it from the pill's WIDTH calculation: the pill is a flex column, so
+                // its width is the widest child's max-content — and the style bar (font picker, size,
+                // B/H/align/list/∀) is WIDER than the circle row. So the pill was being sized by a row
+                // nobody can see, leaving the circles adrift in it (measured: 86px of empty pill to the
+                // right of the last circle) and no amount of tuning the circle rules could fix it,
+                // because they were never what set the width.
+                // `width: 0` drops this row's intrinsic contribution so the VISIBLE row sizes the pill;
+                // `min-width: 100%` then makes it fill whatever width that turns out to be, so it still
+                // lays out correctly when it expands. Growing the pill when the style bar opens is
+                // correct and intended — it just must not do so while collapsed.
+                ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
                 <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
@@ -3259,7 +3313,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 the pill height anywhere. iw-slot-dragging paints every circle's disc opaque
                 while a drag is live so the lifted one passes OVER its neighbours. */}
             {showMainRow && (
-            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'gap-0.5 px-2 py-0.5'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
+            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar py-0.5'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               // PHONE AND DESKTOP ARE ONE EXPERIENCE, SO THEY ARE ONE NUMBER (Peter, 2026-07-17:
               // "there's only 6 slots not 7 which I think is a good number because it fits well on
               // phone… we want to keep the phone and desktop experience continuous"). The phone
@@ -3267,7 +3321,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               // literal 8 — a SECOND copy of ROW_SLOTS, in another language, that no lane would think
               // to update. The whole justification for six is that it fits the phone, so the phone's
               // fit must be derived from six rather than agree with it by coincidence.
-              style={{ ['--iw-row-slots' as string]: String(ROW_SLOTS) }}
+              // ⚠ 2026-08-20: this was STILL feeding the CSS var the static ROW_SLOTS constant (6)
+              // rather than the row's actual live length — so once a 7th slot graduated to default-on
+              // (the clock), the shrink formula kept dividing by 8 (6+2) instead of 9 (7+2), leaving
+              // exactly one circle's worth of width unaccounted for. That's what "hung off the right"
+              // in the screenshot — the ⋮ options button had nowhere to go. toolbarSlots.length is the
+              // exact array rendered below (toolbarSlots.map), so it can never drift from what's on
+              // screen the way a re-typed constant can.
+              style={{ ['--iw-row-slots' as string]: String(toolbarSlots.length) }}
               onClickCapture={(e) => {
                 // A click synthesised from a just-finished touch-hold drag must not activate the
                 // dropped button (or close the bars) — swallow it here in the capture phase.

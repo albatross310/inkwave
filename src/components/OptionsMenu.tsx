@@ -396,10 +396,10 @@ function SavePanel({ onExportBundle, onSave, folderAvailable, folderName, onSync
       <MenuButton onClick={onExportBundle ? () => { onExportBundle(); onDone() } : undefined}>
         ⤓ Download a copy<span className="block text-xs text-stone-400">a self-verifying file you can keep or check at /verify</span>
       </MenuButton>
-      {/* Chromium (File System Access): native "Save to a folder"; once linked it shows the file name. */}
+      {/* Chromium (File System Access): native "Save to folder"; once linked it shows the file name. */}
       {folderAvailable && (
         <MenuButton onClick={onSave ? () => { onSave(); onDone() } : undefined}>
-          {folderName ? `✓ Synced to ${folderName}` : '🗀 Save to a folder'}
+          {folderName ? `✓ Synced to ${folderName}` : 'Save to folder'}
           <span className="block text-xs text-stone-400">
             {folderName ? 'updates here automatically as you write' : 'choose where to save it; it updates there as you write'}
           </span>

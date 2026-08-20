@@ -851,6 +851,89 @@
     height: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
   }
 
+  /* Desktop footer toolbar: the circles shrink so the whole row fits the SAME budget that caps the
+     pill's own max-width — `--iw-bar-budget`, written onto the pill in TiptapEditor.tsx and inherited
+     down to here. Read that assignment's comment for the full story; the short version is that the
+     centred toolbar shares its band with two edge-anchored fixed pills (sync status right, snaps
+     left) and collides with them below ~650px of viewport width, and that BOTH the box and its
+     contents must be bounded by ONE number or they disagree:
+       · cap only the BOX  → circles keep their fixed size and spill past the rounded border
+                             ("the right button is falling off")
+       · cap only the CIRCLES (or nothing) → the centred box grows into the sync pill again
+     Hence one var, two consumers, no second formula that can drift out of step with the first.
+     The `- 34px` is the row's own chrome that sits on TOP of the circles and must come out of the
+     budget before dividing: px-2 side padding (16) + seven gap-0.5 gaps (14) + the pill's 1px borders
+     (2). Omit it and the assembled row exceeds its own target by exactly that much — the "fits the
+     math but not the screen" trap the phone rule above already warns about, reached by a different
+     route. The clamp's UPPER bound is the pre-existing fixed size (44px target / 36px circle), so on
+     any window wide enough for the row at full size this whole rule is a no-op; the LOWER bound keeps
+     the circles tappable when a genuinely narrow window forces the squeeze.
+     --iw-row-slots is written onto the row (see its assignment in TiptapEditor.tsx — it carries the
+     row's LIVE length, not a re-typed copy of the ROW_SLOTS constant) and reused here. */
+  /* END PADDING (Peter, 2026-08-20: "widen the main pill by 20% on either side") — the pill is
+     content-sized, so the ONLY way to widen it at a comfortable window is to give the row more room
+     at its ends. It scales with the budget rather than being a fixed number so it grows on a roomy
+     window and gets out of the way on a cramped one, and it is OWNED HERE rather than as Tailwind's
+     `px-2` on the element (which is why that class was removed from the row's className) — because
+     the shrink formulas below must subtract this exact value as part of their overhead. Two places
+     needing one number is the same trap `--iw-bar-budget` exists to close, so it is a var too. */
+  .iw-desktop-toolbar {
+    /* SPREAD, DON'T PAD (Peter, 2026-08-20: "expand them out to meet the edge of the central pill").
+       The width won by the two widening rounds had all gone into END PADDING — ~90px of empty pill
+       either side of a tight cluster of circles. The pill should stay that wide but spend the space
+       BETWEEN the circles instead, so they reach its ends. So the padding collapses to a small margin
+       and a matching `--iw-bar-gap` takes over: total width is ~unchanged (padding given up ≈ gap
+       gained), the circles simply distribute across it. `gap-0.5` was removed from the row's
+       className for the same reason `px-2` was — the shrink formulas below must subtract this exact
+       value, and a Tailwind class the CSS cannot see would put that number in two places. */
+    /* CEILINGS (Peter, 2026-08-20 fullscreen: "it's a little wide, so the max needs to be narrower").
+       On a wide window the circles hit their own size cap, so every further px of budget was going
+       into gaps and padding and the pill grew to the full width of the parchment. Tight ceilings stop
+       that: past a comfortable window the bar simply stops growing rather than tracking the viewport. */
+    /* CIRCLES FIRST, GAPS GET THE REMAINDER (Peter, 2026-08-20: "the problem is the size of circles in
+       the reduced version for narrower screens, not the big version"). The earlier model sized the
+       GAPS from the budget and left the circles whatever was over — which is backwards, and produced
+       exactly the two complaints: on a wide window the gaps grew until the bar spanned the page, and
+       on a narrow one the circles collapsed to ~23px while the gaps kept their share. Now `--iw-circle`
+       is computed first from the space available per slot and clamped to a comfortable range, and the
+       gap takes only what is genuinely left over (floored at 2px, capped at 10px so it can never
+       inflate the bar again). Result: the bar stops growing on a wide window, and on a narrow one the
+       squeeze comes out of the SPACING before it ever comes out of the circles. */
+    --iw-bar-pad: clamp(4px, calc(var(--iw-bar-budget, 100vw) * 0.02), 10px);
+    /* Budget minus the end paddings and the pill's 1px borders — the space the slots divide up. */
+    --iw-bar-inner: calc(var(--iw-bar-budget, 100vw) - 2 * var(--iw-bar-pad) - 2px);
+    /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need. */
+    --iw-circle: clamp(20px, calc(var(--iw-bar-inner) / (var(--iw-row-slots, 6) + 2) - 2px), 30px);
+    --iw-bar-gap: clamp(2px, calc((var(--iw-bar-inner) - (var(--iw-row-slots, 6) + 2) * var(--iw-circle)) / (var(--iw-row-slots, 6) + 1)), 6px);
+    padding-left: var(--iw-bar-pad);
+    padding-right: var(--iw-bar-pad);
+    gap: var(--iw-bar-gap);
+  }
+  /* The subtracted overhead is everything in the row that is NOT a circle: both end paddings, the
+     seven 2px gaps between eight controls, and the pill's 1px borders. */
+  .iw-desktop-toolbar .min-w-\[44px\] {
+    min-width: var(--iw-circle);
+  }
+  .iw-desktop-toolbar .w-9 {
+    width: var(--iw-circle);
+    height: var(--iw-circle);
+  }
+  /* HEIGHT TRACKS THE CIRCLES EXACTLY — IT MUST NOT ADD TO THEM (2026-08-20 — Peter first: "it's
+     also about 20% too high", then, after the circles were enlarged: "it shouldn't grow in height").
+     The buttons carry a fixed `min-h-[44px]` tap target and THAT is what sets the row's height, so
+     without this rule a narrow window shrank the circles while the bar kept its full thickness (a fat
+     bar around small buttons). The first fix tracked the circle size PLUS 8px of breathing room —
+     which then made the bar taller the moment the circles were enlarged, because every px added to a
+     circle added a px to the bar on top of that padding. So the +8 is gone: this is now the SAME
+     expression as the circle rules above, meaning the target exactly matches its circle and the bar's
+     height is `circle + py-0.5 + border` — enlarging a circle up to the shared 44px ceiling fills the
+     bar's existing height instead of extending it. The 30px floor keeps it tappable when squeezed.
+     NB the ⋮ options trigger is a bare `w-9 h-9` button with no min-h of its own, so it is already
+     sized by the `.w-9` rule above; this rule is for the slots that wrap a circle in a tap target. */
+  .iw-desktop-toolbar .min-h-\[44px\] {
+    min-height: var(--iw-circle);
+  }
+
   /* While a slot drag is live (touch-hold reorder), every slot circle's disc goes OPAQUE —
      day = the pill's white, night = the nightable dolphin grey (--iw-slot-drag-bg token) —
      so the lifted, z-raised circle passes OVER its neighbours instead of both glyphs

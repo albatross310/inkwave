@@ -180,6 +180,32 @@ export function Edit() {
   }, [])
 
   useEffect(() => {
+    // ⚠ 2026-08-20 — STRICTMODE DOUBLE-INVOKE RACE, the actual cause behind "another session is
+    // open" appearing after a completely ordinary refresh with only one real tab involved (reproduced
+    // 100% of the time in isolated single-tab headless testing — no second tab, no other browser
+    // context, nothing else running). entry.client.tsx wraps the app in <StrictMode>, which in DEV
+    // deliberately mount→cleanup→remounts every effect once to surface exactly this class of bug —
+    // and this effect had no cleanup at all, so BOTH invocations ran their full async claim sequence
+    // for real. TWO consequences, both observed directly via navigator.locks.query():
+    //  (a) On a brand-new tab (no stored id yet), each invocation calls newDocument() independently
+    //      and claims its OWN fresh random id — so the tab ends up holding TWO document locks at
+    //      once, with only the SECOND invocation's id ever written to sessionStorage. The first id's
+    //      lock is now an ORPHAN: nothing releases it, ever, for the rest of that page's life.
+    //  (b) On a reload (both invocations resolve the SAME stored id from sessionStorage), they RACE
+    //      for that one lock via claimDocLock's `{ifAvailable:true}` request — Web Locks does not
+    //      special-case "same page", so the loser sees it as unavailable exactly as it would from a
+    //      genuine second tab, and calls setBlocked(...). Whichever invocation's setState call lands
+    //      LAST wins the final render — so even though the winner ALSO successfully opened the
+    //      document, the loser's blocked screen can still be what's on screen, PERMANENTLY (nothing
+    //      ever retries after this point; matches the 8+ second observed persistence).
+    // FIX: standard React cancellation-token pattern, but it has to do more than skip stale setState
+    // calls — it must also RELEASE any lock a cancelled invocation already claimed, or (a)'s leak
+    // still happens even with mismatched UI state avoided. `claimedId` tracks whatever THIS
+    // invocation currently holds; every commit point clears it (the claim is now "real", owned by the
+    // component for its lifetime) and every early-exit / cancellation path releases it first.
+    let cancelled = false
+    let claimedId: string | null = null
+
     async function init() {
       try {
         // 1. THIS TAB's own document — `?doc=`, else the per-tab sessionStorage identity, else
@@ -196,6 +222,8 @@ export function Edit() {
           // and claimDocLock retries past the unload race), so this only ever fires for a genuinely
           // concurrent second tab.
           const mine = await claimDocLock(storedId)
+          if (mine) claimedId = storedId
+          if (cancelled) { if (mine) releaseDocLock(storedId); return }
           if (!mine) {
             // WHO GETS THE BLOCKED SCREEN. Only an EXPLICIT request for this document — a `?doc=`
             // link/bookmark, or this tab's own remembered identity — earns the choose-how screen: the
@@ -207,22 +235,27 @@ export function Edit() {
               // Only a title for a banner — the one place a failed read may be shrugged off, because
               // nothing is written on the strength of it.
               const busy = await readDocument(storedId)
+              if (cancelled) return
               setBlocked({ id: storedId, title: busy.kind === 'found' ? busy.doc.title : 'This document' })
               return
             }
             // last-hint: fall through to step 2 (walk to the next document no live tab holds).
           } else {
             const r = await readDocument(storedId)
+            if (cancelled) { releaseDocLock(storedId); claimedId = null; return }
             // 'error' is NOT 'absent'. Falling through to step 3 on a failed read is what handed
             // Peter a blank page where his thesis had been (11:19:40) and repointed the pointer at
             // it. The compiler now makes ignoring this case impossible to do by accident.
             if (r.kind === 'error') throw r.error
             if (r.kind === 'found') {
               claimTabDoc(r.doc.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
+              claimedId = null // committed — the tab owns this for real now, not this closure's job
               setDoc(migrateDocument(r.doc))
               return
             }
             // 'absent' ⇒ genuinely nothing under this id; fall through and keep looking.
+            releaseDocLock(storedId)
+            claimedId = null
           }
         }
 
@@ -231,23 +264,30 @@ export function Edit() {
         //    land on the writer's next-most-recent document, not a blank page, when it can).
         let sawReadFailure = false
         for (const meta of await listMeta()) {
+          if (cancelled) return
           if (!(await claimDocLock(meta.id))) continue // open in another tab — keep looking
+          claimedId = meta.id
+          if (cancelled) { releaseDocLock(meta.id); claimedId = null; return }
           // One unreadable document must not end the search — the NEXT one may be perfectly
           // readable, and opening the writer's real work beats any error screen. But we remember
           // that a read FAILED, because that changes what step 3 is allowed to conclude.
           const r = await readDocument(meta.id)
+          if (cancelled) { releaseDocLock(meta.id); claimedId = null; return }
           if (r.kind === 'error') {
             sawReadFailure = true
             console.error('[inkwave] init: could not read an indexed document:', meta.id, r.error)
             releaseDocLock(meta.id)
+            claimedId = null
             continue
           }
           if (r.kind === 'found') {
             claimTabDoc(r.doc.id)
+            claimedId = null // committed
             setDoc(migrateDocument(r.doc))
             return
           }
           releaseDocLock(meta.id) // indexed but not in OPFS — don't sit on a claim we can't use
+          claimedId = null
         }
 
         // 3. Create a fresh document. REACHABLE ONLY FROM ABSENCE — every step above either opened
@@ -255,10 +295,13 @@ export function Edit() {
         //    If ANY read failed along the way we do not get to conclude "this writer has nothing":
         //    that inference, drawn from a failure, is the whole 2026-07-15 bug. Fail loudly instead.
         if (sawReadFailure) throw new StorageReadError('documents', new Error('one or more documents could not be read'))
+        if (cancelled) return
         const fresh = newDocument()
         claimTabDoc(fresh.id)
+        claimedId = null // committed
         setDoc(fresh)
       } catch (err) {
+        if (cancelled) return
         // A READ FAILED. We do NOT know that the writer has no work — we know the opposite is
         // possible, and their document may be sitting on disk perfectly intact. So:
         //   · never mint a document (a blank page IS the bug: it tells them, wordlessly, that their
@@ -272,6 +315,13 @@ export function Edit() {
     }
 
     void init()
+    return () => {
+      cancelled = true
+      // Backstop for any commit point above that isn't reachable synchronously from here (e.g. this
+      // fires while init() is mid-`await` and hasn't reached its own cancelled-check yet) — whatever
+      // this invocation currently holds and hasn't committed to a setDoc gets released, never leaked.
+      if (claimedId) { releaseDocLock(claimedId); claimedId = null }
+    }
   }, [])
 
   function handleDocChange(updated: InkwaveDocument) {
