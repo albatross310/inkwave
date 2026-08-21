@@ -3341,7 +3341,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 the pill height anywhere. iw-slot-dragging paints every circle's disc opaque
                 while a drag is live so the lifted one passes OVER its neighbours. */}
             {showMainRow && (
-            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar py-0.5'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
+            <div className={`flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               // PHONE AND DESKTOP ARE ONE EXPERIENCE, SO THEY ARE ONE NUMBER (Peter, 2026-07-17:
               // "there's only 6 slots not 7 which I think is a good number because it fits well on
               // phone… we want to keep the phone and desktop experience continuous"). The phone

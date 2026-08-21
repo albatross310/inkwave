@@ -907,6 +907,14 @@
     --iw-bar-gap: clamp(2px, calc((var(--iw-bar-inner) - (var(--iw-row-slots, 6) + 2) * var(--iw-circle)) / (var(--iw-row-slots, 6) + 1)), 6px);
     padding-left: var(--iw-bar-pad);
     padding-right: var(--iw-bar-pad);
+    /* 5px, up from Tailwind's py-0.5 (2px) — Peter, 2026-08-21: "about another millimetre above and
+       below… about 3px more". Owned here rather than as a py- class for the same reason the side
+       padding and gap are: the circle is sized from this row's own box, so its vertical breathing
+       room belongs with the rest of the row's geometry instead of in a second place. The pill grows
+       6px taller as a result, and the side pills re-centre on it for free — they read the LIVE
+       --iw-toolbar-h rather than a copy of this number. */
+    padding-top: 5px;
+    padding-bottom: 5px;
     gap: var(--iw-bar-gap);
   }
   /* The subtracted overhead is everything in the row that is NOT a circle: both end paddings, the
