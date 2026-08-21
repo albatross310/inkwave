@@ -107,7 +107,7 @@ import { getCachedOpen, putCachedOpen, warmCloudOpen, type OpenCacheProvider } f
 import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
 import { reportOpenError, takeOpenError } from '../storage/openError'
 import { contentHash } from '../provenance/hash'
-import { verifyChain, signingPublicKeyHex } from '../provenance/receipts'
+import { verifyChain, signingPublicKeys } from '../provenance/receipts'
 import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
 
 // No wall-clock resample timer — S_v rotation and receipt signing happen on word nudge only.
@@ -2653,7 +2653,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       // so the next export bundle only includes verifiable receipt chains. Also removes any OPFS
       // snapshots whose embedded receipts were all from purged sessions (so content integrity
       // checks won't fail on receipts that are no longer in bundle.receipts).
-      const pubKey = signingPublicKeyHex()
+      const pubKey = signingPublicKeys()
       const bySession = new Map<string, SignedReceipt[]>()
       for (const r of (docRef.current.scasReceipts ?? [])) {
         const arr = bySession.get(r.sessionToken) ?? []
@@ -2797,7 +2797,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function verifyReceiptChain() {
     const runner = sessionRef.current
     if (!runner || runner.receipts.length === 0) { setChainStatus('no receipts yet'); return }
-    void verifyChain(runner.receipts, runner.sessionToken, signingPublicKeyHex()).then((v) => {
+    void verifyChain(runner.receipts, runner.sessionToken, signingPublicKeys()).then((v) => {
       setChainStatus(v.ok ? `✓ ${v.verified} receipts verified` : `✗ ${v.reason}`)
     })
   }

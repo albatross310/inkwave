@@ -5,7 +5,7 @@ import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
 import { extractSlotMemory, type SlotMemory } from '../verify/slotMemory'
 import { ActivityGraph } from '../verify/ActivityGraph'
-import { signingPublicKeyHex } from '../provenance/receipts'
+import { signingPublicKeys } from '../provenance/receipts'
 import { parseTraceFile } from '../provenance/bundle'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
@@ -31,7 +31,7 @@ export function Verify() {
       }
       setTitle(bundle.document?.title ?? null)
       // Verify against the published key (dev uses the dev placeholder, matching dev-signed bundles).
-      setReport(await verifyBundle(bundle, signingPublicKeyHex()))
+      setReport(await verifyBundle(bundle, signingPublicKeys()))
       setAnalytics(computeAnalytics(bundle))
       if (bundle.document?.contentJson) setSlotMemory(extractSlotMemory(bundle.document.contentJson))
     } catch (e) {

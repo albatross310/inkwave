@@ -30,6 +30,30 @@ export function signingPublicKeyHex(): string {
   return import.meta.env?.DEV ? DEV_SIGNING_PK : PUBLISHED_SIGNING_PK
 }
 
+/**
+ * EVERY key a receipt may legitimately have been signed with — what VERIFICATION must try.
+ *
+ * ⚠ 2026-08-21, and this is the other half of a real data-loss incident. `signingPublicKeyHex()`
+ * answers "which key does THIS BUILD sign with", and verification used it as though it answered
+ * "which key could this receipt have been signed with". Those are different questions the moment a
+ * document outlives one environment — and the gap is not exotic, it is the normal case: under
+ * `import.meta.env.DEV` the first returns the DEV key, so every PRODUCTION-signed document fails
+ * every chain the instant it is opened on localhost. Peter develops on localhost and opens his real
+ * thesis there; a background sweep then read "unverifiable" as "forged" and deleted 79 Bitcoin-
+ * anchored snapshots. The deletion is gone (see TiptapEditor's recoverAndPurge), but the false
+ * verdict that triggered it was still being produced, and it is still wrong: it would mark his real
+ * work unverified in the ReceiptPanel and on /verify for no reason.
+ *
+ * So verification accepts ANY key in this list. It is not a weakening: each entry is a key we
+ * published and signed with, so accepting it is exactly as strong as accepting it before. Widening
+ * is also the safe direction here — a key wrongly ABSENT produces a false "unverified" on genuine
+ * work, while a key wrongly present would require an attacker to hold a private key we published
+ * the public half of. Rotation adds the old key here so already-signed history keeps verifying.
+ */
+export function signingPublicKeys(): string[] {
+  return import.meta.env?.DEV ? [DEV_SIGNING_PK, PUBLISHED_SIGNING_PK] : [PUBLISHED_SIGNING_PK]
+}
+
 // ── byte helpers ─────────────────────────────────────────────────────────────
 function fromHex(h: string): Uint8Array {
   const u = new Uint8Array(h.length / 2)
@@ -89,15 +113,31 @@ async function signedCore(r: SignedReceipt): Promise<string> {
 export interface ReceiptVerdict { ok: boolean; reason?: string }
 
 /** Verify one receipt: its writer-held set matches the signed hash, and the signature is valid. */
-export async function verifyReceipt(receipt: SignedReceipt, pubKeyHex: string): Promise<ReceiptVerdict> {
+export async function verifyReceipt(
+  receipt: SignedReceipt,
+  /** One key, or every key that would be acceptable — see `signingPublicKeys()`. */
+  pubKeyHex: string | string[],
+): Promise<ReceiptVerdict> {
   // The writer-held bitmask must hash to the signed lockedSetHash (else the set was swapped).
   if (await sha256Hex(canonicalize(receipt.lockedSet)) !== receipt.lockedSetHash) {
     return { ok: false, reason: 'lockedSet does not match signed lockedSetHash' }
   }
   try {
     const core = new TextEncoder().encode(await signedCore(receipt))
-    const ok = await ed.verifyAsync(fromBase64(receipt.signature), core, fromHex(pubKeyHex))
-    return ok ? { ok: true } : { ok: false, reason: 'bad signature' }
+    const sig = fromBase64(receipt.signature)
+    // Try each acceptable key. A receipt is genuine if ANY of them signed it — see signingPublicKeys().
+    // EACH ATTEMPT IS GUARDED SEPARATELY, and that is not defensive habit: `ed.verifyAsync` THROWS
+    // on a key it cannot even parse as a curve point rather than returning false, so one bad entry
+    // in the list would otherwise abort the loop and reject a receipt a LATER key would have
+    // verified. Caught by this file's own test before it shipped — the single-key case hid it,
+    // because there the throw and a false both end as `{ ok: false }`.
+    const keys = Array.isArray(pubKeyHex) ? pubKeyHex : [pubKeyHex]
+    for (const k of keys) {
+      try {
+        if (await ed.verifyAsync(sig, core, fromHex(k))) return { ok: true }
+      } catch { /* not this key — try the next */ }
+    }
+    return { ok: false, reason: 'bad signature' }
   } catch (e) {
     return { ok: false, reason: 'verify threw: ' + (e as Error).message }
   }
@@ -113,7 +153,7 @@ export interface ChainVerdict { ok: boolean; verified: number; reason?: string }
 export async function verifyChain(
   receipts: SignedReceipt[],
   sessionToken: string,
-  pubKeyHex: string,
+  pubKeyHex: string | string[],
 ): Promise<ChainVerdict> {
   let expectedPrev = await genesisPrevHash(sessionToken)
   for (let i = 0; i < receipts.length; i++) {

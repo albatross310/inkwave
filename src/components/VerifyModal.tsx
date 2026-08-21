@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'
 import { ActivityGraph } from '../verify/ActivityGraph'
-import { signingPublicKeyHex } from '../provenance/receipts'
+import { signingPublicKeys } from '../provenance/receipts'
 import { parseTraceFile, buildExportBundle, type ExportBundle } from '../provenance/bundle'
 import { readSnapshotArchive } from '../provenance/snapshots'
 import type { InkwaveDocument } from '../types/document'
@@ -46,7 +46,7 @@ export function VerifyModal({
         throw new Error('not an Inkwave export bundle')
       }
       setVerifiedTitle(bundle.document?.title ?? null)
-      setReport(await verifyBundle(bundle, signingPublicKeyHex()))
+      setReport(await verifyBundle(bundle, signingPublicKeys()))
       setAnalytics(computeAnalytics(bundle))
     } catch (e) {
       setError((e as Error).message)

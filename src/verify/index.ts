@@ -147,7 +147,7 @@ async function checkContentIntegrity(bundle: ExportBundle): Promise<VerifyReport
   return { ok: true, checked }
 }
 
-async function checkChains(bundle: ExportBundle, pubKeyHex: string): Promise<VerifyReport['chain']> {
+async function checkChains(bundle: ExportBundle, pubKeyHex: string | string[]): Promise<VerifyReport['chain']> {
   const bySession = new Map<string, SignedReceipt[]>()
   for (const r of bundle.receipts) {
     const arr = bySession.get(r.sessionToken) ?? []
@@ -307,7 +307,7 @@ async function verifyAnchors(bundle: ExportBundle, fetchBlock: BlockFetcher): Pr
  */
 export async function verifyBundle(
   bundle: ExportBundle,
-  pubKeyHex: string = PUBLISHED_SIGNING_PK,
+  pubKeyHex: string | string[] = PUBLISHED_SIGNING_PK,
   fetchBlock: BlockFetcher = defaultFetchBlock,
 ): Promise<VerifyReport> {
   const contentIntegrity = await checkContentIntegrity(bundle)
