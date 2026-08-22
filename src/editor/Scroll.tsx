@@ -38,6 +38,17 @@ const TRACKPAD_ZOOM_SENSITIVITY = 4
 // on its own; it doesn't reach 1.0 by itself only so a literal zero-delta event can't spuriously
 // commit a step.
 const FIRST_STEP_BONUS = 0.92
+// How long after the last committed zoom step the SETTLE runs — the heavy half of zooming: it exits
+// the live-reflow window, re-measures page breaks canonically and re-anchors the viewport.
+// 200 → 450 (2026-08-23, Peter: zoom "goes like three zooms then stops then another three").
+// MEASURED: a deliberate trackpad gesture notches every ~400ms, so at 200 EVERY notch outran the
+// debounce and paid its own full re-measure — 8 notches, 4 blocking tasks of ~80ms. The stall was
+// never the step itself (the step is a cache hit or one scoped reflow); it was the settle firing
+// between steps. 450 sits past a deliberate notch cadence so a multi-notch gesture coalesces into
+// ONE settle, and is still well inside Peter's stated bar for this ("paras split over pages even if
+// they render 0.2s late; the cursor line moves instantly") — the step's own reflow is unchanged, so
+// what he sees while notching does not move; only the re-measure waits for him to stop.
+const ZOOM_SETTLE_MS = 450
 // Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(RATIO)).
 // 1 = the pinched distance ratio maps 1:1 onto the zoom ratio; higher = fewer centimetres of
 // pinch per step. Steps still commit whole on the shared zoomStep lattice. Raised 1.75 → 2.5
@@ -666,7 +677,7 @@ export function Scroll({
         window.dispatchEvent(new Event('inkwave:zoom-settled'))
         // Non-gapped mode: no pagination plugin listening → drop the one-shot listener shortly.
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
-      }, 200)
+      }, ZOOM_SETTLE_MS)
     }
     // MODE LATCH + COOLDOWN (Peter, 2026-07-10): the FIRST zoom event of a gesture picks the
     // mode (water = whole-page magnify, text = font reflow) and it stays LOCKED until 0.5s
