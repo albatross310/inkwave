@@ -902,8 +902,15 @@
     --iw-bar-pad: clamp(4px, calc(var(--iw-bar-budget, 100vw) * 0.02), 10px);
     /* Budget minus the end paddings and the pill's 1px borders — the space the slots divide up. */
     --iw-bar-inner: calc(var(--iw-bar-budget, 100vw) - 2 * var(--iw-bar-pad) - 2px);
-    /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need. */
-    --iw-circle: clamp(20px, calc(var(--iw-bar-inner) / (var(--iw-row-slots, 6) + 2) - 2px), 30px);
+    /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need.
+       FLOOR 17px, and it buys the last usable width: at ~460px of viewport the eight circles fit only
+       at 17, and a small-but-contained circle beats one spilling outside the pill's own border.
+       ⚠ STATED CEILING: below ~440px the row cannot fit at all — 8 circles plus the two edge-anchored
+       text pills need more than that width, and no clamp can invent it. Deliberately not chased: a
+       desktop window that narrow is unrealistic, and touch has its own rules (.iw-phone-toolbar).
+       The honest failure there is a spill; if it ever matters, the fix is to fall back to the phone
+       row, not to shrink the circles into invisibility. */
+    --iw-circle: clamp(17px, calc(var(--iw-bar-inner) / (var(--iw-row-slots, 6) + 2) - 2px), 30px);
     --iw-bar-gap: clamp(2px, calc((var(--iw-bar-inner) - (var(--iw-row-slots, 6) + 2) * var(--iw-circle)) / (var(--iw-row-slots, 6) + 1)), 6px);
     padding-left: var(--iw-bar-pad);
     padding-right: var(--iw-bar-pad);

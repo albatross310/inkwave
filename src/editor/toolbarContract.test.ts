@@ -389,7 +389,14 @@ describe('ONE row size — the phone fit is derived from six, not agreed with it
   // Read off index.css ITSELF, not off jsdom, for the reason theme.test.ts records: jsdom does not
   // resolve custom properties from a stylesheet, so a "the var applies" test reports nothing and
   // passes. MUTATION-PROVED: restore the literal `/ 8` and this fails.
+  // ⚠ COMMENTS ARE STRIPPED FIRST (2026-08-21). This split is on RAW TEXT, so any comment that
+  // NAMES `.iw-phone-toolbar` — e.g. the desktop rule's note that touch has its own rules — becomes
+  // a fake extra "rule" whose next 200 chars are prose, and the guard fails on its own
+  // documentation. That is the mention-vs-use trap CLAUDE.md records biting three lanes in one
+  // round, and its rule applies here: judge what the CSS DOES, never prose about it. The tempting
+  // repair is to delete the sentence; that is the corrosive direction.
   const css = readFileSync(new URL('../styles/index.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
   const phoneRules = css.split('.iw-phone-toolbar').slice(1).map(b => b.slice(0, 200))
 
   it('the phone toolbar sizes its circles from --iw-row-slots', () => {
