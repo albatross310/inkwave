@@ -296,7 +296,15 @@ export function OptionsMenu({
           have none — every Inkwave file showed GREYED OUT in the iOS picker. Omitting accept makes all
           files selectable; openInkwaveFile validates by CONTENT, so a wrong pick just errors politely.
           Desktop keeps the extension filter for a tidier dialog. */}
-      <input ref={fileInputRef} type="file" accept={isTouchDevice() ? undefined : '.studio,.inkwave,.gz,application/gzip,application/json,.json,.trace.json,.insig.json'} className="hidden" onChange={onOpenFile} />
+      {/* NO `accept` LIST, ON ANY PLATFORM (2026-08-23). Touch already dropped it because
+          unregistered UTIs grey out every file; macOS has the same failure for a different reason —
+          the list is EXTENSION-based, so a `.studio` the writer saved without an extension (Finder
+          calls it plain "Document") is greyed out and cannot be selected at all. Peter hit exactly
+          that trying to open "Honours Proposal 2". A filter that hides the writer's own document is
+          worse than no filter: the open path already validates the CONTENT and reports an honest
+          error on anything it cannot parse, so refusing at the picker only removes their way back
+          to their work. */}
+      <input ref={fileInputRef} type="file" className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}

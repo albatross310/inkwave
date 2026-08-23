@@ -264,10 +264,10 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   const listActive = editor.isActive('bulletList') || editor.isActive('orderedList') || editor.isActive('taskList')
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
+  const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().focus().setFontFamily(css).run(); setFontOpen(false) }
   const setSize = (pt: number) => {
     ping(); setLastSize(pt)
-    editor.chain().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
+    editor.chain().focus().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
     setSizeOpen(false)
   }
   function applyFmt(fmt: CharFmt) {
@@ -317,10 +317,18 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     // choice like any other, so it is remembered like any other, and a click after it is a no-op
     // rather than a relapse.
     setLastTxtColor(color)
-    editor.chain().setMark('textStyle', { color }).run()
+    // ⚠ CLEARING NEEDS `removeEmptyTextStyle` (2026-08-23, Peter: "the colour's still not
+    // changing"). `setMark('textStyle', { color: null })` alone does NOT revert the text — REPRODUCED:
+    // apply Red, choose Default, and the span stays rgb(153,27,27). The mark survives with its old
+    // inline style, so Default looked like a dead menu item and the writer had no way out of a
+    // colour at all. This is the pairing Tiptap's own colour extension uses, and it must run in the
+    // SAME chain: null the attribute, then drop any textStyle mark left carrying nothing.
+    // Applying a colour is unchanged — the cleanup is a no-op on a mark that still has attributes,
+    // which is why it can sit on both paths rather than being branched on `color`.
+    editor.chain().focus().setMark('textStyle', { color }).removeEmptyTextStyle().run()
     setColorOpen(false)
   }
-  function applyAlign(a: Align) { ping(); setLastAlign(a); editor.chain().setTextAlign(a).run(); setAlignOpen(false) }
+  function applyAlign(a: Align) { ping(); setLastAlign(a); editor.chain().focus().setTextAlign(a).run(); setAlignOpen(false) }
   function applyListType(type: ListType) {
     ping(); setLastListType(type); setListOpen(false)
     if (type === 'taskList') { editor.chain().focus().toggleTaskList().run(); return }
