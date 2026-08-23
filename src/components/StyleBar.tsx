@@ -282,6 +282,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   }
   function applyHighlight(color: string | null) {
     ping()
+    if (!color) setLastHlColor(null) // clearing is a choice — see applyTextColor's note
     if (color) {
       setLastHlColor(color)
       // Toggle semantics: highlighting text ALREADY in this exact colour unhighlights it
@@ -308,7 +309,14 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   }
   function applyTextColor(color: string | null) {
     ping()
-    if (color) setLastTxtColor(color)
+    // ⚠ REMEMBER 'Default' TOO (Peter, 2026-08-23: "stop the text from going red"). This was
+    // `if (color) setLastTxtColor(color)`, so choosing Default cleared the text but left the
+    // remembered colour as whatever was picked before — and since a plain CLICK on this button
+    // re-applies the remembered colour, the next click put the red straight back. The writer's way
+    // OUT of a colour therefore could not stick: clear it, click the button, red again. Default is a
+    // choice like any other, so it is remembered like any other, and a click after it is a no-op
+    // rather than a relapse.
+    setLastTxtColor(color)
     editor.chain().setMark('textStyle', { color }).run()
     setColorOpen(false)
   }

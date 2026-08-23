@@ -697,7 +697,19 @@ export function Scroll({
         // Scale 1 returns without preventDefault — the native path is untouched.
         if (!hybrid) return
         const s = getMagnify()
-        if (s === 1) return
+        // ⚠ NATIVE SCROLLING FOR THE WHOLE NORMAL ZOOM BAND (Peter, 2026-08-23: scrolling has
+        // "some lag vs a normal word doc… it feels like a resistance"). Above the knee this branch
+        // multiplied every wheel delta by `scrollScale(s) === s`, so at a fit-to-width magnify of
+        // ~0.57 — which is simply what a ~570px window gives you, not a zoom anyone chose — the page
+        // moved 57% of what the fingers asked for. That IS resistance, and `preventDefault()` on top
+        // of it replaced the trackpad's compositor-driven momentum with discrete main-thread writes,
+        // so the shortfall came without inertia to disguise it.
+        // The proportionality it bought ("one notch = the same fraction of a page") is a real idea
+        // but the wrong trade here: the wrapper already sizes the scroll RANGE to the visual content,
+        // so native scrolling covers the document correctly on its own — it just does it with
+        // momentum and sub-pixel smoothing we cannot reproduce by hand. Below the knee the accel
+        // curve still earns its keep (a page at 0.1 needs the boost), so that path is untouched.
+        if (s >= SCROLL_ACCEL_KNEE) return
         e.preventDefault()
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // lines/pages → px
         const f = scrollScale(s)
