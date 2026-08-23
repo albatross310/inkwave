@@ -250,7 +250,8 @@ export function OptionsMenu({
             const r = await readSnapshotArchive(docId)
             if (r.kind === 'error') { console.error('[inkwave] snapshots menu:', r.error); setModal('provunread'); return }
             const last = r.snapshots[r.snapshots.length - 1]
-            if (last) window.open(`/snapshot?doc=${encodeURIComponent(docId)}&snap=${encodeURIComponent(last.id)}`, '_blank', 'noopener')
+            // Same tab — see the matching note in ReceiptPanel.
+            if (last) window.location.href = `/snapshot?doc=${encodeURIComponent(docId)}&snap=${encodeURIComponent(last.id)}`
             else setModal('noprov')
           } catch { /* no snapshots yet */ }
         })()
@@ -399,7 +400,7 @@ function SavePanel({ onExportBundle, onSave, folderAvailable, folderName, onSync
       {/* Chromium (File System Access): native "Save to folder"; once linked it shows the file name. */}
       {folderAvailable && (
         <MenuButton onClick={onSave ? () => { onSave(); onDone() } : undefined}>
-          {folderName ? `✓ Synced to ${folderName}` : 'Save to folder'}
+          {folderName ? `Synced to ${folderName}` : 'Save to folder'}
           <span className="block text-xs text-stone-400">
             {folderName ? 'updates here automatically as you write' : 'choose where to save it; it updates there as you write'}
           </span>

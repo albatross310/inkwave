@@ -189,6 +189,11 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     setColorOpen(false); setAlignOpen(false); setListOpen(false); setIndentOpen(false)
   }, [barVisible])
 
+  // The last font/size the writer PICKED, so a plain click can re-apply it — the same
+  // remembered-value pattern the other style buttons already use (lastFmt, lastAlign, …).
+  // null = nothing picked yet this session, so a click has nothing to apply and opens the menu.
+  const [lastFont,     setLastFont]     = useState<string | null>(null)
+  const [lastSize,     setLastSize]     = useState<number | null>(null)
   const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
   const [lastHlColor,  setLastHlColor]  = useState<string | null>(null)
   const [lastTxtColor, setLastTxtColor] = useState<string | null>(null)
@@ -259,9 +264,9 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   const listActive = editor.isActive('bulletList') || editor.isActive('orderedList') || editor.isActive('taskList')
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  const setFont = (css: string) => { ping(); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
+  const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().setFontFamily(css).run(); setFontOpen(false) }
   const setSize = (pt: number) => {
-    ping()
+    ping(); setLastSize(pt)
     editor.chain().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
     setSizeOpen(false)
   }
@@ -378,9 +383,21 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     setIndentOpen(false)
   }
 
-  // Font + size open ONLY on click-and-hold — a plain click does nothing (no apply, no cycle).
-  const fontPress   = useLongPress(() => {}, () => { closeAll(); setFontOpen(true) })
-  const sizePress   = useLongPress(() => {}, () => { closeAll(); setSizeOpen(true) })
+  // CLICK APPLIES, HOLD OPENS THE MENU — every button on this bar behaves the same way now
+  // (Peter, 2026-08-23: "clicking any of these style buttons applies the given style. Only click
+  // and hold should bring up the menu"). Font and size used to be the exceptions: a plain click
+  // did nothing at all, which reads as a dead button. They now re-apply the last value the writer
+  // picked, exactly as the highlight and text-colour buttons already did — and, like those, fall
+  // back to opening the menu when there is nothing remembered yet, because a click that silently
+  // does nothing is the thing being fixed.
+  const fontPress   = useLongPress(
+    () => { if (lastFont !== null) setFont(lastFont); else { closeAll(); setFontOpen(true) } },
+    () => { closeAll(); setFontOpen(true) },
+  )
+  const sizePress   = useLongPress(
+    () => { if (lastSize !== null) setSize(lastSize); else { closeAll(); setSizeOpen(true) } },
+    () => { closeAll(); setSizeOpen(true) },
+  )
   const fmtPress    = useLongPress(() => applyFmt(lastFmt),          () => { closeAll(); setFmtOpen(true) })
   const hlPress     = useLongPress(
     () => { if (lastHlColor !== null) applyHighlight(lastHlColor); else { closeAll(); setHlOpen(true) } },

@@ -527,6 +527,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // ref guard stops key-repeat from setting state 30×/second while Alt is held.
   const [altHeld, setAltHeld] = useState(false)
   const altHeldRef = useRef(false)
+  const altArmRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (isTouchDevice()) return   // no Alt on a phone; render no hints and bind nothing
     const setAlt = (v: boolean) => {
@@ -534,13 +535,33 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       altHeldRef.current = v
       setAltHeld(v)
     }
+    // ⚠ THE HINTS MUST NOT REACT TO A SHORTCUT IN PROGRESS (Peter, 2026-08-23: "my ctrl del and opt
+    // del aren't working bc these numbers keep coming up on the pill buttons and interfering").
+    // Alt is a MODIFIER before it is a hint trigger: on macOS ⌥⌫ is delete-word-left and ⌃⌫ its
+    // cousin, so a writer taps Alt as part of a chord many times a minute. Showing the badges on
+    // Alt's keydown meant every one of those re-rendered TiptapEditor's whole tree BETWEEN the
+    // modifier and the key it modifies — and this component deliberately does not re-render per
+    // transaction (`shouldRerenderOnTransaction: false`) precisely because that tree is expensive.
+    // So the hint now waits for a DELIBERATE hold: Alt alone, unaccompanied, for ALT_HINT_DELAY_MS.
+    // Any other key arriving cancels it, which is exactly what a chord is. The teaching affordance
+    // is unchanged for someone who holds Alt to look — that is a pause, not a chord — and Alt+digit
+    // still works instantly either way, because the hotkey handler never consulted `altHeld`.
+    const ALT_HINT_DELAY_MS = 400
+    const cancelArm = () => { if (altArmRef.current) { clearTimeout(altArmRef.current); altArmRef.current = null } }
+    const armHint = () => {
+      if (altHeldRef.current || altArmRef.current) return   // already shown, or already waiting
+      altArmRef.current = setTimeout(() => { altArmRef.current = null; setAlt(true) }, ALT_HINT_DELAY_MS)
+    }
+    const dropHint = () => { cancelArm(); setAlt(false) }
     const clickSlot = (el: HTMLElement | null | undefined) => {
       const btn = el?.querySelector('button')
       if (btn) { btn.click(); return true }
       return false
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey) setAlt(true)
+      // Alt PRESSED BY ITSELF starts the hold timer; Alt as part of a chord cancels it outright.
+      if (e.key === 'Alt') armHint()
+      else if (altArmRef.current || altHeldRef.current) dropHint()
       // ⌘,/Ctrl, — the idiomatic preferences key on macOS, and unbound in browsers elsewhere.
       if ((e.metaKey || e.ctrlKey) && e.key === ',' && !e.altKey) {
         const idx = toolbarSlotsRef.current.indexOf('settings')
@@ -560,9 +581,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (idx === null) return
       if (clickSlot(slotElsRef.current[idx])) e.preventDefault()
     }
-    const onKeyUp = (e: KeyboardEvent) => { if (!e.altKey) setAlt(false) }
+    const onKeyUp = (e: KeyboardEvent) => { if (!e.altKey) dropHint() }
     // Alt+Tab away with Alt down and the keyup never arrives — the hints would latch on forever.
-    const onBlur = () => setAlt(false)
+    const onBlur = () => dropHint()
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', onBlur)
@@ -570,6 +591,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
+      cancelArm() // a pending hold timer must not fire into an unmounted tree
     }
   }, [])
   const slotDragRef = useRef<{
@@ -3118,7 +3140,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             }
             return fileName ? (
               <SyncStatus compact={isTouch}
-                label={lastFileSave ? '✓ Synced to folder' : 'Sync pending'}
+                label={lastFileSave ? 'Synced to folder' : 'Sync pending'}
                 synced={!!lastFileSave}
                 path={fileName}
                 lastSync={lastFileSave}
@@ -3136,7 +3158,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             return (
               <SyncStatus
                 compact={isTouch}
-                label={lastGdriveSync ? '✓ Synced to Google Drive' : '▴ Sync pending'}
+                label={lastGdriveSync ? 'Synced to Google Drive' : '▴ Sync pending'}
                 synced={!!lastGdriveSync}
                 lastSync={lastGdriveSync}
                 webUrl={gdriveUrl}
@@ -3148,7 +3170,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (!oneDriveConfigured()) return null
           return oneDriveAcct ? (
             <SyncStatus compact={isTouch}
-              label={lastSync ? '✓ Synced to OneDrive' : '☁ Sync pending'}
+              label={lastSync ? 'Synced to OneDrive' : '☁ Sync pending'}
               synced={!!lastSync}
               path={oneDrivePath(doc)}
               displayName={doc.title || undefined}

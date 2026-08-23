@@ -166,7 +166,7 @@ export function SyncStatus({
             // max-w 5.6rem → 7rem: the label is one size bigger now (see fontSize below) and shed its
             // "a", and it must fit on ONE line — a second line would break the shared height the two
             // side pills now hold.
-            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center justify-end text-right leading-tight whitespace-nowrap px-2.5 py-1 max-w-[7rem] max-lg:px-2 max-lg:max-w-[7rem]'}`}
+            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center justify-end text-right leading-tight whitespace-nowrap px-2.5 py-1 max-w-[6rem] max-lg:px-2 max-lg:max-w-[6rem]'}`}
           style={{
             // PURPLE, matching the snaps pill opposite (Peter, 2026-08-20). Both now read from the
             // same `--iw-pill-fg` token, so the pair stays matched through a night-mode switch instead

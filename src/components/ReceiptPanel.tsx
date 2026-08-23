@@ -279,7 +279,11 @@ export function ReceiptPanel({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => window.open(`/snapshot?doc=${encodeURIComponent(documentId)}&snap=${encodeURIComponent(s.id)}`, '_blank', 'noopener')}
+                  // SAME TAB (Peter, 2026-08-23). It used to `window.open(..., '_blank')`, which is
+                  // also what put a second live tab on the document — the very thing the single-open
+                  // lock then had to arbitrate. Reviewing history is a place you GO and come back
+                  // from ( /snapshot has its own "← editor" button), not a second workspace.
+                  onClick={() => { window.location.href = `/snapshot?doc=${encodeURIComponent(documentId)}&snap=${encodeURIComponent(s.id)}` }}
                   className="w-full px-2.5 py-1 flex flex-col items-start text-left hover:bg-stone-50"
                   style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
                   title={s.summary ?? `bundle ${s.bundleHash}`}
