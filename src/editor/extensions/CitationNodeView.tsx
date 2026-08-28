@@ -457,7 +457,18 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
         </span>,
         document.body,
       )}
-      {readerUrl && <SourceBrowser url={readerUrl.url} title={readerUrl.title} onClose={() => setReaderUrl(null)} />}
+      {readerUrl && (
+        <SourceBrowser
+          url={readerUrl.url}
+          title={readerUrl.title}
+          onClose={() => setReaderUrl(null)}
+          // Highlight a heading (or any text) in the source → it becomes THIS citation's locator.
+          // `locatorForHeading` decides the kind: a numbered heading gives its NUMBER as a section,
+          // an unnumbered one travels as its title verbatim rather than being given an invented one.
+          onCite={(loc) => updateAttributes({ locator: loc.value, locatorKind: loc.kind === 'verbatim' ? 'verbatim' : loc.kind })}
+          onQuote={(quote) => updateAttributes({ quote })}
+        />
+      )}
     </NodeViewWrapper>
   )
 }
