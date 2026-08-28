@@ -5,6 +5,8 @@
 // Replaces the old Zotero/BBT BibPanel + ZoteroSetup. See citations spec §10.
 
 import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
+import { citeClickOpensReader, setCiteClickOpensReader } from './dockLayout'
+import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/Scroll'
 import type { Editor } from '@tiptap/react'
@@ -455,6 +457,9 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
   const [editItem, setEditItem] = useState<CSLItem | null>(null)
+  const [clickReads, setClickReads] = useState(citeClickOpensReader)
+  const [legacyCount, setLegacyCount] = useState(0)
+  useEffect(() => { void legacyLibrarySize().then(setLegacyCount).catch(() => {}) }, [])
   const [isNewRef, setIsNewRef] = useState(false)
   // URL-lookup consent: holds the input that triggered the dialog so "yes" resumes the capture.
   const [urlConsentPending, setUrlConsentPending] = useState<string | null>(null)
@@ -928,6 +933,33 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
               + New
             </button>
+          </div>
+          {/* ── TWO SWITCHES THAT HAD NO WAY TO BE TURNED ON ────────────────────────────────────
+              ⚠ Both were the same omission, and this codebase has a name for it: a live mechanism
+              with no surface (LEDGER_PRIVATE_FIELDS, setLabelSuppressed — both documented, both
+              shipped inert). `citeClickOpensReader` and `importLegacyLibrary` were written, tested
+              and then never given a control, so the first did nothing at all and the second left a
+              writer's entire previous library unreachable after the per-document change. */}
+          <div className="flex items-center gap-3 flex-wrap px-1 pt-1" style={{ fontSize: '12px', color: 'var(--iw-pill-fg, #78716c)' }}>
+            <label className="flex items-center gap-1.5 cursor-pointer" title="Clicking a citation opens its web page in the reader panel, instead of the PDF viewer">
+              <input type="checkbox" checked={clickReads}
+                onChange={e => { setCiteClickOpensReader(e.target.checked); setClickReads(e.target.checked) }} />
+              <span>Click a citation to read it here</span>
+            </label>
+            {legacyCount > 0 && (
+              <button type="button"
+                onClick={() => void (async () => {
+                  const n = await importLegacyLibrary()
+                  setLegacyCount(0)
+                  setNotice({ text: n ? `Brought ${n} source${n === 1 ? '' : 's'} into this document.` : 'Nothing new to import.', kind: 'ok' })
+                  rerender()
+                })()}
+                className="underline"
+                style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                title="Your library used to be shared across every document. Copy those sources into this one.">
+                Import {legacyCount} source{legacyCount === 1 ? '' : 's'} from your old shared library
+              </button>
+            )}
           </div>
         </div>
 

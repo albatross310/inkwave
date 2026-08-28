@@ -14,6 +14,7 @@ import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
 import { formatLocator, asLocatorKind, mergesWithPdfPages, LOCATOR_KINDS } from '../../citations/locator'
 import { SourceBrowser } from '../../components/SourceBrowser'
+import { citeClickOpensReader } from '../../components/dockLayout'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
@@ -293,6 +294,19 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         onClick={e => {
                           e.stopPropagation()
                           if (heldRef.current) { heldRef.current = false; return } // opened the popover — don't navigate
+                          // ⚠ THE TICK BOX ON THE REFERENCES PANEL (Peter, 2026-08-28: "make a tick
+                          // box on the refs panel to turn on click to view in browser. And make it
+                          // just on click not click and hold plus read here"). OFF by default,
+                          // because a plain click already means something else and silently changing
+                          // what a click does to someone's citations is not ours to decide — the
+                          // tick box is where they decide it. With it on, a source that HAS a web
+                          // page reads there; one that only has a PDF still opens the PDF, because
+                          // there is nothing else to show.
+                          const webUrl = sourceUrlOf(bibProvider.get(s.key))
+                          if (citeClickOpensReader() && webUrl) {
+                            setReaderUrl({ url: webUrl, title: s.text })
+                            return
+                          }
                           // Always pop the panel — it shows "No attachment" when the source has no PDF.
                           // NB: no `quote` here — author/year opens where you LEFT OFF, not at the cited
                           // pinpoint (the page-number link is what jumps to the quote).

@@ -302,7 +302,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             </nav>
           )}
 
-          <div ref={bodyRef} data-iw-selectable="" className="flex-1 overflow-y-auto px-8 py-6" style={{ fontFamily: "'EB Garamond', Georgia, serif", fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
+          {/* ⚠ NO PADDING (AND NO SCROLLER) IN LIVE MODE (2026-08-28, Peter: "nevertheless it has
+              this weird white space around it"). The reading column's px-8/py-6 is right for OUR
+              typography and wrong for a real web page, which brings its own margins and its own
+              scrollbar — so the site rendered inside a cream frame with a second scroller around
+              it. The iframe fills the pane edge to edge and scrolls itself. */}
+          <div ref={bodyRef} data-iw-selectable=""
+            className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'}`}
+            style={framed ? undefined : { fontFamily: "'EB Garamond', Georgia, serif", fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
             {error && !framed && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: '#57534e' }}>
                 <div style={{ color: INK, fontSize: '15px' }}>{error}</div>
@@ -323,7 +330,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
               <iframe src={here} title={doc?.title || here} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-                referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }} />
+                referrerPolicy="no-referrer" style={{ display: 'block', width: '100%', height: '100%', border: 'none', background: '#fff' }} />
             )}
             {doc && !framed && doc.blocks.map((b, i) => {
               if (b.kind === 'heading') {
