@@ -8,12 +8,16 @@ describe('pdfZoomFactor', () => {
     expect(pdfZoomFactor(120)).toBeCloseTo(0.9, 6)
   })
 
-  it('a trackpad’s tiny deltas take tiny bites — the complaint', () => {
-    // A pinch streams ~60 events/second. Each used to take a FULL 10%.
-    expect(pdfZoomFactor(-4)).toBeLessThan(1.011)
+  it('a trackpad’s tiny deltas take small bites — the complaint', () => {
+    // A pinch streams ~60 events/second. Each used to take a FULL 10%; now it is proportional.
+    // The bound tracks PDF_ZOOM_K, which Peter has moved once already ("a tad faster, maybe 75%") —
+    // so this asserts the PROPERTY (a fingertip is a fraction of a notch), not the constant.
+    expect(pdfZoomFactor(-4)).toBeLessThan(1.03)
     expect(pdfZoomFactor(-4)).toBeGreaterThan(1.0)
-    expect(pdfZoomFactor(4)).toBeGreaterThan(0.989)
+    expect(pdfZoomFactor(4)).toBeGreaterThan(0.97)
     expect(pdfZoomFactor(4)).toBeLessThan(1.0)
+    // The real invariant: one fingertip event must never be worth a whole mouse notch.
+    expect(pdfZoomFactor(-4) - 1).toBeLessThan((pdfZoomFactor(-120) - 1) / 3)
   })
 
   it('KNOWN-NEGATIVE: the old rule took the same bite whatever the delta', () => {
@@ -23,10 +27,11 @@ describe('pdfZoomFactor', () => {
   })
 
   it('a whole pinch of small events is far gentler than it was', () => {
-    // 30 events of deltaY -4: was 1.1^30 ≈ 17×. Now well under 1.5×.
+    // 30 events of deltaY -4: was 1.1^30 ≈ 17×. Now under 2×, i.e. an order of magnitude gentler.
     const now = Array.from({ length: 30 }).reduce<number>((z) => z * pdfZoomFactor(-4), 1)
-    expect(now).toBeLessThan(1.5)
+    expect(now).toBeLessThan(2)
     expect(1.1 ** 30).toBeGreaterThan(15)
+    expect(now).toBeLessThan((1.1 ** 30) / 8)
   })
 
   it('direction is preserved and a zero delta does nothing', () => {
