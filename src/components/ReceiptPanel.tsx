@@ -113,6 +113,14 @@ export function ReceiptPanel({
   const prevN = useRef(snapshots.length)
 
   const zoom = useZoomScale()
+  // Below this the centred toolbar and the two edge pills start competing for the same row.
+  const [narrowPill, setNarrowPill] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
+  useEffect(() => {
+    const on = () => setNarrowPill(window.innerWidth < 900)
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
@@ -193,7 +201,15 @@ export function ReceiptPanel({
           >
             {compact ? '◈' : (
               <span className="inline-block pl-[1.2em] [text-indent:-1.2em]">
-                ◈ {n} snap{n === 1 ? '' : 's'}{versionCount > 0 ? ` · ${versionCount} version${versionCount === 1 ? '' : 's'}` : ''}
+                {/* ⚠ THE WORDS GO FIRST WHEN THE WINDOW DOES (Peter, 2026-08-28: "we should get rid
+                    of the word snaps when the window gets small enough"). The two side pills are
+                    EDGE-anchored while the toolbar is CENTRED, so on a narrow window the label is
+                    what runs into the buttons — and "snaps" is the part a reader already knows from
+                    the ◈ beside it. The NUMBER is the information; the noun is decoration, and
+                    decoration is what a narrow window should lose. Same threshold the toolbar's own
+                    budget uses, so the two shrink together rather than fighting. */}
+                ◈ {n}{narrowPill ? '' : ` snap${n === 1 ? '' : 's'}`}
+                {versionCount > 0 && !narrowPill ? ` · ${versionCount} version${versionCount === 1 ? '' : 's'}` : ''}
               </span>
             )}
           </button>

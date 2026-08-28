@@ -35,7 +35,12 @@ const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--$
 const ENGINE = arg('engine', 'chromium')
 const PORT = Number(arg('port', '5219'))
 const BASE = `http://localhost:${PORT}`
-const EDITOR = '.ProseMirror'
+// ⚠ `.ProseMirror` ALONE MATCHES THE ANTI-FLASH SHELL (CLAUDE.md, round 14): a load transiently
+// carries TWO — the real editor (contenteditable=true) and an aria-hidden facsimile removed by ~3s.
+// waitForSelector resolves the FIRST match and defaults to state:'visible', so it waited forever on
+// the hidden shell while the real editor was up. 2026-08-28: this probe timed out for exactly that
+// reason and read as a regression in the tab-identity fix.
+const EDITOR = '.ProseMirror[contenteditable="true"]'
 
 async function waitEditor(page) {
   await page.waitForSelector(EDITOR, { timeout: 120000 }) // generous: several agents share this box and CPU starvation must not masquerade as a failed mount
