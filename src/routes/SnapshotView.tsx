@@ -19,6 +19,7 @@ import { aiSummariesEnabled, setAiSummaries, markAiConsent } from '../editor/aiS
 import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { probePerf } from '../editor/perflog'
+import { stepDetent, newDetent, resetDetent, trimmed, TRACKPAD_DETENT, TOUCH_DETENT } from '../editor/scrubDetent'
 import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
@@ -2297,23 +2298,24 @@ function SplitDiffView({
   // GESTURE STATE LIVES IN REFS (round 3): this effect re-subscribes on every step (per-render `nav`
   // identity + the per-landing scroller swap), and effect-local accum/started reset the detent
   // mid-gesture — every step cost ~5 more events (probed: a 22-step scrub degenerated to ~3 hops).
-  const hAccumRef = useRef(0)
-  const hStartedRef = useRef(false)
+  // Detent state in a REF, not effect-local: this effect re-subscribes on every step (per-render
+  // `nav` identity + the per-landing scroller swap), and effect-local state reset the gesture
+  // mid-scrub (round 3 — a 22-step scrub degenerated to ~3 hops).
+  const hDetentRef = useRef(newDetent())
   const onScrub = nav?.onScrub
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     let idle: ReturnType<typeof setTimeout> | undefined
-    const FIRST = 34, REST = 7
     const onWheel = (e: WheelEvent) => {
       if (e.shiftKey || e.ctrlKey || e.metaKey) return
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) * 1.3) return // not a horizontal swipe
       e.preventDefault()
       clearTimeout(idle)
-      idle = setTimeout(() => { hStartedRef.current = false; hAccumRef.current = 0 }, 140) // pause → re-arm the detent
-      hAccumRef.current += e.deltaX
-      let net = 0
-      if (!hStartedRef.current && Math.abs(hAccumRef.current) >= FIRST) { hStartedRef.current = true; const s = hAccumRef.current > 0 ? 1 : -1; hAccumRef.current -= s * FIRST; net += -s } // reversed: right → previous
-      if (hStartedRef.current) while (Math.abs(hAccumRef.current) >= REST) { const s = hAccumRef.current > 0 ? 1 : -1; hAccumRef.current -= s * REST; net += -s }
+      idle = setTimeout(() => resetDetent(hDetentRef.current), 140) // pause → re-arm the detent
+      // ONE shared rule (editor/scrubDetent.ts) — arming distance, then a DEAD ZONE so a short
+      // deliberate swipe is exactly one version, then the trimmed cadence. Negated: slide right →
+      // previous.
+      const net = -stepDetent(hDetentRef.current, e.deltaX, TRACKPAD_DETENT)
       if (net) onScrub?.(net, e.timeStamp, 'scrub') // position scrubber = bitmap scrub from step 1
     }
     L?.addEventListener('wheel', onWheel, { passive: false })
@@ -3243,7 +3245,11 @@ export function SnapshotView() {
     // the intermediate: a 12-notch fling commanded 11 but presented 7. One-per-frame at 60fps =
     // 60 versions/s, far above any wheel cadence, so it keeps up AND flickers every version; an
     // extreme fling just trails by a few frames and catches up (Photos does exactly this).
-    const SW_STEP = 40, MAX_PER_FRAME = 1, LAND_QUIET_MS = 260, FREEZE_HOLD_MS = 400
+    // SW_STEP trimmed 40 → 67 (Peter, 2026-08-28: "take 40% off the net scroll speed for
+    // trackpad/phone"). This costs a MOUSE nothing — a notch delivers 120, so one notch is still
+    // exactly one version, which is this path's whole contract — and halves what a trackpad's
+    // fine-delta stream flies through, which is the surface the complaint is about.
+    const SW_STEP = trimmed(40), MAX_PER_FRAME = 1, LAND_QUIET_MS = 260, FREEZE_HOLD_MS = 400
     const flipEnabled = !isTouchDevice() && (window as unknown as { __iwSwFlipbook?: boolean }).__iwSwFlipbook !== false
 
     const land = () => {
@@ -3358,19 +3364,19 @@ export function SnapshotView() {
   useEffect(() => {
     const el = swipeRef.current
     if (!el) return
-    let dir: '?' | 'h' | 'v' | 'pan' = '?', startX = 0, startY = 0, lastX = 0, accum = 0, started = false
+    let dir: '?' | 'h' | 'v' | 'pan' = '?', startX = 0, startY = 0, lastX = 0, flickAccum = 0
     let panEl: HTMLElement | null = null
     let downAt = 0        // touchstart time — decisive-move delay ≥ HOLD arms the scrub
     let armed = false     // true = many-snaps scrub; false = single-step flick
     let flicked = false   // the flick's one step has fired — ignore the rest of the gesture
     const HOLD = 280      // press-and-hold before moving to arm the multi-snap scrub
-    const FIRST = 38, REST = 9 // scrub detents: first snap, then heaps
+    const detent = newDetent()  // the ARMED scrub's position rule — shared with the trackpad
     const onStart = (e: TouchEvent) => {
       // Multi-touch = a PINCH (the doc pane's pane-zoom pinch, or Scroll's on other surfaces) —
       // never a scrub. Without this guard, finger-0's drift during a pinch scrubbed snapshots
       // mid-gesture (merge fix, 2026-07-10).
       if (e.touches.length > 1) { dir = 'v'; return }
-      dir = '?'; accum = 0; started = false; flicked = false; armed = false
+      dir = '?'; flickAccum = 0; resetDetent(detent); flicked = false; armed = false
       downAt = performance.now()
       startX = lastX = e.touches[0].clientX; startY = e.touches[0].clientY
     }
@@ -3399,16 +3405,15 @@ export function SnapshotView() {
       if (dir === 'v') return                                        // vertical → let the pane scroll natively
       e.preventDefault()
       if (dir === 'pan') { if (panEl) panEl.scrollLeft -= x - lastX; lastX = x; return }
-      accum += x - lastX; lastX = x
+      const dx = x - lastX; lastX = x
       // Slide LEFT = NEXT version, slide RIGHT = previous — the natural page-turn feel.
       if (!armed) {
         // FLICK: exactly one step per gesture, however long the swipe.
-        if (!flicked && Math.abs(accum) >= FIRST) { flicked = true; scrubBy(accum > 0 ? -1 : 1, e.timeStamp) }
+        flickAccum += dx
+        if (!flicked && Math.abs(flickAccum) >= TOUCH_DETENT.first) { flicked = true; scrubBy(flickAccum > 0 ? -1 : 1, e.timeStamp) }
         return
       }
-      let net = 0
-      if (!started && Math.abs(accum) >= FIRST) { started = true; const s = accum > 0 ? 1 : -1; accum -= s * FIRST; net -= s }
-      if (started) while (Math.abs(accum) >= REST) { const s = accum > 0 ? 1 : -1; accum -= s * REST; net -= s }
+      const net = -stepDetent(detent, dx, TOUCH_DETENT) // one shared rule; see editor/scrubDetent.ts
       if (net) scrubBy(net, e.timeStamp, 'scrub') // hold-armed drag = bitmap scrub from step 1
     }
     const onEnd = () => { dir = '?'; panEl = null; flicked = false; armed = false }

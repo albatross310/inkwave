@@ -168,6 +168,17 @@ function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
 // Both wooden rollers are now removed and the page is pulled up near the top of the viewport
 // (see the `.inkwave-editor-surface` rule in styles/index.css). Long-term the parchment grows a
 // vectorised torn-paper edge; keeping the chrome in one shared component makes that a one-place change.
+/** WHEN THE NON-PASSIVE WHEEL LISTENER MUST EXIST — pure, so it can be asserted without a browser.
+ *  A non-passive wheel listener makes the compositor wait for main-thread dispatch on every event,
+ *  so it is attached only when it could actually intercept something. The `pointerOver` term is
+ *  load-bearing and easy to lose: a TRACKPAD PINCH arrives as wheel{ctrlKey:true} with NO keydown,
+ *  so `ctrlHeld` is false throughout, and if the listener is not ALREADY attached the browser has
+ *  zoomed before the page hears about it — a browser zoom level a page cannot undo. See the long
+ *  note at the arming site. */
+export function shouldArmWheel(s: { ctrlHeld: boolean; pointerOver: boolean; magnify: number }): boolean {
+  return s.ctrlHeld || s.pointerOver || s.magnify !== 1
+}
+
 export function Scroll({
   children,
   paperRef,
@@ -1081,18 +1092,42 @@ export function Scroll({
       const armWheel = () => { if (!wheelArmed) { wheelArmed = true; el.addEventListener('wheel', onWheel, { passive: false }) } }
       const disarmWheel = () => { if (wheelArmed) { wheelArmed = false; el.removeEventListener('wheel', onWheel) } }
       let ctrlHeld = false
-      const syncWheelArming = () => { if (ctrlHeld || getMagnify() !== 1) armWheel(); else disarmWheel() }
+      // ⚠ A TRACKPAD PINCH PRESSES NO KEY (2026-08-28, Peter: "both water and page zoom no longer
+      // appear to be working with finger drawing closer and farther. It overrides to the native GPU
+      // zoom"). macOS/Windows trackpads synthesise `wheel` with `ctrlKey: true` and NO keydown ever
+      // fires — so the two arming triggers this had (a real Control/Meta KEY, or magnify ≠ 1) both
+      // read false during a pinch, the non-passive listener was never attached, and the gesture fell
+      // straight through to the BROWSER's own zoom. It looked intermittent because the second
+      // trigger papered over it: at a narrow window fit-to-width puts magnify ≠ 1, so the listener
+      // happened to be armed and the pinch worked — go full-screen and magnify returns to 1, the
+      // listener detaches, and the same gesture zooms the browser instead. Window-size-dependent,
+      // which reads as random.
+      //
+      // A gesture that announces itself only in its own first event cannot be armed for reactively:
+      // by the time we have seen `ctrlKey` the browser has already zoomed a notch, and a browser
+      // zoom level is not something a page can undo. So the listener is armed WHILE THE POINTER IS
+      // OVER THE SURFACE — the only state that reliably precedes the pinch. The latency guard the
+      // arming exists for is preserved where it matters: the cursor parked over another window or
+      // panel still leaves no non-passive wheel listener, and the handler's own first branch
+      // returns for an ordinary scroll without preventDefault (see onWheel), so the compositor
+      // keeps the scroll.
+      let pointerOver = false
+      const syncWheelArming = () => { if (shouldArmWheel({ ctrlHeld, pointerOver, magnify: getMagnify() })) armWheel(); else disarmWheel() }
       const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = true; syncWheelArming() } }
       const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = false; syncWheelArming() } }
       const onBlurWin = () => { ctrlHeld = false; syncWheelArming() }
       const onPointerCheck = (e: PointerEvent) => { // came-in-held: reveal the modifier before the first wheel
         const held = e.ctrlKey || e.metaKey
-        if (held !== ctrlHeld) { ctrlHeld = held; syncWheelArming() }
+        if (held !== ctrlHeld || !pointerOver) { ctrlHeld = held; pointerOver = true; syncWheelArming() }
       }
+      const onPointerEnter = () => { if (!pointerOver) { pointerOver = true; syncWheelArming() } }
+      const onPointerLeave = () => { if (pointerOver) { pointerOver = false; syncWheelArming() } }
       window.addEventListener('keydown', onKeyDown, { capture: true })
       window.addEventListener('keyup', onKeyUp, { capture: true })
       window.addEventListener('blur', onBlurWin)
       el.addEventListener('pointermove', onPointerCheck, { passive: true })
+      el.addEventListener('pointerenter', onPointerEnter, { passive: true })
+      el.addEventListener('pointerleave', onPointerLeave, { passive: true })
       const unsubArm = subscribeMagnify(syncWheelArming)
       syncWheelArming()
       cleanupWheelArming = () => {
@@ -1100,6 +1135,8 @@ export function Scroll({
         window.removeEventListener('keyup', onKeyUp, { capture: true } as EventListenerOptions)
         window.removeEventListener('blur', onBlurWin)
         el.removeEventListener('pointermove', onPointerCheck)
+        el.removeEventListener('pointerenter', onPointerEnter)
+        el.removeEventListener('pointerleave', onPointerLeave)
         unsubArm()
         disarmWheel()
       }

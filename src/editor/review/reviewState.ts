@@ -1,6 +1,7 @@
 // Review-layer client state: the active annotation SET (which comments/suggestions new ones join and
-// which are shown), and whether live suggestion (track-changes) mode is on. Persisted in localStorage
-// and broadcast via a custom event so the toolbar, sticky notes, and editor stay in sync. The set
+// which are shown), and whether live suggestion (track-changes) mode is on. The set pointer and the
+// visibility toggles are persisted in localStorage; SUGGEST MODE DELIBERATELY IS NOT (see below).
+// All of it is broadcast via a custom event so the toolbar, sticky notes, and editor stay in sync. The set
 // LIST is derived from the document itself (distinct `set` attrs on comment marks) so it travels with
 // the doc; this module only holds the active-set pointer + the suggest toggle.
 
@@ -24,8 +25,29 @@ export const DEFAULT_SET = 'Notes'
 export function activeSet(): string { return ls(K_SET) || DEFAULT_SET }
 export function setActiveSet(name: string): void { setLs(K_SET, name || DEFAULT_SET); fire() }
 
-export function suggestOn(): boolean { return ls(K_SUGGEST) === '1' }
-export function setSuggestOn(v: boolean): void { setLs(K_SUGGEST, v ? '1' : '0'); fire() }
+// ⚠ SUGGEST MODE IS DELIBERATELY NOT PERSISTED (2026-08-28, Peter: "stop the text from going
+// red"). It used to live in localStorage, and that made a TRAP with no way out: the ✎ toggle is
+// reachable ONLY from the review row, so closing that row — or simply reloading — left a mode that
+// rewrites EVERY keystroke into a red `insertion` mark, with no visible control and nothing on
+// screen saying why the writing had turned red. MEASURED on Peter's real file: his honours proposal
+// carried five `insertion` marks — the title and every heading — and NOT ONE text-colour mark, so
+// he was reaching for the colour menu to undo something the colour menu cannot touch, which is
+// exactly what an invisible mode costs.
+//
+// The rule now: you can only be IN suggest mode while you can SEE the lit ✎ button. Module state,
+// so a reload clears it; and TiptapEditor clears it when the review row closes. That makes the
+// trap unrepresentable rather than merely unlikely — there is no stored '1' left to come back.
+// The suggestions themselves are untouched: they are marks in the document and stay exactly where
+// they are, to be accepted or discarded from the review bar.
+let _suggest = false
+export function suggestOn(): boolean { return _suggest }
+export function setSuggestOn(v: boolean): void { _suggest = v; fire() }
+
+/** Drop a legacy persisted flag so an existing writer isn't stranded in the mode on their next
+ *  load. One-way: nothing writes K_SUGGEST any more. */
+export function clearLegacySuggestFlag(): void {
+  try { localStorage.removeItem(K_SUGGEST) } catch { /* private mode */ }
+}
 
 // ── Show/hide changes (MS-Word markup visibility) ────────────────────────────────────────────────
 // Global: show the doc WITH tracked suggestions (default) or CLEAN (as-if-accepted — insertions

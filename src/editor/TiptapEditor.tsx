@@ -14,7 +14,7 @@ import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
-import { syncReviewVisibilityStyles } from './review/reviewState'
+import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
@@ -149,7 +149,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
   // Realise the persisted review-visibility state (global show/hide + hidden layers) on boot —
   // a hidden layer must stay hidden across reloads even before the review bar is ever opened.
-  useEffect(() => { syncReviewVisibilityStyles() }, [])
+  // Also drop any legacy PERSISTED suggest flag: track-changes mode is session-only now (see
+  // review/reviewState.ts for why), and a writer already stuck in it must not carry it over.
+  useEffect(() => { syncReviewVisibilityStyles(); clearLegacySuggestFlag() }, [])
 
   // The SCAS engine controller (live state mirrored to doc.scasState for persistence). Created
   // lazily so it survives re-renders; reseated when the active document changes (see effect below).
@@ -859,6 +861,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const t = setTimeout(() => setNotesReady(true), 260)
     return () => clearTimeout(t)
   }, [reviewOpen])
+
+  // ⚠ TRACK CHANGES CANNOT OUTLIVE ITS OWN CONTROL (2026-08-28, Peter: "stop the text from going
+  // red"). The ✎ toggle lives on the review row and nowhere else, so with the row closed the mode
+  // was invisible AND unreachable while still rewriting every keystroke into a red insertion mark —
+  // Peter spent a session in it, reaching for the text-colour menu, which cannot touch a suggestion
+  // mark. Closing the row now ends the mode. The suggestions already made are untouched: they are
+  // marks in the document, and reopening the row shows them with accept/discard.
+  useEffect(() => { if (!reviewOpen) setSuggestOn(false) }, [reviewOpen])
   // The exclusion RULE is pure and lives in toolbarContract.ts (planBarToggle, swept over every
   // (active, which) pair by its tests). This function is only its hands: it does the timing, the
   // sequence guard and the style bar's idle timer. Adding a layer changes NOTHING here.

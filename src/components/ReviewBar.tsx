@@ -200,6 +200,37 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
               )
             })}
             <div className="border-t border-stone-100 my-1" />
+            {/* ⚠ THE WAY OUT (2026-08-28, Peter: "stop the text from going red"). Until this, the
+                ONLY way to clear tracked changes was ✓/✗ one at a time — so a writer who had been
+                in suggestion mode without realising had to step through every insertion to get
+                their prose back to black. A document-wide accept is what an unnoticed session in
+                the mode actually needs, and its opposite (discard everything suggested) is what
+                someone who never wanted the mode needs. Both are confirm()-gated because both
+                change the document irreversibly, and both are hidden when there is nothing to
+                resolve rather than sitting there as dead entries. */}
+            {nChanges > 0 && (<>
+            <button type="button"
+              onClick={() => {
+                if (!confirm(`Accept all ${nChanges} tracked change${nChanges === 1 ? '' : 's'}? The suggested text becomes ordinary text.`)) return
+                resolveSuggestions(editor, 'accept'); setSetMenu(false); tick((x) => x + 1)
+              }}
+              className="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center gap-2"
+              style={{ color: '#374151' }}
+              title="Accept every tracked change in this document">
+              <span className="text-green-700">✓</span><span>Accept all changes</span>
+            </button>
+            <button type="button"
+              onClick={() => {
+                if (!confirm(`Discard all ${nChanges} tracked change${nChanges === 1 ? '' : 's'}? Suggested text is removed and suggested deletions are kept.`)) return
+                resolveSuggestions(editor, 'reject'); setSetMenu(false); tick((x) => x + 1)
+              }}
+              className="w-full text-left px-3 py-1.5 hover:bg-stone-50 flex items-center gap-2"
+              style={{ color: '#374151' }}
+              title="Discard every tracked change in this document">
+              <span className="text-red-600">✗</span><span>Discard all changes</span>
+            </button>
+            <div className="border-t border-stone-100 my-1" />
+            </>)}
             <button type="button"
               onClick={() => { const name = prompt('New annotation set name:')?.trim(); if (name) setActiveSet(name); setSetMenu(false) }}
               className="w-full text-left px-3 py-1.5 hover:bg-stone-50 text-stone-500">＋ New set…</button>
