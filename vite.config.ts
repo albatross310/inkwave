@@ -34,6 +34,15 @@ const devApi: PluginOption = {
       }
       throw new Error('not found')
     }
+    // GET /api/reader?url=… — the source reader's fetch, mirroring api/reader.mjs in dev.
+    server.middlewares.use('/api/reader', async (req, res) => {
+      res.setHeader('content-type', 'application/json')
+      // @ts-expect-error - untyped Node-only ESM module
+      const { readSource } = await import('./api/_reader-core.mjs')
+      const url = new URL(req.url || '', 'http://x').searchParams.get('url') || ''
+      try { res.end(JSON.stringify(await readSource(url))) }
+      catch (err) { res.statusCode = 502; res.end(JSON.stringify({ error: (err as Error)?.message || 'fetch failed' })) }
+    })
     // GET /api/me — the authed caller's cadence entitlement (reads the Clerk token header).
     server.middlewares.use('/api/me', async (req, res) => {
       // @ts-expect-error - untyped Node-only ESM module

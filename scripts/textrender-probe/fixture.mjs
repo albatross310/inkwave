@@ -59,7 +59,7 @@ function rng(seed = 20260717) {
  *   from a document with no way to be wrong. Pass ~22 to get 2-line items.
  */
 export function buildCitationDoc(opts = {}) {
-  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true, maths = 0, refVariety = false, listWords = 9 } = opts
+  const { words = 2200, cites = 29, marked = 1, lists = true, refList = true, id = 'fixture-cites', headings = true, maths = 0, refVariety = false, listWords = 9, tracked = 0 } = opts
   const rnd = rng()
   const keys = AUTHORS.map(([fam], i) => `${fam.toLowerCase()}${1990 + (i % 25)}`)
   const usedKeys = keys.slice(0, Math.max(1, Math.min(keys.length, Math.ceil(cites / 2))))
@@ -69,6 +69,15 @@ export function buildCitationDoc(opts = {}) {
     for (let i = 0; i < n; i++) o.push(SRC[Math.floor(rnd() * SRC.length)])
     const t = o.join(' ')
     return t[0].toUpperCase() + t.slice(1)
+  }
+
+  // TRACKED CHANGES (2026-08-28). Peter's real document is full of `insertion` marks — a whole
+  // class of inline mark that appears in NO fixture here, and his page breaks land mid-line. An
+  // <ins> carries a background-clip:text gradient, so it is exactly the kind of element that could
+  // emit a rect the line filter reads differently. `tracked` = the share of TEXT RUNS marked.
+  const trackRun = (node) => {
+    if (tracked <= 0 || node.type !== 'text' || rnd() >= tracked) return node
+    return { ...node, marks: [...(node.marks || []), { type: 'insertion', attrs: { set: 'Notes' } }] }
   }
 
   const content = []
@@ -132,7 +141,7 @@ export function buildCitationDoc(opts = {}) {
       inline.splice(1, 0, { type: 'text', text: ' ' }, mkMath(), { type: 'text', text: ' as shown. ' })
       mathsPlaced++
     }
-    content.push({ type: 'paragraph', content: inline })
+    content.push({ type: 'paragraph', content: inline.map(trackRun) })
     wordsSoFar += n
     para++
 

@@ -13,6 +13,21 @@ import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations
 import { bibProvider } from '../citations/bibProvider'
 import { isTouchDevice } from '../editor/Scroll'
 import { noteAnnotation, noteScroll } from '../productivity/pdfActivity'
+
+/**
+ * How many device pixels per CSS pixel to render a PDF page at.
+ * FLOOR of 2× regardless of what the display reports — supersampling is what keeps glyphs crisp on
+ * a 1× screen, and it is also what makes the viewer immune to browser zoom (Chrome folds zoom into
+ * devicePixelRatio, so a window at 67% reports ~1.33 and used to render that soft). Ceilings are
+ * unchanged: 3× desktop / 2× touch (iOS's total canvas memory is the scarce resource), and never
+ * more than `maxCanvas` px on a side.
+ */
+export function pdfOutputScale(dpr: number, isTouch: boolean, vw: number, vh: number, maxCanvas = 4096): number {
+  const want = Math.max(2, Number.isFinite(dpr) && dpr > 0 ? dpr : 1)
+  const ceiling = isTouch ? 2 : 3
+  const byMemory = Math.min(vw > 0 ? maxCanvas / vw : Infinity, vh > 0 ? maxCanvas / vh : Infinity)
+  return Math.max(1, Math.min(want, ceiling, byMemory))
+}
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -419,11 +434,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // on non-integer downscales. 2–3× is the sweet spot — crisp without the aliasing. Capped for memory.
     // Touch (iOS) caps at 2×: iPhones report dpr 3, and 3× canvases are 2.25× the bytes for no visible
     // gain on those screens — iOS's TOTAL canvas memory budget is the scarce resource (see eviction).
+    // ⚠ THE CODE CONTRADICTED ITS OWN COMMENT (2026-08-28, Peter: "is there a way for us to simply
+    // fix the PWA to 100% — the PDFs seem to be blurry otherwise"). It said "render at ≥2× … so PDF
+    // text stays crisp even on 1× displays", and then took `min(…, devicePixelRatio)`, which CAPS
+    // the canvas AT the display scale — so a 1× display supersampled by exactly 1×, i.e. not at all.
+    // And a browser at less than 100% zoom REPORTS A LOWER DPR (Chrome folds zoom into it): at 67%
+    // on a Retina Mac, dpr ≈ 1.33, so the page rendered at 1.33× and was downscaled into a soft
+    // mush. That is the blur, and it is why it appeared at "not 100%".
+    // No page can set the browser's zoom, so the fix is not to demand 100% — it is to stop caring:
+    // the floor is now 2× whatever the display says, keeping every existing ceiling (3× desktop /
+    // 2× touch for iOS's canvas-memory budget, and 4096px per side).
     const MAX_CANVAS = 4096
-    const outputScale = Math.max(1, Math.min(
-      isTouch ? 2 : 3, window.devicePixelRatio || 1,
-      MAX_CANVAS / pg.viewport.width, MAX_CANVAS / pg.viewport.height,
-    ))
+    const outputScale = pdfOutputScale(window.devicePixelRatio || 1, isTouch, pg.viewport.width, pg.viewport.height, MAX_CANVAS)
     const canvas = document.createElement('canvas')
     canvas.width = Math.floor(pg.viewport.width * outputScale)
     canvas.height = Math.floor(pg.viewport.height * outputScale)

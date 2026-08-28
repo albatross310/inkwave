@@ -175,6 +175,18 @@ function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
  *  so `ctrlHeld` is false throughout, and if the listener is not ALREADY attached the browser has
  *  zoomed before the page hears about it — a browser zoom level a page cannot undo. See the long
  *  note at the arming site. */
+/** The zoom's no-anchor fallback position, as a fraction of the scroll range — pure, so the clamp
+ *  can be asserted without a browser.
+ *  `scrollRange()` FLOORS AT 1 so it can be divided by. When the document fits its viewport that
+ *  floor is a fiction — there is no range — and any scrollTop divided by it yields ≥ 1, i.e. "you
+ *  are at the bottom"; the next frame multiplies that by a REAL range and the document leaps to the
+ *  references page. A degenerate range answers 0 (everything fits ⇒ you are at the top), and a real
+ *  one is clamped to [0,1], which a proportion cannot leave anyway. */
+export function scrollRatioOf(top: number, range: number): number {
+  if (!Number.isFinite(top) || !Number.isFinite(range) || range <= 1) return 0
+  return Math.min(1, Math.max(0, top / range))
+}
+
 export function shouldArmWheel(s: { ctrlHeld: boolean; pointerOver: boolean; magnify: number }): boolean {
   return s.ctrlHeld || s.pointerOver || s.magnify !== 1
 }
@@ -605,7 +617,19 @@ export function Scroll({
       // dead-anchor re-pick).
       if (!anchorEl || !anchorEl.isConnected) pickAnchor(anchorX, anchorY)
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
-      const ratio = getScrollTop() / scrollRange()
+      // ⚠ THE RATIO MUST BE CLAMPED, and this is the "doc keeps jumping down to the bottom"
+      // (Peter, 2026-08-28, the same session the pinch started working again — which is not a
+      // coincidence: the fallback below is reached ONLY when no content anchor could be picked,
+      // and that is exactly the pinch-over-the-WATER case, which was unreachable while the wheel
+      // listener stayed unarmed at magnify 1).
+      // `scrollRange()` floors at 1 so it can be divided by. When the document currently FITS its
+      // viewport that floor is a FICTION — there is no range — and any scrollTop at all divided by
+      // it yields a ratio ≥ 1, i.e. "you are at the very bottom". The next frame multiplies that by
+      // a REAL range and the document leaps to its end. Same shape as the archive guards: a
+      // defensive default (max(1,…)) silently became a measurement.
+      // So: a degenerate range answers 0 — the honest position when everything fits is the top —
+      // and a real one is clamped to [0,1], which a proportion cannot leave anyway.
+      const ratio = scrollRatioOf(getScrollTop(), scrollRange())
       const topBefore = anchorTop() ?? 0 // at the CURRENT size
       // LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but
       // every reachable level is a shared lattice point the pagination step cache can precompute).

@@ -103,11 +103,58 @@ export function goToLastPosition(): void {
   else (el as HTMLElement).scrollTo({ top, behavior: 'smooth' })
 }
 
+// ── THE WAY BACK (2026-08-28) ────────────────────────────────────────────────────────────────
+// Peter: "I'm finding sometimes the doc keeps jumping down to the bottom and I don't know why" →
+// "It keeps jumping down to the references page." The ⤵ bib circle is 0.82em wide with 0.34em
+// margins and sits INSIDE the parentheses, permanently armed, in the middle of the prose — so
+// clicking anywhere near a citation to place the caret can teleport the writer to the bibliography.
+//
+// `goToLastPosition()` has existed the whole time and NOTHING EVER CALLED IT: the return was built
+// and never given a surface, so an accidental jump was a one-way trip and the writer had to find
+// their paragraph again by hand. That is why it read as the document moving on its own — nothing
+// on screen connected the click to the jump.
+//
+// This is deliberately NOT a change to the geometry of the ⤵ button: its box is inside the text
+// flow, so shrinking or hiding it would move line wraps, which moves canonical page breaks, which
+// is a provenance-adjacent surface (pageModel/PaginationExtension). Naming the jump and offering
+// the way back costs nothing and fixes the actual complaint — not knowing why.
+let backChipTimer: number | undefined
+function showBackChip(): void {
+  if (typeof document === 'undefined') return
+  let chip = document.getElementById('iw-nav-back') as HTMLButtonElement | null
+  if (!chip) {
+    chip = document.createElement('button')
+    chip.id = 'iw-nav-back'
+    chip.type = 'button'
+    chip.textContent = '← back to where you were'
+    chip.className = 'iw-nightable'
+    chip.setAttribute('style', [
+      'position:fixed', 'left:50%', 'transform:translateX(-50%)', 'bottom:6.5rem', 'z-index:250',
+      'font-family:system-ui,sans-serif', 'font-size:12px', 'padding:6px 12px', 'border-radius:9999px',
+      'border:1px solid rgba(92,45,138,0.45)', 'background:#fff', 'color:#5c2d8a', 'cursor:pointer',
+      'box-shadow:0 3px 12px rgba(0,0,0,0.14)', 'opacity:0', 'transition:opacity 160ms ease',
+    ].join(';'))
+    chip.addEventListener('click', () => { goToLastPosition(); hideBackChip() })
+    document.body.appendChild(chip)
+  }
+  requestAnimationFrame(() => { if (chip) chip.style.opacity = '1' })
+  if (backChipTimer) window.clearTimeout(backChipTimer)
+  // Long enough to notice and use, short enough not to become furniture.
+  backChipTimer = window.setTimeout(hideBackChip, 12000)
+}
+function hideBackChip(): void {
+  const chip = document.getElementById('iw-nav-back')
+  if (!chip) return
+  chip.style.opacity = '0'
+  window.setTimeout(() => chip.remove(), 200)
+}
+
 let flashTimer: number | undefined
 export function navigateToAnchor(id: string): void {
   const el = document.getElementById(id)
   if (!el) return
   rememberReturn() // so a citation click can return the reader to here
+  showBackChip()   // …and so the reader can actually USE it (see the note above)
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   // If this target is an inline citation with a ⤵ bib-link circle (i.e. we arrived from the bib),
   // flash THAT circle blue (slow fade) to orient the reader; otherwise flash the target itself purple.

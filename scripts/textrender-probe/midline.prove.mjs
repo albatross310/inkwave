@@ -46,6 +46,14 @@ const CASES = [
   // THE HEADLINE SAMPLE: the thesis-shaped fixture (~13k words / ~174 citations) — ~56 breaks, the
   // corpus the 6/56 mid-line rate was measured on. Synthetic prose, thesis SHAPE only.
   ['citations THESIS-SHAPE (13k)', { words: 13000, cites: 174, headings: true, lists: true, refList: false }],
+  // TRACKED CHANGES — the class Peter's real document carries and no fixture had (2026-08-28). His
+  // break landed mid-line after "an", with the continuation bracket beneath it, and every case
+  // above reports 0/122. An <ins> mark paints its text through a background-clip:text gradient;
+  // whether that changes what getClientRects reports is exactly the kind of thing this codebase
+  // has been burned assuming. Measured, not assumed.
+  ['tracked changes (half marked)', { cites: 0, tracked: 0.5, headings: false, lists: false, refList: false }],
+  ['tracked + citations', { cites: 29, tracked: 0.6, headings: true, lists: true, refList: false }],
+  ['tracked THESIS-SHAPE (13k)', { words: 13000, cites: 174, tracked: 0.5, headings: true, lists: true, refList: false }],
 ]
 
 let fail = 0
@@ -76,7 +84,8 @@ for (const [name, o] of CASES) {
     console.log(`INCONCLUSIVE ⚠  ${name} — rendering not canonical (base ${r.baseFont}px, coarse=${r.coarse}); verdict unreadable`)
     fail++; continue
   }
-  if (!isControl && r.atoms === 0) { console.log(`BLIND     ⚠  ${name} — expected NodeViews, found 0`); fail++; continue }
+  // The tracked-changes cases test a MARK, not a NodeView, so "no atoms" is correct there.
+  if (!isControl && !name.startsWith('tracked changes') && r.atoms === 0) { console.log(`BLIND     ⚠  ${name} — expected NodeViews, found 0`); fail++; continue }
 
   rows.push({ name, ...r })
   const ok = r.midline === 0

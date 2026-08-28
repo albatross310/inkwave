@@ -55,15 +55,18 @@ describe('the buffer after the first step', () => {
 describe('the 40% speed trim', () => {
   it('is applied to the per-step cadence', () => {
     expect(SCRUB_SPEED_TRIM).toBe(0.6)
-    expect(TRACKPAD_DETENT.rest).toBe(trimmed(7))   // 7 → 12
-    expect(TOUCH_DETENT.rest).toBe(trimmed(9))      // 9 → 15
-    expect(TRACKPAD_DETENT.rest).toBeGreaterThan(7)
-    expect(TOUCH_DETENT.rest).toBeGreaterThan(9)
+    expect(TRACKPAD_DETENT.rest).toBe(trimmed(14))  // 7 → 23, i.e. 3.4× the original travel
+    expect(TOUCH_DETENT.rest).toBe(trimmed(16))     // 9 → 27
+    expect(TRACKPAD_DETENT.rest).toBeGreaterThan(7 / SCRUB_SPEED_TRIM)  // slower than round 1
+    expect(TOUCH_DETENT.rest).toBeGreaterThan(9 / SCRUB_SPEED_TRIM)
   })
 
-  it('is NOT applied to the arming distance — starting the scrub is no harder', () => {
-    expect(TRACKPAD_DETENT.first).toBe(34)
-    expect(TOUCH_DETENT.first).toBe(38)
+  it('the arming distance went DOWN — "the first scroll is too hard to find"', () => {
+    // Round 2. The two complaints pull opposite ways: easier to START, slower once started. A test
+    // that asserted one number for both would have to pick a side.
+    expect(TRACKPAD_DETENT.first).toBeLessThan(34)
+    expect(TOUCH_DETENT.first).toBeLessThan(38)
+    expect(TRACKPAD_DETENT.first).toBeLessThan(TRACKPAD_DETENT.rest) // arming is cheaper than a step
   })
 
   it('a long drag delivers ~40% fewer versions than the old cadence', () => {
@@ -71,8 +74,7 @@ describe('the 40% speed trim', () => {
     const longPx = 1000
     const before = swipe(longPx, old), after = swipe(longPx, TRACKPAD_DETENT)
     expect(after).toBeLessThan(before)
-    expect(after / before).toBeGreaterThan(0.5)
-    expect(after / before).toBeLessThan(0.68)
+    expect(after / before).toBeLessThan(0.45)  // ~3.4× the travel per step
   })
 })
 
@@ -87,14 +89,15 @@ describe('gesture state', () => {
     stepDetent(s, 500, TRACKPAD_DETENT)
     resetDetent(s)
     expect(s).toEqual({ accum: 0, started: false, buffered: false })
-    expect(stepDetent(s, 20, TRACKPAD_DETENT)).toBe(0) // 20px is inside `first` again
+    expect(stepDetent(s, TRACKPAD_DETENT.first - 1, TRACKPAD_DETENT)).toBe(0) // inside `first` again
   })
 
   it('a reversal inside the dead zone still costs the full buffer to leave it', () => {
+    const { first, buffer, rest } = TRACKPAD_DETENT
     const s = newDetent()
-    expect(stepDetent(s, 40, TRACKPAD_DETENT)).toBe(1)  // armed, 6px into the buffer
-    expect(stepDetent(s, -6, TRACKPAD_DETENT)).toBe(0)  // back to 0
-    expect(stepDetent(s, 60, TRACKPAD_DETENT)).toBe(0)  // 60 < buffer 68
-    expect(stepDetent(s, 20, TRACKPAD_DETENT)).toBe(1)  // crosses it, then one rest
+    expect(stepDetent(s, first + 6, TRACKPAD_DETENT)).toBe(1)   // armed, 6px into the buffer
+    expect(stepDetent(s, -6, TRACKPAD_DETENT)).toBe(0)          // back to 0
+    expect(stepDetent(s, buffer - 4, TRACKPAD_DETENT)).toBe(0)  // still inside the dead zone
+    expect(stepDetent(s, 4 + rest, TRACKPAD_DETENT)).toBe(1)    // crosses it, then one rest
   })
 })

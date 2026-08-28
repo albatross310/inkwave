@@ -22,7 +22,11 @@
 // distance would make the scrub HARDER to start, which is the opposite of what was asked; the
 // complaint is about how fast it runs once started.
 
-/** Peter's 40%: a step now costs 1/0.6 of the px it used to. */
+/** Peter's 40%, then his correction. ROUND 1 asked for "40% off the net scroll speed"; ROUND 2, on
+ *  feeling it: "I'm still finding the first scroll too hard to find and subsequent notches go past
+ *  too quickly." Those pull in OPPOSITE directions and the single knob could not serve both — the
+ *  arming distance and the cadence are different complaints about different moments, so they are
+ *  different numbers now (see the configs at the bottom). The trim remains what scales the CADENCE. */
 export const SCRUB_SPEED_TRIM = 0.6
 
 export type DetentConfig = {
@@ -71,8 +75,19 @@ export function stepDetent(s: DetentState, delta: number, cfg: DetentConfig): nu
   return net
 }
 
-// The two surfaces' constants, in one place. FIRST is each surface's existing arming distance
-// (unchanged — see the speed-trim note); BUFFER is twice it, so the dead zone is unmistakably a
-// dead zone at the scale of the gesture that just armed it; REST is the old cadence, trimmed.
-export const TRACKPAD_DETENT: DetentConfig = { first: 34, buffer: 68, rest: trimmed(7) }  // rest 12
-export const TOUCH_DETENT: DetentConfig    = { first: 38, buffer: 76, rest: trimmed(9) }  // rest 15
+// The two surfaces' constants, in one place.
+//
+// FIRST — "too hard to find" (Peter, round 2). Nearly halved from the 34/38 that shipped for years:
+// the first version has to arrive under a small, ordinary nudge, because it is the ONLY thing most
+// swipes are asking for. What used to protect against a stray touch is now the BUFFER's job, which
+// is the better place for it — an accidental brush costs you one version and stops, where before it
+// cost nothing and then, one pixel later, cost you six.
+//
+// REST — "subsequent notches go past too quickly". Doubled again on top of round 1's 40%: 7 → 24px
+// on the trackpad, so a step now costs 3.4× the travel it did before any of this. A scrubber that
+// overshoots is worse than one that is slow, because overshooting makes you hunt.
+//
+// BUFFER — ~2.5× FIRST, so the dead zone is unmistakably a dead zone at the scale of the gesture
+// that just armed it, and a light flick cannot leave it.
+export const TRACKPAD_DETENT: DetentConfig = { first: 18, buffer: 46, rest: trimmed(14) } // rest 23
+export const TOUCH_DETENT: DetentConfig    = { first: 22, buffer: 54, rest: trimmed(16) } // rest 27
