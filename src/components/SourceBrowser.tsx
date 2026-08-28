@@ -66,6 +66,50 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 // can only ever show a refusal.
 export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
 
+// ── PLAYABLE MEDIA ───────────────────────────────────────────────────────────────────────────────
+// Peter, 2026-08-28: "if gpt can play youtube then surely we can?" — with a screenshot of ChatGPT
+// showing youtube.com in a panel, tabs and all.
+//
+// THE DIFFERENCE IS NOT EFFORT, IT IS WHAT KIND OF PROGRAM EACH ONE IS. X-Frame-Options and
+// frame-ancestors govern EMBEDDING ONE PAGE INSIDE ANOTHER PAGE, and that is the only thing a web
+// app can do: `<iframe>` (and `<embed>`/`<object>`) are the entire vocabulary, and all of them are
+// covered. That restriction is not an oversight we can route around — it is what stops a page
+// wrapping your bank in an invisible frame, so no browser offers an escape hatch. ChatGPT's panel
+// is not an iframe: it is a NATIVE app hosting a real browser view (Electron/WKWebView), which is a
+// TOP-LEVEL browsing context, and the header simply does not apply to it. The day Inkwave ships as
+// a desktop app it gets the same thing for free; as a web page it never can.
+//
+// BUT VIDEOS ARE A DIFFERENT MATTER, and here the answer is simply yes. YouTube publishes an
+// endpoint whose whole purpose is to be embedded, and it sends NO framing restriction at all
+// (checked: /embed/ returns 200 with no X-Frame-Options and no frame-ancestors, unlike /watch).
+// So a YouTube link is rewritten to it and plays. Same for Vimeo.
+const YT_ID = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([\w-]{6,})/i
+const VIMEO_ID = /vimeo\.com\/(?:video\/)?(\d{6,})/i
+
+/** A watch URL → the publisher's embeddable player. Anything else is returned unchanged. */
+export function embeddableUrl(url: string): string {
+  const yt = YT_ID.exec(url)
+  if (yt) {
+    let start = ''
+    try {
+      const t = new URL(url).searchParams.get('t') ?? ''
+      const secs = /^(\d+)s?$/.exec(t)?.[1]
+      if (secs) start = `?start=${secs}`
+    } catch { /* not parseable — no start time, which is fine */ }
+    // -nocookie: the same player, without YouTube setting tracking cookies for a video the reader
+    // opened from inside their own document. It frames identically (checked).
+    return `https://www.youtube-nocookie.com/embed/${yt[1]}${start}`
+  }
+  const v = VIMEO_ID.exec(url)
+  if (v) return `https://player.vimeo.com/video/${v[1]}`
+  return url
+}
+
+/** True when this URL became a player — the panel then shows it as media, not as a page. */
+export function isPlayable(url: string): boolean {
+  return embeddableUrl(url) !== url || /(youtube-nocookie\.com|player\.vimeo\.com)\/(embed|video)\//i.test(url)
+}
+
 /** True when this address can only be read, never framed — searches, and the engines themselves. */
 export function mustUseReader(url: string): boolean {
   return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing)\.[a-z.]+\//i.test(url)
@@ -245,6 +289,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // here rather than letting the live frame show a refusal is the difference between a browser
     // and a browser-shaped disappointment.
     if (mustUseReader(next)) setFramed(false)
+    // A video has no article to extract — the reader would fetch it and find nothing. Play it.
+    else if (isPlayable(next)) setFramed(true)
     setStack((st) => [...st.slice(0, idx + 1), next])
     setIdx((i) => i + 1)
   }
@@ -295,10 +341,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   useEffect(() => {
     if (!framed) { setFrameRefused(false); return }
     frameLoadedRef.current = false
-    setFrameRefused(likelyRefusesFraming(here))
+    setFrameRefused(!isPlayable(here) && likelyRefusesFraming(here))
     // 2.5s, not 7: a refused frame loads Chrome's error page almost instantly, so the deadline only
     // has to outlast a slow first byte. Peter sat on that grey face for seven seconds twice.
-    const t = setTimeout(() => { if (!frameLoadedRef.current) setFrameRefused(true) }, 2500)
+    // A player can take longer than a page to report load; it is also known-frameable, so the
+    // deadline must not condemn it.
+    const t = setTimeout(() => { if (!frameLoadedRef.current && !isPlayable(here)) setFrameRefused(true) }, 2500)
     return () => clearTimeout(t)
   }, [framed, here])
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
@@ -646,8 +694,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
               <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: '#fff' }}>
-                <iframe src={here} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }}
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                <iframe src={embeddableUrl(here)} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                  allowFullScreen
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
                   // NO referrerPolicy override: many image CDNs use the referer for hotlink
                   // protection, and stripping it is a plausible cause of the missing pictures Peter
                   // saw. The default (strict-origin-when-cross-origin) sends the origin only —

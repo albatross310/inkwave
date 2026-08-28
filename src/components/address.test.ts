@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, SEARCH_URL } from './SourceBrowser'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, SEARCH_URL } from './SourceBrowser'
 
 describe('addressToUrl', () => {
   it('a URL is a URL', () => {
@@ -47,5 +47,42 @@ describe('mustUseReader', () => {
   it('an ordinary source is left to whichever mode the reader chose', () => {
     expect(mustUseReader('https://plato.stanford.edu/entries/identity/')).toBe(false)
     expect(mustUseReader('https://en.wikipedia.org/wiki/Identity')).toBe(false)
+  })
+})
+
+describe('embeddableUrl', () => {
+  // MEASURED: youtube.com/watch sends X-Frame-Options; youtube.com/embed and
+  // youtube-nocookie.com/embed send NONE (checked directly, 200 with no framing header). That is
+  // the whole reason a video can play here while youtube.com itself cannot be shown.
+  it('a watch link becomes the player', () => {
+    expect(embeddableUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'))
+      .toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
+  })
+  it('short links, /shorts and /live too — every shape a YouTube link arrives in', () => {
+    expect(embeddableUrl('https://youtu.be/dQw4w9WgXcQ')).toContain('/embed/dQw4w9WgXcQ')
+    expect(embeddableUrl('https://www.youtube.com/shorts/abc123XYZ')).toContain('/embed/abc123XYZ')
+    expect(embeddableUrl('https://www.youtube.com/live/abc123XYZ')).toContain('/embed/abc123XYZ')
+  })
+  it('keeps a start time', () => {
+    expect(embeddableUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s')).toContain('?start=42')
+  })
+  it('vimeo gets its player', () => {
+    expect(embeddableUrl('https://vimeo.com/76979871')).toBe('https://player.vimeo.com/video/76979871')
+  })
+  it('leaves an ordinary page completely alone', () => {
+    const u = 'https://plato.stanford.edu/entries/identity/'
+    expect(embeddableUrl(u)).toBe(u)
+    expect(isPlayable(u)).toBe(false)
+  })
+  it('KNOWN-NEGATIVE: youtube.com itself is NOT playable — only a video is', () => {
+    // The home page and the search results are top-level pages that refuse framing, and no rewrite
+    // makes them embeddable. Claiming otherwise would be the overclaim.
+    expect(isPlayable('https://www.youtube.com/')).toBe(false)
+    expect(isPlayable('https://www.youtube.com/results?search_query=cats')).toBe(false)
+    expect(embeddableUrl('https://www.youtube.com/')).toBe('https://www.youtube.com/')
+  })
+  it('a video is recognised as playable both before and after rewriting', () => {
+    expect(isPlayable('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true)
+    expect(isPlayable('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')).toBe(true)
   })
 })
