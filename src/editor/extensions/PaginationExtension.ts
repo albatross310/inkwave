@@ -1857,6 +1857,10 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               }
             }
             let tClear = 0, tCompute = 0, tRestore = 0, tDispatch = 0 // perflog phase attribution (DOM path)
+            // Held across the try/finally so the scroll can be re-asserted AFTER the decorations
+            // land — see the note at the dispatch below. Null on the arith path (no DOM measure).
+            let scrollerRef: HTMLElement | null = null
+            let savedTopRef = 0
             let tPhase = performance.now()
             if (!arithMeasured) {
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
@@ -1879,6 +1883,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               ? surfaceEl : null
             const savedTop = scroller ? scroller.scrollTop : window.scrollY
             const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
+            scrollerRef = scroller; savedTopRef = savedTop
             tPhase = performance.now()
             try {
               // The gap widgets are display:block, so they FORCE line breaks — which means a word
@@ -1939,6 +1944,25 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               lastSet = set
             }
             view.dispatch(view.state.tr.setMeta(KEY, lastSet).setMeta('addToHistory', false))
+            // ⚠ RE-ASSERT THE SCROLL AFTER THE GAPS ARE BACK (2026-08-28) — Peter's "the doc keeps
+            // jumping down… it doesn't happen straight away… it's either on a timer or when
+            // something loads", reported while he was reading in the SOURCE PANEL with the editor
+            // idle. That is the signature of this measure: it is idle-gated, so it fires seconds
+            // after you stop, with nobody looking at the document it moves.
+            // THE ORDER WAS WRONG. The measure CLEARS the gap widgets first (so the DOM reflows to
+            // its natural wrapping), which makes a paginated document dramatically SHORTER — every
+            // page gap is a tall block. The browser then CLAMPS scrollTop to that shorter range.
+            // `savedTop` was restored inside the `finally`, i.e. while the gaps were still gone —
+            // so the write was clamped a second time, and only then were the gaps dispatched back.
+            // The document grew again around a scroll position that had already been squashed.
+            // Same shape as the PDF zoom anchor fixed earlier today: the arithmetic was right and
+            // applied one layout too early. Assert it again now that the document is its real
+            // height, and once more next frame for the paint that follows.
+            if (scrollerRef) {
+              if (scrollerRef.scrollTop !== savedTopRef) scrollerRef.scrollTop = savedTopRef
+              const el2 = scrollerRef, want = savedTopRef
+              requestAnimationFrame(() => { if (Math.abs(el2.scrollTop - want) > 1) el2.scrollTop = want })
+            }
             tDispatch = performance.now() - tPhase
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
             if (gapped) schedulePaint()

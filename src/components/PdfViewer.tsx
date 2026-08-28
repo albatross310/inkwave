@@ -86,9 +86,11 @@ export function computeTextFit(
   inputs: { pageW: number; ext: { x0: number; x1: number } | null } | null,
   clientWidth: number,
   fallback: number,
+  /** Space reserved to the right for notes — the page must fit BESIDE it, not behind it. */
+  reservedRight = 0,
 ): number {
   if (!inputs) return fallback
-  const containerW = clientWidth - 24
+  const containerW = clientWidth - 24 - reservedRight
   const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
   if (!inputs.ext) return pageFit
   const w = inputs.ext.x1 - inputs.ext.x0
@@ -258,6 +260,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // that a drag would otherwise also fire.
   const selectedNoteRef = useRef<{ id: string; remove: () => void } | null>(null)
   const dragMovedRef = useRef<string | null>(null)
+  // How far past the page you can scroll. Enough for a text note at the margin, and 0 at fit.
+  const PDF_OVERSCROLL_PX = 180
+  // ⚠ THE MARGIN HAS TO RESIZE THE PAGE (Peter, 2026-08-28: "this button doesn't appear to be
+  // working"). It DID pad the scroller — but every fit calculation measures `clientWidth`, which
+  // padding does not change, so the page kept its old size, overflowed into the new strip and the
+  // margin was only reachable by scrolling. Reserving space that the page then covers is the same
+  // as reserving nothing. Now the reserve is a NUMBER shared by the padding and the fit, so the
+  // page shrinks and the margin is beside it, which is the whole point of asking for one.
+  const commentMarginRef = useRef(0)
   const [commentMargin, setCommentMargin] = useState(() => {
     try { return localStorage.getItem('inkwave:pdfCommentMargin') === '1' } catch { return false }
   })
@@ -265,7 +276,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const heldRef = useRef(false)
   // Per-tool colour memory: underline/strike DEFAULT to dark blue (Peter, 2026-07-10); clicking a
   // swatch while a tool is armed re-colours THAT tool and is remembered for the session.
-  const toolColorsRef = useRef<Partial<Record<ToolKind, string>>>({ underline: DARK_BLUE, strike: DARK_BLUE })
+  // Sticky notes default to YELLOW (Peter, 2026-08-28: "the background should be yellow by
+  // default") — the colour a sticky note is, and what the ▮ highlighter already defaults to.
+  const toolColorsRef = useRef<Partial<Record<ToolKind, string>>>({ underline: DARK_BLUE, strike: DARK_BLUE, text: COLORS[0] })
   function armTool(kind: ToolKind | null) {
     setTool(kind)
     if (kind && kind !== 'erase') setColor(toolColorsRef.current[kind] ?? COLORS[0])
@@ -1037,6 +1050,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
+  // Re-fit as soon as the margin opens or closes: it changes the width the page has to fit into,
+  // which is exactly what the ResizeObserver would react to if the PANEL had changed instead.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || status !== 'ready' || zoomStateRef.current !== 1) return
+    const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current, commentMarginRef.current)
+    if (Math.abs(fit - fitScaleRef.current) < 0.001) return
+    fitScaleRef.current = fit
+    void renderPages(fit)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentMargin, status])
+
   // ── DELETE REMOVES THE SELECTED NOTE (Peter, 2026-08-28) ─────────────────────────────────────
   // The note's own keydown only fires while the note has focus, and a tap on the page furniture
   // takes it away while the note still LOOKS selected. Scoped to this panel's root and skipped
@@ -1100,7 +1125,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     let baseW = sc.clientWidth
     let baseSt: number | null = null // scrollTop at gesture start — frames compose from it
     let settle: ReturnType<typeof setTimeout> | undefined
-    const fitFor = (w: number): number => computeTextFit(fitInputsRef.current, w, fitScaleRef.current)
+    const fitFor = (w: number): number => computeTextFit(fitInputsRef.current, w, fitScaleRef.current, commentMarginRef.current)
     const ro = new ResizeObserver(() => {
       const w = sc.clientWidth
       if (w === baseW) return
@@ -1626,6 +1651,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     await createHighlight(info, 'highlight', color, link)
   }
 
+  const overscrollPx = zoom > 1.02 ? PDF_OVERSCROLL_PX : 0
+  const commentMarginPx = commentMargin
+    ? Math.round(Math.min(320, Math.max(120, (scrollRef.current?.clientWidth ?? 800) * 0.26)))
+    : 0
+  commentMarginRef.current = commentMarginPx
+
   return (
     <div ref={rootRef} style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       onMouseEnter={() => { hoverRef.current = true }} onMouseLeave={() => { hoverRef.current = false }}>
@@ -1714,15 +1745,23 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               style={{
                 width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
+                border: `1px solid ${active ? INK : '#d6cfe0'}`,
                 // THE BUTTON WEARS ITS OWN COLOUR (Peter, 2026-08-28: "the colour of these buttons
                 // needs to reflect the colour chosen"). Now that each palette lives under its tool,
                 // the tool is the only place the choice is visible — a fixed yellow ▮ over a pink
                 // highlighter is a control lying about what it will do. Read from the ref, which is
                 // fresh on every render because setColor re-renders.
-                color: t.kind === 'highlight' || t.kind === 'text'
-                  ? (toolColorsRef.current[t.kind] ?? (t.kind === 'highlight' ? COLORS[0] : DARK_BLUE))
-                  : INK,
+                // ⚠ A NOTE IS A COLOURED PIECE OF PAPER, SO THE BUTTON IS TOO (Peter, 2026-08-28:
+                // "with the text colour, it should be the background not the T that gets coloured",
+                // "the background should be yellow by default"). The highlighter's colour lives in
+                // its ▮ mark, which IS the ink; a sticky note's colour is the SHEET, and a coloured
+                // letter T on white said the wrong thing about what the tool would produce.
+                // The `text` tool's SHEET colour wins over the armed tint: which colour the note
+                // will be is the more useful fact, and the ring already shows it is armed.
+                ...(t.kind === 'text'
+                  ? { background: toolColorsRef.current.text ?? COLORS[0], color: '#2a2a2a' }
+                  : { background: active ? `${INK}14` : '#fff',
+                      color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : INK }),
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
@@ -1817,7 +1856,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onClick={() => {
             const el = scrollRef.current
             if (!el) return
-            const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current)
+            const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current, commentMarginRef.current)
             setZoom(1)
             fitScaleRef.current = fit
             renderedZoomRef.current = 1
@@ -1852,10 +1891,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onClick={() => setDontAddPages(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '1rem',
             border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e' }}>
-          {/* # with a strike drawn at the exact vertical centre → symmetric. */}
-          <span style={{ position: 'relative', lineHeight: 1 }}>#
-            <span aria-hidden="true" style={{ position: 'absolute', left: -2, right: -2, top: '50%', height: 1.5, background: 'currentColor', transform: 'translateY(-50%)' }} />
-          </span>
+          {/* ⚠ REDRAWN (Peter, 2026-08-28: "this button is really ugly. Do you think you can do
+              better"). It was a text "#" with an absolutely-positioned 1.5px bar dragged across its
+              middle — two glyph-metric hacks fighting each other, and it looked it. Now one SVG: a
+              page with a folded corner and a struck-through page number, which says what the toggle
+              actually does (don't add page numbers to the citation) instead of spelling it. */}
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none"
+            stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 3h8l4 4v14H6z" />
+            <path d="M14 3v4h4" />
+            <path d="m8.5 17.5 7-7" stroke="#b45309" strokeWidth="1.8" />
+            <text x="12" y="17" textAnchor="middle" fontSize="7" stroke="none" fill="currentColor">7</text>
+          </svg>
         </button>
         {sideButtons}
         {dockButton}
@@ -1913,11 +1960,22 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         // The comment margin is PADDING on the scroller, not a change to the page: a note's position
         // is a position on the page, so turning the margin on or off can never move one.
         style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3',
-          padding: 12, paddingRight: commentMargin ? 'clamp(120px, 26%, 320px)' : 12,
+          padding: 12, paddingRight: 12 + commentMarginPx,
           touchAction: tool === 'text' || tool === 'erase' ? 'none' : 'auto',
           WebkitUserSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined,
           userSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined }}>
-        <div ref={viewerRef} className="pdfViewer" style={{ '--scale-factor': 1 } as React.CSSProperties} />
+        {/* ⚠ ROOM TO SCROLL PAST THE PAGE (Peter, 2026-08-28: "if you're too zoomed in you can't
+            scroll onto the pdf background. But we should allow one to scroll horizontally a bit of a
+            way — enough to accommodate for textboxes and the like one might want to put on the edge
+            of the document"). The scroll range is the CONTENT's width, so at zoom the page's own
+            edges are the hard limits and a note placed at the margin sits where you cannot reach it.
+            A gutter on the VIEWER (not the scroller) adds that reach without touching containerW,
+            which every fit calculation is measured from — padding the scroller instead would move
+            fit-to-text by 2×GUTTER and quietly change what "flush" means.
+            Only while zoomed: at fit the page already sits in the pane and a scrollbar that buys
+            nothing is just a scrollbar. */}
+        <div ref={viewerRef} className="pdfViewer"
+          style={{ '--scale-factor': 1, paddingLeft: overscrollPx, paddingRight: overscrollPx } as React.CSSProperties} />
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
