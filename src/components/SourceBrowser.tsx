@@ -130,6 +130,18 @@ export function isPlayable(url: string): boolean {
 }
 
 /** True when this address can only be read, never framed — searches, and the engines themselves. */
+/** Was this address a search we issued? */
+export function isSearch(url: string): boolean {
+  return url.startsWith(SEARCH_URL) || /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|mojeek)\.[a-z.]+\//i.test(url)
+}
+/** The words the reader typed, recovered from whichever search URL they became. */
+export function queryOf(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.searchParams.get('q') ?? u.searchParams.get('query') ?? u.searchParams.get('search') ?? ''
+  } catch { return '' }
+}
+
 export function mustUseReader(url: string): boolean {
   return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing)\.[a-z.]+\//i.test(url)
 }
@@ -802,7 +814,34 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             // armed mode you cannot see is a mode you will forget you are in.
             data-iw-tool={tool ?? undefined}
             style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: leading, color: '#2c2a28' }}>
-            {error && !framed && (
+            {/* ⚠ A SEARCH THAT COULD NOT RUN SAYS WHY (2026-08-28). MEASURED from the deployed
+                function, not from a laptop: DuckDuckGo, Mojeek and the public SearX instances all
+                refuse or captcha requests from a datacenter IP, while ordinary sites (SEP,
+                Wikipedia) are served normally. My earlier verification ran from Peter's own machine
+                and could not see this — the same class of error as testing a local build and calling
+                the deploy healthy. Search worked in my terminal and never once worked in production.
+                Wikipedia's search DOES serve us, so it is offered as the one that works here; the
+                writer's own browser is not blocked by anyone, so a tab always works. */}
+            {error && !framed && isSearch(here) && (
+              <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: '#57534e' }}>
+                <div style={{ color: INK, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
+                <div style={{ maxWidth: 470, lineHeight: 1.55 }}>
+                  They serve people, not data centres, so the request is refused before any results
+                  exist. Your own browser isn’t blocked — opening the search in a tab always works.
+                </div>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  <button type="button" onClick={() => go(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(queryOf(here))}`)}
+                    className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                    Search Wikipedia here
+                  </button>
+                  <a href={`https://duckduckgo.com/?q=${encodeURIComponent(queryOf(here))}`} target="_blank" rel="noreferrer noopener"
+                    className="rounded-full px-3 py-1.5 text-white" style={{ background: `linear-gradient(135deg, #7a4fb0, ${INK})`, fontSize: '13px' }}>
+                    Search the web in a tab ↗
+                  </a>
+                </div>
+              </div>
+            )}
+            {error && !framed && !isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: '#57534e' }}>
                 <div style={{ color: INK, fontSize: '15px' }}>{error}</div>
                 {!likelyRefusesFraming(here) && (
@@ -1035,10 +1074,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             SECTIONS — which is also what you cite by. With no headings it falls back to a
             percentage rather than inventing a page number the source does not have. */}
         {!framed && doc && (
-          <div style={{ position: 'absolute', left: 8, bottom: 46, zIndex: 401, pointerEvents: 'none',
-            background: 'rgba(255,255,255,0.92)', color: '#57534e', border: '1px solid rgba(0,0,0,0.08)',
-            borderRadius: 999, padding: '2px 9px', fontSize: '11px', fontFamily: 'system-ui, sans-serif',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+          <div style={{ position: 'absolute', left: 8, bottom: 42, zIndex: 401, pointerEvents: 'none',
+            background: '#fff', color: INK, border: `1px solid ${INK}55`,
+            borderRadius: 999, padding: '3px 11px', fontSize: '12px', fontWeight: 600,
+            fontFamily: 'system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
             {headings.length > 1 ? `§ ${Math.min(headings.length, sectionNow + 1)} / ${headings.length}` : `${readPct}%`}
           </div>
         )}

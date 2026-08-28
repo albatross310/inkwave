@@ -11,9 +11,10 @@
 // party's page is committed here, and none of Peter's writing goes anywhere near a fixture.
 
 import { describe, it, expect } from 'vitest'
-// Untyped Node-only ESM module (lives in api/, outside the src TS project) — imported for real, so
-// this test exercises the SHIPPED extractor rather than a copy of it.
-import * as core from '../../api/_reader-core.mjs'
+// The SHIPPED extractor, imported for real. It lives in src/reader now (split from the serverless
+// core on 2026-08-28) precisely so it can run in the browser too — the server and the client call
+// this same function, and this test is what stops them being allowed to differ.
+import * as core from './extract.mjs'
 const { extractBlocks, decodeEntities } = core as unknown as {
   extractBlocks: (html: string, base: string) => { title: string; blocks: ReaderBlock[] }
   decodeEntities: (s: string) => string
