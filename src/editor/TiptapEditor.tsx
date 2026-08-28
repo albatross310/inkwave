@@ -1579,7 +1579,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (!pm || !(pm === document.activeElement || pm.contains(document.activeElement))) return
       const t = e.target as Element | null
       if (!t?.closest?.('.iw-touch-guard')) return
-      if (t.closest('input, textarea, select, [contenteditable]')) return
+      // Real form fields — and reading surfaces (the source reader's article body) — are exempt:
+      // they legitimately take focus / a selection. See the .iw-touch-guard CSS note.
+      if (t.closest('input, textarea, select, [contenteditable], [data-iw-selectable]')) return
       e.preventDefault()
     }
     document.addEventListener('pointerdown', onPointerDown, { capture: true })
@@ -1596,7 +1598,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!isTouchDevice()) return
     let guarded = false
     const start = (e: TouchEvent) => {
-      if (e.touches.length === 1) guarded = !!(e.target as Element | null)?.closest?.('.iw-touch-guard')
+      if (e.touches.length !== 1) return
+      const t = e.target as Element | null
+      // A reading surface inside a guarded panel is exempt (see the .iw-touch-guard CSS note):
+      // this half preventDefaults touchmove, which cancels a drag-select as surely as the CSS does.
+      guarded = !!t?.closest?.('.iw-touch-guard') && !t.closest('[data-iw-selectable]')
     }
     const move = (e: TouchEvent) => { if (guarded && e.cancelable) e.preventDefault() }
     const end = (e: TouchEvent) => { if (e.touches.length === 0) guarded = false }

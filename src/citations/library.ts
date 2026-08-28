@@ -1,6 +1,23 @@
-// The native citation library — device-scoped persistence in OPFS at library/citations.json.
-// This is the WHOLE library (every saved source, cited or not). It is NOT part of any provenance
-// hash — only the mode-resolved DISPLAYED subset (doc.bibliography) is hashed. See citations §3.
+// The native citation library — PER DOCUMENT, at library/<documentId>/citations.json.
+// This is the WHOLE library for one piece of writing (every source saved while working on it, cited
+// or not). It is NOT part of any provenance hash — only the mode-resolved DISPLAYED subset
+// (doc.bibliography) is hashed. See citations §3.
+//
+// ⚠ IT USED TO BE ONE LIBRARY FOR THE WHOLE ORIGIN (2026-08-28). Peter: "the references don't
+// appear to be being saved in the studio doc but only in the OPFS which means if you start a new doc
+// the old references are still there. Can we make it so they only save in the .studio doc and OPFS
+// only for the doc that's open." A single device-wide file meant every new document opened carrying
+// the last one's bibliography — a thesis's sources appearing in an unrelated essay — and a .studio
+// sent to someone else arrived without the library that made sense of it.
+//
+// Now: the per-document file is the WORKING store (no race with the document's own save — this is
+// its own file, not a read-modify-write of current.json), and `document.library` in the export
+// bundle is how it TRAVELS. Opening a .studio writes its library into that document's file.
+//
+// LEGACY, and it is deliberately NOT adopted automatically: the old device-wide file is left
+// exactly where it is, untouched. Auto-importing it into every document would reproduce the bug
+// this fixes. `legacyLibrarySize()` / `importLegacyLibrary()` exist so a writer can pull their old
+// sources into the document that needs them, once, on purpose.
 //
 // bibProvider holds the in-memory mirror; this module hydrates it on load and persists on change.
 
@@ -9,14 +26,26 @@ import { bibProvider } from './bibProvider'
 
 import { writeOpfsFile } from '../storage/opfsWrite'
 import { isNotFound } from '../storage/notFound'
+import { tabDocId } from '../storage/tabDoc'
 
 const DIR = 'library'
 const FILE = 'citations.json'
 
+/** The document whose library is loaded. Read at CALL time, never cached: a tab can switch
+ *  documents (storage/tabDoc.ts) and a stale id would persist one document's sources into
+ *  another's file — the bug this module was just fixed for, wearing a different hat. */
+function libPath(): string[] {
+  const id = tabDocId()
+  return id ? [DIR, id, FILE] : [DIR, FILE] // no document yet ⇒ the legacy path, read-only in practice
+}
+
 async function getDir(create: boolean): Promise<FileSystemDirectoryHandle | null> {
   try {
     const root = await navigator.storage.getDirectory()
-    return await root.getDirectoryHandle(DIR, { create })
+    let dir = await root.getDirectoryHandle(DIR, { create })
+    const id = tabDocId()
+    if (id) dir = await dir.getDirectoryHandle(id, { create })
+    return dir
   } catch {
     return null
   }
@@ -33,12 +62,14 @@ async function getDir(create: boolean): Promise<FileSystemDirectoryHandle | null
  * with opposite consequences, so they must be different outcomes: NotFound ⇒ [] (safe to write),
  * everything else ⇒ throw (the caller must NOT overwrite a library it could not read).
  */
-async function readFile(): Promise<CSLItem[]> {
+async function readFile(docId?: string | null): Promise<CSLItem[]> {
+  const id = docId === undefined ? tabDocId() : docId
   let dir: FileSystemDirectoryHandle
   try {
     dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(DIR, { create: false })
+    if (id) dir = await dir.getDirectoryHandle(id, { create: false })
   } catch (e) {
-    if (isNotFound(e)) return [] // no library directory yet — a genuine first-use absence
+    if (isNotFound(e)) return [] // no library for this document yet — a genuine first-use absence
     throw e // OPFS unavailable / transient — we do NOT know what is on disk; never write over it
   }
   let text: string
@@ -57,7 +88,7 @@ async function writeFile(items: CSLItem[]): Promise<void> {
   const dir = await getDir(true) // ensures the dir exists / bails when OPFS is absent
   if (!dir) return
   // iOS-safe write (no createWritable on WebKit — worker sync-access fallback).
-  await writeOpfsFile([DIR, FILE], JSON.stringify(items))
+  await writeOpfsFile(libPath(), JSON.stringify(items))
 }
 
 // ─── HYDRATION READINESS ──────────────────────────────────────────────────────────────────────
@@ -123,7 +154,13 @@ export async function loadLibrary(): Promise<void> {
   _libStarted = true
   try {
     const items = await readFile() // throws on a real read failure; [] ONLY on a genuine absence
-    if (items.length) bibProvider.setEntries(items, 'library')
+    // ⚠ SET UNCONDITIONALLY, INCLUDING EMPTY (2026-08-28). This was `if (items.length)`, which was
+    // harmless while there was ONE device-wide library — an empty read only ever meant first use.
+    // With a library PER DOCUMENT an empty read means "this document has no sources", and skipping
+    // the set leaves the PREVIOUS document's entries sitting in the tab-global provider: open a new
+    // piece and the old bibliography is still there, which is precisely the bug being fixed. This
+    // line only runs on a SUCCESSFUL read; a failure throws to the catch below and never clears.
+    bibProvider.setEntries(items, 'library')
     _libUnreadable = false // a completed, SUCCESSFUL read (even an empty one) — persist is safe now
   } catch {
     // We could NOT read the library — do not hydrate (leave bibProvider as-is), and BLOCK persists
@@ -204,4 +241,42 @@ export async function removeFromLibrary(citekey: string): Promise<boolean> {
   const had = bibProvider.remove(citekey)
   if (had) await persistLibrary()
   return had
+}
+
+
+// ── LEGACY DEVICE-WIDE LIBRARY (pre-2026-08-28) ──────────────────────────────────────────────────
+// Left on disk untouched. Nothing reads it automatically — that IS the fix — but a writer whose
+// sources are all in it needs a way to bring them into the document that needs them.
+
+/** How many sources sit in the old device-wide library. 0 when there isn't one (or it can't be
+ *  read — an unreadable legacy file must not be advertised as importable). */
+export async function legacyLibrarySize(): Promise<number> {
+  try { return (await readFile(null)).length } catch { return 0 }
+}
+
+/** Copy the old device-wide library into THIS document's library, merging rather than replacing —
+ *  a source already saved here keeps its citekey and its re-verification history. */
+export async function importLegacyLibrary(): Promise<number> {
+  const legacy = await readFile(null)
+  let added = 0
+  for (const item of legacy) {
+    if (bibProvider.get(item.id)) continue
+    bibProvider.upsert(item, 'library')
+    added++
+  }
+  if (added) await persistLibrary()
+  return added
+}
+
+/** Seed THIS document's library from a .studio that carried one (storage/openDoc.ts). Merge, never
+ *  replace: the file may be a copy the writer has since added to on this device. */
+export async function restoreLibraryFromBundle(items: CSLItem[] | undefined): Promise<void> {
+  if (!items?.length) return
+  let changed = false
+  for (const item of items) {
+    if (bibProvider.get(item.id)) continue
+    bibProvider.upsert(item, 'library')
+    changed = true
+  }
+  if (changed) await persistLibrary()
 }

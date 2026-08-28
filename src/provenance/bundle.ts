@@ -122,6 +122,15 @@ export interface ExportBundle {
     // cannot read as tampering with your thesis. `toolbarHash.test.ts` PROVES that rather than
     // asserting it in a comment.
     toolbar?: ToolbarConfig
+    // THE CITATION LIBRARY FOR THIS PIECE (2026-08-28). Peter: "make it so they only save in the
+    // .studio doc and OPFS only for the doc that's open." The library is now per-document
+    // (citations/library.ts) and this is how it TRAVELS — `document` is an ALLOW-LIST, so a field
+    // that is not named here does not reach the recipient, which is exactly how `doc.toolbar` sat
+    // in local OPFS for weeks looking like it worked.
+    // NOT HASHED: contentHash takes contentJson alone and bundleHash folds four explicit arguments,
+    // so the sources you keep beside a piece cannot read as tampering with its text. The CITED
+    // subset is a different thing and is hashed, per snapshot, as `bibliography`/`bibHash`.
+    library?: CSLItem[]
   }
   snapshots: Snapshot[]       // each with contentJson, contentHash, bundleHash, ots proof, receipts
   receipts: SignedReceipt[]   // the live-composition signed chain (held by the writer)
@@ -192,6 +201,10 @@ export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): 
       // Verbatim (carryToolbarConfig), never migrated: the flag state of the EXPORTING device must
       // not decide what the author's document says. See toolbarContract.ts.
       toolbar: carryToolbarConfig(doc.toolbar),
+      // The whole per-document library, cited or not — a source you saved while writing this piece
+      // and have not quoted yet is still part of the work. `bibliography` below is the CITED subset
+      // (a different thing, and the hashed one).
+      library: bibProvider.getAll(),
     },
     snapshots,
     receipts,

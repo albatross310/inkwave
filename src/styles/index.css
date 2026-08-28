@@ -971,6 +971,19 @@
     user-select: text;
     -webkit-user-select: text;
   }
+  /* ⚠ READING SURFACES INSIDE A GUARDED PANEL STAY SELECTABLE (2026-08-28, Peter: "the text also
+     needs to be selectable"). The guard was written for the toolbar and its drop-ups, where nothing
+     is prose — but the source reader is a PANEL FULL OF PROSE, and inheriting `user-select: none`
+     made its whole reason for existing (select a sentence, cite it) impossible. Marked opt-in with
+     `data-iw-selectable` rather than by dropping the guard: the panel's CHROME should still not
+     start an iOS loupe mid-tap. Half two of the guard (the pointerdown/touchmove preventDefault in
+     TiptapEditor) carries the same exemption — one without the other still blocks the selection. */
+  .iw-touch-guard [data-iw-selectable],
+  .iw-touch-guard [data-iw-selectable] * {
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+  }
 
   /* The footer toolbar band (pill height + keyboard-hug offset, live CSS vars written by
      TiptapEditor) is RESERVED space: scroll-padding makes every native/programmatic

@@ -186,6 +186,10 @@ async function openInkwaveFileInner(
   // documented offline-resolution source for in-text citations (resolve.ts), and a device whose
   // library write fails (the iOS dead-worker history) must still resolve them at the next boot.
   const bib = (data as { bibliography?: import('../types/document').CSLItem[] }).bibliography
+  // The WHOLE per-document library the sender kept beside this piece (2026-08-28) — a superset of
+  // `bib`, which is only what the text cites. Both merge; neither replaces, because this device may
+  // already hold sources added to a copy of the same document.
+  const lib = (data as { document?: { library?: import('../types/document').CSLItem[] } }).document?.library
   // THE STALE CASE — the one that ate his thesis. The file is a past state of this document, so the
   // document to open is the one ALREADY ON DISK, untouched: same id, same body, same receipts. The
   // file was not useless — its snapshots were merged in above, grow-only, which is pure gain — but
@@ -259,10 +263,13 @@ async function openInkwaveFileInner(
   // this used to run before the reveal and was most of the wait on PDF-heavy bundles. bibProvider
   // is reactive, so citations resolve the moment the library lands; PDFs/sidecars stream in behind.
   const pdfs = (data as { pdfs?: Record<string, { name: string; data: string }> }).pdfs
-  if (bib?.length || pdfs) {
+  if (bib?.length || lib?.length || pdfs) {
     void (async () => {
       try {
         await loadLibrary()
+        // The library first (the superset), then the cited entries — a cited item that is also in
+        // the library must land with whatever the sender had, and `upsert` is last-writer-wins.
+        for (const it of lib ?? []) bibProvider.upsert(it, 'library')
         for (const it of bib ?? []) bibProvider.upsert(it, 'library')
         await persistLibrary()
         // Embedded PDFs (explicit-download bundles) restore directly...
