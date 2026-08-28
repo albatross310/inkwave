@@ -60,7 +60,9 @@ const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', DARK_RED, DARK_BLUE]
 // click and hold on the highlight button", "a text colour click and hold on text that changes the
 // sticky note colour". A highlight wants a wash you can read through; a sticky note can be anything.
 const HIGHLIGHT_COLORS = COLORS.slice(0, 4)
-const NOTE_COLORS = COLORS
+// The dark pair are highlight-ink colours; a sticky note in maroon or navy is a note you cannot
+// read (Peter, 2026-08-28: "get rid of these last two colours for text boxes").
+const NOTE_COLORS = COLORS.slice(0, 4)
 type ToolKind = HighlightKind | 'erase'
 // ⚠ UNDERLINE AND STRIKETHROUGH ARE GONE FROM THE TOOL ROW (Peter, 2026-08-28: "let's get rid of
 // underline and strikethrough"). The KINDS stay in the model and in the renderer on purpose: a PDF
@@ -204,6 +206,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const scrollRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<HTMLDivElement>(null)
   const pagesRef = useRef<PageRef[]>([])
+  const pageNowRef = useRef(1)
+  const [pageNow, setPageNow] = useState(1)
+  const [pageTotal, setPageTotal] = useState(0)
   const observerRef = useRef<IntersectionObserver | null>(null)
   const highlightsRef = useRef<PdfHighlight[]>([])
   const docRef = useRef<PdfDoc | null>(null)
@@ -780,6 +785,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       // supersampled + lazily rendered. noteScroll is one Map write and NEVER touches storage; it
       // records only THAT we scrolled, never where (no trace — see pdfActivity.ts).
       noteScroll(citekey)
+      // WHICH PAGE AM I ON (Peter, 2026-08-28: "put an indicator at bottom left of both pdf and
+      // webpage of which page n/x you're at"). The page whose top is nearest the pane's own top and
+      // not below its middle — i.e. the one you are actually reading, not the one whose last line
+      // is scrolling away. Free: this handler already has every page's rect.
+      {
+        const mid = sc.getBoundingClientRect().top + sc.clientHeight * 0.35
+        let n = 1
+        for (let i = 0; i < pagesRef.current.length; i++) {
+          if (pagesRef.current[i].wrapper.getBoundingClientRect().top <= mid) n = i + 1
+        }
+        if (n !== pageNowRef.current) { pageNowRef.current = n; setPageNow(n) }
+      }
       // FULLSCREEN WAVE SWAY (Peter, 2026-07-10): while the PDF floats over the water, its scroll
       // drives the editor's --wave-x sway + dash twinkle exactly like editor scrolling does.
       // Scroll.tsx's sway effect folds this absolute top into its base+top formula.
@@ -856,6 +873,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         const doc = await task.promise
         if (cancelled) return
         docRef.current = doc as PdfDoc
+        setPageTotal((doc as PdfDoc).numPages)
 
         const containerW = (scrollRef.current?.clientWidth ?? 800) - 24
         const baseVp = (await doc.getPage(1)).getViewport({ scale: 1 })
@@ -1976,6 +1994,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             nothing is just a scrollbar. */}
         <div ref={viewerRef} className="pdfViewer"
           style={{ '--scale-factor': 1, paddingLeft: overscrollPx, paddingRight: overscrollPx } as React.CSSProperties} />
+        {status === 'ready' && pageTotal > 0 && (
+          <div aria-live="off" style={{ position: 'sticky', bottom: 6, left: 0, width: 'fit-content', marginLeft: 6,
+            zIndex: 6, pointerEvents: 'none', background: 'rgba(255,255,255,0.9)', color: '#57534e',
+            border: '1px solid rgba(0,0,0,0.08)', borderRadius: 999, padding: '2px 9px', fontSize: '11px',
+            fontFamily: 'system-ui, sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+            {pageNow} / {pageTotal}
+          </div>
+        )}
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>

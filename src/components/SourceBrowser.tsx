@@ -40,7 +40,8 @@ const INK = '#5c2d8a'
 // is theirs.
 // The PDF viewer's own palette, so a highlight means the same colour in both readers.
 const MARK_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
-const NOTE_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#7f1d1d', '#1e3a8a']
+// No dark pair: a sticky note in maroon or navy is a note you cannot read (Peter, 2026-08-28).
+const NOTE_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
 
 const READER_FONTS: Array<{ label: string; css: string }> = [
   { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
@@ -527,6 +528,29 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const toolRef = useRef(tool); toolRef.current = tool
   const markSelectionRef = useRef<(k: MarkKind) => void>(() => {})
 
+  const [sectionNow, setSectionNow] = useState(0)
+  const [readPct, setReadPct] = useState(0)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || framed) return
+    let raf = 0
+    const read = () => {
+      raf = 0
+      const range = Math.max(1, el.scrollHeight - el.clientHeight)
+      setReadPct(Math.min(100, Math.round((el.scrollTop / range) * 100)))
+      // The last heading whose top has passed the pane's upper third — the section you are IN.
+      const mark = el.getBoundingClientRect().top + el.clientHeight * 0.33
+      const hs = el.querySelectorAll('[id^="iw-rd-"]')
+      let n = 0
+      hs.forEach((h, i) => { if (h.getBoundingClientRect().top <= mark) n = i })
+      setSectionNow(n)
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read) }
+    read()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => { el.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
+  }, [doc, framed])
+
   const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
 
   /** One shape for every header action — that is what "symmetric" means here. */
@@ -920,6 +944,19 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 {located.orphaned.length} mark{located.orphaned.length === 1 ? '' : 's'} lost their place
               </span>
             )}
+          </div>
+        )}
+
+        {/* WHERE AM I (Peter, 2026-08-28: "an indicator at bottom left of both pdf and webpage of
+            which page n/x you're at"). A web article has no pages, so the honest unit is its own
+            SECTIONS — which is also what you cite by. With no headings it falls back to a
+            percentage rather than inventing a page number the source does not have. */}
+        {!framed && doc && (
+          <div style={{ position: 'absolute', left: 8, bottom: 46, zIndex: 401, pointerEvents: 'none',
+            background: 'rgba(255,255,255,0.92)', color: '#57534e', border: '1px solid rgba(0,0,0,0.08)',
+            borderRadius: 999, padding: '2px 9px', fontSize: '11px', fontFamily: 'system-ui, sans-serif',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+            {headings.length > 1 ? `§ ${Math.min(headings.length, sectionNow + 1)} / ${headings.length}` : `${readPct}%`}
           </div>
         )}
 
