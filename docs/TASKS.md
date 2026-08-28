@@ -66,9 +66,12 @@ don't worry about the existing highlights. just change the whole layout and meth
 
 ## Lane E — Verification debt (mine)
 
-- [ ] **E1** `scripts/tabdoc-probe/repro.mjs` — the CONTROL arm reproduces all three data-loss cells,
-      the FIXED arm still times out after the selector fix. UNDIAGNOSED. Until it is green, multi-tab
-      isolation is unverified, whatever the newtab probe says.
+- [x] **E1** DONE 2026-08-29. It was the PROBE, and the diagnosis is worth keeping: asking for a
+      document another tab holds is answered with the single-open screen — that IS the fix working —
+      but `waitEditor` demanded an EDITOR, so the fixed arm sat for two minutes and died, reading as
+      a regression. Cell B's own comment said a second tab is "deliberately NOT required to land on
+      it"; its code required exactly that. The comment and the code disagreed and the code was wrong.
+      Now: control reproduces loss in A, B, C · fixed loses nothing in any of them.
 - [ ] **E2** An end-to-end browser probe for the SOURCE READER. Every reader bug this session was
       found by Peter, not by me; my one attempt mounted nothing and printed PASS.
 - [ ] **E3** The PDF zoom snap-back fix (re-asserting the anchor after layout) is a MECHANISM, not a

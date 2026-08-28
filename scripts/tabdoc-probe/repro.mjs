@@ -42,9 +42,24 @@ const BASE = `http://localhost:${PORT}`
 // reason and read as a regression in the tab-identity fix.
 const EDITOR = '.ProseMirror[contenteditable="true"]'
 
+/**
+ * ⚠ THE BLOCKED SCREEN IS A LEGITIMATE LANDING (2026-08-29). Asking for a document another tab
+ * holds is answered with "This document is open in another window" and three choices — that IS the
+ * single-open fix working, and it is exactly what cell B's own comment says it will not require a
+ * tab to avoid. But this helper demanded an EDITOR, so the FIXED arm sat here for two minutes and
+ * died, which read as a regression in a fix from July. The comment and the code disagreed, and the
+ * code was wrong.
+ * Returns which one arrived, so a cell can score honestly instead of assuming.
+ */
 async function waitEditor(page) {
-  await page.waitForSelector(EDITOR, { timeout: 120000 }) // generous: several agents share this box and CPU starvation must not masquerade as a failed mount
+  const got = await Promise.race([
+    page.waitForSelector(EDITOR, { timeout: 120000 }).then(() => 'editor').catch(() => 'timeout'),
+    page.waitForFunction(() => /open in another window/i.test(document.body.innerText), null, { timeout: 120000 })
+      .then(() => 'blocked').catch(() => 'timeout'),
+  ])
+  if (got === 'timeout') throw new Error('neither an editor nor the blocked screen appeared')
   await page.waitForTimeout(1200) // the editor reveals behind a wave choreography
+  return got
 }
 
 async function typeInto(page, text) {
@@ -143,7 +158,7 @@ async function runScenario(browser, legacy) {
   const contested = await tabPointer(A)
   const B2 = await ctx.newPage()
   await B2.goto(`${BASE}/?doc=${contested}`, { waitUntil: 'domcontentloaded' }) // explicitly ask for it
-  await waitEditor(B2)
+  const b2Landed = await waitEditor(B2)
   // Tab A must still be editing the contested document, or nothing is contested. Tab B2 is
   // deliberately NOT required to land on it: refusing to put a second tab on a live document is a
   // legitimate way to keep both writers' words, and demanding "both tabs on one file" would forbid
@@ -152,15 +167,19 @@ async function runScenario(browser, legacy) {
   if (aStill !== contested) throw new Error(`CELL B VOID: tab A stopped holding the contested document (${aStill} != ${contested})`)
   const b2Doc = await tabPointer(B2)
   await typeInto(A, ' FROM-TAB-A')
-  await typeInto(B2, ' FROM-TAB-B')
+  // A BLOCKED tab has no document to type into — and that is the point of blocking it. Under the
+  // control it always gets an editor (on tab A's own file), which is how it destroys A's words.
+  if (b2Landed === 'editor') await typeInto(B2, ' FROM-TAB-B')
   await A.waitForTimeout(1500)
   const all = await allOpfsText(A)
   const joined = all.map((d) => d.text).join(' | ')
   const aLived = joined.includes('FROM-TAB-A')
-  const bLived = joined.includes('FROM-TAB-B')
+  // The invariant is "nobody's words are destroyed", not "both tabs wrote". A tab that was REFUSED
+  // the document wrote nothing, and nothing is exactly what it should have written.
+  const bLived = b2Landed === 'blocked' ? true : joined.includes('FROM-TAB-B')
   add('B', "two tabs wanting one document never destroy each other's words",
     aLived && bLived,
-    `tab B2 asked for ${contested} and landed on ${b2Doc === contested ? "THE SAME FILE" : "a document of its own"}; ` +
+    `tab B2 asked for ${contested} and ${b2Landed === 'blocked' ? 'was REFUSED it (the single-open screen)' : b2Doc === contested ? 'landed on THE SAME FILE' : 'landed on a document of its own'}; ` +
     `across ${all.length} documents in OPFS: ` +
     (aLived && bLived ? 'both survived'
       : !aLived && !bLived ? "BOTH tabs' words were DESTROYED"
