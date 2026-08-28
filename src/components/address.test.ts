@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, SEARCH_URL } from './SourceBrowser'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL } from './SourceBrowser'
 
 describe('addressToUrl', () => {
   it('a URL is a URL', () => {
@@ -84,5 +84,24 @@ describe('embeddableUrl', () => {
   it('a video is recognised as playable both before and after rewriting', () => {
     expect(isPlayable('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true)
     expect(isPlayable('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')).toBe(true)
+  })
+})
+
+describe('stripTracking', () => {
+  it('drops the campaign tag a link arrived with', () => {
+    // Peter saw `?utm_source=chatgpt.com` in the address bar — added by whoever gave him the link.
+    expect(stripTracking('https://plato.sydney.edu.au/entries/identity-time/?utm_source=chatgpt.com'))
+      .toBe('https://plato.sydney.edu.au/entries/identity-time/')
+    expect(stripTracking('https://x.com/a?fbclid=123&gclid=456')).toBe('https://x.com/a')
+  })
+  it('keeps parameters the page actually needs', () => {
+    // A search query, an article id, a page number — stripping these would break the link.
+    expect(stripTracking('https://html.duckduckgo.com/html/?q=identity')).toBe('https://html.duckduckgo.com/html/?q=identity')
+    expect(stripTracking('https://example.com/a?id=7&page=3')).toBe('https://example.com/a?id=7&page=3')
+  })
+  it('leaves a clean URL byte-identical, and never throws on rubbish', () => {
+    const u = 'https://plato.stanford.edu/entries/identity/'
+    expect(stripTracking(u)).toBe(u)
+    expect(stripTracking('not a url')).toBe('not a url')
   })
 })

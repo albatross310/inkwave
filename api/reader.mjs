@@ -5,7 +5,7 @@
 // CODE, never as the upstream's message: an upstream error string can echo the URL and internal
 // hostnames back to the caller, which is the one thing an SSRF guard exists to prevent leaking.
 
-import { readSource } from './_reader-core.mjs'
+import { readSource, checkFramable } from './_reader-core.mjs'
 import { clientIp, rateLimit } from './_ratelimit.mjs'
 
 const CODES = new Set(['bad url', 'blocked host', 'unreachable', 'not html', 'too large',
@@ -21,6 +21,12 @@ export default async function handler(req, res) {
   const { ok } = await rateLimit(clientIp(req), 'reader', 60, 60)
   if (!ok) { res.statusCode = 429; return res.end(JSON.stringify({ error: 'rate' })) }
   try {
+    // ?probe=1 — headers only: can this page be shown in a frame? (See checkFramable: the browser
+    // cannot answer this, because a refused frame fires `load` like any other.)
+    if (new URL(req.url, 'http://x').searchParams.get('probe') === '1') {
+      res.end(JSON.stringify(await checkFramable(url)))
+      return
+    }
     res.end(JSON.stringify(await readSource(url)))
   } catch (err) {
     const code = CODES.has(err?.message) ? err.message : 'fetch failed'

@@ -38,9 +38,10 @@ const devApi: PluginOption = {
     server.middlewares.use('/api/reader', async (req, res) => {
       res.setHeader('content-type', 'application/json')
       // @ts-expect-error - untyped Node-only ESM module
-      const { readSource } = await import('./api/_reader-core.mjs')
-      const url = new URL(req.url || '', 'http://x').searchParams.get('url') || ''
-      try { res.end(JSON.stringify(await readSource(url))) }
+      const { readSource, checkFramable } = await import('./api/_reader-core.mjs')
+      const params = new URL(req.url || '', 'http://x').searchParams
+      const url = params.get('url') || ''
+      try { res.end(JSON.stringify(params.get('probe') === '1' ? await checkFramable(url) : await readSource(url))) }
       catch (err) { res.statusCode = 502; res.end(JSON.stringify({ error: (err as Error)?.message || 'fetch failed' })) }
     })
     // GET /api/me — the authed caller's cadence entitlement (reads the Clerk token header).

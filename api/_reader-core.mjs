@@ -273,3 +273,37 @@ export async function readSource(url) {
   if (!blocks.length) throw new Error('no readable text')
   return { url: finalUrl, title, blocks }
 }
+
+
+// ── CAN THIS PAGE BE SHOWN IN A FRAME? ───────────────────────────────────────────────────────────
+// ⚠ THE BROWSER CANNOT TELL YOU, AND `onLoad` LIES. A refused frame fires `load` — on Chrome's own
+// "refused to connect" error page — so the obvious client-side detector (a deadline cancelled by
+// onLoad) never fires, which is exactly why Peter kept seeing the grey broken-page icon after that
+// detector was written. `contentWindow` and `contentDocument` throw identically for a real
+// cross-origin document and for the error page, so nothing in the page discriminates.
+//
+// The headers do, and only the server can read them. This asks for them and nothing else: no body
+// is parsed, nothing is stored, nothing is logged — the same posture as readSource above.
+export async function checkFramable(url) {
+  const u = await assertSafeUrl(url)
+  const res = await fetch(u.toString(), {
+    method: 'GET',                       // some hosts answer HEAD differently (or not at all)
+    redirect: 'follow',
+    signal: AbortSignal.timeout(8000),
+    headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' },
+  })
+  const xfo = (res.headers.get('x-frame-options') || '').toLowerCase()
+  const csp = (res.headers.get('content-security-policy') || '').toLowerCase()
+  const fa = /frame-ancestors\s+([^;]*)/.exec(csp)?.[1]?.trim()
+  // DENY / SAMEORIGIN both refuse us; ALLOW-FROM is obsolete and unreliable, so treat it as refusal.
+  if (xfo.includes('deny') || xfo.includes('sameorigin') || xfo.includes('allow-from')) {
+    return { framable: false, reason: `x-frame-options: ${xfo}` }
+  }
+  // frame-ancestors 'none'/'self', or any list that cannot include us. A wildcard or an https: source
+  // may permit us; we do not try to match our own origin here — over-refusing would hide pages that
+  // work, so only the unambiguous refusals count.
+  if (fa !== undefined && !/[*]|https:(?!\/)/.test(fa)) {
+    return { framable: false, reason: `frame-ancestors ${fa}` }
+  }
+  return { framable: true }
+}

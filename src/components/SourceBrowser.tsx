@@ -19,6 +19,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
+import { splitMath, hasMath } from '../reader/readerMath'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import { locateAll, markRuns, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
 import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
@@ -32,6 +35,20 @@ import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
+
+/** One formula. A KaTeX failure renders the SOURCE, never a gap: unreadable LaTeX still tells the
+ *  reader what the argument's step was; a hole does not. */
+function Katex({ tex, display }: { tex: string; display: boolean }) {
+  const html = useMemo(() => {
+    try { return katex.renderToString(tex, { displayMode: display, throwOnError: false, strict: false }) }
+    catch { return null }
+  }, [tex, display])
+  if (!html) return <code style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.9em' }}>{tex}</code>
+  return <span style={display ? { display: 'block', margin: '0.8em 0', textAlign: 'center' } : undefined}
+    // KaTeX's own output, from a string we control the shape of — this is the one place markup is
+    // generated rather than described, and it is generated HERE, not fetched.
+    dangerouslySetInnerHTML={{ __html: html }} />
+}
 
 // Reader-mode faces (Peter, 2026-08-28: "an option to change the font in the second mode to a
 // number of preset sexy fonts"). Drawn from the app's own certified set — these are already
@@ -129,6 +146,20 @@ export function addressToUrl(raw: string): string | null {
   return SEARCH_URL + encodeURIComponent(t)
 }
 
+/** Tracking parameters a link picked up on its way to you. Peter, 2026-08-28, seeing
+ *  `?utm_source=chatgpt.com` in the address bar: they are added by whoever gave you the link, not
+ *  by us — but a reader is a place you READ, and carrying someone's campaign tag into every request
+ *  and every citation is noise at best. Stripped on navigation; nothing else about the URL changes. */
+const TRACKING_PARAMS = /^(utm_[a-z]+|gclid|fbclid|mc_[a-z]+|ref|ref_src|igshid|si|spm|_hsenc|_hsmi|vero_id|oly_enc_id|oly_anon_id)$/i
+export function stripTracking(url: string): string {
+  try {
+    const u = new URL(url)
+    let hit = false
+    for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAMS.test(k)) { u.searchParams.delete(k); hit = true }
+    return hit ? u.toString() : url
+  } catch { return url }
+}
+
 /** DuckDuckGo wraps every result in a redirect (`/l/?uddg=<encoded>`). Unwrap it, so clicking a
  *  result goes to the SITE — otherwise every navigation from a search lands on a redirector, which
  *  the reader then has nothing to extract from. */
@@ -213,7 +244,13 @@ function Runs({ runs, onNavigate, marks, onEraseMark }: {
   return (
     <>
       {runs.map((r, i) => {
-        let node: React.ReactNode = r.text
+        // LaTeX arrives RAW because the publisher typesets it with MathJax in the browser and we
+        // fetched the page before any script ran (reader/readerMath.ts). KaTeX is already bundled.
+        let node: React.ReactNode = hasMath(r.text)
+          ? splitMath(r.text).map((seg, k) => seg.kind === 'text'
+              ? <span key={k}>{seg.value}</span>
+              : <Katex key={k} tex={seg.value} display={!!seg.display} />)
+          : r.text
         if (r.code) node = <code style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92em' }}>{node}</code>
         if (r.em) node = <em>{node}</em>
         if (r.strong) node = <strong>{node}</strong>
@@ -297,7 +334,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }
 
   const go = (raw: string) => {
-    const next = unwrapRedirect(raw)
+    const next = stripTracking(unwrapRedirect(raw))
     if (!/^https?:\/\//i.test(next)) return
     // ⚠ AN IN-PAGE ANCHOR IS NOT A NAVIGATION (2026-08-28, Peter: "on SEP these hyperlinks don't
     // work in reader mode"). SEP's contents list is `#Intr`, `#RelaIden`… — the SAME page with a
@@ -365,17 +402,25 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   })()
 
   const [frameRefused, setFrameRefused] = useState(false)
-  const frameLoadedRef = useRef(false)
+  // ⚠ ASK THE SERVER; `onLoad` LIES (2026-08-28, Peter: "we need to replace this with a proper
+  // error message that explains some pages can't be read in their original form"). A refused frame
+  // FIRES `load` — on Chrome's own "refused to connect" page — so the deadline-cancelled-by-onLoad
+  // detector written earlier never fired at all, and the grey broken-page icon kept showing. I had
+  // written that exact trap down in a probe ("onLoad is worthless on its own") and then relied on it
+  // in the component anyway. Nothing INSIDE the page discriminates either: contentWindow and
+  // contentDocument throw identically for a real cross-origin document and for the error page.
+  // The HEADERS do, and only the server can read them (/api/reader?probe=1 → checkFramable).
+  // The probe runs IN PARALLEL with the frame, so a page that works is never delayed by the question.
   useEffect(() => {
     if (!framed) { setFrameRefused(false); return }
-    frameLoadedRef.current = false
-    setFrameRefused(!isPlayable(here) && likelyRefusesFraming(here))
-    // 2.5s, not 7: a refused frame loads Chrome's error page almost instantly, so the deadline only
-    // has to outlast a slow first byte. Peter sat on that grey face for seven seconds twice.
-    // A player can take longer than a page to report load; it is also known-frameable, so the
-    // deadline must not condemn it.
-    const t = setTimeout(() => { if (!frameLoadedRef.current && !isPlayable(here)) setFrameRefused(true) }, 2500)
-    return () => clearTimeout(t)
+    if (isPlayable(here)) { setFrameRefused(false); return }   // an embed endpoint — known frameable
+    let live = true
+    setFrameRefused(likelyRefusesFraming(here))                 // the hosts we already know, instantly
+    fetch(`/api/reader?probe=1&url=${encodeURIComponent(here)}`)
+      .then((r) => r.json())
+      .then((j) => { if (live && j && j.framable === false) setFrameRefused(true) })
+      .catch(() => { /* the probe failing is not evidence of refusal — let the frame try */ })
+    return () => { live = false }
   }, [framed, here])
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -528,6 +573,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const toolRef = useRef(tool); toolRef.current = tool
   const markSelectionRef = useRef<(k: MarkKind) => void>(() => {})
 
+  // ⚠ REMEMBER WHERE YOU WERE WHEN SWITCHING MODES (Peter, 2026-08-28: "we also want the browser
+  // to remember where we were on the page when we hit change between read mode and original mode").
+  // Reader mode only, and that is not a shortcut — a live page is a cross-origin document, and the
+  // browser will not let us read or set its scroll. What we CAN do is return you to your place in
+  // the reader, which is the half that involves our own scroller.
+  const readerScrollRef = useRef(new Map<string, number>())
   const [sectionNow, setSectionNow] = useState(0)
   const [readPct, setReadPct] = useState(0)
   useEffect(() => {
@@ -545,11 +596,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       hs.forEach((h, i) => { if (h.getBoundingClientRect().top <= mark) n = i })
       setSectionNow(n)
     }
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read) }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read); readerScrollRef.current.set(here, el.scrollTop) }
     read()
+    // Restore the place we left this article at, once it has its height.
+    const want = readerScrollRef.current.get(here)
+    if (want && want > 8) requestAnimationFrame(() => { if (el.scrollHeight - el.clientHeight > want) el.scrollTop = want })
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => { el.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
-  }, [doc, framed])
+  }, [doc, framed, here])
 
   const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
 
@@ -654,6 +708,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               if (next) { go(next); (e.currentTarget as HTMLInputElement).blur() }
             }}
             placeholder="address or search"
+            title={framed
+              ? 'The page this panel loaded. Links you follow inside the live page are the site’s own — Inkwave can’t see where they go.'
+              : 'Type an address, or words to search'}
             spellCheck={false}
             className="iw-nightable"
             style={{ flex: 1, minWidth: 80, height: 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
@@ -664,21 +721,37 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               icons; it is an action like the others and now looks like one. The dock button CYCLES
               (below → right → left) so the two separate dock controls collapse into one, which is
               what makes four the right number rather than a number things were squeezed into. */}
-          {btn(framed ? '⌂' : '⛶', framed ? 'Reader view — selectable and citable' : 'Live page — the real site', () => setFramed((f) => !f), framed)}
+          {/* ⚠ THE TOGGLE NAMES THE PAGE IT WILL SHOW (Peter, 2026-08-28: "when I click the house
+              button at the top it goes to wikipedia.com not the current page"). Following a link
+              INSIDE the live frame is a cross-origin navigation: the browser tells us nothing about
+              it — not the URL, not that it happened — so switching to Reader can only go back to the
+              page we loaded. That is a boundary, not a bug we can close, and the tooltip says so
+              rather than letting the button look broken. */}
+          {btn(framed ? '⌂' : '⛶',
+            framed ? `Reader view — shows ${hostOf(here)}${new URL(here).pathname.length > 1 ? new URL(here).pathname : ''} (the page this panel loaded; links you followed inside the live page aren’t visible to Inkwave)` : 'Live page — the real site, with its own navigation',
+            () => setFramed((f) => !f), framed)}
           {btn('▤', `Dock: ${orientation === 'side' ? (dockSide === 'left' ? 'left' : 'right') : 'below'} — click to move`, cycleDock, false)}
           {btn('↗', 'Open in a browser tab', () => window.open(here, '_blank', 'noopener,noreferrer'), false)}
           {btn('✕', 'Close (Esc)', onClose, false)}
         </div>
 
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0" style={{ position: 'relative' }}>
           {/* Section list — the fastest way to cite a section is to not have to find it first. */}
           {/* ☰ SITS OVER THE NAVIGATOR (Peter, 2026-08-28: "this button needs to be over the
               navigator"), not adrift in the header — a control that hides a column belongs at the
               top of that column, where what it acts on is unambiguous. When the column is hidden it
               becomes a thin re-open tab in its place, so the action stays reversible in situ. */}
+          {/* A BUTTON, NOT A COLUMN (Peter, 2026-08-28: "move this little bar thing up to the top
+              and make it not a whole column just a little button at the top"). A full-height strip
+              to re-open a list is a piece of furniture standing in for a control; it also stole
+              22px of reading width down the entire article for a click you make once. */}
           {!framed && headings.length > 1 && !showNav && (
             <button type="button" title="Show the section list" onClick={toggleNav}
-              style={{ width: 22, flexShrink: 0, border: 'none', borderRight: '1px solid #e7e5e4', background: 'transparent', color: '#a8a29e', cursor: 'pointer', fontSize: '13px' }}>☰</button>
+              style={{ position: 'absolute', left: 6, top: 6, zIndex: 5, width: 24, height: 24,
+                borderRadius: 6, border: '1px solid var(--iw-nightable-border, #d6cfe0)',
+                background: 'rgba(255,255,255,0.92)', color: INK, cursor: 'pointer', fontSize: '13px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }}>☰</button>
           )}
           {!framed && showNav && headings.length > 1 && (
             <nav className="hidden md:flex flex-col overflow-hidden border-r border-stone-200" style={{ width: 220, fontSize: '12px' }}>
@@ -693,11 +766,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 2px' }}>☰</button>
               </div>
               <div className="overflow-y-auto py-1">
-              {headings.map((h) => (
+              {headings.map((h, hi) => (
                 <button key={h.id} type="button"
                   onClick={() => document.getElementById(`iw-rd-${h.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                   className="w-full text-left px-3 py-1 hover:bg-stone-50 flex items-center gap-1 group"
-                  style={{ color: '#57534e', paddingLeft: 8 + Math.min(3, Math.max(0, h.level - 1)) * 10 }}>
+                  // WHERE YOU ARE (Peter, 2026-08-28: "this lhs panel also needs to highlight where
+                  // we're currently at"). Driven by the same reading position the § n/x readout
+                  // uses, so the list and the counter can never disagree.
+                  style={{ paddingLeft: 8 + Math.min(3, Math.max(0, h.level - 1)) * 10,
+                    color: hi === sectionNow ? INK : '#57534e',
+                    fontWeight: hi === sectionNow ? 600 : 400,
+                    background: hi === sectionNow ? `${INK}12` : undefined,
+                    borderLeft: `2px solid ${hi === sectionNow ? INK : 'transparent'}` }}>
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{h.text}</span>
                   {onCite && (
                     <span role="button" title={`Cite this section`}
@@ -745,9 +825,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // fires no error event, so the detector is a deadline; generous, because a slow site
               // called "refused" would be the worse lie.
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: '#57534e' }}>
-                <div style={{ color: INK, fontSize: '15px' }}>{hostOf(here)} won’t open inside another page.</div>
-                <div style={{ maxWidth: 460, lineHeight: 1.5 }}>
-                  That’s a header the publisher sends with the page, and nothing here can override it.
+                <div style={{ color: INK, fontSize: '15px' }}>{hostOf(here)} can’t be shown in its original form here.</div>
+                <div style={{ maxWidth: 470, lineHeight: 1.55 }}>
+                  Some sites send a header telling browsers not to display them inside another page. It’s
+                  what stops a page wrapping your bank in a disguise, so nothing in Inkwave can override
+                  it. Reader view usually still works — it fetches the article text and shows it here,
+                  where you can highlight and cite it.
                 </div>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setFramed(false)}
@@ -763,7 +846,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
               <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: '#fff' }}>
-                <iframe src={embeddableUrl(here)} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }}
+                <iframe src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
