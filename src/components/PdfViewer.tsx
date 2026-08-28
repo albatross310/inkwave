@@ -1994,8 +1994,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             nothing is just a scrollbar. */}
         <div ref={viewerRef} className="pdfViewer"
           style={{ '--scale-factor': 1, paddingLeft: overscrollPx, paddingRight: overscrollPx } as React.CSSProperties} />
+        {/* Lower and clearer (Peter, 2026-08-28) — it sat on the text and read as part of it. */}
         {status === 'ready' && pageTotal > 0 && (
-          {/* Lower and clearer (Peter, 2026-08-28) — it sat on the text and read as part of it. */}
           <div aria-live="off" style={{ position: 'sticky', bottom: -2, left: 0, width: 'fit-content', marginLeft: 8,
             zIndex: 6, pointerEvents: 'none', background: '#fff', color: INK,
             border: `1px solid ${INK}55`, borderRadius: 999, padding: '3px 11px', fontSize: '12px',
