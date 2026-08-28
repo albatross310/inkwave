@@ -51,16 +51,50 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
   { label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
 ]
 
-/** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, no
- *  dot) goes to a search engine, because a reader who types words expects to find something rather
- *  than an error. */
+// ⚠ SEARCH GOES THROUGH THE READER, NOT THE LIVE FRAME — and it has to be DuckDuckGo's HTML
+// endpoint, not Google. Peter asked for Google ("effectively search google") and then hit the wall:
+// "having trouble using the google thingo". MEASURED, both ways, because this is exactly the kind of
+// thing that should not be guessed:
+//   • FRAMING: google.com, duckduckgo.com, html.duckduckgo.com and bing all send X-Frame-Options or
+//     frame-ancestors 'self'. NO search engine can be shown in the live frame. That is not something
+//     any code here can change.
+//   • READING: google.com/search fetched server-side returns ONE block and the words "click here" —
+//     its results need JavaScript, so there is nothing to extract. html.duckduckgo.com/html returns
+//     31 blocks and 123 real result links.
+// So: Google satisfies neither path, and DuckDuckGo's no-JS endpoint satisfies the reader path
+// completely. Searching switches to Reader mode, where it works, rather than to Live mode, where it
+// can only ever show a refusal.
+export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
+
+/** True when this address can only be read, never framed — searches, and the engines themselves. */
+export function mustUseReader(url: string): boolean {
+  return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing)\.[a-z.]+\//i.test(url)
+}
+
+/** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, or
+ *  no dot) goes to the search endpoint, because a reader who types words expects to find something
+ *  rather than an error. */
 export function addressToUrl(raw: string): string | null {
   const t = raw.trim()
   if (!t) return null
   if (/^https?:\/\//i.test(t)) return t
   const looksLikeHost = /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(t) && !/\s/.test(t)
   if (looksLikeHost) return `https://${t}`
-  return `https://www.google.com/search?q=${encodeURIComponent(t)}`
+  return SEARCH_URL + encodeURIComponent(t)
+}
+
+/** DuckDuckGo wraps every result in a redirect (`/l/?uddg=<encoded>`). Unwrap it, so clicking a
+ *  result goes to the SITE — otherwise every navigation from a search lands on a redirector, which
+ *  the reader then has nothing to extract from. */
+export function unwrapRedirect(url: string): string {
+  try {
+    const u = new URL(url)
+    if (/(^|\.)duckduckgo\.com$/i.test(u.hostname) && u.pathname.startsWith('/l/')) {
+      const target = u.searchParams.get('uddg')
+      if (target && /^https?:\/\//i.test(target)) return target
+    }
+  } catch { /* not a URL we can improve */ }
+  return url
 }
 
 /** Hosts known to refuse framing, so the FALLBACK can say so before showing an empty rectangle. */
@@ -203,8 +237,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     setMarks(next)
     try { localStorage.setItem(marksStoreKey, JSON.stringify(next)) } catch { /* private / full */ }
   }
-  const go = (next: string) => {
+  const go = (raw: string) => {
+    const next = unwrapRedirect(raw)
     if (!/^https?:\/\//i.test(next)) return
+    // A search (or a search engine) can only ever be READ — see the note on SEARCH_URL. Switching
+    // here rather than letting the live frame show a refusal is the difference between a browser
+    // and a browser-shaped disappointment.
+    if (mustUseReader(next)) setFramed(false)
     setStack((st) => [...st.slice(0, idx + 1), next])
     setIdx((i) => i + 1)
   }
@@ -218,6 +257,38 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     try { return localStorage.getItem('inkwave:readerLive') === '1' } catch { return false }
   })
   useEffect(() => { try { localStorage.setItem('inkwave:readerLive', framed ? '1' : '0') } catch { /* private */ } }, [framed])
+  // ── PAGE WIDTH IN LIVE MODE (Peter, 2026-08-28: "it's not using the whole space") ────────────
+  // The iframe's width IS the CSS viewport the site lays out for, so "not using the whole space" is
+  // not something we can fix by stretching anything — it is the site's own responsive layout at
+  // whatever width we hand it. Britannica at ~900px picks its DESKTOP layout, right rail and all,
+  // and leaves the rail empty; the same site at ~500px picks its phone layout and fills the width.
+  // So this is a CHOICE, and it belongs to the reader:
+  //   auto   — the panel's real width, 1:1 (what it did before)
+  //   narrow — lay out at 520px and scale UP: the phone layout, big text, no empty rails
+  //   wide   — lay out at 1400px and scale DOWN: the full desktop layout, smaller text
+  // Implemented by sizing the iframe to the chosen viewport and transform-scaling it to fit, which
+  // is the only way to give a cross-origin document a viewport it did not ask for.
+  const [pageWidth, setPageWidth] = useState<'auto' | 'narrow' | 'wide'>(() => {
+    try { return (localStorage.getItem('inkwave:readerPageWidth') as 'auto' | 'narrow' | 'wide') || 'auto' } catch { return 'auto' }
+  })
+  const frameHostRef = useRef<HTMLDivElement>(null)
+  const [hostBox, setHostBox] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = frameHostRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setHostBox({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    setHostBox({ w: el.clientWidth, h: el.clientHeight })
+    return () => ro.disconnect()
+  }, [framed])
+  const frameGeom = (() => {
+    const w = hostBox.w || 900, h = hostBox.h || 600
+    if (pageWidth === 'auto' || w === 0) return { w, h, scale: 1 }
+    const target = pageWidth === 'narrow' ? 520 : 1400
+    const scale = w / target
+    return { w: target, h: h / scale, scale }
+  })()
+
   const [frameRefused, setFrameRefused] = useState(false)
   const frameLoadedRef = useRef(false)
   useEffect(() => {
@@ -357,6 +428,22 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
   const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
 
+  /** One shape for every header action — that is what "symmetric" means here. */
+  const btn = (glyph: string, title: string, onPress: () => void, lit: boolean) => (
+    <button type="button" title={title} aria-label={title} onClick={onPress}
+      style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, display: 'flex', alignItems: 'center',
+        justifyContent: 'center', cursor: 'pointer', fontSize: '13px', lineHeight: 1,
+        border: `1px solid ${lit ? INK : 'var(--iw-nightable-border, #d6cfe0)'}`,
+        background: lit ? `${INK}14` : 'transparent', color: INK }}>{glyph}</button>
+  )
+
+  /** below → side-right → side-left → below. Two controls' worth of state on one button. */
+  const cycleDock = () => {
+    if (orientation !== 'side') { setStoredOrient('side'); writeStoredOrientation('side'); setDockSide('right'); writeStoredDockSide('right'); return }
+    if (dockSide === 'right') { setDockSide('left'); writeStoredDockSide('left'); return }
+    setStoredOrient('bottom'); writeStoredOrientation('bottom')
+  }
+
   const citeHeading = (text: string) => { onCite?.(locatorForHeading(text)); setSel(null) }
 
   /** Turn the live selection into a mark. The BLOCK is found by the selected text, not by walking
@@ -425,35 +512,15 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             style={{ flex: 1, minWidth: 80, height: 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
               border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
               color: 'inherit', outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
-          {/* READER ⇄ LIVE PAGE. Two honest modes rather than one that pretends: Reader is the
-              article in OUR document (so it can be selected and cited); Live is the real site with
-              its own CSS, images and navigation, which the browser keeps sealed off from us — so
-              nothing in it can be selected INTO a citation. The footer says which you are in. */}
-          <button type="button" title={framed ? 'Reader view (selectable, citable)' : 'Live page (full site, not selectable)'}
-            onClick={() => setFramed((f) => !f)}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: framed ? INK : '#a8a29e', fontSize: '13px', padding: '0 3px' }}>
-            {framed ? '⌂' : '⛶'}
-          </button>
-          <a href={here} target="_blank" rel="noreferrer noopener" className="underline whitespace-nowrap" style={{ color: INK, fontSize: '12px' }}>
-            open in a tab ↗
-          </a>
-          {/* Same two controls, same preferences, as the PDF panel — move one and both follow. */}
-          {isWide && !isPhone && (
-            <button type="button" title={orientation === 'side' ? 'Dock below' : 'Dock to the side'}
-              onClick={() => setStoredOrient((o) => { const n = o === 'side' ? 'bottom' : 'side'; writeStoredOrientation(n); return n })}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 3px' }}>
-              {orientation === 'side' ? '▤' : '▥'}
-            </button>
-          )}
-          {orientation === 'side' && (
-            <button type="button" title={`Move to the ${dockSide === 'left' ? 'right' : 'left'}`}
-              onClick={() => setDockSide((d) => { const n = d === 'left' ? 'right' : 'left'; writeStoredDockSide(n); return n })}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 3px' }}>
-              {dockSide === 'left' ? '→' : '←'}
-            </button>
-          )}
-          <button type="button" onClick={onClose} aria-label="Close"
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#78716c', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}>×</button>
+          {/* FOUR SYMMETRIC BUTTONS (Peter, 2026-08-28: "this could be reduced down to a button.
+              Four symmetric buttons"). "open in a tab ↗" was a wide underlined link sitting among
+              icons; it is an action like the others and now looks like one. The dock button CYCLES
+              (below → right → left) so the two separate dock controls collapse into one, which is
+              what makes four the right number rather than a number things were squeezed into. */}
+          {btn(framed ? '⌂' : '⛶', framed ? 'Reader view — selectable and citable' : 'Live page — the real site', () => setFramed((f) => !f), framed)}
+          {btn('▤', `Dock: ${orientation === 'side' ? (dockSide === 'left' ? 'left' : 'right') : 'below'} — click to move`, cycleDock, false)}
+          {btn('↗', 'Open in a browser tab', () => window.open(here, '_blank', 'noopener,noreferrer'), false)}
+          {btn('✕', 'Close (Esc)', onClose, false)}
         </div>
 
         <div className="flex flex-1 min-h-0">
@@ -540,8 +607,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             {framed && !frameRefused && (
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
-              <iframe src={here} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-                referrerPolicy="no-referrer" style={{ display: 'block', width: '100%', height: '100%', border: 'none', background: '#fff' }} />
+              <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: '#fff' }}>
+                <iframe src={here} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                  // NO referrerPolicy override: many image CDNs use the referer for hotlink
+                  // protection, and stripping it is a plausible cause of the missing pictures Peter
+                  // saw. The default (strict-origin-when-cross-origin) sends the origin only —
+                  // enough for those checks, and it leaks no path.
+                  style={{ display: 'block', border: 'none', background: '#fff',
+                    width: frameGeom.w, height: frameGeom.h,
+                    transform: frameGeom.scale === 1 ? undefined : `scale(${frameGeom.scale})`,
+                    transformOrigin: '0 0' }} />
+              </div>
             )}
             {doc && !framed && doc.blocks.map((b, i) => {
               if (b.kind === 'heading') {
@@ -665,6 +742,24 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 {located.orphaned.length} mark{located.orphaned.length === 1 ? '' : 's'} lost their place
               </span>
             )}
+          </div>
+        )}
+
+        {/* LIVE MODE gets its own thin bar — just the width choice. It is not a fifth header button
+            (Peter asked for four, symmetric) and it is not a markup tool, because there is nothing
+            in a live page we are allowed to mark. */}
+        {framed && !frameRefused && (
+          <div className="flex items-center gap-2 px-2 py-1.5 border-t border-stone-200"
+            style={{ fontSize: '11px', background: 'var(--iw-panel-bg, #faf8fc)', color: 'var(--iw-pill-fg, #78716c)' }}>
+            <span>Page width</span>
+            <select value={pageWidth} title="How wide a screen the site should lay out for"
+              onChange={(e) => { const v = e.target.value as 'auto' | 'narrow' | 'wide'; setPageWidth(v); try { localStorage.setItem('inkwave:readerPageWidth', v) } catch { /* private */ } }}
+              className="iw-nightable"
+              style={{ height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
+              <option value="auto">Fit the panel</option>
+              <option value="narrow">Big text (phone layout)</option>
+              <option value="wide">Wide (desktop layout)</option>
+            </select>
           </div>
         )}
 

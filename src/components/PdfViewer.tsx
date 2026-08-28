@@ -253,6 +253,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
   const [colorOpen, setColorOpen] = useState<ToolKind | null>(null)
+  // The currently SELECTED text note, remembered outside the DOM node so a document-level Delete
+  // can remove it however focus has drifted (see setSelected). `dragMovedRef` suppresses the click
+  // that a drag would otherwise also fire.
+  const selectedNoteRef = useRef<{ id: string; remove: () => void } | null>(null)
+  const dragMovedRef = useRef<string | null>(null)
   const [commentMargin, setCommentMargin] = useState(() => {
     try { return localStorage.getItem('inkwave:pdfCommentMargin') === '1' } catch { return false }
   })
@@ -355,11 +360,19 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           const delBtn = document.createElement('button')
           delBtn.textContent = '×'
           delBtn.title = 'Remove note'
-          delBtn.style.cssText = `position:absolute;left:${r0.x * pw + noteW - 8}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:12px;pointer-events:auto;z-index:3;display:none;`
+          // TOP-LEFT (Peter, 2026-08-28: "the x needs to be at top left not top right"). A note grows
+          // rightward and downward from its origin, so the right edge MOVES as the box is resized or
+          // its text wraps — the handle wandered. The origin does not.
+          delBtn.style.cssText = `position:absolute;left:${r0.x * pw - 8}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:12px;pointer-events:auto;z-index:3;display:none;`
           delBtn.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); removeNote() })
           let selected = false
           const setSelected = (on: boolean) => {
             selected = on
+            // Remembered OUTSIDE the node so Delete works even when focus has drifted off it — the
+            // note is focusable, but a tap anywhere on the page furniture takes focus away and the
+            // node's own keydown then never fires. Peter: "empty textboxes/comments need to delete
+            // when I hit delete and they are selected."
+            selectedNoteRef.current = on ? { id: hl.id, remove: removeNote } : (selectedNoteRef.current?.id === hl.id ? null : selectedNoteRef.current)
             delBtn.style.display = on ? 'block' : 'none'
             note.style.outline = on ? `2px solid ${INK}` : 'none'
           }
@@ -369,7 +382,46 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const rng = document.createRange(); rng.selectNodeContents(note); rng.collapse(false)
             const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(rng)
           }
-          note.addEventListener('click', () => {
+          // ── DRAG TO MOVE (Peter, 2026-08-28: "and need to move on click and drag") ──────────
+          // Threshold-based, so a plain click still selects: nothing moves until the pointer has
+          // travelled more than a few px, and only then is the click suppressed. Positions are
+          // FRACTIONS of the page (like every other annotation rect), so a moved note stays put
+          // through zoom, rotation and a re-render — dragging in px and storing px would pin it to
+          // one scale.
+          let drag: { px: number; py: number; x0: number; y0: number; moved: boolean } | null = null
+          note.addEventListener('pointerdown', (ev) => {
+            if (note.contentEditable === 'true') return   // editing: the pointer is placing a caret
+            drag = { px: ev.clientX, py: ev.clientY, x0: r0.x, y0: r0.y, moved: false }
+            note.setPointerCapture(ev.pointerId)
+          })
+          note.addEventListener('pointermove', (ev) => {
+            if (!drag) return
+            const dx = ev.clientX - drag.px, dy = ev.clientY - drag.py
+            if (!drag.moved && Math.hypot(dx, dy) < 4) return
+            drag.moved = true
+            note.style.cursor = 'grabbing'
+            // Convert screen px → page fractions through the CURRENT rendered size, so the note
+            // tracks the pointer exactly at any zoom.
+            const nx = Math.max(0, Math.min(1, drag.x0 + dx / pw))
+            const ny = Math.max(0, Math.min(1, drag.y0 + dy / ph))
+            r0.x = nx; r0.y = ny
+            note.style.left = `${nx * pw}px`; note.style.top = `${ny * ph}px`
+            delBtn.style.left = `${nx * pw - 8}px`; delBtn.style.top = `${ny * ph - 9}px`
+          })
+          const endDrag = (ev: PointerEvent) => {
+            if (!drag) return
+            const moved = drag.moved
+            drag = null
+            note.style.cursor = note.contentEditable === 'true' ? 'text' : 'pointer'
+            try { note.releasePointerCapture(ev.pointerId) } catch { /* already released */ }
+            if (moved) { dragMovedRef.current = hl.id; void saveHighlights(citekey, highlightsRef.current) }
+          }
+          note.addEventListener('pointerup', endDrag)
+          note.addEventListener('pointercancel', endDrag)
+
+          note.addEventListener('click', (ev) => {
+            // A drag is not a click. Without this, moving a note also selected (or edited) it.
+            if (dragMovedRef.current === hl.id) { dragMovedRef.current = null; ev.stopPropagation(); return }
             if (note.contentEditable === 'true') return
             if (selected) { enterEdit(); return } // second tap while selected = edit (touch dblclick substitute)
             setSelected(true); note.focus()
@@ -983,6 +1035,28 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // ── DELETE REMOVES THE SELECTED NOTE (Peter, 2026-08-28) ─────────────────────────────────────
+  // The note's own keydown only fires while the note has focus, and a tap on the page furniture
+  // takes it away while the note still LOOKS selected. Scoped to this panel's root and skipped
+  // whenever a real text field (or the note in edit mode) owns the keystroke.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const sel = selectedNoteRef.current
+      if (!sel) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, select')) return
+      if (t?.isContentEditable) return            // editing the note: Delete means delete a character
+      e.preventDefault()
+      selectedNoteRef.current = null
+      sel.remove()
+    }
+    root.addEventListener('keydown', onKey)
+    return () => root.removeEventListener('keydown', onKey)
   }, [])
 
   // ── ONE AXIS AT A TIME (Peter, 2026-08-28) ───────────────────────────────────────────────────
