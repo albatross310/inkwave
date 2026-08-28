@@ -49,7 +49,16 @@ function csp(nonce: string): string {
     "font-src 'self' https://fonts.gstatic.com data:",
     // blob: — the embedded-source PDF viewer frames a blob: URL of the OPFS-stored PDF (same-origin,
     // created by our own code) in the citation side panel.
-    "frame-src 'self' blob: https://js.stripe.com https://hooks.stripe.com https://m.stripe.network https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://clerk.iwzero.me https://clerk.inkwave.studio https://*.clerk.accounts.dev https://*.clerk.com https://challenges.cloudflare.com https://login.microsoftonline.com",
+    // ⚠ `https:` IS DELIBERATE (2026-08-28, Peter: "find a way to have an inbuilt browser open up
+    // the webpage in question for e.g. Stanford EP articles"). The source reader frames the page a
+    // citation points at, and a writer's sources are the open web — an allow-list would have to
+    // name every publisher anyone ever cites, which is not a list that can be right. What this
+    // widens is narrow: a framed cross-origin document is isolated by the browser (it cannot read
+    // our DOM, our storage or our OPFS, and we cannot read its selection — see the reader's own
+    // note), the iframe is additionally `sandbox`ed, and script-src/connect-src are UNTOUCHED, so
+    // nothing new can execute in OUR origin or talk to a new host on our behalf. Framing is the one
+    // capability that buys the feature.
+    "frame-src 'self' blob: https: https://js.stripe.com https://hooks.stripe.com https://m.stripe.network https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://clerk.iwzero.me https://clerk.inkwave.studio https://*.clerk.accounts.dev https://*.clerk.com https://challenges.cloudflare.com https://login.microsoftonline.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
   ].join('; ')

@@ -12,6 +12,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { NodeViewProps } from '@tiptap/react'
 import { NodeViewWrapper } from '@tiptap/react'
+import { formatLocator, asLocatorKind, mergesWithPdfPages, LOCATOR_KINDS } from '../../citations/locator'
+import { SourceBrowser } from '../../components/SourceBrowser'
 import { bibProvider } from '../../citations/bibProvider'
 import { subscribeCitationStyle } from '../../citations/citationsBus'
 import {
@@ -80,6 +82,9 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   const attrs = node.attrs as CitationAttrs
   const [segs, setSegs] = useState<Seg[]>([])
   const [pageEdit, setPageEdit] = useState<{ key: string; x: number; y: number; fromPage?: boolean } | null>(null)
+  // The in-app source reader (components/SourceBrowser.tsx) — read the page this citation points at
+  // without losing your place in the document.
+  const [readerUrl, setReaderUrl] = useState<{ url: string; title: string } | null>(null)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
 
@@ -122,8 +127,14 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
         const rest = [...new Set(hlPages.filter(p => !locSet.has(p)))].sort((x, y) => x - y)
         if (rest.length && (locSet.size || locStr.trim())) { plainPages = formatPages(rest); espLoc = locStr.trim() }
       }
-      const pages = item && !espLoc ? mergePages(locStr, hlPages) : ''
-      const pageLabel = pages ? (/[–-]/.test(pages) || /,/.test(pages) ? `pp. ${pages}` : `p. ${pages}`) : ''
+      // A SECTION IS NOT A PAGE (2026-08-28). Highlight-derived pages may only union with a PAGE
+      // locator — merging them into "§2.1" would print "§2.1, 7", two different quantities in one
+      // reference. For every other kind the locator stands alone and the highlight pages, if any,
+      // render as the plain (unlinked) list they already have.
+      const kind = asLocatorKind(a.locatorKind)
+      const canMerge = mergesWithPdfPages(kind)
+      const pages = item && !espLoc ? (canMerge ? mergePages(locStr, hlPages) : locStr.trim()) : ''
+      const pageLabel = formatLocator(pages, kind)
       return item
         // text is author-year only (pages passed empty) so the page can be its OWN clickable link.
         ? { key, text: oneCiteText(item, { suppressAuthor: a.suppressAuthor, pages: '' }), pages: pageLabel, plainPages, espLoc, pageNum: (espLoc ? pageFromLocator(espLoc) : pageFromLocator(pages)) ?? null, hasPdf: hasPdf(item), occ: occMap.get(key) ?? 1, found: true }
@@ -181,7 +192,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
   // Also rebuild when node attrs change (e.g., different citekeys after editing a citation).
   useEffect(() => {
     queueMicrotask(() => buildLabelRef.current())
-  }, [attrs.citekeys, attrs.suppressAuthor, attrs.locator, attrs.prefix, attrs.suffix])
+  }, [attrs.citekeys, attrs.suppressAuthor, attrs.locator, attrs.locatorKind, attrs.prefix, attrs.suffix])
 
   const hasMissing = segs.some(s => !s.found)
   const pre = attrs.prefix ? `${attrs.prefix} ` : ''
@@ -381,13 +392,27 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
             fontFamily: 'system-ui, sans-serif', userSelect: 'none',
           }}
         >
-          <span>p.</span>
+          {/* WHAT is being cited — page (the default, and what every existing citation keeps),
+              section, paragraph, chapter, line, note. Peter, 2026-08-28: "cite paragraphs etc."
+              You can also just TYPE it: "§2.1" or "ch. 2" is left exactly as written whatever this
+              says (citations/locator.ts), so the picker is a convenience, never a toll gate. */}
+          <select
+            ref={bindStopPM as unknown as React.Ref<HTMLSelectElement>}
+            value={asLocatorKind(attrs.locatorKind)}
+            onChange={e => updateAttributes({ locatorKind: e.target.value === 'page' ? null : e.target.value })}
+            title="What part of the source is being cited"
+            style={{ fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 3px', outline: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+          >
+            {LOCATOR_KINDS.map(k => (
+              <option key={k.kind} value={k.kind}>{k.short === '—' ? 'as written' : k.short}</option>
+            ))}
+          </select>
           <input
             ref={bindStopPM}
             autoFocus
             value={attrs.locator ?? ''}
             onChange={e => updateAttributes({ locator: e.target.value || null })}
-            placeholder="2, 4–6"
+            placeholder={asLocatorKind(attrs.locatorKind) === 'page' ? '2, 4–6' : '2.1'}
             style={{ width: 56, fontSize: '12px', border: `1px solid ${INK}33`, borderRadius: 4, padding: '2px 5px', outline: 'none' }}
           />
           {/* Go to the cited sentence: opens the embedded PDF at that quote if there is one, otherwise
@@ -404,6 +429,22 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
               />
             </>
           )}
+          {/* READ IT HERE — a web source opens in a panel over the document rather than a new tab
+              (Peter, 2026-08-28: "an inbuilt browser open up the webpage in question for e.g.
+              Stanford EP articles"). Only for web sources: a source with a PDF already has the
+              in-app PDF viewer, which is the better reader AND can see your selection. */}
+          {pageEditUrl && !hasPdf(bibProvider.get(pageEdit.key)) && (
+            <button type="button" title="Read this source here"
+              onClick={() => {
+                const label = segs.find(s => s.key === pageEdit.key)?.text ?? pageEdit.key
+                setReaderUrl({ url: pageEditUrl, title: label })
+                setPageEdit(null)
+              }}
+              style={{ fontSize: '12px', color: INK, background: 'transparent', border: `1px solid ${INK}33`,
+                borderRadius: 4, padding: '2px 7px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              read here
+            </button>
+          )}
           {/* Delete this page reference — only offered when the popover was opened from a PAGE NUMBER
               (not the author-year). Clears the manual pages AND removes this occurrence's highlights. */}
           {pageEdit.fromPage && (
@@ -416,6 +457,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
         </span>,
         document.body,
       )}
+      {readerUrl && <SourceBrowser url={readerUrl.url} title={readerUrl.title} onClose={() => setReaderUrl(null)} />}
     </NodeViewWrapper>
   )
 }

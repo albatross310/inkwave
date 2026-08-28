@@ -15,6 +15,9 @@ export interface CitationAttrs {
   prefix?: string | null
   suffix?: string | null
   locator?: string | null
+  /** What the locator counts (citations/locator.ts). null = page — the default every existing
+   *  citation keeps. DISPLAY ONLY: never read by citationText, so never in a hash. */
+  locatorKind?: string | null
   suppressAuthor?: boolean
   quote?: string | null   // pinpoint sentence selected in the source PDF (for open-at + highlight)
 }
@@ -48,6 +51,12 @@ export const CitationNode = Node.create({
       prefix:         { default: null },
       suffix:         { default: null },
       locator:        { default: null },
+      // WHAT the locator counts — pages, sections, paragraphs… (citations/locator.ts). DISPLAY
+      // ONLY: `citationText` emits the locator VALUE verbatim and never reads this, so a label
+      // cannot move a byte of pmToText, the contentHash, or anything anchored to Bitcoin.
+      locatorKind:    { default: null,
+        parseHTML: el => el.getAttribute('data-loc-kind') || null,
+        renderHTML: attrs => (attrs.locatorKind ? { 'data-loc-kind': String(attrs.locatorKind) } : {}) },
       suppressAuthor: { default: false },
       quote:          { default: null },
       // Stable per-INSTANCE id (set on insert). Lets pinpoints/highlights be scoped to THIS citation
