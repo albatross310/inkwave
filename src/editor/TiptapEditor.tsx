@@ -16,6 +16,7 @@ import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
 import { rememberReturn } from '../citations/citationNav'
+import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemory'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
@@ -144,6 +145,48 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     docRef.current = doc
   }, [doc])
 
+
+  // ── WHERE YOU WERE, ACROSS A HARD REFRESH (2026-08-28, Peter: "very useful as I have to keep
+  // hard refreshing for testing") ───────────────────────────────────────────────────────────────
+  // Written on a settled scroll, restored once the document has its real height — i.e. AFTER the
+  // reveal and the first pagination, because a paginated document is dramatically shorter until the
+  // gap widgets land and restoring against that shorter range would clamp the offset to nothing.
+  // The rule itself (clamp, refuse a materially different document, ignore the very top) is pure
+  // and lives in editor/scrollMemory.ts.
+  useEffect(() => {
+    const el = document.querySelector('.inkwave-editor-surface.iw-fill:not(.is-phone)') as HTMLElement | null
+    if (!el) return
+    const id = docRef.current?.id
+    if (!id) return
+    let saveTimer: ReturnType<typeof setTimeout> | undefined
+    const onScroll = () => {
+      clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => writeScrollMemory(id, el.scrollTop, el.scrollHeight), 400)
+    }
+    const mem = readScrollMemory(id)
+    let restored = false
+    const tryRestore = () => {
+      if (restored) return
+      const range = Math.max(0, el.scrollHeight - el.clientHeight)
+      const want = restoreOffset(mem, el.scrollHeight, range)
+      if (want == null) { restored = true; el.addEventListener('scroll', onScroll, { passive: true }); return }
+      el.scrollTop = want
+      // Only call it restored once it actually took — the height keeps growing while pages measure.
+      if (Math.abs(el.scrollTop - want) <= 2) {
+        restored = true
+        el.addEventListener('scroll', onScroll, { passive: true })
+      }
+    }
+    // Try across the settling window rather than once: fonts, pagination and the reveal each change
+    // the height, and a single attempt lands before the document is its real size.
+    const timers = [900, 1600, 2600, 4000].map((t) => setTimeout(tryRestore, t))
+    return () => {
+      timers.forEach(clearTimeout)
+      clearTimeout(saveTimer)
+      el.removeEventListener('scroll', onScroll)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.id])
 
   // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
   useEffect(() => { applyCrossoutMode() }, [])

@@ -29,6 +29,7 @@ import {
 } from './dockLayout'
 import { isTouchDevice } from '../editor/Scroll'
 import { tabDocId } from '../storage/tabDoc'
+import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
 
@@ -268,6 +269,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
   const [marks, setMarks] = useState<ReaderMark[]>([])
+  const [leading, setLeading] = useState(() => {
+    try { return Number(localStorage.getItem('inkwave:readerLeading')) || 1.62 } catch { return 1.62 }
+  })
   const [font, setFont] = useState(() => {
     try { return localStorage.getItem('inkwave:readerFont') || READER_FONTS[0].css } catch { return READER_FONTS[0].css }
   })
@@ -282,9 +286,30 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     setMarks(next)
     try { localStorage.setItem(marksStoreKey, JSON.stringify(next)) } catch { /* private / full */ }
   }
+  /** Same page, different #fragment — SEP's section links, and every "contents" list on the web. */
+  const sameDocHash = (a: string, bStr: string): string | null => {
+    try {
+      const x = new URL(a), y = new URL(bStr)
+      if (x.origin !== y.origin || x.pathname !== y.pathname || x.search !== y.search) return null
+      return y.hash ? y.hash.slice(1) : null
+    } catch { return null }
+  }
+
   const go = (raw: string) => {
     const next = unwrapRedirect(raw)
     if (!/^https?:\/\//i.test(next)) return
+    // ⚠ AN IN-PAGE ANCHOR IS NOT A NAVIGATION (2026-08-28, Peter: "on SEP these hyperlinks don't
+    // work in reader mode"). SEP's contents list is `#Intr`, `#RelaIden`… — the SAME page with a
+    // fragment. Pushing that onto the history stack refetches the whole article and lands you back
+    // at the top, which is indistinguishable from the link doing nothing. The extractor already
+    // keeps each heading's own id from the source (`b.id`), so the anchor has somewhere real to go.
+    const frag = sameDocHash(here, next)
+    if (frag) {
+      const el = document.getElementById(`iw-rd-${frag}`)
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+      // No heading with that id — fall through and let it navigate rather than silently doing
+      // nothing, which is the failure being fixed.
+    }
     // A search (or a search engine) can only ever be READ — see the note on SEARCH_URL. Switching
     // here rather than letting the live frame show a refusal is the difference between a browser
     // and a browser-shaped disappointment.
@@ -318,6 +343,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [pageWidth, setPageWidth] = useState<'auto' | 'narrow' | 'wide'>(() => {
     try { return (localStorage.getItem('inkwave:readerPageWidth') as 'auto' | 'narrow' | 'wide') || 'auto' } catch { return 'auto' }
   })
+  const onCloseRef = useRef(onClose); onCloseRef.current = onClose
+  const handingOverRef = useRef(false)
   const frameHostRef = useRef<HTMLDivElement>(null)
   const [hostBox, setHostBox] = useState({ w: 0, h: 0 })
   useEffect(() => {
@@ -413,7 +440,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // editor surface and every floating pill already know how to get out of the way.
   useEffect(() => {
     applyDockRoom(dockRoom({ open: true, fullscreen: false, orientation, dockSide, width, height }))
-    return () => applyDockRoom(NO_DOCK_ROOM)
+    return () => {
+      // Hand the strip over rather than blanking it: if a PDF is opening into the same dock, the
+      // editor must not snap wide for a frame and back again.
+      if (!handingOverRef.current) applyDockRoom(NO_DOCK_ROOM)
+      handingOverRef.current = false
+    }
   }, [orientation, dockSide, width, height])
 
   useEffect(() => {
@@ -435,6 +467,19 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // ⚠ ONE DOCK, ONE OCCUPANT (2026-08-28, Peter: "clicking a pdf when browser is open doesn't
+  // replace it. They should seamlessly replace each other with the same page sizing etc"). Both
+  // panels write the SAME four room variables (components/dockLayout.ts) — that is what makes their
+  // placement identical — which also means two open at once fight over one strip and the second one
+  // to write wins. So the reader stands down the moment a PDF is opened. It does NOT clear the room
+  // on the way out: the PDF panel is about to claim the same geometry, and blanking it first is a
+  // frame of the editor snapping wide and back, which is the opposite of seamless.
+  useEffect(() => {
+    const onPdf = () => { handingOverRef.current = true; onCloseRef.current() }
+    window.addEventListener(OPEN_PDF_EVENT, onPdf)
+    return () => window.removeEventListener(OPEN_PDF_EVENT, onPdf)
+  }, [])
 
   // THE SELECTION. Read on pointerup inside the reader body only — a selection made in the writer's
   // own document must never be mistaken for one made in the source.
@@ -652,7 +697,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             // EVERY TOOL CHANGES THE CURSOR (Peter: "each button needs to change the cursor"). An
             // armed mode you cannot see is a mode you will forget you are in.
             data-iw-tool={tool ?? undefined}
-            style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
+            style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: leading, color: '#2c2a28' }}>
             {error && !framed && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: '#57534e' }}>
                 <div style={{ color: INK, fontSize: '15px' }}>{error}</div>
@@ -853,6 +898,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               className="iw-nightable"
               style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
               {READER_FONTS.map((f) => <option key={f.css} value={f.css}>{f.label}</option>)}
+            </select>
+            {/* Line spacing (Peter, 2026-08-28). Sits beside the face because they are one decision
+                — how this article should read — and a source you are working THROUGH wants more air
+                than one you are skimming. */}
+            <select value={String(leading)} title="Line spacing"
+              onChange={(e) => { const v = Number(e.target.value); setLeading(v); try { localStorage.setItem('inkwave:readerLeading', String(v)) } catch { /* private */ } }}
+              className="iw-nightable"
+              style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              <option value="1.35">Tight</option>
+              <option value="1.62">Normal</option>
+              <option value="1.9">Airy</option>
+              <option value="2.3">Double</option>
             </select>
 
             {located.orphaned.length > 0 && (

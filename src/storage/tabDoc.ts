@@ -99,8 +99,22 @@ export function resolveTabDocId(): { id: string | null; source: DocIdSource } {
   if (fromUrl) return { id: fromUrl, source: 'url' }
   const fromTab = readSession()
   if (fromTab) return { id: fromTab, source: 'tab' }
-  const hint = lastDocHint()
-  if (hint) return { id: hint, source: 'last-hint' }
+  // ⚠ A NEW TAB OPENS BLANK (2026-08-28, Peter: "when I open a new tab it always keeps reverting to
+  // this one thing Honours Proposal … what we need is for new tabs to open as blank and to make
+  // sure multiple tabs on different docs never overlap if hard refreshed").
+  //
+  // The last-document hint used to answer here, and it was the wrong shape of helpful: it made
+  // EVERY new tab an attempt to reopen the same document, which then collided with the tab that
+  // already had it — the one-live-tab lock fired, the second tab was told to switch or copy, and
+  // the writer had to fight their way to a blank page. A hint that guesses right once and wrong
+  // every time after that is a worse default than no guess.
+  //
+  // The two behaviours he asked for are exactly sessionStorage's own semantics, so the rule is now
+  // just "read the tab's identity, and nothing else":
+  //   • HARD REFRESH → sessionStorage survives ⇒ the same document, every time.
+  //   • NEW TAB      → sessionStorage is empty ⇒ blank, and it can collide with nothing.
+  // `lastDocHint()` is kept: it still records where the writer was, and the Storage panel lists
+  // every document — but nothing BOOTS from it any more.
   return { id: null, source: 'none' }
 }
 
@@ -117,12 +131,12 @@ function syncUrl(id: string): void {
 }
 
 /**
- * THIS TAB now owns `id`. Writes the per-tab identity (authoritative), refreshes the new-tab hint,
- * and reflects it in the URL.
+ * THIS TAB now owns `id`. Writes the per-tab identity (authoritative), records the most-recent
+ * document, and reflects it in the URL.
  *
- * The localStorage hint is still written because a BRAND-NEW tab has no identity and should open
- * the writer's most recent document — that is the useful half of the old behaviour. What it can no
- * longer do is reach back and re-point a tab that already has an identity of its own.
+ * The localStorage record is still written — it is a useful "where was I", and the Storage panel
+ * and the recent list read it — but NOTHING BOOTS FROM IT any more (see resolveTabDocId). A new tab
+ * opens blank; only this tab's own sessionStorage, or an explicit ?doc=, decides what it shows.
  */
 export function claimTabDoc(id: string): void {
   if (typeof window === 'undefined') return

@@ -259,11 +259,23 @@ export function Edit() {
           }
         }
 
-        // 2. Fall back to the most recently updated document in IndexedDB that no live tab holds —
-        //    walking past the busy ones rather than stopping at the newest (a second tab should
-        //    land on the writer's next-most-recent document, not a blank page, when it can).
+        // 2. Fall back to the most recently updated document in IndexedDB that no live tab holds.
+        //
+        // ⚠ NOT FOR A BRAND-NEW TAB (2026-08-28, Peter: "when I open a new tab it always keeps
+        // reverting to this one thing Honours Proposal … what we need is for new tabs to open as
+        // blank"). This walk is what actually did the reverting — removing the last-document hint
+        // was necessary and not sufficient, because a tab with no identity fell through to here and
+        // opened the most recent free document, which is the same document every time.
+        //
+        // The walk is still right for the case it was written for: a tab that HAD an identity and
+        // found that document gone (deleted, or never synced to this device) should land on the
+        // writer's next-most-recent work rather than a blank page. That is a recovery, and a
+        // recovery should try. A fresh tab is not recovering from anything — it has no opinion about
+        // any document, and answering it with someone's thesis is a guess that collides with
+        // whichever tab already has it open.
+        const freshTab = source === 'none'
         let sawReadFailure = false
-        for (const meta of await listMeta()) {
+        for (const meta of freshTab ? [] : await listMeta()) {
           if (cancelled) return
           if (!(await claimDocLock(meta.id))) continue // open in another tab — keep looking
           claimedId = meta.id
@@ -291,7 +303,8 @@ export function Edit() {
         }
 
         // 3. Create a fresh document. REACHABLE ONLY FROM ABSENCE — every step above either opened
-        //    a document or established that there is genuinely nothing there to open.
+        //    a document or established that there is genuinely nothing there to open — or, for a
+        //    brand-new tab, deliberately declined to look (step 2's note).
         //    If ANY read failed along the way we do not get to conclude "this writer has nothing":
         //    that inference, drawn from a failure, is the whole 2026-07-15 bug. Fail loudly instead.
         if (sawReadFailure) throw new StorageReadError('documents', new Error('one or more documents could not be read'))
