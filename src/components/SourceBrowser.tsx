@@ -219,6 +219,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // can edit between visits.
   const [tool, setTool] = useState<MarkKind | 'erase' | null>(null)
   const [markColor, setMarkColor] = useState(MARK_COLORS[0])
+  const markColorRef = useRef(markColor); markColorRef.current = markColor
   const [paletteOpen, setPaletteOpen] = useState<MarkKind | null>(null)
   const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
@@ -399,6 +400,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       if (!el.contains(range.commonAncestorContainer)) { setSel(null); return }
       const text = s.toString().replace(/\s+/g, ' ').trim()
       if (text.length < 2) { setSel(null); return }
+      // ⚠ AN ARMED TOOL MARKS ON SELECT (Peter, 2026-08-28: "switching on highlight mode should
+      // mean anything we highlight gets highlighted"). A mode that still made you press a button
+      // afterwards was not a mode, it was a button with extra steps.
+      if (toolRef.current === 'highlight' || toolRef.current === 'note') { markSelectionRef.current(toolRef.current); return }
       const r = range.getBoundingClientRect()
       setSel({ text, x: r.left + r.width / 2, y: r.top })
     }
@@ -426,6 +431,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     [doc],
   )
 
+  const toolRef = useRef(tool); toolRef.current = tool
+  const markSelectionRef = useRef<(k: MarkKind) => void>(() => {})
+
   const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
 
   /** One shape for every header action — that is what "symmetric" means here. */
@@ -444,6 +452,27 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     setStoredOrient('bottom'); writeStoredOrientation('bottom')
   }
 
+  /** The nearest heading ABOVE the block this text sits in — the section a reader would name. */
+  const sectionFor = (text: string): string | null => {
+    let bi = -1
+    for (let i = 0; i < blockTexts.length; i++) if (blockTexts[i].includes(text)) { bi = i; break }
+    if (bi < 0) return null
+    const blocks = doc?.blocks ?? []
+    for (let i = bi; i >= 0; i--) {
+      const b = blocks[i]
+      if (b && b.kind === 'heading' && b.text.trim()) return b.text
+    }
+    return null
+  }
+  const formatSection = (loc: { kind: string; value: string }) =>
+    loc.kind === 'section' ? `§${loc.value}` : loc.kind === 'chapter' ? `ch. ${loc.value}` : `“${loc.value.slice(0, 24)}”`
+
+  // ⚠ AN ACTION WITH NO FEEDBACK READS AS A DEAD BUTTON (Peter: "clicking the left option doesn't
+  // do anything"). It DID do something — it wrote the quote onto the citation, out of sight in the
+  // document behind the panel — which is indistinguishable from nothing at all.
+  const [toast, setToast] = useState<string | null>(null)
+  const flash = (msg: string) => { setToast(msg); window.setTimeout(() => setToast(null), 2200) }
+
   const citeHeading = (text: string) => { onCite?.(locatorForHeading(text)); setSel(null) }
 
   /** Turn the live selection into a mark. The BLOCK is found by the selected text, not by walking
@@ -461,13 +490,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     }
     if (block < 0) return  // the selection spans blocks — refuse rather than mark the wrong words
     const m: ReaderMark = {
-      id: uuidv4(), kind, color: markColor, block, start, text,
+      id: uuidv4(), kind, color: markColorRef.current, block, start, text,
       body: kind === 'note' ? '' : undefined, createdAt: new Date().toISOString(),
     }
     writeMarks([...marks, m])
     s2.removeAllRanges()
     setSel(null)
   }
+  markSelectionRef.current = markSelection
 
   return createPortal(
     <div className="iw-nightable iw-touch-guard flex flex-col bg-white"
@@ -535,10 +565,15 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           )}
           {!framed && showNav && headings.length > 1 && (
             <nav className="hidden md:flex flex-col overflow-hidden border-r border-stone-200" style={{ width: 220, fontSize: '12px' }}>
+              {/* ☰ at the RIGHT END of its own row (Peter, 2026-08-28: "put this button over to the
+                  right of the column … the cell that it's in"). It closes the column leftward, so
+                  it belongs on the edge it collapses toward — and it sits where the re-open tab
+                  will appear, so the control does not jump across the panel when you use it. */}
               <div className="flex items-center gap-1 px-2 py-1 border-b border-stone-100" style={{ flexShrink: 0 }}>
-                <button type="button" title="Hide the section list" onClick={toggleNav}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 2px' }}>☰</button>
                 <span className="text-stone-400" style={{ fontSize: '11px' }}>Sections</span>
+                <button type="button" title="Hide the section list" onClick={toggleNav}
+                  className="ml-auto"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 2px' }}>☰</button>
               </div>
               <div className="overflow-y-auto py-1">
               {headings.map((h) => (
@@ -566,6 +601,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               it. The iframe fills the pane edge to edge and scrolls itself. */}
           <div ref={bodyRef} data-iw-selectable=""
             className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'}`}
+            // EVERY TOOL CHANGES THE CURSOR (Peter: "each button needs to change the cursor"). An
+            // armed mode you cannot see is a mode you will forget you are in.
+            data-iw-tool={tool ?? undefined}
             style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
             {error && !framed && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: '#57534e' }}>
@@ -661,18 +699,43 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <div className="iw-nightable fixed z-[401] flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1"
             style={{ left: sel.x, top: Math.max(8, sel.y - 42), transform: 'translateX(-50%)', border: `1px solid ${INK}44`, fontSize: '12px' }}
             onMouseDown={(e) => e.preventDefault()}>
+            {/* THE SAME COLOURED DOTS AS THE PDF (Peter: "highlighting text without any mode on
+                should put up the coloured dots and link to citation panel"). One gesture, one
+                vocabulary, in both readers — a dot highlights in that colour immediately. */}
+            {MARK_COLORS.map((c) => (
+              <button key={c} type="button" title="Highlight"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setMarkColor(c); markColorRef.current = c; markSelection('highlight') }}
+                style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', flexShrink: 0 }} />
+            ))}
+            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 2px' }} />
             {onQuote && (
-              <button type="button" onClick={() => { onQuote(sel.text); setSel(null) }}
+              <button type="button" onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onQuote(sel.text); setSel(null); flash('Saved as the cited sentence') }}
                 className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                use as cited sentence
+                quote this
               </button>
             )}
-            {onCite && (
-              <button type="button" onClick={() => { onCite(locatorForHeading(sel.text)); setSel(null) }}
-                className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                cite as locator
-              </button>
-            )}
+            {onCite && (() => {
+              // ⚠ CITE THE SECTION THE SELECTION IS IN — not the selection (Peter, 2026-08-28: "if
+              // we cite as locator what we really want is for it to cite the heading or section
+              // number as the locator"). It used to hand the SELECTED SENTENCE to
+              // locatorForHeading, which of course found no number in it and returned the whole
+              // sentence verbatim as the locator: "(Smith 2005, Each object is, at the later time,
+              // composed…)". Nonsense, and my mistake — the function was built for headings and I
+              // fed it prose.
+              const sec = sectionFor(sel.text)
+              if (!sec) return null            // no heading above it ⇒ nothing honest to cite
+              const loc = locatorForHeading(sec)
+              return (
+                <button type="button" onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onCite(loc); setSel(null); flash(`Cited ${formatSection(loc)}`) }}
+                  className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  title={`Use "${sec}" as this citation's locator`}>
+                  cite {formatSection(loc)}
+                </button>
+              )
+            })()}
           </div>
         )}
 
@@ -719,10 +782,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 )}
               </div>
             ))}
+            {/* The PDF's eraser, glyph for glyph (Peter: "the erasor button needs to look same as
+                for pdfs"). Same tool, same picture — a different icon reads as a different thing. */}
             <button type="button" title="Eraser — click a mark to remove it"
               onClick={() => setTool((cur) => (cur === 'erase' ? null : 'erase'))}
-              style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: '0.9rem',
-                border: `1px solid ${tool === 'erase' ? INK : '#d6cfe0'}`, background: tool === 'erase' ? `${INK}14` : '#fff', color: '#d17ba5' }}>⌫</button>
+              style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `1px solid ${tool === 'erase' ? INK : '#d6cfe0'}`, background: tool === 'erase' ? `${INK}14` : '#fff' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#e8a0c0" stroke="#c76fa0" strokeWidth="1.1"
+                  d="M15.6 3.5 3.5 15.6a2 2 0 0 0 0 2.8l2.1 2.1a2 2 0 0 0 2.8 0L20.5 8.4a2 2 0 0 0 0-2.8l-2.1-2.1a2 2 0 0 0-2.8 0Z" />
+                <path fill="none" stroke="#c76fa0" strokeWidth="1.1" d="m10.2 8.8 5 5" />
+              </svg>
+            </button>
 
             <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
             {/* Reading face — Peter's "preset sexy fonts". Reader mode only; a live page's
@@ -743,6 +814,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </span>
             )}
           </div>
+        )}
+
+        {toast && (
+          <div style={{ position: 'absolute', left: '50%', bottom: 54, transform: 'translateX(-50%)', zIndex: 402,
+            background: INK, color: '#fff', fontSize: '12px', padding: '6px 12px', borderRadius: 999,
+            boxShadow: '0 3px 12px rgba(0,0,0,0.25)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>{toast}</div>
         )}
 
         {/* LIVE MODE gets its own thin bar — just the width choice. It is not a fifth header button

@@ -127,7 +127,8 @@ export function writeStoredDockSide(v: DockSide): void {
 // citations is not ours to decide — which is right in general and wrong here, because HE decided,
 // and then had to say so again. The tick box stays: it is how you turn it back off, and it is what
 // makes the default a choice rather than an imposition.
-// A source with only a PDF still opens the PDF — there is nothing else to show it in.
+// A source with a PDF attached still opens the PDF: that is the reader you chose for it, and
+// it is the one that can see your selection. The web page is the fallback, not the override.
 const CLICK_READER_KEY = 'inkwave:citeClickOpensReader'
 export function citeClickOpensReader(): boolean {
   try { return localStorage.getItem(CLICK_READER_KEY) !== '0' } catch { return true }

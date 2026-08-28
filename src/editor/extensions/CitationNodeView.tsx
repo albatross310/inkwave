@@ -300,10 +300,15 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                           // because a plain click already means something else and silently changing
                           // what a click does to someone's citations is not ours to decide — the
                           // tick box is where they decide it. With it on, a source that HAS a web
-                          // page reads there; one that only has a PDF still opens the PDF, because
-                          // there is nothing else to show.
+                          // page AND NO PDF reads there.
+                          // ⚠ PDF WINS (Peter, 2026-08-28: "clicking goes to pdf if there's a pdf
+                          // or the website if no pdf attached"). The comment above already SAID
+                          // that; the code did not do it, because the condition never asked about
+                          // the PDF. A source you have gone to the trouble of attaching a PDF to is
+                          // one you want to read in the PDF — and the PDF viewer is the reader that
+                          // can also see your selection.
                           const webUrl = sourceUrlOf(bibProvider.get(s.key))
-                          if (citeClickOpensReader() && webUrl) {
+                          if (citeClickOpensReader() && webUrl && !hasPdf(bibProvider.get(s.key))) {
                             setReaderUrl({ url: webUrl, title: s.text })
                             return
                           }
