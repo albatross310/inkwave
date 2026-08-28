@@ -6,13 +6,13 @@
 // Menu items trigger on pointer-up for immediacy.
 
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { useLongPress } from './useLongPress'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 
 const INK = '#5c2d8a'
 const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 1.125rem })
 const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
-const HOLD_MS = 175        // ms before a press becomes a long-press
 
 // MATH-CERTIFIED FONTS ONLY (2026-07-12, round-7, Peter's call: "test all the fonts independently
 // and if some perform badly we replace them with better fonts"). The old system-font entries
@@ -137,34 +137,6 @@ const INDENT_ITEMS: Array<{ action: IndentAction; label: string; preview: string
   { action: 'clear', label: 'Clear line format',  preview: '⌫' },
 ]
 
-function useLongPress(onShortPress: () => void, onLongPress: () => void) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const firedRef = useRef(false)
-  const clear = () => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
-  }
-  return {
-    // stopPropagation prevents the outer toolbar div's onPointerDown from calling
-    // e.preventDefault(), which on iOS suppresses the subsequent click event (causing
-    // second-press deadlock when the editor is already focused).
-    onPointerDown: (e: React.PointerEvent) => {
-      e.stopPropagation()
-      firedRef.current = false
-      timerRef.current = setTimeout(() => { firedRef.current = true; onLongPress() }, HOLD_MS)
-    },
-    // iOS can end a press WITHOUT a click (touch cancel, scroll, system long-press UI), which used
-    // to leave the timer running → the drop-up popped open after the finger was gone. Clear on every
-    // pointer end; short-press still lives in onClick (fires after pointerup on desktop AND touch,
-    // gated by firedRef), so click behaviour is unchanged.
-    onPointerUp: clear,
-    onPointerCancel: clear,
-    onPointerLeave: clear,
-    onClick: () => {
-      clear()
-      if (!firedRef.current) onShortPress()
-    },
-  }
-}
 
 export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   editor: Editor

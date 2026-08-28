@@ -4,7 +4,7 @@
 // drives text-layer positioning/selection. Highlights are our own overlay divs (normalised rects),
 // stored on the source's _iw.highlights — not baked into the PDF.
 
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
@@ -29,6 +29,7 @@ export function pdfOutputScale(dpr: number, isTouch: boolean, vw: number, vh: nu
   return Math.max(1, Math.min(want, ceiling, byMemory))
 }
 import { lockAxis, newAxisState } from './axisLock'
+import { HOLD_MS } from './useLongPress'
 
 /**
  * How much one ctrl/⌘-wheel event zooms the PDF.
@@ -42,7 +43,7 @@ import { lockAxis, newAxisState } from './axisLock'
  * deliberate notch from a fingertip. The clamp keeps a mouse EXACTLY as it was: a 120px notch
  * saturates at 1.1/0.9, so nothing about the mouse path changes.
  */
-const PDF_ZOOM_K = 0.0025
+const PDF_ZOOM_K = 0.0044 // +75% on the first cut (Peter: "a tad faster, maybe 75%")
 export function pdfZoomFactor(deltaY: number): number {
   if (!Number.isFinite(deltaY) || deltaY === 0) return 1
   return Math.min(1.1, Math.max(0.9, Math.exp(-deltaY * PDF_ZOOM_K)))
@@ -55,6 +56,11 @@ const INK = '#5c2d8a'
 const DARK_RED = '#991b1b'
 const DARK_BLUE = '#1e3a8a'
 const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', DARK_RED, DARK_BLUE]
+// Peter, 2026-08-28: the palettes live UNDER the tools they belong to — "move highlight colour into
+// click and hold on the highlight button", "a text colour click and hold on text that changes the
+// sticky note colour". A highlight wants a wash you can read through; a sticky note can be anything.
+const HIGHLIGHT_COLORS = COLORS.slice(0, 4)
+const NOTE_COLORS = COLORS
 type ToolKind = HighlightKind | 'erase'
 // ⚠ UNDERLINE AND STRIKETHROUGH ARE GONE FROM THE TOOL ROW (Peter, 2026-08-28: "let's get rid of
 // underline and strikethrough"). The KINDS stay in the model and in the renderer on purpose: a PDF
@@ -68,6 +74,28 @@ const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'erase', label: '⌫', title: 'Eraser — click any annotation to remove it' },
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
+
+/**
+ * FIT THE TEXT TO THE WINDOW — the scale at which the page's TEXT BLOCK spans the panel, with a
+ * safety inset so glyphs never kiss the edge. Clamped to [page-fit … 2×page-fit] so a stray text
+ * bbox can neither zoom out below whole-page fit nor crop wildly; no text layer ⇒ page fit.
+ * ONE definition, used by the initial load, the resize re-fit and the ⤢ button — three places that
+ * must agree about what "flush" means or the button would land somewhere the resize then moved.
+ */
+export function computeTextFit(
+  inputs: { pageW: number; ext: { x0: number; x1: number } | null } | null,
+  clientWidth: number,
+  fallback: number,
+): number {
+  if (!inputs) return fallback
+  const containerW = clientWidth - 24
+  const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
+  if (!inputs.ext) return pageFit
+  const w = inputs.ext.x1 - inputs.ext.x0
+  if (!(w > 0)) return pageFit
+  return Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / w))
+}
+
 
 // A pink pencil-eraser icon (Material "eraser" glyph) for the erase tool.
 function EraserIcon() {
@@ -224,7 +252,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const [zoom, setZoom] = useState(() => savedUserZoom() ?? 1)
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
-  const [colorOpen, setColorOpen] = useState(false)
+  const [colorOpen, setColorOpen] = useState<ToolKind | null>(null)
+  const holdRef = useRef<Partial<Record<ToolKind, ReturnType<typeof setTimeout>>>>({})
+  const heldRef = useRef(false)
   // Per-tool colour memory: underline/strike DEFAULT to dark blue (Peter, 2026-07-10); clicking a
   // swatch while a tool is armed re-colours THAT tool and is remembered for the session.
   const toolColorsRef = useRef<Partial<Record<ToolKind, string>>>({ underline: DARK_BLUE, strike: DARK_BLUE })
@@ -910,10 +940,24 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         viewer.style.transformOrigin = ''
         zoomBaseRef.current = null
         renderedZoomRef.current = zoom
-        el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
-        el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
+        // ⚠ RE-ASSERT THE ANCHOR AFTER LAYOUT (2026-08-28, Peter: "it goes towards the cursor then
+        // flashes back centrally after you finish zooming"). scrollLeft is CLAMPED BY THE BROWSER to
+        // the scroll range that exists AT THE MOMENT OF THE WRITE — and immediately after
+        // renderPages resolves the new, wider canvases have not necessarily been laid out, so the
+        // write is silently clipped to the OLD maximum and the view lands wherever that put it. The
+        // arithmetic was never wrong; it was applied one layout too early. Setting it again after
+        // the visible pages have painted, and once more on the next frame, costs two assignments
+        // and makes the clamp harmless.
+        // STATED, NOT PROVED: this is the mechanism that fits the symptom, reasoned from the clamp
+        // and the ordering — it has not been reproduced here (it needs a real PDF and a trackpad).
+        const anchor = () => {
+          el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
+          el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
+        }
+        anchor()
         await renderVisibleNow(renderTokenRef.current) // paint the visible pages BEFORE lifting the freeze
-        requestAnimationFrame(() => requestAnimationFrame(unfreeze))
+        anchor()
+        requestAnimationFrame(() => { anchor(); requestAnimationFrame(unfreeze) })
       }).catch(unfreeze)
     }, 170)
     return () => clearTimeout(zoomSettleRef.current)
@@ -976,15 +1020,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     let baseW = sc.clientWidth
     let baseSt: number | null = null // scrollTop at gesture start — frames compose from it
     let settle: ReturnType<typeof setTimeout> | undefined
-    const fitFor = (w: number): number => {
-      const inputs = fitInputsRef.current
-      if (!inputs) return fitScaleRef.current
-      const containerW = w - 24
-      const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
-      return inputs.ext
-        ? Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / (inputs.ext.x1 - inputs.ext.x0)))
-        : pageFit
-    }
+    const fitFor = (w: number): number => computeTextFit(fitInputsRef.current, w, fitScaleRef.current)
     const ro = new ResizeObserver(() => {
       const w = sc.clientWidth
       if (w === baseW) return
@@ -1544,7 +1580,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           Flex `order` does the visual re-stack (pages 1 · context 2 · toolbar 3) without moving
           the JSX, so every absolute-positioned popover keeps its anchor. Secondary controls are
           compact; every control explains itself via its tooltip. */}
-      <div style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, rowGap: 6, padding: '7px 12px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
+      {/* ONE ROW (Peter, 2026-08-28: "try to get this down to one row. Get rid of unnecessary space
+          between button types"). gap 6→3 and the dividers reduced to margin-only separators; the
+          colour swatches are gone entirely, folded into hold-palettes on the tools they belong to. */}
+      <div style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, rowGap: 4, padding: '6px 8px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
         onMouseLeave={() => setHint(null)}>
         {onClose && (
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
@@ -1565,11 +1604,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
         )}
         {fullscreenButton}
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
         {TOOLS.map(t => {
           const active = tool === t.kind
-          return (
-            <button key={t.kind} type="button" title={`${t.title} — click, then select text`}
+          const btn = (
+            <button key={t.kind} type="button" title={`${t.title} — click, then select text${t.kind === 'highlight' || t.kind === 'text' ? ' · hold for colours' : ''}`}
               onMouseEnter={() => setHint(`${t.title}`)}
               // Keep a live text selection alive through the press — mousedown on a button would
               // collapse it before onClick could read it (the pending toolbar works from stored
@@ -1600,6 +1639,47 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
+          // ⚠ THE PALETTE LIVES UNDER THE TOOL IT BELONGS TO (Peter, 2026-08-28: "move highlight
+          // colour into click and hold on the highlight button. Add a text colour click and hold on
+          // text that changes the sticky note colour"). Six permanently-visible swatches were six
+          // tap targets for a choice made once in a while, and they were the reason the row wrapped.
+          // CLICK still arms the tool — unchanged; only a HOLD opens the colours, the same gesture
+          // the style bar uses (components/useLongPress.ts, one implementation).
+          const palette = t.kind === 'highlight' ? HIGHLIGHT_COLORS : t.kind === 'text' ? NOTE_COLORS : null
+          if (!palette) return btn
+          return (
+            <div key={t.kind} style={{ position: 'relative', flexShrink: 0 }}>
+              <span onPointerDown={() => {
+                holdRef.current[t.kind] = setTimeout(() => { heldRef.current = true; setColorOpen(t.kind) }, HOLD_MS)
+              }}
+                onPointerUp={() => { const h = holdRef.current[t.kind]; if (h) clearTimeout(h) }}
+                onPointerLeave={() => { const h = holdRef.current[t.kind]; if (h) clearTimeout(h) }}
+                onPointerCancel={() => { const h = holdRef.current[t.kind]; if (h) clearTimeout(h) }}
+                onClickCapture={(ev) => { if (heldRef.current) { heldRef.current = false; ev.stopPropagation(); ev.preventDefault() } }}>
+                {btn}
+              </span>
+              {colorOpen === t.kind && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setColorOpen(null)} />
+                  <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
+                    {palette.map((c) => (
+                      <button key={c} type="button" title={c}
+                        onMouseDown={(ev) => ev.preventDefault()}
+                        onClick={() => {
+                          // A SELECTED annotation takes the swatch (recolour it); otherwise it sets
+                          // this TOOL's colour — which is what makes one palette per tool coherent.
+                          if (selectedMkRef.current) { recolorMarkup(selectedMkRef.current, c); setColorOpen(null); return }
+                          setColor(c)
+                          toolColorsRef.current[t.kind] = c
+                          setColorOpen(null)
+                        }}
+                        style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: (toolColorsRef.current[t.kind] ?? color) === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )
         })}
         {/* Text-note font size */}
         <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
@@ -1607,44 +1687,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           // Narrower (Peter, 2026-08-28: "make the font size button smaller"). The iOS 16px floor
           // is untouched on touch — shrinking a control below it makes the page auto-zoom on focus
           // and STAY zoomed, which is a far worse bug than a wide select.
-          style={{ height: 28, width: isTouch ? undefined : 62, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.72rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0 }}>
-          {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
+          // No "px", no dropdown arrow, no reserved arrow gutter (Peter, 2026-08-28) — the row has
+          // to fit on ONE line and a two-digit number needs none of that to be read as a size.
+          style={{ height: 28, width: isTouch ? 44 : 34, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
+          {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
-        {/* ONE COLOUR BUTTON (Peter, 2026-08-28: "put all the highlight colours and text colours
-            into one button"). Six permanently-visible swatches were six tap targets for a choice
-            made once in a while; this is the current colour, and it opens the rest. Highlight
-            colours and note colours share the popover because they are one decision — what colour
-            am I marking in — and the tool already decides which of the two it means. */}
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          <button type="button" title="Markup colour" aria-label="Markup colour"
-            onMouseEnter={() => setHint('the colour highlights and notes are made in')}
-            onClick={() => setColorOpen(o => !o)}
-            style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ width: 17, height: 17, borderRadius: '50%', background: color, border: '1px solid rgba(0,0,0,0.15)' }} />
-          </button>
-          {colorOpen && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setColorOpen(false)} />
-              <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
-                {COLORS.map((c, i) => (
-                  <Fragment key={c}>
-                    {/* The dark pair are NOTE colours — kept visually separate, as they were. */}
-                    {i === COLORS.length - 2 && <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 1px' }} />}
-                    <button type="button" title={c}
-                      onClick={() => {
-                        if (selectedMkRef.current) { recolorMarkup(selectedMkRef.current, c); setColorOpen(false); return }
-                        setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c
-                        setColorOpen(false)
-                      }}
-                      style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
-                  </Fragment>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
         {/* Scroll-highlighted navigator */}
         <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
@@ -1666,16 +1715,29 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             void renderPages(fitScaleRef.current * zoom)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
-        {/* CENTRE THE VIEW (Peter, 2026-08-28) — the companion to the one-axis scroll lock: the lock
-            stops the page drifting sideways, and this puts it back when it already has (or after a
-            zoom that left the column off to one side). Horizontal only: vertical position is where
-            you are READING and must never be thrown away by a button about sideways drift. */}
-        <button type="button" title="Centre the page" aria-label="Centre the page"
-          onMouseEnter={() => setHint('centre the page horizontally')}
+        {/* FIT THE TEXT TO THE WINDOW (Peter, 2026-08-28: "it needs to zoom and pan sideways so
+            that the edge of the text is flush with the window on both sides, and go into a state
+            such that this flushness is maintained if you make the window bigger or smaller").
+            Three things, and the third is the one that needed saying: it RESETS THE ZOOM OVERRIDE.
+            Fit-to-text already re-fits itself on every panel resize — but only while zoom is 1
+            ("manual zoom wins", and rightly: a resize must not undo a zoom the reader chose). So
+            once you had zoomed, the flushness stopped following the window, and no amount of
+            panning brought it back. Setting zoom to 1 is what re-enters the self-maintaining state;
+            the scale and the pan below just get you there in one frame instead of on the next
+            resize. */}
+        <button type="button" title="Fit the text to the window" aria-label="Fit the text to the window"
+          onMouseEnter={() => setHint('fit the text width to the window, and keep it fitted as the window changes')}
           onClick={() => {
             const el = scrollRef.current
             if (!el) return
-            el.scrollLeft = Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
+            const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current)
+            setZoom(1)
+            fitScaleRef.current = fit
+            renderedZoomRef.current = 1
+            void renderPages(fit)
+            el.scrollLeft = textFitX0Ref.current != null
+              ? Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
+              : Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
