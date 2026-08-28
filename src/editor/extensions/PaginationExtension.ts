@@ -492,6 +492,51 @@ export function _computeBreaksForTest(
   return { sig: computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf).sig }
 }
 
+// ⚠ IS THE LAYOUT THE WRITER SEES CANONICAL? (2026-08-28.) Set by the measure BEFORE it enters the
+// forced context — inside that window the DOM is canonical by construction, so `canonicalIsLive`
+// cannot be asked there and would answer about the wrong layout. See snapBlocksWhenReflowed below.
+/**
+ * Should this break snap to the block boundary instead of splitting the paragraph?
+ * Pure, and exported, because the whole fix is one predicate and a browser probe that ran once is
+ * not a guard. Two conditions beyond "the rendering is not canonical", and both are load-bearing:
+ *  • `orphan > 0` — the block must have STARTED on this page. With orphan 0 the block begins at
+ *    this very line, so blockStart IS the break and snapping is a no-op.
+ *  • `blockStart > lastBreakAt` — never snap back to a position we already broke at. A block TALLER
+ *    than a page would otherwise be pushed whole, overflow again on the next page, and snap to the
+ *    same boundary forever. It is pushed once, then split mid-block (one cut line, not a loop).
+ */
+export function shouldSnapToBlock(o: {
+  liveIsCanonical: boolean; orphan: number; blockStart: number; lastBreakAt: number
+}): boolean {
+  return !o.liveIsCanonical && o.orphan > 0 && o.blockStart > o.lastBreakAt
+}
+
+let liveIsCanonical = true
+export function _setLiveIsCanonicalForTest(v: boolean): void { liveIsCanonical = v }
+
+/**
+ * ⚠ A CANONICAL LINE START IS NOT A RENDERED LINE START AT ANY OTHER ZOOM — and that is the whole
+ * of Peter's "lines cutting at arbitrary points when you go over the page" (2026-08-28).
+ *
+ * Breaks are CANONICAL by design: measured at zoom 1 in a forced context so the same words land on
+ * page N on every device and in print. The rendered layout at another font zoom wraps SOMEWHERE
+ * ELSE, so a break placed at a canonical line start lands in the MIDDLE of a rendered line — and
+ * the gap widget is `display:block`, so it slices that line and leaves a fragment ("an") alone at
+ * the bottom of the page. MEASURED, and it is not marginal:
+ *      editor zoom 1.00 → 0/10 mid-line breaks     1.08 → 7/10     1.26 → 9/10     0.86 → 10/10
+ * i.e. every zoom except exactly 1 cuts almost every page. midline.prove.mjs reported 0/194 clean
+ * for a year because it runs at defaults — the fixtures were canonical, so the bug was structurally
+ * invisible to them.
+ *
+ * A BLOCK BOUNDARY IS A LINE START IN EVERY LAYOUT, at any zoom, by construction — no measurement
+ * required. So when the rendering is not canonical the break snaps to the block boundary instead of
+ * splitting mid-paragraph: the page is a little less full, and no line is ever cut. At canonical
+ * rendering (the default desktop view, and every print/PDF path) NOTHING changes — the mid-block
+ * split Peter chose in 2026-07-15 ("probably split") is exactly as it was, byte for byte.
+ *
+ * The `snap` machinery this uses is the pre-2026-07-15 widow/orphan path, still present and still
+ * correct (`brokeUsed`, `used = orphan`); only its trigger changed.
+ */
 function computeBreaks(
   lines: MeasuredLine[],
   blocks: MeasuredBlock[],
@@ -527,6 +572,7 @@ function computeBreaks(
   // lines resolve LAZILY via posOf — only the line a break actually lands on pays the hit-test.
   // `curBlock = -1` after a break mirrors the old reset: orphan counting restarts per page.
   let curBlock = -1, blockStartUsed = 0
+  let lastBreakAt = -1 // guards the block snap against pushing an over-tall block forever
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
     if (lines[i].blockIdx !== curBlock) {
@@ -542,7 +588,7 @@ function computeBreaks(
       decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
       sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
       bandOut?.breaks.push({ at: refListPos, brokeUsed: used, botMargin })
-      pageNo++; used = 0; curBlock = -1; refBroken = true
+      pageNo++; used = 0; curBlock = -1; refBroken = true; lastBreakAt = refListPos
     }
     // Break before the LINE that would overflow the text area.
     if (i > 0 && used + lh > textArea && posOf(lines[i]) > 0) {
@@ -553,7 +599,12 @@ function computeBreaks(
       // the dotted continuation bracket). `orphan` is still tracked for the sig/used accounting.
       // (History: flat ≤22% pushed every straddler whole → wasted page bottoms; fa11bf0 split only
       // when both sides kept ≥2 lines; Peter now wants the fuller look outright.)
-      const snap = false
+      // Snap to the block boundary ONLY where a mid-block break would cut a rendered line — i.e.
+      // when the writer's layout is not the canonical one. Guarded two ways so a block TALLER than
+      // a page cannot be pushed forever: it must have started on this page (`orphan > 0`), and we
+      // never snap back to a position we already broke at — so an over-tall block is pushed once,
+      // then split mid-block on the next page (one cut line, instead of a loop).
+      const snap = shouldSnapToBlock({ liveIsCanonical, orphan, blockStart, lastBreakAt })
       const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
       const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
       const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
@@ -569,6 +620,7 @@ function computeBreaks(
         sig.push(`${at}:${Math.round(botMargin)}`)
         bandOut?.breaks.push({ at, brokeUsed, botMargin })
         pageNo++
+        lastBreakAt = at
         used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
         curBlock = -1             // recompute the block-on-page baseline at the next line
       }
@@ -1690,6 +1742,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               // already IS canonical (canonicalIsLive below — desktop at default zoom/magnify),
               // which is the common desktop case; elsewhere (phone) the reflows are the price of
               // correctness and the savings come from region-scoped reads + baked positions.
+              liveIsCanonical = canonicalIsLive(surfaceEl0) // before the force — see computeBreaks
               const restore0 = canonicalIsLive(surfaceEl0)
                 ? () => { /* live layout ≡ canonical — nothing to force */ }
                 : forceCanonicalContext(
@@ -1808,6 +1861,8 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (!arithMeasured) {
             const surfaceEl = (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
             const editorEl = view.dom as HTMLElement
+            // Ask BEFORE the force: inside that window the DOM is canonical by construction.
+            liveIsCanonical = canonicalIsLive(surfaceEl)
             const restore = !fluid && canonicalIsLive(surfaceEl)
               ? () => { /* live layout ≡ canonical (desktop at defaults) — skip both reflows */ }
               : forceCanonicalContext(
