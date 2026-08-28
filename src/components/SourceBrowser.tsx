@@ -19,6 +19,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
+import { locateAll, markRuns, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
+import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
 import {
   applyDockRoom, dockHandlePos, dockPanelPos, dockResize, dockRoom, NO_DOCK_ROOM,
@@ -30,9 +32,45 @@ import { tabDocId } from '../storage/tabDoc'
 
 const INK = '#5c2d8a'
 
+// Reader-mode faces (Peter, 2026-08-28: "an option to change the font in the second mode to a
+// number of preset sexy fonts"). Drawn from the app's own certified set — these are already
+// fetched for the editor, so choosing one costs no new download and they sit beside the writing
+// rather than against it. Reader mode only: LIVE mode is the publisher's page and its typography
+// is theirs.
+// The PDF viewer's own palette, so a highlight means the same colour in both readers.
+const MARK_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
+const NOTE_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', '#7f1d1d', '#1e3a8a']
+
+const READER_FONTS: Array<{ label: string; css: string }> = [
+  { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
+  { label: 'Fell',     css: "'IM Fell DW Pica', Georgia, serif" },
+  { label: 'Spectral', css: "'Spectral', Georgia, serif" },
+  { label: 'Lora',     css: "'Lora', Georgia, serif" },
+  { label: 'Crimson',  css: "'Crimson Pro', Georgia, serif" },
+  { label: 'Carlito',  css: "'Carlito', system-ui, sans-serif" },
+  { label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+]
+
+/** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, no
+ *  dot) goes to a search engine, because a reader who types words expects to find something rather
+ *  than an error. */
+export function addressToUrl(raw: string): string | null {
+  const t = raw.trim()
+  if (!t) return null
+  if (/^https?:\/\//i.test(t)) return t
+  const looksLikeHost = /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(t) && !/\s/.test(t)
+  if (looksLikeHost) return `https://${t}`
+  return `https://www.google.com/search?q=${encodeURIComponent(t)}`
+}
+
 /** Hosts known to refuse framing, so the FALLBACK can say so before showing an empty rectangle. */
+// Hosts known to send X-Frame-Options / frame-ancestors. NOT a security control and never
+// exhaustive — the deadline below is what catches the general case; this just skips the wait for
+// the ones we have already met (Peter hit abc.net.au and youtube.com within a minute of each other).
 const KNOWN_NO_FRAME = [/(^|\.)jstor\.org$/i, /(^|\.)sciencedirect\.com$/i, /(^|\.)tandfonline\.com$/i,
-  /(^|\.)springer\.com$/i, /(^|\.)wiley\.com$/i, /(^|\.)x\.com$/i, /(^|\.)twitter\.com$/i]
+  /(^|\.)springer\.com$/i, /(^|\.)wiley\.com$/i, /(^|\.)x\.com$/i, /(^|\.)twitter\.com$/i,
+  /(^|\.)youtube\.com$/i, /(^|\.)google\.[a-z.]+$/i, /(^|\.)abc\.net\.au$/i, /(^|\.)facebook\.com$/i,
+  /(^|\.)instagram\.com$/i, /(^|\.)linkedin\.com$/i, /(^|\.)reddit\.com$/i]
 
 function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
@@ -51,7 +89,47 @@ const ERRORS: Record<string, string> = {
   rate: 'Too many pages fetched just now — try again in a moment.',
 }
 
-function Runs({ runs, onNavigate }: { runs: Run[]; onNavigate?: (url: string) => void }) {
+/** Paint the mark runs over a block's text. Splitting happens on PLAIN-TEXT offsets, so the block's
+ *  own runs (links, emphasis) are walked in step and a mark that starts mid-link still paints. */
+function markedStyle(ms: Located[]): React.CSSProperties | undefined {
+  if (!ms.length) return undefined
+  const hl = ms.find((m) => m.kind === 'highlight')
+  const note = ms.find((m) => m.kind === 'note')
+  return {
+    background: hl ? hl.color : undefined,
+    borderBottom: note ? `2px solid ${note.color}` : undefined,
+    borderRadius: hl ? 2 : undefined,
+  }
+}
+
+function Runs({ runs, onNavigate, marks, onEraseMark }: {
+  runs: Run[]; onNavigate?: (url: string) => void; marks?: Located[]; onEraseMark?: (id: string) => void
+}) {
+  if (marks && marks.length) {
+    // Walk the runs and the mark boundaries together on one plain-text cursor.
+    const total = runs.reduce((n, r) => n + r.text.length, 0)
+    const segs = markRuns(total, marks)
+    const out: React.ReactNode[] = []
+    let cur = 0
+    for (const r of runs) {
+      const rStart = cur, rEnd = cur + r.text.length
+      cur = rEnd
+      for (const g of segs) {
+        const from = Math.max(g.from, rStart), to = Math.min(g.to, rEnd)
+        if (to <= from) continue
+        const piece = { ...r, text: r.text.slice(from - rStart, to - rStart) }
+        const st = markedStyle(g.marks)
+        out.push(
+          <span key={`${rStart}-${from}`} style={st}
+            onClick={g.marks.length && onEraseMark ? () => onEraseMark(g.marks[0].id) : undefined}
+            title={g.marks.find((m) => m.kind === 'note')?.body || undefined}>
+            <Runs runs={[piece]} onNavigate={onNavigate} />
+          </span>,
+        )
+      }
+    }
+    return <>{out}</>
+  }
   return (
     <>
       {runs.map((r, i) => {
@@ -96,6 +174,35 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [idx, setIdx] = useState(0)
   useEffect(() => { setStack([url]); setIdx(0) }, [url])
   const here = stack[idx] ?? url
+  const [addr, setAddr] = useState(url)
+  useEffect(() => { setAddr(here) }, [here])
+
+  const docKey = (() => { try { return tabDocId() ?? 'global' } catch { return 'global' } })()
+  // ── MARKUP (Peter: "roughly the same markup tools as for the pdfs … reproduce the same
+  // ecosystem") ─────────────────────────────────────────────────────────────────────────────────
+  // Highlights and sticky notes over the fetched text. Anchored by the TEXT they cover, not by an
+  // offset — see reader/marks.ts for why that distinction is load-bearing on a page the publisher
+  // can edit between visits.
+  const [tool, setTool] = useState<MarkKind | 'erase' | null>(null)
+  const [markColor, setMarkColor] = useState(MARK_COLORS[0])
+  const [paletteOpen, setPaletteOpen] = useState<MarkKind | null>(null)
+  const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const heldRef = useRef(false)
+  const [marks, setMarks] = useState<ReaderMark[]>([])
+  const [font, setFont] = useState(() => {
+    try { return localStorage.getItem('inkwave:readerFont') || READER_FONTS[0].css } catch { return READER_FONTS[0].css }
+  })
+  const marksStoreKey = `inkwave:readerMarks:${docKey}:${here}`
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(marksStoreKey)
+      setMarks(raw ? (JSON.parse(raw) as ReaderMark[]) : [])
+    } catch { setMarks([]) }
+  }, [marksStoreKey])
+  const writeMarks = (next: ReaderMark[]) => {
+    setMarks(next)
+    try { localStorage.setItem(marksStoreKey, JSON.stringify(next)) } catch { /* private / full */ }
+  }
   const go = (next: string) => {
     if (!/^https?:\/\//i.test(next)) return
     setStack((st) => [...st.slice(0, idx + 1), next])
@@ -103,7 +210,25 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }
   const [doc, setDoc] = useState<ReaderDoc | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [framed, setFramed] = useState(false)   // LIVE PAGE mode — the real site in an iframe
+  // ⚠ THE MODE IS REMEMBERED (Peter, 2026-08-28: "clicking the link goes straight to the website no
+  // delay"). Reader mode has to FETCH before it can show anything — perhaps a second — and once
+  // someone is using this as a browser that second is the whole complaint. So the mode is sticky per
+  // document: choose Live once and every link opens straight into the live site.
+  const [framed, setFramed] = useState(() => {
+    try { return localStorage.getItem('inkwave:readerLive') === '1' } catch { return false }
+  })
+  useEffect(() => { try { localStorage.setItem('inkwave:readerLive', framed ? '1' : '0') } catch { /* private */ } }, [framed])
+  const [frameRefused, setFrameRefused] = useState(false)
+  const frameLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!framed) { setFrameRefused(false); return }
+    frameLoadedRef.current = false
+    setFrameRefused(likelyRefusesFraming(here))
+    // 2.5s, not 7: a refused frame loads Chrome's error page almost instantly, so the deadline only
+    // has to outlast a slow first byte. Peter sat on that grey face for seven seconds twice.
+    const t = setTimeout(() => { if (!frameLoadedRef.current) setFrameRefused(true) }, 2500)
+    return () => clearTimeout(t)
+  }, [framed, here])
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
@@ -130,7 +255,6 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // (Peter, 2026-08-28: "You need an x to get rid of this — and save per document", "a button to
   // hide the menu"). Per document rather than per origin because which sources you are reading, and
   // how much room you want for them, is a property of the piece you are writing.
-  const docKey = (() => { try { return tabDocId() ?? 'global' } catch { return 'global' } })()
   const [showNav, setShowNav] = useState(() => {
     try { return localStorage.getItem(`inkwave:readerNav:${docKey}`) !== '0' } catch { return true }
   })
@@ -213,12 +337,50 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => { el.removeEventListener('pointerup', t); el.removeEventListener('keyup', t) }
   }, [doc])
 
+  // Blocks as plain text, for anchoring. `list` blocks join their items — a list is one block for
+  // marking purposes, which is the same granularity the extractor produced.
+  const blockTexts = useMemo(
+    () => (doc?.blocks ?? []).map((b) => ('text' in b ? b.text : b.items.map((i) => i.map((r) => r.text).join('')).join('\n'))),
+    [doc],
+  )
+  const located = useMemo(() => locateAll(marks, blockTexts), [marks, blockTexts])
+  const byBlock = useMemo(() => {
+    const m = new Map<number, Located[]>()
+    for (const l of located.placed) { const a = m.get(l.block) ?? []; a.push(l); m.set(l.block, a) }
+    return m
+  }, [located])
+
   const headings = useMemo(
     () => (doc?.blocks ?? []).filter((b): b is Extract<ReaderBlock, { kind: 'heading' }> => b.kind === 'heading'),
     [doc],
   )
 
+  const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
+
   const citeHeading = (text: string) => { onCite?.(locatorForHeading(text)); setSel(null) }
+
+  /** Turn the live selection into a mark. The BLOCK is found by the selected text, not by walking
+   *  the DOM — the same identification the mark is stored under, so creating and re-finding can
+   *  never disagree about what a mark covers. */
+  const markSelection = (kind: MarkKind) => {
+    const s2 = window.getSelection()
+    if (!s2 || s2.isCollapsed) return
+    const text = s2.toString().replace(/\s+/g, ' ').trim()
+    if (text.length < 2) return
+    let block = -1, start = -1
+    for (let i = 0; i < blockTexts.length; i++) {
+      const at = blockTexts[i].indexOf(text)
+      if (at >= 0) { block = i; start = at; break }
+    }
+    if (block < 0) return  // the selection spans blocks — refuse rather than mark the wrong words
+    const m: ReaderMark = {
+      id: uuidv4(), kind, color: markColor, block, start, text,
+      body: kind === 'note' ? '' : undefined, createdAt: new Date().toISOString(),
+    }
+    writeMarks([...marks, m])
+    s2.removeAllRanges()
+    setSel(null)
+  }
 
   return createPortal(
     <div className="iw-nightable iw-touch-guard flex flex-col bg-white"
@@ -243,8 +405,26 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>←</button>
           <button type="button" title="Forward" disabled={idx >= stack.length - 1} onClick={() => setIdx((i) => Math.min(stack.length - 1, i + 1))}
             style={{ background: 'transparent', border: 'none', cursor: idx >= stack.length - 1 ? 'default' : 'pointer', color: idx >= stack.length - 1 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>→</button>
-          <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc?.title || title || hostOf(here)}</span>
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-stone-400" style={{ fontSize: '11px', flex: 1 }}>{hostOf(here)}</span>
+          <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: '30%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {doc?.title || title || hostOf(here)}
+          </span>
+          {/* ADDRESS BAR (Peter, 2026-08-28: "we should be able to search the web by url"). It is
+              an address bar in the ordinary sense: a URL goes there, a bare host gets https://, and
+              words with no dot go to GOOGLE (Peter named it) — a reader who types
+              words expects to find something, not an error. */}
+          <input value={addr} onChange={(e) => setAddr(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              const next = addressToUrl(addr)
+              if (next) { go(next); (e.currentTarget as HTMLInputElement).blur() }
+            }}
+            placeholder="address or search"
+            spellCheck={false}
+            className="iw-nightable"
+            style={{ flex: 1, minWidth: 80, height: 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
+              border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
+              color: 'inherit', outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
           {/* READER ⇄ LIVE PAGE. Two honest modes rather than one that pretends: Reader is the
               article in OUR document (so it can be selected and cited); Live is the real site with
               its own CSS, images and navigation, which the browser keeps sealed off from us — so
@@ -257,11 +437,6 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <a href={here} target="_blank" rel="noreferrer noopener" className="underline whitespace-nowrap" style={{ color: INK, fontSize: '12px' }}>
             open in a tab ↗
           </a>
-          {!framed && headings.length > 1 && (
-            <button type="button" title={showNav ? 'Hide the section list' : 'Show the section list'}
-              onClick={toggleNav}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: showNav ? INK : '#a8a29e', fontSize: '13px', padding: '0 3px' }}>☰</button>
-          )}
           {/* Same two controls, same preferences, as the PDF panel — move one and both follow. */}
           {isWide && !isPhone && (
             <button type="button" title={orientation === 'side' ? 'Dock below' : 'Dock to the side'}
@@ -283,8 +458,22 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
         <div className="flex flex-1 min-h-0">
           {/* Section list — the fastest way to cite a section is to not have to find it first. */}
+          {/* ☰ SITS OVER THE NAVIGATOR (Peter, 2026-08-28: "this button needs to be over the
+              navigator"), not adrift in the header — a control that hides a column belongs at the
+              top of that column, where what it acts on is unambiguous. When the column is hidden it
+              becomes a thin re-open tab in its place, so the action stays reversible in situ. */}
+          {!framed && headings.length > 1 && !showNav && (
+            <button type="button" title="Show the section list" onClick={toggleNav}
+              style={{ width: 22, flexShrink: 0, border: 'none', borderRight: '1px solid #e7e5e4', background: 'transparent', color: '#a8a29e', cursor: 'pointer', fontSize: '13px' }}>☰</button>
+          )}
           {!framed && showNav && headings.length > 1 && (
-            <nav className="hidden md:block overflow-y-auto border-r border-stone-200 py-2" style={{ width: 220, fontSize: '12px' }}>
+            <nav className="hidden md:flex flex-col overflow-hidden border-r border-stone-200" style={{ width: 220, fontSize: '12px' }}>
+              <div className="flex items-center gap-1 px-2 py-1 border-b border-stone-100" style={{ flexShrink: 0 }}>
+                <button type="button" title="Hide the section list" onClick={toggleNav}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 2px' }}>☰</button>
+                <span className="text-stone-400" style={{ fontSize: '11px' }}>Sections</span>
+              </div>
+              <div className="overflow-y-auto py-1">
               {headings.map((h) => (
                 <button key={h.id} type="button"
                   onClick={() => document.getElementById(`iw-rd-${h.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
@@ -299,6 +488,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   )}
                 </button>
               ))}
+              </div>
             </nav>
           )}
 
@@ -309,7 +499,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               it. The iframe fills the pane edge to edge and scrolls itself. */}
           <div ref={bodyRef} data-iw-selectable=""
             className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'}`}
-            style={framed ? undefined : { fontFamily: "'EB Garamond', Georgia, serif", fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
+            style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: 1.62, color: '#2c2a28' }}>
             {error && !framed && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: '#57534e' }}>
                 <div style={{ color: INK, fontSize: '15px' }}>{error}</div>
@@ -326,10 +516,31 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             {!error && !doc && !framed && (
               <div className="flex items-center justify-center h-full" style={{ color: '#a8a29e', fontSize: '13px' }}>reading…</div>
             )}
-            {framed && (
+            {framed && frameRefused && (
+              // ⚠ SAY IT, DON'T SHOW CHROME'S GREY FACE (2026-08-28, Peter: "it's not working for
+              // this abc website" — iview.abc.net.au sends X-Frame-Options and the panel showed the
+              // browser's "refused to connect" error, which reads as OUR bug). A refused frame
+              // fires no error event, so the detector is a deadline; generous, because a slow site
+              // called "refused" would be the worse lie.
+              <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: '#57534e' }}>
+                <div style={{ color: INK, fontSize: '15px' }}>{hostOf(here)} won’t open inside another page.</div>
+                <div style={{ maxWidth: 460, lineHeight: 1.5 }}>
+                  That’s a header the publisher sends with the page, and nothing here can override it.
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setFramed(false)}
+                    className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                    Read it here instead
+                  </button>
+                  <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
+                    style={{ background: `linear-gradient(135deg, #7a4fb0, ${INK})`, fontSize: '13px' }}>Open in a tab ↗</a>
+                </div>
+              </div>
+            )}
+            {framed && !frameRefused && (
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
-              <iframe src={here} title={doc?.title || here} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+              <iframe src={here} title={doc?.title || here} onLoad={() => { frameLoadedRef.current = true }} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
                 referrerPolicy="no-referrer" style={{ display: 'block', width: '100%', height: '100%', border: 'none', background: '#fff' }} />
             )}
             {doc && !framed && doc.blocks.map((b, i) => {
@@ -338,7 +549,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 return (
                   <Tag key={i} id={`iw-rd-${b.id}`} className="group"
                     style={{ fontSize: b.level <= 1 ? '1.5em' : b.level === 2 ? '1.22em' : '1.06em', fontWeight: 600, margin: '1.4em 0 0.5em', color: '#1c1a19' }}>
-                    <Runs onNavigate={go} runs={b.runs} />
+                    <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} onEraseMark={eraseMark} />
                     {onCite && (
                       <button type="button" title="Cite this section" onClick={() => citeHeading(b.text)}
                         className="opacity-0 group-hover:opacity-100"
@@ -363,7 +574,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               if (b.kind === 'code') {
                 return <pre key={i} style={{ margin: '0.9em 0', padding: '0.7em', background: '#00000008', borderRadius: 6, overflowX: 'auto', fontSize: '0.88em' }}><Runs onNavigate={go} runs={b.runs} /></pre>
               }
-              return <p key={i} style={{ margin: '0.85em 0' }}><Runs onNavigate={go} runs={b.runs} /></p>
+              return <p key={i} style={{ margin: '0.85em 0' }}><Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} onEraseMark={eraseMark} /></p>
             })}
           </div>
         </div>
@@ -384,6 +595,75 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 cite as locator
               </button>
+            )}
+          </div>
+        )}
+
+        {/* ── THE MARKUP BAR (Peter, 2026-08-28: "a tab at the bottom with roughly the same markup
+            tools as for the pdfs … reproduce the same ecosystem") ────────────────────────────────
+            Same three tools, same gesture (click arms, HOLD opens the colours), same palette, so a
+            highlight means the same thing in both readers. READER MODE ONLY: a live page is the
+            publisher's document and the browser seals it off from us — we cannot mark what we
+            cannot read, and offering a tool that silently does nothing is worse than not offering
+            it, so the bar renders the reason instead. */}
+        {!framed && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-stone-200 flex-wrap"
+            style={{ fontSize: '12px', background: 'var(--iw-panel-bg, #faf8fc)' }}>
+            {([
+              { kind: 'highlight' as const, label: '▮', title: 'Highlight — select text, then click · hold for colours', palette: MARK_COLORS },
+              { kind: 'note' as const, label: '🗒', title: 'Sticky note — select text, then click · hold for colours', palette: NOTE_COLORS },
+            ]).map((t) => (
+              <div key={t.kind} style={{ position: 'relative' }}>
+                <button type="button" title={t.title}
+                  onPointerDown={() => { holdRef.current = setTimeout(() => { heldRef.current = true; setPaletteOpen(t.kind) }, 400) }}
+                  onPointerUp={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
+                  onPointerLeave={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
+                  onClick={() => {
+                    if (heldRef.current) { heldRef.current = false; return }
+                    // Text already selected → mark it now. Nothing selected → arm the tool.
+                    const sel2 = window.getSelection()
+                    if (sel2 && !sel2.isCollapsed) { markSelection(t.kind); return }
+                    setTool((cur) => (cur === t.kind ? null : t.kind))
+                  }}
+                  style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: '0.9rem',
+                    border: `1px solid ${tool === t.kind ? INK : '#d6cfe0'}`, background: tool === t.kind ? `${INK}14` : '#fff',
+                    color: t.kind === 'highlight' ? '#c99a06' : INK }}>{t.label}</button>
+                {paletteOpen === t.kind && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setPaletteOpen(null)} />
+                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
+                      {t.palette.map((c) => (
+                        <button key={c} type="button" onMouseDown={(ev) => ev.preventDefault()}
+                          onClick={() => { setMarkColor(c); setPaletteOpen(null) }}
+                          style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: markColor === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            <button type="button" title="Eraser — click a mark to remove it"
+              onClick={() => setTool((cur) => (cur === 'erase' ? null : 'erase'))}
+              style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: '0.9rem',
+                border: `1px solid ${tool === 'erase' ? INK : '#d6cfe0'}`, background: tool === 'erase' ? `${INK}14` : '#fff', color: '#d17ba5' }}>⌫</button>
+
+            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
+            {/* Reading face — Peter's "preset sexy fonts". Reader mode only; a live page's
+                typography is the publisher's. */}
+            <select value={font} title="Reading font"
+              onChange={(e) => { setFont(e.target.value); try { localStorage.setItem('inkwave:readerFont', e.target.value) } catch { /* private */ } }}
+              className="iw-nightable"
+              style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              {READER_FONTS.map((f) => <option key={f.css} value={f.css}>{f.label}</option>)}
+            </select>
+
+            {located.orphaned.length > 0 && (
+              // A mark whose text the publisher has since changed. Said out loud rather than
+              // silently dropped OR silently re-placed over words the reader never marked.
+              <span className="ml-auto text-stone-400" style={{ fontSize: '11px' }}
+                title="These marks covered text that is no longer on the page — the publisher has edited it.">
+                {located.orphaned.length} mark{located.orphaned.length === 1 ? '' : 's'} lost their place
+              </span>
             )}
           </div>
         )}

@@ -121,9 +121,16 @@ export function writeStoredDockSide(v: DockSide): void {
 // make it just on click not click and hold plus read here." OFF by default, because a plain click
 // currently opens the PDF panel and silently changing what a click does to someone's citations is
 // not ours to decide — the tick box is where they decide it.
+// ⚠ DEFAULT ON (Peter, 2026-08-28, twice: "make it just on click not click and hold plus read
+// here", then "what I mean is no click and hold. Just click the main text of the link should go
+// there"). I shipped it default-OFF on the reasoning that changing what a click does to someone's
+// citations is not ours to decide — which is right in general and wrong here, because HE decided,
+// and then had to say so again. The tick box stays: it is how you turn it back off, and it is what
+// makes the default a choice rather than an imposition.
+// A source with only a PDF still opens the PDF — there is nothing else to show it in.
 const CLICK_READER_KEY = 'inkwave:citeClickOpensReader'
 export function citeClickOpensReader(): boolean {
-  try { return localStorage.getItem(CLICK_READER_KEY) === '1' } catch { return false }
+  try { return localStorage.getItem(CLICK_READER_KEY) !== '0' } catch { return true }
 }
 export function setCiteClickOpensReader(v: boolean): void {
   try { localStorage.setItem(CLICK_READER_KEY, v ? '1' : '0') } catch { /* private mode */ }

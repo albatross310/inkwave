@@ -253,6 +253,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
   const [colorOpen, setColorOpen] = useState<ToolKind | null>(null)
+  const [commentMargin, setCommentMargin] = useState(() => {
+    try { return localStorage.getItem('inkwave:pdfCommentMargin') === '1' } catch { return false }
+  })
   const holdRef = useRef<Partial<Record<ToolKind, ReturnType<typeof setTimeout>>>>({})
   const heldRef = useRef(false)
   // Per-tool colour memory: underline/strike DEFAULT to dark blue (Peter, 2026-07-10); clicking a
@@ -995,12 +998,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     const st = newAxisState()
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) return
-      const axis = lockAxis(st, e.deltaX, e.deltaY, e.timeStamp)
-      if (!axis) return                       // undecided jitter — let the browser have it
+      // preventDefault ALWAYS, including while undecided: letting an undecided event through is
+      // letting the browser scroll both axes, which is the lock leaking at exactly the moment the
+      // hand is least steady (see axisLock.ts).
       e.preventDefault()
+      const move = lockAxis(st, e.deltaX, e.deltaY, e.timeStamp)
+      if (!move) return
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1
-      if (axis === 'y') el.scrollTop += e.deltaY * unit
-      else el.scrollLeft += e.deltaX * unit
+      if (move.axis === 'y') el.scrollTop += move.delta * unit
+      else el.scrollLeft += move.delta * unit
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -1635,7 +1641,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${active ? INK : '#d6cfe0'}`, background: active ? `${INK}14` : '#fff',
-                color: t.kind === 'highlight' ? '#eab308' : INK,
+                // THE BUTTON WEARS ITS OWN COLOUR (Peter, 2026-08-28: "the colour of these buttons
+                // needs to reflect the colour chosen"). Now that each palette lives under its tool,
+                // the tool is the only place the choice is visible — a fixed yellow ▮ over a pink
+                // highlighter is a control lying about what it will do. Read from the ref, which is
+                // fresh on every render because setColor re-renders.
+                color: t.kind === 'highlight' || t.kind === 'text'
+                  ? (toolColorsRef.current[t.kind] ?? (t.kind === 'highlight' ? COLORS[0] : DARK_BLUE))
+                  : INK,
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
@@ -1740,6 +1753,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               : Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
+        {/* COMMENT MARGIN (Peter, 2026-08-28: "another button over here that refers to viewing with
+            a padding on the right for adding comments"). Reserves a strip to the right of the page
+            so sticky notes have somewhere to live that is not on top of the text. It changes the
+            LAYOUT, not the render: the page is untouched, so a note's position is still a position
+            on the page and turning the margin off cannot move one. */}
+        <button type="button" title={commentMargin ? 'Hide the comment margin' : 'Show a margin on the right for notes'}
+          onMouseEnter={() => setHint('reserve a margin on the right to put notes in')}
+          onClick={() => setCommentMargin(v => { const n = !v; try { localStorage.setItem('inkwave:pdfCommentMargin', n ? '1' : '0') } catch { /* private */ } ; return n })}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
+            border: `1px solid ${commentMargin ? INK : '#d6cfe0'}`, background: commentMargin ? `${INK}1f` : '#fff', color: INK }}>◨</button>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
         <span style={{ marginLeft: 'auto' }} />
         {/* TOGGLE GROUP right of the ✕ (Peter, 2026-07-10): ⇄ sync-editor, # don't-add-pages,
@@ -1813,7 +1836,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           keeps native pan/pinch. user-select off too, so a long-press can't start iOS text selection
           mid-gesture. */}
       <div ref={scrollRef} onMouseUp={onMouseUp} onPointerDown={onPdfPointerDown}
-        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3', padding: 12,
+        // The comment margin is PADDING on the scroller, not a change to the page: a note's position
+        // is a position on the page, so turning the margin on or off can never move one.
+        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3',
+          padding: 12, paddingRight: commentMargin ? 'clamp(120px, 26%, 320px)' : 12,
           touchAction: tool === 'text' || tool === 'erase' ? 'none' : 'auto',
           WebkitUserSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined,
           userSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined }}>

@@ -84,12 +84,12 @@ describe('click-to-read preference', () => {
     vi.stubGlobal('window', { dispatchEvent: () => true })
     vi.resetModules()
   })
-  it('is OFF until it is ticked — a click already means something else', async () => {
+  it('is ON by default — Peter asked for a plain click to open the source, twice', async () => {
     const m = await import('./dockLayout')
+    expect(m.citeClickOpensReader()).toBe(true)
+    m.setCiteClickOpensReader(false)          // …and the tick box is how you turn it off
     expect(m.citeClickOpensReader()).toBe(false)
     m.setCiteClickOpensReader(true)
     expect(m.citeClickOpensReader()).toBe(true)
-    m.setCiteClickOpensReader(false)
-    expect(m.citeClickOpensReader()).toBe(false)
   })
 })
