@@ -28,6 +28,25 @@ export function pdfOutputScale(dpr: number, isTouch: boolean, vw: number, vh: nu
   const byMemory = Math.min(vw > 0 ? maxCanvas / vw : Infinity, vh > 0 ? maxCanvas / vh : Infinity)
   return Math.max(1, Math.min(want, ceiling, byMemory))
 }
+import { lockAxis, newAxisState } from './axisLock'
+
+/**
+ * How much one ctrl/⌘-wheel event zooms the PDF.
+ *
+ * ⚠ IT USED TO IGNORE THE EVENT'S SIZE (Peter, 2026-08-28: "change the zoom sensitivity so that
+ * it's much less quick. At the moment it's too sensitive to properly control"). The rule was a flat
+ * ×1.1 / ×0.9 PER EVENT, which is right for a mouse — one notch, one step — and wrong for a
+ * trackpad, which is where the complaint comes from: a pinch streams ~60 events a second with tiny
+ * deltas, and each one took a full 10% bite, so the page shot from fit to maximum in a flick.
+ * Now the step is PROPORTIONAL to the delta, which is the thing that actually distinguishes a
+ * deliberate notch from a fingertip. The clamp keeps a mouse EXACTLY as it was: a 120px notch
+ * saturates at 1.1/0.9, so nothing about the mouse path changes.
+ */
+const PDF_ZOOM_K = 0.0025
+export function pdfZoomFactor(deltaY: number): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 1
+  return Math.min(1.1, Math.max(0.9, Math.exp(-deltaY * PDF_ZOOM_K)))
+}
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -37,10 +56,14 @@ const DARK_RED = '#991b1b'
 const DARK_BLUE = '#1e3a8a'
 const COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6', DARK_RED, DARK_BLUE]
 type ToolKind = HighlightKind | 'erase'
+// ⚠ UNDERLINE AND STRIKETHROUGH ARE GONE FROM THE TOOL ROW (Peter, 2026-08-28: "let's get rid of
+// underline and strikethrough"). The KINDS stay in the model and in the renderer on purpose: a PDF
+// annotated before today may already carry them, and dropping the render would make an existing
+// mark silently vanish from someone's source — the deletion-by-omission this codebase keeps
+// refusing. You can no longer CREATE one; every one already made still shows, and the eraser still
+// removes it.
 const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'highlight', label: '▮', title: 'Highlight' },
-  { kind: 'underline', label: 'U', title: 'Underline' },
-  { kind: 'strike', label: 'S', title: 'Strikethrough' },
   { kind: 'text', label: 'T', title: 'Text note — click on the page to place' },
   { kind: 'erase', label: '⌫', title: 'Eraser — click any annotation to remove it' },
 ]
@@ -201,6 +224,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const [zoom, setZoom] = useState(() => savedUserZoom() ?? 1)
   const [tool, setTool] = useState<ToolKind | null>(null) // active markup mode (null = off)
   const [color, setColor] = useState(COLORS[0])
+  const [colorOpen, setColorOpen] = useState(false)
   // Per-tool colour memory: underline/strike DEFAULT to dark blue (Peter, 2026-07-10); clicking a
   // swatch while a tool is armed re-colours THAT tool and is remembered for the session.
   const toolColorsRef = useRef<Partial<Record<ToolKind, string>>>({ underline: DARK_BLUE, strike: DARK_BLUE })
@@ -908,7 +932,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       zoomAnchorRef.current = { x: e.clientX, y: e.clientY } // zoom around the pointer
-      setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * (e.deltaY < 0 ? 1.1 : 0.9))))
+      setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * pdfZoomFactor(e.deltaY))))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // ── ONE AXIS AT A TIME (Peter, 2026-08-28) ───────────────────────────────────────────────────
+  // "restrict the scroll in pdf mode so that you can only go down and up or left to right at a
+  // time. So the downwards scroll isn't subject to arbitrary drift left and right." A trackpad
+  // reports both axes on every event and no hand is perfectly vertical, so reading down a zoomed
+  // page slides it sideways until the column is off-centre. The axis is chosen ONCE per gesture
+  // (components/axisLock.ts) — per event, a wobble flips it, which is the drift wearing a hat.
+  // Ctrl/⌘ is left alone above: that gesture is the zoom, and it owns both axes.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const st = newAxisState()
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return
+      const axis = lockAxis(st, e.deltaX, e.deltaY, e.timeStamp)
+      if (!axis) return                       // undecided jitter — let the browser have it
+      e.preventDefault()
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1
+      if (axis === 'y') el.scrollTop += e.deltaY * unit
+      else el.scrollLeft += e.deltaX * unit
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -1502,24 +1550,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
             style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
-        {/* TOGGLE GROUP right of the ✕ (Peter, 2026-07-10): ⇄ sync-editor, # don't-add-pages,
-            ◧ hide-on-editor-click, ⛶ fullscreen — grouped at the left end, functions unchanged. */}
-        {/* Sync-editor toggle — a box that lights up purple when on. */}
-        <button type="button" title="Sync editor: scroll the editor to where the highlight is cited when you click the ‹ › arrows"
-          onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
-          onClick={() => setSyncEditor(v => !v)}
-          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
-            border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
-        {/* "Don't add pages to inline" toggle — lights up purple when on. */}
-        <button type="button" disabled={!!noRef} title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
-          onClick={() => setDontAddPages(v => !v)}
-          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '1rem',
-            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e' }}>
-          {/* # with a strike drawn at the exact vertical centre → symmetric. */}
-          <span style={{ position: 'relative', lineHeight: 1 }}>#
-            <span aria-hidden="true" style={{ position: 'absolute', left: -2, right: -2, top: '50%', height: 1.5, background: 'currentColor', transform: 'translateY(-50%)' }} />
-          </span>
-        </button>
+        {/* ⇄ sync-editor and # don't-add-pages MOVED TO THE RIGHT END (Peter, 2026-08-28: "let's
+            move these two buttons over to the rhs"). They are per-session preferences, not actions
+            you reach for while reading, so they belong with the dock controls rather than beside
+            the ✕. Functions unchanged — the JSX moved, nothing else. */}
         {/* Hide-on-editor-click toggle (full screen) — lights up purple when on; off by default.
             Hidden on touch: the phone top dock NEVER closes on editor taps (tapping the bottom
             half to TYPE is its whole point — Peter, 2026-07-10), so the toggle would be inert. */}
@@ -1570,24 +1604,46 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {/* Text-note font size */}
         <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
           onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          style={{ height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.82rem' /* <16px makes iOS auto-zoom on focus */, padding: '0 4px', cursor: 'pointer', flexShrink: 0 }}>
+          // Narrower (Peter, 2026-08-28: "make the font size button smaller"). The iOS 16px floor
+          // is untouched on touch — shrinking a control below it makes the page auto-zoom on focus
+          // and STAY zoomed, which is a far worse bug than a wide select.
+          style={{ height: 28, width: isTouch ? undefined : 62, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.72rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0 }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}px</option>)}
         </select>
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
-        {COLORS.map((c, i) => (
-          <Fragment key={c}>
-            {/* Small divider between the highlight colours and the dark red/blue pair (Peter, 2026-07-10). */}
-            {i === COLORS.length - 2 && <span style={{ width: 1, height: 14, background: `${INK}22`, margin: '0 2px', flexShrink: 0, transform: 'translateY(-3px)' }} />}
-            <button type="button"
-              onClick={() => {
-                // A SELECTED markup annotation takes the swatch: recolour it (persisted) and leave
-                // the armed tool's colour alone. Otherwise the swatch sets the tool colour as before.
-                if (selectedMkRef.current) { recolorMarkup(selectedMkRef.current, c); return }
-                setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c
-              }}
-              style={{ width: 18, height: 18, borderRadius: '50%', background: c, cursor: 'pointer', flexShrink: 0, transform: 'translateY(-3px)', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
-          </Fragment>
-        ))}
+        {/* ONE COLOUR BUTTON (Peter, 2026-08-28: "put all the highlight colours and text colours
+            into one button"). Six permanently-visible swatches were six tap targets for a choice
+            made once in a while; this is the current colour, and it opens the rest. Highlight
+            colours and note colours share the popover because they are one decision — what colour
+            am I marking in — and the tool already decides which of the two it means. */}
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <button type="button" title="Markup colour" aria-label="Markup colour"
+            onMouseEnter={() => setHint('the colour highlights and notes are made in')}
+            onClick={() => setColorOpen(o => !o)}
+            style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ width: 17, height: 17, borderRadius: '50%', background: color, border: '1px solid rgba(0,0,0,0.15)' }} />
+          </button>
+          {colorOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setColorOpen(false)} />
+              <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
+                {COLORS.map((c, i) => (
+                  <Fragment key={c}>
+                    {/* The dark pair are NOTE colours — kept visually separate, as they were. */}
+                    {i === COLORS.length - 2 && <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 1px' }} />}
+                    <button type="button" title={c}
+                      onClick={() => {
+                        if (selectedMkRef.current) { recolorMarkup(selectedMkRef.current, c); setColorOpen(false); return }
+                        setColor(c); const t = toolRef.current; if (t && t !== 'erase') toolColorsRef.current[t] = c
+                        setColorOpen(false)
+                      }}
+                      style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                  </Fragment>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         <span style={{ width: 1, height: 20, background: `${INK}22`, margin: '0 1px', flexShrink: 0 }} />
         {/* Scroll-highlighted navigator */}
         <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
@@ -1610,8 +1666,38 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             void renderPages(fitScaleRef.current * zoom)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
+        {/* CENTRE THE VIEW (Peter, 2026-08-28) — the companion to the one-axis scroll lock: the lock
+            stops the page drifting sideways, and this puts it back when it already has (or after a
+            zoom that left the column off to one side). Horizontal only: vertical position is where
+            you are READING and must never be thrown away by a button about sideways drift. */}
+        <button type="button" title="Centre the page" aria-label="Centre the page"
+          onMouseEnter={() => setHint('centre the page horizontally')}
+          onClick={() => {
+            const el = scrollRef.current
+            if (!el) return
+            el.scrollLeft = Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
+          }}
+          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
         <span style={{ marginLeft: 'auto' }} />
+        {/* TOGGLE GROUP right of the ✕ (Peter, 2026-07-10): ⇄ sync-editor, # don't-add-pages,
+            ◧ hide-on-editor-click, ⛶ fullscreen — grouped at the left end, functions unchanged. */}
+        {/* Sync-editor toggle — a box that lights up purple when on. */}
+        <button type="button" title="Sync editor: scroll the editor to where the highlight is cited when you click the ‹ › arrows"
+          onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
+          onClick={() => setSyncEditor(v => !v)}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
+            border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
+        {/* "Don't add pages to inline" toggle — lights up purple when on. */}
+        <button type="button" disabled={!!noRef} title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
+          onClick={() => setDontAddPages(v => !v)}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '1rem',
+            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e' }}>
+          {/* # with a strike drawn at the exact vertical centre → symmetric. */}
+          <span style={{ position: 'relative', lineHeight: 1 }}>#
+            <span aria-hidden="true" style={{ position: 'absolute', left: -2, right: -2, top: '50%', height: 1.5, background: 'currentColor', transform: 'translateY(-50%)' }} />
+          </span>
+        </button>
         {sideButtons}
         {dockButton}
       </div>

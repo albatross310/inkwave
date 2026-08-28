@@ -20,6 +20,12 @@ import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
 import type { LocatorKind } from '../citations/locator'
+import {
+  applyDockRoom, dockHandlePos, dockPanelPos, dockResize, dockRoom, NO_DOCK_ROOM,
+  readStoredDockSide, readStoredOrientation, resolveOrientation, writeStoredDockSide,
+  writeStoredOrientation, WIDE_QUERY, type DockOrientation,
+} from './dockLayout'
+import { isTouchDevice } from '../editor/Scroll'
 
 const INK = '#5c2d8a'
 
@@ -78,6 +84,50 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
+  // ── THE DOCK — the PDF panel's rules, not a copy of them (components/dockLayout.ts) ──────────
+  // Peter: "can you get it to open in the side or below with same width and placing as the pdf
+  // reader?" Shared preferences too, so moving one moves both.
+  const [width, setWidth] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerWidth : 1280) * 0.5))
+  const [height, setHeight] = useState(() => Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.5))
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{ axis: 'x' | 'y'; start: number; size: number } | null>(null)
+  const [storedOrient, setStoredOrient] = useState<'bottom' | 'side'>(readStoredOrientation)
+  const [dockSide, setDockSide] = useState(readStoredDockSide)
+  const [isWide, setIsWide] = useState(() => typeof window !== 'undefined' && window.matchMedia(WIDE_QUERY).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE_QUERY)
+    const h = (e: MediaQueryListEvent) => setIsWide(e.matches)
+    mq.addEventListener('change', h)
+    return () => mq.removeEventListener('change', h)
+  }, [])
+  const isPhone = isTouchDevice()
+  const orientation: DockOrientation = resolveOrientation(isPhone, isWide, storedOrient)
+
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: PointerEvent) => {
+      const d = drag.current
+      if (!d) return
+      const delta = (d.axis === 'x' ? e.clientX : e.clientY) - d.start
+      // The panel grows toward the editor, so a LEFT dock and a BOTTOM dock read the drag in
+      // opposite senses from a right dock — same arithmetic, one sign.
+      const sign = d.axis === 'x' ? (dockSide === 'left' ? 1 : -1) : -1
+      const next = dockResize(d.axis, d.size, delta * sign)
+      if (d.axis === 'x') setWidth(next); else setHeight(next)
+    }
+    const up = () => { drag.current = null; setDragging(false) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  }, [dragging, dockSide])
+
+  // Carve the room out of the editor — the SAME four CSS variables the PDF panel writes, so the
+  // editor surface and every floating pill already know how to get out of the way.
+  useEffect(() => {
+    applyDockRoom(dockRoom({ open: true, fullscreen: false, orientation, dockSide, width, height }))
+    return () => applyDockRoom(NO_DOCK_ROOM)
+  }, [orientation, dockSide, width, height])
+
   useEffect(() => {
     let live = true
     setDoc(null); setError(null); setFramed(false)
@@ -127,11 +177,22 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const citeHeading = (text: string) => { onCite?.(locatorForHeading(text)); setSel(null) }
 
   return createPortal(
-    <div className="fixed inset-0 z-[400] flex items-center justify-center" style={{ background: 'rgba(30,22,45,0.42)' }}
-      onMouseDown={onClose}>
-      <div className="iw-nightable iw-touch-guard flex flex-col bg-white rounded-xl shadow-2xl overflow-hidden"
-        style={{ width: 'min(1100px, 94vw)', height: 'min(880px, 92vh)', border: `1px solid ${INK}44` }}
-        onMouseDown={(e) => e.stopPropagation()}>
+    <div className="iw-nightable iw-touch-guard flex flex-col bg-white"
+      style={{ position: 'fixed', zIndex: 80, ...dockPanelPos({ orientation, dockSide, width, height }) }}
+      onMouseDown={(e) => e.stopPropagation()}>
+      {/* Resize handle on the edge facing the editor — the same rule and the same 10px grab strip
+          the PDF panel uses (components/dockLayout.ts). */}
+      {orientation !== 'top' && (
+        <div title="Drag to resize"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            const axis = orientation === 'side' ? 'x' : 'y'
+            drag.current = { axis, start: axis === 'x' ? e.clientX : e.clientY, size: axis === 'x' ? width : height }
+            setDragging(true)
+          }}
+          style={{ position: 'absolute', zIndex: 2, background: dragging ? `${INK}22` : 'transparent', ...dockHandlePos(orientation, dockSide) }} />
+      )}
+      <div className="flex flex-col flex-1 min-h-0">
 
         <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-200" style={{ fontSize: '13px' }}>
           <span style={{ color: INK, fontWeight: 600 }}>{doc?.title || title || hostOf(url)}</span>
@@ -139,6 +200,21 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <a href={url} target="_blank" rel="noreferrer noopener" className="underline whitespace-nowrap" style={{ color: INK, fontSize: '12px' }}>
             open in a tab ↗
           </a>
+          {/* Same two controls, same preferences, as the PDF panel — move one and both follow. */}
+          {isWide && !isPhone && (
+            <button type="button" title={orientation === 'side' ? 'Dock below' : 'Dock to the side'}
+              onClick={() => setStoredOrient((o) => { const n = o === 'side' ? 'bottom' : 'side'; writeStoredOrientation(n); return n })}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 3px' }}>
+              {orientation === 'side' ? '▤' : '▥'}
+            </button>
+          )}
+          {orientation === 'side' && (
+            <button type="button" title={`Move to the ${dockSide === 'left' ? 'right' : 'left'}`}
+              onClick={() => setDockSide((d) => { const n = d === 'left' ? 'right' : 'left'; writeStoredDockSide(n); return n })}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 3px' }}>
+              {dockSide === 'left' ? '→' : '←'}
+            </button>
+          )}
           <button type="button" onClick={onClose} aria-label="Close"
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#78716c', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}>×</button>
         </div>

@@ -158,7 +158,14 @@ export function SyncStatus({
           }}
           title={tooltip}
           className={`iw-nightable ${compact || pdfOpen
-            ? 'flex items-center justify-center w-10 h-10 rounded-full bg-white shadow-sm text-lg'
+            // ⚠ STILL A PILL WITH A PANEL OPEN (Peter, 2026-08-28: "this button should be a pill
+            // like the lhs pill of same height and have same midline horizontally as the main
+            // pill"). It used to become a w-10 h-10 CIRCLE — 40px against the side pills' 30px, on
+            // its own baseline — so opening the PDF or the source reader silently broke the pairing
+            // that components/sidePill.ts exists to hold. It only ever needed to be NARROWER (so it
+            // can't reach the toolbar), not a different shape: same height, same font, same
+            // midline, just the ☁ glyph instead of the label.
+            ? 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center justify-center px-2.5'
             // max-w narrowed 8.5rem → 7.5rem → 5.6rem (Peter, 2026-08-20: "a bit narrower", then
             // "take 25% off the left of the rh pill"). It is RIGHT-anchored, so trimming its max-width
             // takes the space off its LEFT edge, which is what was asked. The label already wraps by
@@ -176,9 +183,7 @@ export function SyncStatus({
             // Purple outline (Peter, 2026-08-20) matching the footer toolbar pill and the snaps pill
             // on the opposite side — the same token, so night mode remaps all three together rather
             // than leaving this one a hard-coded day colour.
-            border: compact
-              ? `1px solid ${INK}66`
-              : '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
+            border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
             // ⚠ 2026-08-20 (Peter: "align at horizontal axis, move lower") — narrowing the pill above
             // makes longer labels ("Reconnect to keep saving") wrap to 2 lines while short ones
             // ("Save to a folder") stay on 1, so this button's own height VARIES by label — a fixed
@@ -198,7 +203,7 @@ export function SyncStatus({
             // against the snaps pill's 30.8px, i.e. nearly double. A fixed height (not min-height) is
             // what makes "the same" enforceable: the label wraps to two lines and would otherwise size
             // the box itself. See components/sidePill.ts for why 30px clears the wrapped text.
-            ...(compact || pdfOpen ? {} : {
+            ...({
               height: SIDE_PILL_H,
               // ONE SIZE SHARED WITH THE SNAPS PILL (Peter: "make it same font size as on the left and
               // shrink the left pill text if you have to"). 12px is the meeting point — this pill came

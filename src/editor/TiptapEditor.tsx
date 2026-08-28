@@ -15,6 +15,7 @@ import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
+import { rememberReturn } from '../citations/citationNav'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
@@ -1833,7 +1834,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (found < 0) return
       const dom = editor.view.nodeDOM(found) as HTMLElement | null
       const el = dom && dom.nodeType === 1 ? dom : (dom?.parentElement ?? null)
-      el?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      if (!el) return
+      // Same class as the ⤵ jump: any programmatic scroll of the writer's document must be
+      // reversible and must SAY it happened, or it reads as the page moving on its own.
+      rememberReturn()
+      el.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
     }
     window.addEventListener('inkwave:goto-citation-instance', onGoto)
     return () => window.removeEventListener('inkwave:goto-citation-instance', onGoto)
