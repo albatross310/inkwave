@@ -22,7 +22,8 @@ import { locatorForHeading } from '../reader/types'
 import { splitMath, hasMath } from '../reader/readerMath'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { locateAll, markRuns, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
+import { locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
+import { pdfZoomFactor } from './zoomGesture'
 import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
 import {
@@ -59,6 +60,38 @@ function Katex({ tex, display }: { tex: string; display: boolean }) {
 const MARK_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
 // No dark pair: a sticky note in maroon or navy is a note you cannot read (Peter, 2026-08-28).
 const NOTE_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
+// ⚠ COLOURED TEXT NEEDS ITS OWN PALETTE — INKS, NOT WASHES (Peter: "an input text which allows us
+// to input coloured text at the cursor"). Reusing the highlighter four would put pale yellow words
+// on cream: text you cannot read is not an annotation. These are the PDF's own dark pair plus a
+// green and the app's ink, so a written-in word is as legible as the prose it sits beside.
+const TEXT_COLORS = ['#991b1b', '#1e3a8a', '#166534', INK]
+// A textbox is the PDF's sticky note, so it takes the sticky note's colours — same object, same
+// vocabulary, both readers.
+const BOX_COLORS = NOTE_COLORS
+
+// ── READER ZOOM (Peter, 2026-08-28: "and all the same zoom settings etc") ───────────────────────
+// SAME GESTURE, DIFFERENT SUBJECT. The PDF zooms a RASTER, so it re-renders and grows a horizontal
+// scrollbar; the reader owns its own text, so zooming means growing the TYPE and letting the
+// article reflow to the panel — no second axis, ever. The ⌘/ctrl-wheel curve is imported rather
+// than re-tuned (see zoomGesture.ts) so the two readers cannot drift apart under the same finger.
+const READER_ZOOM_MIN = 0.6, READER_ZOOM_MAX = 3, READER_BASE_PX = 17
+export function clampReaderZoom(z: number): number {
+  if (!Number.isFinite(z)) return 1
+  return Math.min(READER_ZOOM_MAX, Math.max(READER_ZOOM_MIN, z))
+}
+/** One −/+ press. A fixed ×1.15 rather than a ladder: the ladder and the wheel would be two rules
+ *  for one question, and the writer would meet both. */
+export function readerZoomStep(z: number, dir: 1 | -1): number {
+  return clampReaderZoom(z * (dir === 1 ? 1.15 : 1 / 1.15))
+}
+
+// How much text a point mark remembers as its anchor. Long enough that a phrase is very unlikely to
+// repeat inside one block (which is the only thing that could re-place it on the wrong words), short
+// enough that an ordinary edit nearby does not destroy it.
+const ANCHOR_LEN = 48
+// A textbox anchors to the OPENING of the paragraph it was dropped on — the one part of a block
+// that a reader would recognise, and the part an author is least likely to rewrite.
+const BOX_ANCHOR_LEN = 60
 
 const READER_FONTS: Array<{ label: string; css: string }> = [
   { label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
@@ -212,6 +245,30 @@ const ERRORS: Record<string, string> = {
   rate: 'Too many pages fetched just now — try again in a moment.',
 }
 
+/**
+ * The anchor phrase for an insertion made at `offset` inside a run of text.
+ *
+ * ⚠ A CARET IS A NUMBER AND A NUMBER IS NOT AN ANCHOR. reader/marks.ts refuses to place a highlight
+ * by remembered offset because the publisher can rewrite the page between visits; a caret is the
+ * same problem with nothing to hold on to at all. So an insertion remembers the WORDS it was made
+ * against — behind the caret by preference, because that is the text the reader had just finished
+ * reading when they decided to write — and is re-found by them, or reported lost. Nothing here
+ * invents a second anchoring scheme: the phrase becomes an ordinary `ReaderMark.text`.
+ *
+ * Returns null when there is nothing to anchor to (a caret in whitespace at a block edge), which is
+ * a refusal, not a failure — the caller declines to place the mark rather than guessing a position.
+ */
+export function anchorSlice(nodeText: string, offset: number): { phrase: string; before: boolean } | null {
+  const at = Math.max(0, Math.min(nodeText.length, offset))
+  const back = nodeText.slice(Math.max(0, at - ANCHOR_LEN), at)
+  // `before: false` ⇒ render at the anchor's END, which is the caret. Preferred.
+  if (back.trim().length >= 3) return { phrase: back, before: false }
+  // At a block's very start there is nothing behind it, so anchor FORWARD and render at the start.
+  const fwd = nodeText.slice(at, at + ANCHOR_LEN)
+  if (fwd.trim().length >= 3) return { phrase: fwd, before: true }
+  return null
+}
+
 /** Paint the mark runs over a block's text. Splitting happens on PLAIN-TEXT offsets, so the block's
  *  own runs (links, emphasis) are walked in step and a mark that starts mid-link still paints. */
 function markedStyle(ms: Located[]): React.CSSProperties | undefined {
@@ -225,14 +282,49 @@ function markedStyle(ms: Located[]): React.CSSProperties | undefined {
   }
 }
 
-function Runs({ runs, onNavigate, marks, onEraseMark }: {
-  runs: Run[]; onNavigate?: (url: string) => void; marks?: Located[]; onEraseMark?: (id: string) => void
+/**
+ * The reader's own words, written INTO the article at a point (D1). It is rendered as an ordinary
+ * inline span of coloured text — deliberately not a badge or a bubble: Peter asked to "input
+ * coloured text", and a note that reads as part of the sentence is the thing he described.
+ * `data-iw-ins` marks it as ours so it can never be mistaken for the publisher's prose by a reader,
+ * a screenshot, or a future selection rule.
+ */
+function InsertedText({ mark, onErase }: { mark: Located; onErase?: (id: string) => void }) {
+  return (
+    <span data-iw-ins={mark.id} title="Your note — armed eraser removes it"
+      onClick={onErase ? (e) => { e.stopPropagation(); onErase(mark.id) } : undefined}
+      style={{ color: mark.color, fontWeight: 600, whiteSpace: 'pre-wrap',
+        borderBottom: `1px dotted ${mark.color}`, padding: '0 0.15em' }}>
+      {mark.body}
+    </span>
+  )
+}
+
+function Runs({ runs, onNavigate, marks, points, onEraseMark }: {
+  runs: Run[]
+  onNavigate?: (url: string) => void
+  marks?: Located[]
+  /** Point-anchored insertions rendered at a seam INSIDE this block (D1's coloured text). */
+  points?: Located[]
+  onEraseMark?: (id: string) => void
 }) {
-  if (marks && marks.length) {
+  const ranges = marks ?? []
+  const pts = points ?? []
+  if (ranges.length || pts.length) {
     // Walk the runs and the mark boundaries together on one plain-text cursor.
     const total = runs.reduce((n, r) => n + r.text.length, 0)
-    const segs = markRuns(total, marks)
+    // A point mark has no width, so it would fall inside whatever run happened to contain it and
+    // never get emitted. Its position becomes a CUT, which guarantees a seam exists exactly there.
+    const segs = markRuns(total, ranges, pts.map((p) => pointAt(p, total)))
     const out: React.ReactNode[] = []
+    const done = new Set<string>()
+    const emitPoints = (at: number) => {
+      for (const p of pts) {
+        if (done.has(p.id) || pointAt(p, total) !== at) continue
+        done.add(p.id)
+        out.push(<InsertedText key={`ins-${p.id}`} mark={p} onErase={onEraseMark} />)
+      }
+    }
     let cur = 0
     for (const r of runs) {
       const rStart = cur, rEnd = cur + r.text.length
@@ -240,6 +332,7 @@ function Runs({ runs, onNavigate, marks, onEraseMark }: {
       for (const g of segs) {
         const from = Math.max(g.from, rStart), to = Math.min(g.to, rEnd)
         if (to <= from) continue
+        emitPoints(from)
         const piece = { ...r, text: r.text.slice(from - rStart, to - rStart) }
         const st = markedStyle(g.marks)
         out.push(
@@ -251,6 +344,7 @@ function Runs({ runs, onNavigate, marks, onEraseMark }: {
         )
       }
     }
+    emitPoints(total)   // an insertion at the very end of the block has no following seam
     return <>{out}</>
   }
   return (
@@ -315,6 +409,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [tool, setTool] = useState<MarkKind | 'erase' | null>(null)
   const [markColor, setMarkColor] = useState(MARK_COLORS[0])
   const markColorRef = useRef(markColor); markColorRef.current = markColor
+  // Per-tool colour memory. Highlights and text-ink are different palettes with different jobs, so
+  // one shared "current colour" would make arming the T tool silently recolour the highlighter (and
+  // vice versa) — the writer's chosen ink must survive them switching tools.
+  const [textColor, setTextColor] = useState(TEXT_COLORS[0])
+  const textColorRef = useRef(textColor); textColorRef.current = textColor
+  const [boxColor, setBoxColor] = useState(BOX_COLORS[0])
+  const boxColorRef = useRef(boxColor); boxColorRef.current = boxColor
   const [paletteOpen, setPaletteOpen] = useState<MarkKind | null>(null)
   const holdRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const heldRef = useRef(false)
@@ -325,6 +426,17 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [font, setFont] = useState(() => {
     try { return localStorage.getItem('inkwave:readerFont') || READER_FONTS[0].css } catch { return READER_FONTS[0].css }
   })
+  // Zoom (D3). Remembered like the face and the leading — how big a source needs to be is a
+  // property of your eyes and your screen, not of the page you happen to have open.
+  const [zoom, setZoom] = useState(() => {
+    try { return clampReaderZoom(Number(localStorage.getItem('inkwave:readerZoom')) || 1) } catch { return 1 }
+  })
+  const applyZoom = (next: number) => {
+    const z = clampReaderZoom(next)
+    setZoom(z)
+    try { localStorage.setItem('inkwave:readerZoom', String(z)) } catch { /* private */ }
+  }
+  const zoomRef = useRef(zoom); zoomRef.current = zoom
   const marksStoreKey = `inkwave:readerMarks:${docKey}:${here}`
   useEffect(() => {
     try {
@@ -435,6 +547,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => { live = false }
   }, [framed, here])
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
+  // The open coloured-text composer (D1): an anchor already resolved, waiting for the words. It
+  // carries the RESOLVED anchor rather than a DOM position, so nothing about it can go stale while
+  // the writer is typing into it.
+  const [composer, setComposer] = useState<
+    { x: number; y: number; block: number; start: number; text: string; before: boolean; value: string } | null
+  >(null)
+  /** The textbox currently being typed into (D2), by mark id. */
+  const [editingBox, setEditingBox] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   // ── THE DOCK — the PDF panel's rules, not a copy of them (components/dockLayout.ts) ──────────
@@ -571,10 +691,19 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     [doc],
   )
   const located = useMemo(() => locateAll(marks, blockTexts), [marks, blockTexts])
-  const byBlock = useMemo(() => {
-    const m = new Map<number, Located[]>()
-    for (const l of located.placed) { const a = m.get(l.block) ?? []; a.push(l); m.set(l.block, a) }
-    return m
+  // THREE POPULATIONS, ONE ANCHORING RULE. They are split here rather than in marks.ts because the
+  // difference is purely about WHERE each is drawn: ranges paint over the block's own text, points
+  // are inserted at a seam inside it, boxes hang beneath it. All three came out of the same
+  // `locateAll`, so a lost anchor is reported the same way whatever the tool was.
+  const { byBlock, pointsByBlock, boxesByBlock } = useMemo(() => {
+    const rangeM = new Map<number, Located[]>()
+    const pointM = new Map<number, Located[]>()
+    const boxM = new Map<number, Located[]>()
+    for (const l of located.placed) {
+      const m = l.kind === 'box' ? boxM : l.kind === 'text' ? pointM : rangeM
+      const a = m.get(l.block) ?? []; a.push(l); m.set(l.block, a)
+    }
+    return { byBlock: rangeM, pointsByBlock: pointM, boxesByBlock: boxM }
   }, [located])
 
   const headings = useMemo(
@@ -618,6 +747,21 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }, [doc, framed, here])
 
   const eraseMark = (id: string) => { if (tool === 'erase') writeMarks(marks.filter((m) => m.id !== id)) }
+
+  // ⌘/Ctrl + wheel zooms the article (D3). A NATIVE listener, not React's `onWheel`: React registers
+  // wheel passively at the root, so preventDefault there is silently ignored and the browser zooms
+  // the whole app instead — the same trap PdfViewer records for its own zoom.
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || framed) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      applyZoom(zoomRef.current * pdfZoomFactor(e.deltaY))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [framed, doc])
 
   /** One shape for every header action — that is what "symmetric" means here. */
   const btn = (glyph: string, title: string, onPress: () => void, lit: boolean) => (
@@ -689,6 +833,102 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     setSel(null)
   }
   markSelectionRef.current = markSelection
+
+  // ── POINT TOOLS: coloured text at the cursor (D1) and a textbox (D2) ─────────────────────────
+  // Both are placed by CLICK rather than by selection, which is what makes them different tools
+  // rather than two more things the highlight gesture does. Both resolve their anchor the same way
+  // `markSelection` does — find the remembered TEXT in `blockTexts` — so creating a mark and
+  // re-finding it on the next visit can never disagree about where it belongs.
+
+  /** Which block a DOM node sits in, from the index the renderer stamped on it. */
+  const blockIndexOf = (node: Node | null): number => {
+    const el = (node instanceof Element ? node : node?.parentElement) ?? null
+    const host = el?.closest?.('[data-iw-blk]') as HTMLElement | null
+    const n = host ? Number(host.dataset.iwBlk) : NaN
+    return Number.isInteger(n) ? n : -1
+  }
+
+  /** Resolve an anchor phrase to (block, start). Prefers the block the caret was actually in, so
+   *  a phrase that also occurs elsewhere cannot pull the mark across the article. */
+  const resolveAnchor = (phrase: string, preferBlock: number): { block: number; start: number } | null => {
+    if (preferBlock >= 0) {
+      const at = blockTexts[preferBlock]?.indexOf(phrase) ?? -1
+      if (at >= 0) return { block: preferBlock, start: at }
+    }
+    for (let i = 0; i < blockTexts.length; i++) {
+      const at = blockTexts[i].indexOf(phrase)
+      if (at >= 0) return { block: i, start: at }
+    }
+    return null
+  }
+
+  /** Open the composer at the caret the click just placed. */
+  const openComposerAtCaret = (x: number, y: number) => {
+    const s = window.getSelection()
+    const node = s?.focusNode
+    // The caret must be in real article TEXT. Landing on an element (a gap between blocks, a
+    // rendered formula's internals) gives nothing to anchor to, so we decline rather than pick a
+    // nearby position that the reader did not choose.
+    if (!node || node.nodeType !== Node.TEXT_NODE || !bodyRef.current?.contains(node)) {
+      flash('Click on the words you want to write next to'); return
+    }
+    const a = anchorSlice(node.textContent ?? '', s?.focusOffset ?? 0)
+    if (!a) { flash('Click on the words you want to write next to'); return }
+    // KaTeX output and other generated text is not in `blockTexts` at all, so this legitimately
+    // fails there — and failing is right: a mark whose anchor is not in the source text could never
+    // be re-found on the next visit.
+    const at = resolveAnchor(a.phrase, blockIndexOf(node))
+    if (!at) { flash('That spot can’t be written on — try the prose beside it'); return }
+    setComposer({ x, y, block: at.block, start: at.start, text: a.phrase, before: a.before, value: '' })
+  }
+
+  const commitComposer = () => {
+    if (!composer) return
+    const body = composer.value.trim()
+    if (!body) { setComposer(null); return }
+    writeMarks([...marks, {
+      id: uuidv4(), kind: 'text', color: textColorRef.current, block: composer.block,
+      start: composer.start, text: composer.text, before: composer.before, body,
+      createdAt: new Date().toISOString(),
+    }])
+    setComposer(null)
+    setTool(null)   // one placement per arming: a click-to-place tool left armed writes on the next stray tap
+  }
+
+  /** Drop a textbox on the paragraph that was clicked. */
+  const placeBoxAt = (target: EventTarget | null) => {
+    const bi = blockIndexOf(target as Node | null)
+    // ⚠ A BOX HAS NO PLACE IN A REFLOWED COLUMN except relative to its paragraph. Page coordinates
+    // are meaningless here: the article is re-fetched, re-wrapped at the panel's width and re-typeset
+    // at whatever zoom the reader has chosen, so a box at (x, y) would point at different words every
+    // visit. It anchors to the paragraph's OPENING and hangs beneath it.
+    const t = bi >= 0 ? (blockTexts[bi] ?? '') : ''
+    const phrase = t.slice(0, BOX_ANCHOR_LEN)
+    if (phrase.trim().length < 3) { flash('Click on a paragraph to put a textbox under it'); return }
+    const id = uuidv4()
+    writeMarks([...marks, {
+      id, kind: 'box', color: boxColorRef.current, block: bi, start: 0, text: phrase, body: '',
+      createdAt: new Date().toISOString(),
+    }])
+    setEditingBox(id)
+    setTool(null)
+  }
+
+  const setBoxBody = (id: string, body: string) =>
+    writeMarks(marks.map((m) => (m.id === id ? { ...m, body } : m)))
+
+  /** Every tool that places by CLICK routes through here, in the capture phase — so a click meant
+   *  to drop a note can never also follow the link it landed on. */
+  const onBodyClickCapture = (e: React.MouseEvent) => {
+    const t = toolRef.current
+    if (t !== 'text' && t !== 'box') return
+    e.preventDefault()
+    e.stopPropagation()
+    if (t === 'box') placeBoxAt(e.target)
+    // The caret is placed by the browser during the pointer-down default action, which we have NOT
+    // suppressed — so by the time this click fires the selection is already where the reader aimed.
+    else openComposerAtCaret(e.clientX, e.clientY)
+  }
 
   return createPortal(
     <div className="iw-nightable iw-touch-guard flex flex-col bg-white"
@@ -820,8 +1060,16 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'}`}
             // EVERY TOOL CHANGES THE CURSOR (Peter: "each button needs to change the cursor"). An
             // armed mode you cannot see is a mode you will forget you are in.
+            // ⚠ THE ATTRIBUTE IS ONLY HALF OF IT — it was written here for months with NOTHING
+            // reading it, which is a mechanism with no surface: indistinguishable, from the writer's
+            // chair, from the feature never having been built. The rules live in index.css under
+            // `[data-iw-tool]`; if you add a tool, add its cursor in the same commit.
             data-iw-tool={tool ?? undefined}
-            style={framed ? undefined : { fontFamily: font, fontSize: '17px', lineHeight: leading, color: '#2c2a28' }}>
+            onClickCapture={framed ? undefined : onBodyClickCapture}
+            style={framed ? undefined : {
+              fontFamily: font, fontSize: `${Math.round(READER_BASE_PX * zoom)}px`,
+              lineHeight: leading, color: '#2c2a28',
+            }}>
             {/* ⚠ A SEARCH THAT COULD NOT RUN SAYS WHY (2026-08-28). MEASURED from the deployed
                 function, not from a laptop: DuckDuckGo, Mojeek and the public SearX instances all
                 refuse or captcha requests from a datacenter IP, while ordinary sites (SEP,

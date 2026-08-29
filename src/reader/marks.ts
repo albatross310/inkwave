@@ -15,7 +15,21 @@
 // The same refusal the music module makes about bar numbers: carry what you know, resolve later,
 // never fabricate the key.
 
-export type MarkKind = 'highlight' | 'note'
+// RANGE kinds paint over text the reader selected. POINT kinds insert the reader's OWN words beside
+// it (Peter, 2026-08-28: "an input text which allows us to input coloured text at the cursor", "a
+// textbox like in pdf mode which puts a textbox"). The difference is about ANCHORING, not painting:
+// a range mark's `text` is what it COVERS, a point mark's `text` is the phrase it sits NEXT TO —
+// an anchor, carried for exactly the same reason the covered text is. A caret offset into last
+// week's article is a promise the publisher never made, so a point mark that cannot find its anchor
+// is orphaned like any other rather than dropped at a remembered index.
+// Both kinds re-find through the ONE `locateMark` below. Only the render position differs, so there
+// is no second anchoring scheme here to drift out of step with this one.
+export type MarkKind = 'highlight' | 'note' | 'text' | 'box'
+
+/** True for the kinds that INSERT at an edge of their anchor instead of painting over it. */
+export function isPointKind(k: MarkKind): boolean {
+  return k === 'text' || k === 'box'
+}
 
 export type ReaderMark = {
   id: string
@@ -25,10 +39,14 @@ export type ReaderMark = {
   block: number
   /** Character offset within that block's plain text. A hint, re-checked against `text`. */
   start: number
-  /** The exact text the mark covered — the thing that actually identifies it. */
+  /** The text that identifies this mark: what it COVERS (range kinds) or what it sits NEXT TO
+   *  (point kinds). Either way it is what is re-found on load, never the offset alone. */
   text: string
-  /** Sticky-note body. Empty for a highlight. */
+  /** A sticky note's body, or the words a 'text'/'box' mark inserts. Empty for a highlight. */
   body?: string
+  /** Point kinds only: render at the anchor's START rather than its END. Set when the insertion sat
+   *  at the very beginning of a block, where there is no preceding text to anchor to. */
+  before?: boolean
   createdAt: string
 }
 
@@ -75,18 +93,33 @@ export function locateAll(marks: ReaderMark[], blockTexts: string[]): { placed: 
   return { placed, orphaned }
 }
 
+/** Where a POINT mark renders inside its block: the far edge of its anchor, or the near one when
+ *  the insertion was made at a block's very start. Clamped, so a stale offset can only ever land
+ *  inside the block it was found in. */
+export function pointAt(m: Located, len: number): number {
+  return Math.max(0, Math.min(len, m.before ? m.start : m.end))
+}
+
 /**
  * Split a block's [0,len) into runs carrying the marks covering each. Overlapping marks are allowed
  * (a note inside a highlight), so a run carries a LIST and the boundaries are every mark edge —
  * which is what makes overlap render correctly instead of the last one silently winning.
+ *
+ * `cuts` adds boundaries that no range mark asked for — the positions of POINT marks, so an
+ * inserted note has an exact seam to be emitted at instead of being placed by a nearby guess.
  */
-export function markRuns(len: number, marks: Located[]): Array<{ from: number; to: number; marks: Located[] }> {
-  if (!marks.length || len <= 0) return [{ from: 0, to: len, marks: [] }]
+export function markRuns(
+  len: number,
+  marks: Located[],
+  cuts: number[] = [],
+): Array<{ from: number; to: number; marks: Located[] }> {
+  if (len <= 0 || (!marks.length && !cuts.length)) return [{ from: 0, to: len, marks: [] }]
   const edges = new Set<number>([0, len])
   for (const m of marks) {
     if (m.start > 0 && m.start < len) edges.add(m.start)
     if (m.end > 0 && m.end < len) edges.add(m.end)
   }
+  for (const c of cuts) if (c > 0 && c < len) edges.add(c)
   const cuts = [...edges].sort((a, b) => a - b)
   const out: Array<{ from: number; to: number; marks: Located[] }> = []
   for (let i = 0; i < cuts.length - 1; i++) {
