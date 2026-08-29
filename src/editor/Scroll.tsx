@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
-import { notePerf, probePerf } from './perflog'
+import { probePerf, notePerf } from './perflog'
 import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
 
 // True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
@@ -630,7 +630,9 @@ export function Scroll({
       // So: a degenerate range answers 0 — the honest position when everything fits is the top —
       // and a real one is clamped to [0,1], which a proportion cannot leave anyway.
       const ratio = scrollRatioOf(getScrollTop(), scrollRange())
+      const tPick0 = performance.now()
       const topBefore = anchorTop() ?? 0 // at the CURRENT size
+      probePerf('zoom-anchorPre', performance.now() - tPick0)
       // LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but
       // every reachable level is a shared lattice point the pagination step cache can precompute).
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
@@ -647,7 +649,10 @@ export function Scroll({
       // touchstart, which forced a full placeholder-switch relayout inside the touchstart task
       // and a second reflow at the first commit; entering here folds the switch into the commit's
       // one forced layout below). Both exit in the settle.
+      const tLive0 = performance.now()
       enterZoomLive()
+      probePerf('zoom-enterLive', performance.now() - tLive0)
+      const tReflow0 = performance.now()
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       // Skipped-placeholder heights track the committed zoom (see enterZoomLive) — same recalc.
       if (zoomLiveEd) el.style.setProperty('--iw-cis-scale', ((next / zoomLiveZ0) ** 2).toFixed(4))
@@ -661,13 +666,16 @@ export function Scroll({
       // ONE forced layout for the whole frame (2026-07-11 first-response cost): placeholder
       // switch + font reflow + wrapper sync all land in this single anchor read.
       const topAfter = anchorTop()
+      const tAfterAnchor = performance.now()
       // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed — AFTER the
       // anchor read, so a cache MISS's band measure rides the layout just forced above (a hit is
       // pure style writes that batch into this frame's paint; the panels still move WITH the
       // text). The surface is included so the SnapshotView's zoom (its own Scroll dispatches too)
       // can never drive the live editor's panels. Dispatched before the scroll correction below —
       // applyBands' sheet min-height write must precede the scroll write or the range could clamp.
+      const tStep0 = performance.now()
       window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el, z0: zoomLiveZ0 } }))
+      probePerf('zoom-stepEvent', performance.now() - tStep0)
       if (topAfter != null) {
         // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
         // content-visibility placeholder set re-evaluates between frames (scroll corrections move
@@ -683,6 +691,11 @@ export function Scroll({
       }
       editorZoomRef.current = next
       notePerf('zoom-commit', performance.now() - commitT0)
+      // Per-EVENT profiling (probePerf costs one property check unless a harness defines
+      // window.__iwPerf). notePerf keeps only the worst value per 2s, which cannot answer "what
+      // does ONE notch cost" — see scripts/textrender-probe/zoomcost.prove.mjs.
+      probePerf('zoom-commit', performance.now() - commitT0)
+      probePerf('zoom-reflow', tAfterAnchor - tReflow0)   // the write + the forced anchor read
       if (settle) clearTimeout(settle)
       settle = setTimeout(function settleFn() {
         // Fingers still down = the gesture is NOT over (a paused pinch) — settling now would tear

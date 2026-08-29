@@ -86,8 +86,27 @@ don't worry about the existing highlights. just change the whole layout and meth
 
 ## Lane F — Editor
 
-- [ ] **F1** Zoom "even better" — the ~80ms per-notch reflow, untouched since he first asked. Needs
-      a real change to in-gesture reflow, not another constant.
+- [ ] **F1** Zoom "even better". MEASURED 2026-08-29 (`pnpm prove:zoomcost`, 13k words / 325 blocks
+      / 55 gaps, CPU-contended box so read RATIOS not absolutes):
+
+          zoom-commit   p50 103ms   ← the whole synchronous commit, per notch
+          zoom-stepEvent p50  68ms   ← 66% of it
+          zoom-reflow    p50  32ms   ← the CSS write + the forced anchor read
+          zoom-enterLive p50   0ms
+          step cache: 1 hit, 11 misses, 17 precomputed
+
+      THE TEXT REFLOW IS NOT THE PROBLEM — the pagination band measure is, and it misses almost
+      every time. The cause is not that the precompute failed: it ran (17 entries). It fills
+      `stepCache`, while a LIVE gesture reads `liveCache`, because the placeholder regime
+      (`iw-zoom-live`) has different geometry and the two must not be mixed — that separation is
+      deliberate and correct (see the comment at PaginationExtension.ts ~1341). The consequence is
+      that the precompute cannot help the case it exists for: during a gesture every step is a
+      synchronous live `readBands()`.
+
+      THE LEVER, therefore, is to warm `liveCache` for the NEXT step IN THE PLACEHOLDER REGIME,
+      between notches rather than on the input path — a zoom gesture is monotonic, so the next
+      notch is nearly always ±1 in the same direction, and a real wheel leaves 150–260ms of idle
+      between notches to do it in. Not attempted yet; the measurement is the deliverable so far.
 
 ---
 
