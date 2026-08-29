@@ -1447,14 +1447,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             may quietly decline is the dead button this reader has already shipped twice. */}
         {!framed && grantHint && extState === 'blocked' && (
           <div className="flex items-start gap-2 px-3 py-1.5 border-t"
-            style={{ fontSize: '11px', background: `${INK}0a`, borderColor: `${INK}22`, color: '#57534e' }}>
+            style={{ fontSize: '11px', background: `${INK}0a`, borderColor: `${INK}22`, color: MUTED_CHROME }}>
             <span style={{ flex: 1, lineHeight: 1.5 }}>
               Open the Inkwave extension (its icon in your browser’s toolbar) and turn on
               <strong> Fetch pages for the reader</strong>. Sources will then load from your own
               connection instead of Inkwave’s server — which is also what makes web search work here.
             </span>
             <button type="button" onClick={() => setGrantHint(false)} title="Hide this"
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#a8a29e', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>×</button>
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: MUTED_CHROME, fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>×</button>
           </div>
         )}
 
@@ -1601,7 +1601,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {via === 'extension' ? (
                   <span title="Fetched by the Inkwave extension, from your own connection and address. Inkwave’s server was not involved and never saw this address."
-                    style={{ fontSize: '11px', color: 'var(--iw-verified, #15803d)', whiteSpace: 'nowrap' }}>
+                    // The LITERAL day green, not var(--iw-verified): this pill sits on the markup
+                    // bar, which is paper and stays light at night, where that token is #6ee7a0.
+                    style={{ fontSize: '11px', color: '#15803d', whiteSpace: 'nowrap' }}>
                     ⌂ your connection
                   </span>
                 ) : extState === 'blocked' ? (
@@ -1613,7 +1615,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   </button>
                 ) : (
                   <span title="Fetched by Inkwave’s server, which sees the address for the moment it takes to fetch it and keeps no log or copy. Installing the Inkwave extension moves this to your own connection."
-                    style={{ fontSize: '11px', color: 'var(--iw-pill-fg, #78716c)', whiteSpace: 'nowrap' }}>
+                    // MEASURED 1.1:1 with the chrome token here — see MUTED_PAPER's note.
+                    style={{ fontSize: '11px', color: MUTED_PAPER, whiteSpace: 'nowrap' }}>
                     ☁ Inkwave’s server
                   </span>
                 )}
