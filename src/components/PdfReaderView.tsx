@@ -300,7 +300,7 @@ export function PdfReaderView({
     ? { width: 110, height: 40, touchAction: 'none' }
     : { width: 86 }
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
+    <div className="iw-pdf-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
           view exists, so they are in it rather than buried in the viewer's already-full toolbar. */}
       <div className="iw-tap-row" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -353,7 +353,7 @@ export function PdfReaderView({
       )}
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto' }}>
-        <div ref={rootRef} onMouseUp={onMouseUpOuter}
+        <div ref={rootRef} onMouseUp={onMouseUpOuter} className="iw-pdf-reader-page"
           style={{ maxWidth: Math.min(760, 46 * size), margin: '0 auto', padding: '26px 22px 90px',
             fontFamily: font, fontSize: size, lineHeight: lead, color: '#241f2b',
             cursor: tool === 'text' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : undefined }}>
@@ -361,7 +361,7 @@ export function PdfReaderView({
           {pages.map(p => (
             <section key={p.n} data-page={p.n}>
               <div style={{ margin: '26px 0 12px', display: 'flex', alignItems: 'center', gap: 10,
-                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#a9a0b8' }}>
+                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--iw-reader-muted, #6b645f)' }}>
                 <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
                 page {p.n + pageOffset}
                 <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
