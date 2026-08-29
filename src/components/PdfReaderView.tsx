@@ -28,6 +28,7 @@ import type { HighlightKind, PdfHighlight } from '../citations/pdfHighlights'
 import { noteAnchorText, rectsForRange } from './pdfReflow'
 import type { PageReflow } from './pdfReflow'
 import { getPageReflow } from './pdfReflowStore'
+import { isTouchDevice } from '../editor/Scroll'
 import { FONTS } from './StyleBar'
 
 const INK = '#5c2d8a'
@@ -284,26 +285,41 @@ export function PdfReaderView({
 
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
   const lost = placement.lost
+  // A <select> is a replaced element: no pseudo-element, so it cannot borrow the `.iw-tap` hit
+  // region and its BOX has to be the target. 34px is also what the app-wide 16px iOS input floor
+  // (index.css) needs in order not to clip its own line.
+  const touch = isTouchDevice()
+  // ⚠ THE TWO SLIDERS ARE THE REASON THIS VIEW EXISTS (Peter asked for font, size and line spacing
+  // first) AND THEY WERE THE LEAST USABLE THING IN IT ON A PHONE. Measured 86×16 at 375px:
+  //  • 16px tall is a drag target you miss, and
+  //  • a range input owns a HORIZONTAL drag while the app-wide phone rule is `touch-action: pan-x
+  //    pan-y` — which does NOT inherit, and which no UA stylesheet overrides for `type=range`. So a
+  //    finger dragging the thumb sideways was a candidate PAN: the browser could take the gesture
+  //    and scroll instead. Same class as the PDF text note's drag; same fix.
+  const RANGE: React.CSSProperties = touch
+    ? { width: 110, height: 40, touchAction: 'none' }
+    : { width: 86 }
   return (
-    <div className="iw-pdf-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--iw-reader-paper, #fbfaf7)' }}>
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
           view exists, so they are in it rather than buried in the viewer's already-full toolbar. */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: 'var(--iw-reader-bar, #faf8fc)', fontSize: '0.78rem', color: INK }}>
+      <div className="iw-tap-row" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: 'var(--iw-reader-bar, #faf8fc)', fontSize: '0.78rem', color: INK,
+        ['--iw-tap-x' as string]: '8px' }}>
         <select value={font} onChange={e => setFont(e.target.value)} title="Reading font"
-          style={{ height: 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
+          style={{ height: touch ? 40 : 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
           {FONTS.map(f => <option key={f.label} value={f.css}>{f.label}</option>)}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Text size">
           <span aria-hidden="true">A</span>
           <input type="range" min={13} max={34} step={1} value={size} onChange={e => setSize(Number(e.target.value))}
-            style={{ width: 86 }} aria-label="Text size" />
+            style={RANGE} aria-label="Text size" />
           <span style={{ minWidth: 22, textAlign: 'right' }}>{size}</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Line spacing">
           <span aria-hidden="true">↕</span>
           <input type="range" min={11} max={30} step={1} value={Math.round(lead * 10)}
-            onChange={e => setLead(Number(e.target.value) / 10)} style={{ width: 86 }} aria-label="Line spacing" />
+            onChange={e => setLead(Number(e.target.value) / 10)} style={RANGE} aria-label="Line spacing" />
           <span style={{ minWidth: 26, textAlign: 'right' }}>{lead.toFixed(1)}</span>
         </label>
         <span style={{ marginLeft: 'auto' }} />
@@ -315,7 +331,7 @@ export function PdfReaderView({
             {lost.length} mark{lost.length === 1 ? '' : 's'} not placed here
           </button>
         )}
-        {!done && <span style={{ color: 'var(--iw-reader-muted, #6b645f)' }}>reading… {pages.length}</span>}
+        {!done && <span style={{ color: '#8d7ba3' }}>reading… {pages.length}</span>}
       </div>
 
       {showOrphans && lost.length > 0 && (
@@ -337,16 +353,16 @@ export function PdfReaderView({
       )}
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto' }}>
-        <div ref={rootRef} onMouseUp={onMouseUpOuter} className="iw-pdf-reader-page"
+        <div ref={rootRef} onMouseUp={onMouseUpOuter}
           style={{ maxWidth: Math.min(760, 46 * size), margin: '0 auto', padding: '26px 22px 90px',
-            fontFamily: font, fontSize: size, lineHeight: lead, color: 'var(--iw-reader-ink, #241f2b)',
+            fontFamily: font, fontSize: size, lineHeight: lead, color: '#241f2b',
             cursor: tool === 'text' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : undefined }}>
-          {!pages.length && <p style={{ color: 'var(--iw-reader-muted, #6b645f)' }}>Reading the text…</p>}
+          {!pages.length && <p style={{ color: '#9ca3af' }}>Reading the text…</p>}
           {pages.map(p => (
             <section key={p.n} data-page={p.n}>
               <div style={{ margin: '26px 0 12px', display: 'flex', alignItems: 'center', gap: 10,
-                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--iw-reader-muted, #6b645f)' }}>
-                <span style={{ flex: 1, height: 1, background: 'var(--iw-reader-edge, #e4dfec)' }} />
+                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#a9a0b8' }}>
+                <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
                 page {p.n + pageOffset}
                 <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
               </div>
@@ -424,9 +440,9 @@ function Block({ page, bi, text, heading, marks, notes, onPatch, onRemove }: {
             style={{ outline: 'none', minHeight: '1.2em', whiteSpace: 'pre-wrap' }}>
             {n.hl.note ?? ''}
           </div>
-          <button type="button" title="Remove this note" onClick={() => onRemove(n.id)}
+          <button type="button" title="Remove this note" onClick={() => onRemove(n.id)} className="iw-tap"
             style={{ position: 'absolute', top: -8, right: -8, width: 18, height: 18, borderRadius: '50%',
-              border: '1px solid rgba(0,0,0,0.2)', background: '#fff', color: '#7f1d1d', cursor: 'pointer',
+              border: '1px solid rgba(0,0,0,0.2)', background: 'var(--iw-reader-ctl, #fff)', color: '#7f1d1d', cursor: 'pointer',
               fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
         </div>
       ))}

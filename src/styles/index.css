@@ -985,6 +985,55 @@
     -webkit-touch-callout: default;
   }
 
+  /* ── TAP TARGETS ON TOUCH: GROW THE HIT AREA, NOT THE LAYOUT (2026-08-30) ────────────────────
+     MEASURED at 375px with touch emulation on Peter's iPhone-8 geometry: the source reader's header
+     icons are 24×24, its markup tools 26×26, its zoom −/+ 22×22, its "hide this note" ✕ 12.7×14;
+     the PDF toolbar is 28×28 throughout. Every one is under any usable thumb target, and the ✕ is
+     barely hittable at all.
+     WHY A PSEUDO-ELEMENT AND NOT A BIGGER BUTTON. Both bars are DENSE and both were deliberately
+     tuned: Peter asked the PDF toolbar down to ONE ROW ("try to get this down to one row"), and the
+     reader's phone panel is a 50dvh TOP dock — growing five tools plus two selects plus a zoom
+     cluster to 44px each wraps the bar to three rows and eats the article. So the PAINTED control
+     keeps its size and only its HIT REGION grows: a ::after on the control itself, which is part of
+     that control's own hit region (events still target the button), so nothing reflows.
+     THE WIDTH IS HALF THE ROW GAP PER SIDE, NEVER A FLAT 44px — deliberately. Two neighbours each
+     claiming 44px OVERLAP, and in an overlap the later sibling paints last and WINS, so an
+     unconditional expansion would make each button's right edge dead: a "fix" that takes a tap
+     target away. `--iw-tap-x` is the row's own gap, so each control owns everything up to the
+     midpoint between it and its neighbour and no two ever contend.
+     RESIDUAL, STATED: vertical reaches 44px (rows are short and their padding absorbs it), but
+     horizontal reaches only (control + gap) — ~29-32px in these rows. A dense row of icons cannot
+     give every icon 44px WIDE without reflowing it, and reflowing Peter's one-row toolbar is his
+     call, not ours. Most misses on a horizontal row are vertical, which is the half this fixes. */
+  /* `.iw-tap-row` treats every BUTTON inside it, for a bar that is nothing but icon buttons (the
+     PDF toolbar) — tagging fifteen of them by hand is fifteen chances to miss one, and the sixteenth
+     button someone adds tomorrow would silently not get it. `<select>` is deliberately NOT included:
+     it is a replaced element and Chrome/Safari do not render its pseudo-elements at all, so a select
+     must get a real height instead (and does, on touch). */
+  @media (pointer: coarse) and (hover: none) {
+    .iw-tap, .iw-tap-row button { position: relative; }
+    .iw-tap::after, .iw-tap-row button::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: calc(100% + var(--iw-tap-x, 8px));
+      height: max(100%, 44px);
+      /* Invisible, and it must stay invisible: this is a hit region, not a control. */
+      background: transparent;
+      border-radius: inherit;
+    }
+    /* ⚠ NEVER INSIDE A VERTICAL MENU. `.iw-tap-row` treats every descendant button, and the PDF
+       toolbar's ⋮ drop-up is a COLUMN of menu items 2px apart — 44px-tall regions there would each
+       reach ~7px into the item above and below, and the later sibling wins the overlap, so "Print"
+       would eat part of "Export". The expansion only makes sense where the neighbours are sideways.
+       Plain descendant selectors, deliberately: a `:not(… *)` form needs Selectors-4 complex :not,
+       which iOS 16.0-16.3 does not have — this app's own floor. */
+    .iw-tap-row [role="menu"] button::after,
+    .iw-tap-row .iw-tap-off button::after { content: none; }
+  }
+
   /* ── THE SOURCE READER'S ARMED-TOOL CURSORS (Peter, 2026-08-28: "each button needs to change the
      cursor") ─────────────────────────────────────────────────────────────────────────────────────
      ⚠ `data-iw-tool` WAS WRITTEN ON THE READER BODY WITH NOTHING READING IT. The attribute shipped,
