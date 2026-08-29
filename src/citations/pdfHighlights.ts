@@ -10,10 +10,37 @@ export interface HighlightRect { x: number; y: number; w: number; h: number } //
 
 export type HighlightKind = 'highlight' | 'underline' | 'strike' | 'text'
 
+/**
+ * WHERE A MARK IS, SAID IN TEXT RATHER THAN IN PIXELS — what the reader view anchors on.
+ *
+ * A rectangle describes the page as the publisher drew it. The reader view does not draw that page:
+ * it re-sets the text in the reader's own font at the reader's own line spacing, so a rectangle
+ * there means nothing. So a mark made from today on carries BOTH: `rects` (the page view, unchanged)
+ * and `anchor` (the reader view). They are derived from ONE mapping — `src/components/pdfReflow.ts`
+ * — read in the two directions, so the two views cannot disagree about where a highlight sits.
+ *
+ * `block`/`start` are HINTS. `text` is the identity, re-found by `locateMark` in src/reader/marks.ts
+ * — the same model, deliberately not a second one.
+ *
+ * ⚠ OPTIONAL, AND IT STAYS OPTIONAL. A mark made before this existed has no anchor; Peter's call
+ * was that those may go stale ("I don't care if old docs go stale"). Stale is not DELETED — an
+ * un-anchorable mark is listed in the reader view as one it could not place, and the page view
+ * renders it exactly as it always did.
+ */
+export interface TextAnchor {
+  /** Index of the paragraph within that page's reflowed blocks. A hint, re-checked against `text`. */
+  block: number
+  /** Character offset within the block. A hint, re-checked against `text`. */
+  start: number
+  /** The exact reflowed text the mark covered — the thing that actually identifies it. */
+  text: string
+}
+
 export interface PdfHighlight {
   id: string
   page: number            // 1-based
   rects: HighlightRect[]
+  anchor?: TextAnchor     // reader-view placement; absent on marks made before the reader view
   color: string           // rgba/hex
   kind?: HighlightKind    // fill (default), underline, or strikethrough
   text: string            // the selected text (used for search fallback + display)
