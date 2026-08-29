@@ -72,8 +72,15 @@ don't worry about the existing highlights. just change the whole layout and meth
       a regression. Cell B's own comment said a second tab is "deliberately NOT required to land on
       it"; its code required exactly that. The comment and the code disagreed and the code was wrong.
       Now: control reproduces loss in A, B, C · fixed loses nothing in any of them.
-- [ ] **E2** An end-to-end browser probe for the SOURCE READER. Every reader bug this session was
-      found by Peter, not by me; my one attempt mounted nothing and printed PASS.
+- [x] **E2** DONE 2026-08-29 — `pnpm prove:reader`. Drives the real app: seeds a document and a
+      per-document library in OPFS, boots via `?doc=`, clicks the citation, and uses the reader.
+      12 checks green. It found two real bugs on its first honest run (the article's own title being
+      offered as a locator, in two places) — the first reader bugs found by me rather than by Peter.
+      FOUR wrong theories before it worked, every one of which looked exactly like the feature being
+      broken: a route glob that silently did not match, a `page.evaluate` inside a route handler
+      deadlocking the pending request, a hand-written URL expectation, and finally the real cause —
+      the SERVICE WORKER answering `/api/reader` from its own cache, which `page.route` does not
+      intercept (`serviceWorkers: 'block'`).
 - [ ] **E3** The PDF zoom snap-back fix (re-asserting the anchor after layout) is a MECHANISM, not a
       proof — never reproduced here. If it persists, that hypothesis is wrong.
 

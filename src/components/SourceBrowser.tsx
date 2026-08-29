@@ -643,7 +643,15 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     const blocks = doc?.blocks ?? []
     for (let i = bi; i >= 0; i--) {
       const b = blocks[i]
-      if (b && b.kind === 'heading' && b.text.trim()) return b.text
+      if (!b || b.kind !== 'heading' || !b.text.trim()) continue
+      // ⚠ THE ARTICLE'S OWN TITLE IS NOT A SECTION (2026-08-29, found by the end-to-end probe, not
+      // by Peter — the first one this session that way round). Text before the first real heading
+      // has no section above it but DOES have the h1, so "cite §" offered the piece's own title as
+      // the locator: "(Sider 2001, Identity Over Time)". Citing a work's title inside a citation of
+      // that work says nothing. There is nothing honest to cite there, so nothing is offered.
+      if (b.level <= 1) return null
+      if (doc?.title && b.text.trim() === doc.title.trim()) return null
+      return b.text
     }
     return null
   }
@@ -791,7 +799,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     background: hi === sectionNow ? `${INK}12` : undefined,
                     borderLeft: `2px solid ${hi === sectionNow ? INK : 'transparent'}` }}>
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{h.text}</span>
-                  {onCite && (
+                  {onCite && h.level > 1 && h.text.trim() !== (doc?.title ?? '').trim() && (
                     <span role="button" title={`Cite this section`}
                       onClick={(e) => { e.stopPropagation(); citeHeading(h.text) }}
                       className="opacity-0 group-hover:opacity-100 px-1 flex-shrink-0"
@@ -906,7 +914,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   <Tag key={i} id={`iw-rd-${b.id}`} className="group"
                     style={{ fontSize: b.level <= 1 ? '1.5em' : b.level === 2 ? '1.22em' : '1.06em', fontWeight: 600, margin: '1.4em 0 0.5em', color: '#1c1a19' }}>
                     <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} onEraseMark={eraseMark} />
-                    {onCite && (
+                    {/* No "cite §" on the article's own TITLE — citing a work's title inside a
+                        citation of that work says nothing. Same rule as sectionFor. */}
+                    {onCite && b.level > 1 && b.text.trim() !== (doc?.title ?? '').trim() && (
                       <button type="button" title="Cite this section" onClick={() => citeHeading(b.text)}
                         className="opacity-0 group-hover:opacity-100"
                         style={{ marginLeft: '0.5em', fontSize: '0.6em', color: INK, border: `1px solid ${INK}44`, borderRadius: 6, padding: '2px 7px', background: 'transparent', cursor: 'pointer', verticalAlign: 'middle' }}>
