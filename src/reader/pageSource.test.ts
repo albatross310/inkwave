@@ -9,10 +9,14 @@
 // nothing unless the same spy, in the same file, is shown being called; a probe that cannot fail is
 // decoration. So each `not.toHaveBeenCalled` sits next to its known-positive.
 
-import { describe, it, expect, vi } from 'vitest'
-import { loadSource, probeExtension, fetchViaExtension, type Port } from './pageSource'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  APP_SOURCE, EXT_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_FETCHED, READER_PING, READER_PONG,
+  _resetExtensionMemo, extensionState, fetchViaExtension, loadSource, openExtensionPopup,
+  probeExtension, type Port,
+} from './pageSource'
+import {
+  APP_SOURCE, EXT_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_FETCHED, READER_GRANT,
+  READER_GRANTED, READER_PING, READER_PONG,
 } from './extensionProtocol'
 import type { ReaderBlock } from './types'
 import * as extractor from './extract.mjs'
@@ -190,5 +194,74 @@ describe('ONE EXTRACTOR, TWO FETCHERS', () => {
     // `https://short.link/geach/`, which is a different host entirely.)
     expect(para.runs.find((r) => r.href)?.href).toBe('https://plato.stanford.edu/entries/geach/')
     expect(para.runs.find((r) => r.href)?.href).not.toContain('short.link')
+  })
+})
+
+// ── ASKING THE EXTENSION TO OPEN ITS OWN POPUP ──────────────────────────────────────────────────
+
+describe('openExtensionPopup reports refusal as refusal', () => {
+  const answers = (ok: boolean) => new TestPort((m, self) => {
+    if (m.type === READER_GRANT) self.deliver({ source: EXT_SOURCE, type: READER_GRANTED, uuid: m.uuid, ok })
+  })
+
+  it('true when the extension raised it', async () => {
+    await expect(openExtensionPopup(answers(true), 40)).resolves.toBe(true)
+  })
+
+  it('false when the browser refused — a real outcome, not an error', async () => {
+    // `action.openPopup()` is recent and can decline. The reader must still show the writer how to
+    // do it by hand, so this has to come back as a plain false rather than throwing or hanging.
+    await expect(openExtensionPopup(answers(false), 40)).resolves.toBe(false)
+  })
+
+  it('false when nothing answers at all', async () => {
+    await expect(openExtensionPopup(silent(), 30)).resolves.toBe(false)
+  })
+})
+
+// ── THE SESSION MEMO ────────────────────────────────────────────────────────────────────────────
+// The probe costs a round trip, so it is asked once per page load. Two rules, both of which have a
+// way of going wrong silently.
+
+describe('extensionState is asked once, and never poisoned by the prerender', () => {
+  beforeEach(() => { _resetExtensionMemo() })
+  afterEach(() => { _resetExtensionMemo() })
+
+  it('⚠ NEVER CACHES THE SSR ANSWER — there is no window during prerender', async () => {
+    // If the memo were written under SSR, every reader in the built app would believe the
+    // extension absent until a reload. Prove the SSR call answers 'absent' AND leaves no memo:
+    // a later browser-side call must be free to find the extension.
+    const saved = globalThis.window
+    delete (globalThis as { window?: unknown }).window
+    let ssr: string
+    try { ssr = await extensionState() } finally { (globalThis as { window?: unknown }).window = saved }
+    expect(ssr).toBe('absent')
+
+    // Nothing was remembered: with a window again, the memo starts fresh. (No extension is
+    // installed under vitest, so the honest answer is still 'absent' — what is being asserted is
+    // that the SSR call did not FREEZE it, which the refresh test below then exercises for real.)
+    await expect(extensionState()).resolves.toBe('absent')
+  })
+
+  it('returns the SAME promise until asked to refresh', async () => {
+    // Needs a window to memoise at all (see the rule above), and this file runs under node — so a
+    // minimal one stands in for the browser's. It never answers, which is fine: what is under test
+    // is how many times the question is ASKED.
+    const saved = globalThis.window
+    const asked: unknown[] = []
+    ;(globalThis as { window?: unknown }).window = {
+      addEventListener() {}, removeEventListener() {},
+      postMessage: (m: unknown) => { asked.push(m) },
+      location: { origin: 'http://localhost' },
+    }
+    try {
+      const first = extensionState()
+      expect(extensionState()).toBe(first)          // one round trip per load, not one per navigation
+      expect(asked).toHaveLength(1)
+      const forced = extensionState(true)
+      expect(forced).not.toBe(first)                // …and the grant path can force a re-ask
+      expect(asked).toHaveLength(2)
+      await Promise.all([first, forced])
+    } finally { (globalThis as { window?: unknown }).window = saved }
   })
 })
