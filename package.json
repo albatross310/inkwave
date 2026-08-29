@@ -24,7 +24,8 @@
     "prove:reader": "node scripts/textrender-probe/reader.prove.mjs",
     "prove:zoomcost": "node scripts/textrender-probe/zoomcost.prove.mjs",
     "prove:readerext": "node scripts/textrender-probe/readerext.prove.mjs",
-    "prove:pdfreader": "node scripts/textrender-probe/pdfreader.prove.mjs"
+    "prove:pdfreader": "node scripts/textrender-probe/pdfreader.prove.mjs",
+    "prove:liveimages": "node scripts/textrender-probe/liveimages.prove.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.13.0",

@@ -35,7 +35,8 @@ searx "verifying your browser", priv.au captcha, marginalia 5 blocks & 0 links, 
       and says so. ⚠ THE REMAINING LINK IS UNPROVEN AND ONLY PETER CAN CLOSE IT: the extension's own
       request to DuckDuckGo **from his address** is not exercised by any test here. One real search
       with the extension loaded settles it.
-- [ ] **A4** Sites that refuse framing become READABLE through the extension (JSTOR, Springer,
+- [x] **A4** DONE-ish 2026-08-30 by the extension wiring: reader mode now fetches via the extension, so a site that refuses FRAMING can still be READ. Carries A3's caveat — unproven against a real extension and a live third-party request.
+      ORIGINALLY:  Sites that refuse framing become READABLE through the extension (JSTOR, Springer,
       Wiley), using the writer's own session. This is the bigger prize than search. NOT STARTED.
       NB the honesty limit found in A1: an extension-worker fetch is cross-site by initiator, so a
       site's SameSite=Lax/Strict cookies are NOT sent — "your own session" is partly true and the
@@ -51,36 +52,59 @@ searx "verifying your browser", priv.au captcha, marginalia 5 blocks & 0 links, 
 Peter: *"build the reader view for pdfs. make sure highlights and text boxes translate between it…
 don't worry about the existing highlights. just change the whole layout and method for future ones."*
 
-- [ ] **B1** Extract per-page text via pdf.js's text layer; render reflowed with the app's own fonts
+- [x] **B1** DONE 2026-08-30, merged.
+      ORIGINALLY:  Extract per-page text via pdf.js's text layer; render reflowed with the app's own fonts
       and line spacing.
-- [ ] **B2** New marks anchor BY TEXT (the model in `src/reader/marks.ts`), not by rectangle — so a
+- [x] **B2** DONE.
+      ORIGINALLY:  New marks anchor BY TEXT (the model in `src/reader/marks.ts`), not by rectangle — so a
       highlight survives reflow and a different font size.
-- [ ] **B3** Text boxes anchor to the NEAREST TEXT. A note at page coordinates has no meaning in a
+- [x] **B3** DONE.
+      ORIGINALLY:  Text boxes anchor to the NEAREST TEXT. A note at page coordinates has no meaning in a
       reflowed column; Peter has accepted paragraph-level placement.
-- [ ] **B4** Old rect-anchored marks may go stale — his explicit call. They must not be DELETED, and
+- [x] **B4** DONE.
+      ORIGINALLY:  Old rect-anchored marks may go stale — his explicit call. They must not be DELETED, and
       the view must say when it cannot place one.
-- [ ] **B5** Line spacing and font controls, which is what he originally asked for and what a fixed
+- [x] **B5** DONE — and browser-proved by `pnpm prove:pdfreader` (47/47): a font change moves the laid-out height 129.19→193.78px at a fixed column, and a highlight survives it.
+      ORIGINALLY:  Line spacing and font controls, which is what he originally asked for and what a fixed
       PDF layout structurally cannot give.
 
 ## Lane C — PDF export / print
 
-- [ ] **C1** A ⋮ menu on the PDF toolbar with **Export** and **Print** of the MARKED-UP pdf (his
+- [x] **C1** DONE 2026-08-30, merged.
+      ORIGINALLY:  A ⋮ menu on the PDF toolbar with **Export** and **Print** of the MARKED-UP pdf (his
       words: "export/print the marked up pdf as a pdf … or to printer").
-- [ ] **C2** One mechanism if possible: render pages with overlays into a print view, which gives
+- [x] **C2** DONE — one canvas render, two exits.
+      ORIGINALLY:  One mechanism if possible: render pages with overlays into a print view, which gives
       both printing and the browser's own Save-as-PDF.
 
 ## Lane D — Reader tools
 
-- [ ] **D1** A coloured-text tool: *"an input text which allows us to input coloured text at the
+- [x] **D1** DONE 2026-08-30, merged.
+      ORIGINALLY:  A coloured-text tool: *"an input text which allows us to input coloured text at the
       cursor"*.
-- [ ] **D2** A textbox tool in the reader, like the PDF's sticky note.
-- [ ] **D3** *"all the same zoom settings etc"* — the reader has font and line-spacing choices but no
+- [x] **D2** DONE.
+      ORIGINALLY:  A textbox tool in the reader, like the PDF's sticky note.
+- [x] **D3** DONE.
+      ORIGINALLY:  *"all the same zoom settings etc"* — the reader has font and line-spacing choices but no
       zoom.
-- [ ] **D4** Per-tool CURSORS. `data-iw-tool` is written on the body but **no CSS reads it yet** —
+- [x] **D4** DONE — the CSS exists now.
+      ORIGINALLY:  Per-tool CURSORS. `data-iw-tool` is written on the body but **no CSS reads it yet** —
       the attribute is there and does nothing, which is the "mechanism with no surface" failure this
       session hit twice.
-- [ ] **D5** Missing images in live mode. `referrerPolicy="no-referrer"` was dropped as a plausible
-      cause — STATED, NOT PROVED. Diagnose properly.
+- [~] **D5** Missing images in live mode — MEASURED 2026-08-30, `pnpm prove:liveimages`, and NOT
+      reproduced. 33 image requests across Wikipedia and SEP framed exactly as live mode frames them
+      (same sandbox, same allow list, no referrerPolicy override): 33 × HTTP 200, zero failures, zero
+      CSP violations reported by our page.
+      WHAT THAT SETTLES AND WHAT IT DOES NOT. It settles that there is no GENERAL mechanism — and it
+      settles the intuition everyone reaches for first, which is wrong: a cross-origin framed
+      document's subresources are governed by ITS OWN policy, not ours, so our CSP cannot be
+      starving them. It does NOT close the report: Peter saw it on particular pages, and the probe
+      only rules out the general case. NEXT STEP is the URL he saw it on; without one there is
+      nothing further to measure.
+      ⚠ The probe's own first run reported ZERO image requests on both pages and looked like a
+      damning result — the frame had been blocked by the PROBE SERVER's `default-src 'self'`, which
+      is not the CSP we ship. It now frames from a host page with no policy of its own and asserts
+      the shipped `frame-src https:` separately, from the source of the header we actually send.
 
 ## Lane E — Verification debt (mine)
 
