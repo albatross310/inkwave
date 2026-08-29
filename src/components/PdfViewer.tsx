@@ -2077,7 +2077,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 ...(t.kind === 'text'
                   ? { background: toolColorsRef.current.text ?? COLORS[0], color: '#2a2a2a' }
                   : { background: active ? `${INK}14` : '#fff',
-                      color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : INK }),
+                      color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : INK,
+                      // ⚠ THE SWATCH MUST STILL BE VISIBLE. Peter's rule above is that the button
+                      // wears the armed colour — but the default is #ffe066 on a white face, which
+                      // MEASURED 1.3:1 (a control needs 3:1), i.e. the one thing the ▮ exists to
+                      // say was the thing you could not see. An outline carries the contrast while
+                      // the fill keeps carrying the colour: the mark still reads as that colour,
+                      // and it reads at all. Not applied to the `text` tool — it colours its whole
+                      // SHEET and puts a dark glyph on top, which already has its own contrast.
+                      ...(t.kind === 'highlight' ? { WebkitTextStrokeWidth: '0.6px', WebkitTextStrokeColor: 'rgba(60,40,10,0.72)' } : {}) }),
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )

@@ -829,21 +829,22 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
         {/* Extension promo — top of panel (dismissible) */}
         {!extDismissed && (
-          <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between bg-stone-50/60">
+          <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between"
+            style={{ background: 'var(--iw-subtle-bg, #fcfcfb)' }}>
             <span className="text-xs text-stone-500">Download the Inkwave citation extension for single-click import on any page, using Claude Sonnet</span>
             <div className="flex gap-2 flex-shrink-0 ml-3 items-center">
               <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
                 target="_blank" rel="noopener noreferrer"
-                className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+                className="text-xs text-stone-500 hover:text-[#5c2d8a] underline underline-offset-2">
                 Chrome
               </a>
               <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
                 target="_blank" rel="noopener noreferrer"
-                className="text-xs text-stone-400 hover:text-[#5c2d8a] underline underline-offset-2">
+                className="text-xs text-stone-500 hover:text-[#5c2d8a] underline underline-offset-2">
                 Firefox
               </a>
               <button type="button" onClick={dismissExt} title="Dismiss"
-                className="text-stone-400 hover:text-stone-600 text-sm leading-none ml-1 flex items-center">×</button>
+                className="text-stone-500 hover:text-stone-600 text-sm leading-none ml-1 flex items-center">×</button>
             </div>
           </div>
         )}
@@ -967,7 +968,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           {!helpDismissed && (
             <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-400">
-                type <kbd className="font-mono bg-stone-100 border border-stone-200 rounded px-0.5">@</kbd> in the editor to insert · <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
+                type <kbd className="font-mono border border-stone-200 rounded px-0.5" style={{ background: 'var(--iw-chip-bg, #f5f5f4)' }}>@</kbd> in the editor to insert · <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
               </div>
               <button type="button" onClick={dismissHelp} title="Hide these tips"
                 className="ml-auto text-stone-400 hover:text-stone-600 text-base leading-none flex-shrink-0">×</button>
@@ -1059,7 +1060,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                    </div>
                    {/* used / last-verified sit under the button stack (Peter, 2026-07-10). */}
                    <div className="flex items-center justify-end gap-2">
-                    {used && <span className="text-[13px] text-green-600 flex-shrink-0">● used</span>}
+                    {used && <span className="text-[13px] flex-shrink-0" style={{ color: 'var(--iw-verified, #15803d)' }}>● used</span>}
                     {(() => { const iw = (item as { _iw?: IwCitationMeta })._iw; return iw?.lastVerified && !iw?.deadUrl
                       ? <span className="text-[12px] text-stone-400 flex-shrink-0" title={`Last re-verified ${new Date(iw.lastVerified).toLocaleString()}`}>✓ {relTime(iw.lastVerified)}</span>
                       : null })()}

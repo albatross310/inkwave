@@ -1029,7 +1029,11 @@
      was chosen for, in both themes, and night merely takes the glare off the paper.
      (It was also simply BROKEN before this: the body carried an inline `color:#2c2a28` that nothing
      overrode, so night mode rendered near-black prose on the dolphin-grey panel.) */
-  .iw-reader-page {
+  .iw-reader-page,
+  /* The PDF's reader view is the SAME KIND OF SURFACE — reflowed prose in the writer's own font,
+     carrying marks from the same palette — so it takes the same paper rather than a second set of
+     near-identical literals. Two reading columns themed by two rules is how they drift. */
+  .iw-pdf-reader-page {
     background: var(--iw-reader-paper, #fff);
     color: var(--iw-reader-ink, #2c2a28) !important;
   }
@@ -1598,6 +1602,36 @@
 :root { --iw-countdown-fg: #a8a29e; }
 :root[data-theme="night"] { --iw-countdown-fg: #dfe3e9; }
 
+/* ── READING SURFACES (the source reader's article, the PDF reader view) ─────────────────────────
+   PAPER TOKENS, and they are deliberately NOT chrome tokens. A mark's colour is stored in the mark
+   and shared between the two readers (reader/marks.ts), so a theme that reinterpreted it would make
+   one highlight two colours on two devices — and light ink under a pale yellow wash is unreadable
+   in either theme. So paper does not invert; night only takes the glare off it. Defined at :root in
+   BOTH themes (the countdown precedent above): these surfaces sit INSIDE .iw-nightable panels, and
+   a token scoped to that block would hand a reading column the CHROME's light-on-dark values —
+   which is the shape of the bug this whole family exists to prevent.
+   `--iw-reader-muted` is the muted label ON that paper: --iw-pill-fg is a CHROME token (light grey
+   at night) and using it on paper renders light-grey-on-cream, measured at 1.22:1 in the reader's
+   markup bar. */
+:root { --iw-reader-paper: #ffffff; --iw-reader-ink: #2c2a28; --iw-reader-muted: #6b645f; }
+:root[data-theme="night"] { --iw-reader-paper: #e7e1d7; --iw-reader-ink: #23211f; --iw-reader-muted: #5f5852; }
+/* The reader's MARKUP BAR is paper chrome for the same reason (measured 2026-08-30). Its buttons
+   WEAR THE MARK'S OWN COLOUR — a pale-yellow highlighter swatch, a dark-red ink — so the bar must
+   stay a light surface in both themes or the swatches stop meaning anything; that is also why it
+   matches the PDF viewer's own toolbar, which the reader was built to mirror. It DIMS at night
+   rather than glaring, exactly as the article above it does. Before this, the bar was a literal
+   #faf8fc reading a never-defined `--iw-panel-bg` while its labels used the CHROME token
+   --iw-pill-fg — light grey on near-white, measured at 1.22:1 for the zoom readout. */
+:root { --iw-reader-bar: #faf8fc; --iw-reader-ctl: #ffffff; --iw-reader-edge: #d6cfe0; }
+:root[data-theme="night"] { --iw-reader-bar: #ded8cd; --iw-reader-ctl: #f0ebe2; --iw-reader-edge: #b9b1a3; }
+
+/* A muted fill inside night chrome (a promo strip, a <kbd> chip). Tailwind's bg-stone-50/100 are
+   NOT remapped by the .iw-nightable block below and must not be: `bg-stone-100` is also used for
+   1px DIVIDERS, which a blanket remap would paint out. So the panels that need a subtle fill take
+   these tokens instead of a utility class. */
+:root { --iw-subtle-bg: #fcfcfb; --iw-chip-bg: #f5f5f4; }
+:root[data-theme="night"] { --iw-subtle-bg: #4a535e; --iw-chip-bg: #525b66; }
+
 /* Music module (MusicXML path) — the rendered notation's colours. Day values here, night values in
    the night block below. Unlike the charts, these are NOT consumed as var() inside an SVG attribute:
    OSMD generates the notation SVG and only accepts concrete colour strings, so src/music/theme.ts
@@ -1631,12 +1665,11 @@
      is unreadable. The badge's ink is the night surface instead, so the pill reads as a punch-out
      in both themes rather than a smudge in one. */
   --iw-hotkey-hint-fg: #3d4550;
-  /* The source reader's ARTICLE (not its chrome). Dimmed, never inverted — the highlight palette
-     is stored inside each mark and shared with the PDF viewer, so the ink must stay dark enough to
-     read through a pale yellow wash in either theme. See .iw-reader-page. */
-  --iw-reader-paper: #e7e1d7;
-  --iw-reader-ink: #23211f;
-  --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
+  /* (--iw-reader-paper / --iw-reader-ink MOVED to the unscoped :root night rule above, beside
+     --iw-reader-muted: the PDF reader view is a reading surface too and does not necessarily sit
+     inside a .iw-nightable, and a paper token that resolves only inside chrome is the same
+     conditional-resolution bug --iw-countdown-fg documents.) */
+  --iw-badge-ai: #f0a868;                   /* source badges — lighter amber / grey on dark */
   --iw-badge-manual: #a8b0bc;
   --iw-verify-tick: #4a9d6a;                  /* verify ✓ — muted green (darker than a vivid tick) on dark */
   /* Music module — notation on the dark page. The engraving goes light-on-dark like body text;
@@ -1654,7 +1687,17 @@
 /* Light hover fills (hover:bg-stone-50/100) would flash bright white on the dark panel — darken them. */
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-50:hover,
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-100:hover { background-color: #3c444e !important; }
-/* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey. */
+/* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey.
+   ⚠ THE TWO [style*=…] ARMS ONLY EVER MATCH A HAND-WRITTEN style ATTRIBUTE, NEVER A REACT ONE, and
+   the difference is not a subtlety — it is most of this app. React sets inline styles through the
+   CSSOM (`el.style.setProperty`), and the CSSOM SERIALISES COLOURS: the attribute then reads
+   `background: rgb(255, 255, 255);`, which neither substring matches. MEASURED both ways in a real
+   engine (2026-08-30): setAttribute('style','background: #fff') matches; style.setProperty
+   ('background','#fff') does not. So every React `style={{ background: '#fff' }}` in a night panel
+   has always stayed WHITE, and only `.iw-nightable` elements written imperatively (citationNav's
+   back chip) were ever repainted here. The arms are KEPT because that chip depends on them.
+   THE FIX FOR A REACT COMPONENT IS A TOKEN, not another substring: an rgb() arm would silently
+   re-tone every unaudited panel in the app at once, which is a change nobody measured. */
 :root[data-theme="night"] .iw-nightable .bg-white,
 :root[data-theme="night"] .iw-nightable [style*="background: #fff"],
 :root[data-theme="night"] .iw-nightable [style*="background:#fff"] { background-color: #3c444e !important; }
