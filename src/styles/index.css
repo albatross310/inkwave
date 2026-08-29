@@ -985,6 +985,55 @@
     -webkit-touch-callout: default;
   }
 
+  /* ── THE SOURCE READER'S ARMED-TOOL CURSORS (Peter, 2026-08-28: "each button needs to change the
+     cursor") ─────────────────────────────────────────────────────────────────────────────────────
+     ⚠ `data-iw-tool` WAS WRITTEN ON THE READER BODY WITH NOTHING READING IT. The attribute shipped,
+     the comment beside it said every tool changes the cursor, and no rule anywhere selected on it —
+     so from the writer's chair the feature was indistinguishable from never having been built. That
+     is the failure this project keeps meeting from the other side (a guard with no consumer); this
+     is the same shape wearing a feature's clothes. THE ATTRIBUTE AND THE RULE SHIP TOGETHER: if you
+     add a tool to SourceBrowser, add its cursor here in the same commit.
+
+     Each declaration is an SVG cursor with a KEYWORD FALLBACK, and the fallback is load-bearing
+     rather than decorative: SVG cursors are well supported in Chromium and not uniformly elsewhere,
+     and a cursor list falls through per the CSS spec, so an engine that refuses the picture still
+     gets a DIFFERENT cursor per tool — which is the whole of what Peter asked for. The fallbacks are
+     deliberately five distinct keywords, so the feature degrades in resolution, never in kind.
+     The trailing numbers are the hotspot: the pixel in the image that IS the pointer. */
+  [data-iw-tool="highlight"], [data-iw-tool="highlight"] * {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M2 22h6l-3-3z" fill="%23c99a06"/><path d="M7 18 17 8l-3-3L4 15z" fill="%23ffe066" stroke="%23c99a06" stroke-width="1.3"/><path d="M15 4l3 3 3-3-3-3z" fill="%23c99a06"/></svg>') 2 22, text;
+  }
+  [data-iw-tool="note"], [data-iw-tool="note"] * {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M3 3h14v12l-5 5H3z" fill="%23ffe066" stroke="%23a9821a" stroke-width="1.3"/><path d="M17 15h-5v5z" fill="%23e8cf6d" stroke="%23a9821a" stroke-width="1.3"/></svg>') 3 3, copy;
+  }
+  [data-iw-tool="text"], [data-iw-tool="text"] * {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M9 2v20M6 2h6M6 22h6" stroke="%23111" stroke-width="1.6" fill="none"/><path d="M13 8h9M17.5 8v10" stroke="%235c2d8a" stroke-width="2.4" fill="none"/></svg>') 9 12, crosshair;
+  }
+  [data-iw-tool="box"], [data-iw-tool="box"] * {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="2" y="5" width="16" height="12" rx="2" fill="%23ffe066" stroke="%23a9821a" stroke-width="1.3"/><path d="M19 13v8M15 17h8" stroke="%235c2d8a" stroke-width="2" fill="none"/></svg>') 2 5, cell;
+  }
+  [data-iw-tool="erase"], [data-iw-tool="erase"] * {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M15.6 3.5 3.5 15.6a2 2 0 0 0 0 2.8l2.1 2.1a2 2 0 0 0 2.8 0L20.5 8.4a2 2 0 0 0 0-2.8l-2.1-2.1a2 2 0 0 0-2.8 0Z" fill="%23f9a8d4" stroke="%239d174d" stroke-width="1.2"/><path d="m10.2 8.8 5 5" stroke="%239d174d" stroke-width="1.2" fill="none"/></svg>') 4 20, pointer;
+  }
+  /* A field you are typing into is never a tool target — the tool cursor over a live textarea would
+     say the click will place something when it will place a caret. */
+  [data-iw-tool] input, [data-iw-tool] textarea,
+  [data-iw-tool] [contenteditable="true"] { cursor: text !important; }
+
+  /* ── THE READER'S ARTICLE IS PAPER, AND PAPER DOES NOT INVERT ────────────────────────────────
+     The panel CHROME is `.iw-nightable` and themes normally. The ARTICLE does not, and that is a
+     decision rather than an omission: a mark's COLOUR IS STORED IN THE MARK (reader/marks.ts) and
+     is the same palette the PDF viewer writes, so a theme that reinterpreted those colours would
+     make one highlight two different colours on two devices — and light ink over a pale yellow wash
+     is unreadable whichever theme you are in. So the reading surface keeps the contrast the palette
+     was chosen for, in both themes, and night merely takes the glare off the paper.
+     (It was also simply BROKEN before this: the body carried an inline `color:#2c2a28` that nothing
+     overrode, so night mode rendered near-black prose on the dolphin-grey panel.) */
+  .iw-reader-page {
+    background: var(--iw-reader-paper, #fff);
+    color: var(--iw-reader-ink, #2c2a28) !important;
+  }
+
   /* The footer toolbar band (pill height + keyboard-hug offset, live CSS vars written by
      TiptapEditor) is RESERVED space: scroll-padding makes every native/programmatic
      scroll-into-view — including the browser's own caret-reveal and selection-handle reveal —
@@ -1582,6 +1631,11 @@
      is unreadable. The badge's ink is the night surface instead, so the pill reads as a punch-out
      in both themes rather than a smudge in one. */
   --iw-hotkey-hint-fg: #3d4550;
+  /* The source reader's ARTICLE (not its chrome). Dimmed, never inverted — the highlight palette
+     is stored inside each mark and shared with the PDF viewer, so the ink must stay dark enough to
+     read through a pale yellow wash in either theme. See .iw-reader-page. */
+  --iw-reader-paper: #e7e1d7;
+  --iw-reader-ink: #23211f;
   --iw-badge-ai: #f0a868;                     /* source badges — lighter amber / grey on dark */
   --iw-badge-manual: #a8b0bc;
   --iw-verify-tick: #4a9d6a;                  /* verify ✓ — muted green (darker than a vivid tick) on dark */
