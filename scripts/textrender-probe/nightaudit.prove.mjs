@@ -118,7 +118,7 @@ const WALKER = `
       return r.width > 1 && r.height > 1
     }
     // WCAG 1.4.3 exempts INACTIVE components: a disabled control is meant to look unavailable, and
-    // scoring its greyed label as a failure is the instrument inventing work. `disabled` is
+    // scoring its greyed label as a failure is the instrument inventing work. The disabled flag is
     // inherited by a fieldset's children, so ask the nearest disabled ancestor, not the node.
     const inactive = (el) => !!(el.closest('[disabled], [aria-disabled="true"], fieldset:disabled'))
     const walk = (el) => {

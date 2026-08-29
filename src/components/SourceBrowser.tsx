@@ -1518,15 +1518,20 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </div>
             ))}
             {/* The PDF's eraser, glyph for glyph (Peter: "the erasor button needs to look same as
-                for pdfs"). Same tool, same picture — a different icon reads as a different thing. */}
+                for pdfs"). Same tool, same picture — a different icon reads as a different thing.
+                ⚠ IT WAS NOT THE SAME PICTURE. This copy had been drawn in a lighter pink
+                (#e8a0c0/#c76fa0) than the PDF's EraserIcon and than index.css's own erase cursor,
+                which both use #f9a8d4/#9d174d — so the promise in the line above was false, and the
+                pale outline measured 2.85:1 on the night bar (a control needs 3). Now literally the
+                PDF's two colours. */}
             <button type="button" title="Eraser — click a mark to remove it"
               onClick={() => setTool((cur) => (cur === 'erase' ? null : 'erase'))}
               style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${tool === 'erase' ? INK : 'var(--iw-reader-edge, #d6cfe0)'}`, background: tool === 'erase' ? `${INK}14` : 'var(--iw-reader-ctl, #fff)' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="#e8a0c0" stroke="#c76fa0" strokeWidth="1.1"
+                <path fill="#f9a8d4" stroke="#9d174d" strokeWidth="1.1"
                   d="M15.6 3.5 3.5 15.6a2 2 0 0 0 0 2.8l2.1 2.1a2 2 0 0 0 2.8 0L20.5 8.4a2 2 0 0 0 0-2.8l-2.1-2.1a2 2 0 0 0-2.8 0Z" />
-                <path fill="none" stroke="#c76fa0" strokeWidth="1.1" d="m10.2 8.8 5 5" />
+                <path fill="none" stroke="#9d174d" strokeWidth="1.1" d="m10.2 8.8 5 5" />
               </svg>
             </button>
 
@@ -1664,7 +1669,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             text does nothing there, so it is worth keeping available — the × remembers per document
             and the ☰/mode change brings it back for a source where it matters. */}
         {showNotice && (
-          <div className="px-3 py-1.5 border-t border-stone-200 text-stone-400 flex items-start gap-2" style={{ fontSize: '11px' }}>
+          <div className="px-3 py-1.5 border-t border-stone-200 text-stone-500 flex items-start gap-2" style={{ fontSize: '11px' }}>
             {/* ⚠ THIS SENTENCE IS A CLAIM ABOUT WHERE THE REQUEST WENT, so it is a function of
                 `via` and never a constant. Through the extension our server is not in the path at
                 all — strictly stronger than the "sees it for an instant, logs nothing" posture
