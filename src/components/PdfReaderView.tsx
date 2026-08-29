@@ -289,6 +289,16 @@ export function PdfReaderView({
   // region and its BOX has to be the target. 34px is also what the app-wide 16px iOS input floor
   // (index.css) needs in order not to clip its own line.
   const touch = isTouchDevice()
+  // ⚠ THE TWO SLIDERS ARE THE REASON THIS VIEW EXISTS (Peter asked for font, size and line spacing
+  // first) AND THEY WERE THE LEAST USABLE THING IN IT ON A PHONE. Measured 86×16 at 375px:
+  //  • 16px tall is a drag target you miss, and
+  //  • a range input owns a HORIZONTAL drag while the app-wide phone rule is `touch-action: pan-x
+  //    pan-y` — which does NOT inherit, and which no UA stylesheet overrides for `type=range`. So a
+  //    finger dragging the thumb sideways was a candidate PAN: the browser could take the gesture
+  //    and scroll instead. Same class as the PDF text note's drag; same fix.
+  const RANGE: React.CSSProperties = touch
+    ? { width: 110, height: 40, touchAction: 'none' }
+    : { width: 86 }
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
@@ -303,13 +313,13 @@ export function PdfReaderView({
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Text size">
           <span aria-hidden="true">A</span>
           <input type="range" min={13} max={34} step={1} value={size} onChange={e => setSize(Number(e.target.value))}
-            style={{ width: 86 }} aria-label="Text size" />
+            style={RANGE} aria-label="Text size" />
           <span style={{ minWidth: 22, textAlign: 'right' }}>{size}</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Line spacing">
           <span aria-hidden="true">↕</span>
           <input type="range" min={11} max={30} step={1} value={Math.round(lead * 10)}
-            onChange={e => setLead(Number(e.target.value) / 10)} style={{ width: 86 }} aria-label="Line spacing" />
+            onChange={e => setLead(Number(e.target.value) / 10)} style={RANGE} aria-label="Line spacing" />
           <span style={{ minWidth: 26, textAlign: 'right' }}>{lead.toFixed(1)}</span>
         </label>
         <span style={{ marginLeft: 'auto' }} />

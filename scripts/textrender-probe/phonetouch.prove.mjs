@@ -542,6 +542,46 @@ try {
       report('pdf', pd)
       check(pd.panel && pd.panel.y <= 2, 'pdf: the phone dock is the TOP dock', JSON.stringify(pd.panel))
 
+      // ── THE PDF READER VIEW (pdfReflow), the third surface on the list ───────────────────────
+      // Its own header carries two selects and two range sliders, none of which had been opened at
+      // phone width. A <select> cannot borrow the hit region (replaced element, no pseudo-element),
+      // so its own box is the only target it has.
+      const reflowOpened = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('[data-probe-pdf] button')].find((x) => /^Reader view/.test(x.title || ''))
+        if (!b) return 'no reader-view button'
+        b.click()
+        return 'clicked'
+      })
+      if (reflowOpened !== 'clicked') {
+        check(false, 'pdf reader view: the toolbar offers it', reflowOpened)
+      } else {
+        await page.waitForTimeout(2500)
+        const found = await page.evaluate(() => {
+          // Its header is the one carrying a "Reading font" select and a "Text size" range.
+          const s = document.querySelector('[data-probe-pdf] select[title="Reading font"]')
+          if (!s) return false
+          s.closest('div').setAttribute('data-probe-reflow', '')
+          return true
+        })
+        if (!found) {
+          check(false, 'pdf reader view: it rendered its controls', 'no "Reading font" select on screen')
+        } else {
+          const rv = await page.evaluate(new Function('return ' + AUDIT)(), '[data-probe-reflow]')
+          report('pdf reader view', rv)
+          // The two sliders are <input type=range>: they are not buttons and carry no ::after, so
+          // they are scored on their real box like every other typing control.
+          const ranges = await page.evaluate(() => [...document.querySelectorAll('[data-probe-reflow] input[type=range]')]
+            .map((r) => { const b = r.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height) } }))
+          note(`pdf reader view: ${ranges.length} slider(s) ${ranges.map((r) => `${r.w}×${r.h}`).join(', ')} — a native range's thumb is the OS's own target, not ours`)
+        }
+        // Back to the page view so the note checks below run against the surface they mean.
+        await page.evaluate(() => {
+          const b = [...document.querySelectorAll('[data-probe-pdf] button')].find((x) => /^Reader view|^Page view/.test(x.title || ''))
+          b?.click()
+        })
+        await page.waitForTimeout(1500)
+      }
+
       // ── THE ⋮ EXPORT MENU, OPEN. A vertical menu is the one place the hit-region expansion must
       //    NOT apply: 2px apart, a 44px-tall region on each item reaches into both neighbours and
       //    the later one wins, so "Print" would take a bite out of "Export". Open it and re-run the

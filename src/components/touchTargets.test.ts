@@ -148,6 +148,17 @@ describe('an element that owns a gesture declares touch-action', () => {
   it("the PDF toolbar's hold wrapper does", () => {
     expect(PDF).toMatch(/touchAction:\s*'none'/)
   })
+  it("the PDF reader view's size and spacing sliders do", () => {
+    // A range input owns a HORIZONTAL drag, and no UA stylesheet overrides `pan-x pan-y` for it —
+    // so without this the browser could take the drag as a pan and scroll instead of moving the
+    // thumb. Measured 86×16 before; a 16px-tall drag target is also simply a miss.
+    const r = /const RANGE: React\.CSSProperties = touch\s*\?\s*\{([^}]*)\}/.exec(PDF_READER)
+    expect(r, 'the touch branch of RANGE').toBeTruthy()
+    expect(r![1]).toMatch(/touchAction:\s*'none'/)
+    expect(Number(/height:\s*(\d+)/.exec(r![1])![1])).toBeGreaterThanOrEqual(40)
+    // …and both sliders use it. Two sliders and one styled would be the worse bug: half-fixed.
+    expect((PDF_READER.match(/style=\{RANGE\}/g) ?? []).length).toBe(2)
+  })
 })
 
 describe('a hold gesture survives the browser taking the gesture', () => {
