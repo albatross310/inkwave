@@ -28,6 +28,7 @@ import type { HighlightKind, PdfHighlight } from '../citations/pdfHighlights'
 import { noteAnchorText, rectsForRange } from './pdfReflow'
 import type { PageReflow } from './pdfReflow'
 import { getPageReflow } from './pdfReflowStore'
+import { isTouchDevice } from '../editor/Scroll'
 import { FONTS } from './StyleBar'
 
 const INK = '#5c2d8a'
@@ -284,14 +285,19 @@ export function PdfReaderView({
 
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
   const lost = placement.lost
+  // A <select> is a replaced element: no pseudo-element, so it cannot borrow the `.iw-tap` hit
+  // region and its BOX has to be the target. 34px is also what the app-wide 16px iOS input floor
+  // (index.css) needs in order not to clip its own line.
+  const touch = isTouchDevice()
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
           view exists, so they are in it rather than buried in the viewer's already-full toolbar. */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', fontSize: '0.78rem', color: INK }}>
+      <div className="iw-tap-row" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', fontSize: '0.78rem', color: INK,
+        ['--iw-tap-x' as string]: '8px' }}>
         <select value={font} onChange={e => setFont(e.target.value)} title="Reading font"
-          style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
+          style={{ height: touch ? 40 : 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
           {FONTS.map(f => <option key={f.label} value={f.css}>{f.label}</option>)}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Text size">
@@ -424,7 +430,7 @@ function Block({ page, bi, text, heading, marks, notes, onPatch, onRemove }: {
             style={{ outline: 'none', minHeight: '1.2em', whiteSpace: 'pre-wrap' }}>
             {n.hl.note ?? ''}
           </div>
-          <button type="button" title="Remove this note" onClick={() => onRemove(n.id)}
+          <button type="button" title="Remove this note" onClick={() => onRemove(n.id)} className="iw-tap"
             style={{ position: 'absolute', top: -8, right: -8, width: 18, height: 18, borderRadius: '50%',
               border: '1px solid rgba(0,0,0,0.2)', background: '#fff', color: '#7f1d1d', cursor: 'pointer',
               fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>

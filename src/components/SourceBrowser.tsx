@@ -15,7 +15,7 @@
 // them the panel always has something to offer, and it SAYS which mode it is in rather than leaving
 // the reader to guess why selection does or doesn't work.
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
@@ -40,6 +40,42 @@ import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
+
+// ── TOUCH SIZING ────────────────────────────────────────────────────────────────────────────────
+// The ICON buttons keep their painted size on every device and grow only their HIT REGION, via the
+// `.iw-tap` rule in index.css — see its header for why (a dense bar cannot grow to 44px per control
+// without wrapping to three rows inside a 50dvh phone dock).
+// A control you TYPE IN is the exception, and it is not a taste call: the global phone rule floors
+// every input/select at 16px (`input, select, textarea { font-size: max(16px, 1em) }` — iOS zooms
+// the whole page to anything smaller and STAYS zoomed), so a 22px box is shorter than the line it
+// now has to hold. The FONT was floored months ago and the BOXES were never grown with it.
+// 40, not 34: a `<select>` cannot borrow the `.iw-tap` hit region (a replaced element renders no
+// pseudo-element in Chrome or Safari), so for these controls the painted box IS the target and it
+// has to carry the whole size on its own.
+const TOUCH_FIELD_H = 40
+
+/**
+ * Keep a `translateX(-50%)` popover anchored near `x` but never hanging off a screen edge.
+ *
+ * ⚠ THIS IS A PHONE BUG, NOT A POLISH ITEM. Both floating boxes here are centred on the point you
+ * touched — which is fine on a 1500px panel and not on a 375px one: the composer is ~354px wide, so
+ * ANY selection in the left or right third of an iPhone screen put half of it (and the ✓/✕ that
+ * commit or cancel a half-typed note) past the edge, unreachable. A layout effect, so the clamp
+ * lands before paint rather than as a visible jump.
+ */
+function useClampedX(x: number | null | undefined) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || x == null) return
+    const half = el.offsetWidth / 2
+    const vw = window.innerWidth
+    // A box wider than the viewport has no satisfying position; centre it rather than pick an edge.
+    const left = half * 2 >= vw - 16 ? vw / 2 : Math.min(Math.max(x, half + 8), vw - half - 8)
+    el.style.left = `${left}px`
+  }, [x])
+  return ref
+}
 
 /** One formula. A KaTeX failure renders the SOURCE, never a gap: unreadable LaTeX still tells the
  *  reader what the argument's step was; a hole does not. */
@@ -580,6 +616,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   /** The textbox currently being typed into (D2), by mark id. */
   const [editingBox, setEditingBox] = useState<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  // Both floating boxes are centred on the touched point; on a 375px screen that is off the edge
+  // for anything you select near a margin. See useClampedX.
+  const selBoxRef = useClampedX(sel?.x)
+  const composerBoxRef = useClampedX(composer?.x)
 
   // ── THE DOCK — the PDF panel's rules, not a copy of them (components/dockLayout.ts) ──────────
   // Peter: "can you get it to open in the side or below with same width and placing as the pdf
@@ -839,7 +879,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
   /** One shape for every header action — that is what "symmetric" means here. */
   const btn = (glyph: string, title: string, onPress: () => void, lit: boolean) => (
-    <button type="button" title={title} aria-label={title} onClick={onPress}
+    <button type="button" title={title} aria-label={title} onClick={onPress} className="iw-tap"
       style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, display: 'flex', alignItems: 'center',
         justifyContent: 'center', cursor: 'pointer', fontSize: '13px', lineHeight: 1,
         border: `1px solid ${lit ? INK : 'var(--iw-nightable-border, #d6cfe0)'}`,
@@ -1028,14 +1068,24 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       )}
       <div className="flex flex-col flex-1 min-h-0">
 
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-200" style={{ fontSize: '13px' }}>
+        {/* `--iw-tap-x` = this row's own gap (gap-2 → 8px): each `.iw-tap` control claims half of it
+            per side, so neighbours never contend. See the rule's header in index.css. */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-200"
+          style={{ fontSize: '13px', ['--iw-tap-x' as string]: '8px' }}>
           <button type="button" title="Back" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}
+            className="iw-tap"
             style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>←</button>
           <button type="button" title="Forward" disabled={idx >= stack.length - 1} onClick={() => setIdx((i) => Math.min(stack.length - 1, i + 1))}
+            className="iw-tap"
             style={{ background: 'transparent', border: 'none', cursor: idx >= stack.length - 1 ? 'default' : 'pointer', color: idx >= stack.length - 1 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>→</button>
+          {/* The title is the FIRST thing to go on a phone (Peter's iPhone 8 is 375px): four header
+              actions, a back/forward pair and a usable address bar do not fit beside it, and the
+              address bar already says where you are. Desktop keeps it. */}
+          {!isPhone && (
           <span style={{ color: INK, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: '30%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {doc?.title || title || hostOf(here)}
           </span>
+          )}
           {/* ADDRESS BAR (Peter, 2026-08-28: "we should be able to search the web by url"). It is
               an address bar in the ordinary sense: a URL goes there, a bare host gets https://, and
               words with no dot go to GOOGLE (Peter named it) — a reader who types
@@ -1053,7 +1103,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               : 'Type an address, or words to search'}
             spellCheck={false}
             className="iw-nightable"
-            style={{ flex: 1, minWidth: 80, height: 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
+            style={{ flex: 1, minWidth: 80, height: isPhone ? TOUCH_FIELD_H : 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
               border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
               color: 'inherit', outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
           {/* FOUR SYMMETRIC BUTTONS (Peter, 2026-08-28: "this could be reduced down to a button.
@@ -1086,7 +1136,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               to re-open a list is a piece of furniture standing in for a control; it also stole
               22px of reading width down the entire article for a click you make once. */}
           {!framed && headings.length > 1 && !showNav && (
-            <button type="button" title="Show the section list" onClick={toggleNav}
+            <button type="button" title="Show the section list" onClick={toggleNav} className="iw-tap"
               style={{ position: 'absolute', left: 6, top: 6, zIndex: 5, width: 24, height: 24,
                 borderRadius: 6, border: '1px solid var(--iw-nightable-border, #d6cfe0)',
                 background: 'rgba(255,255,255,0.92)', color: INK, cursor: 'pointer', fontSize: '13px',
@@ -1102,7 +1152,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               <div className="flex items-center gap-1 px-2 py-1 border-b border-stone-100" style={{ flexShrink: 0 }}>
                 <span className="text-stone-400" style={{ fontSize: '11px' }}>Sections</span>
                 <button type="button" title="Hide the section list" onClick={toggleNav}
-                  className="ml-auto"
+                  className="ml-auto iw-tap"
                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: INK, fontSize: '13px', padding: '0 2px' }}>☰</button>
               </div>
               <div className="overflow-y-auto py-1">
@@ -1286,7 +1336,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     {onCite && b.level > 1 && b.text.trim() !== (doc?.title ?? '').trim() && (
                       <button type="button" title="Cite this section" onClick={() => citeHeading(b.text)}
                         className="opacity-0 group-hover:opacity-100"
-                        style={{ marginLeft: '0.5em', fontSize: '0.6em', color: INK, border: `1px solid ${INK}44`, borderRadius: 6, padding: '2px 7px', background: 'transparent', cursor: 'pointer', verticalAlign: 'middle' }}>
+                        // ⚠ NOT `.iw-tap` — this button sits INSIDE the prose. A 44px hit zone
+                        // around it would reach over the lines above and below and take taps away
+                        // from the article's own text, which must stay selectable (that selection
+                        // is the entire reason the page is fetched rather than framed). So it grows
+                        // for real, in the space a heading's line box already has.
+                        style={{ marginLeft: '0.5em', fontSize: '0.6em', color: INK, border: `1px solid ${INK}44`, borderRadius: 6, padding: isPhone ? '9px 10px' : '2px 7px', background: 'transparent', cursor: 'pointer', verticalAlign: 'middle' }}>
                         cite §
                       </button>
                     )}
@@ -1336,11 +1391,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             live in it rather than under a hold-to-open palette: the colour IS the note here (it is
             all you can see of it later), so choosing one must not be a hidden gesture. */}
         {composer && !framed && (
-          <div className="iw-nightable fixed z-[402] flex items-center gap-1.5 bg-white rounded-full shadow-lg px-2 py-1.5"
+          <div ref={composerBoxRef} className="iw-nightable fixed z-[402] flex items-center gap-1.5 bg-white rounded-full shadow-lg px-2 py-1.5"
             style={{ left: composer.x, top: Math.max(8, composer.y - 46), transform: 'translateX(-50%)',
-              border: `1px solid ${INK}44`, fontSize: '12px' }}>
+              maxWidth: 'calc(100vw - 16px)',
+              border: `1px solid ${INK}44`, fontSize: '12px', ['--iw-tap-x' as string]: '6px' }}>
             {TEXT_COLORS.map((c) => (
-              <button key={c} type="button" title="Ink"
+              <button key={c} type="button" title="Ink" className="iw-tap"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setTextColor(c); textColorRef.current = c }}
                 style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer',
@@ -1355,26 +1411,28 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setComposer(null) }
               }}
               className="iw-nightable"
-              style={{ width: 190, height: 22, fontSize: '12px', padding: '0 8px', borderRadius: 999,
+              style={{ width: 190, height: isPhone ? TOUCH_FIELD_H : 22, fontSize: '12px', padding: '0 8px', borderRadius: 999,
                 border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
                 color: textColor, fontWeight: 600, outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
             <button type="button" title="Write it in" onMouseDown={(e) => e.preventDefault()} onClick={commitComposer}
-              className="rounded-full px-2 py-0.5" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
+              className="rounded-full px-2 py-0.5 iw-tap" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
             <button type="button" title="Cancel" onMouseDown={(e) => e.preventDefault()} onClick={() => setComposer(null)}
+              className="iw-tap"
               style={{ color: 'var(--iw-pill-fg, #78716c)', background: 'transparent', border: 'none', cursor: 'pointer' }}>✕</button>
           </div>
         )}
 
         {/* Floating actions over a selection — the whole reason the page is fetched rather than framed. */}
         {sel && !framed && (onCite || onQuote) && (
-          <div className="iw-nightable fixed z-[401] flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1"
-            style={{ left: sel.x, top: Math.max(8, sel.y - 42), transform: 'translateX(-50%)', border: `1px solid ${INK}44`, fontSize: '12px' }}
+          <div ref={selBoxRef} className="iw-nightable fixed z-[401] flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1"
+            style={{ left: sel.x, top: Math.max(8, sel.y - 42), transform: 'translateX(-50%)',
+              maxWidth: 'calc(100vw - 16px)', border: `1px solid ${INK}44`, fontSize: '12px', ['--iw-tap-x' as string]: '4px' }}
             onMouseDown={(e) => e.preventDefault()}>
             {/* THE SAME COLOURED DOTS AS THE PDF (Peter: "highlighting text without any mode on
                 should put up the coloured dots and link to citation panel"). One gesture, one
                 vocabulary, in both readers — a dot highlights in that colour immediately. */}
             {MARK_COLORS.map((c) => (
-              <button key={c} type="button" title="Highlight"
+              <button key={c} type="button" title="Highlight" className="iw-tap"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setMarkColor(c); markColorRef.current = c; markSelection('highlight') }}
                 style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', flexShrink: 0 }} />
@@ -1383,7 +1441,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             {onQuote && (
               <button type="button" onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onQuote(sel.text); setSel(null); flash('Saved as the cited sentence') }}
-                className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                className="rounded-full px-2.5 py-1 iw-tap" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 quote this
               </button>
             )}
@@ -1401,7 +1459,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               return (
                 <button type="button" onMouseDown={(e) => e.preventDefault()}
                   onClick={() => { onCite(loc); setSel(null); flash(`Cited ${formatSection(loc)}`) }}
-                  className="rounded-full px-2.5 py-1" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  className="rounded-full px-2.5 py-1 iw-tap" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   title={`Use "${sec}" as this citation's locator`}>
                   cite {formatSection(loc)}
                 </button>
@@ -1438,7 +1496,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             it, so the bar renders the reason instead. */}
         {!framed && (
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-stone-200 flex-wrap"
-            style={{ fontSize: '12px', background: 'var(--iw-panel-bg, #faf8fc)' }}>
+            style={{ fontSize: '12px', background: 'var(--iw-panel-bg, #faf8fc)', ['--iw-tap-x' as string]: '6px' }}>
             {/* TWO GESTURES, AND THE TOOL DECIDES WHICH. A highlight and a sticky note act on a
                 SELECTION; coloured text and a textbox are placed by a CLICK, because they add words
                 the page never had and so have nothing to select. Giving the placing tools the
@@ -1451,10 +1509,17 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               { kind: 'box' as const, mode: 'place' as const, label: '▭', title: 'Textbox — click, then click a paragraph to hang a note under it · hold for colours', palette: BOX_COLORS, color: boxColor, setColor: setBoxColor, glyph: INK },
             ]).map((t) => (
               <div key={t.kind} style={{ position: 'relative' }}>
-                <button type="button" title={t.title}
+                <button type="button" title={t.title} className="iw-tap"
                   onPointerDown={() => { holdRef.current = setTimeout(() => { heldRef.current = true; setPaletteOpen(t.kind) }, 400) }}
                   onPointerUp={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
                   onPointerLeave={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
+                  // ⚠ POINTERCANCEL IS NOT OPTIONAL ON TOUCH, and it was missing here while the PDF
+                  // toolbar's identical gesture has always had it. A finger that drifts enough for
+                  // the browser to claim the gesture as a scroll gets `pointercancel` and NO
+                  // `pointerup`, so the 400ms timer went on to fire: the palette opened under a
+                  // finger that had already left, and `heldRef` stayed true and swallowed the NEXT
+                  // tap on the tool. Two wrong outcomes from one missing line.
+                  onPointerCancel={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
                   onClick={() => {
                     if (heldRef.current) { heldRef.current = false; return }
                     // Text already selected → mark it now. Nothing selected → arm the tool. A
@@ -1465,15 +1530,26 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     setTool((cur) => (cur === t.kind ? null : t.kind))
                   }}
                   style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: '0.9rem',
+                    // AN ELEMENT THAT OWNS A GESTURE OWNS ITS OWN touch-action (CLAUDE.md — it does
+                    // NOT inherit, and the app-wide phone rule is `pan-x pan-y`). Under that rule a
+                    // hold on this button is also a candidate PAN, so the browser may claim the
+                    // gesture mid-hold and cancel it; `none` says the hold is ours. There is nothing
+                    // to scroll under a toolbar button, so nothing is lost.
+                    touchAction: 'none',
                     fontWeight: t.kind === 'text' ? 700 : undefined,
                     border: `1px solid ${tool === t.kind ? INK : '#d6cfe0'}`, background: tool === t.kind ? `${INK}14` : '#fff',
                     color: t.glyph }}>{t.label}</button>
                 {paletteOpen === t.kind && (
                   <>
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setPaletteOpen(null)} />
-                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
+                    {/* ⚠ POINTERDOWN, NOT MOUSEDOWN. A tap only produces a synthetic mousedown if
+                        iOS decides the gesture was a click — and it withholds one whenever the
+                        touch is treated as a scroll or a touchmove was preventDefaulted, which this
+                        panel's own `.iw-touch-guard` handler (TiptapEditor) does. So the dismiss
+                        scrim was listening for an event a finger is not guaranteed to send. */}
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onPointerDown={() => setPaletteOpen(null)} />
+                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '6px' }}>
                       {t.palette.map((c) => (
-                        <button key={c} type="button" onMouseDown={(ev) => ev.preventDefault()}
+                        <button key={c} type="button" className="iw-tap" onMouseDown={(ev) => ev.preventDefault()}
                           // EACH TOOL REMEMBERS ITS OWN COLOUR. One shared "current colour" would
                           // mean picking an ink for the T tool silently recoloured the highlighter,
                           // and the two palettes do not even overlap (washes vs inks).
@@ -1487,7 +1563,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             ))}
             {/* The PDF's eraser, glyph for glyph (Peter: "the erasor button needs to look same as
                 for pdfs"). Same tool, same picture — a different icon reads as a different thing. */}
-            <button type="button" title="Eraser — click a mark to remove it"
+            <button type="button" title="Eraser — click a mark to remove it" className="iw-tap"
               onClick={() => setTool((cur) => (cur === 'erase' ? null : 'erase'))}
               style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${tool === 'erase' ? INK : '#d6cfe0'}`, background: tool === 'erase' ? `${INK}14` : '#fff' }}>
@@ -1504,7 +1580,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             <select value={font} title="Reading font"
               onChange={(e) => { setFont(e.target.value); try { localStorage.setItem('inkwave:readerFont', e.target.value) } catch { /* private */ } }}
               className="iw-nightable"
-              style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
               {READER_FONTS.map((f) => <option key={f.css} value={f.css}>{f.label}</option>)}
             </select>
             {/* Line spacing (Peter, 2026-08-28). Sits beside the face because they are one decision
@@ -1513,7 +1589,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             <select value={String(leading)} title="Line spacing"
               onChange={(e) => { const v = Number(e.target.value); setLeading(v); try { localStorage.setItem('inkwave:readerLeading', String(v)) } catch { /* private */ } }}
               className="iw-nightable"
-              style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
               <option value="1.35">Tight</option>
               <option value="1.62">Normal</option>
               <option value="1.9">Airy</option>
@@ -1527,16 +1603,16 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 same thing; the percentage is a button because a number you cannot get back to 100%
                 from is a trap. */}
             <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
-            <div className="flex items-center" style={{ gap: 2 }}>
-              <button type="button" title="Smaller text" aria-label="Smaller text"
+            <div className="flex items-center" style={{ gap: 2, ['--iw-tap-x' as string]: '2px' }}>
+              <button type="button" title="Smaller text" aria-label="Smaller text" className="iw-tap"
                 onClick={() => applyZoom(readerZoomStep(zoom, -1))}
                 style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', lineHeight: 1 }}>−</button>
-              <button type="button" title="Back to 100%" onClick={() => applyZoom(1)}
+              <button type="button" title="Back to 100%" onClick={() => applyZoom(1)} className="iw-tap"
                 style={{ minWidth: 42, height: 22, borderRadius: 6, border: '1px solid transparent', background: 'transparent',
                   color: 'var(--iw-pill-fg, #78716c)', cursor: 'pointer', fontSize: '11px', fontFamily: 'system-ui, sans-serif' }}>
                 {Math.round(zoom * 100)}%
               </button>
-              <button type="button" title="Bigger text" aria-label="Bigger text"
+              <button type="button" title="Bigger text" aria-label="Bigger text" className="iw-tap"
                 onClick={() => applyZoom(readerZoomStep(zoom, 1))}
                 style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', lineHeight: 1 }}>+</button>
             </div>
@@ -1614,7 +1690,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             <select value={pageWidth} title="How wide a screen the site should lay out for"
               onChange={(e) => { const v = e.target.value as 'auto' | 'narrow' | 'wide'; setPageWidth(v); try { localStorage.setItem('inkwave:readerPageWidth', v) } catch { /* private */ } }}
               className="iw-nightable"
-              style={{ height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
+              style={{ height: isPhone ? TOUCH_FIELD_H : 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
               <option value="auto">Fit the panel</option>
               <option value="narrow">Big text (phone layout)</option>
               <option value="wide">Wide (desktop layout)</option>
@@ -1639,7 +1715,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               : via === 'extension'
                 ? 'Article text, fetched by the Inkwave extension from your own connection. Inkwave’s server was not involved and never saw this address.'
                 : 'Article text, fetched for you. Inkwave keeps no log and no copy of what you read — but it does see the address for the moment it takes to fetch.'}</span>
+            {/* MEASURED 12.7×14 at 375px — the smallest control in the panel, and the one a reader
+                reaches for first (it is how you get the privacy footer off a phone screen). */}
             <button type="button" onClick={dismissNotice} title="Hide this note" aria-label="Hide this note"
+              className="iw-tap"
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#a8a29e', fontSize: '14px', lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
           </div>
         )}

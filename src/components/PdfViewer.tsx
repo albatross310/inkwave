@@ -425,7 +425,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           const noteBorder = emptyNote ? `1.5px dashed ${INK}` : '1px solid rgba(0,0,0,0.2)'
           const minH = (r0.h || 0) > 0.001 ? `min-height:${Math.max(20, (r0.h || 0) * ph)}px;` : ''
           const noteW = Math.max(60, (r0.w || 0.3) * pw)
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;`
+          // ⚠ `touch-action:none` — WITHOUT IT DRAG-TO-MOVE DOES NOT EXIST ON TOUCH. The app-wide
+          // phone rule is `* { touch-action: pan-x pan-y }` and touch-action does NOT inherit, so a
+          // finger pressed on a note is a candidate PAN: the browser takes the gesture, scrolls the
+          // PDF and sends `pointercancel`, and `setPointerCapture` cannot override that (capture
+          // routes events, it does not claim the gesture). The note simply never moves, silently.
+          // Same rule CLAUDE.md records for the SCAS reel: an element that owns a drag declares it.
+          // COST, stated: you can no longer start a page scroll with your finger on a note. Notes
+          // are small boxes; if a tall one ever makes a page hard to scroll, the narrower fix is to
+          // set this only while the note is SELECTED (tap, then drag) — at the price of dragging
+          // meaning something different on touch than it does with a mouse.
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;touch-action:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Click/tap to select (✕ or Delete removes) · double-click or tap again to edit'
           const removeNote = () => {
@@ -442,7 +452,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           // TOP-LEFT (Peter, 2026-08-28: "the x needs to be at top left not top right"). A note grows
           // rightward and downward from its origin, so the right edge MOVES as the box is resized or
           // its text wraps — the handle wandered. The origin does not.
-          delBtn.style.cssText = `position:absolute;left:${r0.x * pw - 8}px;top:${r0.y * ph - 9}px;width:16px;height:16px;padding:0;line-height:14px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:12px;pointer-events:auto;z-index:3;display:none;`
+          // 16px is a mouse target. On touch the badge grows to 28 and stays CENTRED on the note's
+          // corner, so it gains its size outward rather than reaching further into the note — a
+          // delete that is easy to hit by accident is worse than one that is hard to hit on purpose.
+          // (It cannot use the `.iw-tap` hit region for that reason: a 44px zone here would cover
+          // the note's top-left corner, and a tap meant to EDIT would delete.)
+          const dBtn = isTouch ? 28 : 16
+          delBtn.style.cssText = `position:absolute;left:${r0.x * pw - dBtn / 2}px;top:${r0.y * ph - dBtn / 2 - 1}px;width:${dBtn}px;height:${dBtn}px;padding:0;line-height:${dBtn - 2}px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:${isTouch ? 18 : 12}px;pointer-events:auto;z-index:3;display:none;touch-action:none;`
           delBtn.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); removeNote() })
           let selected = false
           const setSelected = (on: boolean) => {
@@ -485,7 +501,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const ny = Math.max(0, Math.min(1, drag.y0 + dy / ph))
             r0.x = nx; r0.y = ny
             note.style.left = `${nx * pw}px`; note.style.top = `${ny * ph}px`
-            delBtn.style.left = `${nx * pw - 8}px`; delBtn.style.top = `${ny * ph - 9}px`
+            delBtn.style.left = `${nx * pw - dBtn / 2}px`; delBtn.style.top = `${ny * ph - dBtn / 2 - 1}px`
           })
           const endDrag = (ev: PointerEvent) => {
             if (!drag) return
@@ -2010,7 +2026,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       {/* ONE ROW (Peter, 2026-08-28: "try to get this down to one row. Get rid of unnecessary space
           between button types"). gap 6→3 and the dividers reduced to margin-only separators; the
           colour swatches are gone entirely, folded into hold-palettes on the tools they belong to. */}
-      <div style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, rowGap: 4, padding: '6px 8px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap' }}
+      {/* `--iw-tap-x` = this row's own gap. On touch every `.iw-tap` control below claims half of it
+          per side and grows to 44px TALL, without the row reflowing — Peter asked this bar down to
+          ONE ROW and a 28px icon cannot become 44px wide without breaking that. See index.css. */}
+      <div className="iw-tap-row"
+        style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, rowGap: 4, padding: '6px 8px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap', ['--iw-tap-x' as string]: '3px' }}
         onMouseLeave={() => setHint(null)}>
         {onClose && (
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
@@ -2091,7 +2111,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           if (!palette) return btn
           return (
             <div key={t.kind} style={{ position: 'relative', flexShrink: 0 }}>
-              <span onPointerDown={() => {
+              {/* touchAction:none — this span OWNS the hold gesture, and touch-action does NOT
+                  inherit (CLAUDE.md), so under the app-wide `pan-x pan-y` phone rule the browser
+                  could claim the hold as a pan and cancel it. Nothing scrolls under a toolbar. */}
+              <span style={{ touchAction: 'none', display: 'inline-flex' }} onPointerDown={() => {
                 holdRef.current[t.kind] = setTimeout(() => { heldRef.current = true; setColorOpen(t.kind) }, HOLD_MS)
               }}
                 onPointerUp={() => { const h = holdRef.current[t.kind]; if (h) clearTimeout(h) }}
@@ -2102,7 +2125,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               </span>
               {colorOpen === t.kind && (
                 <>
-                  <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setColorOpen(null)} />
+                  {/* POINTERDOWN, NOT MOUSEDOWN — a finger is not guaranteed to produce a synthetic
+                      mousedown (iOS withholds one when the gesture is treated as a scroll, or when
+                      a touchmove was preventDefaulted). Same fix as the source reader's palette. */}
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onPointerDown={() => setColorOpen(null)} />
                   <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
                     {palette.map((c) => (
                       <button key={c} type="button" title={c}
@@ -2131,7 +2157,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           // and STAY zoomed, which is a far worse bug than a wide select.
           // No "px", no dropdown arrow, no reserved arrow gutter (Peter, 2026-08-28) — the row has
           // to fit on ONE line and a two-digit number needs none of that to be read as a size.
-          style={{ height: 28, width: isTouch ? 44 : 34, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
+          // A <select> gets no pseudo-element in Chrome/Safari, so it cannot borrow the `.iw-tap`
+          // hit region — its box has to be the target. 34px is also what the forced 16px iOS floor
+          // (index.css) needs to hold its own line without clipping.
+          style={{ height: isTouch ? 40 : 28, width: isTouch ? 44 : 34, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
@@ -2322,7 +2351,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           style={{ order: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderTop: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
           <span style={{ fontStyle: 'italic', flex: 1, minWidth: 0 }}>“…{context}”</span>
           {/* Per-open dismiss — reclaims the strip's height; stopPropagation so it never jumps to the citation. */}
-          <button type="button" title="Hide this context strip"
+          <button type="button" title="Hide this context strip" className="iw-tap"
             onClick={ev => { ev.stopPropagation(); setContextDismissed(true) }}
             style={{ flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent', color: '#8d7ba3', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, borderRadius: 4 }}>×</button>
         </div>
@@ -2331,10 +2360,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       <div style={{ order: 1, position: 'relative', flex: 1, minHeight: 0 }}>
       {/* Find-in-PDF bar (Ctrl+F) — anchored just ABOVE the bottom toolbar, opening upward. */}
       {searchOpen && (
-        <div className="iw-nightable" style={{
+        <div className="iw-nightable iw-tap-row" style={{
           position: 'absolute', bottom: 10, right: 18, zIndex: 25,
           display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: `1px solid ${INK}44`,
           borderRadius: 10, boxShadow: '0 3px 14px rgba(0,0,0,0.22)', padding: '8px 12px',
+          // The bar is 240px of input + a counter + three buttons: at 375px it overflows the panel
+          // it is anchored inside. Cap it and let the input take what is left.
+          maxWidth: 'calc(100% - 24px)', ['--iw-tap-x' as string]: '8px',
         }}>
           <input
             ref={searchBoxRef}
@@ -2345,7 +2377,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false); clearFindHits() }
             }}
             placeholder="Find in PDF…"
-            style={{ width: 240, fontSize: isTouch ? '16px' : '15px' /* <16px makes iOS auto-zoom on focus */, border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
+            style={{ width: 240, minWidth: 0, flex: '1 1 auto', fontSize: isTouch ? '16px' : '15px' /* <16px makes iOS auto-zoom on focus */, border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
           />
           <span style={{ fontSize: '13px', color: 'var(--iw-pill-fg, #78716c)', minWidth: 48, textAlign: 'center' }}>
             {matchInfo.total ? `${matchInfo.cur}/${matchInfo.total}` : (searchQuery ? '0/0' : '')}
