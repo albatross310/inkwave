@@ -3145,6 +3145,35 @@ commit that stole four lanes' work, because that commit was green. Nothing but t
 between a parallel session and a lane silently losing its night's work — the same loss the OPFS bugs
 caused Peter, from the other direction.
 
+**⚠ `set -e` IS SILENTLY IGNORED BY THE Bash TOOL'S SHELL — GATE WITH `&&` (2026-08-30).** Verified
+directly: `set -e; false; echo REACHED` prints REACHED. So every gate written as
+`set -e` + newline-separated `pnpm typecheck` / `pnpm test` / `pnpm build` + a final `echo GREEN`
+reports success **whatever the exit codes were**, and I ran several of those and read them as proof.
+An agent hit the same thing and caught it only by testing `set -e` against `false` on purpose.
+
+This is the third shape of the same wound in two days, and the pattern is the point: **anything that
+always succeeds, placed between the gate and the push, hides the gate.** The three were
+`pnpm test | grep …` (grep exits 0 when it FINDS the failure lines), `pnpm typecheck; echo "tc=$?"`
+(echo exits 0), and now `set -e` itself (inert here). Two broken commits were pushed this way.
+
+THE ONE FORM THAT WORKS, because a failure short-circuits the chain rather than being reported by it:
+
+    pnpm typecheck >/dev/null 2>&1 && pnpm test >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 \
+      && git commit … && git push …
+
+Nothing between the links. No `echo`, no pipe, no `set -e`. And `&&` short-circuiting was itself
+verified here (`false && echo BAD || echo GOOD`) rather than assumed — which is the whole lesson.
+
+**BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION.** A message written inline with
+`-m "… `readJson` …"` runs `readJson` and splices its (empty) output into the message. Use
+`-F <file>` with a heredoc for any message containing code identifiers — several commits this
+session lost words that way.
+
+**`git reset --soft origin/master` IN A WORKTREE WILL STAGE A REVERT OF OTHER LANES' WORK.** Two
+agents independently hit this while tidying history: master had moved under them, so the reset
+staged the *removal* of commits they had never touched. Both caught it in `git status` before
+committing. Prefer `git rebase origin/master`; if you do reset, read `git status` before you commit.
+
 **KEEP AT LEAST 5 AGENTS RUNNING (Peter, 2026-07-17 — a standing floor, not a target).** Whenever
 there is work left on the specs, at least five lanes should be in flight. Peter has asked for this
 repeatedly across sessions ("I want six working all the time", "agents running low", "where did all
