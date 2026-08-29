@@ -204,3 +204,36 @@ PROBE_PORT=4231 node scripts/textrender-probe/panerect.mjs
     pane now publishes its measured line list (`window.__iwStaticLinesHook`) and the probe reads
     THAT. If a probe's verdict would survive the production code being deleted, it is not measuring
     production.
+
+## The PDF READER VIEW (`pnpm prove:pdfreader`, 2026-08-30)
+
+`pdfreader.prove.mjs` — the first time `src/components/pdfReflow.ts` + `PdfReaderView.tsx` have been
+driven in a browser. Boots its own ephemeral server, seeds a deterministic 3-page PDF
+(`pdffixture.mjs`, generated in-repo — Peter's own sources never enter this repo) as a real source on
+a real document through the real OPFS paths, opens it the way he does (a click on an in-text
+citation), and then USES the reader.
+
+```sh
+pnpm build          # it READS what the browser downloads; a stale build/ makes it VOID, not fail
+pnpm prove:pdfreader
+```
+
+Every verdict is a measurement, and four of them carry a known-negative that must fire first: the
+block-text comparison is required to REJECT a deliberately wrong expectation; the height instrument
+must read identically twice with nothing touched; two seeded rect-only legacy marks must be reported
+as unplaceable (so "still placed" is falsifiable) and must read back at two DIFFERENT rectangles (so
+the overlay instrument is not a constant). MUTATION-PROVED, all three mutants die on the right
+checks: drop `anchor` from `createFromSelection` ⇒ 6 fail + 1 VOID · hardcode the reader's
+`lineHeight` ⇒ the proportion check fails · shift the page-view rect 2% ⇒ the seed-match checks fail.
+
+FOUR PROBE BUGS FOUND BY IT, each of which reported a WORKING feature as broken:
+- `fetch('data:…')` to decode the fixture is refused by the app's CSP (`connect-src` has no `data:`)
+  and read as "OPFS is broken". Use `atob`.
+- `getSelection().toString()` AFTER the mouseup is empty, because `createFromSelection` clears the
+  selection on SUCCESS. Read it before dispatching.
+- **Escape does not disarm the tool — it CLOSES THE PDF PANEL** (PdfViewer and PdfSidePanel both
+  listen; the panel wins). Toggle the tool button instead.
+- `page.mouse.click(5, 5)` lands on the editor, which is how a bottom-docked panel is *designed* to
+  close. Dismiss popovers from inside the reader.
+Hence `placedMarks`/`orphanReport` return **null, never an empty list**, when the reader is not on
+screen: "no marks painted" and "there is nothing to paint on" are different answers.

@@ -323,6 +323,36 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   (slow, often blocked, and the one PDF path through our server) — sources embed files only;
   legacy `pdfUrl` metadata is inert. Haiku page-offset
   detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
+- **THE PDF READER VIEW IS NOW DRIVEN IN A REAL BROWSER — `pnpm prove:pdfreader` (2026-08-30).**
+  `pdfReflow.ts` + `pdfReflowStore.ts` + `PdfReaderView.tsx` (the ¶ toggle: the PDF's text re-set in
+  the reader's own font and line spacing, marks anchored BY TEXT via `src/reader/marks.ts`) shipped
+  to master on unit tests and the gate alone — and the gate can see none of what it promises. LIVE,
+  no flag; Peter reads his sources here daily. `scripts/textrender-probe/pdfreader.prove.mjs` seeds a
+  deterministic 3-page PDF (`pdffixture.mjs`, generated in-repo from text you can read — his own
+  sources never enter this repo) as a real source through the real OPFS paths, opens it by clicking
+  an in-text citation, and MEASURES: all 8 reflowed paragraphs byte-equal to the fixture's own text;
+  Garamond→JetBrains changes the paragraph's laid-out height 129.19→193.78px at a FIXED column width
+  (the height IS the proof the font swapped — `document.fonts.check()` lies); lead 1.7→3.0 grows it
+  ×1.765 against a line-height ×1.765; a highlight over a unique phrase persists with a TEXT anchor
+  (+ rects, so the page view draws it too) and survives a font change, a line-spacing change and a
+  RELOAD, same id, same words; a text note lands 16px under its own paragraph with the paragraph's
+  opening 60 chars as its anchor; and the two seeded rect-only legacy marks are drawn at
+  byte-identical normalised rectangles before, after and across the reload. 47/47.
+  **FOUR PROBE BUGS, EVERY ONE OF WHICH ACCUSED A WORKING FEATURE** — read these before writing any
+  probe against this panel: (1) `fetch('data:…')` is refused by the app's own CSP and reads as "OPFS
+  is broken" — use `atob`; (2) `getSelection().toString()` after the mouseup is EMPTY because
+  `createFromSelection` clears the selection on SUCCESS — read it before dispatching; (3) **Escape
+  does not disarm the tool, it CLOSES THE PANEL** (PdfViewer and PdfSidePanel both listen; the panel
+  wins) — toggle the tool button; (4) `page.mouse.click(5,5)` lands on the editor, which is how a
+  bottom-docked panel is *designed* to close. Hence the probe's helpers return **null, never an
+  empty list**, when the reader is off screen — "no marks painted" and "there is nothing to paint on"
+  are different answers, the same distinction `readJson` and `readSnapshotsFromDisk` exist to keep.
+  MUTATION-PROVED (drop `anchor` ⇒ 6 fail + 1 VOID · hardcode `lineHeight` ⇒ 1 · shift the page rect
+  2% ⇒ 3). HONEST GAPS, stated: Chromium only (WebKit has no `navigator.storage` here, so the iOS
+  worker write path is untouched); the fixture is a born-digital text-layer PDF, so a SCANNED page
+  with no text layer takes the "use the page view" branch unprobed; and multi-column, RTL and
+  footnote-heavy real typesetting are not represented — the fixture proves the reflow RULES against
+  the thresholds they were written for, not against a publisher's page.
 - **Media import (2026-07-17, `src/media/`, LIVE — no flag).** Peter's "photo import button (which
   has photo or audio or video)" — GENERAL, into any document, and the prerequisite for the music
   lane's "turn this photo into a piece" and §A5's practice recordings. `mediaStore.ts` REUSES

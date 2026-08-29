@@ -19,7 +19,8 @@
     "prove:editor": "pnpm prove:schema && pnpm prove:mount && pnpm prove:breaks",
     "prove:pdfposthoc": "node scripts/pdfposthoc.prove.mjs",
     "prove:jump": "node scripts/textrender-probe/jumpguard.prove.mjs",
-    "prove:reader": "node scripts/textrender-probe/reader.prove.mjs"
+    "prove:reader": "node scripts/textrender-probe/reader.prove.mjs",
+    "prove:pdfreader": "node scripts/textrender-probe/pdfreader.prove.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.13.0",
