@@ -140,8 +140,31 @@ don't worry about the existing highlights. just change the whole layout and meth
 
 ## Lane F — Editor
 
-- [ ] **F1** Zoom "even better". MEASURED 2026-08-29 (`pnpm prove:zoomcost`, 13k words / 325 blocks
-      / 55 gaps, CPU-contended box so read RATIOS not absolutes):
+- [x] **F1** DONE 2026-08-30 — the lever below was the right one and it landed. `pnpm prove:zoomcost`
+      is now an ABBA A/B against a live known-negative (`window.__iwLiveWarm = false`); one run,
+      both arms, same box: **zoom-commit p50 133.9 → 34.4ms (0.26×)**, zoom-stepEvent 81.5 → 0.5ms,
+      misses 22 → 4, hits 2 → 20, 18 steps warmed between notches. `zoom-reflow` is untouched at
+      ~32ms and is now the whole of a notch. Breaks byte-identical (`pnpm prove:breaks`).
+      TWO WRONG THEORIES WERE MEASURED FIRST, and they are why the fix is scheduling rather than a
+      cheaper read: deriving the band from its gap's rect + its own inline `top`/`height` matched to
+      0.0000px across 55 bands and was NOT faster (1.08×), and exempting the gap widgets from the
+      live window's content-visibility did nothing either. `scripts/textrender-probe/bandcost.diag.mjs`
+      settled it: repeating the identical band loop immediately after itself costs 0.2ms, so the
+      ~70ms is ONE forced layout the anchor read did not cover — not 55 per-element unlocks.
+      ⚠ THE PROBE ALMOST CERTIFIED BOTH FICTIONS. Run A-then-B, both reported the second arm
+      1.07–1.08× slower — the same ratio for two unrelated changes, i.e. arm ORDER on a shared box.
+      Hence ABBA. Its geometry gate then failed on the REAL fix and was also wrong (it sampled the
+      panels 260ms after the last notch, a window containing the warm, and cried 55/56 panels
+      differing by 55,662px); an in-app audit — `window.__iwWarmAudit`, kept, with
+      `warmaudit.diag.mjs` as its consumer — showed every warmed entry equal to a live measure to
+      0.0px. Sample in the same task as the commit you are asking about.
+      KEPT BY THE GATE: `src/editor/zoomWarm.ts` `planLiveWarm` is pure, 13 tests / ~11ms / no
+      browser, six mutants proved to die. It is SELF-CALIBRATING — it reads what the last warm
+      actually cost and refuses when the writer's observed cadence cannot absorb it, because a warm
+      the next notch waits on is worse than a miss (visible in the final run: the noisy arm backed
+      off to 3 warms / 8 misses while the quiet one took 9 / 2).
+      ORIGINALLY, and the measurement that still stands. MEASURED 2026-08-29 (`pnpm prove:zoomcost`,
+      13k words / 325 blocks / 55 gaps, CPU-contended box so read RATIOS not absolutes):
 
           zoom-commit   p50 103ms   ← the whole synchronous commit, per notch
           zoom-stepEvent p50  68ms   ← 66% of it
@@ -160,7 +183,7 @@ don't worry about the existing highlights. just change the whole layout and meth
       THE LEVER, therefore, is to warm `liveCache` for the NEXT step IN THE PLACEHOLDER REGIME,
       between notches rather than on the input path — a zoom gesture is monotonic, so the next
       notch is nearly always ±1 in the same direction, and a real wheel leaves 150–260ms of idle
-      between notches to do it in. Not attempted yet; the measurement is the deliverable so far.
+      between notches to do it in. ~~Not attempted yet~~ — built, and the numbers are above.
 
 ---
 

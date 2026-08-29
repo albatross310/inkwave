@@ -35,13 +35,14 @@ import { buildArithMeasure, arithBlockLayout } from '../arithMeasure'
 import { makeCanvasMeasure, canvasShapingMatchesEditor, type Measure } from '../arithmeticLayout'
 import { scaleFor } from '../magnify'
 import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomStep'
+import { planLiveWarm } from '../zoomWarm'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
 import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, GAP, PHONE_GAP, PHONE_SHEET_RADIUS, phoneLike, gapEl } from '../pageGap'
 import { bibProvider } from '../../citations/bibProvider'
 import { harvestCiteBoxes, clearCiteBoxes } from '../../citations/citeBox'
 import { getCitationStyle } from '../../citations/citationsBus'
-import { notePerf } from '../perflog'
+import { notePerf, probePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
@@ -1001,7 +1002,15 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           const readBands = (): BandGeo | null => {
             if (!sheet || !layer) return null
             const s = scaleFor(sheet)
+            // PHASE PROBES (zero cost unless a harness defines window.__iwPerf — perflog.probePerf).
+            // They are what turned "zoom is slow" into a fix: `zoom-rbFirstRect` reads 0.0ms, which
+            // is the load-bearing fact — the layout is ALREADY clean here (Scroll.tsx forced it for
+            // its anchor read), so `zoom-rbBandLoop`'s cost is not layout but the per-gap display
+            // lock. See the `.inkwave-page-gap` content-visibility exemption in index.css.
+            const _t0 = performance.now()
             const sheetR = sheet.getBoundingClientRect()
+            probePerf('zoom-rbFirstRect', performance.now() - _t0)
+            const _t1 = performance.now()
             const bands = Array.from(sheet.querySelectorAll('.inkwave-page-gap-band')) as HTMLElement[]
             const tops: number[] = []
             const heights: number[] = []
@@ -1010,6 +1019,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               tops.push((r.top - sheetR.top) / s)
               heights.push(r.height / s)
             }
+            probePerf('zoom-rbBandLoop', performance.now() - _t1)
             // SINGLE-PASS content height (round-4, Peter: "zoom is slow now"): the old read hid
             // the panel layer + cleared minHeight to take sheet.scrollHeight — a SECOND forced
             // full layout on every paint pass, cache miss and atomic exit. Same rule
@@ -1032,6 +1042,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             }
             const padB = parseFloat(getComputedStyle(sheet).paddingBottom) || 0
             const total = (bottom - sheetR.top) / s + padB
+            probePerf('zoom-rbRest', performance.now() - _t1)
             return { tops, heights, total }
           }
           // Position panels at every region NOT covered by a gap band: [0..band0], [band0..band1], …
@@ -1342,9 +1353,11 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // stepCache's full-layout geometry must never apply mid-gesture. Routing mid-gesture
           // steps here keeps a within-gesture step RETRACE pure style writes.
           const liveCache = new Map<number, BandGeo>()
-          const cacheStats = { hits: 0, misses: 0, precomputed: 0 } // debug/smoke counters
+          const cacheStats = { hits: 0, misses: 0, precomputed: 0, warmed: 0 } // debug/smoke counters
           ;(window as unknown as { __iwStepCache?: typeof cacheStats }).__iwStepCache = cacheStats
-          const clearStepCache = () => { stepCache.clear(); liveCache.clear() }
+          // Also cancels any in-flight between-notch warm: it is scheduled against the geometry of
+          // the context being cleared, so letting it land would cache exactly what this invalidates.
+          const clearStepCache = () => { stepCache.clear(); liveCache.clear(); cancelLiveWarm() }
           const surfaceOf = () => (view.dom as HTMLElement).closest('.inkwave-editor-surface') as HTMLElement | null
           const currentStep = () => zoomToStep(parseFloat(surfaceOf()?.style.getPropertyValue('--iw-editor-zoom') || '') || 1)
           // ── ATOMIC TEXT+BAND through reflow zoom (round-6, Peter: "Zooming should change text
@@ -1361,10 +1374,99 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // heights), so what the eye sees is pixel-matched to the reflowed text every frame. A
           // cache hit is pure style writes (instant "paint from math"); a miss reads the bands
           // live in this same task, riding the layout Scroll.tsx's anchor read already forced.
+          // ── THE BETWEEN-NOTCH WARM — what actually makes a notch cheap (2026-08-30) ────────────
+          // MEASURED (`pnpm prove:zoomcost`, 13k words / 325 blocks / 55 gaps): a notch's commit is
+          // ~110ms, of which the reflow+anchor is ~33 and the step event ~78 — and 98% of that 78 is
+          // `readBands()`, i.e. the MISS path above, on 11 of 12 notches. The idle precompute is not
+          // broken and it does not help: it fills `stepCache`, while a live gesture reads
+          // `liveCache`, because the placeholder regime is a different geometry regime and mixing
+          // them is forbidden (see liveCache's own comment). So during a gesture every step measured
+          // the bands synchronously, on the input path.
+          // TWO WRONG THEORIES WERE MEASURED AND DISCARDED FIRST, and they are why the fix is
+          // scheduling rather than a cheaper read: (1) deriving the band from its gap's rect + the
+          // band's own inline top/height matched to 0.0000px across 55 bands and was NOT faster
+          // (1.08×); (2) exempting the gap widgets from the live window's content-visibility did
+          // nothing either. A standalone diagnostic then settled it: repeating the identical band
+          // loop immediately after itself costs 0.2ms. The 78ms is ONE forced layout that the
+          // anchor read did not cover — not 55 per-element unlocks — so no read is cheaper, and the
+          // only lever left is WHEN it happens.
+          // A zoom gesture is monotonic and a real wheel leaves 150–260ms between notches, so the
+          // next step is nearly always ±1 in the same direction and there is idle time to measure
+          // it in. This warms exactly that one step, in the PLACEHOLDER REGIME (so it lands in
+          // liveCache, never stepCache — the separation is untouched), strictly BETWEEN notches:
+          // · armed on a committed step, and CANCELLED by the next one, so a fast trackpad stream
+          //   (~16ms apart) never fires it — at that cadence there is no idle to spend and the warm
+          //   would compete with the gesture, which is the one thing the idle precompute exists to
+          //   avoid. It also skips outright once the observed cadence is faster than the warm can
+          //   finish in.
+          // · a MISS stays exactly as correct as before: it measures live in the same task. This
+          //   only makes the miss rarer, never the answer different.
+          // The SCHEDULING RULE itself lives in `editor/zoomWarm.ts` as a pure function, because a
+          // browser probe is not a guard: warming too eagerly puts the measure back on the input
+          // path, warming never restores the old cost, and neither shows up as a wrong pixel.
+          const LIVE_WARM_DELAY_MS = 45   // > a trackpad's ~16ms cadence, so a fast stream cancels it
+          let liveWarmTimer: ReturnType<typeof setTimeout> | undefined
+          let lastStepAt = 0
+          let lastStepIdx: number | null = null
+          let lastWarmMs = 0 // what a warm ACTUALLY costs on this machine — the cadence gate reads it
+          const cancelLiveWarm = () => { if (liveWarmTimer) { clearTimeout(liveWarmTimer); liveWarmTimer = undefined } }
+          // Measure one lattice step's bands UNDER THE LIVE WINDOW. Same set→read→restore shape as
+          // measureStep (the hypothetical layout never paints), but it must also move
+          // `--iw-cis-scale` — Scroll.tsx recomputes it per commit as (z/z0)², and the placeholder
+          // heights it drives are part of this regime's geometry. Reading the bands at the next
+          // step's zoom WITHOUT it would cache geometry no commit will ever reproduce.
+          const measureLiveStep = (k: number, z0: number) => {
+            const surface = surfaceOf()
+            if (!surface || !sheet || !layer) return
+            const scroller = surface.classList.contains('iw-fill') && !surface.classList.contains('is-phone') ? surface : null
+            const savedTop = scroller ? scroller.scrollTop : window.scrollY
+            const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
+            const prevZ = surface.style.getPropertyValue('--iw-editor-zoom')
+            const prevCis = surface.style.getPropertyValue('--iw-cis-scale')
+            const z = stepToZoom(k)
+            surface.style.setProperty('--iw-editor-zoom', String(z))
+            if (prevCis) surface.style.setProperty('--iw-cis-scale', ((z / z0) ** 2).toFixed(4))
+            let geo: BandGeo | null = null
+            try {
+              geo = readBands()
+            } finally {
+              if (prevZ) surface.style.setProperty('--iw-editor-zoom', prevZ)
+              else surface.style.removeProperty('--iw-editor-zoom')
+              if (prevCis) surface.style.setProperty('--iw-cis-scale', prevCis)
+              if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
+              else window.scrollTo(savedLeft, savedTop)
+            }
+            if (geo) { liveCache.set(k, geo); cacheStats.warmed++ }
+          }
+          const scheduleLiveWarm = (step: number, from: number | null, gapMs: number, placeholders: boolean, z0: number) => {
+            cancelLiveWarm()
+            const plan = planLiveWarm({
+              enabled: (window as unknown as { __iwLiveWarm?: boolean }).__iwLiveWarm !== false, // live known-negative
+              placeholders, phone: phoneLike(), step, from, gapMs,
+              delayMs: LIVE_WARM_DELAY_MS, lastWarmMs,
+              minStep: ZOOM_STEP_MIN, maxStep: ZOOM_STEP_MAX, cached: liveCache.has(step + Math.sign(step - (from ?? step))),
+            })
+            if (!plan.warm) return
+            const k = plan.step
+            liveWarmTimer = setTimeout(() => {
+              liveWarmTimer = undefined
+              // Re-checked AT FIRE TIME, not at schedule time: 45ms is long enough for the gesture to
+              // have ended, the live window to have come down, or another step to have landed, and a
+              // warm under any of those caches geometry no commit will ever reproduce.
+              if (destroyed || !(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) return
+              if (!(view.dom as HTMLElement).classList.contains('iw-zoom-live')) return
+              if (currentStep() !== step) return
+              const t0 = performance.now()
+              measureLiveStep(k, z0)
+              lastWarmMs = performance.now() - t0
+              probePerf('zoom-liveWarm', lastWarmMs)
+            }, LIVE_WARM_DELAY_MS)
+          }
           const onZoomStep = (e: Event) => {
             const d = (e as CustomEvent).detail as { step?: number; surface?: Element; z0?: number; resync?: boolean } | undefined
             if (!gapped || !sheet || !layer || !d || typeof d.step !== 'number') return
             if (d.surface !== surfaceOf()) return // another surface's zoom (SnapshotView) — not ours
+            cancelLiveWarm() // a notch has landed: whatever we were about to warm is superseded
             const placeholders = (view.dom as HTMLElement).classList.contains('iw-zoom-live')
             const cache = placeholders ? liveCache : stepCache
             if (d.resync) {
@@ -1377,16 +1479,51 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               return
             }
             const hit = cache.get(d.step)
-            if (hit) { cacheStats.hits++; applyBands(hit) }
+            if (hit) {
+              cacheStats.hits++
+              // AUDIT (probe-only, `window.__iwWarmAudit = true`): is a cached entry the same
+              // geometry a live measure would have produced at this instant? A cache that is fast
+              // and WRONG is the regression this whole subsystem exists to prevent, so the question
+              // has to be askable rather than argued about.
+              if ((window as unknown as { __iwWarmAudit?: boolean }).__iwWarmAudit) {
+                const live = readBands()
+                if (live) {
+                  let dT = 0, dH = 0
+                  const n = Math.min(live.tops.length, hit.tops.length)
+                  for (let i = 0; i < n; i++) { dT = Math.max(dT, Math.abs(live.tops[i] - hit.tops[i])); dH = Math.max(dH, Math.abs(live.heights[i] - hit.heights[i])) }
+                  const w = (window as unknown as { __iwWarmAuditLog?: unknown[] })
+                  ;(w.__iwWarmAuditLog ||= []).push({ step: d.step, bandsLive: live.tops.length, bandsHit: hit.tops.length,
+                    maxTopDelta: +dT.toFixed(1), maxHeightDelta: +dH.toFixed(1), totalDelta: +(live.total - hit.total).toFixed(1) })
+                }
+              }
+              const tA0 = performance.now()
+              applyBands(hit)
+              probePerf('zoom-applyBands', performance.now() - tA0)
+            }
             else {
               // MISS → measure the bands LIVE, synchronously, in this same task. Scroll.tsx forces
               // the step's layout (its anchor read) before dispatching, so readBands' single-pass
               // rect reads ride it — visually identical to a hit, one layout flush dearer. Bands
               // and text land in the SAME frame — no join, no overflow.
               cacheStats.misses++
+              const tR0 = performance.now()
               const geo = readBands()
-              if (geo) { applyBands(geo); cache.set(d.step, geo) }
+              const tR1 = performance.now()
+              probePerf('zoom-readBands', tR1 - tR0)
+              if (geo) { applyBands(geo); cache.set(d.step, geo); probePerf('zoom-applyBands', performance.now() - tR1) }
             }
+            // ARM THE NEXT STEP'S WARM. Direction from the PREVIOUS committed step where there is
+            // one, else from the gesture's own start zoom (z0) — the first notch of a gesture is
+            // exactly the one a writer notices, so it must not be the one that cannot predict.
+            const now = performance.now()
+            const gap = lastStepIdx === null ? Infinity : now - lastStepAt
+            // A step we saw a second ago is this gesture's previous notch (and catches a reversal
+            // mid-gesture); anything older belongs to a finished gesture and must not be trusted as
+            // "where we came from" — the gesture's own start zoom is, and it is monotonic.
+            const from = gap <= 1000 ? lastStepIdx : (typeof d.z0 === 'number' ? zoomToStep(d.z0) : null)
+            lastStepAt = now
+            lastStepIdx = d.step
+            scheduleLiveWarm(d.step, from, gap, placeholders, d.z0 ?? stepToZoom(d.step))
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
           // Idle precompute: one step per frame, nearest-first from the current step until the
@@ -2140,6 +2277,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)
               if (preRaf) cancelAnimationFrame(preRaf)
+              cancelLiveWarm()
               if (idleFullTimer) clearTimeout(idleFullTimer)
               layer?.remove()
               if (gapped) {
