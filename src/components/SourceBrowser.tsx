@@ -24,6 +24,10 @@ import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
 import { pdfZoomFactor } from './zoomGesture'
+import {
+  extensionState, loadSource, openExtensionPopup, windowPort,
+  type ExtensionState, type Via,
+} from '../reader/pageSource'
 import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
 import {
@@ -238,6 +242,7 @@ const ERRORS: Record<string, string> = {
   'not html': 'That link isn’t a web page (it may be a PDF — attach it to the source instead).',
   'too large': 'That page is unusually large and wasn’t fetched.',
   'no readable text': 'No article text could be found on that page.',
+  'fetch failed': 'That page couldn’t be reached.',
   rate: 'Too many pages fetched just now — try again in a moment.',
 }
 
@@ -645,19 +650,69 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     }
   }, [orientation, dockSide, width, height])
 
+  // ── WHO FETCHES THIS PAGE ────────────────────────────────────────────────────────────────────
+  // Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" — yes, through
+  // the extension this repo already ships (reader/pageSource.ts). MEASURED, from the DEPLOYED
+  // function and not from a laptop: duckduckgo, lite-ddg and mojeek answer "fetch failed", searx.be
+  // answers "Verifying your browser…", priv.au a captcha, marginalia 5 blocks and zero links, while
+  // wikipedia and plato.stanford.edu are served normally. Search engines serve people, not data
+  // centres — so the fetch moves to the writer's own browser when there is one to move it to.
+  //
+  // ⚠ THE PANEL MUST SAY WHICH HAPPENED. `via` is rendered, never inferred: a privacy posture the
+  // writer cannot see is a privacy posture they do not have, and this reader has already shipped
+  // two controls that looked identical whether or not they did anything.
+  const [via, setVia] = useState<Via | null>(null)
+  const [extState, setExtState] = useState<ExtensionState>('absent')
+  // Bumped to re-run the load after the permission is granted, so the page in front of the writer
+  // comes back through their own connection rather than waiting for the next navigation.
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     let live = true
-    setDoc(null); setError(null)
-    fetch(`/api/reader?url=${encodeURIComponent(here)}`)
-      .then(async (r) => {
-        const j = await r.json().catch(() => ({ error: 'fetch failed' }))
+    setDoc(null); setError(null); setVia(null)
+    void (async () => {
+      // Asked ONCE per page load and memoised (reader/pageSource.ts) — otherwise this deadline
+      // would sit in front of every link the reader follows.
+      const st = await extensionState()
+      if (!live) return
+      setExtState(st)
+      try {
+        const { doc: d, via: v } = await loadSource(here, { port: st === 'ready' ? windowPort() : null })
         if (!live) return
-        if (!r.ok || j.error) { setError(ERRORS[j.error] ?? 'That page couldn’t be read here.'); return }
-        setDoc(j as ReaderDoc)
-      })
-      .catch(() => { if (live) setError('That page couldn’t be reached.') })
+        setDoc(d); setVia(v)
+      } catch (e) {
+        if (!live) return
+        setError(ERRORS[(e as Error)?.message] ?? 'That page couldn’t be read here.')
+      }
+    })()
     return () => { live = false }
-  }, [here])
+  }, [here, reloadKey])
+
+  // ⚠ THE GRANT HAPPENS SOMEWHERE WE CANNOT WATCH. `permissions.request()` is only honoured inside
+  // an extension page, so the writer turns page fetching on in the popup and this page is told
+  // nothing at all. Re-asking when the window regains focus is the reconcile: coming back from the
+  // popup is exactly that event. Only while `blocked`, so a settled reader re-asks nothing.
+  useEffect(() => {
+    if (extState !== 'blocked') return
+    const recheck = () => {
+      void extensionState(true).then((st) => {
+        setExtState(st)
+        if (st === 'ready') setReloadKey((k) => k + 1)   // re-read THIS page through the extension
+      })
+    }
+    window.addEventListener('focus', recheck)
+    return () => window.removeEventListener('focus', recheck)
+  }, [extState])
+
+  // The offer, at the moment it would help. `openExtensionPopup` returns false when the browser
+  // refuses — a real outcome, not a bug — so the instruction is shown either way and the button is
+  // only ever a shortcut to it.
+  const [grantHint, setGrantHint] = useState(false)
+  const askForFetchPermission = () => {
+    setGrantHint(true)
+    const port = windowPort()
+    if (port) void openExtensionPopup(port)
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -1110,11 +1165,27 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             {error && !framed && isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: '#57534e' }}>
                 <div style={{ color: INK, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
+                {/* ⚠ THE REMEDY IS NAMED, AND IT DEPENDS ON WHAT THE WRITER ALREADY HAS. The
+                    extension fetches from their own address, which is the whole reason a search
+                    engine refuses us and serves them — so where it is installed-but-unpermitted the
+                    fix is one click and this says so; where it is absent, saying "install the
+                    extension" is the honest answer rather than a shrug toward a browser tab. */}
                 <div style={{ maxWidth: 470, lineHeight: 1.55 }}>
                   They serve people, not data centres, so the request is refused before any results
                   exist. Your own browser isn’t blocked — opening the search in a tab always works.
+                  {extState === 'blocked'
+                    ? ' The Inkwave extension can fetch it from your own connection instead, but hasn’t been given permission yet.'
+                    : extState === 'absent'
+                      ? ' The Inkwave browser extension fetches sources from your own connection, which makes search work here.'
+                      : ''}
                 </div>
                 <div className="flex gap-2 flex-wrap justify-center">
+                  {extState === 'blocked' && (
+                    <button type="button" onClick={askForFetchPermission}
+                      className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                      Use my own connection
+                    </button>
+                  )}
                   <button type="button" onClick={() => go(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(queryOf(here))}`)}
                     className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
                     Search Wikipedia here
@@ -1339,6 +1410,25 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           </div>
         )}
 
+        {/* ⚠ THE GRANT LIVES IN THE EXTENSION, AND SAYING SO IS THE FEATURE. `permissions.request()`
+            is honoured only inside an extension page, so no button here can open the browser's own
+            dialog — the most this can do is ask the extension to raise its popup, which recent
+            Chrome allows and older browsers refuse. So the INSTRUCTION is always printed and the
+            button is only a shortcut to it. A control whose whole behaviour depends on an API that
+            may quietly decline is the dead button this reader has already shipped twice. */}
+        {!framed && grantHint && extState === 'blocked' && (
+          <div className="flex items-start gap-2 px-3 py-1.5 border-t"
+            style={{ fontSize: '11px', background: `${INK}0a`, borderColor: `${INK}22`, color: '#57534e' }}>
+            <span style={{ flex: 1, lineHeight: 1.5 }}>
+              Open the Inkwave extension (its icon in your browser’s toolbar) and turn on
+              <strong> Fetch pages for the reader</strong>. Sources will then load from your own
+              connection instead of Inkwave’s server — which is also what makes web search work here.
+            </span>
+            <button type="button" onClick={() => setGrantHint(false)} title="Hide this"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#a8a29e', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>×</button>
+          </div>
+        )}
+
         {/* ── THE MARKUP BAR (Peter, 2026-08-28: "a tab at the bottom with roughly the same markup
             tools as for the pdfs … reproduce the same ecosystem") ────────────────────────────────
             Same three tools, same gesture (click arms, HOLD opens the colours), same palette, so a
@@ -1451,14 +1541,47 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', lineHeight: 1 }}>+</button>
             </div>
 
+            {/* ⚠ WHOSE CONNECTION FETCHED THIS. Always visible in reader mode, because the whole
+                difference between the two paths is invisible otherwise — the article looks the
+                same either way. When the extension is installed but has not been granted
+                permission this is also the BUTTON that offers to fix it, which is the moment the
+                offer is worth anything (the popup is where the grant must actually happen). */}
+            {/* One right-aligned group: two `ml-auto` siblings would leave the second with no free
+                space to claim, so the pill and the orphan note would end up jammed together in the
+                wrong order. */}
+            <span className="ml-auto" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {located.orphaned.length > 0 && (
               // A mark whose text the publisher has since changed. Said out loud rather than
               // silently dropped OR silently re-placed over words the reader never marked.
-              <span className="ml-auto text-stone-400" style={{ fontSize: '11px' }}
+              <span className="text-stone-400" style={{ fontSize: '11px' }}
                 title="These marks covered text that is no longer on the page — the publisher has edited it.">
                 {located.orphaned.length} mark{located.orphaned.length === 1 ? '' : 's'} lost their place
               </span>
             )}
+            {doc && via && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {via === 'extension' ? (
+                  <span title="Fetched by the Inkwave extension, from your own connection and address. Inkwave’s server was not involved and never saw this address."
+                    style={{ fontSize: '11px', color: 'var(--iw-verified, #15803d)', whiteSpace: 'nowrap' }}>
+                    ⌂ your connection
+                  </span>
+                ) : extState === 'blocked' ? (
+                  <button type="button" onClick={askForFetchPermission}
+                    title="The Inkwave extension is installed but hasn’t been allowed to fetch pages. Turning that on loads sources from your own connection instead."
+                    style={{ fontSize: '11px', color: INK, background: 'transparent', border: `1px solid ${INK}44`,
+                      borderRadius: 999, padding: '1px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    ☁ Inkwave’s server — use my connection
+                  </button>
+                ) : (
+                  <span title="Fetched by Inkwave’s server, which sees the address for the moment it takes to fetch it and keeps no log or copy. Installing the Inkwave extension moves this to your own connection."
+                    style={{ fontSize: '11px', color: 'var(--iw-pill-fg, #78716c)', whiteSpace: 'nowrap' }}>
+                    ☁ Inkwave’s server
+                  </span>
+                )}
+              </span>
+            )}
+
+            </span>
           </div>
         )}
 
@@ -1504,9 +1627,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             and the ☰/mode change brings it back for a source where it matters. */}
         {showNotice && (
           <div className="px-3 py-1.5 border-t border-stone-200 text-stone-400 flex items-start gap-2" style={{ fontSize: '11px' }}>
+            {/* ⚠ THIS SENTENCE IS A CLAIM ABOUT WHERE THE REQUEST WENT, so it is a function of
+                `via` and never a constant. Through the extension our server is not in the path at
+                all — strictly stronger than the "sees it for an instant, logs nothing" posture
+                api/_reader-core.mjs documents, and the copy says the stronger thing only when the
+                stronger thing is what happened. Nothing here claims the fetch carried the writer's
+                SESSION: an extension-worker request is cross-site by initiator, so a site's
+                SameSite cookies are not sent, and the address is the part that is simply true. */}
             <span style={{ flex: 1 }}>{framed
               ? 'Live page — your browser keeps it separate from Inkwave, so text selected here can’t be picked up.'
-              : 'Article text, fetched for you. Inkwave keeps no log and no copy of what you read — but it does see the address for the moment it takes to fetch.'}</span>
+              : via === 'extension'
+                ? 'Article text, fetched by the Inkwave extension from your own connection. Inkwave’s server was not involved and never saw this address.'
+                : 'Article text, fetched for you. Inkwave keeps no log and no copy of what you read — but it does see the address for the moment it takes to fetch.'}</span>
             <button type="button" onClick={dismissNotice} title="Hide this note" aria-label="Hide this note"
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#a8a29e', fontSize: '14px', lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
           </div>

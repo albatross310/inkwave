@@ -29,10 +29,13 @@ export const READER_PING = 'reader/ping'
 export const READER_PONG = 'reader/pong'
 export const READER_FETCH = 'reader/fetch'
 export const READER_FETCHED = 'reader/fetched'
+export const READER_GRANT = 'reader/grant'
+export const READER_GRANTED = 'reader/granted'
 
 // content script ↔ background worker
 export const BG_READER_STATUS = 'inkwave:readerStatus'
 export const BG_FETCH_PAGE = 'inkwave:fetchPage'
+export const BG_OPEN_POPUP = 'inkwave:openReaderPopup'
 
 /** What the background worker knows about its own ability to fetch an arbitrary page. */
 export interface ReaderStatus {
@@ -78,4 +81,18 @@ export function isReaderFetched(d: unknown, uuid: string): d is FetchPageResult 
   if (!isRecord(d) || d.source !== EXT_SOURCE || d.type !== READER_FETCHED || d.uuid !== uuid) return false
   if (d.ok === true) return typeof d.finalUrl === 'string' && typeof d.html === 'string'
   return d.ok === false && typeof d.error === 'string'
+}
+
+/**
+ * ⚠ THE GRANT CANNOT HAPPEN IN THE APP, AND NO AMOUNT OF UI HERE CHANGES THAT.
+ * `permissions.request()` is honoured only from a user gesture inside an EXTENSION PAGE — not from
+ * a web page, not from a content script (which has no `permissions` API at all), not from the
+ * background worker. So the most the reader can do at the moment the permission would help is ask
+ * the extension to open its own popup, where the real button lives. `ok:false` is an ordinary
+ * answer — `action.openPopup()` is recent and may refuse — and the UI must therefore carry the
+ * manual instruction whether or not this succeeds, rather than depending on it.
+ */
+export function isReaderGranted(d: unknown, uuid: string): d is { ok: boolean } {
+  return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_GRANTED
+    && d.uuid === uuid && typeof d.ok === 'boolean'
 }

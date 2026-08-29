@@ -5,8 +5,8 @@
 
 import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
-  BG_FETCH_PAGE, BG_READER_STATUS, EXT_SOURCE, READER_FETCH, READER_FETCHED, READER_PING,
-  READER_PONG, type FetchPageResult, type ReaderStatus,
+  BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, EXT_SOURCE, READER_FETCH, READER_FETCHED,
+  READER_GRANT, READER_GRANTED, READER_PING, READER_PONG, type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
@@ -71,6 +71,19 @@ export default defineContentScript({
           .catch(() => ({ ok: false, error: 'extension unavailable' })) as FetchPageResult
         window.postMessage(
           { source: EXT_SOURCE, type: READER_FETCHED, uuid: d.uuid, ...r },
+          window.location.origin,
+        )
+        return
+      }
+
+      // The reader offering the permission AT THE MOMENT IT WOULD HELP. All this can do is ask the
+      // background worker to open the popup — the actual grant must happen inside an extension
+      // page, and no message can move that boundary.
+      if (d.type === READER_GRANT && d.uuid) {
+        const r = await browser.runtime.sendMessage({ type: BG_OPEN_POPUP })
+          .catch(() => ({ ok: false })) as { ok?: boolean } | null
+        window.postMessage(
+          { source: EXT_SOURCE, type: READER_GRANTED, uuid: d.uuid, ok: !!r?.ok },
           window.location.origin,
         )
         return

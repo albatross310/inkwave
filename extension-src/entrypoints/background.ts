@@ -11,7 +11,7 @@ import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
-  BG_FETCH_PAGE, BG_READER_STATUS, NEEDS_PERMISSION,
+  BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, NEEDS_PERMISSION,
   type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
 import { assertFetchable, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
@@ -159,6 +159,15 @@ export default defineBackground(() => {
       return true
     }
 
+    // The reader asking, from the page, for the popup that holds the permission button. It may
+    // legitimately fail — `action.openPopup()` is recent, is absent on MV2 Firefox under this name,
+    // and can refuse when the window is not focused — so the answer is a boolean the reader is
+    // built to handle, never a promise it waits on.
+    if (m.type === BG_OPEN_POPUP) {
+      openReaderPopup().then(ok => sendResponse({ ok })).catch(() => sendResponse({ ok: false }))
+      return true
+    }
+
     if (m.type === BG_FETCH_PAGE && typeof m.url === 'string') {
       fetchPageForReader(m.url)
         .then(sendResponse)
@@ -195,6 +204,19 @@ async function canFetchPages(): Promise<boolean> {
 
 async function readerStatus(): Promise<ReaderStatus> {
   return { canFetch: await canFetchPages() }
+}
+
+/** Open the popup so the writer can grant page fetching without hunting for the toolbar icon.
+ *  Chrome 127+ has `action.openPopup`; Firefox MV2 spells it `browserAction`; either may refuse.
+ *  Returning false is a normal outcome and the reader shows the manual instruction regardless. */
+async function openReaderPopup(): Promise<boolean> {
+  const api = (browser as unknown as {
+    action?: { openPopup?: () => Promise<void> }
+    browserAction?: { openPopup?: () => Promise<void> }
+  })
+  const open = api.action?.openPopup ?? api.browserAction?.openPopup
+  if (!open) return false
+  try { await open.call(api.action ?? api.browserAction); return true } catch { return false }
 }
 
 const READER_FETCH_TIMEOUT_MS = 20_000

@@ -18,15 +18,33 @@ several other things. Search engines and many publishers refuse Vercel's datacen
 serving people normally (MEASURED against the deployed endpoint: duckduckgo/mojeek/lite-ddg blocked,
 searx "verifying your browser", priv.au captcha, marginalia 5 blocks & 0 links, wikipedia fine).
 
-- [ ] **A1** Extension background `fetchPage(url)` handler — returns HTML + final URL, using the
-      reader's own address and session. Broaden `host_permissions`.
-- [ ] **A2** Client fetch layer: try the extension, fall back to `/api/reader`. `src/reader/
-      extract.mjs` is already split out and browser-safe, so the SAME extractor runs either way.
-- [ ] **A3** Search works again once A1/A2 land. Re-verify **from production**, not from a laptop —
-      that mistake is why this item exists.
+- [x] **A1** Extension background `fetchPage(url)` handler — returns `{finalUrl, html}` over the
+      EXISTING content-script bridge (`reader/ping`+`reader/fetch`, relayed to `inkwave:fetchPage`).
+      `<all_urls>` is an **optional** host permission granted from the popup, so the install prompt
+      is unchanged; the rules that can be tested without a network live in `src/reader/fetchRules.ts`.
+      ⚠ STATED, NOT PROVED: nothing here builds or loads the extension — `extension-src` is a
+      separate pnpm workspace with no `node_modules`, outside `tsc -b` and outside vitest's
+      `src/**` include, so the background worker is written-and-reviewed, never executed.
+- [x] **A2** `src/reader/pageSource.ts` — extension first, `/api/reader` second, and the SAME
+      `extract.mjs` runs either way (a test asserts the extension path's blocks are byte-identical
+      to calling the extractor directly). The fallback is for a FAILED FETCH only: a page the
+      extension fetched and found no prose in does not get sent to our server for a second opinion.
+- [x] **A3** Search works when the extension is the fetcher — `pnpm prove:readerext`, 12/12, two
+      cells: permitted ⇒ results render from the extension's bytes and `/api/reader` is never
+      requested (observed at the network); not-permitted ⇒ the identical search goes to the server
+      and says so. ⚠ THE REMAINING LINK IS UNPROVEN AND ONLY PETER CAN CLOSE IT: the extension's own
+      request to DuckDuckGo **from his address** is not exercised by any test here. One real search
+      with the extension loaded settles it.
 - [ ] **A4** Sites that refuse framing become READABLE through the extension (JSTOR, Springer,
-      Wiley), using the writer's own session. This is the bigger prize than search.
-- [ ] **A5** Say plainly, in the UI, when the extension is doing the fetching and when it is not.
+      Wiley), using the writer's own session. This is the bigger prize than search. NOT STARTED.
+      NB the honesty limit found in A1: an extension-worker fetch is cross-site by initiator, so a
+      site's SameSite=Lax/Strict cookies are NOT sent — "your own session" is partly true and the
+      shipped copy therefore claims only the ADDRESS.
+- [x] **A5** The reader says which connection fetched the page — a pill in the markup bar on every
+      article ("⌂ your connection" / "☁ Inkwave's server"), the privacy notice varies with it, and
+      where the extension is installed-but-unpermitted the pill becomes the button that offers the
+      grant. Kept by `SourceBrowser.fetch.test.tsx` (mutation-proved: force the server path ⇒ 2 die;
+      make the notice constant ⇒ 1 dies).
 
 ## Lane B — PDF reader view
 

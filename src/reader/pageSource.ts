@@ -36,8 +36,8 @@
 
 import type { ReaderBlock, ReaderDoc } from './types'
 import {
-  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_PING,
-  isReaderFetched, isReaderPong, type FetchPageResult,
+  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_GRANT, READER_PING,
+  isReaderFetched, isReaderGranted, isReaderPong, type FetchPageResult,
 } from './extensionProtocol'
 // The SHIPPED extractor — the same module api/_reader-core.mjs imports. Untyped Node-free ESM, so
 // the shape is asserted at the boundary here and nowhere else.
@@ -92,43 +92,87 @@ function newId(): string {
 }
 
 /**
- * Ask the extension whether it is there and allowed to fetch.
+ * One request, one reply, correlated and deadlined — the shape all three exchanges below share.
  *
- * ⚠ ASK, DO NOT WAIT TO BE TOLD. A "the extension is here" announcement is a ONE-SHOT ASYNC SIGNAL,
- * and this file's own project has the scar tissue: a listener attached after the announcement waits
- * for ever, silently, and a feature that is merely disabled looks exactly like a feature nobody
- * needed. So the page asks, correlated by uuid, and a silence within the deadline is an answer
- * ('absent') rather than a hang.
+ * ⚠ ASK, DO NOT WAIT TO BE TOLD. An "the extension is here" announcement is a ONE-SHOT ASYNC SIGNAL
+ * and this repo has the scar tissue: a listener attached after it fired waits for ever, silently,
+ * and a feature that is merely disabled is indistinguishable from a feature nobody built. So the
+ * page asks; `null` back means the deadline passed, which is an ANSWER and not a hang.
+ *
+ * The uuid is not decoration either: without it, a late reply to an EARLIER question satisfies a
+ * later one, and the reader believes an extension that has since gone away.
  */
-export function probeExtension(port: Port | null, timeoutMs = 700): Promise<ExtensionState> {
-  if (!port) return Promise.resolve('absent')
+function ask<T>(
+  port: Port,
+  request: Record<string, unknown>,
+  match: (d: unknown, uuid: string) => T | null,
+  timeoutMs: number,
+): Promise<T | null> {
   const uuid = newId()
-  return new Promise<ExtensionState>((resolve) => {
+  return new Promise<T | null>((resolve) => {
     let done = false
-    const finish = (s: ExtensionState) => { if (!done) { done = true; off(); clearTimeout(t); resolve(s) } }
-    const off = port.on((d) => { if (isReaderPong(d, uuid)) finish(d.canFetch ? 'ready' : 'blocked') })
-    const t = setTimeout(() => finish('absent'), timeoutMs)
-    port.post({ source: APP_SOURCE, type: READER_PING, uuid })
+    const finish = (v: T | null) => { if (!done) { done = true; off(); clearTimeout(t); resolve(v) } }
+    // Subscribe BEFORE posting: the content script may answer synchronously.
+    const off = port.on((d) => { const hit = match(d, uuid); if (hit !== null) finish(hit) })
+    const t = setTimeout(() => finish(null), timeoutMs)
+    port.post({ ...request, source: APP_SOURCE, uuid })
   })
+}
+
+/** Ask the extension whether it is there and allowed to fetch. */
+export async function probeExtension(port: Port | null, timeoutMs = 600): Promise<ExtensionState> {
+  if (!port) return 'absent'
+  const r = await ask<ExtensionState>(port, { type: READER_PING },
+    (d, uuid) => (isReaderPong(d, uuid) ? (d.canFetch ? 'ready' : 'blocked') : null), timeoutMs)
+  return r ?? 'absent'
 }
 
 /** One page, fetched by the extension. Rejects with the extension's own error CODE as the message
  *  (`needs-permission`, `not html`, `too large`, an http status…) so the caller can distinguish the
  *  one that is fixable from the ones that are not. */
-export function fetchViaExtension(port: Port, url: string, timeoutMs = 25_000): Promise<{ finalUrl: string; html: string }> {
-  const uuid = newId()
-  return new Promise((resolve, reject) => {
-    let done = false
-    const finish = (fn: () => void) => { if (!done) { done = true; off(); clearTimeout(t); fn() } }
-    const off = port.on((d) => {
-      if (!isReaderFetched(d, uuid)) return
-      const r = d as FetchPageResult
-      finish(() => (r.ok ? resolve({ finalUrl: r.finalUrl, html: r.html }) : reject(new Error(r.error))))
-    })
-    const t = setTimeout(() => finish(() => reject(new Error('extension timed out'))), timeoutMs)
-    port.post({ source: APP_SOURCE, type: READER_FETCH, uuid, url })
-  })
+export async function fetchViaExtension(port: Port, url: string, timeoutMs = 25_000): Promise<{ finalUrl: string; html: string }> {
+  const r = await ask<FetchPageResult>(port, { type: READER_FETCH, url },
+    (d, uuid) => (isReaderFetched(d, uuid) ? (d as FetchPageResult) : null), timeoutMs)
+  if (!r) throw new Error('extension timed out')
+  if (!r.ok) throw new Error(r.error)
+  return { finalUrl: r.finalUrl, html: r.html }
 }
+
+/**
+ * Ask the extension to open its own popup, where the permission button lives.
+ *
+ * Returns false when it could not — including when it did not answer at all — and the caller MUST
+ * still show the writer how to do it by hand. `action.openPopup()` is a recent API and may simply
+ * refuse; a button whose only fallback is silence is the dead button this reader has already been
+ * bitten by twice.
+ */
+export async function openExtensionPopup(port: Port, timeoutMs = 3000): Promise<boolean> {
+  const r = await ask<{ ok: boolean }>(port, { type: READER_GRANT },
+    (d, uuid) => (isReaderGranted(d, uuid) ? { ok: d.ok } : null), timeoutMs)
+  return !!r?.ok
+}
+
+// ── THE SESSION'S ANSWER, ASKED ONCE ────────────────────────────────────────────────────────────
+// The probe costs a round trip, and re-running it per navigation would put its deadline in front of
+// every link the reader follows. So it is memoised for the page's lifetime — with two rules that
+// are easy to get wrong and expensive to get wrong:
+//   • NEVER CACHE THE SSR ANSWER. There is no window during prerender, so an eager module-scope
+//     probe would bake 'absent' into the build's first paint and the extension would be invisible
+//     until a reload. `typeof window === 'undefined'` returns without writing the memo.
+//   • `refresh` EXISTS BECAUSE THE ANSWER CHANGES. Granting the permission happens in the
+//     extension's popup, which cannot tell the page anything; the reader re-asks when the window
+//     regains focus, which is exactly when the writer has come back from doing it.
+let memo: Promise<ExtensionState> | null = null
+
+export function extensionState(refresh = false): Promise<ExtensionState> {
+  if (typeof window === 'undefined') return Promise.resolve('absent')
+  if (!memo || refresh) memo = probeExtension(windowPort())
+  return memo
+}
+
+/** Test-only: forget the memoised answer. Exported rather than reached into, so the memo can stay
+ *  module-private and a test cannot accidentally depend on its shape. */
+export function _resetExtensionMemo(): void { memo = null }
 
 /** The server half, unchanged in behaviour from what SourceBrowser used to do inline: a short error
  *  CODE comes back and is re-thrown as-is, because the component maps codes to sentences. */
