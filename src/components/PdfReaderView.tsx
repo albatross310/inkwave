@@ -285,13 +285,13 @@ export function PdfReaderView({
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
   const lost = placement.lost
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
+    <div className="iw-pdf-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--iw-reader-paper, #fbfaf7)' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
           view exists, so they are in it rather than buried in the viewer's already-full toolbar. */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: '#faf8fc', fontSize: '0.78rem', color: INK }}>
+        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: 'var(--iw-reader-bar, #faf8fc)', fontSize: '0.78rem', color: INK }}>
         <select value={font} onChange={e => setFont(e.target.value)} title="Reading font"
-          style={{ height: 26, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
+          style={{ height: 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
           {FONTS.map(f => <option key={f.label} value={f.css}>{f.label}</option>)}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Text size">
@@ -315,7 +315,7 @@ export function PdfReaderView({
             {lost.length} mark{lost.length === 1 ? '' : 's'} not placed here
           </button>
         )}
-        {!done && <span style={{ color: '#8d7ba3' }}>reading… {pages.length}</span>}
+        {!done && <span style={{ color: 'var(--iw-reader-muted, #6b645f)' }}>reading… {pages.length}</span>}
       </div>
 
       {showOrphans && lost.length > 0 && (
@@ -337,16 +337,16 @@ export function PdfReaderView({
       )}
 
       <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto' }}>
-        <div ref={rootRef} onMouseUp={onMouseUpOuter}
+        <div ref={rootRef} onMouseUp={onMouseUpOuter} className="iw-pdf-reader-page"
           style={{ maxWidth: Math.min(760, 46 * size), margin: '0 auto', padding: '26px 22px 90px',
-            fontFamily: font, fontSize: size, lineHeight: lead, color: '#241f2b',
+            fontFamily: font, fontSize: size, lineHeight: lead, color: 'var(--iw-reader-ink, #241f2b)',
             cursor: tool === 'text' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : undefined }}>
-          {!pages.length && <p style={{ color: '#9ca3af' }}>Reading the text…</p>}
+          {!pages.length && <p style={{ color: 'var(--iw-reader-muted, #6b645f)' }}>Reading the text…</p>}
           {pages.map(p => (
             <section key={p.n} data-page={p.n}>
               <div style={{ margin: '26px 0 12px', display: 'flex', alignItems: 'center', gap: 10,
-                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#a9a0b8' }}>
-                <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
+                fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--iw-reader-muted, #6b645f)' }}>
+                <span style={{ flex: 1, height: 1, background: 'var(--iw-reader-edge, #e4dfec)' }} />
                 page {p.n + pageOffset}
                 <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
               </div>
@@ -367,7 +367,7 @@ export function PdfReaderView({
 
         {pending && (
           <div style={{ position: 'absolute', left: Math.max(8, pending.x - 100), top: pending.y + 8, zIndex: 20,
-            background: '#fff', border: `1px solid ${INK}44`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+            background: 'var(--iw-reader-ctl, #fff)', border: `1px solid ${INK}44`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
             padding: '6px 8px', display: 'flex', gap: 6 }}>
             {['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6'].map(c => (
               <button key={c} type="button" title="Highlight" onMouseDown={ev => ev.preventDefault()}
