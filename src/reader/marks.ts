@@ -93,6 +93,38 @@ export function locateAll(marks: ReaderMark[], blockTexts: string[]): { placed: 
   return { placed, orphaned }
 }
 
+/**
+ * How much text a point mark remembers as its anchor. Long enough that the phrase is very unlikely
+ * to repeat inside one block — the only thing that could re-place a mark on the wrong words — and
+ * short enough that an ordinary edit nearby does not destroy it.
+ */
+export const ANCHOR_LEN = 48
+
+/**
+ * The anchor phrase for an insertion made at `offset` inside a run of the article's own text.
+ *
+ * ⚠ A CARET IS A NUMBER AND A NUMBER IS NOT AN ANCHOR. This file refuses to place a highlight by
+ * remembered offset because the publisher can rewrite the page between visits; a caret is that same
+ * problem with nothing at all to hold on to. So an insertion remembers the WORDS it was made
+ * against — behind the caret by preference, because that is the text the reader had just finished
+ * reading when they decided to write — and is re-found by them, or reported lost like any other.
+ *
+ * Returns null when there is nothing to anchor to (a caret in whitespace at a block edge). That is
+ * a REFUSAL, not a failure: the caller declines to place the mark rather than inventing a position
+ * for it, which is the same choice `locateMark` makes at the other end of the mark's life.
+ */
+export function anchorSlice(nodeText: string, offset: number): { phrase: string; before: boolean } | null {
+  const at = Math.max(0, Math.min(nodeText.length, offset))
+  // `before: false` ⇒ render at the anchor's END, which is exactly the caret. Preferred.
+  const back = nodeText.slice(Math.max(0, at - ANCHOR_LEN), at)
+  if (back.trim().length >= 3) return { phrase: back, before: false }
+  // At a block's very start there is nothing behind the caret, so anchor FORWARD instead and render
+  // at that phrase's start — the same point, described from the other side.
+  const fwd = nodeText.slice(at, at + ANCHOR_LEN)
+  if (fwd.trim().length >= 3) return { phrase: fwd, before: true }
+  return null
+}
+
 /** Where a POINT mark renders inside its block: the far edge of its anchor, or the near one when
  *  the insertion was made at a block's very start. Clamped, so a stale offset can only ever land
  *  inside the block it was found in. */
@@ -120,10 +152,10 @@ export function markRuns(
     if (m.end > 0 && m.end < len) edges.add(m.end)
   }
   for (const c of cuts) if (c > 0 && c < len) edges.add(c)
-  const cuts = [...edges].sort((a, b) => a - b)
+  const bounds = [...edges].sort((a, b) => a - b)
   const out: Array<{ from: number; to: number; marks: Located[] }> = []
-  for (let i = 0; i < cuts.length - 1; i++) {
-    const from = cuts[i], to = cuts[i + 1]
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const from = bounds[i], to = bounds[i + 1]
     if (to <= from) continue
     out.push({ from, to, marks: marks.filter((m) => m.start <= from && m.end >= to) })
   }

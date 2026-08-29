@@ -15,14 +15,14 @@
 // them the panel always has something to offer, and it SAYS which mode it is in rather than leaving
 // the reader to guess why selection does or doesn't work.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
 import { splitMath, hasMath } from '../reader/readerMath'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
+import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
 import { pdfZoomFactor } from './zoomGesture'
 import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
@@ -85,10 +85,6 @@ export function readerZoomStep(z: number, dir: 1 | -1): number {
   return clampReaderZoom(z * (dir === 1 ? 1.15 : 1 / 1.15))
 }
 
-// How much text a point mark remembers as its anchor. Long enough that a phrase is very unlikely to
-// repeat inside one block (which is the only thing that could re-place it on the wrong words), short
-// enough that an ordinary edit nearby does not destroy it.
-const ANCHOR_LEN = 48
 // A textbox anchors to the OPENING of the paragraph it was dropped on — the one part of a block
 // that a reader would recognise, and the part an author is least likely to rewrite.
 const BOX_ANCHOR_LEN = 60
@@ -245,30 +241,6 @@ const ERRORS: Record<string, string> = {
   rate: 'Too many pages fetched just now — try again in a moment.',
 }
 
-/**
- * The anchor phrase for an insertion made at `offset` inside a run of text.
- *
- * ⚠ A CARET IS A NUMBER AND A NUMBER IS NOT AN ANCHOR. reader/marks.ts refuses to place a highlight
- * by remembered offset because the publisher can rewrite the page between visits; a caret is the
- * same problem with nothing to hold on to at all. So an insertion remembers the WORDS it was made
- * against — behind the caret by preference, because that is the text the reader had just finished
- * reading when they decided to write — and is re-found by them, or reported lost. Nothing here
- * invents a second anchoring scheme: the phrase becomes an ordinary `ReaderMark.text`.
- *
- * Returns null when there is nothing to anchor to (a caret in whitespace at a block edge), which is
- * a refusal, not a failure — the caller declines to place the mark rather than guessing a position.
- */
-export function anchorSlice(nodeText: string, offset: number): { phrase: string; before: boolean } | null {
-  const at = Math.max(0, Math.min(nodeText.length, offset))
-  const back = nodeText.slice(Math.max(0, at - ANCHOR_LEN), at)
-  // `before: false` ⇒ render at the anchor's END, which is the caret. Preferred.
-  if (back.trim().length >= 3) return { phrase: back, before: false }
-  // At a block's very start there is nothing behind it, so anchor FORWARD and render at the start.
-  const fwd = nodeText.slice(at, at + ANCHOR_LEN)
-  if (fwd.trim().length >= 3) return { phrase: fwd, before: true }
-  return null
-}
-
 /** Paint the mark runs over a block's text. Splitting happens on PLAIN-TEXT offsets, so the block's
  *  own runs (links, emphasis) are walked in step and a mark that starts mid-link still paints. */
 function markedStyle(ms: Located[]): React.CSSProperties | undefined {
@@ -297,6 +269,53 @@ function InsertedText({ mark, onErase }: { mark: Located; onErase?: (id: string)
         borderBottom: `1px dotted ${mark.color}`, padding: '0 0.15em' }}>
       {mark.body}
     </span>
+  )
+}
+
+/**
+ * A textbox (D2) — the PDF's sticky note, hung under the paragraph it belongs to.
+ *
+ * ⚠ IT IS NOT PLACED AT COORDINATES, and the PDF's version is. That difference is forced: a PDF
+ * page is a fixed rectangle forever, while this article is re-fetched, re-wrapped at whatever width
+ * the panel happens to be, and re-typeset at whatever zoom the reader chose — so (x, y) would point
+ * at different words every visit. Anchoring to the paragraph is the same concession Lane B accepted
+ * for the reflowed PDF view, and it is the honest one: the box says which paragraph it is about,
+ * which is the only thing it could ever have truthfully claimed.
+ */
+function BoxCard({ mark, editing, onOpen, onChange, onDone, onDelete }: {
+  mark: Located
+  editing: boolean
+  onOpen: () => void
+  onChange: (v: string) => void
+  onDone: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div data-iw-box={mark.id}
+      style={{ margin: '0.4em 0 0.9em', padding: '6px 9px', borderRadius: 8, position: 'relative',
+        background: mark.color, color: '#2a2a2a', border: '1px solid rgba(0,0,0,0.16)',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.16)', fontFamily: 'system-ui, sans-serif',
+        fontSize: '0.8em', lineHeight: 1.4 }}>
+      {editing ? (
+        <textarea autoFocus value={mark.body ?? ''} rows={2}
+          onChange={(e) => onChange(e.target.value)}
+          // Esc commits too — the PDF's notes behave the same way, and a note you cannot get out of
+          // without finding the right pixel is a note you stop making.
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onDone() } }}
+          onBlur={onDone}
+          style={{ width: '100%', resize: 'vertical', background: 'transparent', border: 'none',
+            outline: 'none', font: 'inherit', color: 'inherit' }} />
+      ) : (
+        <div onClick={onOpen} style={{ whiteSpace: 'pre-wrap', cursor: 'pointer', minHeight: '1.2em' }}>
+          {mark.body || <span style={{ opacity: 0.55 }}>empty note — click to write</span>}
+        </div>
+      )}
+      <button type="button" title="Delete this note" aria-label="Delete this note"
+        onClick={(e) => { e.stopPropagation(); onDelete() }}
+        style={{ position: 'absolute', top: -7, right: -7, width: 16, height: 16, borderRadius: '50%',
+          border: '1px solid #7f1d1d', background: '#fff', color: '#7f1d1d', fontSize: '11px',
+          lineHeight: '13px', padding: 0, cursor: 'pointer' }}>×</button>
+    </div>
   )
 }
 
@@ -879,6 +898,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // be re-found on the next visit.
     const at = resolveAnchor(a.phrase, blockIndexOf(node))
     if (!at) { flash('That spot can’t be written on — try the prose beside it'); return }
+    // ⚠ NOT INSIDE A LIST. A list block's plain text joins its items with newlines, but each item
+    // renders its own runs — so an offset into the block does not address a position inside any one
+    // bullet, and the insertion would appear in the wrong one. Refusing is the only honest answer
+    // available until list items are blocks in their own right. (A TEXTBOX on a list is fine: it
+    // hangs under the whole list, which is exactly what it claims.)
+    if (doc?.blocks[at.block]?.kind === 'list') { flash('Coloured text can’t go inside a list yet — try a textbox'); return }
     setComposer({ x, y, block: at.block, start: at.start, text: a.phrase, before: a.before, value: '' })
   }
 
@@ -1057,7 +1082,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               scrollbar — so the site rendered inside a cream frame with a second scroller around
               it. The iframe fills the pane edge to edge and scrolls itself. */}
           <div ref={bodyRef} data-iw-selectable=""
-            className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'}`}
+            className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'iw-reader-page overflow-y-auto px-8 py-6'}`}
             // EVERY TOOL CHANGES THE CURSOR (Peter: "each button needs to change the cursor"). An
             // armed mode you cannot see is a mode you will forget you are in.
             // ⚠ THE ATTRIBUTE IS ONLY HALF OF IT — it was written here for months with NOTHING
@@ -1066,9 +1091,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             // `[data-iw-tool]`; if you add a tool, add its cursor in the same commit.
             data-iw-tool={tool ?? undefined}
             onClickCapture={framed ? undefined : onBodyClickCapture}
+            // ⚠ NO `color` HERE. The article's ink is `.iw-reader-page`'s (index.css), because it
+            // must survive night mode: an inline colour on this div was the whole bug — nothing
+            // overrode it, so night rendered near-black prose on the dolphin-grey panel. Headings and
+            // quotes below inherit for the same reason.
             style={framed ? undefined : {
               fontFamily: font, fontSize: `${Math.round(READER_BASE_PX * zoom)}px`,
-              lineHeight: leading, color: '#2c2a28',
+              lineHeight: leading,
             }}>
             {/* ⚠ A SEARCH THAT COULD NOT RUN SAYS WHY (2026-08-28). MEASURED from the deployed
                 function, not from a laptop: DuckDuckGo, Mojeek and the public SearX instances all
@@ -1156,12 +1185,31 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </div>
             )}
             {doc && !framed && doc.blocks.map((b, i) => {
+              // `data-iw-blk` is how a CLICK finds its block. The point tools resolve their anchor
+              // by TEXT like every other mark, but they consult the clicked block FIRST, so a
+              // phrase that also occurs elsewhere in the article cannot drag the mark across it.
+              const blk = { 'data-iw-blk': i }
+              const pts = pointsByBlock.get(i)
+              // Boxes hang under their block, outside it — a note inside a <p> would be inside the
+              // sentence for selection and for copying.
+              const boxes = (boxesByBlock.get(i) ?? []).map((bx) => (
+                <BoxCard key={bx.id} mark={bx} editing={editingBox === bx.id}
+                  onOpen={() => { if (toolRef.current === 'erase') eraseMark(bx.id); else setEditingBox(bx.id) }}
+                  onChange={(v) => setBoxBody(bx.id, v)}
+                  // An empty box left behind is litter, not a note (the PDF's own rule: "empty
+                  // textboxes/comments need to delete").
+                  onDone={() => { setEditingBox(null); if (!(bx.body ?? '').trim()) writeMarks(marks.filter((m) => m.id !== bx.id)) }}
+                  onDelete={() => { setEditingBox(null); writeMarks(marks.filter((m) => m.id !== bx.id)) }} />
+              ))
+              const wrap = (node: React.ReactNode) =>
+                boxes.length ? <Fragment key={i}>{node}{boxes}</Fragment> : node
+
               if (b.kind === 'heading') {
                 const Tag = (`h${Math.min(4, Math.max(1, b.level))}`) as 'h1'
-                return (
-                  <Tag key={i} id={`iw-rd-${b.id}`} className="group"
-                    style={{ fontSize: b.level <= 1 ? '1.5em' : b.level === 2 ? '1.22em' : '1.06em', fontWeight: 600, margin: '1.4em 0 0.5em', color: '#1c1a19' }}>
-                    <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} onEraseMark={eraseMark} />
+                return wrap(
+                  <Tag key={i} id={`iw-rd-${b.id}`} className="group" {...blk}
+                    style={{ fontSize: b.level <= 1 ? '1.5em' : b.level === 2 ? '1.22em' : '1.06em', fontWeight: 600, margin: '1.4em 0 0.5em', color: 'inherit' }}>
+                    <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
                     {/* No "cite §" on the article's own TITLE — citing a work's title inside a
                         citation of that work says nothing. Same rule as sectionFor. */}
                     {onCite && b.level > 1 && b.text.trim() !== (doc?.title ?? '').trim() && (
@@ -1171,27 +1219,80 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                         cite §
                       </button>
                     )}
-                  </Tag>
+                  </Tag>,
                 )
               }
               if (b.kind === 'list') {
                 const L = b.ordered ? 'ol' : 'ul'
-                return (
-                  <L key={i} style={{ margin: '0.7em 0 0.7em 1.4em', listStyle: b.ordered ? 'decimal' : 'disc' }}>
+                // ⚠ NO `points` HERE, DELIBERATELY. A list block's plain text is its items joined by
+                // newlines, but each <li> renders its own runs — so a plain-text offset does not
+                // address a position inside any one item, and an insertion would be drawn in the
+                // wrong bullet. openComposerAtCaret refuses on lists for the same reason; a mark
+                // that renders somewhere other than where it was made is worse than one refused.
+                return wrap(
+                  <L key={i} {...blk} style={{ margin: '0.7em 0 0.7em 1.4em', listStyle: b.ordered ? 'decimal' : 'disc' }}>
                     {b.items.map((it, j) => <li key={j} style={{ margin: '0.25em 0' }}><Runs onNavigate={go} runs={it} /></li>)}
-                  </L>
+                  </L>,
                 )
               }
               if (b.kind === 'quote') {
-                return <blockquote key={i} style={{ margin: '0.9em 0', paddingLeft: '1em', borderLeft: `3px solid ${INK}33`, color: '#4b4844' }}><Runs onNavigate={go} runs={b.runs} /></blockquote>
+                return wrap(
+                  <blockquote key={i} {...blk} style={{ margin: '0.9em 0', paddingLeft: '1em', borderLeft: `3px solid ${INK}33`, opacity: 0.85 }}>
+                    <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
+                  </blockquote>,
+                )
               }
               if (b.kind === 'code') {
-                return <pre key={i} style={{ margin: '0.9em 0', padding: '0.7em', background: '#00000008', borderRadius: 6, overflowX: 'auto', fontSize: '0.88em' }}><Runs onNavigate={go} runs={b.runs} /></pre>
+                return wrap(
+                  <pre key={i} {...blk} style={{ margin: '0.9em 0', padding: '0.7em', background: '#00000008', borderRadius: 6, overflowX: 'auto', fontSize: '0.88em' }}>
+                    <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
+                  </pre>,
+                )
               }
-              return <p key={i} style={{ margin: '0.85em 0' }}><Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} onEraseMark={eraseMark} /></p>
+              return wrap(
+                <p key={i} {...blk} style={{ margin: '0.85em 0' }}>
+                  <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
+                </p>,
+              )
             })}
           </div>
         </div>
+
+        {/* ── THE COLOURED-TEXT COMPOSER (D1) ──────────────────────────────────────────────────
+            Peter: "an input text which allows us to input coloured text at the cursor". It opens AT
+            the click, because that is where the words will land — a panel at the bottom of the
+            screen would make you look away from the place you were writing about. The ink swatches
+            live in it rather than under a hold-to-open palette: the colour IS the note here (it is
+            all you can see of it later), so choosing one must not be a hidden gesture. */}
+        {composer && !framed && (
+          <div className="iw-nightable fixed z-[402] flex items-center gap-1.5 bg-white rounded-full shadow-lg px-2 py-1.5"
+            style={{ left: composer.x, top: Math.max(8, composer.y - 46), transform: 'translateX(-50%)',
+              border: `1px solid ${INK}44`, fontSize: '12px' }}>
+            {TEXT_COLORS.map((c) => (
+              <button key={c} type="button" title="Ink"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setTextColor(c); textColorRef.current = c }}
+                style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer',
+                  flexShrink: 0, border: textColor === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.2)' }} />
+            ))}
+            <input autoFocus value={composer.value} placeholder="your words…"
+              onChange={(e) => setComposer((c) => (c ? { ...c, value: e.target.value } : c))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitComposer() }
+                // Esc must not reach the panel's own handler, which would close the whole reader —
+                // cancelling a half-typed note is not a request to shut the source.
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setComposer(null) }
+              }}
+              className="iw-nightable"
+              style={{ width: 190, height: 22, fontSize: '12px', padding: '0 8px', borderRadius: 999,
+                border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
+                color: textColor, fontWeight: 600, outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
+            <button type="button" title="Write it in" onMouseDown={(e) => e.preventDefault()} onClick={commitComposer}
+              className="rounded-full px-2 py-0.5" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
+            <button type="button" title="Cancel" onMouseDown={(e) => e.preventDefault()} onClick={() => setComposer(null)}
+              style={{ color: 'var(--iw-pill-fg, #78716c)', background: 'transparent', border: 'none', cursor: 'pointer' }}>✕</button>
+          </div>
+        )}
 
         {/* Floating actions over a selection — the whole reason the page is fetched rather than framed. */}
         {sel && !framed && (onCite || onQuote) && (
@@ -1248,9 +1349,16 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
         {!framed && (
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-stone-200 flex-wrap"
             style={{ fontSize: '12px', background: 'var(--iw-panel-bg, #faf8fc)' }}>
+            {/* TWO GESTURES, AND THE TOOL DECIDES WHICH. A highlight and a sticky note act on a
+                SELECTION; coloured text and a textbox are placed by a CLICK, because they add words
+                the page never had and so have nothing to select. Giving the placing tools the
+                selection gesture would mean "select some text to write something that isn't in it",
+                which is why they arm and wait instead. */}
             {([
-              { kind: 'highlight' as const, label: '▮', title: 'Highlight — select text, then click · hold for colours', palette: MARK_COLORS },
-              { kind: 'note' as const, label: '🗒', title: 'Sticky note — select text, then click · hold for colours', palette: NOTE_COLORS },
+              { kind: 'highlight' as const, mode: 'select' as const, label: '▮', title: 'Highlight — select text, then click · hold for colours', palette: MARK_COLORS, color: markColor, setColor: setMarkColor, glyph: '#c99a06' },
+              { kind: 'note' as const, mode: 'select' as const, label: '🗒', title: 'Sticky note — select text, then click · hold for colours', palette: NOTE_COLORS, color: markColor, setColor: setMarkColor, glyph: INK },
+              { kind: 'text' as const, mode: 'place' as const, label: 'T', title: 'Coloured text — click, then click where the words should go · hold for inks', palette: TEXT_COLORS, color: textColor, setColor: setTextColor, glyph: textColor },
+              { kind: 'box' as const, mode: 'place' as const, label: '▭', title: 'Textbox — click, then click a paragraph to hang a note under it · hold for colours', palette: BOX_COLORS, color: boxColor, setColor: setBoxColor, glyph: INK },
             ]).map((t) => (
               <div key={t.kind} style={{ position: 'relative' }}>
                 <button type="button" title={t.title}
@@ -1259,22 +1367,28 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   onPointerLeave={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
                   onClick={() => {
                     if (heldRef.current) { heldRef.current = false; return }
-                    // Text already selected → mark it now. Nothing selected → arm the tool.
+                    // Text already selected → mark it now. Nothing selected → arm the tool. A
+                    // PLACING tool always arms: there is nothing for it to do to a selection.
                     const sel2 = window.getSelection()
-                    if (sel2 && !sel2.isCollapsed) { markSelection(t.kind); return }
+                    if (t.mode === 'select' && sel2 && !sel2.isCollapsed) { markSelection(t.kind as MarkKind); return }
+                    setComposer(null)
                     setTool((cur) => (cur === t.kind ? null : t.kind))
                   }}
                   style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: '0.9rem',
+                    fontWeight: t.kind === 'text' ? 700 : undefined,
                     border: `1px solid ${tool === t.kind ? INK : '#d6cfe0'}`, background: tool === t.kind ? `${INK}14` : '#fff',
-                    color: t.kind === 'highlight' ? '#c99a06' : INK }}>{t.label}</button>
+                    color: t.glyph }}>{t.label}</button>
                 {paletteOpen === t.kind && (
                   <>
                     <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onMouseDown={() => setPaletteOpen(null)} />
                     <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
                       {t.palette.map((c) => (
                         <button key={c} type="button" onMouseDown={(ev) => ev.preventDefault()}
-                          onClick={() => { setMarkColor(c); setPaletteOpen(null) }}
-                          style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: markColor === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                          // EACH TOOL REMEMBERS ITS OWN COLOUR. One shared "current colour" would
+                          // mean picking an ink for the T tool silently recoloured the highlighter,
+                          // and the two palettes do not even overlap (washes vs inks).
+                          onClick={() => { t.setColor(c); setPaletteOpen(null) }}
+                          style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: t.color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
                       ))}
                     </div>
                   </>
@@ -1315,6 +1429,27 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               <option value="1.9">Airy</option>
               <option value="2.3">Double</option>
             </select>
+
+            {/* ── ZOOM (D3 — Peter: "and all the same zoom settings etc") ────────────────────────
+                The PDF's gesture and the PDF's curve (zoomGesture.ts), applied to TYPE rather than
+                to a raster: the column reflows to the panel at every step, so this reader never
+                grows the second scrollbar the PDF has to. ⌘/Ctrl+wheel over the article does the
+                same thing; the percentage is a button because a number you cannot get back to 100%
+                from is a trap. */}
+            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
+            <div className="flex items-center" style={{ gap: 2 }}>
+              <button type="button" title="Smaller text" aria-label="Smaller text"
+                onClick={() => applyZoom(readerZoomStep(zoom, -1))}
+                style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', lineHeight: 1 }}>−</button>
+              <button type="button" title="Back to 100%" onClick={() => applyZoom(1)}
+                style={{ minWidth: 42, height: 22, borderRadius: 6, border: '1px solid transparent', background: 'transparent',
+                  color: 'var(--iw-pill-fg, #78716c)', cursor: 'pointer', fontSize: '11px', fontFamily: 'system-ui, sans-serif' }}>
+                {Math.round(zoom * 100)}%
+              </button>
+              <button type="button" title="Bigger text" aria-label="Bigger text"
+                onClick={() => applyZoom(readerZoomStep(zoom, 1))}
+                style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', lineHeight: 1 }}>+</button>
+            </div>
 
             {located.orphaned.length > 0 && (
               // A mark whose text the publisher has since changed. Said out loud rather than
