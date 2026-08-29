@@ -20,6 +20,14 @@
     #showPanel { background: none; border: 1px solid rgba(92,45,138,0.4); border-radius: 6px; color: #5c2d8a; font-size: 10px; padding: 2px 8px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
     #showPanel:hover { background: rgba(92,45,138,0.08); }
     #already .al-missing { margin-top: 5px; font-size: 10px; color: #92400e; background: #fef3c7; padding: 4px 7px; border-radius: 5px; }
+    /* Page-fetching grant */
+    #fetchRow { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: rgba(92,45,138,0.06); border: 1px solid rgba(92,45,138,0.16); }
+    .fr-label { font-size: 11px; color: #5c2d8a; }
+    .fr-state { font-size: 10px; color: #8a8378; margin-top: 2px; }
+    .fr-state.on { color: #15803d; }
+    #grantFetch { background: none; border: 1px solid rgba(92,45,138,0.4); border-radius: 6px; color: #5c2d8a; font-size: 10px; padding: 3px 9px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+    #grantFetch:hover { background: rgba(92,45,138,0.08); }
+    #grantFetch[hidden] { display: none; }
     /* Fields panel */
     #fields { display: none; margin-top: 12px; border-top: 1px solid #e7e0d4; padding-top: 10px; }
     #fields h3 { font-size: 11px; font-weight: normal; color: #8a8378; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
@@ -54,6 +62,16 @@
       <h3>Captured fields</h3>
       <div id="fieldList"></div>
     </div>
+    <!-- Page fetching for Inkwave's source reader. Optional permission, granted here because
+         Chrome only honours permissions.request() from a user gesture in an extension page. -->
+    <div id="fetchRow">
+      <div style="flex:1">
+        <div class="fr-label">Fetch pages for the reader</div>
+        <div class="fr-state" id="fetchState"></div>
+      </div>
+      <button id="grantFetch">Turn on</button>
+    </div>
+
     <div class="hint" id="hint">Journal articles (DOI) and arXiv preprints capture instantly. Open your Inkwave tab to see them land in your library.</div>
     <div class="hint" style="margin-top:5px;color:#b0a89e">Shortcut: <kbd style="font-family:inherit;background:#ede8e0;border-radius:3px;padding:0 4px;font-size:10px">Alt+Shift+C</kbd> — captures directly from any page (no popup).</div>
   </div>

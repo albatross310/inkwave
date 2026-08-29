@@ -10,6 +10,11 @@ import { extractToCsl, parseAuthor, parseDate } from '@inkwave/citations/capture
 import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
+import {
+  BG_FETCH_PAGE, BG_READER_STATUS, NEEDS_PERMISSION,
+  type FetchPageResult, type ReaderStatus,
+} from '@inkwave/reader/extensionProtocol'
+import { assertFetchable, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
 
@@ -110,7 +115,7 @@ export default defineBackground(() => {
   })
 
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    const m = msg as { type?: string; tabId?: number; quote?: string; capture?: CaptureMsg } | null
+    const m = msg as { type?: string; tabId?: number; quote?: string; capture?: CaptureMsg; url?: string; id?: string; updates?: unknown } | null
     if (!m) return false
 
     if (m.type === 'inkwave:capture') {
@@ -142,6 +147,25 @@ export default defineBackground(() => {
       return false
     }
 
+    // ── THE SOURCE READER'S FETCH, FROM THE WRITER'S OWN ADDRESS ────────────────────────────────
+    // Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" These two
+    // messages are the answer. The app asks the content script, the content script asks here, and
+    // the request goes out of this browser — not out of a Vercel function that DuckDuckGo,
+    // Mojeek and every public SearX instance refuse (measured against the deployed endpoint).
+    // Both are async: `return true` keeps the channel open, and forgetting it is how a caller
+    // waits for ever on a reply the runtime already threw away.
+    if (m.type === BG_READER_STATUS) {
+      readerStatus().then(sendResponse).catch(() => sendResponse({ canFetch: false } satisfies ReaderStatus))
+      return true
+    }
+
+    if (m.type === BG_FETCH_PAGE && typeof m.url === 'string') {
+      fetchPageForReader(m.url)
+        .then(sendResponse)
+        .catch(e => sendResponse({ ok: false, error: String((e as Error)?.message || e) } satisfies FetchPageResult))
+      return true
+    }
+
     if (m.type === 'inkwave:highlightOnTab' && m.tabId && m.quote) {
       void injectAndHighlight(m.tabId, m.quote)
       return false
@@ -155,6 +179,53 @@ export default defineBackground(() => {
     return false
   })
 })
+
+// ── PAGE FETCHING FOR THE SOURCE READER ─────────────────────────────────────────────────────────
+// The rules live in src/reader/fetchRules.ts (pure, and therefore covered by `pnpm test`); what is
+// left here is the one thing that has to happen in an extension worker — the fetch itself, from the
+// writer's own address, with the browser's own user agent.
+
+/** `<all_urls>` is an OPTIONAL permission (see wxt.config.ts for why), so it may simply not be
+ *  granted — and "not granted" must be reported as itself, never as a fetch failure. The reader
+ *  can offer to fix the first and can only apologise for the second. */
+async function canFetchPages(): Promise<boolean> {
+  try { return await browser.permissions.contains({ origins: ['<all_urls>'] }) }
+  catch { return false }   // Firefox MV2 spells it differently in the manifest; a throw means no.
+}
+
+async function readerStatus(): Promise<ReaderStatus> {
+  return { canFetch: await canFetchPages() }
+}
+
+const READER_FETCH_TIMEOUT_MS = 20_000
+
+async function fetchPageForReader(rawUrl: string): Promise<FetchPageResult> {
+  let url: URL
+  try { url = assertFetchable(rawUrl) } catch (e) { return { ok: false, error: String((e as Error).message) } }
+  if (!await canFetchPages()) return { ok: false, error: NEEDS_PERMISSION }
+
+  try {
+    // redirect: 'follow' — unlike the server core there is no per-hop check to make here, because
+    // there is no privileged network to protect; `res.url` is then the address the page really came
+    // from, which is what relative links in the extracted blocks must resolve against.
+    const res = await fetch(url.toString(), {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(READER_FETCH_TIMEOUT_MS),
+      // Accept only. No user-agent, no referer: the browser's own headers are the entire point.
+      headers: { accept: READER_ACCEPT },
+    })
+    if (!res.ok) return { ok: false, error: `http ${res.status}` }
+    const ctype = res.headers.get('content-type')
+    const html = decodeHtml(await res.arrayBuffer(), ctype)
+    return { ok: true, finalUrl: res.url || url.toString(), html }
+  } catch (e) {
+    // A DOMException from AbortSignal.timeout has a name and an unhelpful message; everything else
+    // reports its own. Nothing here is logged — the reader's posture is that no record is kept of
+    // what was read, and a console line in a service worker is a record.
+    const err = e as { name?: string; message?: string }
+    return { ok: false, error: err?.name === 'TimeoutError' ? 'timed out' : String(err?.message || 'fetch failed') }
+  }
+}
 
 async function updateCaptureFields(id: string, updates: Record<string, string>): Promise<{ ok: boolean }> {
   const store = await browser.storage.local.get(QUEUE_KEY)

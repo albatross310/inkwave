@@ -194,5 +194,38 @@ btn.addEventListener('click', () => {
   })
 })
 
+// ── PAGE FETCHING FOR INKWAVE'S SOURCE READER ───────────────────────────────────────────────────
+// `<all_urls>` is an OPTIONAL permission (wxt.config.ts explains the choice), so it is granted HERE:
+// Chrome honours permissions.request() only from a user gesture inside an extension page, and the
+// popup is the only extension page this add-on has. The app cannot ask for it, and neither can the
+// background worker.
+//
+// ⚠ IT SAYS WHICH STATE IT IS IN. A toggle whose two states look the same is how a writer ends up
+// believing a feature is on while every page quietly goes back through the server.
+const fetchStateEl = document.getElementById('fetchState') as HTMLElement
+const grantBtn = document.getElementById('grantFetch') as HTMLButtonElement
+const ALL_URLS = { origins: ['<all_urls>'] }
+
+async function renderFetchState() {
+  let on = false
+  try { on = await browser.permissions.contains(ALL_URLS) } catch { on = false }
+  fetchStateEl.className = on ? 'fr-state on' : 'fr-state'
+  fetchStateEl.textContent = on
+    ? 'On — pages load from your own connection.'
+    : 'Off — Inkwave’s server fetches them, and search engines refuse it.'
+  grantBtn.hidden = on
+}
+
+grantBtn.addEventListener('click', () => {
+  // Must be called synchronously from the click, or the gesture is gone by the time it runs.
+  browser.permissions.request(ALL_URLS)
+    .then(() => renderFetchState())
+    .catch(() => {
+      fetchStateEl.className = 'fr-state'
+      fetchStateEl.textContent = 'Couldn’t turn it on — your browser refused the request.'
+    })
+})
+
 restoreStatus()
 void loadCurrentCapture()
+void renderFetchState()
