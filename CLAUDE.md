@@ -2848,6 +2848,70 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - touch-action does NOT inherit — per-element, hence the universal phone rule; mid-gesture elements
   that own a drag (SCAS reel) need their own `touch-action:none`.
 - iOS auto-zooms (and STAYS zoomed) focusing controls <16px — global 16px floor on phone.
+- **THE FLOOR SETS A FONT AND NOBODY EVER GREW THE BOXES (2026-08-30).** That rule is
+  `font-size: max(16px, 1em) !important` on `input, select, textarea` — it changes the TYPE and
+  nothing else, so a control declared at `height: 22` is now shorter than the line it has to hold.
+  Measured on the source reader's address bar, its composer, its two reading selects, the live-mode
+  page-width select, the PDF's note-size select and the PDF reader view's font select: every one
+  had been floored months ago and every one was still a 22-28px box. `TOUCH_FIELD_H = 40`
+  (SourceBrowser) is the answer, and 40 rather than 34 for a structural reason: **a `<select>` is a
+  REPLACED element and renders no `::before`/`::after` in Chrome or Safari**, so it can never
+  borrow a pseudo-element hit region — its own box is the only target it has.
+- **TAP TARGETS: GROW THE HIT REGION, NOT THE LAYOUT — `.iw-tap` / `.iw-tap-row` (index.css,
+  2026-08-30).** Measured at 375×667 with touch: reader header icons 24×24, markup tools 26×26,
+  zoom −/+ 22×22, the notice's ✕ 12.7×14; the whole PDF toolbar 28×28; a text note's delete badge
+  16×16. Both bars are DELIBERATELY dense (Peter asked the PDF toolbar down to ONE row; the reader's
+  phone dock is 50dvh), so the painted control keeps its size and only its hit region grows — a
+  `::after` on the control, which is part of that control's own hit region, so nothing reflows.
+  · **THE WIDTH IS HALF THE ROW GAP PER SIDE, NEVER A FLAT 44px.** Two neighbours each claiming 44
+    OVERLAP, and the later sibling paints last and WINS the overlap — an unconditional expansion
+    TAKES a tap target away. `--iw-tap-x` is the row's own gap, set per row (8/6/2px in the reader,
+    3px in the PDF toolbar); one shared constant would be wrong in most of them.
+  · **NEVER INSIDE A VERTICAL MENU.** `.iw-tap-row` treats every descendant button, and the PDF's ⋮
+    drop-up is a COLUMN 2px apart — 44px regions there would make "Print" eat part of "Export".
+    `[role="menu"] button::after { content: none }`, and those rows grow for real instead.
+  · **RESIDUAL, STATED:** horizontal reaches only (control + gap) — 29-32px. A dense icon row cannot
+    give every icon 44px WIDE without reflowing, and that is Peter's call. Most misses on a
+    horizontal row are vertical, which is the half this fixes.
+- **AN ELEMENT THAT OWNS A DRAG DECLARES `touch-action`, and two shipped ones did not (2026-08-30).**
+  The rule was already in this list; these are the instances it had not reached. The PDF's TEXT NOTE
+  (drag-to-move) and the PDF reader view's SIZE and LINE-SPACING sliders both own a drag, and under
+  the app-wide `pan-x pan-y` a finger on either was a candidate PAN: the browser took the gesture,
+  scrolled, and sent `pointercancel`. **`setPointerCapture` cannot override that** — capture routes
+  events, it does not claim the gesture — so the note simply never moved and the sliders never slid,
+  silently, on the only device that matters here. No UA stylesheet sets touch-action on
+  `input[type=range]`; do not assume one does.
+- **A HOLD GESTURE NEEDS `onPointerCancel`, and a DISMISS SCRIM NEEDS `onPointerDown` (2026-08-30).**
+  The reader's hold-to-open palette had no pointercancel while the PDF toolbar's identical gesture
+  always had: a finger that drifted got no `pointerup`, so the 400ms timer still fired — the palette
+  opened under a finger that had left AND `heldRef` stayed set, swallowing the next tap on that tool.
+  Separately, all three full-screen scrims (both colour palettes, the ⋮ export menu) dismissed on
+  `mousedown` alone; **iOS withholds the synthetic mouse event whenever the gesture is treated as a
+  scroll or a touchmove was preventDefaulted** — which this panel's own `.iw-touch-guard` handler
+  does. A scrim on mousedown is a dismiss that sometimes is not there.
+- **A POPOVER CENTRED ON YOUR FINGER HANGS OFF A 375px SCREEN.** The reader's selection popover and
+  its coloured-text composer are `left: x; translateX(-50%)`; the composer is ~354px wide, so any
+  selection near a margin put half of it — and the ✓/✕ that commit or cancel — past the edge
+  (`useClampedX`, a layout effect so the clamp lands before paint). The PDF's ⋮ menu measured
+  **left = −134**: it is `right: 0` of the ⋮ BUTTON and the toolbar WRAPS on a phone, so the ⋮ can
+  land near the left edge with a 232px right-aligned card behind it.
+- KEPT: `src/components/touchTargets.test.ts` (25 tests, ~25ms, no browser, 8 mutants proved to die;
+  **comments are STRIPPED before scanning** — these fixes are explained by sentences containing the
+  literal words "onMouseDown", "mousedown" and "pan-x pan-y", and a raw-text guard would fire on its
+  own documentation). In-browser truth: `pnpm prove:phonetouch`
+  (`scripts/textrender-probe/phonetouch.prove.mjs`) — 375×667 `hasTouch`/`isMobile`, computed styles
+  and real geometry, with a DESKTOP CONTROL proving the hit region cannot reach a mouse (0 of 16),
+  a collision check proving no region reaches into a neighbour's own button (a flat `max(100%,80px)`
+  fires it on 24 + 22 pairs; a flat 44px does NOT — it only reaches the neighbour's EDGE, which is
+  why the first negative proved nothing), and VOID guards throughout.
+  **THREE PROBE ARTEFACTS to know before writing another:** a naive overflow walk accused the reader
+  of a 24px overflow that was KaTeX's 1px-clipped MathML (`getBoundingClientRect` answers where a box
+  WOULD be — intersect with every clipping ancestor); pressing **Escape to dismiss a palette CLOSES
+  THE READER**, so the later checks measured a panel that was not there; and an **armed highlight
+  tool deliberately MARKS a selection instead of raising the popover**, so the popover checks
+  reported the feature broken until the probe disarmed first (and disarming takes TWO clicks — the
+  hold's `heldRef` is consumed by the browser's own post-long-press click, which a synthetic
+  pointerdown/pointerup never produces).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
