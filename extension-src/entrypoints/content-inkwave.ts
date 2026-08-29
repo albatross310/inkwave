@@ -4,6 +4,10 @@
 // UUID-idempotent: a re-flush re-acks without double-adding.
 
 import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
+import {
+  BG_FETCH_PAGE, BG_READER_STATUS, EXT_SOURCE, READER_FETCH, READER_FETCHED, READER_PING,
+  READER_PONG, type FetchPageResult, type ReaderStatus,
+} from '@inkwave/reader/extensionProtocol'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
 
@@ -40,6 +44,37 @@ export default defineContentScript({
       if (e.source !== window) return
       const d = e.data as { source?: string; type?: string; uuid?: string; capture?: unknown; url?: string } | null
       if (!d || d.source !== 'inkwave-app') return
+
+      // ── THE SOURCE READER'S FETCH RELAY ──────────────────────────────────────────────────────
+      // Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" — the app
+      // asks here, this relays to the background worker, and the request leaves the writer's own
+      // browser instead of a data centre the search engines refuse.
+      //
+      // ⚠ THE PING EXISTS SO THE PAGE CAN *ASK*. A page that waits to be told the extension is here
+      // loses to the ordinary race — a content script injected after the app mounted has already
+      // said its piece — and a promise that never settles is indistinguishable from a feature
+      // nobody built. So the app asks, keyed by uuid, and silence within its deadline is an answer.
+      if (d.type === READER_PING && d.uuid) {
+        const st = await browser.runtime.sendMessage({ type: BG_READER_STATUS })
+          .catch(() => null) as ReaderStatus | null
+        window.postMessage(
+          { source: EXT_SOURCE, type: READER_PONG, uuid: d.uuid, canFetch: !!st?.canFetch },
+          window.location.origin,
+        )
+        return
+      }
+
+      if (d.type === READER_FETCH && d.uuid && d.url) {
+        // A relay failure is reported as a failure, never as silence: the app falls back to the
+        // server on it, and a dropped reply would instead hang until its own timeout.
+        const r = await browser.runtime.sendMessage({ type: BG_FETCH_PAGE, url: d.url })
+          .catch(() => ({ ok: false, error: 'extension unavailable' })) as FetchPageResult
+        window.postMessage(
+          { source: EXT_SOURCE, type: READER_FETCHED, uuid: d.uuid, ...r },
+          window.location.origin,
+        )
+        return
+      }
 
       if (d.type === 'cite/ack' && d.uuid) {
         // Ack from app → write to history then dequeue.
