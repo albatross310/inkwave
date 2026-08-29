@@ -1024,6 +1024,14 @@
       background: transparent;
       border-radius: inherit;
     }
+    /* ⚠ NEVER INSIDE A VERTICAL MENU. `.iw-tap-row` treats every descendant button, and the PDF
+       toolbar's ⋮ drop-up is a COLUMN of menu items 2px apart — 44px-tall regions there would each
+       reach ~7px into the item above and below, and the later sibling wins the overlap, so "Print"
+       would eat part of "Export". The expansion only makes sense where the neighbours are sideways.
+       Plain descendant selectors, deliberately: a `:not(… *)` form needs Selectors-4 complex :not,
+       which iOS 16.0-16.3 does not have — this app's own floor. */
+    .iw-tap-row [role="menu"] button::after,
+    .iw-tap-row .iw-tap-off button::after { content: none; }
   }
 
   /* ── THE SOURCE READER'S ARMED-TOOL CURSORS (Peter, 2026-08-28: "each button needs to change the

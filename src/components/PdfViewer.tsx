@@ -4,7 +4,7 @@
 // drives text-layer positioning/selection. Highlights are our own overlay divs (normalised rects),
 // stored on the source's _iw.highlights — not baked into the PDF.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { getPdfjs, PDF_DOC_PARAMS } from '../citations/pdfjsSetup'
 import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, type HighlightKind } from '../citations/pdfHighlights'
@@ -73,10 +73,15 @@ const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
 /** One row of the ⋮ menu. Declared once so the items cannot drift apart. */
+// A menu item is the one control here that CANNOT borrow the `.iw-tap` hit region: the items are a
+// COLUMN 2px apart, so a 44px-tall region on each would reach into both neighbours and the later
+// sibling would win — "Print" taking a bite out of "Export" (index.css excludes [role="menu"] for
+// exactly this). So the row grows for real on touch. Measured 35.5px before.
 const MORE_ITEM: React.CSSProperties = {
   flex: 1, textAlign: 'left', padding: '7px 9px', borderRadius: 7, border: '1px solid transparent',
   background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1.3,
 }
+const MORE_ITEM_TOUCH: React.CSSProperties = { ...MORE_ITEM, padding: '12px 10px', lineHeight: 1.35 }
 
 /**
  * FIT THE TEXT TO THE WINDOW — the scale at which the page's TEXT BLOCK spans the panel, with a
@@ -1417,6 +1422,18 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     | { phase: 'message'; text: string }
   const [output, setOutput] = useState<OutputState>({ phase: 'idle' })
   const [moreOpen, setMoreOpen] = useState(false)
+  // Keep the ⋮ card on screen — see the note at its render. A layout effect so the nudge lands
+  // before paint rather than as a visible jump, and it re-runs on every phase of the menu because
+  // confirm/busy/done change its width.
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = moreMenuRef.current
+    if (!el) return
+    el.style.right = '0px'
+    const r = el.getBoundingClientRect()
+    if (r.left < 8) el.style.right = `${-(8 - r.left)}px`
+    else if (r.right > window.innerWidth - 8) el.style.right = `${(r.right - (window.innerWidth - 8))}px`
+  })
   const cancelOutputRef = useRef(false)
 
   /** A filename a reader will recognise months later. */
@@ -2245,10 +2262,21 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               border: `1px solid ${moreOpen ? INK : '#d6cfe0'}`, background: moreOpen ? `${INK}1f` : '#fff', color: INK }}>⋮</button>
           {moreOpen && (
             <>
+              {/* POINTERDOWN — a finger is not guaranteed to produce a synthetic mousedown (iOS
+                  withholds one when the gesture is read as a scroll, or when a touchmove was
+                  preventDefaulted). Same fix as the two colour palettes. */}
               <div style={{ position: 'fixed', inset: 0, zIndex: 20 }}
-                onMouseDown={() => { if (output.phase !== 'busy') { setMoreOpen(false); setOutput({ phase: 'idle' }) } }} />
-              <div className="iw-nightable" role="menu" style={{
-                position: 'absolute', bottom: 34, right: 0, zIndex: 21, minWidth: 232, maxWidth: 300,
+                onPointerDown={() => { if (output.phase !== 'busy') { setMoreOpen(false); setOutput({ phase: 'idle' }) } }} />
+              {/* ⚠ MEASURED HALF OFF THE SCREEN AT 375px: left = -134. The menu is `right: 0` of
+                  the ⋮ BUTTON, and on a phone the toolbar WRAPS, so the ⋮ can land near the left
+                  edge — a 232px right-aligned card then hangs 134px past it, taking "Export
+                  marked-up PDF" with it. Nothing about `right: 0` is wrong on a wide panel; it is
+                  wrong wherever the anchor is narrower than the card, which only happens here.
+                  The clamp measures after render (a layout effect, so it lands before paint) and
+                  nudges `right` negative by exactly the overhang — it never moves a menu that fits. */}
+              <div ref={moreMenuRef} className="iw-nightable" role="menu" style={{
+                position: 'absolute', bottom: 34, right: 0, zIndex: 21, minWidth: 232,
+                maxWidth: 'min(300px, calc(100vw - 16px))',
                 display: 'flex', flexDirection: 'column', gap: 2, padding: 6, borderRadius: 10,
                 background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
                 fontSize: isTouch ? '15px' : '0.82rem', color: '#3f3a48',
@@ -2256,9 +2284,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 {output.phase === 'idle' && (
                   <>
                     <button type="button" role="menuitem" onClick={() => void beginOutput('export')}
-                      style={MORE_ITEM}>⤓&nbsp;&nbsp;Export marked-up PDF</button>
+                      style={isTouch ? MORE_ITEM_TOUCH : MORE_ITEM}>⤓&nbsp;&nbsp;Export marked-up PDF</button>
                     <button type="button" role="menuitem" onClick={() => void beginOutput('print')}
-                      style={MORE_ITEM}>⎙&nbsp;&nbsp;Print marked-up PDF…</button>
+                      style={isTouch ? MORE_ITEM_TOUCH : MORE_ITEM}>⎙&nbsp;&nbsp;Print marked-up PDF…</button>
                     {/* Said here, not discovered later: the marks are drawn onto the pages, so the
                         output is a picture of them. The browser's own Save-as-PDF from the print
                         dialog produces the same thing, so this is a property of the feature, not of
@@ -2278,11 +2306,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button type="button" onClick={() => void runOutput(output.what, output.scale)}
-                        style={{ ...MORE_ITEM, background: INK, color: '#fff', textAlign: 'center' }}>
+                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), background: INK, color: '#fff', textAlign: 'center' }}>
                         {output.what === 'export' ? 'Export anyway' : 'Print anyway'}
                       </button>
                       <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
-                        style={{ ...MORE_ITEM, textAlign: 'center' }}>Cancel</button>
+                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), textAlign: 'center' }}>Cancel</button>
                     </div>
                   </div>
                 )}
@@ -2296,14 +2324,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                       <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: INK, transition: 'width 120ms linear' }} />
                     </div>
                     <button type="button" onClick={() => { cancelOutputRef.current = true }}
-                      style={{ ...MORE_ITEM, textAlign: 'center' }}>Cancel</button>
+                      style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), textAlign: 'center' }}>Cancel</button>
                   </div>
                 )}
                 {output.phase === 'message' && (
                   <div style={{ padding: '4px 8px', lineHeight: 1.45 }}>
                     <div style={{ marginBottom: 8 }}>{output.text}</div>
                     <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
-                      style={{ ...MORE_ITEM, textAlign: 'center' }}>OK</button>
+                      style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), textAlign: 'center' }}>OK</button>
                   </div>
                 )}
               </div>

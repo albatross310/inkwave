@@ -88,6 +88,12 @@ const AUDIT = `(rootSel) => {
       font: parseFloat(cs.fontSize),
       w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
       x: Math.round(r.left), right: Math.round(r.right),
+      // The hit RECT, for the collision check below. An expanded region is centred on the control.
+      hit: Number.isFinite(aw) && Number.isFinite(ah)
+        ? { l: r.left + r.width / 2 - Math.max(r.width, aw) / 2, t: r.top + r.height / 2 - Math.max(r.height, ah) / 2,
+            rr: r.left + r.width / 2 + Math.max(r.width, aw) / 2, b: r.top + r.height / 2 + Math.max(r.height, ah) / 2 }
+        : { l: r.left, t: r.top, rr: r.right, b: r.bottom },
+      topY: r.top, bottomY: r.bottom,
       touchAction: cs.touchAction, userSelect: cs.userSelect || cs.webkitUserSelect,
       typing: el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA',
       // A link INSIDE the article is the author's prose, not our chrome: it is as big as the type
@@ -157,6 +163,23 @@ const report = (name, a) => {
   const noGain = chrome.filter((c) => Math.min(c.w, c.h) < TAP_MIN && c.hitH <= c.h + 0.5 && c.hitW <= c.w + 0.5)
   check(noGain.length === 0, `${name}: every SMALL control actually gained hit area (the rule is applying)`,
     noGain.map((c) => `${c.label || c.tag} ${c.w}×${c.h}`).join(' | ') || 'all ok')
+  // 4b. ⚠ THE EXPANSION MUST NOT REACH ANOTHER CONTROL. An enlarged hit region is only a fix if it
+  //     stops short of the next control; where two overlap, the later sibling paints last and WINS,
+  //     so a "bigger target" quietly takes pixels OFF its neighbour's own painted button — a fix
+  //     that removes a tap target. The condition is therefore overlap with a neighbour's PAINTED
+  //     BOX, not with its centre: by the time a region reaches a centre it has already eaten half
+  //     the control, and the damage started long before. It catches a WRAPPED row (two rows 32px
+  //     apart carrying 44px-tall regions) exactly as readily as a tight one.
+  //     KNOWN-NEGATIVE, run before this was trusted: replacing the shipped
+  //     `width: calc(100% + var(--iw-tap-x))` with a flat `max(100%, 80px)` fires it on 26 pairs.
+  const overlap = (h, r) => h.l < r.right && h.rr > r.x && h.t < r.bottomY && h.b > r.topY
+  const stolen = []
+  for (const a2 of chrome) for (const b2 of chrome) {
+    if (a2 === b2) continue
+    if (overlap(a2.hit, b2)) stolen.push(`${a2.label || a2.tag} reaches into ${b2.label || b2.tag}`)
+  }
+  check(stolen.length === 0, `${name}: no control's hit area reaches into a NEIGHBOUR's own button`,
+    `${stolen.length} pair(s)` + (stolen.length ? ': ' + stolen.slice(0, 3).join(' | ') : ''))
   const narrow = chrome.filter((c) => c.hitW < TAP_MIN)
   note(`${name}: ${narrow.length} control(s) still under ${TAP_MIN}px WIDE — the documented residual of a one-row bar` +
     (narrow.length ? ': ' + narrow.map((c) => `${c.label || c.tag} ${c.hitW}`).join(', ') : ''))
@@ -518,6 +541,29 @@ try {
       const pd = await page.evaluate(new Function('return ' + AUDIT)(), '[data-probe-pdf]')
       report('pdf', pd)
       check(pd.panel && pd.panel.y <= 2, 'pdf: the phone dock is the TOP dock', JSON.stringify(pd.panel))
+
+      // ── THE ⋮ EXPORT MENU, OPEN. A vertical menu is the one place the hit-region expansion must
+      //    NOT apply: 2px apart, a 44px-tall region on each item reaches into both neighbours and
+      //    the later one wins, so "Print" would take a bite out of "Export". Open it and re-run the
+      //    same two checks on what is actually on screen.
+      const menuOpened = await page.evaluate(() => {
+        const b = document.querySelector('[data-probe-pdf] [data-iw-pdf-more]')
+        if (!b) return 'no ⋮ button'
+        b.click()
+        return 'clicked'
+      })
+      await page.waitForTimeout(400)
+      const menu = await page.evaluate(new Function('return ' + AUDIT)(), '[data-probe-pdf] [role="menu"]')
+      if (menu.error) {
+        check(false, 'pdf: the ⋮ export menu opens', `${menuOpened} — ${menu.error}`)
+      } else {
+        report('pdf ⋮ menu', menu)
+      }
+      await page.evaluate(() => {
+        const b = document.querySelector('[data-probe-pdf] [data-iw-pdf-more]')
+        b?.click()
+      })
+      await page.waitForTimeout(300)
 
       // ── A TEXT NOTE MUST BE DRAGGABLE BY A FINGER ────────────────────────────────────────────
       // Place one through the real tool, then read the element's OWN touch-action. The app-wide
