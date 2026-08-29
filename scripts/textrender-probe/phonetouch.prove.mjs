@@ -641,6 +641,81 @@ try {
       }
     } else check(false, 'pdf: found the viewer panel')
   }
+  // ── THE DESKTOP CONTROL — the fix must be INVISIBLE to a mouse ────────────────────────────────
+  // An expanded hit region is right for a thumb and wrong for a pointer: an invisible 44px halo on
+  // a 24px button would swallow clicks aimed at its neighbour, on the device where precision is
+  // free. The rule is inside `@media (pointer: coarse) and (hover: none)`, and this is the arm that
+  // proves that scoping rather than trusting it — a cell that only ever runs on touch cannot tell a
+  // correctly-scoped rule from an unscoped one.
+  console.log('\n── THE DESKTOP CONTROL (mouse, 1500px) — the rule must NOT apply ───────────────')
+  const dctx = await b.newContext({ viewport: { width: 1500, height: 950 }, serviceWorkers: 'block' })
+  const dpage = await dctx.newPage()
+  await dpage.route((u) => u.pathname === '/api/reader', (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('probe') === '1') return route.fulfill({ status: 200, contentType: 'application/json', body: '{"framable":true}' })
+    const { title, blocks } = extractBlocks(PAGE_HTML, u.searchParams.get('url') || '')
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: u.searchParams.get('url'), title, blocks }) })
+  })
+  // ⚠ OPFS IS PER CONTEXT. A fresh browser context starts with EMPTY storage, so the document and
+  // library seeded above do not exist here — the first cut of this arm found no citation, opened
+  // nothing, and VOIDed. (It voided rather than passing, which is the only reason that was five
+  // minutes instead of an hour.) Seed again, WITHOUT the PDF, so a plain click opens the READER.
+  await dpage.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
+  await dpage.waitForSelector(EDITOR, { timeout: 60000 })
+  await dpage.evaluate(async (id) => {
+    const item = { id: 'sider2001', type: 'article-journal', title: 'Identity Over Time',
+      author: [{ family: 'Sider', given: 'T' }], issued: { 'date-parts': [[2001]] },
+      URL: 'https://plato.stanford.edu/entries/identity-time/' }
+    const doc = { id, title: 'Desktop control', createdAt: new Date().toISOString(), schemaVersion: '1',
+      contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [
+        { type: 'text', text: 'As argued ' },
+        { type: 'citation', attrs: { citekeys: ['sider2001'], prefix: '', suffix: '', locator: '', suppressAuthor: false } },
+        { type: 'text', text: ' the puzzle persists.' }] }] } }
+    const root = await navigator.storage.getDirectory()
+    const docs = await root.getDirectoryHandle('documents', { create: true })
+    const dir = await docs.getDirectoryHandle(id, { create: true })
+    const dh = await dir.getFileHandle('current.json', { create: true })
+    const dw = await dh.createWritable(); await dw.write(JSON.stringify(doc)); await dw.close()
+    const lib = await root.getDirectoryHandle('library', { create: true })
+    const per = await lib.getDirectoryHandle(id, { create: true })
+    const fh = await per.getFileHandle('citations.json', { create: true })
+    const w = await fh.createWritable(); await w.write(JSON.stringify([item])); await w.close()
+  }, docId + '-desk')
+  await dpage.goto(`${base}/?doc=${docId}-desk`, { waitUntil: 'domcontentloaded' })
+  await dpage.waitForSelector(EDITOR, { timeout: 60000 })
+  await dpage.waitForTimeout(2500)
+  await dpage.evaluate(() => {
+    const link = document.querySelector('.iw-cite-link')
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  let deskReady = false
+  try { await dpage.waitForSelector('.iw-tap', { timeout: 25000 }); deskReady = true } catch { /* below */ }
+  if (!deskReady) {
+    // VOID rather than pass: "no expanded region" on a page with no toolbar is not an observation.
+    const why = await dpage.evaluate(() => ({
+      cite: document.querySelectorAll('.iw-cite-link').length,
+      canvases: document.querySelectorAll('canvas').length,
+      selectable: document.querySelectorAll('[data-iw-selectable]').length,
+      body: document.body.innerText.replace(/\s+/g, ' ').slice(0, 160),
+    }))
+    check(false, 'desktop: a panel with tap-row chrome opened (VOID guard — nothing to measure otherwise)',
+      JSON.stringify(why))
+  } else {
+    await dpage.waitForTimeout(1200)
+    const desk = await dpage.evaluate(() => {
+      const btns = [...document.querySelectorAll('.iw-tap-row button, .iw-tap')]
+      const grown = btns.filter((el) => {
+        const af = getComputedStyle(el, '::after')
+        return af.content !== 'none' && af.content !== 'normal'
+      })
+      return { total: btns.length, grown: grown.length }
+    })
+    check(desk.total > 5, 'desktop: the chrome rendered (so "none grew" means something)',
+      `${desk.total} controls carrying the class`)
+    check(desk.grown === 0, 'desktop: NOT ONE control grew a hit region — the rule is coarse-pointer only',
+      `${desk.grown} of ${desk.total}`)
+  }
+  await dctx.close()
 } catch (e) {
   console.log(`  ✗ ${e.message}\n${(e.stack || '').split('\n').slice(1, 4).join('\n')}`)
   fail++
