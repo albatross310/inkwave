@@ -1947,6 +1947,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               : Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
+        {/* READER VIEW toggle (Peter, 2026-08-28: "yep build the reader view for pdfs"). ¶ = the
+            text, reflowed in your own font at your own line spacing; the page view is one tap back.
+            A MODE beside the page view, never instead of it — a scan with no text layer is still
+            only readable as a page, and so is every mark made before marks carried text anchors. */}
+        <button type="button" title={readerMode ? 'Back to the page view' : 'Reader view — the text reflowed in your own font and line spacing'}
+          aria-pressed={readerMode} data-iw-reader-toggle
+          onMouseEnter={() => setHint('read the text reflowed, with your own font and line spacing')}
+          onClick={() => setReaderMode(v => !v)}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
+            border: `1px solid ${readerMode ? INK : '#d6cfe0'}`, background: readerMode ? `${INK}1f` : '#fff', color: INK }}>¶</button>
         {/* COMMENT MARGIN (Peter, 2026-08-28: "another button over here that refers to viewing with
             a padding on the right for adding comments"). Reserves a strip to the right of the page
             so sticky notes have somewhere to live that is not on top of the text. It changes the
@@ -2069,6 +2079,38 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
+
+      {/* The reader view COVERS the page scroller rather than replacing it: every fit calculation in
+          this file measures `clientWidth`, and a display:none scroller measures 0, so unmounting or
+          hiding it would silently rewrite the page view's zoom while nobody was looking. Laid out
+          underneath, covered — the same trick the atomic reveal above uses, for the same reason. */}
+      {readerMode && status === 'ready' && (
+        <div data-iw-reader style={{ position: 'absolute', inset: 0, zIndex: 8 }}>
+          <PdfReaderView
+            doc={docRef.current}
+            highlights={highlightsRef.current}
+            rev={markRev}
+            tool={tool}
+            color={color}
+            noteSize={noteSize}
+            pageOffset={offsetRef.current}
+            onCreate={made => {
+              highlightsRef.current = [...highlightsRef.current, ...made]
+              redrawOverlays()
+              noteAnnotation(citekey) // the ledger's annotating signal, same as the page view's
+              persistMarks()
+            }}
+            onPatch={(id, patch) => {
+              const hl = highlightsRef.current.find(h => h.id === id)
+              if (!hl) return
+              Object.assign(hl, patch)
+              redrawOverlays()
+              persistMarks()
+            }}
+            onRemove={removeHighlight}
+          />
+        </div>
+      )}
 
       {/* (The floating rotate/−/%/+ pill is gone — rotate moved into the bottom toolbar;
           Ctrl/⌘+wheel remains the zoom. Peter, 2026-07-10.) */}

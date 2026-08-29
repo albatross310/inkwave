@@ -63,43 +63,68 @@ export function buildPageReflow(items: PlacedItem[], pageW: number, pageH: numbe
   if (!keep.length) return { blocks: [], items, pageW, pageH }
 
   // ── items → lines ────────────────────────────────────────────────────────────────────────────
-  const order = [...keep].sort((a, b) => {
-    const A = items[a], B = items[b]
-    const overlap = Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y)
-    if (overlap > Math.min(A.h, B.h) * 0.5) return A.x - B.x
-    return A.y - B.y
-  })
+  // TWO PASSES, and the separation matters. Banding by y then sorting each band by x is a TOTAL
+  // order; a single sort whose comparator asks "do these overlap vertically?" is not transitive
+  // (A overlaps B, B overlaps C, A misses C), so Array.sort may return any of several orders for
+  // the same page — a reflow that is not a function of its input, which every anchor here depends
+  // on being.
+  const byY = [...keep].sort((a, b) => items[a].y - items[b].y || items[a].x - items[b].x)
+  const bands: number[][] = []
+  let bandTop = 0, bandBot = 0
+  for (const idx of byY) {
+    const it = items[idx]
+    const band = bands[bands.length - 1]
+    const overlap = band ? Math.min(it.y + it.h, bandBot) - Math.max(it.y, bandTop) : -1
+    // 0.35, not 0.5: a footnote superscript is small AND raised, so it overlaps its own line by
+    // barely half its height — at 0.5 it becomes a line of its own and splits the sentence around
+    // it in two. Nothing is at risk at the other end, because consecutive printed lines do not
+    // overlap vertically at all (the leading is a positive gap), so no threshold below 1.0 can
+    // merge two real lines.
+    if (band && overlap > Math.min(it.h, bandBot - bandTop) * 0.35) {
+      band.push(idx)
+      bandTop = Math.min(bandTop, it.y); bandBot = Math.max(bandBot, it.y + it.h)
+    } else {
+      bands.push([idx]); bandTop = it.y; bandBot = it.y + it.h
+    }
+  }
 
   const lines: Line[] = []
-  for (const idx of order) {
-    const it = items[idx]
-    const cur = lines[lines.length - 1]
-    const overlap = cur ? Math.min(it.y + it.h, cur.bottom) - Math.max(it.y, cur.top) : -1
-    if (cur && overlap > Math.min(it.h, cur.bottom - cur.top) * 0.5 && it.x >= cur.left - 1) {
-      // Same printed line. A gap wider than a quarter of the glyph height is a real word space that
-      // the PDF drew by MOVING rather than by emitting a space character.
-      const gap = it.x - cur.right
-      let text = cur.text
-      if (gap > it.h * 0.22 && !/\s$/.test(text) && !/^\s/.test(it.str)) text += ' '
-      cur.segs.push({ item: idx, from: text.length, to: text.length + it.str.length })
-      cur.text = text + it.str
-      cur.items.push(idx)
-      cur.top = Math.min(cur.top, it.y); cur.bottom = Math.max(cur.bottom, it.y + it.h)
-      cur.right = Math.max(cur.right, it.x + it.w)
-      cur.size = Math.max(cur.size, it.h)
-    } else {
-      lines.push({ items: [idx], text: it.str, segs: [{ item: idx, from: 0, to: it.str.length }],
-        top: it.y, bottom: it.y + it.h, left: it.x, right: it.x + it.w, size: it.h })
+  for (const band of bands) {
+    band.sort((a, b) => items[a].x - items[b].x)
+    let line: Line | null = null
+    for (const idx of band) {
+      const it = items[idx]
+      if (!line) {
+        line = { items: [idx], text: it.str, segs: [{ item: idx, from: 0, to: it.str.length }],
+          top: it.y, bottom: it.y + it.h, left: it.x, right: it.x + it.w, size: it.h }
+        continue
+      }
+      // A gap wider than a fifth of the glyph height is a real word space that the PDF drew by
+      // MOVING the pen rather than by emitting a space character — the commonest way a naive
+      // extractor ends up with "thewordsallrunningtogether".
+      const gap = it.x - line.right
+      let text = line.text
+      if (gap > it.h * 0.2 && !/\s$/.test(text) && !/^\s/.test(it.str)) text += ' '
+      line.segs.push({ item: idx, from: text.length, to: text.length + it.str.length })
+      line.text = text + it.str
+      line.items.push(idx)
+      line.top = Math.min(line.top, it.y); line.bottom = Math.max(line.bottom, it.y + it.h)
+      line.right = Math.max(line.right, it.x + it.w)
+      line.size = Math.max(line.size, it.h)
     }
+    if (line) lines.push(line)
   }
   for (const l of lines) { l.text = l.text.replace(/\s+$/, '') }
 
   // ── lines → paragraphs ───────────────────────────────────────────────────────────────────────
   const H = median(lines.map(l => l.bottom - l.top)) || 12
   const bodySize = median(lines.map(l => l.size)) || H
-  const maxRight = Math.max(...lines.map(l => l.right))
-  const paraLefts = lines.map(l => l.left)
-  const bodyLeft = median(paraLefts)
+  const bodyLeft = median(lines.map(l => l.left))
+  // The RIGHT MARGIN, not the widest line: a running head, a wide table or one over-long footnote
+  // would otherwise define "full width" and every ordinary line would read as a short one. The 75th
+  // percentile is the edge the body text actually reaches.
+  const sortedRights = lines.map(l => l.right).sort((a, b) => a - b)
+  const rightEdge = sortedRights[Math.min(sortedRights.length - 1, Math.floor(sortedRights.length * 0.75))] ?? 0
 
   const blocks: ReflowBlock[] = []
   let cur: { text: string; segs: Seg[]; heading: boolean } | null = null
@@ -116,9 +141,18 @@ export function buildPageReflow(items: PlacedItem[], pageW: number, pageH: numbe
       // (b) a first-line INDENT — the other convention, used when there is no blank line;
       // (c) the previous line stopped well short of the right margin, so the paragraph ended there;
       // (d) the glyph size changed — a heading, a pull-quote, a footnote block.
+      //
+      // ⚠ (c) IS DELIBERATELY THE SHYEST OF THE FOUR, and it is a FRACTION OF THE MEASURE, not a
+      // number of ems. It is a BACKSTOP for text that separates paragraphs by neither extra leading
+      // nor indent — rare, because a document doing neither gives its own reader no way to see a
+      // paragraph either. Ragged-right prose ends its lines a whole long word (≈5 ems) short as a
+      // matter of course, so an em-based threshold either misses paragraph ends or shatters every
+      // ragged paragraph into one block per line — MEASURED: at four ems the fixture in
+      // pdfReflow.test.ts ('KNOWN-NEGATIVE: ordinary ragged-right lines…') split into two. Under
+      // two thirds of the measure is a line that stopped early on purpose.
       if (gap > H * 0.65) brk = true
       else if (l.left > bodyLeft + bodySize * 0.9) brk = true
-      else if (prev.right < maxRight - bodySize * 2.2) brk = true
+      else if (prev.right - bodyLeft < (rightEdge - bodyLeft) * 0.62) brk = true
       else if (Math.abs(l.size - prev.size) > bodySize * 0.28) brk = true
       // A new COLUMN or a jump back UP the page is always a break, whatever the gap says.
       if (l.top < prev.top - H * 0.5) brk = true
@@ -188,14 +222,18 @@ export function anchorInPage(
     const hay = blocks[bi].text
     const at = hay.indexOf(needle)
     if (at >= 0) return { block: bi, start: at, text: needle }
-    // Whitespace-flexible: the selection crossed a line break, so its spacing is the PAGE's, not the
-    // reflowed text's. Optional hyphen+space between every pair of characters covers the words the
-    // typesetter split — the same de-hyphenation buildPageReflow applied, read from the other side.
-    const flexible = needle.split(/\s+/).map(escapeRe).join('[\\s\\u00ad-]+')
+    // (1) WHITESPACE-FLEXIBLE. The selection crossed a printed line break, so its spacing is the
+    //     PAGE's — a newline where the reflowed text has one space.
+    const flexible = needle.split(/\s+/).map(escapeRe).join('\\s+')
     let m = new RegExp(flexible).exec(hay)
     if (!m) {
-      const loose = [...needle.replace(/\s+/g, '')].map(escapeRe).join('-?\\s*')
-      m = new RegExp(loose).exec(hay)
+      // (2) SEPARATOR-BLIND. The typesetter split a word across lines and buildPageReflow HEALED it,
+      //     so the selection's "iden- tity" has no counterpart in "identity" — there is no gap left
+      //     to be flexible about. Matching character by character with at most a few separators
+      //     between is the only thing that can bridge that, and the cap is what keeps it a local
+      //     match rather than a licence to span half a page.
+      const bare = [...needle.replace(/[\s­-]+/g, '')].map(escapeRe).join('[\\s\\u00ad-]{0,3}')
+      m = new RegExp(bare).exec(hay)
     }
     if (m) return { block: bi, start: m.index, text: hay.slice(m.index, m.index + m[0].length) }
   }
