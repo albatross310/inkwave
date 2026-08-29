@@ -81,8 +81,20 @@ don't worry about the existing highlights. just change the whole layout and meth
       deadlocking the pending request, a hand-written URL expectation, and finally the real cause —
       the SERVICE WORKER answering `/api/reader` from its own cache, which `page.route` does not
       intercept (`serviceWorkers: 'block'`).
-- [ ] **E3** The PDF zoom snap-back fix (re-asserting the anchor after layout) is a MECHANISM, not a
-      proof — never reproduced here. If it persists, that hypothesis is wrong.
+- [x] **E3** DONE 2026-08-30 — `pnpm prove:pdfzoom`. **The hypothesis was wrong, and the fix built on
+      it was a no-op.** Reproduced first: a real ctrl+wheel zoom over a generated PDF fixture,
+      sampled every frame. The content under the cursor drifts 198→319px *during* the gesture and
+      then jumps 149px when the freeze lifts — and the re-assert made no difference at all (legacy
+      and fixed trajectories were identical to 0.1px). **No scrollLeft write was ever clamped**: the
+      one write asked for 570.7 into a range of 1778. The real cause is a layout CONSTANT being
+      multiplied by the zoom ratio — the 180px overscroll gutter (`PDF_OVERSCROLL_PX`) arrives the
+      instant `zoom` crosses 1.02, i.e. mid-preview, and the settle formula
+      `(scroll + ax) * ratio - ax` scales it (and the scroller's 12px padding) as though it were
+      content. Closed forms confirmed to the pixel: `180 × liveScale` during the gesture,
+      `(12 + 180) − 12 × ratio` at the settle. Fixed by keying the gutter to the RENDERED zoom and
+      anchoring on a fraction of the page's own box; measured 170.2px → 0.2px, in-gesture 318.9 → 0.0,
+      vertical −9.5 → −0.5. Kept by `src/components/pdfZoomAnchor.test.ts` (11ms, no browser,
+      mutation-proved).
 
 ## Lane F — Editor
 
