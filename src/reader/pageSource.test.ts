@@ -184,6 +184,11 @@ describe('ONE EXTRACTOR, TWO FETCHERS', () => {
     })
     expect(got.doc.url).toBe('https://plato.stanford.edu/entries/identity/')
     const para = got.doc.blocks.find((b) => b.kind === 'para') as Extract<ReaderBlock, { kind: 'para' }>
-    expect(para.runs.find((r) => r.href)?.href).toBe('https://plato.stanford.edu/geach/')
+    // `../geach/` from `/entries/identity/` is `/entries/geach/`. (The expectation here was
+    // hand-written as `/geach/` — one `..` too many — and failed against correct code. The test's
+    // POINT stands and still discriminates: resolved against the REQUESTED url it would have been
+    // `https://short.link/geach/`, which is a different host entirely.)
+    expect(para.runs.find((r) => r.href)?.href).toBe('https://plato.stanford.edu/entries/geach/')
+    expect(para.runs.find((r) => r.href)?.href).not.toContain('short.link')
   })
 })
