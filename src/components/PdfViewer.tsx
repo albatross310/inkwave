@@ -30,6 +30,9 @@ export function pdfOutputScale(dpr: number, isTouch: boolean, vw: number, vh: nu
 }
 import { lockAxis, newAxisState } from './axisLock'
 import { HOLD_MS } from './useLongPress'
+import { PdfReaderView } from './PdfReaderView'
+import { anchorInPage, nearestBlock, noteAnchorText } from './pdfReflow'
+import { getPageReflow } from './pdfReflowStore'
 
 /**
  * How much one ctrl/⌘-wheel event zooms the PDF.
@@ -309,7 +312,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     if (!hl) return
     hl.color = c
     redrawOverlays()
-    void saveHighlights(citekey, highlightsRef.current)
+    persistMarks()
   }
   const [noteSize, setNoteSize] = useState<number>(() => { try { return Number(localStorage.getItem('inkwave:pdfNoteSize')) || 12 } catch { return 12 } })
   const toolRef = useRef<ToolKind | null>(null); toolRef.current = tool
@@ -329,11 +332,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const matchesRef = useRef<number[]>([]) // page index per match occurrence
   const searchBoxRef = useRef<HTMLInputElement>(null)
 
+  // ── READER VIEW (Peter, 2026-08-28: "yep build the reader view for pdfs") ─────────────────────
+  // A MODE, not a replacement. The page view below is untouched and stays the default; this flips
+  // the pane to `PdfReaderView`, which re-sets the SAME text in the reader's own font and line
+  // spacing — the answer to his earlier "do we have a way of altering the line spacing on the pdf
+  // to make it wider? Or to change the font", which a fixed PDF layout cannot give.
+  const [readerMode, setReaderMode] = useState(() => {
+    try { return localStorage.getItem('inkwave:pdfReaderMode') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('inkwave:pdfReaderMode', readerMode ? '1' : '0') } catch { /* private */ }
+  }, [readerMode])
+  // The page view owns the highlight list in a REF (it draws imperatively), so React cannot see a
+  // mutation. One counter, bumped at every mutation site through `persistMarks`, is the signal the
+  // reader view re-renders on. Bumping inside redrawOverlays instead would re-render on every zoom.
+  const [markRev, setMarkRev] = useState(0)
+  function persistMarks(): void {
+    setMarkRev(v => v + 1)
+    void saveHighlights(citekey, highlightsRef.current)
+  }
+
   const removeHighlight = (id: string) => {
     if (selectedMkRef.current === id) { selectedMkRef.current = null; setSelectedMk(null) } // no dangling selection/popup
     highlightsRef.current = highlightsRef.current.filter(h => h.id !== id)
     redrawOverlays()
-    void saveHighlights(citekey, highlightsRef.current)
+    persistMarks()
   }
 
   function redrawOverlays() {
@@ -369,7 +392,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           note.title = 'Click/tap to select (✕ or Delete removes) · double-click or tap again to edit'
           const removeNote = () => {
             highlightsRef.current = highlightsRef.current.filter(h => h.id !== hl.id)
-            redrawOverlays(); void saveHighlights(citekey, highlightsRef.current)
+            redrawOverlays(); persistMarks()
           }
           // ✕ delete handle — a SIBLING, not a child (children of a contentEditable become editable and
           // would pollute textContent). Same look as the annotation × handles (the sheet is white in every
@@ -432,7 +455,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             drag = null
             note.style.cursor = note.contentEditable === 'true' ? 'text' : 'pointer'
             try { note.releasePointerCapture(ev.pointerId) } catch { /* already released */ }
-            if (moved) { dragMovedRef.current = hl.id; void saveHighlights(citekey, highlightsRef.current) }
+            if (moved) { dragMovedRef.current = hl.id; persistMarks() }
           }
           note.addEventListener('pointerup', endDrag)
           note.addEventListener('pointercancel', endDrag)
@@ -464,7 +487,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const v = (note.textContent ?? '').trim()
             hl.note = v; hl.text = v
             note.contentEditable = 'false'; note.style.cursor = 'pointer'
-            void saveHighlights(citekey, highlightsRef.current)
+            persistMarks()
           })
           if (editNoteIdRef.current === hl.id) { editNoteIdRef.current = null; requestAnimationFrame(enterEdit) }
           pg.hlLayer.appendChild(note)
@@ -1643,7 +1666,45 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     editNoteIdRef.current = hl.id // redraw auto-enters edit mode on it
     redrawOverlays()
     noteAnnotation(citekey) // the ledger's annotating signal — see pdfActivity.ts
-    void saveHighlights(citekey, highlightsRef.current)
+    persistMarks()
+    void attachNoteAnchor(hl)
+  }
+
+  // ── TRANSLATION, PAGE VIEW → READER VIEW ─────────────────────────────────────────────────────
+  // A mark made on the printed page gets a TEXT anchor as well as its rects, so the reader view can
+  // place it. Deliberately AFTER the mark exists and is persisted: the anchor is an addition, never
+  // a precondition — a page whose text cannot be read (a scan) must still get its highlight, and it
+  // then simply shows in the reader view's "not placed here" list rather than being refused.
+  // Returns nothing and swallows nothing silently: a page with no text answers null and the mark
+  // keeps no anchor, which is the honest state.
+  async function attachTextAnchors(made: PdfHighlight[], text: string): Promise<void> {
+    const doc = docRef.current
+    if (!doc || !made.length) return
+    let changed = false
+    for (const hl of made) {
+      const reflow = await getPageReflow(doc, hl.page)
+      if (!reflow) continue
+      const a = anchorInPage(reflow.blocks, text)
+      if (a) { hl.anchor = a; changed = true }
+    }
+    if (changed) persistMarks()
+  }
+
+  /** A text note's anchor: the paragraph NEAREST where it was dropped (Peter: "anchor text boxes at
+   *  nearest text"). Its page coordinates describe a layout the reader view does not draw. */
+  async function attachNoteAnchor(hl: PdfHighlight): Promise<void> {
+    const doc = docRef.current
+    const r0 = hl.rects[0]
+    if (!doc || !r0) return
+    const reflow = await getPageReflow(doc, hl.page)
+    if (!reflow) return
+    const bi = nearestBlock(reflow, r0.x + r0.w / 2, r0.y)
+    if (bi == null) return
+    const bt = reflow.blocks[bi]?.text ?? ''
+    const anchorText = noteAnchorText(bt)
+    if (!anchorText) return
+    hl.anchor = { block: bi, start: Math.max(0, bt.indexOf(anchorText)), text: anchorText }
+    persistMarks()
   }
 
   async function createHighlight(info: Pending, kind: HighlightKind, color: string, link: boolean) {
@@ -1657,7 +1718,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     highlightsRef.current = [...highlightsRef.current, ...made]
     redrawOverlays()
     noteAnnotation(citekey) // the ledger's annotating signal — see pdfActivity.ts
+    setMarkRev(v => v + 1)
     await saveHighlights(citekey, highlightsRef.current)
+    void attachTextAnchors(made, info.text)
     if (link) onLinkToCitation?.(info.text, info.groups[0].page)
   }
 
@@ -1884,6 +1947,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               : Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
+        {/* READER VIEW toggle (Peter, 2026-08-28: "yep build the reader view for pdfs"). ¶ = the
+            text, reflowed in your own font at your own line spacing; the page view is one tap back.
+            A MODE beside the page view, never instead of it — a scan with no text layer is still
+            only readable as a page, and so is every mark made before marks carried text anchors. */}
+        <button type="button" title={readerMode ? 'Back to the page view' : 'Reader view — the text reflowed in your own font and line spacing'}
+          aria-pressed={readerMode} data-iw-reader-toggle
+          onMouseEnter={() => setHint('read the text reflowed, with your own font and line spacing')}
+          onClick={() => setReaderMode(v => !v)}
+          style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
+            border: `1px solid ${readerMode ? INK : '#d6cfe0'}`, background: readerMode ? `${INK}1f` : '#fff', color: INK }}>¶</button>
         {/* COMMENT MARGIN (Peter, 2026-08-28: "another button over here that refers to viewing with
             a padding on the right for adding comments"). Reserves a strip to the right of the page
             so sticky notes have somewhere to live that is not on top of the text. It changes the
@@ -2006,6 +2079,38 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
         {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
+
+      {/* The reader view COVERS the page scroller rather than replacing it: every fit calculation in
+          this file measures `clientWidth`, and a display:none scroller measures 0, so unmounting or
+          hiding it would silently rewrite the page view's zoom while nobody was looking. Laid out
+          underneath, covered — the same trick the atomic reveal above uses, for the same reason. */}
+      {readerMode && status === 'ready' && (
+        <div data-iw-reader style={{ position: 'absolute', inset: 0, zIndex: 8 }}>
+          <PdfReaderView
+            doc={docRef.current}
+            highlights={highlightsRef.current}
+            rev={markRev}
+            tool={tool}
+            color={color}
+            noteSize={noteSize}
+            pageOffset={offsetRef.current}
+            onCreate={made => {
+              highlightsRef.current = [...highlightsRef.current, ...made]
+              redrawOverlays()
+              noteAnnotation(citekey) // the ledger's annotating signal, same as the page view's
+              persistMarks()
+            }}
+            onPatch={(id, patch) => {
+              const hl = highlightsRef.current.find(h => h.id === id)
+              if (!hl) return
+              Object.assign(hl, patch)
+              redrawOverlays()
+              persistMarks()
+            }}
+            onRemove={removeHighlight}
+          />
+        </div>
+      )}
 
       {/* (The floating rotate/−/%/+ pill is gone — rotate moved into the bottom toolbar;
           Ctrl/⌘+wheel remains the zoom. Peter, 2026-07-10.) */}

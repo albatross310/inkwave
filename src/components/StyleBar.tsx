@@ -23,7 +23,7 @@ const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 // everywhere. Legacy docs with old marks still render: each css string keeps the old system stack
 // as its fallback tail, and an old mark's own stack resolves exactly as before (no @font-face ever
 // existed for those names).
-const FONTS = [
+export const FONTS = [
   // Identity
   { group: 'Identity', label: 'Fell',      css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
   { group: 'Identity', label: 'Garamond',  css: "'EB Garamond', Georgia, serif" },
