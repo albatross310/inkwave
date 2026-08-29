@@ -18,6 +18,7 @@
     "prove:snapsweep": "node scripts/textrender-probe/snapsweep.prove.mjs",
     "prove:editor": "pnpm prove:schema && pnpm prove:mount && pnpm prove:breaks",
     "prove:pdfposthoc": "node scripts/pdfposthoc.prove.mjs",
+    "prove:pdfexport": "node scripts/pdfexport.prove.mjs",
     "prove:jump": "node scripts/textrender-probe/jumpguard.prove.mjs",
     "prove:reader": "node scripts/textrender-probe/reader.prove.mjs",
     "prove:zoomcost": "node scripts/textrender-probe/zoomcost.prove.mjs"

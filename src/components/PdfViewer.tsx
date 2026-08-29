@@ -13,6 +13,11 @@ import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations
 import { bibProvider } from '../citations/bibProvider'
 import { isTouchDevice } from '../editor/Scroll'
 import { noteAnnotation, noteScroll } from '../productivity/pdfActivity'
+import {
+  planAnnotatedRender, renderAnnotatedPages, buildPrintHtml, marksWithoutGeometry, SLOW_PAGE_COUNT,
+  type PdfDocLike,
+} from './pdfAnnotatedPages'
+import { buildImagePdf } from './minimalPdf'
 
 /**
  * How many device pixels per CSS pixel to render a PDF page at.
@@ -66,6 +71,12 @@ const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'erase', label: '⌫', title: 'Eraser — click any annotation to remove it' },
 ]
 const ZOOM_MIN = 0.4, ZOOM_MAX = 4
+
+/** One row of the ⋮ menu. Declared once so the items cannot drift apart. */
+const MORE_ITEM: React.CSSProperties = {
+  flex: 1, textAlign: 'left', padding: '7px 9px', borderRadius: 7, border: '1px solid transparent',
+  background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1.3,
+}
 
 /**
  * FIT THE TEXT TO THE WINDOW — the scale at which the page's TEXT BLOCK spans the panel, with a
@@ -1281,6 +1292,158 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     setTimeout(() => el.remove(), 1800)
   }
 
+  // ── EXPORT / PRINT THE MARKED-UP PDF (Peter, 2026-08-28) ─────────────────────────────────────
+  // "we need a three dots button with an export and print button that export/print the marked up
+  // pdf as a pdf … or to printer."
+  //
+  // ONE mechanism, two exits: pdfAnnotatedPages re-renders every page from the pdf.js document and
+  // burns the marks into the canvas; Print and Export then hand the SAME pixels to the browser or
+  // to a file. See that module's header for why the on-screen canvases could not be reused (most of
+  // them are a 0.2–0.45× base render, or evicted, or sized for the reader's zoom).
+  //
+  // ⚠ IT EXPORTS THE PAGE VIEW, AND ONLY THE PAGE VIEW. There are two views of a PDF now, and
+  // "the marked-up PDF" means something different in each: this one is the publisher's pages with
+  // rectangles on them, and the reader view (PdfReaderView) is the text RE-SET in the reader's own
+  // font — a different document, whose export would be a different feature. Peter asked to
+  // "export/print the marked up pdf as a pdf", so the pages are what comes out, whichever view
+  // happens to be on screen when the menu is used.
+  //   That is not the same as dropping reader-made marks. A mark made in the reader view also
+  // stores page rects (PdfReaderView → pdfReflow.rectsForRange, "so the two views agree by
+  // construction"), so it prints here like any other. What cannot be painted is a mark whose rects
+  // came back EMPTY — `marksWithoutGeometry` finds those, and the menu SAYS how many rather than
+  // handing over a document quietly missing them.
+  //
+  // Every other failure mode is shown in the same place: a source too large to render at readable
+  // resolution is REFUSED with the reason, a long one asks first, and a cancel throws the partial
+  // render away instead of exporting the pages that happened to finish.
+  type OutputKind = 'export' | 'print'
+  type OutputState =
+    | { phase: 'idle' }
+    | { phase: 'confirm'; what: OutputKind; pages: number; mb: number; scale: number }
+    | { phase: 'busy'; what: OutputKind; done: number; total: number }
+    | { phase: 'message'; text: string }
+  const [output, setOutput] = useState<OutputState>({ phase: 'idle' })
+  const [moreOpen, setMoreOpen] = useState(false)
+  const cancelOutputRef = useRef(false)
+
+  /** A filename a reader will recognise months later. */
+  function outputFileBase(): string {
+    const raw = (citekey || 'source').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '')
+    return (raw || 'source') + '-annotated'
+  }
+
+  /** Decide the render scale, and ask or refuse where the answer is not simply "yes". */
+  async function beginOutput(what: OutputKind): Promise<void> {
+    const doc = docRef.current
+    if (!doc) return
+    try {
+      const page1 = await doc.getPage(1)
+      const vp1 = page1.getViewport({ scale: 1, rotation: rotationRef.current })
+      const plan = planAnnotatedRender(doc.numPages, vp1.width, vp1.height)
+      if (!plan.ok) { setOutput({ phase: 'message', text: plan.reason }); return }
+      if (doc.numPages >= SLOW_PAGE_COUNT) {
+        setOutput({ phase: 'confirm', what, pages: doc.numPages, mb: Math.round(plan.estBytes / (1024 * 1024)), scale: plan.scale })
+        return
+      }
+      void runOutput(what, plan.scale)
+    } catch (err) {
+      setOutput({ phase: 'message', text: `Couldn't read this PDF: ${(err as Error)?.message || 'unknown error'}` })
+    }
+  }
+
+  async function runOutput(what: OutputKind, scale: number): Promise<void> {
+    const doc = docRef.current
+    if (!doc) return
+    cancelOutputRef.current = false
+    setOutput({ phase: 'busy', what, done: 0, total: doc.numPages })
+    const orphans = marksWithoutGeometry(highlightsRef.current).length
+    try {
+      const pages = await renderAnnotatedPages({
+        doc: doc as unknown as PdfDocLike,
+        marks: highlightsRef.current,
+        rotation: rotationRef.current,
+        scale,
+        onProgress: (done, total) => setOutput({ phase: 'busy', what, done, total }),
+        cancelled: () => cancelOutputRef.current,
+      })
+      // A cancel leaves a PARTIAL render. Handing that over would give the writer a document that is
+      // silently short — the one outcome this whole path is written to avoid.
+      if (cancelOutputRef.current || pages.length < doc.numPages) { setOutput({ phase: 'idle' }); return }
+      if (what === 'export') downloadAnnotatedPdf(pages)
+      else printAnnotatedPdf(pages)
+      if (orphans > 0) {
+        setOutput({ phase: 'message', text:
+          `${orphans} ${orphans === 1 ? 'mark has' : 'marks have'} no position on the page, so ` +
+          `${orphans === 1 ? 'it was' : 'they were'} not included. ` +
+          `${orphans === 1 ? 'It is' : 'They are'} still on your source — open the reader view to see ${orphans === 1 ? 'it' : 'them'}.` })
+      } else {
+        setOutput({ phase: 'idle' })
+        setMoreOpen(false)
+      }
+    } catch (err) {
+      setOutput({ phase: 'message', text: `Couldn't render the annotated pages: ${(err as Error)?.message || 'unknown error'}` })
+    }
+  }
+
+  function downloadAnnotatedPdf(pages: Array<{ jpeg: Uint8Array; widthPt: number; heightPt: number }>): void {
+    const bytes = buildImagePdf(pages)
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${outputFileBase()}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  /**
+   * Print through a hidden IFRAME rather than a popup window.
+   *
+   * exportPdf.ts opens a tab because it hands over a whole styled document; here the payload is a
+   * list of images, and an iframe cannot be eaten by a popup blocker — which matters because the
+   * render takes seconds, so the open could not sit inside the click's user gesture anyway, and
+   * that is exactly the condition under which blockers refuse. The browser's own "Save as PDF" is
+   * available from the dialog this opens, so Print covers that route too.
+   */
+  function printAnnotatedPdf(pages: Array<{ jpeg: Uint8Array; widthPt: number; heightPt: number }>): void {
+    const urls = pages.map(p => URL.createObjectURL(new Blob([p.jpeg as BlobPart], { type: 'image/jpeg' })))
+    const html = buildPrintHtml(
+      pages.map((p, i) => ({ url: urls[i], widthPt: p.widthPt, heightPt: p.heightPt })),
+      outputFileBase(),
+    )
+    const frame = document.createElement('iframe')
+    frame.setAttribute('aria-hidden', 'true')
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;opacity:0;border:0;'
+    document.body.appendChild(frame)
+    const idoc = frame.contentDocument
+    const iwin = frame.contentWindow
+    if (!idoc || !iwin) { urls.forEach(URL.revokeObjectURL); frame.remove(); return }
+    let cleaned = false
+    const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      urls.forEach(URL.revokeObjectURL)
+      frame.remove()
+    }
+    idoc.open(); idoc.write(html); idoc.close()
+    // The images MUST be decoded before print() — a print fired at an undecoded <img> prints blank
+    // sheets, and so does a blob: URL revoked too early. Both fail silently, which is why the wait
+    // is on the images themselves rather than on a timer.
+    const imgs = Array.from(idoc.images)
+    void Promise.all(imgs.map(img => img.complete
+      ? Promise.resolve()
+      : new Promise<void>(r => { img.onload = () => r(); img.onerror = () => r() })))
+      .then(() => {
+        iwin.onafterprint = cleanup
+        iwin.focus()
+        iwin.print()
+        // Backstop: several browsers never fire onafterprint. Long, because revoking while the
+        // preview is still open would blank the very pages the reader is looking at.
+        setTimeout(cleanup, 5 * 60 * 1000)
+      })
+  }
+
   // ── Find in PDF ───────────────────────────────────────────────────────────────
   const normText = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
   const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -1954,6 +2117,85 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onClick={() => setCommentMargin(v => { const n = !v; try { localStorage.setItem('inkwave:pdfCommentMargin', n ? '1' : '0') } catch { /* private */ } ; return n })}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
             border: `1px solid ${commentMargin ? INK : '#d6cfe0'}`, background: commentMargin ? `${INK}1f` : '#fff', color: INK }}>◨</button>
+        {/* ⋮ MORE — Export / Print the marked-up PDF (Peter, 2026-08-28: "we need a three dots
+            button with an export and print button"). A MENU, not two more buttons: Peter has asked
+            twice for this row to stay on ONE line, and these are actions reached occasionally, not
+            controls reached while reading. Same hold-palette shape as the tools above it — a fixed
+            backdrop closes it, and `iw-nightable` makes the card theme itself. */}
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <button type="button" title="Export or print the marked-up PDF" aria-haspopup="menu" aria-expanded={moreOpen}
+            data-iw-pdf-more
+            onMouseEnter={() => setHint('export or print this PDF with your annotations on it')}
+            onClick={() => { setMoreOpen(v => !v); setOutput({ phase: 'idle' }) }}
+            style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1,
+              border: `1px solid ${moreOpen ? INK : '#d6cfe0'}`, background: moreOpen ? `${INK}1f` : '#fff', color: INK }}>⋮</button>
+          {moreOpen && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 20 }}
+                onMouseDown={() => { if (output.phase !== 'busy') { setMoreOpen(false); setOutput({ phase: 'idle' }) } }} />
+              <div className="iw-nightable" role="menu" style={{
+                position: 'absolute', bottom: 34, right: 0, zIndex: 21, minWidth: 232, maxWidth: 300,
+                display: 'flex', flexDirection: 'column', gap: 2, padding: 6, borderRadius: 10,
+                background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
+                fontSize: isTouch ? '15px' : '0.82rem', color: '#3f3a48',
+              }}>
+                {output.phase === 'idle' && (
+                  <>
+                    <button type="button" role="menuitem" onClick={() => void beginOutput('export')}
+                      style={MORE_ITEM}>⤓&nbsp;&nbsp;Export marked-up PDF</button>
+                    <button type="button" role="menuitem" onClick={() => void beginOutput('print')}
+                      style={MORE_ITEM}>⎙&nbsp;&nbsp;Print marked-up PDF…</button>
+                    {/* Said here, not discovered later: the marks are drawn onto the pages, so the
+                        output is a picture of them. The browser's own Save-as-PDF from the print
+                        dialog produces the same thing, so this is a property of the feature, not of
+                        our writer. */}
+                    <div style={{ padding: '6px 8px 2px', fontSize: '0.92em', lineHeight: 1.4, color: 'var(--iw-pill-fg, #78716c)' }}>
+                      Your highlights and notes are drawn onto the pages, so the text in the copy
+                      isn't selectable.
+                    </div>
+                  </>
+                )}
+                {output.phase === 'confirm' && (
+                  <div style={{ padding: '4px 8px', lineHeight: 1.45 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      This PDF is <strong>{output.pages} pages</strong>. Rendering every page with its
+                      annotations will take a little while and about <strong>{output.mb} MB</strong> of
+                      memory{output.scale < 2 ? ', at a reduced resolution to fit' : ''}.
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" onClick={() => void runOutput(output.what, output.scale)}
+                        style={{ ...MORE_ITEM, background: INK, color: '#fff', textAlign: 'center' }}>
+                        {output.what === 'export' ? 'Export anyway' : 'Print anyway'}
+                      </button>
+                      <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
+                        style={{ ...MORE_ITEM, textAlign: 'center' }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+                {output.phase === 'busy' && (
+                  <div style={{ padding: '4px 8px', lineHeight: 1.45 }}>
+                    <div style={{ marginBottom: 6 }}>
+                      {output.what === 'export' ? 'Building your PDF' : 'Preparing to print'} — page{' '}
+                      <strong>{output.done}</strong> of <strong>{output.total}</strong>
+                    </div>
+                    <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: `${INK}22`, overflow: 'hidden', marginBottom: 8 }}>
+                      <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: INK, transition: 'width 120ms linear' }} />
+                    </div>
+                    <button type="button" onClick={() => { cancelOutputRef.current = true }}
+                      style={{ ...MORE_ITEM, textAlign: 'center' }}>Cancel</button>
+                  </div>
+                )}
+                {output.phase === 'message' && (
+                  <div style={{ padding: '4px 8px', lineHeight: 1.45 }}>
+                    <div style={{ marginBottom: 8 }}>{output.text}</div>
+                    <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
+                      style={{ ...MORE_ITEM, textAlign: 'center' }}>OK</button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
         {/* Grey status hints removed — every control explains itself via its hover tooltip (title). */}
         <span style={{ marginLeft: 'auto' }} />
         {/* TOGGLE GROUP right of the ✕ (Peter, 2026-07-10): ⇄ sync-editor, # don't-add-pages,
