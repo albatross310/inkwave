@@ -353,6 +353,46 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   with no text layer takes the "use the page view" branch unprobed; and multi-column, RTL and
   footnote-heavy real typesetting are not represented — the fixture proves the reflow RULES against
   the thresholds they were written for, not against a publisher's page.
+- **⚠ THE PDF ZOOM SNAP-BACK — THE SHIPPED MECHANISM WAS WRONG, AND THE FIX BUILT ON IT WAS A NO-OP
+  (2026-08-30, `pnpm prove:pdfzoom`).** Peter: *"when you zoom the pdf … it goes towards the cursor
+  then flashes back centrally after you finish zooming."* LIVE, no flag. The 2026-08-28 fix
+  re-asserted the scroll anchor after paint and again next frame, on a **STATED, NOT PROVED** theory
+  that `scrollLeft` was being clipped to a stale scroll range. `scripts/pdfzoom-probe/` reproduced
+  the symptom and **refuted that theory outright**: legacy and "fixed" trajectories were identical to
+  0.1px, and **not one scrollLeft write was ever clamped** — the single write asked for 570.7 into a
+  range of 1778. A fix nobody could distinguish from its own control had been shipped and written up.
+  - **THE REAL CAUSE IS A LAYOUT CONSTANT MULTIPLIED BY THE ZOOM RATIO.** `overscrollPx`
+    (`PDF_OVERSCROLL_PX = 180`, the gutter that lets you scroll past a zoomed page) was keyed to the
+    LIVE `zoom`, so it appeared the instant the first notch crossed 1.02 — **in the middle of the
+    CSS-transform preview, whose entire premise is "scale the CURRENT render, no reflow"**. The pages
+    jumped 180px right under a transform anchored where they used to be. Then the settle's
+    `scrollLeft = (scroll + ax) * ratio - ax` scaled that 180px — and the scroller's own 12px padding
+    — as though they were content. Closed forms, confirmed TO THE PIXEL across 5 notches:
+    in-gesture err = **180 × liveScale** (198.0 / 217.8 / 239.6 / 263.5 / 289.9); settled err =
+    **(12 + 180) − 12 × ratio** = 170.7 predicted vs 170.2 measured. Vertical takes the same
+    disease from the 12px page margins (−9.5px).
+  - **THE ERROR IS INDEPENDENT OF THE CURSOR** — which is exactly why it reads as "flashes back
+    *centrally*" rather than as a cursor-tracking bug, and why staring at the anchor arithmetic
+    (which is correct) never found it.
+  - THE FIX, two halves: the gutter now follows the **RENDERED** zoom (it belongs to the laid-out
+    render, so it changes when the render does), and the anchor is a fraction of the **PAGE'S OWN
+    BOX** applied as a scroll DELTA — paddings, margins, gutters and scroll-origin conventions all
+    cancel because they are already inside `page.left`, so none of them can be mis-scaled. The
+    delta is applied again after React commits the gutter (**probed load-bearing**: the write moves
+    561 → 741, exactly the 180). MEASURED: settled 170.2 → **0.2px**, in-gesture 318.9 → **0.0px**,
+    vertical −9.5 → **−0.5px**.
+  - KEPT by `src/components/pdfZoomAnchor.test.ts` — 11ms, no browser: it models the real horizontal
+    layout (12px pad + 180px gutter + a scaling page) and proves the page-fraction rule invariant
+    while the proportional rule is off by the closed form. Mutation-proved BOTH ways: making the
+    delta forget the layout offset kills 2; **and setting the model's gutter to 0 kills the
+    known-negative**, so the negative discriminates rather than passing by construction.
+  - THE SEAM: `window.__iwPdfZoomAnchor = 'legacy'` restores BOTH halves of the old behaviour so the
+    control reproduces the bug in the SAME build. It exists FOR the probe; if the probe goes, it goes.
+  - **AND THE PROBE'S OWN CONTROL WAS MIS-FRAMED FIRST.** It demanded that the control TRACK the
+    cursor during the gesture — reading "goes towards the cursor" as a report that the preview phase
+    was fine. It is not: the preview is where the 180px drift lives. Scoring a control against what
+    you assumed instead of what it does is how a probe certifies the wrong half.
+
 - **Media import (2026-07-17, `src/media/`, LIVE — no flag).** Peter's "photo import button (which
   has photo or audio or video)" — GENERAL, into any document, and the prerequisite for the music
   lane's "turn this photo into a piece" and §A5's practice recordings. `mediaStore.ts` REUSES

@@ -137,6 +137,46 @@ type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // esli
 // narrow bbox (a lone page number would explode the zoom) return null → caller falls back to
 // page-width fit.
 const TEXT_FIT_INSET = 10 // px of safety either side so glyphs never kiss the panel edge
+
+// The zoom-anchor known-negative. `window.__iwPdfZoomAnchor = 'legacy'` restores the pre-2026-08-30
+// rule — the proportional scroll formula AND the live-zoom overscroll gutter — so
+// scripts/pdfzoom-probe/zoomanchor.prove.mjs can reproduce Peter's snap-back in the SAME build it
+// verifies the fix in. It exists FOR that probe; if the probe goes, this goes.
+const legacyZoomAnchor = (): boolean =>
+  typeof window !== 'undefined' && (window as { __iwPdfZoomAnchor?: string }).__iwPdfZoomAnchor === 'legacy'
+
+// ── ZOOM ANCHORING: the two rules, as pure functions, so the gate can keep them apart ────────────
+// A browser probe proves this once; a unit test keeps it true. See pdfZoomAnchor.test.ts.
+export interface AnchorBox { left: number; top: number; width: number; height: number }
+
+/** Where the cursor sits inside its page, as a fraction of that page's box. */
+export function anchorFraction(page: AnchorBox, cursor: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: page.width ? (cursor.x - page.left) / page.width : 0,
+    y: page.height ? (cursor.y - page.top) / page.height : 0,
+  }
+}
+
+/**
+ * THE SHIPPED RULE. How far to scroll so that the same fraction of the same page is back under the
+ * cursor — a DELTA read off the page's real box after the re-render. Constants in the layout
+ * (scroller padding, page margins, the overscroll gutter) cancel, because they are already inside
+ * `page.left`; nothing here can mis-scale them.
+ */
+export function anchorScrollDelta(page: AnchorBox, f: { x: number; y: number }, cursor: { x: number; y: number }): { dx: number; dy: number } {
+  return {
+    dx: (page.left + f.x * page.width) - cursor.x,
+    dy: (page.top + f.y * page.height) - cursor.y,
+  }
+}
+
+/**
+ * THE PRE-2026-08-30 RULE, kept as the known-negative. "Every offset scales with the zoom" — which
+ * is false for every constant in the layout, and is what put the words in the wrong place.
+ */
+export function proportionalAnchorScroll(scroll: number, axis: number, ratio: number): number {
+  return Math.max(0, (scroll + axis) * ratio - axis)
+}
 async function textExtentsOf(doc: PdfDoc, pageNum: number): Promise<{ x0: number; x1: number; pageW: number } | null> {
   try {
     const page = await doc.getPage(Math.min(Math.max(pageNum, 1), doc.numPages))
@@ -915,7 +955,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         }
 
         await renderPages(fitScaleRef.current * initZoom)
-        renderedZoomRef.current = initZoom // drawn at fit×override → baseline for the CSS-zoom ratio
+        setRendered(initZoom) // drawn at fit×override → baseline for the CSS-zoom ratio
         if (cancelled) return
         setStatus('ready')
         // Direct scroll (placeholder sizes are final, so no reflow to fight). Re-apply a couple of
@@ -1006,6 +1046,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const zoomAnchorRef = useRef<{ x: number; y: number } | null>(null)
   const rotationRef = useRef(0)                                      // 0/90/180/270 — user PDF rotation
   const renderedZoomRef = useRef(1)                                  // the zoom the canvases are drawn at
+  // …and the same value as STATE, because the overscroll gutter is a property of the RENDERED
+  // layout, not of the zoom the writer is still in the middle of choosing. See `overscrollPx`.
+  const [renderedZoom, setRenderedZoom] = useState(1)
+  const setRendered = useCallback((z: number) => { renderedZoomRef.current = z; setRenderedZoom(z) }, [])
   const zoomSettleRef = useRef<ReturnType<typeof setTimeout>>()
   const zoomBaseRef = useRef<{ left: number; top: number } | null>(null) // untransformed viewer origin
   useEffect(() => {
@@ -1033,10 +1077,38 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       const box = el.getBoundingClientRect()
       const ax = a ? a.x - box.left : el.clientWidth / 2
       const ay = a ? a.y - box.top  : el.clientHeight / 2
-      // EXACT anchor: the content pixel under the cursor is (scroll+ax); at the new scale it's
-      // (scroll+ax)*ratio, so scroll so it lands back at ax. This MATCHES the CSS transform above, so
-      // dropping the transform for the sharp render causes no jump (the fraction estimate did — it
-      // drifted a little each time, which read as flicker).
+      const cxNow = box.left + ax, cyNow = box.top + ay // the anchor point, in viewport coords
+      // ⚠ ANCHOR ON THE PAGE, NOT ON A PROPORTION (2026-08-30 — MEASURED, see
+      // scripts/pdfzoom-probe/zoomanchor.prove.mjs). The old rule was
+      //     scrollLeft = (scrollLeft + ax) * ratio - ax
+      // i.e. "every horizontal offset scales with the zoom". It does not. The scroller's own 12px
+      // padding, the pages' 12px inter-page margins and — decisively — the 180px overscroll GUTTER
+      // are CONSTANTS in the layout, and multiplying them by `ratio` is what moved the words.
+      // MEASURED at 1.77× on a 1400px pane: the content under the cursor settled 170.2px away from
+      // it, and `192 - 12 * ratio` predicts that to the pixel (192 = 12px scroller pad + 180px
+      // gutter). It is INDEPENDENT of where the cursor is, which is why it reads as "flashes back
+      // centrally" rather than as a cursor-tracking error.
+      // So: record where the cursor sits INSIDE ITS OWN PAGE as a fraction of that page's box, and
+      // after the re-render put that same fraction back under the cursor as a scroll DELTA. A
+      // fraction of a real element is immune to every constant in the layout — no padding, margin,
+      // gutter or scroll-origin convention enters the arithmetic, so none of them can be
+      // mis-scaled. Applying it as a delta also means an intermediate clamp self-corrects on the
+      // next application rather than being baked in.
+      const pgIdx = (() => {
+        const pages = pagesRef.current
+        if (!pages.length) return -1
+        let best = 0, bestD = Infinity
+        for (let i = 0; i < pages.length; i++) {
+          const r = pages[i].wrapper.getBoundingClientRect()
+          const d = cyNow < r.top ? r.top - cyNow : cyNow > r.bottom ? cyNow - r.bottom : 0
+          if (d < bestD) { bestD = d; best = i }
+          if (d === 0) break
+        }
+        return best
+      })()
+      const pr0 = pgIdx >= 0 ? pagesRef.current[pgIdx].wrapper.getBoundingClientRect() : null
+      const frac = pr0 ? anchorFraction(pr0, { x: cxNow, y: cyNow }) : { x: 0, y: 0 }
+      // The pre-fix rule, kept ONLY as the probe's live known-negative (below).
       const ratio = zoom / renderedZoomRef.current
       const sl = el.scrollLeft, st = el.scrollTop
       // Freeze the current view so the teardown+repaint below never shows a blank (the end-of-zoom
@@ -1046,24 +1118,29 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         viewer.style.transform = ''
         viewer.style.transformOrigin = ''
         zoomBaseRef.current = null
-        renderedZoomRef.current = zoom
-        // ⚠ RE-ASSERT THE ANCHOR AFTER LAYOUT (2026-08-28, Peter: "it goes towards the cursor then
-        // flashes back centrally after you finish zooming"). scrollLeft is CLAMPED BY THE BROWSER to
-        // the scroll range that exists AT THE MOMENT OF THE WRITE — and immediately after
-        // renderPages resolves the new, wider canvases have not necessarily been laid out, so the
-        // write is silently clipped to the OLD maximum and the view lands wherever that put it. The
-        // arithmetic was never wrong; it was applied one layout too early. Setting it again after
-        // the visible pages have painted, and once more on the next frame, costs two assignments
-        // and makes the clamp harmless.
-        // STATED, NOT PROVED: this is the mechanism that fits the symptom, reasoned from the clamp
-        // and the ordering — it has not been reproduced here (it needs a real PDF and a trackpad).
+        setRendered(zoom) // …which is also what brings the overscroll gutter in, one layout from here
+        // LIVE KNOWN-NEGATIVE, added WITH scripts/pdfzoom-probe/zoomanchor.prove.mjs and owned by
+        // it: 'legacy' restores the pre-2026-08-30 rule verbatim, so the probe reproduces the
+        // snap-back in the SAME build it verifies the fix in. If the probe goes, this goes — a live
+        // off-switch with no consumer is not something we keep.
+        const legacy = legacyZoomAnchor()
         const anchor = () => {
-          el.scrollLeft = Math.max(0, (sl + ax) * ratio - ax)
-          el.scrollTop  = Math.max(0, (st + ay) * ratio - ay)
+          if (legacy) {
+            el.scrollLeft = proportionalAnchorScroll(sl, ax, ratio)
+            el.scrollTop  = proportionalAnchorScroll(st, ay, ratio)
+            return
+          }
+          const pg = pagesRef.current[pgIdx]
+          if (!pg) return
+          const d = anchorScrollDelta(pg.wrapper.getBoundingClientRect(), frac, { x: cxNow, y: cyNow })
+          el.scrollLeft += d.dx
+          el.scrollTop  += d.dy
         }
         anchor()
         await renderVisibleNow(renderTokenRef.current) // paint the visible pages BEFORE lifting the freeze
         anchor()
+        // The gutter arrives with React's commit of setRendered above, so the LAST application must
+        // be a frame later — under the freeze, so none of this is ever seen mid-correction.
         requestAnimationFrame(() => { anchor(); requestAnimationFrame(unfreeze) })
       }).catch(unfreeze)
     }, 170)
@@ -1882,7 +1959,15 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     await createHighlight(info, 'highlight', color, link)
   }
 
-  const overscrollPx = zoom > 1.02 ? PDF_OVERSCROLL_PX : 0
+  // ⚠ THE GUTTER FOLLOWS THE *RENDERED* ZOOM, NOT THE LIVE ONE (2026-08-30, and it was half of the
+  // snap-back — see scripts/pdfzoom-probe/zoomanchor.prove.mjs). Keyed to `zoom`, this 180px
+  // paddingLeft appeared the instant the writer's first notch crossed 1.02, i.e. IN THE MIDDLE of
+  // the CSS-transform preview, whose entire premise is "scale the CURRENT render — no reflow". The
+  // pages jumped 180px right under a transform anchored to where they used to be, so the content
+  // under the cursor slid away by exactly 180 × the live scale (MEASURED: 198.0 at 1.1×, 289.9 at
+  // 1.61×, 318.9 at 1.77× — 180×ratio to the pixel). The gutter belongs to the laid-out render, so
+  // it changes when the render does; `legacy` restores the old keying as the probe's control.
+  const overscrollPx = (legacyZoomAnchor() ? zoom : renderedZoom) > 1.02 ? PDF_OVERSCROLL_PX : 0
   const commentMarginPx = commentMargin
     ? Math.round(Math.min(320, Math.max(120, (scrollRef.current?.clientWidth ?? 800) * 0.26)))
     : 0
@@ -2068,7 +2153,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               const vp = (await doc.getPage(1)).getViewport({ scale: 1, rotation: next })
               fitScaleRef.current = Math.max(ZOOM_MIN, Math.min(3, containerW / vp.width))
             }
-            renderedZoomRef.current = zoom
+            setRendered(zoom)
             void renderPages(fitScaleRef.current * zoom)
           }}
           style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
@@ -2090,7 +2175,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current, commentMarginRef.current)
             setZoom(1)
             fitScaleRef.current = fit
-            renderedZoomRef.current = 1
+            setRendered(1)
             void renderPages(fit)
             el.scrollLeft = textFitX0Ref.current != null
               ? Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
