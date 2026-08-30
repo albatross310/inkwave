@@ -7,7 +7,8 @@
 // The folder-mirror to a writer-granted directory arrives in M4.
 
 import { v4 as uuidv4 } from 'uuid'
-import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt, TiptapJSON } from '../types/document'
+import type { InkwaveDocument, Snapshot, SnapshotMeta, SignedReceipt } from '../types/document'
+import { countWords } from './countWords'
 import { contentHash, bundleHash, bibliographyHash, emailHeadersHash, musicAttachmentsHash } from './hash'
 import { normaliseHeaders } from '../email/headers'
 import { stampBundle, upgradeProof } from './ots'
@@ -427,19 +428,10 @@ export function groupByVersion<T extends Pick<Snapshot, 'trigger'>>(snapshots: T
   return groups
 }
 
-/** Count content words in TipTap JSON (whitespace-delimited runs of letters/digits). */
-export function countWords(contentJson: TiptapJSON): number {
-  let text = ''
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return
-    const n = node as { text?: string; content?: unknown[] }
-    if (typeof n.text === 'string') text += n.text + ' '
-    if (Array.isArray(n.content)) n.content.forEach(walk)
-  }
-  walk(contentJson)
-  const m = text.trim().match(/[\p{L}\p{N}]+/gu)
-  return m ? m.length : 0
-}
+// The word notion now lives in `./countWords` (a leaf that imports nothing — see its header for why
+// `bundle.ts` could not simply import it from here). Imported for local use AND re-exported, so the
+// four existing callers keep importing `countWords` from this module exactly as before.
+export { countWords }
 
 /**
  * Take a snapshot IF the content has changed since the last one. Returns the new Snapshot, or null
