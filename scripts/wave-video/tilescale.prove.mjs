@@ -41,14 +41,14 @@
 // Usage: node scripts/wave-video/tilescale.prove.mjs [--port 4325] [--width 1280] [--height 800]
 //                                                    [--mode cover|crop]
 import { webkit } from '@playwright/test'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const port = Number(args[args.indexOf('--port') + 1]) || 4325
 const W = Number(args[args.indexOf('--width') + 1]) || 1280
 const H = Number(args[args.indexOf('--height') + 1]) || 800
 const MODE = args.indexOf('--mode') >= 0 ? args[args.indexOf('--mode') + 1] : 'crop'
-const BASE = `http://127.0.0.1:${port}`
-
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 // The desk clip's capture geometry (generate.mjs LADDER) — its DESIGN CSS box.
 // The desk rung's DESIGN CSS BOX — must mirror RUNGS in src/editor/waveVideo.ts (`desk`).
 // Was 1280x800 when this probe was written against the cover-fit ladder; the crop ladder raised it

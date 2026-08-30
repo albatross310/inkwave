@@ -47,6 +47,7 @@ const phone = await breaksOn(
 )
 
 let fail = 0
+let voided = 0
 // The contexts must actually DIFFER, or "identical breaks" is a tautology.
 if (!phone.env.coarse) { console.log('\nINCONCLUSIVE ⚠ — phone context did not register as coarse-pointer; phoneLike() never engaged.'); fail++ }
 if (desktop.env.coarse) { console.log('\nINCONCLUSIVE ⚠ — desktop context registered as coarse-pointer.'); fail++ }
@@ -55,8 +56,32 @@ if (!desktop.breaks.length) { console.log('\nINCONCLUSIVE ⚠ — no breaks meas
 const same = desktop.breaks.length === phone.breaks.length && desktop.breaks.every((v, i) => v === phone.breaks[i])
 console.log(`\ndesktop: ${desktop.breaks.join(', ')}`)
 console.log(`phone  : ${phone.breaks.join(', ')}`)
-if (!same) { console.log('\nCROSS-DEVICE DRIFT ✗ — canonical pagination is BROKEN: pages differ per device.'); fail++ }
-else console.log('\nCROSS-DEVICE IDENTICAL ✓ — same words on the same page on both.')
+
+// ⚠ THE TWO LEGS ARE NO LONGER COMPARABLE, AND THIS PROBE SAID "canonical pagination is BROKEN"
+// ABOUT A DELIBERATE CHANGE (2026-08-30).
+//
+// `8f5ae9d` ("page breaks no longer cut a line in half at any zoom") added `shouldSnapToBlock`,
+// which fires when `!liveIsCanonical`. `canonicalIsLive()` returns FALSE for `phoneLike()`, and
+// `phoneLike` is exactly the `(pointer: coarse) and (hover: none)` query this probe's own guard
+// above asserts the phone leg matches. So the phone leg now snaps straddling blocks to their
+// boundary and the desktop leg does not — the legs differ by DESIGN, on any document with a
+// straddling block, and this fixture has several.
+//
+// The old message was the worst possible one: it named the app's load-bearing invariant and
+// declared it broken, in a probe nobody could run until today. That is the failure mode this whole
+// audit exists to stop — an instrument that trains the reader to distrust it.
+//
+// VOID, not FAIL: the comparison is not wrong, it is unavailable. Restoring it means putting the
+// two legs on the same footing (force the desktop leg non-canonical too, or compare snap-adjusted
+// breaks) — a real piece of work, and someone should do it deliberately rather than be told
+// pagination is broken.
+if (!same) {
+  console.log('\n⊘ VOID — the desktop and phone legs are not comparable since `8f5ae9d`.')
+  console.log('  The phone leg is non-canonical by definition (phoneLike ⇒ !canonicalIsLive), so it')
+  console.log('  applies shouldSnapToBlock and the desktop leg does not. This is NOT cross-device drift;')
+  console.log('  it is two different break rules. Put the legs on equal footing before reading a verdict.')
+  voided++
+} else console.log('\nCROSS-DEVICE IDENTICAL ✓ — same words on the same page on both.')
 // The mid-line verdict counts ONLY where the RENDERING is canonical. The phone renders at 22.5px in
 // a ~350px column — a different reflow — so canonical break positions are not expected to coincide
 // with the phone's own line starts. That is canonical pagination working (identical breaks above),
@@ -68,4 +93,5 @@ console.log(`  phone: midline=${phone.midline} NOT APPLICABLE — rendering is n
 console.log('         canonical breaks land wherever the phone\'s own ×1.25 reflow puts them, BY DESIGN.')
 
 await b.close()
-process.exit(fail ? 1 : 0)
+console.log(voided && !fail ? '\nVOID — a precondition moved; this run proves nothing about cross-device breaks.' : '')
+process.exit(fail ? 1 : voided ? 2 : 0)

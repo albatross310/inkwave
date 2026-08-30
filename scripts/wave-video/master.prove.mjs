@@ -19,12 +19,12 @@
 //
 // Usage: node scripts/wave-video/master.prove.mjs [--port 4321] [--expect-broken]
 import { webkit } from '@playwright/test'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const expectBroken = args.includes('--expect-broken')
 const port = Number(args[args.indexOf('--port') + 1]) || 4321
-const BASE = `http://127.0.0.1:${port}`
-
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const b = await webkit.launch()
 const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } }) // desk rung, like Peter
 await ctx.addInitScript(() => { try { localStorage.setItem('inkwave:waveVideo', 'debug') } catch { /* private */ } })

@@ -17,13 +17,13 @@
 //
 // Usage: node scripts/wave-video/reveal.prove.mjs [--expect-broken] [--port 4311] [--slow-video MS]
 import { webkit } from '@playwright/test'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const expectBroken = args.includes('--expect-broken')
 const port = Number(args[args.indexOf('--port') + 1]) || 4311
 const slowVideo = args.includes('--slow-video') ? Number(args[args.indexOf('--slow-video') + 1]) : 0
-const BASE = `http://127.0.0.1:${port}`
-
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const b = await webkit.launch()
 const ctx = await b.newContext({
   viewport: { width: 375, height: 667 }, // iPhone 8
