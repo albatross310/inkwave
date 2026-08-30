@@ -28,6 +28,18 @@ export const PHONE_TOP_H =
 export const WIDE_QUERY = '(min-width: 1024px)'
 
 /**
+ * Wide enough for the reader's 220px section COLUMN. Tailwind's `md`, but stated once here because
+ * it now has TWO consumers: the column itself, and the tap-to-open section list that stands in for
+ * it below this width. It was a bare `hidden md:flex` and the fallback keyed off `isPhone`
+ * (pointer: coarse) — two rules that nearly agree and disagree exactly in the gap that matters, a
+ * narrow DESKTOP window, where the column is hidden and the device is not a phone, so there was no
+ * route to the sections at all. Same shape as the footer's `--iw-bar-budget`: one constant, two
+ * consumers, because two constraints computed from nearly-the-same number is what produces a dead
+ * range where neither holds.
+ */
+export const NAV_COLUMN_QUERY = '(min-width: 768px)'
+
+/**
  * PHONE = TOP dock, always (panel above, editor in the bottom half). A non-touch narrow window
  * keeps the bottom dock; only a wide screen honours the stored bottom/side preference.
  */

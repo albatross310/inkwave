@@ -763,9 +763,19 @@ write shim, so metadata can say a PDF exists with no local bytes).
   own documentation). In-browser truth: `pnpm prove:phonetouch`
   (`scripts/textrender-probe/phonetouch.prove.mjs`) — 375×667 `hasTouch`/`isMobile`, computed styles
   and real geometry, with a DESKTOP CONTROL proving the hit region cannot reach a mouse (0 of 16),
-  a collision check proving no region reaches into a neighbour's own button (a flat `max(100%,80px)`
-  fires it on 24 + 22 pairs; a flat 44px does NOT — it only reaches the neighbour's EDGE, which is
-  why the first negative proved nothing), and VOID guards throughout.
+  a collision check proving no region reaches into a neighbour's own button, and VOID guards
+  throughout.
+  · **⚠ CORRECTED 2026-08-31 — A FLAT 44px WIDTH IS NOT SAFE, AND THIS FILE SAID IT WAS.** The line
+    here read "a flat `max(100%,80px)` fires it on 24 + 22 pairs; a flat 44px does NOT — it only
+    reaches the neighbour's EDGE". MEASURED in the same build by shipping it: `max(calc(100% +
+    var(--iw-tap-x)), 44px)` takes every width residual to **0** and fires the collision check on
+    **59 pairs** (reader 24 · reader-live 16 · PDF 19). The arithmetic says the same — a 24px
+    control with an 8px gap puts the neighbour's painted box 20px from centre and a 44px region
+    reaches 22px — so the claim was wrong, not merely optimistic. It is exactly the fix that
+    REMOVES tap targets, and a reader trusting that sentence would have shipped it. **The 29-32px
+    horizontal residual therefore stands, and it is now measured rather than assumed: it cannot be
+    closed without reflowing the rows**, which is Peter's call (he asked the PDF toolbar down to
+    ONE row).
   **THREE PROBE ARTEFACTS to know before writing another:** a naive overflow walk accused the reader
   of a 24px overflow that was KaTeX's 1px-clipped MathML (`getBoundingClientRect` answers where a box
   WOULD be — intersect with every clipping ancestor); pressing **Escape to dismiss a palette CLOSES

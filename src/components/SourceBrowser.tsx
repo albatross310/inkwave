@@ -41,7 +41,7 @@ import type { LocatorKind } from '../citations/locator'
 import {
   applyDockRoom, dockHandlePos, dockPanelPos, dockResize, dockRoom, NO_DOCK_ROOM,
   readStoredDockSide, readStoredOrientation, resolveOrientation, writeStoredDockSide,
-  writeStoredOrientation, WIDE_QUERY, type DockOrientation,
+  writeStoredOrientation, WIDE_QUERY, NAV_COLUMN_QUERY, type DockOrientation,
 } from './dockLayout'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { tabDocId } from '../storage/tabDoc'
@@ -602,6 +602,21 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }, [])
   const isPhone = isTouchDevice()
   const orientation: DockOrientation = resolveOrientation(isPhone, isWide, storedOrient)
+
+  // Is there room for the 220px section COLUMN? Evaluated in JS rather than left as `hidden md:flex`
+  // so the same answer drives the column and the tap-to-open list that replaces it — see
+  // NAV_COLUMN_QUERY. Same guarded-init + change-listener shape as `isWide` above.
+  const [navRoom, setNavRoom] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(NAV_COLUMN_QUERY).matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(NAV_COLUMN_QUERY)
+    const h = (e: MediaQueryListEvent) => setNavRoom(e.matches)
+    mq.addEventListener('change', h)
+    return () => mq.removeEventListener('change', h)
+  }, [])
+  // The section list as a drop-up, for every width the column cannot appear at.
+  const [sectionMenu, setSectionMenu] = useState(false)
 
   // The section list and the privacy footer are both dismissible, and both remember PER DOCUMENT
   // (Peter, 2026-08-28: "You need an x to get rid of this — and save per document", "a button to
@@ -1417,12 +1432,78 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           {btn(framed ? '⌂' : '⛶',
             framed ? `Reader view — shows ${hostOf(here)}${new URL(here).pathname.length > 1 ? new URL(here).pathname : ''} (the page this panel loaded; links you followed inside the live page aren’t visible to Inkwave)` : 'Live page — the real site, with its own navigation',
             () => setFramed((f) => !f), framed)}
+          {/* ☰ — THE SECTION LIST, FOR EVERY WIDTH THE 220px COLUMN CANNOT APPEAR AT.
+              Hiding a 220px column inside a 375px panel is right; leaving no route between sections
+              was the gap. And the ☰ that re-opens the column lives INSIDE the column, so a reader
+              who had it open had no control either — the feature was unreachable in both states.
+
+              IN THE HEADER, and that is Peter's own placement for this control: "move this little
+              bar thing up to the top and make it not a whole button just a little button at the
+              top". It is also the only row with room. The obvious alternative was to make the
+              existing `§ n / x` pill its own trigger — no new chrome, and the label already names
+              the current section — but `prove:phonetouch` refused it twice: the panel is 334px tall
+              with a WRAPPED two-row markup bar under that corner, so a 44px hit region on a 26px
+              pill reached into the line-spacing select, and raising the pill put its painted box
+              there instead. An expansion that overlaps a neighbour TAKES a tap target away, because
+              the later sibling wins. This row already carries `--iw-tap-x: 8px` and four 24×24
+              controls that pass, so the budget is known rather than hoped for.
+
+              Gated on `!navRoom`, NOT on `isPhone`: a narrow DESKTOP window has no column either,
+              and keying the two off different rules is what left the hole in the first place. */}
+          {!framed && headings.length > 1 && !navRoom &&
+            btn('☰', 'Sections', () => setSectionMenu(v => !v), sectionMenu)}
           {btn('▤', `Dock: ${orientation === 'side' ? (dockSide === 'left' ? 'left' : 'right') : 'below'} — click to move`, cycleDock, false)}
           {btn('↗', 'Open in a browser tab', () => window.open(here, '_blank', 'noopener,noreferrer'), false)}
           {btn('✕', 'Close (Esc)', onClose, false)}
         </div>
 
         <div className="flex flex-1 min-h-0" style={{ position: 'relative' }}>
+          {/* The section list itself. A drop-DOWN, because its trigger is in the header — the
+              markup bar's palettes drop UP from theirs for the same reason. */}
+          {sectionMenu && !framed && !navRoom && headings.length > 1 && (
+            <>
+              {/* onPointerDown, never onMouseDown: iOS withholds the synthetic mouse event whenever
+                  the gesture is treated as a scroll or a touchmove was preventDefaulted — which
+                  this panel's own `.iw-touch-guard` handler does — so a mousedown-only scrim is a
+                  dismiss that sometimes is not there. Escape is deliberately NOT bound: it closes
+                  the whole reader, and stealing it here would take that away. */}
+              <div style={{ position: 'fixed', inset: 0, zIndex: 20 }}
+                onPointerDown={() => setSectionMenu(false)} />
+              <div className="iw-nightable" role="menu" aria-label="Sections"
+                style={{ position: 'absolute', top: 6, right: 6, zIndex: 21,
+                  display: 'flex', flexDirection: 'column',
+                  minWidth: 200, maxWidth: 'min(320px, calc(100vw - 24px))',
+                  // All the height the pane actually has, capped so it never becomes a wall on a
+                  // narrow desktop window. RESIDUAL, STATED: the phone dock is 50dvh and this row
+                  // is what is left after the header, the wrapped markup bar and the notice — about
+                  // 113px, so roughly two and a half rows show and the rest scrolls.
+                  // `overscrollBehavior: contain` keeps that scroll off the article behind it.
+                  maxHeight: 'min(100%, 320px)', overflowY: 'auto', overscrollBehavior: 'contain',
+                  padding: 4, borderRadius: 10, background: CTL, border: `1px solid ${EDGE}`,
+                  boxShadow: '0 4px 16px var(--iw-reader-shadow, rgba(0,0,0,0.16))', fontSize: '13px' }}>
+                {headings.map((h, hi) => (
+                  <button key={h.id} type="button" role="menuitem"
+                    onClick={() => {
+                      document.getElementById(`iw-rd-${h.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      setSectionMenu(false)
+                    }}
+                    /* ≥44px FOR REAL, never via `.iw-tap`: index.css exempts `[role="menu"] button`
+                       from the hit-region pseudo precisely because in a column those regions reach
+                       into the rows above and below, and each item would eat its neighbour's
+                       target. A vertical menu grows its rows instead. */
+                    style={{ display: 'flex', alignItems: 'center', width: '100%', minHeight: 44,
+                      textAlign: 'left', border: 'none', cursor: 'pointer', borderRadius: 6,
+                      padding: '6px 10px',
+                      paddingLeft: 10 + Math.min(3, Math.max(0, h.level - 1)) * 10,
+                      color: hi === sectionNow ? INKP : MUTED_CHROME,
+                      fontWeight: hi === sectionNow ? 600 : 400,
+                      background: hi === sectionNow ? `${INK}12` : 'transparent' }}>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">{h.text}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {/* Section list — the fastest way to cite a section is to not have to find it first. */}
           {/* ☰ SITS OVER THE NAVIGATOR (Peter, 2026-08-28: "this button needs to be over the
               navigator"), not adrift in the header — a control that hides a column belongs at the
@@ -1446,7 +1527,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               style={{ position: 'absolute', right: 10, bottom: 10, zIndex: 5,
                 border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '13px',
                 cursor: pdfSave.busy ? 'default' : 'pointer', opacity: pdfSave.busy ? 0.7 : 1,
-                boxShadow: '0 1px 6px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '4px' }}>
+                boxShadow: '0 1px 6px var(--iw-reader-shadow, rgba(0,0,0,0.16))', ['--iw-tap-x' as string]: '4px' }}>
               {pdfSave.busy ? 'Downloading…' : '⤓ Save to my sources'}
             </button>
           )}
@@ -1457,14 +1538,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               style={{ position: 'absolute', right: 10, bottom: 10, zIndex: 5, maxWidth: 320,
                 borderRadius: 10, border: `1px solid ${EDGE}`, background: CTL, padding: '8px 10px',
                 fontSize: '12.5px', lineHeight: 1.5, textAlign: 'left',
-                color: pdfSave.result.ok ? 'var(--iw-verified, #15803d)' : INKP,
-                boxShadow: '0 1px 6px rgba(0,0,0,0.16)' }}>
+                color: pdfSave.result.ok ? 'var(--iw-reader-ok, #15803d)' : INKP,
+                boxShadow: '0 1px 6px var(--iw-reader-shadow, rgba(0,0,0,0.16))' }}>
               {pdfSave.result.ok
                 ? `Saved as “${pdfSave.result.citekey}” — it needs its author and year.`
                 : pdfSave.result.reason}
             </div>
           )}
-          {!framed && headings.length > 1 && !showNav && (
+          {!framed && headings.length > 1 && !showNav && navRoom && (
             <button type="button" title="Show the section list" onClick={toggleNav} className="iw-tap"
               style={{ position: 'absolute', left: 6, top: 6, zIndex: 5, width: 24, height: 24,
                 borderRadius: 6, border: `1px solid ${EDGE}`,
@@ -1472,8 +1553,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }}>☰</button>
           )}
-          {!framed && showNav && headings.length > 1 && (
-            <nav className="hidden md:flex flex-col overflow-hidden border-r border-stone-200" style={{ width: 220, fontSize: '12px' }}>
+          {!framed && showNav && navRoom && headings.length > 1 && (
+            <nav className="flex flex-col overflow-hidden border-r border-stone-200" style={{ width: 220, fontSize: '12px' }}>
               {/* ☰ at the RIGHT END of its own row (Peter, 2026-08-28: "put this button over to the
                   right of the column … the cell that it's in"). It closes the column leftward, so
                   it belongs on the edge it collapses toward — and it sits where the re-open tab
@@ -2018,7 +2099,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                         panel's own `.iw-touch-guard` handler (TiptapEditor) does. So the dismiss
                         scrim was listening for an event a finger is not guaranteed to send. */}
                     <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onPointerDown={() => setPaletteOpen(null)} />
-                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: CTL, border: `1px solid ${EDGE}`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '6px' }}>
+                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: CTL, border: `1px solid ${EDGE}`, boxShadow: '0 4px 16px var(--iw-reader-shadow, rgba(0,0,0,0.16))', ['--iw-tap-x' as string]: '6px' }}>
                       {t.palette.map((c) => (
                         <button key={c} type="button" className="iw-tap" onMouseDown={(ev) => ev.preventDefault()}
                           // EACH TOOL REMEMBERS ITS OWN COLOUR. One shared "current colour" would

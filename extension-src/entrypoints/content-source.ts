@@ -4,6 +4,11 @@
 // Uses the CSS Custom Highlight API — no DOM mutation. Degrades silently on no-match or API absence.
 
 import { highlightQuote, clearHighlight } from '../utils/textHighlight'
+// Pure field helpers live in src/ so `pnpm test` can reach them (this directory is outside it).
+import {
+  normNode, normText, authorCandidates, relativeDateCandidates, dateSearchCandidates,
+  escAttr,
+} from '@inkwave/reader/sourceFields'
 import type { CaptureMsg } from './background'
 
 type FieldEntry = { value?: string; quote?: string | null }
@@ -50,25 +55,6 @@ export default defineContentScript({
   },
 })
 
-// normNode: normalises a single text node without trimming — preserving the trailing
-// space in "Tyler " so cross-element names like "Tyler Graham" are found when the
-// first name and surname are in separate inline elements.
-function normNode(s: string): string {
-  return s.normalize('NFC')
-    .replace(/[   ]/g, ' ')
-    .replace(/['']/g, "'")
-    .replace(/[""]/g, '"')
-    .replace(/[–—]/g, '-')
-    .replace(/­/g, '')
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
-  // no .trim() here: trimming strips trailing spaces from nodes, breaking cross-element name matching
-}
-
-// Walk visible text nodes and return true if `needle` is found (normalised).
-// normText: needle normalizer — same as normNode but trims outer whitespace.
-function normText(s: string): string { return normNode(s).trim() }
-
 // existsOnPage: cascade through four sources to handle SPA shadow DOM, lazy content, etc.
 function existsOnPage(needle: string): boolean {
   if (!needle || needle.length < 3) return false
@@ -100,64 +86,6 @@ function existsInVisibleText(needle: string): boolean {
   try { return normNode(document.body.innerText).includes(normed) } catch { return false }
 }
 
-// Multi-author values ("Tyler Graham, Katie Collins" / "Tyler Graham and Katie Collins") rarely
-// appear contiguously in the page — each author sits in its own byline card. Offer the whole value
-// first, then each individual author, so hover can at least snap to the primary author.
-function authorCandidates(value: string): string[] {
-  const parts = value.split(/\s*(?:,|;|&|\band\b)\s*/i).map(s => s.trim()).filter(s => s.length >= 3)
-  return parts.length > 1 ? [value, ...parts] : [value]
-}
-
-// YouTube shows a RELATIVE date ("13 days ago") next to the view count; the absolute date hides
-// behind the "…more" dropdown. Derive the likely relative strings from the ISO date + today so hover
-// can snap to what's actually on screen. ±1 on each unit absorbs YouTube's timestamp-vs-midnight
-// rounding. Video-only (relative forms would false-match elsewhere on ordinary pages).
-function relativeDateCandidates(iso: string): string[] {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!m) return []
-  const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-  const now = new Date()
-  const days = Math.round((now.getTime() - then.getTime()) / 86_400_000)
-  if (!Number.isFinite(days) || days < 0) return []
-  const ago = (n: number, u: string) => `${n} ${u}${n === 1 ? '' : 's'} ago`
-  if (days === 0) return ['today']
-  if (days === 1) return ['yesterday', '1 day ago']
-  const weeks = Math.round(days / 7), months = Math.round(days / 30), years = Math.round(days / 365)
-  // Primary form first, matching YouTube's unit thresholds (days→weeks at 14, →months ~8wk, →years
-  // at a year). Coarse fallbacks next; the raw "N days ago" goes LAST so a comment's day-stamp is the
-  // least-preferred match (comments are full of relative dates; the video's own form is the target).
-  const out: string[] = []
-  if (days <= 13) out.push(ago(days, 'day'))
-  else if (days < 56) out.push(ago(weeks, 'week'))
-  else if (days < 365) out.push(ago(months, 'month'))
-  else out.push(ago(years, 'year'))
-  if (weeks >= 1) out.push(ago(weeks, 'week'))
-  if (months >= 1) out.push(ago(months, 'month'))
-  if (years >= 1) out.push(ago(years, 'year'))
-  out.push(ago(days, 'day'))
-  return [...new Set(out)]
-}
-
-// For date values the AI returns ISO format (2017-08-28) but pages show
-// "August 28, 2017" etc. Try several common renderings before giving up.
-function dateSearchCandidates(value: string): string[] {
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!m) return [value]
-  const [, y, mo, d] = m
-  try {
-    const dt = new Date(Number(y), Number(mo) - 1, Number(d))
-    return [
-      value,
-      dt.toLocaleDateString('en-US', { year: 'numeric', month: 'long',  day: 'numeric' }), // August 28, 2017
-      dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }), // Aug 28, 2017
-      `${Number(d)} ${dt.toLocaleDateString('en-US', { month: 'long' })} ${Number(y)}`,    // 28 August 2017
-      `${Number(d)} ${dt.toLocaleDateString('en-US', { month: 'short' })} ${Number(y)}`,   // 28 Aug 2017
-      `${dt.toLocaleDateString('en-US', { month: 'long' })} ${Number(d)}`,                 // August 28
-      y,                                                                                    // 2017 (year alone)
-    ]
-  } catch { return [value] }
-}
-
 // Count occurrences of `needle` in the visible text (capped). Used to decide whether a value is
 // DISTINCTIVE enough to highlight: a book's press ("University of Wales Press") occurs ~once and is a
 // meaningful target, but a site brand ("CNET") repeats throughout the body — highlighting the first
@@ -173,8 +101,22 @@ function countInVisibleText(needle: string): number {
   } catch { return 0 }
 }
 
+// THE PANEL'S DRAG LISTENERS LIVE ON `document`, SO SOMETHING HAS TO OUTLIVE THE PANEL TO CANCEL
+// THEM. A WeakMap rather than a module-level slot: the panel is the key, so a stale entry cannot
+// abort a NEWER panel's drag, and an entry for a panel nobody holds is collectable on its own.
+const panelDrag = new WeakMap<Element, AbortController>()
+
+/** THE ONE WAY THE CAPTURE PANEL GOES AWAY. Both callers used to `remove()` the element directly
+ *  and only one of them also cancelled the drag. */
+function removeCapturePanel(el: Element | null | undefined): void {
+  if (!el) return
+  panelDrag.get(el)?.abort()
+  panelDrag.delete(el)
+  el.remove()
+}
+
 function showCapturePanel(capture: CaptureMsg) {
-  document.getElementById('inkwave-capture-panel')?.remove()
+  removeCapturePanel(document.getElementById('inkwave-capture-panel'))
 
   const panel = document.createElement('div')
   panel.id = 'inkwave-capture-panel'
@@ -253,10 +195,10 @@ function showCapturePanel(capture: CaptureMsg) {
         <button class="iwcp-close" aria-label="Dismiss">×</button>
       </div>
       <div class="iwcp-type-row">
-        <span class="iwcp-type-badge">${esc(typeLabel)}</span>
+        <span class="iwcp-type-badge">${escAttr(typeLabel)}</span>
         ${isLowConf ? '<span class="iwcp-conf-warn">Low confidence</span>' : ''}
       </div>
-      <span class="iwcp-title">${esc(capture.title ?? 'Citation captured')}</span>
+      <span class="iwcp-title">${escAttr(capture.title ?? 'Citation captured')}</span>
     </div>
     <ul class="iwcp-fields">
       ${fields.map(([key, f]) => {
@@ -269,16 +211,16 @@ function showCapturePanel(capture: CaptureMsg) {
         const symbol = aiVerified ? '✓' : autoFound ? '◎' : '○'
         const role   = (aiVerified || autoFound) ? 'button' : 'listitem'
         return `<li class="iwcp-field${cls}"
-                    data-quote="${esc(quoteAttr)}"
-                    data-field-key="${esc(key)}"
-                    data-value="${esc(f.value ?? '')}"
+                    data-quote="${escAttr(quoteAttr)}"
+                    data-field-key="${escAttr(key)}"
+                    data-value="${escAttr(f.value ?? '')}"
                     tabindex="${(aiVerified || autoFound) ? '0' : '-1'}"
                     role="${(aiVerified || autoFound) ? 'button' : 'listitem'}"
-                    aria-label="${esc(label)}: ${esc(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
+                    aria-label="${escAttr(label)}: ${escAttr(f.value ?? '')}${autoFound ? ' — click to confirm' : aiVerified ? ' — hover to verify' : ''}">
           <span class="iwcp-check">${symbol}</span>
-          <span class="iwcp-label">${esc(label)}</span>
-          <span class="iwcp-value">${esc(f.value ?? '')}</span>
-          <button class="iwcp-edit" aria-label="Edit ${esc(label)}" title="Edit"
+          <span class="iwcp-label">${escAttr(label)}</span>
+          <span class="iwcp-value">${escAttr(f.value ?? '')}</span>
+          <button class="iwcp-edit" aria-label="Edit ${escAttr(label)}" title="Edit"
                   style="all:unset;box-sizing:border-box;margin-left:auto;padding:0 4px;cursor:pointer;font-size:11px;opacity:0.4;line-height:1;flex-shrink:0">✎</button>
         </li>`
       }).join('')}
@@ -286,13 +228,13 @@ function showCapturePanel(capture: CaptureMsg) {
     ${missing.length > 0 ? `
     <div class="iwcp-warnings">
       <span class="iwcp-warn-icon">⚠</span>
-      <span>Missing for this type: ${esc(missing.join(', '))}</span>
+      <span>Missing for this type: ${escAttr(missing.join(', '))}</span>
     </div>
     <form class="iwcp-fill" id="iwcp-fill">
       ${(capture.missingRequired ?? []).map(key => `
         <label class="iwcp-fill-row">
-          <span class="iwcp-fill-label">${esc(FIELD_LABELS[key] ?? key)}</span>
-          <input class="iwcp-fill-input" name="${esc(key)}" placeholder="${esc(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off"
+          <span class="iwcp-fill-label">${escAttr(FIELD_LABELS[key] ?? key)}</span>
+          <input class="iwcp-fill-input" name="${escAttr(key)}" placeholder="${escAttr(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off"
             style="all:unset;box-sizing:border-box;display:block;width:100%;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(92,45,138,0.25);border-radius:5px;padding:3px 7px;background:#fff;color:#3a3a3a" />
         </label>`).join('')}
       <div class="iwcp-fill-footer">
@@ -387,7 +329,7 @@ function showCapturePanel(capture: CaptureMsg) {
   })
 
   panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
-    panel.remove()
+    removeCapturePanel(panel)
     clearHighlight()
   })
 
@@ -429,7 +371,7 @@ function showCapturePanel(capture: CaptureMsg) {
           li.setAttribute('data-quote', range ? value : '')
           li.setAttribute('tabindex', range ? '0' : '-1')
           li.setAttribute('role', range ? 'button' : 'listitem')
-          li.innerHTML = `<span class="iwcp-check">${symbol}</span><span class="iwcp-label">${esc(label)}</span><span class="iwcp-value">${esc(value)}</span>`
+          li.innerHTML = `<span class="iwcp-check">${symbol}</span><span class="iwcp-label">${escAttr(label)}</span><span class="iwcp-value">${escAttr(value)}</span>`
           if (range) {
             li.addEventListener('mouseenter', () => highlightQuote(value))
             li.addEventListener('focus',      () => highlightQuote(value))
@@ -470,11 +412,26 @@ function showCapturePanel(capture: CaptureMsg) {
   // distinctive (handled in the verify loop above), so no special wiring here.
 
   // Draggable panel: mousedown on header drags by top/left.
+  //
+  // ⚠ THE DRAG'S LISTENERS ARE ON `document`, SO THEIR LIFETIME IS THE PANEL'S — AND IT WAS NOT.
+  // They were removed only by a `{ once: true }` handler on the close button, which is ONE of the
+  // ways this panel goes away. The other is the `remove()` at the top of showCapturePanel: every
+  // re-show (a second capture, or the tabs.onUpdated re-injection on reload) dropped the old panel
+  // without ever clicking its close button, leaking a mousemove and a mouseup that hold the whole
+  // detached panel alive. A content script runs on `<all_urls>` and lives as long as the tab, so
+  // the leak accumulates for the rest of the writer's session on that page.
+  //
+  // Removal is a funnel now (`removeCapturePanel`), which is the fix; the `isConnected` re-check in
+  // `onMove` is the backstop for any future path that bypasses it, because a convention two call
+  // sites have to remember is exactly what failed here.
   const panelHeader = panel.querySelector<HTMLElement>('.iwcp-header')
   if (panelHeader) {
     panelHeader.style.cursor = 'move'
+    const drag = new AbortController()
+    panelDrag.set(panel, drag)
     let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0
     const onMove = (e: MouseEvent) => {
+      if (!panel.isConnected) { drag.abort(); return }
       if (!dragging) return
       panel.style.left = `${origLeft + e.clientX - startX}px`
       panel.style.top  = `${origTop  + e.clientY - startY}px`
@@ -490,19 +447,11 @@ function showCapturePanel(capture: CaptureMsg) {
       dragging = true
       e.preventDefault()
     })
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    panel.querySelector('.iwcp-close')?.addEventListener('click', () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }, { once: true })
+    document.addEventListener('mousemove', onMove, { signal: drag.signal })
+    document.addEventListener('mouseup', onUp, { signal: drag.signal })
   }
 
   document.body.appendChild(panel)
-}
-
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 function injectStyles(): void {

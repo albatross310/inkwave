@@ -371,6 +371,57 @@ try {
     check(!stillOpen, 'reader: a TOUCH outside dismisses the palette (pointerdown, not mousedown-only)')
   }
 
+  // ── THE SECTION LIST, WHICH ON A PHONE IS THE ONLY ROUTE BETWEEN SECTIONS ──────────────────────
+  // The 220px column is `navRoom`-gated, so at 375px it cannot render — and the ☰ that re-opens it
+  // used to live INSIDE it, which meant a reader with the column open had no control either. The
+  // header ☰ replaces both. This drives it rather than trusting it: a menu whose rows are not
+  // thumb-sized, or which hangs off a 375px screen, is the same class of gap wearing a fix's
+  // clothes.
+  {
+    const opened = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-probe-reader] button')].find((x) => (x.title || '') === 'Sections')
+      if (!b) return { trigger: false }
+      b.click()
+      return { trigger: true }
+    })
+    check(opened.trigger, 'reader: the ☰ Sections trigger exists at 375px (the column cannot)')
+    await page.waitForTimeout(250)
+    const menu = await page.evaluate(() => {
+      const m = document.querySelector('[data-probe-reader] [role="menu"][aria-label="Sections"]')
+      if (!m) return null
+      const r = m.getBoundingClientRect()
+      const items = [...m.querySelectorAll('[role="menuitem"]')].map((i) => {
+        const ir = i.getBoundingClientRect()
+        return { h: Math.round(ir.height * 10) / 10, w: Math.round(ir.width * 10) / 10, text: (i.textContent || '').trim().slice(0, 24) }
+      })
+      return { x: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height), items, vw: innerWidth }
+    })
+    // VOID rather than pass: every assertion below is "for each row", vacuously true of no menu.
+    if (!menu) { note('reader ☰: VOID — the menu did not open, nothing below is readable') }
+    else {
+      note(`reader ☰: menu ${menu.right - menu.x}×${menu.h} at x=${menu.x} · ${menu.items.length} section(s)`)
+      check(menu.items.length > 1, 'reader ☰: the menu lists the sections', `${menu.items.length} row(s)`)
+      check(menu.x >= 0 && menu.right <= menu.vw,
+        'reader ☰: the menu fits the phone width', `x=${menu.x} right=${menu.right} vw=${menu.vw}`)
+      // Its rows must be tall FOR REAL: `[role="menu"] button::after` is exempt from the hit-region
+      // pseudo (in a column those regions eat their neighbours), so nothing widens these for us.
+      const short = menu.items.filter((i) => i.h < TAP_MIN)
+      check(short.length === 0, `reader ☰: every section row is ≥ ${TAP_MIN}px tall (no pseudo can help a menu)`,
+        short.map((i) => `${i.text} ${i.w}×${i.h}`).join(' | ') || `all ${menu.items.length} ok`)
+      // And it dismisses on a TOUCH, not on a mouse event a finger may never produce.
+      await page.evaluate(() => {
+        const scrim = [...document.querySelectorAll('[data-probe-reader] div')].find((d) => {
+          const s = d.getAttribute('style') || ''
+          return /position: fixed/.test(s) && /inset: 0/.test(s)
+        })
+        scrim?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }))
+      })
+      await page.waitForTimeout(250)
+      const gone = await page.evaluate(() => !document.querySelector('[data-probe-reader] [role="menu"][aria-label="Sections"]'))
+      check(gone, 'reader ☰: a TOUCH outside dismisses it (pointerdown, not mousedown-only)')
+    }
+  }
+
   // ── THE SELECTION POPOVER, at phone width ──────────────────────────────────────────────────────
   // ⚠ DISARM FIRST. The palette test above TAPPED the highlight tool, which ARMS it — and an armed
   // highlight/note tool deliberately MARKS a selection instead of raising the popover

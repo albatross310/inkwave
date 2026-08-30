@@ -61,6 +61,7 @@ const ctx = await b.newContext({ viewport: { width: 1400, height: 900 }, service
 const page = await ctx.newPage()
 
 let fail = 0
+let voided = 0   // preconditions that did not hold — see the verdict block
 const check = (ok, msg, extra = '') => { console.log(`${ok ? '  ✓' : '  ✗'} ${msg}${extra ? ' — ' + extra : ''}`); if (!ok) fail++ }
 
 try {
@@ -68,7 +69,15 @@ try {
   await page.goto(base + '/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => { try { localStorage.setItem('inkwave:theme', 'night') } catch {} })
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForSelector(EDITOR, { timeout: 60000 })
+  // The one precondition everything below rests on. Without the editor there are no panels to
+  // scan, and "0 matches" would mean "nothing was looked at" while reading as "the arms are dead".
+  try {
+    await page.waitForSelector(EDITOR, { timeout: 60000 })
+  } catch {
+    console.log('  ⚠ the editor never mounted — nothing to scan')
+    voided++
+    throw new Error('__void__')
+  }
   await page.waitForTimeout(2000)
   const theme = await page.evaluate(() => document.documentElement.dataset.theme)
   check(theme === 'night', 'night theme is applied to <html>', `data-theme=${theme}`)
@@ -194,9 +203,28 @@ try {
   console.log('\n  coverage: the editor screen with every reachable menu open. /snapshot, /verify and')
   console.log('  the flagged panels are not mounted here — see the note above for the static half.')
 } catch (e) {
-  console.log(`  ✗ ${e.message}\n${e.stack}`)
-  fail++
+  // A voided precondition already reported itself; only real faults count as failures.
+  if (e?.message !== '__void__') { console.log(`  ✗ ${e.message}\n${e.stack}`); fail++ }
 } finally { await b.close(); await stop() }
 
-console.log(fail ? `\nFAIL (${fail})` : '\nPASS')
-process.exitCode = fail ? 1 : 0
+// ⚠ A THIRD ANSWER: "I CANNOT TELL". This probe's whole question is whether a rescue arm still
+// SELECTS anything, and it can only ask that of surfaces it managed to mount. If the editor never
+// came up — a build that did not serve, a panel that moved — then "0 matches" is not evidence the
+// arms are dead; it is evidence nothing was scanned. Reporting that as PASS would be the strongest
+// possible false negative for exactly the claim this probe exists to support.
+//
+// The repo's audit ratchet (src/audit/probesRunnable.test.ts) requires this, and it required it of
+// me: the first cut of this file had only pass/fail and the ratchet said so.
+if (!fail && voided) {
+  // ⚠ THE NEWLINE IS ITS OWN CALL, and that is not style. The audit ratchet greps the SOURCE for
+  // /\bVOID\b/, and in source a template literal's `\n` is the two characters backslash-n — so
+  // `\nVOID` reads as `nVOID` with no word boundary and the guard cannot see it. A probe that
+  // HAS a void path but is counted as mute is the guard failing quietly in the direction of
+  // more debt, which is the shape this file exists to catch.
+  console.log('')
+  console.log(`VOID (${voided}) — a precondition moved; this run proves nothing about the arms.`)
+  process.exitCode = 2
+} else {
+  console.log(fail ? `\nFAIL (${fail})` : '\nPASS')
+  process.exitCode = fail ? 1 : 0
+}

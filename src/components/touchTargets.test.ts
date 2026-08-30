@@ -223,6 +223,43 @@ describe('dismiss scrims listen for the event a finger actually sends', () => {
 })
 
 // ── FLOATING BOXES STAY ON A 375px SCREEN ───────────────────────────────────────────────────────
+// ── THE SECTION LIST IS REACHABLE WHEREVER THE COLUMN IS NOT ────────────────────────────────────
+// The reader's 220px section column is right to hide in a 375px panel. What was wrong is that
+// hiding it left NO route between sections — and the ☰ that re-opens it lives INSIDE the column, so
+// a reader who had it open had no control either. `prove:phonetouch` drives the real menu; this is
+// the cheap half that keeps the two structural facts true between probe runs.
+describe('the reader can always reach its sections', () => {
+  it('ONE query drives both the column and its replacement', () => {
+    // The column was `hidden md:flex` (a CSS breakpoint) while everything else about the phone here
+    // keys off `isPhone` (pointer: coarse). Two rules that nearly agree disagree exactly in the gap
+    // that matters — a narrow DESKTOP window, where the column is hidden and the device is not a
+    // phone — and there the sections were unreachable. Same shape as the footer's --iw-bar-budget:
+    // one constant, two consumers.
+    expect(READER).toContain('NAV_COLUMN_QUERY')
+    expect(read('components/dockLayout.ts')).toContain('export const NAV_COLUMN_QUERY')
+    // And the Tailwind breakpoint must NOT come back as a second, silent copy of that decision.
+    expect(READER, 'the nav column is back on a bare CSS breakpoint').not.toMatch(/hidden md:flex/)
+  })
+
+  it('the trigger is gated on the same room test, not on isPhone', () => {
+    const trigger = READER.match(/\{[^\n]*!navRoom[^\n]*\n?[^\n]*btn\('☰'/)?.[0] ?? ''
+    expect(trigger, 'the ☰ Sections trigger is missing or no longer gated on navRoom').not.toBe('')
+  })
+
+  it('the section menu is a real menu, and its rows are tall FOR REAL', () => {
+    const menu = READER.match(/role="menu" aria-label="Sections"[\s\S]*?\n {14}<\/div>/)?.[0] ?? ''
+    expect(menu, 'the Sections menu was not found — re-aim this guard').not.toBe('')
+    expect(menu).toContain('role="menuitem"')
+    // `.iw-tap` is EXEMPT inside `[role="menu"]` (index.css) because in a column those regions reach
+    // into the rows above and below and each item eats its neighbour's target. So nothing widens
+    // these for us and the row must carry its own height. A row that asked for `iw-tap` instead
+    // would get no region at all and silently be 31px.
+    expect(menu).toMatch(/minHeight:\s*44/)
+    expect(menu, 'a menu row asked for iw-tap, which index.css refuses inside a menu')
+      .not.toMatch(/className="[^"]*iw-tap/)
+  })
+})
+
 describe('a popover centred on your finger cannot hang off the edge', () => {
   it('the reader clamps both of its floating boxes', () => {
     // MEASURED: the composer is ~354px wide and is centred on the touched point, so ANY selection

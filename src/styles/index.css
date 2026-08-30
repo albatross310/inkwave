@@ -1875,6 +1875,10 @@
   --iw-reader-on-mark: #2c2a28; /* ink ON a mark's own fill — highlight, sticky note, textbox */
   --iw-reader-wash: 55%;        /* highlight fill strength in the PDF reader view (.iw-mark-fill) */
   --iw-reader-ok: #15803d;      /* "your connection" — a paper-safe green, NOT --iw-verified */
+  /* A drop shadow on a control floating over reader paper or a framed page. Was written as a bare
+     rgba(0,0,0,0.16) at four sites; black is nearly invisible on a night surface, so night needs a
+     DEEPER one rather than the same value — which is the whole reason a literal cannot serve. */
+  --iw-reader-shadow: rgba(0, 0, 0, 0.16);
   --iw-reader-ink-red: #991b1b;      /* the writer's own coloured text — stored value by day */
   --iw-reader-ink-blue: #1e3a8a;
   --iw-reader-ink-green: #166534;
@@ -1907,6 +1911,7 @@
    Only PdfReaderView had been migrated to --iw-reader-bar; the web reader was left behind. */
 :root { --iw-reader-bar: #faf8fc; --iw-reader-ctl: #ffffff; --iw-reader-edge: #d6cfe0; }
 :root[data-theme="night"] { --iw-reader-bar: #302d27; --iw-reader-ctl: #3a3630; --iw-reader-edge: #57514a; }
+  --iw-reader-shadow: rgba(0, 0, 0, 0.55);   /* black reads as nothing on a dark surface */
 /* THE PDF VIEWER'S BOTTOM TOOLBAR JOINS THIS FAMILY (2026-08-30), and the argument is that its day
    values already WERE these: bar #faf8fc, control face #fff, outline #d6cfe0, glyph #5c2d8a — the
    four literals PdfViewer.tsx had been carrying since July. Not a coincidence and not a new palette:
