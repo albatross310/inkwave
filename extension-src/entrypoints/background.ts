@@ -11,9 +11,16 @@ import type { ExtractResponse } from '@inkwave/citations/capture'
 import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citations/requiredFields'
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
+  BG_ALLOW_FRAME, BG_CLEAR_FRAME,
   BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, NEEDS_PERMISSION,
   type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
+// ⚠ THE RULE SHAPE IS DEFINED IN src/, NOT HERE. Same reason the wire names are (see the header of
+// extensionProtocol.ts): the extension imports from src/ and never the reverse, so one definition
+// serves both — and, decisively for this one, the gate can then check the SHIPPED rule rather than
+// a restatement of it. A copy of the expected shape in a test passes for ever while the real rule
+// drifts underneath it; that is the pmToText/textMap trap this repo already carries a guard for.
+import { frameRuleFor, FRAME_RULE_ID } from '@inkwave/reader/framingRule'
 import { assertFetchable, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
@@ -175,6 +182,24 @@ export default defineBackground(() => {
       return true
     }
 
+    // ── LIVE VIEW ────────────────────────────────────────────────────────────────────────────────
+    // See the note above frameRuleFor for the three restrictions and what they are each for.
+    // ⚠ `ok: true` means A RULE WAS INSTALLED. It does not mean the page will render: a site can
+    // still refuse in its body (facebook does), serve a CAPTCHA (google did), or render signed out
+    // (anything behind a login, because Lax cookies do not survive a third-party frame). The panel
+    // must not report success on the strength of this.
+    if (m.type === BG_ALLOW_FRAME && typeof m.url === 'string') {
+      allowFraming(m.url)
+        .then(() => sendResponse({ ok: true }))
+        .catch(e => sendResponse({ ok: false, error: String((e as Error)?.message || e) }))
+      return true
+    }
+
+    if (m.type === BG_CLEAR_FRAME) {
+      clearFraming().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }))
+      return true
+    }
+
     if (m.type === 'inkwave:highlightOnTab' && m.tabId && m.quote) {
       void injectAndHighlight(m.tabId, m.quote)
       return false
@@ -217,6 +242,50 @@ async function openReaderPopup(): Promise<boolean> {
   const open = api.action?.openPopup ?? api.browserAction?.openPopup
   if (!open) return false
   try { await open.call(api.action ?? api.browserAction); return true } catch { return false }
+}
+
+// ── LIVE VIEW: LETTING ONE PAGE BE FRAMED ───────────────────────────────────────────────────────
+// Peter, 2026-08-30: "build the extension." The full argument, the measurements and the honest
+// limits live in src/reader/extensionProtocol.ts; the short version is that `X-Frame-Options` and
+// CSP `frame-ancestors` are enforced by the BROWSER, so a web page can never opt out of another
+// site's refusal, and an extension can.
+//
+// ⚠ THREE RESTRICTIONS, AND EACH ONE IS LOAD-BEARING. Removing framing protection browser-wide
+// would make every site the writer visits clickjackable — a citation tool becoming a hazard on
+// pages it has nothing to do with. So:
+//   1. SESSION rules (`updateSessionRules`), never a static ruleset: they die with the browser
+//      session even if a crash means nothing ever calls clearFraming().
+//   2. `initiatorDomains: APP_INITIATORS` — the rule applies ONLY to a frame Inkwave itself
+//      created. The same page opened in the writer's own tab is untouched, because there the
+//      initiator is that page, not us.
+//   3. `resourceTypes: ['sub_frame']` — a top-level navigation is never rewritten.
+// `frameRuleFor` is exported-by-convention for the unit guard, which asserts a rule can never be
+// built without all three. A "temporary" rule that outlives the panel is the bug this shape exists
+// to prevent, and it is not the kind of bug you notice by using the app.
+type DnrApi = {
+  updateSessionRules?: (o: { addRules?: unknown[]; removeRuleIds?: number[] }) => Promise<void>
+}
+const dnr = (): DnrApi | null =>
+  (browser as unknown as { declarativeNetRequest?: DnrApi }).declarativeNetRequest ?? null
+
+/** Install the framing rule for ONE host. Replaces any previous one — the panel shows a single
+ *  page at a time, so a second call means the writer navigated, not that they want both. */
+async function allowFraming(rawUrl: string): Promise<void> {
+  const api = dnr()
+  if (!api?.updateSessionRules) throw new Error('declarativeNetRequest unavailable')
+  // Parse rather than trust: a caller that passes something unparseable must not silently install
+  // a rule for a host we did not mean. (The page is the caller and the page is not the enemy, but
+  // a rule built from a typo is a rule nobody can account for later.)
+  const host = new URL(rawUrl).hostname
+  if (!host) throw new Error('no host')
+  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor(host)] })
+}
+
+/** Drop it. Called when the panel closes, when it navigates away from live view, and on unload. */
+async function clearFraming(): Promise<void> {
+  const api = dnr()
+  if (!api?.updateSessionRules) return
+  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID] })
 }
 
 const READER_FETCH_TIMEOUT_MS = 20_000

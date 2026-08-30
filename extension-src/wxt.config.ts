@@ -19,7 +19,13 @@ export default defineConfig({
   manifest: ({ browser }) => ({
     name: 'Inkwave Citation Capture',
     description: 'Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.',
-    permissions: ['activeTab', 'storage', 'scripting'],
+    // `declarativeNetRequestWithHostAccess` rather than `declarativeNetRequest`: it grants rule
+    // installation only where host access is ALREADY held, so the framing rule inherits the
+    // optional `<all_urls>` grant below instead of being a second, broader permission the writer
+    // never agreed to. Its install prompt is also silent, where the plain form warns about reading
+    // browsing activity — which would be a warning about something this extension does not do
+    // (no rule here observes a request; they only strip framing headers from a frame WE created).
+    permissions: ['activeTab', 'storage', 'scripting', 'declarativeNetRequestWithHostAccess'],
     commands: {
       capture: {
         suggested_key: {

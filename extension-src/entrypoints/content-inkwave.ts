@@ -5,7 +5,9 @@
 
 import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
+  BG_ALLOW_FRAME, BG_CLEAR_FRAME,
   BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, EXT_SOURCE, READER_FETCH, READER_FETCHED,
+  READER_FRAME, READER_FRAMED, READER_UNFRAME,
   READER_GRANT, READER_GRANTED, READER_PING, READER_PONG, type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
 
@@ -86,6 +88,29 @@ export default defineContentScript({
           { source: EXT_SOURCE, type: READER_GRANTED, uuid: d.uuid, ok: !!r?.ok },
           window.location.origin,
         )
+        return
+      }
+
+      // ── LIVE VIEW ──────────────────────────────────────────────────────────────────────────────
+      // The panel asking to be allowed to frame ONE page, and releasing it when it closes. The
+      // rule's scoping lives in the worker (frameRuleFor) rather than here, because a content
+      // script runs in the page and anything it decides is a decision the page could have made.
+      if (d.type === READER_FRAME && d.uuid && d.url) {
+        const r = await browser.runtime.sendMessage({ type: BG_ALLOW_FRAME, url: d.url })
+          .catch(() => ({ ok: false, error: 'extension unavailable' })) as { ok?: boolean; error?: string } | null
+        window.postMessage(
+          { source: EXT_SOURCE, type: READER_FRAMED, uuid: d.uuid, ok: !!r?.ok, error: r?.error },
+          window.location.origin,
+        )
+        return
+      }
+
+      // ⚠ FIRE-AND-FORGET, DELIBERATELY. The release runs from the panel's teardown — and on a tab
+      // close there is no later turn in which to receive a reply. Waiting for an ack here would
+      // make the common path the one that never completes. The session-rule lifetime is the
+      // backstop: it cannot outlive the browser session even if this message is lost.
+      if (d.type === READER_UNFRAME) {
+        void browser.runtime.sendMessage({ type: BG_CLEAR_FRAME }).catch(() => {})
         return
       }
 

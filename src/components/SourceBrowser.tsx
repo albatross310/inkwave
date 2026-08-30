@@ -26,7 +26,7 @@ import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKi
 import { readerInk } from '../reader/markInk'
 import { pdfZoomFactor } from './zoomGesture'
 import {
-  extensionState, loadSource, openExtensionPopup, windowPort,
+  allowFramingVia, extensionState, loadSource, openExtensionPopup, releaseFraming, windowPort,
   type ExtensionState, type Via,
 } from '../reader/pageSource'
 import { v4 as uuidv4 } from 'uuid'
@@ -621,6 +621,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return { w: target, h: h / scale, scale }
   })()
 
+  // Live view through the extension. The STATE is declared here because the refusal detector just
+  // below reads it; the EFFECT that installs the rule lives after `extState`, since it cannot run
+  // before we know whether there is an extension to ask.
+  const [framingOn, setFramingOn] = useState(false)
+  const [frameKey, setFrameKey] = useState(0)
+
   const [frameRefused, setFrameRefused] = useState(false)
   // ⚠ ASK THE SERVER; `onLoad` LIES (2026-08-28, Peter: "we need to replace this with a proper
   // error message that explains some pages can't be read in their original form"). A refused frame
@@ -634,6 +640,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   useEffect(() => {
     if (!framed) { setFrameRefused(false); return }
     if (isPlayable(here)) { setFrameRefused(false); return }   // an embed endpoint — known frameable
+    // The extension has stripped this page's framing headers, so the server's answer about what
+    // those headers SAY is no longer a prediction about what this browser will DO. Asking anyway
+    // would show "this page can't be framed" over a page that is, at that moment, framing.
+    if (framingOn) { setFrameRefused(false); return }
     let live = true
     setFrameRefused(likelyRefusesFraming(here))                 // the hosts we already know, instantly
     fetch(`/api/reader?probe=1&url=${encodeURIComponent(here)}`)
@@ -641,7 +651,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       .then((j) => { if (live && j && j.framable === false) setFrameRefused(true) })
       .catch(() => { /* the probe failing is not evidence of refusal — let the frame try */ })
     return () => { live = false }
-  }, [framed, here])
+  }, [framed, here, framingOn])
+
   const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null)
   // The open coloured-text composer (D1): an anchor already resolved, waiting for the words. It
   // carries the RESOLVED anchor rather than a DOM position, so nothing about it can go stale while
@@ -779,6 +790,35 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     window.addEventListener('focus', recheck)
     return () => window.removeEventListener('focus', recheck)
   }, [extState])
+
+  // ── LIVE VIEW THROUGH THE EXTENSION ───────────────────────────────────────────────────────────
+  // Peter, 2026-08-30: "build the extension." X-Frame-Options and CSP frame-ancestors are enforced
+  // by the BROWSER, so no page can opt out of another site's refusal — but an extension can strip
+  // them before the browser reads them. Measured headed, with a canary proving the ruleset live and
+  // a control proving refusals were detectable at all: google / youtube-watch / abc.net.au /
+  // facebook all go REFUSED → framed (docs/SEARCH-AND-THE-EXTENSION.md).
+  //
+  // ⚠ THE RULE MUST BE INSTALLED BEFORE THE FRAME LOADS, which is what `frameKey` is for: it
+  // remounts the iframe once the rule lands. Without it the frame is refused first and the rule
+  // arrives at an error page that will not retry itself — the feature would appear to work only on
+  // the second attempt, which reads as flakiness rather than as ordering.
+  useEffect(() => {
+    // `isPlayable` pages already frame (youtube /embed sends no XFO), so asking would install a
+    // rule that buys nothing and still has to be cleaned up.
+    if (!framed || extState !== 'ready' || isPlayable(here)) { setFramingOn(false); return }
+    const port = windowPort()
+    if (!port) { setFramingOn(false); return }
+    let live = true
+    void allowFramingVia(port, here).then((ok) => {
+      if (!live || !ok) return                 // a refusal is ordinary: the frame behaves as before
+      setFramingOn(true)
+      setFrameKey((k) => k + 1)
+    }).catch(() => { /* likewise — never a thrown error in front of the writer */ })
+    // RELEASED ON EVERY EXIT — leaving live view, navigating elsewhere, and unmount. The worker's
+    // rule is session-scoped as the backstop, so even a release that never arrives (a tab closed
+    // mid-flight) cannot leave framing open past the browser session.
+    return () => { live = false; setFramingOn(false); releaseFraming(port) }
+  }, [framed, here, extState])
 
   // The offer, at the moment it would help. `openExtensionPopup` returns false when the browser
   // refuses — a real outcome, not a bug — so the instruction is shown either way and the button is
@@ -1337,7 +1377,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
               <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: CTL }}>
-                <iframe src={embeddableUrl(here)} title={doc?.title || here}
+                <iframe key={frameKey} src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
@@ -1762,8 +1802,18 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 stronger thing is what happened. Nothing here claims the fetch carried the writer's
                 SESSION: an extension-worker request is cross-site by initiator, so a site's
                 SameSite cookies are not sent, and the address is the part that is simply true. */}
+            {/* ⚠ AND THE SIGNED-OUT SENTENCE IS NOT A HEDGE — IT IS MEASURED. Three cookies, one
+                origin, read first-party and then framed: SameSite=Lax (the DEFAULT a cookie gets
+                when it says nothing) and Strict are both dropped; only None survives. So a site the
+                writer is logged into renders logged OUT here, and no header the extension removes
+                can change that — it is the browser's third-party context rule. Saying it at the
+                moment it happens is the difference between a known limit and Inkwave looking
+                broken; a writer who sees their own account signed out and is told nothing
+                reasonably concludes the panel is faulty. */}
             <span style={{ flex: 1 }}>{framed
-              ? 'Live page — your browser keeps it separate from Inkwave, so text selected here can’t be picked up.'
+              ? (framingOn
+                ? 'Live page, opened by the Inkwave extension from your own connection. Sites you’re signed in to will show as signed out — a page in a panel doesn’t carry your session.'
+                : 'Live page — your browser keeps it separate from Inkwave, so text selected here can’t be picked up.')
               : via === 'extension'
                 ? 'Article text, fetched by the Inkwave extension from your own connection. Inkwave’s server was not involved and never saw this address.'
                 : 'Article text, fetched for you. Inkwave keeps no log and no copy of what you read — but it does see the address for the moment it takes to fetch.'}</span>

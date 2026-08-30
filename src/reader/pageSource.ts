@@ -36,8 +36,9 @@
 
 import type { ReaderBlock, ReaderDoc } from './types'
 import {
-  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_GRANT, READER_PING,
-  isReaderFetched, isReaderGranted, isReaderPong, type FetchPageResult,
+  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_FRAME, READER_GRANT, READER_PING,
+  READER_UNFRAME,
+  isReaderFetched, isReaderFramed, isReaderGranted, isReaderPong, type FetchPageResult,
 } from './extensionProtocol'
 // The SHIPPED extractor — the same module api/_reader-core.mjs imports. Untyped Node-free ESM, so
 // the shape is asserted at the boundary here and nowhere else.
@@ -150,6 +151,32 @@ export async function openExtensionPopup(port: Port, timeoutMs = 3000): Promise<
   const r = await ask<{ ok: boolean }>(port, { type: READER_GRANT },
     (d, uuid) => (isReaderGranted(d, uuid) ? { ok: d.ok } : null), timeoutMs)
   return !!r?.ok
+}
+
+/**
+ * Ask the extension to let ONE page be framed, so live view can show a site that refuses framing.
+ *
+ * ⚠ TRUE MEANS A RULE WAS INSTALLED — IT DOES NOT MEAN THE PAGE WILL RENDER, and the caller must
+ * not tell the writer otherwise. Measured in a real browser (docs/SEARCH-AND-THE-EXTENSION.md):
+ * abc.net.au and youtube's own watch page render properly, facebook still refuses in its BODY where
+ * there is no header to strip, google served a CAPTCHA, and ANY logged-in site renders SIGNED OUT
+ * because `SameSite=Lax` — the default a cookie gets when it says nothing — is dropped in a
+ * third-party frame. That last one is the browser's own rule and no header we remove touches it.
+ */
+export async function allowFramingVia(port: Port, url: string, timeoutMs = 3000): Promise<boolean> {
+  const r = await ask<{ ok: boolean }>(port, { type: READER_FRAME, url },
+    (d, uuid) => (isReaderFramed(d, uuid) ? { ok: d.ok } : null), timeoutMs)
+  return !!r?.ok
+}
+
+/**
+ * Release it. Fire-and-forget BY DESIGN: this runs from the panel's teardown, and on a tab close
+ * there is no later turn in which an ack could arrive — waiting would make the common path the one
+ * that never completes. The rule is session-scoped in the worker precisely so that a lost release
+ * cannot leave framing open past the browser session.
+ */
+export function releaseFraming(port: Port | null): void {
+  try { port?.post({ source: APP_SOURCE, type: READER_UNFRAME, uuid: newId() }) } catch { /* gone */ }
 }
 
 // ── THE SESSION'S ANSWER, ASKED ONCE ────────────────────────────────────────────────────────────

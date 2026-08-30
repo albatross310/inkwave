@@ -96,3 +96,48 @@ export function isReaderGranted(d: unknown, uuid: string): d is { ok: boolean } 
   return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_GRANTED
     && d.uuid === uuid && typeof d.ok === 'boolean'
 }
+
+// ── LIVE VIEW: LETTING A PAGE BE FRAMED AT ALL ──────────────────────────────────────────────────
+// Peter, 2026-08-30: "build the extension." Reader mode extracts an article's TEXT; live view shows
+// the page itself, and most of the web refuses to be framed — `X-Frame-Options` and CSP
+// `frame-ancestors` are enforced by the BROWSER, so no web app can opt out of another site's
+// refusal. An extension can, by removing those response headers before the browser reads them.
+//
+// MEASURED (headed Chromium, with a canary rule proving the ruleset live and a control run proving
+// refusals detectable — docs/SEARCH-AND-THE-EXTENSION.md): google, youtube/watch, abc.net.au and
+// facebook all go REFUSED → framed. abc.net.au renders 14,921 chars of real page; youtube renders
+// its actual watch page. No framebusting script fired on any of them.
+//
+// ⚠ AND THE HONEST HALF, MEASURED IN THE SAME RUN: `SameSite=Lax` — which is what a cookie gets
+// when it does not say otherwise — and `Strict` are BOTH dropped in a third-party frame; only
+// `SameSite=None` survives. So a logged-in site frames and renders SIGNED OUT, and no header we
+// remove can change that: it is the browser's third-party context rule, not a header. Facebook
+// additionally refuses in the BODY, where there is nothing to strip. The UI must say this, because
+// a signed-out page with no explanation reads as Inkwave being broken.
+//
+// ⚠ WHY THIS IS SCOPED AND NOT A STANDING RULESET. Removing framing protection browser-wide would
+// make every site the writer visits clickjackable — a citation tool turning into a hazard on pages
+// it has nothing to do with. So the rule is (a) SESSION-scoped, added when the reader opens a live
+// page and removed when it closes, (b) restricted by `initiatorDomains` to Inkwave's own origins,
+// so it can only ever apply to a frame THIS APP created, and (c) restricted to `sub_frame`. A rule
+// that outlives the panel is the bug this shape exists to prevent.
+
+// page ↔ content script
+export const READER_FRAME = 'reader/frame'
+export const READER_FRAMED = 'reader/framed'
+export const READER_UNFRAME = 'reader/unframe'
+
+// content script ↔ background worker
+export const BG_ALLOW_FRAME = 'inkwave:allowFrame'
+export const BG_CLEAR_FRAME = 'inkwave:clearFrame'
+
+// The rule's own shape — and APP_INITIATORS — live in ./framingRule.ts, next to the scoping
+// argument they exist to enforce. This file stays the WIRE: names and shape guards only.
+
+/** ⚠ Answering `ok:true` means a rule was INSTALLED, never that the page will render. A site can
+ *  still refuse in its body (facebook does), serve a CAPTCHA (google did), or render signed out
+ *  (anything behind a login). Callers must not report success on the strength of this. */
+export function isReaderFramed(d: unknown, uuid: string): d is { ok: boolean; error?: string } {
+  return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_FRAMED
+    && d.uuid === uuid && typeof d.ok === 'boolean'
+}
