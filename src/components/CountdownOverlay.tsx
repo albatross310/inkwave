@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { subscribe, getPomodoroState } from '../productivity/pomodoroStore'
 import { TYPE } from '../music/typeScale'
 import { TimeFace } from './TimeFace'

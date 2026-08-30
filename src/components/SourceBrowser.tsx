@@ -40,7 +40,7 @@ import {
   readStoredDockSide, readStoredOrientation, resolveOrientation, writeStoredDockSide,
   writeStoredOrientation, WIDE_QUERY, type DockOrientation,
 } from './dockLayout'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
 

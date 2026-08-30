@@ -11,7 +11,7 @@ import { highlightsOf, saveHighlights, type PdfHighlight, type HighlightRect, ty
 import { pageOffsetOf } from '../citations/pageOffset'
 import { setLastPdfPage, setLastPdfScroll, getLastPdfScroll } from '../citations/pdfViewer'
 import { bibProvider } from '../citations/bibProvider'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { noteAnnotation, noteScroll } from '../productivity/pdfActivity'
 import {
   planAnnotatedRender, renderAnnotatedPages, buildPrintHtml, marksWithoutGeometry, SLOW_PAGE_COUNT,

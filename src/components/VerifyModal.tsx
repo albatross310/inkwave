@@ -3,7 +3,7 @@
 // bottom-sheet modal so the writer never leaves the editor.
 
 import { createPortal } from 'react-dom'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { useState, useEffect } from 'react'
 import { verifyBundle, type VerifyReport } from '../verify'
 import { computeAnalytics, type Analytics } from '../verify/analytics'

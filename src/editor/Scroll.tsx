@@ -9,12 +9,11 @@ import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { probePerf, notePerf } from './perflog'
 import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
 
-// True on touch phones/tablets (coarse pointer, no hover). Device-based — does NOT change with
-// browser zoom — so it's the right signal for "phone vs desktop" layout (margins, background).
-export function isTouchDevice(): boolean {
-  return typeof window !== 'undefined'
-    && window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches === true
-}
+// Re-exported so the callers that want BOTH this and <Scroll> are unchanged. It lives in its own
+// leaf module because fourteen of its seventeen importers want nothing else from this file — see
+// `isTouchDevice.ts`.
+import { isTouchDevice } from './isTouchDevice'
+export { isTouchDevice }
 
 // ── Zoom input sensitivity (Peter, 2026-07-10: both were too slow — retune HERE) ──────────────
 // Trackpad ctrl-pinch fine-deltas: multiplier on the fractional step per 100px of deltaY. A
