@@ -21,7 +21,7 @@ import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
 import { createDock } from './toolbarDock'
-import { moveSlot, nearestSlot, neighborShift } from './toolbarSlots'
+import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
 import {
   SlotId, BarLayerId, BAR_HANDOFF_MS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
@@ -748,7 +748,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       const dy = t.clientY - st.startY
       if (!st.armed) {
         // A real drag begins with stillness — movement before the hold elapses is a tap/slide.
-        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(st.timer); slotDragRef.current = null }
+        // Same rule as the drop-up drag below; see `brokeHoldSlop`.
+        if (brokeHoldSlop(dx, dy)) { clearTimeout(st.timer); slotDragRef.current = null }
         return
       }
       st.moved = true
@@ -841,7 +842,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       const dx = t.clientX - st.startX
       const dy = t.clientY - st.startY
       if (!st.armed) {
-        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(st.timer); popupDragRef.current = null }
+        if (brokeHoldSlop(dx, dy)) { clearTimeout(st.timer); popupDragRef.current = null }
         return
       }
       slotDragStyle(st.el as HTMLDivElement, `translate(${dx}px, ${dy}px) scale(1.18)`, 'none')

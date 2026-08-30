@@ -43,3 +43,29 @@ export function nearestSlot(centers: readonly number[], x: number): number {
   }
   return best
 }
+
+// ─── Hold-to-arm: the slop rule ──────────────────────────────────────────────
+// Shared by BOTH toolbar drags — reordering a row circle, and dragging an entry out of the ▲
+// drop-up onto the row. They had a copy each, with a bare `10` in each, and they must agree: they
+// are the same gesture started from two places, and a writer who learns the feel of one expects it
+// from the other.
+//
+// ⚠ SCOPED TO THE TOOLBAR ON PURPOSE. This repo has several hold-to-arm gestures with DIFFERENT
+// thresholds that were each tuned against a real complaint — /snapshot's scrub arms at ~280ms, the
+// PDF and reader colour palettes at 400ms with their own slop. Unifying them all behind one constant
+// would silently retune gestures nobody asked to change. Two callers, one rule, one file.
+
+/** Movement before the hold elapses that means "this is a tap or a slide, not a drag". */
+export const HOLD_SLOP_PX = 10
+
+/**
+ * Has the finger moved far enough BEFORE arming to cancel the pending hold?
+ *
+ * A real drag begins with stillness. This is checked on every pre-arm touchmove, and returning true
+ * cancels the timer — so it must stay a cheap axis test and must treat both axes alike: the row drag
+ * is horizontal and the drop-up drag is 2D, but the CANCEL rule is the same for both, because what
+ * it detects is "the finger is going somewhere", not "the finger is going the wrong way".
+ */
+export function brokeHoldSlop(dx: number, dy: number): boolean {
+  return Math.abs(dx) > HOLD_SLOP_PX || Math.abs(dy) > HOLD_SLOP_PX
+}

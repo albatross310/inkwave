@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { moveSlot, neighborShift, nearestSlot } from './toolbarSlots'
+import { moveSlot, neighborShift, nearestSlot, brokeHoldSlop, HOLD_SLOP_PX } from './toolbarSlots'
 
 const ORDER = ['bib', 'guide', 'math', 'receipt'] as const
 
@@ -50,5 +50,40 @@ describe('nearestSlot', () => {
   it('clamps beyond the ends', () => {
     expect(nearestSlot(centers, -500)).toBe(0)
     expect(nearestSlot(centers, 500)).toBe(3)
+  })
+})
+
+// ─── The hold-to-arm slop rule ───────────────────────────────────────────────
+// Both toolbar drags cancel a pending hold when the finger moves first. They had a copy each with a
+// bare `10`; these pin the shared rule so the two gestures cannot drift apart, which is the whole
+// reason it was lifted.
+describe('brokeHoldSlop', () => {
+  it('stillness does not break the hold', () => {
+    expect(brokeHoldSlop(0, 0)).toBe(false)
+  })
+
+  it('is inclusive at the threshold — exactly 10px is still a hold', () => {
+    // Strict `>`: a finger resting with 10px of jitter must still arm, or the gesture feels broken
+    // on anyone whose hand is not perfectly steady.
+    expect(brokeHoldSlop(HOLD_SLOP_PX, 0)).toBe(false)
+    expect(brokeHoldSlop(0, HOLD_SLOP_PX)).toBe(false)
+    expect(brokeHoldSlop(HOLD_SLOP_PX + 1, 0)).toBe(true)
+  })
+
+  it('treats BOTH axes alike — the row drag is horizontal, the drop-up drag is 2D', () => {
+    // What it detects is "the finger is going somewhere", not "going the wrong way", so a purely
+    // vertical slide must cancel the row drag too.
+    expect(brokeHoldSlop(0, 40)).toBe(true)
+    expect(brokeHoldSlop(40, 0)).toBe(true)
+  })
+
+  it('is sign-agnostic', () => {
+    expect(brokeHoldSlop(-40, 0)).toBe(true)
+    expect(brokeHoldSlop(0, -40)).toBe(true)
+  })
+
+  it('neither axis alone can mask the other', () => {
+    expect(brokeHoldSlop(-40, 2)).toBe(true)
+    expect(brokeHoldSlop(2, -40)).toBe(true)
   })
 })
