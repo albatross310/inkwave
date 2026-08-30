@@ -145,6 +145,24 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     docRef.current = doc
   }, [doc])
 
+  // ── ONE COMMIT PATH FOR A DOCUMENT MUTATION ───────────────────────────────────────────────────
+  // Every mutation must do the same three things in the same order: make the new document the one
+  // this component reads (`docRef`), tell the parent (`onDocChange`), and schedule the write
+  // (`scheduleSave`). This was written out longhand at ten call sites, which is ten chances to omit
+  // the third line — and omitting it is SILENT: the edit appears on screen, the parent re-renders,
+  // and only the DISK is stale, so the work is lost at the next reload rather than at the moment of
+  // the mistake. `email.prove.mjs` caught exactly that omission once (a header edit never called
+  // `scheduleSave`, because autosave is driven by the editor's own update handler and a header field
+  // never fires it), and nothing but a browser probe could have.
+  //
+  // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document into
+  // `docRef` and is not a mutation — there is nothing to tell the parent and nothing new to save.
+  const commitDoc = (updated: InkwaveDocument) => {
+    docRef.current = updated
+    onDocChange(updated)
+    scheduleSave(updated)
+  }
+
 
   // ── WHERE YOU WERE, ACROSS A HARD REFRESH (2026-08-28, Peter: "very useful as I have to keep
   // hard refreshing for testing") ───────────────────────────────────────────────────────────────
@@ -541,9 +559,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       toolbar: mergeRowIntoConfig(docRef.current.toolbar, newSlots),
       updatedAt: new Date().toISOString(),
     }
-    docRef.current = updated
-    onDocChange(updated)
-    scheduleSave(updated)
+    commitDoc(updated)
   }
 
   const toolbarSlotsRef = useRef<SlotId[]>(toolbarSlots)
@@ -2729,9 +2745,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       if (recovered.length && !cancelled && docRef.current.id === docId) {
         const merged = [...recovered, ...(docRef.current.scasReceipts ?? [])]
         const updated: InkwaveDocument = { ...docRef.current, scasReceipts: merged }
-        docRef.current = updated
-        onDocChange(updated)
-        scheduleSave(updated)
+        commitDoc(updated)
       }
 
       // Purge sessions whose receipts fail cryptographic verification (bad signature = was signed
@@ -2804,9 +2818,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           )
         }
         const updated: InkwaveDocument = { ...docRef.current, scasReceipts: cleanReceipts }
-        docRef.current = updated
-        onDocChange(updated)
-        scheduleSave(updated)
+        commitDoc(updated)
       }
 
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
@@ -2853,17 +2865,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         scasState: scasRef.current!.state,
         scasReceipts: allReceipts,
       }
-      docRef.current = updated
-      onDocChange(updated)
-      scheduleSave(updated)
+      commitDoc(updated)
       mirrorIfActive()
       if (!ed.isDestroyed) ed.view.dispatch(ed.state.tr.setMeta(SCAS_HINT_META, true))
     } else {
       scasRef.current!.resampleNow()
       const updated: InkwaveDocument = { ...docRef.current, scasState: scasRef.current!.state }
-      docRef.current = updated
-      onDocChange(updated)
-      scheduleSave(updated)
+      commitDoc(updated)
     }
   }
 
@@ -2915,9 +2923,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       scasState: scas.state,
       updatedAt: new Date().toISOString(),
     }
-    docRef.current = updated
-    onDocChange(updated)
-    scheduleSave(updated)
+    commitDoc(updated)
     // Force the highlight plugin to rebuild decorations from the updated lookup.
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
     // Re-focusing keeps the cursor in the editor on desktop; on a phone it would re-open
@@ -3000,9 +3006,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               media: [...(docRef.current.media ?? []), asset],
               updatedAt: new Date().toISOString(),
             }
-            docRef.current = updated
-            onDocChange(updated)
-            scheduleSave(updated)
+            commitDoc(updated)
           }}
         />
       )}
@@ -3091,9 +3095,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 // to onDocChange alone the headers lived in React state and vanished on reload
                 // unless the writer happened to also touch the body. docRef is updated FIRST so any
                 // snapshot/finalise work that reads it sees the new headers immediately.
-                docRef.current = updated
-                onDocChange(updated)
-                scheduleSave(updated)
+                commitDoc(updated)
               }}
             />
           )}
@@ -3666,9 +3668,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               setCitationStyle(s)
               setCitationStyleBus(s)
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
-              docRef.current = updated
-              onDocChange(updated)
-              scheduleSave(updated)
+              commitDoc(updated)
             }}
             onClose={() => setBibPanelOpen(false)}
           />
