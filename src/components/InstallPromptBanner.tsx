@@ -91,7 +91,7 @@ export function InstallPromptBanner({ installPrompt }: { installPrompt: any }) {
       zIndex: 300,
       background: 'white', border: `1px solid ${INK}44`,
       borderRadius: '14px', padding: '16px 18px 14px',
-      boxShadow: '0 8px 32px rgba(92,45,138,0.18)',
+      boxShadow: '0 8px 32px rgb(var(--iw-ink-rgb) / 0.18)',
       fontFamily: 'IM Fell DW Pica, serif',
     }}>
       <button
@@ -107,7 +107,7 @@ export function InstallPromptBanner({ installPrompt }: { installPrompt: any }) {
       </p>
 
       {ios ? (
-        <div style={{ background: 'rgba(92,45,138,0.06)', borderRadius: '8px', padding: '10px 12px', fontSize: '0.8rem', color: '#4a3f3a', lineHeight: 1.5 }}>
+        <div style={{ background: 'rgb(var(--iw-ink-rgb) / 0.06)', borderRadius: '8px', padding: '10px 12px', fontSize: '0.8rem', color: '#4a3f3a', lineHeight: 1.5 }}>
           Tap the&nbsp;
           <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 5px', background: '#007AFF', color: 'white', borderRadius: 4, verticalAlign: 'middle' }}>
             <svg width="10" height="13" viewBox="0 0 10 13" fill="none" aria-hidden="true" style={{ display: 'block' }}>

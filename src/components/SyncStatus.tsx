@@ -183,7 +183,7 @@ export function SyncStatus({
             // Purple outline (Peter, 2026-08-20) matching the footer toolbar pill and the snaps pill
             // on the opposite side — the same token, so night mode remaps all three together rather
             // than leaving this one a hard-coded day colour.
-            border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
+            border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
             // ⚠ 2026-08-20 (Peter: "align at horizontal axis, move lower") — narrowing the pill above
             // makes longer labels ("Reconnect to keep saving") wrap to 2 lines while short ones
             // ("Save to a folder") stay on 1, so this button's own height VARIES by label — a fixed

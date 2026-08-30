@@ -35,7 +35,7 @@ export function Toast() {
       style={{
         position: 'fixed', bottom: 96, left: '50%', transform: 'translateX(-50%)', zIndex: 300,
         maxWidth: 'min(460px, 92vw)', background: '#fff', color: '#3a3a3a',
-        border: `1px solid var(--iw-nightable-border, rgba(92,45,138,0.27))`, borderRadius: 12, boxShadow: '0 6px 24px rgba(0,0,0,0.18)',
+        border: `1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.27))`, borderRadius: 12, boxShadow: '0 6px 24px rgba(0,0,0,0.18)',
         padding: '12px 16px', fontSize: '0.92rem', lineHeight: 1.45, cursor: 'pointer',
         fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
       }}

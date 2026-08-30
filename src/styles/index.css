@@ -1910,6 +1910,63 @@
   --iw-score-highlight: #9b5ccc;           /* a bar an annotation or citation points at */
   --iw-score-title: #44403c;               /* title / composer above the score */
 }
+/* ── THE DAY HALF OF THE CHROME PALETTE (2026-08-30) ────────────────────────────────────────────
+   Every token below had a NIGHT value in the block underneath and NO DAY VALUE ANYWHERE. Its day
+   colour lived only as the `#fallback` inside `var(--iw-x, #fallback)` at each use site — so
+   CLAUDE.md's promise ("adding a scheme = one more :root block; components don't change") was false
+   for exactly these: re-pointing the day palette meant editing components, and a THIRD palette
+   could not reach them at all, because there was no declaration to override.
+
+   THIS BLOCK REPAINTS NOTHING. Each value is byte-identical to the single fallback its consumers
+   already pass, so day resolves to what it always did and the scoped night values below still win
+   inside chrome. `colourScan.test.ts` PROVES that rather than asking you to believe it: it reads
+   every `var(--tok, fallback)` in src/ and fails when a fallback disagrees with the day value here.
+
+   DELIBERATELY NOT MOVED HERE, because these are NOT one-value-per-token and a day definition would
+   genuinely repaint something — Peter's call, reported rather than guessed:
+     --iw-paper      three day surfaces share one night value: the writing SHEET (#f7f2e8 parchment),
+                     the music panel CARDS (#fff) and the score PAGE (#fcfaf6). One token, three
+                     roles; picking any single day value repaints the other two.
+     --iw-newbtn-fg  documented as "+ New text on its light-blue chip" (day #0369a1), but two other
+                     callers pass #fff for white-on-a-dark-fill. They already disagree at NIGHT,
+                     where the token is #0c4a6e — a latent bug, not merely drift.
+
+   `--iw-score-gap` and `--iw-gap-rule` were read by src/music/ScorePage.tsx and DECLARED NOWHERE IN
+   THE REPO — the same class of dangling token the reader lane just found in `--iw-panel-bg`. They
+   worked only because their fallbacks happen to be light in both themes. They are deliberately
+   theme-INVARIANT (the reflow gap is paper inserted into a photograph of a page, and you cannot
+   invert a picture of a page), so they take no night value — but they are declared now, so a future
+   palette can see them and choose. A fallback nobody declared is not a decision anyone made. */
+/* THE INK AS COMPONENTS, for tints — and it is the single highest-count defect in this app.
+   `rgba(92, 45, 138, a)` is written by hand at THIRTY-FOUR distinct alphas across EIGHTY-FOUR sites
+   (0.03 0.04 0.06 0.07 0.08 0.10 0.12 0.14 0.16 0.18 0.24 0.25 0.27 0.28 …, plus `0.1` AND `0.10`,
+   `0.3` AND `0.30` — nobody chose those; they accumulated one component at a time). Every one of
+   them hardcodes the DAY ink, so EVERY purple tint in the app stays day-purple on a charcoal panel
+   and no palette can reach it. A tint needs the ink's COMPONENTS, which `--iw-ink` (a whole colour)
+   cannot give: hence this, consumed as `rgb(var(--iw-ink-rgb) / 0.12)`.
+   Day is byte-identical to the literal it replaces, so day cannot move. */
+:root { --iw-ink-rgb: 92 45 138; }
+
+:root {
+  --iw-light: #9b5ccc;                     /* lighter purple accent */
+  --iw-verified: #15803d;                  /* verified ✓ box */
+  --iw-verify-tick: #246b24;               /* the verify tick itself — a shade under the box */
+  --iw-badge-ai: #b45309;                  /* "a machine said this" amber (CitationPanel, charts) */
+  --iw-badge-manual: #6b7280;              /* "a person said this" grey, beside it */
+  --iw-addbtn-bg: #5c2d8a;                 /* Add button — filled */
+  --iw-addbtn-fg: #ffffff;
+  --iw-addbtn-border: transparent;         /* day needs no outline; night adds one */
+  --iw-toggle-on: #5c2d8a;                 /* switch track — on / off */
+  --iw-toggle-off: #d1d5db;
+  --iw-slot-drag-bg: #faf8ff;              /* opaque slot-circle disc during toolbar drags */
+  --iw-hotkey-hint-fg: #ffffff;            /* the Alt-held badge, punched out of --iw-ink */
+  --iw-page-num: #000000;                  /* the big sheet page number */
+  --iw-paper-line: rgba(80, 50, 10, 0.18); /* SCAS reel backing: ring + shadow on parchment */
+  --iw-paper-shadow: rgba(60, 40, 10, 0.16);
+  --iw-score-gap: #fdfdfb;                 /* music reflow: the inserted band — paper, both themes */
+  --iw-gap-rule: rgba(92, 45, 138, 0.1);   /* …and its writing rule */
+}
+
 :root[data-theme="night"] .iw-nightable {
   background-color: #454e59 !important;   /* dolphin-back grey */
   color: #dfe3e9 !important;
@@ -1922,6 +1979,7 @@
      Guide's key column) sat QUIETER than the prose beside it, which inverts the hierarchy in every
      panel at once. As a FILL it is unaffected: --iw-on-ink still reads 8.5:1 on it. */
   --iw-ink: #d7c8f8;                        /* light purple in place of #5c2d8a inline colours */
+  --iw-ink-rgb: 215 200 248;                /* …and its components, for tints. MUST track --iw-ink */
   --iw-on-ink: #2c2e35;                     /* text on an --iw-ink fill — dark, because the fill is light */
   --iw-light: #c3a8ef;                      /* lighter purple accent (was #9b5ccc) */
   --iw-verified: #6ee7a0;                    /* verified ✓ box — light green on dark */
