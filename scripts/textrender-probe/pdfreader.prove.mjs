@@ -430,11 +430,52 @@ try {
   const highlightMade = check(!!mine, 'the highlight was created and painted over EXACTLY the phrase',
     marks.map(m => JSON.stringify(m.text)).join(' ') || 'no marks painted')
 
+
   // What actually reached the disk — the anchor is the whole claim, so read it rather than infer it.
   let lib = await readLibrary(docId)
   const stored = (lib?.[0]?._iw?.highlights ?? []).find(h => h.anchor?.text === UNIQUE_PHRASE)
   check(!!stored, 'the mark was PERSISTED with a TEXT anchor, not just coordinates',
     stored ? `block ${stored.anchor.block}, start ${stored.anchor.start}` : 'no anchored mark on disk')
+
+  // ── THE FILL IS ACTUALLY PAINTED, AND IT IS THE MARK'S OWN COLOUR ────────────────────────────
+  // `placedMarks` has always COLLECTED `bg` and nothing ever read it — the shape CLAUDE.md calls a
+  // metric that collects nothing. It matters now: the wash moved from a JS `rgba()` string to CSS
+  // `color-mix(in srgb, var(--iw-mark) var(--iw-reader-wash), transparent)` under an `@supports`
+  // guard (2026-08-30, so a highlight stays YELLOW instead of compositing to olive on the night
+  // reading page). If that declaration were ever invalid at computed-value time the property would
+  // fall to `unset` — TRANSPARENT — NOT to the opaque fallback in the base rule. A highlight that
+  // silently paints nothing is exactly the class this file exists to catch.
+  // Compared against the mark's OWN persisted colour rather than a literal: the tool's default
+  // colour is the viewer's to choose, and a probe that hardcodes it tests the probe's assumption.
+  if (mine && stored) {
+    // ⚠ `color-mix()` COMPUTES TO `color(srgb r g b / a)`, NOT to `rgb()`, and its channels are
+    // 0-1 rather than 0-255. The first cut of this check read only `rgba?()` and reported a
+    // PERFECTLY CORRECT fill — `color(srgb 1 0.878431 0.4 / 0.55)`, which IS #ffe066 at 0.55 — as
+    // both "transparent" and "the wrong colour". A parser blind to its own subject fails toward
+    // "the feature is broken", the most expensive direction to be wrong in (CLAUDE.md records the
+    // identical trap in RichDiffView's conservation extractor).
+    const rgb255 = (s) => {
+      const c = /color\(\s*srgb\s+([^)]+)\)/i.exec(s || '')
+      if (c) {
+        const p = c[1].split(/[\s/]+/).filter(Boolean).map(Number)
+        return { rgb: p.slice(0, 3).map(v => Math.round(v * 255)), a: p.length > 3 ? p[3] : 1 }
+      }
+      const m = /rgba?\(([^)]+)\)/.exec(s || '')
+      if (!m) return { rgb: [], a: 0 }
+      const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number)
+      return { rgb: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 }
+    }
+    const painted = rgb255(mine.bg)
+    const want = [1, 3, 5].map(i => parseInt(stored.color.replace('#', '').slice(i - 1, i + 1), 16))
+    // The instrument is armed on a known value before its verdict is read, because the format the
+    // engine hands back is exactly what this check got wrong once already.
+    const armed = rgb255('color(srgb 1 0.878431 0.4 / 0.55)')
+    check(armed.rgb.join(',') === '255,224,102' && armed.a === 0.55,
+      'the colour parser reads color(srgb …) as well as rgb()', JSON.stringify(armed))
+    check(painted.a > 0.2, 'the highlight FILL is really painted, not transparent', mine.bg)
+    check(painted.rgb.join(',') === want.join(','),
+      'the fill is the STORED colour — no theme reinterprets a mark', `${mine.bg} vs stored ${stored.color}`)
+  }
   if (stored) {
     check(stored.page === UNIQUE_AT.page && stored.anchor.block === UNIQUE_AT.block,
       'the anchor names the right page and paragraph',

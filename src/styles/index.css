@@ -1069,15 +1069,12 @@
   [data-iw-tool] input, [data-iw-tool] textarea,
   [data-iw-tool] [contenteditable="true"] { cursor: text !important; }
 
-  /* ── THE READER'S ARTICLE IS PAPER, AND PAPER DOES NOT INVERT ────────────────────────────────
-     The panel CHROME is `.iw-nightable` and themes normally. The ARTICLE does not, and that is a
-     decision rather than an omission: a mark's COLOUR IS STORED IN THE MARK (reader/marks.ts) and
-     is the same palette the PDF viewer writes, so a theme that reinterpreted those colours would
-     make one highlight two different colours on two devices — and light ink over a pale yellow wash
-     is unreadable whichever theme you are in. So the reading surface keeps the contrast the palette
-     was chosen for, in both themes, and night merely takes the glare off the paper.
-     (It was also simply BROKEN before this: the body carried an inline `color:#2c2a28` that nothing
-     overrode, so night mode rendered near-black prose on the dolphin-grey panel.) */
+  /* ── THE READER'S ARTICLE IS PAPER, AND ITS PAPER HAS ITS OWN NIGHT ──────────────────────────
+     The panel CHROME is `.iw-nightable` and themes normally; the ARTICLE takes the reader PAPER
+     tokens instead, which are a DIFFERENT dark from the chrome and from the editor's own page.
+     See the token block at the bottom of this file for why the marks survive the inversion.
+     (It was also simply BROKEN before any of this: the body carried an inline `color:#2c2a28` that
+     nothing overrode, so night mode rendered near-black prose on the dolphin-grey panel.) */
   .iw-reader-page,
   /* The PDF's reader view is the SAME KIND OF SURFACE — reflowed prose in the writer's own font,
      carrying marks from the same palette — so it takes the same paper rather than a second set of
@@ -1085,6 +1082,22 @@
   .iw-pdf-reader-page {
     background: var(--iw-reader-paper, #fff);
     color: var(--iw-reader-ink, #2c2a28) !important;
+  }
+
+  /* A HIGHLIGHT'S FILL, in the one place it was translucent. The web reader has always painted the
+     mark's colour at FULL strength; the PDF reader view washed it to 55% alpha, on the reasoning
+     that "a solid fill over body text is unreadable" — which was true only while nothing set the
+     ink on top of it. Over a DARK page that wash composites to a muddy olive (measured
+     rgba(255,224,102,.55) over #26241f → #9d8b46: it passes contrast against a dark ink and it does
+     not look yellow), so the strength is a token and night takes the opaque fill the web reader
+     already uses. The mark's own colour is passed in as `--iw-mark` and is never reinterpreted.
+     The base declaration is the OPAQUE fallback, so an engine without color-mix degrades to what
+     the other reader does rather than to no highlight at all. */
+  .iw-mark-fill { background: var(--iw-mark); }
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    .iw-mark-fill {
+      background: color-mix(in srgb, var(--iw-mark) var(--iw-reader-wash, 55%), transparent);
+    }
   }
 
   /* The footer toolbar band (pill height + keyboard-hug offset, live CSS vars written by
@@ -1652,27 +1665,122 @@
 :root[data-theme="night"] { --iw-countdown-fg: #dfe3e9; }
 
 /* ── READING SURFACES (the source reader's article, the PDF reader view) ─────────────────────────
-   PAPER TOKENS, and they are deliberately NOT chrome tokens. A mark's colour is stored in the mark
-   and shared between the two readers (reader/marks.ts), so a theme that reinterpreted it would make
-   one highlight two colours on two devices — and light ink under a pale yellow wash is unreadable
-   in either theme. So paper does not invert; night only takes the glare off it. Defined at :root in
-   BOTH themes (the countdown precedent above): these surfaces sit INSIDE .iw-nightable panels, and
-   a token scoped to that block would hand a reading column the CHROME's light-on-dark values —
-   which is the shape of the bug this whole family exists to prevent.
-   `--iw-reader-muted` is the muted label ON that paper: --iw-pill-fg is a CHROME token (light grey
-   at night) and using it on paper renders light-grey-on-cream, measured at 1.22:1 in the reader's
-   markup bar. */
-:root { --iw-reader-paper: #ffffff; --iw-reader-ink: #2c2a28; --iw-reader-muted: #6b645f; }
-:root[data-theme="night"] { --iw-reader-paper: #e7e1d7; --iw-reader-ink: #23211f; --iw-reader-muted: #5f5852; }
-/* The reader's MARKUP BAR is paper chrome for the same reason (measured 2026-08-30). Its buttons
-   WEAR THE MARK'S OWN COLOUR — a pale-yellow highlighter swatch, a dark-red ink — so the bar must
-   stay a light surface in both themes or the swatches stop meaning anything; that is also why it
-   matches the PDF viewer's own toolbar, which the reader was built to mirror. It DIMS at night
-   rather than glaring, exactly as the article above it does. Before this, the bar was a literal
-   #faf8fc reading a never-defined `--iw-panel-bg` while its labels used the CHROME token
-   --iw-pill-fg — light grey on near-white, measured at 1.22:1 for the zoom readout. */
+   ⚠ THE READING COLUMN NOW INVERTS AT NIGHT. The previous rule here was "paper dims but never
+   inverts", on the argument that a mark's colour is stored in the mark and shared between the two
+   readers, so a theme that reinterpreted it would make one highlight two colours on two devices.
+   Peter, 2026-08-30: *"the whole read mode on both pdfs and web pages needs a night mode too — but
+   make sure the palette is slightly different from the main page and there's a dividing line
+   between."* Both are satisfiable at once, and the old rule was conflating two different things:
+
+     · a mark's IDENTITY — its stored hex, shared across the two readers. UNCHANGED, in both
+       themes. `#ffe066` is still `#ffe066` and there is no per-theme remap of any mark fill.
+     · the CONTRAST PAIRING that mark needs to stay readable — what ink sits ON it. That has
+       ALWAYS been a function of the surface; it merely happened to be invisible while the surface
+       never changed.
+
+   A highlight is an OPAQUE FILL of a pale colour, so the text on it takes a dark ink whatever the
+   page behind it is doing — which is what `--iw-reader-on-mark` states. Its DAY value is byte-equal
+   to the day paper ink, so nothing about the day rendering moves; at night a highlighted run
+   becomes an island of day inside the night page, which is exactly what a highlighter looks like on
+   paper. So "a yellow highlight still looks like a yellow highlight" is not a compromise here — it
+   is more true than before, because a pale wash over a dark page is a muddy olive and a pale fill
+   with dark ink is a highlighter.
+
+   THE ONE GENUINE CASTING: the writer's own COLOURED TEXT (`TEXT_COLORS` — maroon/navy/green/ink)
+   is a STROKE, not a fill: its colour IS the readable element, and those inks were chosen for white
+   paper (maroon on a night page measures ~1.5:1 — unreadable, no surface choice fixes it). So the
+   three get tokens on exactly the same footing as `--iw-ink` itself, which the app has always shown
+   dark by day and light by night. The STORED value never changes; `readerInk()` (reader/markInk.ts)
+   maps a known stored ink to its token for DISPLAY only, and passes anything unknown through.
+
+   PALETTE CHOICE. Night paper is a WARM charcoal (#26241f) against the editor's own night page
+   (--iw-paper #2c2e35, a cool blue-grey): the same value range, a different temperature, so the
+   panel reads as a different document at a glance rather than as more app — which is Peter's
+   "slightly different from the main page". `--iw-reader-divider` draws the boundary he asked for.
+   Defined at :root in BOTH themes (the countdown precedent above): these surfaces sit INSIDE
+   .iw-nightable panels, and a token scoped to that block would hand a reading column the CHROME's
+   light-on-dark values — the shape of the bug this whole family exists to prevent. */
+:root {
+  --iw-reader-paper: #ffffff;
+  --iw-reader-ink: #2c2a28;
+  --iw-reader-muted: #6b645f;   /* muted label ON paper — NOT --iw-pill-fg, which is chrome */
+  --iw-reader-accent: #5c2d8a;  /* purple ON a reader surface: article links, bar glyphs, § pill */
+  --iw-reader-hair: rgba(92, 45, 138, 0.13);   /* hairline rules + dividers on a reader surface */
+  --iw-reader-tint: rgba(92, 45, 138, 0.08);   /* the lit-tool fill in the markup bar */
+  --iw-reader-on-mark: #2c2a28; /* ink ON a mark's own fill — highlight, sticky note, textbox */
+  --iw-reader-wash: 55%;        /* highlight fill strength in the PDF reader view (.iw-mark-fill) */
+  --iw-reader-ok: #15803d;      /* "your connection" — a paper-safe green, NOT --iw-verified */
+  --iw-reader-ink-red: #991b1b;      /* the writer's own coloured text — stored value by day */
+  --iw-reader-ink-blue: #1e3a8a;
+  --iw-reader-ink-green: #166534;
+  --iw-reader-ink-gold: #8a6a04;     /* the highlighter TOOL's glyph, not a mark's fill */
+}
+:root[data-theme="night"] {
+  --iw-reader-paper: #26241f;   /* warm charcoal — the editor's night page is cool #2c2e35 */
+  --iw-reader-ink: #e8e2d6;     /* 12.0:1 on the paper above */
+  --iw-reader-muted: #b3aa9c;
+  --iw-reader-accent: #c3a8ef;
+  --iw-reader-hair: rgba(232, 226, 214, 0.20);
+  --iw-reader-tint: rgba(195, 168, 239, 0.20);
+  --iw-reader-on-mark: #23211f; /* a mark's fill is PALE in both themes, so its ink stays dark */
+  --iw-reader-wash: 100%;       /* opaque: a 55% wash over a dark page is olive, not yellow */
+  --iw-reader-ok: #7fd39a;
+  --iw-reader-ink-red: #ff9b8f;      /* same hue, cast for a dark surface (see readerInk) */
+  --iw-reader-ink-blue: #8fb8ff;
+  --iw-reader-ink-green: #7fd39a;
+  --iw-reader-ink-gold: #e8c766;
+}
+/* The reader's MARKUP BAR and its control faces belong to the PAPER, not the chrome — they wear the
+   mark's own colour (a pale-yellow highlighter swatch, an ink dot) and a swatch has to be shown
+   against the surface its mark will land on. So they go dark WITH the reading column rather than
+   staying a near-white slab glued to a night page.
+   ⚠ BEFORE THIS, SourceBrowser's bar read `var(--iw-panel-bg, #faf8fc)` — and `--iw-panel-bg` IS
+   DEFINED NOWHERE IN THIS REPO. So the bar rendered a near-white #faf8fc in BOTH themes (measured
+   byte-identical day and night), while the chrome rescues in the .iw-nightable block below painted
+   near-white labels onto it (`[class*="text-stone"]` → #dfe3e9 at 1.2:1, --iw-verified → #6ee7a0).
+   That is Peter's "the bottom bar's fonts are washed out": chrome tokens applied to a paper surface.
+   Only PdfReaderView had been migrated to --iw-reader-bar; the web reader was left behind. */
 :root { --iw-reader-bar: #faf8fc; --iw-reader-ctl: #ffffff; --iw-reader-edge: #d6cfe0; }
-:root[data-theme="night"] { --iw-reader-bar: #ded8cd; --iw-reader-ctl: #f0ebe2; --iw-reader-edge: #b9b1a3; }
+:root[data-theme="night"] { --iw-reader-bar: #302d27; --iw-reader-ctl: #3a3630; --iw-reader-edge: #57514a; }
+/* THE READER PANEL'S OWN CHROME — the header strip, which is .iw-nightable dolphin grey at night and
+   is NOT a reading surface. Peter: *"the top bar's fonts are too dark."* Two separate faults, both
+   measured on the live panel: the back/forward arrows carried the LITERAL #5c2d8a, which is 1.13:1
+   on #454e59 — invisible, not dim — and no gate had ever scored them, because a one-entry history
+   leaves both arrows DISABLED and WCAG 1.4.3 exempts a disabled control; and the title and four icon
+   buttons took --iw-ink (#cbb8f2) at 4.7:1, which passes AA and is still thin for a 13px glyph on a
+   dark ground. --iw-reader-chrome-fg is a brighter lavender of the same family (5.8:1).
+   --iw-reader-chrome-dim is the DISABLED arrow: its old literal #d6d3d1 measured 5.67:1 at night —
+   BRIGHTER than the enabled arrow beside it, which is backwards. */
+:root { --iw-reader-chrome-fg: #5c2d8a; --iw-reader-chrome-dim: #d6d3d1; }
+:root[data-theme="night"] { --iw-reader-chrome-fg: #ddd0f7; --iw-reader-chrome-dim: #6b7382; }
+/* The line between the panel and the editor (Peter: "there's a dividing line between"). The panel
+   had NO border at all, so at night a #454e59 panel sat against a #2c2e35 editor with nothing
+   between them. Drawn in both themes — day gains one too. */
+:root { --iw-reader-divider: #cfc7dc; }
+:root[data-theme="night"] { --iw-reader-divider: #7b8494; }
+/* …and the rule that lets it actually paint. `.iw-nightable` below sets `border-color: … !important`,
+   which beats an INLINE border on the panel — so the docked reader's edge was silently the chrome
+   border colour at night and the token was inert. Measured, not assumed: the panel read
+   rgb(92,102,114) with `--iw-reader-divider: #7b8494` declared. Wins on specificity ((0,4,0) vs
+   (0,3,0)), so its position in the file is not load-bearing. A dock panel MUST carry this class. */
+.iw-dock-panel { border-color: var(--iw-reader-divider) !important; }
+:root[data-theme="night"] .iw-nightable.iw-dock-panel { border-color: var(--iw-reader-divider) !important; }
+/* A FORM FIELD THAT SITS ON READER PAPER, NOT ON CHROME — the markup bar's two reading selects, the
+   live-mode page-width select, the PDF reader view's font select. `.iw-nightable` below paints every
+   field the CHROME grey with `!important`, which is right for a field in a panel and wrong for one
+   in the markup bar: it drops a cool blue-grey box into the warm paper bar.
+   ⚠ THE CLASS IS DOUBLED FOR SPECIFICITY, DELIBERATELY, and an ancestor-scoped selector was tried
+   first and does not work. It has to beat BOTH `.iw-nightable select` (0,3,1) — a field inside a
+   themed panel, which the source reader's are — AND `.iw-nightable` itself (0,3,0), because the PDF
+   reader view has no themed ancestor at all and carries the class on the field. (0,4,0) clears both
+   and needs no element name, so one rule covers every shape. It wins on specificity rather than by
+   being declared later, so its position in this file is not load-bearing.
+   The address bar is deliberately NOT in this set — it lives in the header, which IS chrome. */
+:root[data-theme="night"] .iw-reader-field.iw-reader-field {
+  background-color: var(--iw-reader-ctl) !important;
+  color: var(--iw-reader-ink) !important;
+  border-color: var(--iw-reader-edge) !important;
+}
 
 /* A muted fill inside night chrome (a promo strip, a <kbd> chip). Tailwind's bg-stone-50/100 are
    NOT remapped by the .iw-nightable block below and must not be: `bg-stone-100` is also used for

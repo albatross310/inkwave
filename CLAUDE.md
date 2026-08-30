@@ -3414,6 +3414,107 @@ night block remaps them for free — `judged.test.ts` asserts that structurally 
 SERIES_STYLE fails the build). Verified both themes render distinctly: panel bg #fff → #454e59,
 `--iw-ink` #5c2d8a → #cbb8f2.
 
+### THE READING SURFACES HAVE THEIR OWN NIGHT — and the paper-never-inverts rule is RETIRED (2026-08-30)
+
+**LIVE, default-on.** The in-app source reader (`SourceBrowser.tsx`) and the PDF reader view
+(`PdfReaderView.tsx`). Peter, verbatim: *"the whole read mode on both pdfs and web pages needs a
+night mode too — but make sure the palette is slightly different from the main page and there's a
+dividing line between."*
+
+**THE RULE THAT WAS THERE — and why it was conflating two things.** The 2026-08-30 morning audit had
+established that the reading column is PAPER: it *dims but never inverts*, on the argument that a
+mark's colour is stored in the mark and shared with the PDF viewer, so a theme that reinterpreted it
+would make one highlight two colours on two devices. That argument protects a real invariant and it
+is still true — but it was being applied to two different things at once:
+
+* a mark's **IDENTITY** — its stored hex. Unchanged, in both themes. `#ffe066` is still `#ffe066`;
+  there is no per-theme remap of any mark fill anywhere.
+* the **CONTRAST PAIRING** it needs to stay readable — what ink sits ON it. That has always been a
+  function of the surface. It merely *looked* like a constant while the surface never changed.
+
+A highlight is an opaque **FILL** of a pale colour with text on top, so the ink on it is dark
+whatever the page behind is doing (`--iw-reader-on-mark`, whose DAY value is byte-equal to the day
+paper ink — so nothing about the day rendering moved). At night a highlighted run becomes an island
+of day inside the night page, which is what a highlighter looks like on paper. MEASURED, real
+browser, real mark placed through the real UI: fill `rgb(255,224,102)` in **both** themes, ink
+10.96:1 day / 12.31:1 night.
+
+**THE ONE GENUINE CASTING, and it is a STROKE not a fill.** The writer's own coloured text
+(`TEXT_COLORS` — maroon/navy/green/ink) is a stroke: its colour IS the readable element, and those
+inks were chosen for white paper. Maroon on the night reading page measures ~1.5:1, and **no choice
+of dark surface fixes it** (4.5:1 against that maroon needs a mid-tone page, which is not a night
+mode). So the three get tokens on exactly the footing `--iw-ink` has always had — dark by day, light
+by night — and `src/reader/markInk.ts` `readerInk()` maps stored → token for **display only**.
+Nothing is ever written back; an unknown colour passes through untouched; the output always carries
+the stored value as the `var()` fallback.
+
+**THE PALETTE.** Night reading paper is a WARM charcoal `#26241f` against the editor's own night
+page `--iw-paper: #2c2e35` (cool blue-grey) and the chrome's `#454e59`. Same value range, different
+temperature — so the panel reads as a *different document* at a glance rather than as more app,
+which is Peter's "slightly different from the main page". Measured page↔editor contrast 1.20:1:
+near enough to still read as a page, distinct enough not to be one wash.
+
+**FOUR REAL BUGS, all measured, none of which the contrast gate could see:**
+
+1. **`--iw-panel-bg` IS DECLARED NOWHERE IN THIS REPO**, and `SourceBrowser`'s markup bar read
+   `var(--iw-panel-bg, #faf8fc)`. So the bar painted its near-white fallback **byte-identically in
+   both themes** — a white slab glued to the bottom of a night reading column — and no amount of
+   work on the token block could ever have reached it. Only `PdfReaderView` had been migrated to
+   `--iw-reader-bar`; the web reader was left behind while the CSS comment claimed both were done.
+   **This failure is SILENT BY CONSTRUCTION: a `var()` with a fallback always renders something.**
+   That is Peter's *"the bottom bar's fonts are washed out"* — chrome rescues
+   (`[class*="text-stone"]` → `#dfe3e9` at ~1.2:1, `--iw-verified` → `#6ee7a0`) painting near-white
+   labels onto a near-white bar. KEPT by a sweep in `readerContrast.test.ts`: every `var(--iw-…)`
+   either reader reads must be DECLARED in index.css.
+2. **THE ENABLED BACK ARROW WAS THE LITERAL `#5c2d8a` ON THE NIGHT HEADER — 1.13:1, invisible** —
+   and **nothing had ever scored it**, because with a one-entry history both arrows are `disabled`
+   and WCAG 1.4.3 exempts a disabled control. The probe now NAVIGATES first, which is the only way
+   the exemption stops covering it. (Its *disabled* colour measured 5.67:1 — **brighter than the
+   enabled one beside it**. Backwards in both directions at once.)
+3. **THE DIVIDING LINE ALREADY EXISTED AND COULD NOT BE SEEN.** `dockLayout.ts` drew
+   `1px solid #5c2d8a33` — a 20%-alpha DARK purple, which over the night panel composites to very
+   nearly the panel itself. `PdfSidePanel` carried a second copy of the same literal. Both are the
+   token now. **`.iw-nightable { border-color: … !important }` beats an INLINE border**, so the
+   token needed `.iw-dock-panel` to win at night — measured: the panel read `rgb(92,102,114)` (the
+   chrome border) with `--iw-reader-divider: #7b8494` declared, i.e. the token was inert. A dock
+   panel MUST carry that class.
+4. **THE HIGHLIGHTER TOOL'S GLYPH `#8a6a04` died on the night control face (2.37:1)** — found by
+   the new unit guard, not by Peter. Cast through `readerInk` like the other strokes.
+
+**AND THE WASH HAD TO GO OPAQUE AT NIGHT.** `PdfReaderView`'s `wash()` faded a highlight to 55%
+alpha because *"a solid fill over body text is unreadable"* — true only while nothing set the ink ON
+the fill, which the source reader has always done. Over the night page that wash composites to
+`#9d8b46`, a muddy olive: it *passes contrast* against a dark ink and **it does not look yellow**,
+which is precisely the thing Peter asked us not to break. So the strength is a token
+(`--iw-reader-wash`: 55% day, 100% night) applied in CSS via `.iw-mark-fill`, with the opaque
+declaration as the `@supports` fallback so an engine without `color-mix` degrades to what the other
+reader already does rather than to no highlight at all.
+
+**WHICH SURFACE A CONTROL SITS ON IS THE WHOLE QUESTION**, and getting it wrong produced *both* of
+Peter's complaints simultaneously, in opposite directions. The reader panel is not one surface: its
+HEADER is chrome (`--iw-reader-chrome-fg`/`-dim`), while its ARTICLE, its MARKUP BAR and every
+control face in that bar are reader PAPER. Ask first, then take that surface's token. The error
+screens are the awkward case — they render inside a pane that is reader paper in reader mode and the
+chrome panel in live mode, decided by a prop — so they take the one ink measuring ≥4.5:1 on **both**.
+
+**GUARDS (the browser probe is the truth; it is not a guard).**
+`pnpm prove:nightaudit` now measures what the pixels ARE, not merely whether they clear a ratio —
+because **the walker ran 0 failures in BOTH themes on the build Peter complained about**. Contrast
+is the floor. It reads the surfaces back, navigates so the arrows are live, places a REAL highlight
+and reads its fill and ink, and checks the edge that actually faces the editor.
+`src/styles/readerContrast.test.ts` (32 tests, ~22ms, no browser) carries the pure half —
+**mutation-proved, 5 mutants, all die**: revert the paper (8 fail) · mark ink inherits the page (1) ·
+chrome-fg back to `--iw-ink` (1) · the undefined token returns (1) · inks not cast (1).
+`markInk.test.ts` (6) and the `dockLayout.test.ts` divider pair (mutant dies) complete it.
+⚠ The dangling-token sweep **STRIPS COMMENTS**, and its first cut fired on its own documentation —
+the fix's comment in SourceBrowser SAYS `var(--iw-panel-bg, …)` in order to forbid it. Judge what
+the code DOES, never prose about it; the pair (fires on a use, silent on a mention) is asserted.
+
+**WHAT NEEDS PETER'S EYES.** The casting of his coloured *text* is the one place a stored mark
+renders as a different colour by theme. It follows the app's own `--iw-ink` convention exactly and
+touches no highlight, note or textbox — but it is his call whether a maroon annotation reading as a
+light red at night is right, or whether that palette should instead be re-chosen to work on both.
+
 ## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
 
 A big doc (thesis + embedded PDFs, ~20 MB `.studio`) was lagging ~10s on every load / hard refresh.

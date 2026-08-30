@@ -93,3 +93,42 @@ describe('click-to-read preference', () => {
     expect(m.citeClickOpensReader()).toBe(true)
   })
 })
+
+describe('THE DIVIDING LINE the dock draws (Peter, 2026-08-30)', () => {
+  // *"make sure the palette is slightly different from the main page and there's a dividing line
+  // between."* There already WAS one — `1px solid #5c2d8a33`, a 20%-alpha dark purple, which over
+  // the night panel composites to very nearly the panel itself. So the line existed and could not
+  // be seen, in exactly the theme that needed it. These pin the two halves of the fix that a colour
+  // assertion in readerContrast.test.ts cannot reach: that the value is a TOKEN at all, and that it
+  // lands on the edge facing the editor rather than on all four.
+  const opts = { orientation: 'side' as const, dockSide: 'right' as const, width: 500, height: 400 }
+
+  it('borders the edge facing the editor, and only that edge', () => {
+    const right = dockPanelPos(opts)
+    expect(right.borderLeft, 'docked right ⇒ the LEFT edge faces the editor').toBeTruthy()
+    expect(right.borderRight).toBeUndefined()
+    const left = dockPanelPos({ ...opts, dockSide: 'left' })
+    expect(left.borderRight, 'docked left ⇒ the RIGHT edge does').toBeTruthy()
+    expect(left.borderLeft).toBeUndefined()
+    const below = dockPanelPos({ ...opts, orientation: 'bottom' })
+    expect(below.borderTop, 'docked below ⇒ the TOP edge does').toBeTruthy()
+  })
+
+  it('is a THEME TOKEN, never a literal — the literal is what made it invisible at night', () => {
+    const shapes = [
+      opts,
+      { ...opts, dockSide: 'left' as const },
+      { ...opts, orientation: 'bottom' as const },
+      { ...opts, fullscreen: true },
+    ]
+    for (const o of shapes) {
+      const sides = Object.entries(dockPanelPos(o)).filter(([k]) => /^border(Top|Right|Bottom|Left)$/.test(k))
+      expect(sides.length, `some edge is bordered for ${JSON.stringify(o)}`).toBeGreaterThan(0)
+      for (const [k, v] of sides) {
+        expect(String(v), `${k} reads a token`).toContain('var(--iw-reader-divider')
+        // The known-negative, stated rather than implied: this exact literal IS the bug.
+        expect(String(v), `${k} carries no literal purple`).not.toContain('#5c2d8a')
+      }
+    }
+  })
+})
