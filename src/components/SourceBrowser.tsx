@@ -848,6 +848,25 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // it is exactly the condition under which a framing rule can be installed.
   useEffect(() => { canFrameRef.current = extState === 'ready' }, [extState])
 
+  // ── A READABLE DIAGNOSTIC, BECAUSE "still broken" IS NOT A STAGE ─────────────────────────────
+  // Live view through the extension has FIVE places it can fail and they are indistinguishable
+  // from the panel: no content script in this tab (the commonest — Chrome injects them on page
+  // load, so a tab open before the install has no bridge), the extension present but not granted
+  // <all_urls>, the worker missing declarativeNetRequest, the rule refused, or the site refusing in
+  // its body afterwards. Each needs a different fix and they all look like one refusal message.
+  // window.__iwReader reports the stage instead of making the writer describe a screenshot.
+  useEffect(() => {
+    ;(window as unknown as { __iwReader?: unknown }).__iwReader = {
+      extension: extState,            // 'absent' | 'blocked' | 'ready'
+      bridge: !!windowPort(),         // is a content script listening in THIS tab?
+      liveMode: framed,
+      framingInstalled: framingOn,    // did the worker actually install the rule?
+      framingRefusedAnyway: frameRefused,
+      here,
+      via,                            // who fetched the article text: 'server' | 'extension'
+    }
+  }, [extState, framed, framingOn, frameRefused, here, via])
+
   // The offer, at the moment it would help. `openExtensionPopup` returns false when the browser
   // refuses — a real outcome, not a bug — so the instruction is shown either way and the button is
   // only ever a shortcut to it.
