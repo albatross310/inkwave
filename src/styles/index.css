@@ -1874,12 +1874,191 @@
 :root[data-theme="night"] .iw-nightable textarea { background-color: #3c444e !important; color: #eef1f5 !important; border-color: #5c6672 !important; }
 :root[data-theme="night"] .iw-nightable input::placeholder { color: #9aa3af !important; }
 
+/* ── SNAPSHOT VIEW (/snapshot) — ONE palette for the whole route ─────────────────────────────────
+   WHY THESE ARE :root TOKENS AND NOT `.iw-nightable`. That class is for a FLOATING PANEL: it forces
+   `background-color: #454e59 !important` on the element it sits on. /snapshot is not a panel — it is
+   a whole route of three full-height panes flanking the near-black document pane, and painting them
+   dolphin grey would produce exactly the half-lit screen this block exists to fix (Peter, 2026-08-30:
+   the header, the diff panel, the summary card and the minimap were all still day-cream over a black
+   page). So the route takes its own tokens defined at :root in BOTH themes — the same shape as
+   --iw-reader-* and --iw-countdown-fg, whose comments give the general rule: a token whose consumer
+   does not sit inside chrome must not be scoped to chrome, or it silently resolves to its DAY value
+   on the night page. Every one is consumed as `var(--iw-snap-…, <day literal>)` from SnapshotView's
+   inline styles, so a stylesheet that failed to load still paints the day design rather than nothing.
+
+   THE DEPTH RAMP, darkest to lightest, is what makes the night screen readable as one surface:
+     void  #0a0b0e  the editor surface behind the doc pane (unchanged, set above)
+     bar   the fixed header, a hair above the void so it reads as a bar and not a hole
+     pane  the diff/hunk panel — the biggest area on screen, so it sits LOW
+     side  the summary/minimap column, one step up because it holds cards
+     card  the summary box, the version pill, an unlit toggle — the raised objects
+     paper #2c2e35  the sheets in the doc pane (unchanged)
+
+   THE DIFF COLOURS ARE THE DELIBERATE PART. Day keeps its exact greens and reds. Night does NOT
+   simply lighten them: a saturated #b91c1c on charcoal reads as an ERROR, and the productivity work
+   settled that cutting is writing and must never be painted as alarm (summary.test.ts sweeps for it).
+   So night takes a dusty ROSE for deletions and a soft SAGE for additions — still warm-vs-cool, still
+   instantly separable, neither of them a warning light. The strikethrough and the ring carry the
+   meaning; the hue only has to stay distinguishable. --iw-snap-danger is SEPARATE from the deletion
+   colour on purpose: "✕ snapshot" destroys a Bitcoin-anchored record and is allowed to look like it,
+   and keeping the two apart means retuning one can never quietly retune the other. */
+:root {
+  --iw-snap-bar: rgba(255, 255, 255, 0.95);  /* fixed header bar */
+  --iw-snap-pane: #f9f7f4;                   /* diff / hunk panel ground */
+  --iw-snap-side: #fbfaf6;                   /* summary + minimap column ground */
+  --iw-snap-card: #ffffff;                   /* raised objects: summary box, version pill, unlit toggle */
+  --iw-snap-ink: #5c2d8a;                    /* the route's purple — labels, borders, lit fills */
+  --iw-snap-ink-hover: #7a3fb5;
+  --iw-snap-on-ink: #ffffff;                 /* text ON an --iw-snap-ink FILL (never a literal white) */
+  --iw-snap-text: #3a3a3a;                   /* body text in the diff panel + summary card */
+  --iw-snap-muted: #6f6a7d;                  /* …context words, "no change this page", empty states */
+  --iw-snap-edge: rgba(92, 45, 138, 0.2);    /* the header's hairline */
+  --iw-snap-card-edge: rgba(92, 45, 138, 0.4);
+  --iw-snap-rule: rgba(92, 45, 138, 0.32);   /* the diff panel's dashed page rules */
+  --iw-snap-midline: rgba(92, 45, 138, 0.38); /* the golden-ratio reading line across both panes */
+  --iw-snap-page-num: rgba(92, 45, 138, 0.85);
+  --iw-snap-chip-bg: rgba(92, 45, 138, 0.08);      /* header pill, unlit */
+  --iw-snap-chip-bg-on: rgba(92, 45, 138, 0.16);   /* header pill, lit / hovered */
+  --iw-snap-chip-edge: rgba(92, 45, 138, 0.35);
+  --iw-snap-nav-bg: rgba(140, 90, 200, 0.35);      /* the ‹ › snapshot lozenges */
+  --iw-snap-nav-bg-off: rgba(140, 90, 200, 0.06);
+  --iw-snap-nav-fg: rgba(92, 45, 138, 0.85);
+  --iw-snap-nav-fg-off: rgba(140, 90, 200, 0.25);
+  --iw-snap-nav-edge: rgba(140, 90, 200, 0.28);
+  --iw-snap-nav-edge-off: rgba(140, 90, 200, 0.1);
+  --iw-snap-divider: rgba(92, 45, 138, 0.1);       /* the drag handles between panes */
+  --iw-snap-divider-fixed: rgba(92, 45, 138, 0.14);
+  --iw-snap-divider-hover: rgba(92, 45, 138, 0.28);
+  --iw-snap-divider-grip: rgba(92, 45, 138, 0.4);
+  --iw-snap-map: #9fd9c8;                    /* minimap ground */
+  --iw-snap-map-page: #f7f2e8;               /* a page thumbnail on it */
+  --iw-snap-map-num: rgba(92, 45, 138, 0.8);
+  --iw-snap-map-shadow: rgba(80, 50, 10, 0.15);
+  --iw-snap-danger: #b91c1c;                 /* "✕ snapshot" — destructive, NOT the deletion mark */
+  --iw-snap-danger-bg: rgba(185, 28, 28, 0.07);
+  --iw-snap-danger-edge: rgba(185, 28, 28, 0.25);
+  --iw-snap-scrollbar-track: #efe9df;
+  --iw-snap-scrollbar-thumb: #b8b2a8;
+  --iw-snap-scrollbar-thumb-hover: #a49d90;
+  /* Diff marks. The *-rgb triples are channels only, because the alignment glow multiplies them by
+     the live --iw-align (0..1) and `rgba(var(--x), …)` is the only way to keep that tunable. */
+  --iw-snap-add-fg: #166534;
+  --iw-snap-add-bg: rgba(22, 163, 74, 0.16);
+  --iw-snap-add-ring-rgb: 21, 128, 61;
+  --iw-snap-add-fill-rgb: 22, 163, 74;
+  --iw-snap-add-tick: #16a34a;               /* minimap tick */
+  --iw-snap-add-tick-hi: #0d6b30;            /* …hovered */
+  --iw-snap-del-fg: #b91c1c;
+  --iw-snap-del-bg: rgba(185, 28, 28, 0.07);
+  --iw-snap-del-ring-rgb: 185, 28, 28;
+  --iw-snap-del-fill-rgb: 200, 30, 30;
+  --iw-snap-del-tick: #dc2626;
+  --iw-snap-del-tick-hi: #8f1414;
+}
+:root[data-theme="night"] {
+  --iw-snap-bar: rgba(18, 20, 26, 0.95);
+  --iw-snap-pane: #14161b;
+  --iw-snap-side: #181b21;
+  --iw-snap-card: #20242b;
+  --iw-snap-ink: #cbb8f2;
+  --iw-snap-ink-hover: #ddcffa;
+  --iw-snap-on-ink: #221d2b;
+  --iw-snap-text: #dfe3e9;
+  --iw-snap-muted: #9aa3af;
+  --iw-snap-edge: rgba(203, 184, 242, 0.22);
+  --iw-snap-card-edge: rgba(203, 184, 242, 0.4);
+  --iw-snap-rule: rgba(203, 184, 242, 0.3);
+  --iw-snap-midline: rgba(203, 184, 242, 0.42);
+  --iw-snap-page-num: rgba(203, 184, 242, 0.85);
+  --iw-snap-chip-bg: rgba(203, 184, 242, 0.1);
+  --iw-snap-chip-bg-on: rgba(203, 184, 242, 0.18);
+  --iw-snap-chip-edge: rgba(203, 184, 242, 0.34);
+  --iw-snap-nav-bg: rgba(160, 120, 220, 0.3);
+  --iw-snap-nav-bg-off: rgba(160, 120, 220, 0.06);
+  --iw-snap-nav-fg: #d8c6f7;
+  --iw-snap-nav-fg-off: rgba(216, 198, 247, 0.3);
+  --iw-snap-nav-edge: rgba(203, 184, 242, 0.3);
+  --iw-snap-nav-edge-off: rgba(203, 184, 242, 0.12);
+  --iw-snap-divider: rgba(203, 184, 242, 0.12);
+  --iw-snap-divider-fixed: rgba(203, 184, 242, 0.16);
+  --iw-snap-divider-hover: rgba(203, 184, 242, 0.3);
+  --iw-snap-divider-grip: rgba(203, 184, 242, 0.45);
+  /* The minimap keeps its mint IDENTITY — it is the one green object on the route and Peter reads it
+     as a shape at a glance — but at night it is a deep teal so the page thumbnails on it (charcoal,
+     one step up from the sheets) still read as cards. Their separation is 1.56:1, a graphic
+     distinction, carried further by the shadow token below. */
+  --iw-snap-map: #132824;
+  --iw-snap-map-page: #3a444e;
+  --iw-snap-map-num: rgba(203, 184, 242, 0.92);
+  --iw-snap-map-shadow: rgba(0, 0, 0, 0.5);
+  --iw-snap-danger: #edaaa3;
+  --iw-snap-danger-bg: rgba(214, 150, 145, 0.12);
+  --iw-snap-danger-edge: rgba(214, 150, 145, 0.3);
+  --iw-snap-scrollbar-track: #1b1e24;
+  --iw-snap-scrollbar-thumb: #4a525c;
+  --iw-snap-scrollbar-thumb-hover: #5e6774;
+  --iw-snap-add-fg: #8fd9ae;
+  --iw-snap-add-bg: rgba(110, 200, 150, 0.18);
+  --iw-snap-add-ring-rgb: 110, 200, 150;
+  --iw-snap-add-fill-rgb: 90, 190, 135;
+  --iw-snap-add-tick: #6ecf9a;
+  --iw-snap-add-tick-hi: #b6f0cd;
+  --iw-snap-del-fg: #edaaa3;
+  --iw-snap-del-bg: rgba(214, 150, 145, 0.15);
+  --iw-snap-del-ring-rgb: 214, 150, 145;
+  --iw-snap-del-fill-rgb: 200, 130, 125;
+  --iw-snap-del-tick: #e59b93;
+  --iw-snap-del-tick-hi: #ffc9c2;
+}
+
+/* ── THE BROWSER MUST NOT STEAL THE SIDEWAYS SWIPE ON /snapshot (2026-08-30) ─────────────────────
+   Peter, on a Mac trackpad: a two-finger horizontal swipe fires the browser's own history
+   navigation and throws him out of the review mid-read. This is a COLLISION, not an annoyance —
+   that exact gesture is already a shipped feature here: SnapshotView binds a `wheel` listener that
+   reads `deltaX` and drives the position scrubber (the Apple-Photos-style version fly-through).
+
+   TWO PLACES, because they fail differently and only one of them is obvious:
+   · `.iw-snap-scroll` — the doc pane, the diff panel and the summary card. These have
+     `overflow-x: auto`, so a swipe scrolls them until they hit their own edge and then CHAINS
+     outward; `contain` terminates the chain at the pane.
+   · `html.iw-no-swipe-nav` — the root, and this is the one that actually matters. The route is
+     `overflow: hidden`, so a swipe that lands anywhere WITHOUT a scroller under it — the minimap,
+     the side panel, the header bar, the divider, the gaps between panes — chains straight to a
+     viewport with nothing to scroll, which is precisely when the browser decides the gesture was
+     meant for it. `overscroll-behavior` on the ROOT ELEMENT propagates to the viewport (it does
+     NOT propagate from `body`), so the root is where the rule has to live. SnapshotView adds the
+     class on mount and drops it on unmount — the `.iw-water-ready` / `.iw-wave-video-wait` shape.
+
+   `contain` RATHER THAN `none`: both suppress the native swipe navigation, and `contain` keeps the
+   rubber-band affordance, so nothing about how the panes feel changes.
+
+   ⚠ THIS IS THE DECLARATIVE MECHANISM, NOT `preventDefault`. The scrub's own handler already calls
+   preventDefault, and it is not enough for two independent reasons: it is only bound to the two
+   pane scrollers (so it is absent everywhere else on the route), and it only fires when the swipe
+   is steeply horizontal (|dX| > 1.3·|dY|) — a shallow diagonal falls through it untouched. Both
+   holes are exactly where the browser was taking the gesture. Do not "simplify" this back into a
+   preventDefault: a gesture recogniser that has already decided it owns the stream cannot be
+   talked out of it by a later cancelled event.
+
+   ⚠ WHAT IT DOES NOT COVER, stated: iOS/iPadOS EDGE-swipe back is a system gesture, not scroll
+   overflow, and no web page can suppress it. This is the trackpad/scroll-driven case only. */
+html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
+
 /* Snapshot-view scroll panes: force an always-visible classic scrollbar (overlay bars auto-hide). */
-.iw-snap-scroll { scrollbar-width: thin; scrollbar-color: #b8b2a8 #efe9df; scrollbar-gutter: stable; }
+.iw-snap-scroll {
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--iw-snap-scrollbar-thumb, #b8b2a8) var(--iw-snap-scrollbar-track, #efe9df);
+  scrollbar-gutter: stable;
+}
 .iw-snap-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
-.iw-snap-scroll::-webkit-scrollbar-track { background: #efe9df; }
-.iw-snap-scroll::-webkit-scrollbar-thumb { background: #b8b2a8; border-radius: 6px; border: 2px solid #efe9df; }
-.iw-snap-scroll::-webkit-scrollbar-thumb:hover { background: #a49d90; }
+.iw-snap-scroll::-webkit-scrollbar-track { background: var(--iw-snap-scrollbar-track, #efe9df); }
+.iw-snap-scroll::-webkit-scrollbar-thumb {
+  background: var(--iw-snap-scrollbar-thumb, #b8b2a8);
+  border-radius: 6px;
+  border: 2px solid var(--iw-snap-scrollbar-track, #efe9df);
+}
+.iw-snap-scroll::-webkit-scrollbar-thumb:hover { background: var(--iw-snap-scrollbar-thumb-hover, #a49d90); }
 
 /* Synchronised alignment glow: CONTINUOUS, driven by --iw-align (0..1) set each scroll frame. Brightest
    (1) when a diff's centre sits on the midline in BOTH panes, tapering out ~40px past its top/bottom edges
@@ -1890,16 +2069,16 @@
    included) for free. Ring listed first so it sits on top of the fill. */
 .diff-add {
   box-shadow:
-    inset 0 0 0 2px rgba(21,128,61, var(--iw-align, 0)),
-    inset 0 0 0 100vmax rgba(22,163,74, calc(var(--iw-align, 0) * 0.32));
+    inset 0 0 0 2px rgba(var(--iw-snap-add-ring-rgb, 21,128,61), var(--iw-align, 0)),
+    inset 0 0 0 100vmax rgba(var(--iw-snap-add-fill-rgb, 22,163,74), calc(var(--iw-align, 0) * 0.32));
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   border-radius: 2px;
 }
 .diff-del {
   box-shadow:
-    inset 0 0 0 2px rgba(185,28,28, var(--iw-align, 0)),
-    inset 0 0 0 100vmax rgba(200,30,30, calc(var(--iw-align, 0) * 0.30));
+    inset 0 0 0 2px rgba(var(--iw-snap-del-ring-rgb, 185,28,28), var(--iw-align, 0)),
+    inset 0 0 0 100vmax rgba(var(--iw-snap-del-fill-rgb, 200,30,30), calc(var(--iw-align, 0) * 0.30));
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   border-radius: 2px;
