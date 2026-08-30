@@ -1910,6 +1910,53 @@
   --iw-score-highlight: #9b5ccc;           /* a bar an annotation or citation points at */
   --iw-score-title: #44403c;               /* title / composer above the score */
 }
+/* ── THE DAY HALF OF THE CHROME PALETTE (2026-08-30) ────────────────────────────────────────────
+   Every token below had a NIGHT value in the block underneath and NO DAY VALUE ANYWHERE. Its day
+   colour lived only as the `#fallback` inside `var(--iw-x, #fallback)` at each use site — so
+   CLAUDE.md's promise ("adding a scheme = one more :root block; components don't change") was false
+   for exactly these: re-pointing the day palette meant editing components, and a THIRD palette
+   could not reach them at all, because there was no declaration to override.
+
+   THIS BLOCK REPAINTS NOTHING. Each value is byte-identical to the single fallback its consumers
+   already pass, so day resolves to what it always did and the scoped night values below still win
+   inside chrome. `colourScan.test.ts` PROVES that rather than asking you to believe it: it reads
+   every `var(--tok, fallback)` in src/ and fails when a fallback disagrees with the day value here.
+
+   DELIBERATELY NOT MOVED HERE, because these are NOT one-value-per-token and a day definition would
+   genuinely repaint something — Peter's call, reported rather than guessed:
+     --iw-paper      three day surfaces share one night value: the writing SHEET (#f7f2e8 parchment),
+                     the music panel CARDS (#fff) and the score PAGE (#fcfaf6). One token, three
+                     roles; picking any single day value repaints the other two.
+     --iw-newbtn-fg  documented as "+ New text on its light-blue chip" (day #0369a1), but two other
+                     callers pass #fff for white-on-a-dark-fill. They already disagree at NIGHT,
+                     where the token is #0c4a6e — a latent bug, not merely drift.
+
+   `--iw-score-gap` and `--iw-gap-rule` were read by src/music/ScorePage.tsx and DECLARED NOWHERE IN
+   THE REPO — the same class of dangling token the reader lane just found in `--iw-panel-bg`. They
+   worked only because their fallbacks happen to be light in both themes. They are deliberately
+   theme-INVARIANT (the reflow gap is paper inserted into a photograph of a page, and you cannot
+   invert a picture of a page), so they take no night value — but they are declared now, so a future
+   palette can see them and choose. A fallback nobody declared is not a decision anyone made. */
+:root {
+  --iw-light: #9b5ccc;                     /* lighter purple accent */
+  --iw-verified: #15803d;                  /* verified ✓ box */
+  --iw-verify-tick: #246b24;               /* the verify tick itself — a shade under the box */
+  --iw-badge-ai: #b45309;                  /* "a machine said this" amber (CitationPanel, charts) */
+  --iw-badge-manual: #6b7280;              /* "a person said this" grey, beside it */
+  --iw-addbtn-bg: #5c2d8a;                 /* Add button — filled */
+  --iw-addbtn-fg: #ffffff;
+  --iw-addbtn-border: transparent;         /* day needs no outline; night adds one */
+  --iw-toggle-on: #5c2d8a;                 /* switch track — on / off */
+  --iw-toggle-off: #d1d5db;
+  --iw-slot-drag-bg: #faf8ff;              /* opaque slot-circle disc during toolbar drags */
+  --iw-hotkey-hint-fg: #ffffff;            /* the Alt-held badge, punched out of --iw-ink */
+  --iw-page-num: #000000;                  /* the big sheet page number */
+  --iw-paper-line: rgba(80, 50, 10, 0.18); /* SCAS reel backing: ring + shadow on parchment */
+  --iw-paper-shadow: rgba(60, 40, 10, 0.16);
+  --iw-score-gap: #fdfdfb;                 /* music reflow: the inserted band — paper, both themes */
+  --iw-gap-rule: rgba(92, 45, 138, 0.1);   /* …and its writing rule */
+}
+
 :root[data-theme="night"] .iw-nightable {
   background-color: #454e59 !important;   /* dolphin-back grey */
   color: #dfe3e9 !important;

@@ -114,6 +114,127 @@ export function scanSource(src: string): ColourCensus {
 /** Directories never worth walking. */
 export const SKIP_DIR = new Set(['node_modules', 'dist', 'build', '__snapshots__'])
 
+// ─── THE TOKEN CONTRACT ──────────────────────────────────────────────────────────────────────────
+// Everything above counts literals. This half checks the OTHER failure, and it is the quieter one: a
+// `var(--iw-x, #fallback)` that reads a token nobody ever declared is INDISTINGUISHABLE at a glance
+// from one that works — it renders the fallback, in every theme, forever, with no error. The reader
+// lane found `--iw-panel-bg` that way (declared nowhere, read by two live surfaces); this sweep also
+// found `--iw-score-gap` and `--iw-gap-rule` in src/music/ScorePage.tsx.
+//
+// It is DERIVED FROM SOURCE both sides — the tokens components actually read, against the tokens
+// index.css actually declares — rather than a hand-written list, which is the drift that
+// `contrastWalkerContract.test.ts` exists to stop one directory over.
+
+/** One `var(--token, fallback)` call site. */
+export interface VarUse { token: string; fallback: string | null }
+
+/** Every `var(--iw-…)` read in a source file, with whatever fallback it passes. */
+export function varUses(src: string): VarUse[] {
+  const out: VarUse[] = []
+  for (const m of stripComments(src).matchAll(/var\(\s*(--iw-[a-z0-9-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g)) {
+    out.push({ token: m[1], fallback: m[2]?.trim() || null })
+  }
+  return out
+}
+
+/**
+ * Custom properties DECLARED in a stylesheet, split by theme. Comments are stripped first: index.css
+ * explains `--iw-on-ink` by quoting the white-on-#cbb8f2 bug it fixes, and a raw-text scan would
+ * read that sentence as a declaration.
+ */
+export function declaredTokens(css: string): { day: Map<string, string>; night: Map<string, string> } {
+  const day = new Map<string, string>()
+  const night = new Map<string, string>()
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  for (const rule of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const isNight = /data-theme="night"/.test(rule[1])
+    for (const d of rule[2].matchAll(/(--iw-[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+      ;(isNight ? night : day).set(d[1], d[2].trim())
+    }
+  }
+  return { day, night }
+}
+
+/**
+ * Colours that are equal but spelled differently. `#fff` and `#ffffff` are the same paint, and a
+ * guard that called them a mismatch would force a cosmetic rewrite of every call site to say
+ * nothing. Whitespace inside rgb()/rgba() is normalised for the same reason.
+ */
+export function sameColour(a: string, b: string): boolean {
+  return normaliseColour(a) === normaliseColour(b)
+}
+
+/**
+ * One colour, one spelling — so the drift check reports real disagreements and not typography.
+ *
+ * ⚠ TWO BUGS IN THIS ONE FUNCTION, both of which MANUFACTURED FINDINGS, and both caught only by
+ * reading the list it produced rather than by trusting its count:
+ *   1. The first cut stripped trailing alpha zeros with a regex that could never fire, so
+ *      `rgba(…,0.10)` was reported as drift from `rgba(…,0.1)` — 2 of its 14 "findings" were the
+ *      instrument's own.
+ *   2. The fix then ran the numeric normaliser over HEX too: `#000000` is all digits, so it became
+ *      `Number('000000')` = `#0`, and `--iw-page-num` was reported as drift from itself. A
+ *      normaliser that changes what it is comparing is worse than none.
+ * Hence the two branches are kept apart: hex is expanded and lowercased and NEVER arithmetic; only
+ * the components inside rgb()/hsl() are compared as numbers.
+ */
+export function normaliseColour(s: string): string {
+  const t = s.trim().toLowerCase().replace(/\s+/g, '')
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])([0-9a-f])?$/.exec(t)
+  if (short) {
+    const d = (c: string) => c + c
+    return `#${d(short[1])}${d(short[2])}${d(short[3])}${short[4] ? d(short[4]) : ''}`
+  }
+  if (t.startsWith('#')) return t
+  return t.replace(/[\d.]+/g, (n) => String(Number(n)))
+}
+
+/**
+ * Is this fallback a COLOUR?
+ *
+ * The dangling check has to separate colour tokens from the layout ones (`--iw-toolbar-h`,
+ * `--iw-kb-offset`, `--iw-tap-x`, `--iw-align`…), which are set imperatively from JS and are
+ * correctly absent from the stylesheet. Doing that with a hand-written list of layout names is the
+ * drift `contrastWalkerContract.test.ts` exists to stop, so it is derived instead: a token is a
+ * colour token when a call site passes it a colour. `transparent` and `currentColor` count — they
+ * are values of a colour property, and a token whose only fallback is `transparent` is still a
+ * colour a palette may want to re-point.
+ */
+export function isColourValue(v: string): boolean {
+  const t = v.trim().toLowerCase()
+  return /^#[0-9a-f]{3,8}$/.test(t) || /^(?:rgba?|hsla?)\(/.test(t) ||
+    t === 'transparent' || t === 'currentcolor' || /^(?:white|black)$/.test(t)
+}
+
+/**
+ * Custom properties this repo WRITES AT RUNTIME, from source.
+ *
+ * Two spellings, because one alone is a false instrument: `el.style.setProperty('--iw-x', …)` and
+ * React's inline-style key form `{ ['--iw-x' as string]: '6px' }`. Scanning only for `setProperty`
+ * finds 13 properties and MISSES `--iw-tap-x`, `--iw-row-slots` and `--iw-wave-x` — which is exactly
+ * enough of a gap to make a "these are all runtime channels" exemption quietly wrong.
+ *
+ * This is corroboration, NOT the line the dangling check draws. The line is "is it a COLOUR token",
+ * derived from the fallbacks call sites pass — a runtime-written property is fine, and an undeclared
+ * COLOUR token is the bug (`--iw-panel-bg`, `--iw-score-gap`, `--iw-gap-rule`). Several of these must
+ * stay imperative for measured reasons: CLAUDE.md records that declaring `--iw-wave-x` as an
+ * inheriting custom property invalidated the whole page subtree, p50 417ms → 50ms.
+ */
+export function runtimeWritten(src: string): Set<string> {
+  const clean = stripComments(src)
+  const out = new Set<string>()
+  for (const m of clean.matchAll(/setProperty\(\s*['"`](--iw-[a-z0-9-]+)/g)) out.add(m[1])
+  for (const m of clean.matchAll(/\[\s*['"`](--iw-[a-z0-9-]+)['"`]\s*(?:as\s+\w+\s*)?\]\s*:/g)) out.add(m[1])
+  return out
+}
+
+/**
+ * Tokens whose day value is deliberately NOT declared, each because declaring one would repaint
+ * something real. Reported in colourScan.test.ts so the list cannot quietly grow; the argument for
+ * each is in index.css beside the day palette.
+ */
+export const UNDECLARED_BY_DESIGN = new Set(['--iw-paper', '--iw-newbtn-fg'])
+
 /**
  * Files exempt from the BARE cap, each for a reason that is asserted in the test rather than
  * trusted. An exemption nobody re-proves is how a real hole opens (claims.test.ts's fixture-carrier

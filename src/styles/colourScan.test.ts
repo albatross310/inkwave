@@ -21,7 +21,11 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { EXEMPT, isScannable, isTestFile, scanSource, SKIP_DIR, stripComments } from './colourScan'
+import {
+  declaredTokens, EXEMPT, isColourValue, isScannable, isTestFile, sameColour, scanSource, SKIP_DIR,
+  runtimeWritten, stripComments,
+  UNDECLARED_BY_DESIGN, varUses,
+} from './colourScan'
 import baseline from './colourBaseline.json'
 
 const REPO = resolve(__dirname, '../..')
@@ -54,7 +58,12 @@ if (process.env.UPDATE_COLOUR_BASELINE) {
     throw new Error(`refusing to raise caps: ${raised.map(([f, n]) => `${f} -> ${n}`).join(', ')}`)
   }
   const total = Object.values(files).reduce((a, b) => a + b, 0)
-  writeFileSync(resolve(__dirname, 'colourBaseline.json'), JSON.stringify({ total, files }, null, 2) + '\n')
+  // driftingTokens is carried over, never recomputed here: it caps a DIFFERENT defect (a fallback
+  // disagreeing with the palette) and silently re-recording it would let the drift ratchet upward
+  // every time someone regenerated the literal counts.
+  const { driftingTokens } = baseline
+  writeFileSync(resolve(__dirname, 'colourBaseline.json'),
+    JSON.stringify({ total, driftingTokens, files }, null, 2) + '\n')
 }
 
 const CAPS = baseline.files as Record<string, number>
@@ -132,6 +141,95 @@ describe('palette gate — the ratchet', () => {
     const gone = Object.keys(CAPS).filter((f) => !CENSUS.has(f))
     expect(gone, `capped paths that no longer exist — rerun with UPDATE_COLOUR_BASELINE=1: ${gone.join(', ')}`)
       .toHaveLength(0)
+  })
+})
+
+describe('the token contract — no dangling reads, no drifted fallbacks', () => {
+  const CSS = readFileSync(join(REPO, 'src/styles/index.css'), 'utf8')
+  const { day, night } = declaredTokens(CSS)
+  const USES = FILES.flatMap((f) => varUses(readFileSync(join(REPO, f), 'utf8')).map((u) => ({ ...u, f })))
+
+  it('VOID GUARD: the sweep sees real tokens on both sides', () => {
+    // "No dangling tokens" is true by construction if either side came back empty — the empty-list
+    // trap. Both halves must be populated before any verdict below is worth reading.
+    expect(USES.length, 'no var(--iw-…) reads found in src/ — the scan is blind').toBeGreaterThan(200)
+    expect(day.size + night.size, 'no tokens parsed out of index.css').toBeGreaterThan(50)
+  })
+
+  it('KNOWN-NEGATIVE: the scan sees a dangling read and a drifted fallback', () => {
+    // Proves both verdicts discriminate, through the same functions the real files go through.
+    expect(varUses(`color: 'var(--iw-nope, #123456)'`)[0]).toEqual({ token: '--iw-nope', fallback: '#123456' })
+    expect(declaredTokens(`:root { --iw-x: #abc; }`).day.get('--iw-x')).toBe('#abc')
+    // Both halves matter. These four pass ONLY because both normaliser bugs are fixed: the first
+    // cut called 0.10-vs-0.1 drift, the second called #000000 drift from itself.
+    expect(sameColour('#fff', '#ffffff')).toBe(true)          // must NOT be called drift
+    expect(sameColour('rgba(0,0,0,.1)', 'rgba(0, 0, 0, 0.10)')).toBe(true)
+    expect(sameColour('#000', '#000000')).toBe(true)
+    expect(sameColour('#5c2d8a55', '#5c2d8a')).toBe(false)    // alpha is part of the colour
+    expect(sameColour('#5c2d8a', '#9b5ccc')).toBe(false)      // must be called drift
+    expect(sameColour('rgba(0,0,0,0.1)', 'rgba(0,0,0,0.2)')).toBe(false)
+  })
+
+  it('every token a component READS is DECLARED in index.css', () => {
+    // The `--iw-panel-bg` class of bug: a var() on a token nobody declared renders its fallback in
+    // every theme, forever, with no error — and looks exactly like theming that worked.
+    // Scoped to COLOUR tokens, derived from the fallbacks the call sites pass — the layout tokens
+    // (--iw-toolbar-h, --iw-kb-offset, --iw-align…) are set imperatively from JS and are correctly
+    // absent from the stylesheet.
+    const colourTokens = new Set(USES.filter((u) => u.fallback && isColourValue(u.fallback)).map((u) => u.token))
+    const dangling = [...new Set(
+      USES.filter((u) => colourTokens.has(u.token))
+        .filter((u) => !day.has(u.token) && !night.has(u.token) && !UNDECLARED_BY_DESIGN.has(u.token))
+        .map((u) => `${u.token} (read in ${u.f})`),
+    )]
+    expect(dangling, 'declare these in src/styles/index.css, or the theme can never reach them').toEqual([])
+  })
+
+  it('every fallback AGREES with the declared day value — so declaring one repaints nothing', () => {
+    // This is what makes moving a day value into the palette a provable no-op rather than a hope,
+    // and it is the check that FOUND --iw-paper's three-roles-one-token collision: a token read with
+    // #f7f2e8 here, #fff there and #fcfaf6 somewhere else cannot be given one day value quietly.
+    const drift = new Map<string, Set<string>>()
+    for (const u of USES) {
+      const declared = day.get(u.token)
+      if (!declared || !u.fallback) continue
+      // A fallback built from a template expression (`${INK}55`) is not a literal this can compare,
+      // and neither is a token aliasing another token. Comparing either reports drift that is not
+      // there — an instrument manufacturing its own findings.
+      if (!isColourValue(u.fallback) || !isColourValue(declared)) continue
+      if (sameColour(declared, u.fallback)) continue
+      if (!drift.has(u.token)) drift.set(u.token, new Set())
+      drift.get(u.token)!.add(`${u.fallback} in ${u.f}`)
+    }
+    const lines = [...drift.entries()].map(([t, s]) => `${t} declared ${day.get(t)} but read as ${[...s].join(', ')}`)
+    expect(lines.length, `fallbacks disagreeing with the palette:\n${lines.join('\n')}`)
+      .toBeLessThanOrEqual(baseline.driftingTokens)
+  })
+
+  it('every token the colour scope EXCLUDES is accounted for — the exclusion is not a hole', () => {
+    // NON-CIRCULAR CORROBORATION. The dangling check above scopes itself to tokens read with a
+    // COLOUR fallback, so "the rest are layout channels" is its assumption, not its finding. This
+    // asks a genuinely independent question of the same source: a token that nothing declares AND
+    // nothing writes at runtime is unaccounted for — nobody sets it, so its fallback is all there
+    // has ever been, and that is the shape of the --iw-panel-bg bug wearing a non-colour fallback.
+    const written = new Set<string>()
+    for (const f of FILES) for (const t of runtimeWritten(readFileSync(join(REPO, f), 'utf8'))) written.add(t)
+    expect(written.size, 'no runtime-written properties found — the corroborating scan is blind')
+      .toBeGreaterThan(5)
+
+    const colourTokens = new Set(USES.filter((u) => u.fallback && isColourValue(u.fallback)).map((u) => u.token))
+    const orphan = [...new Set(USES.map((u) => u.token))]
+      .filter((t) => !colourTokens.has(t) && !day.has(t) && !night.has(t) && !written.has(t))
+    expect(orphan, 'read, but nothing declares or writes them — are these colours?').toEqual([])
+  })
+
+  it('the deliberately-undeclared list stays small and every entry is genuinely undeclared', () => {
+    // An exemption nobody re-proves is how a real hole opens. If a token here HAS gained a day
+    // value, it must leave this list — otherwise the list becomes a place to park drift.
+    for (const t of UNDECLARED_BY_DESIGN) {
+      expect(day.has(t), `${t} now has a day value — remove it from UNDECLARED_BY_DESIGN`).toBe(false)
+    }
+    expect(UNDECLARED_BY_DESIGN.size, 'each entry needs an argument in index.css').toBeLessThanOrEqual(2)
   })
 })
 
