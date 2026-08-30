@@ -42,6 +42,12 @@ const MUTED = 'var(--iw-reader-muted, #6b645f)'
 // Ink laid ON a mark's own fill. A highlight or note card is an opaque PALE patch in both themes,
 // so its text is dark in both — day is byte-unchanged, night stops it turning to pale-on-pale.
 const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
+// The amber "we could not place these" band. It was three bare literals here and two more in
+// TiptapEditor a Tailwind step away — the same band, written twice, neither of them theming. On the
+// night reading page it was a near-white slab. See --iw-notice-* in index.css.
+const NOTICE_BG = 'var(--iw-notice-bg, #fff7ed)'
+const NOTICE_EDGE = 'var(--iw-notice-edge, #f0c98a)'
+const NOTICE_FG = 'var(--iw-notice-fg, #92400e)'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> }
@@ -339,16 +345,16 @@ export function PdfReaderView({
         {lost.length > 0 && (
           <button type="button" onClick={() => setShowOrphans(v => !v)}
             title="Marks this view cannot place. They are untouched and still show in the page view."
-            style={{ border: `1px solid #b4530955`, background: '#fff7ed', color: '#9a3412', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: '0.74rem' }}>
+            style={{ border: `1px solid ${NOTICE_EDGE}`, background: NOTICE_BG, color: NOTICE_FG, borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: '0.74rem' }}>
             {lost.length} mark{lost.length === 1 ? '' : 's'} not placed here
           </button>
         )}
-        {!done && <span style={{ color: '#8d7ba3' }}>reading… {pages.length}</span>}
+        {!done && <span style={{ color: MUTED }}>reading… {pages.length}</span>}
       </div>
 
       {showOrphans && lost.length > 0 && (
-        <div style={{ flexShrink: 0, maxHeight: 150, overflow: 'auto', padding: '8px 12px', background: '#fff7ed',
-          borderBottom: '1px solid #fed7aa', fontSize: '0.78rem', color: '#7c2d12' }}>
+        <div style={{ flexShrink: 0, maxHeight: 150, overflow: 'auto', padding: '8px 12px', background: NOTICE_BG,
+          borderBottom: `1px solid ${NOTICE_EDGE}`, fontSize: '0.78rem', color: NOTICE_FG }}>
           <p style={{ margin: '0 0 6px' }}>
             These were placed by rectangle on the printed page, so this view has no text to hang them on.
             Nothing has been deleted — switch to the page view to see them where they were made.
@@ -379,7 +385,7 @@ export function PdfReaderView({
                 <span style={{ flex: 1, height: 1, background: HAIR }} />
               </div>
               {!p.reflow && (
-                <p style={{ color: '#9a3412', fontStyle: 'italic', fontSize: '0.85em' }}>
+                <p style={{ color: NOTICE_FG, fontStyle: 'italic', fontSize: '0.85em' }}>
                   This page has no text layer — it is a scanned image. Use the page view to read it.
                 </p>
               )}

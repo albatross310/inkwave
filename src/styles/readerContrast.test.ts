@@ -380,6 +380,69 @@ describe('EVERY READER TOKEN A COMPONENT READS IS ACTUALLY DECLARED', () => {
   })
 })
 
+// ── THE NOTICE BANDS ────────────────────────────────────────────────────────────────────────────
+// The amber "still reading this PDF" / "open on another device" strip and the red "that didn't
+// save" strip. They were written three times in bare literals — twice amber, a Tailwind step apart
+// — so none of them themed and the two amber ones did not even agree with each other.
+//
+// ⚠ A CONTRAST SWEEP ALONE WOULD CERTIFY THE BUG, and this is the surface that proves it: a
+// near-white band with dark orange text passes AA beautifully, at midnight, on a night reading
+// page. So the darkening assertion is not decoration here — it is the whole claim, and the ratio
+// is the floor beneath it.
+describe('the notice bands theme, and the ratio is not the only question', () => {
+  const BANDS = [
+    { name: 'notice (amber)', bg: '--iw-notice-bg', fg: '--iw-notice-fg', edge: '--iw-notice-edge' },
+    { name: 'alert (red)', bg: '--iw-alert-bg', fg: '--iw-alert-fg', edge: '--iw-alert-edge' },
+  ]
+
+  for (const band of BANDS) {
+    it(`${band.name}: its text is legible on its own ground, in BOTH themes`, () => {
+      for (const theme of ['day', 'night'] as const) {
+        expect(contrastRatio(token(band.fg, theme), token(band.bg, theme)),
+          `${band.name} ${theme}`).toBeGreaterThanOrEqual(BODY)
+      }
+    })
+
+    it(`${band.name}: the night ground is DARKER, not merely different`, () => {
+      // The assertion a ratio cannot make. Reverting either band to its literal leaves the contrast
+      // arm above perfectly green and fails this one.
+      expect(luminance(token(band.bg, 'night')),
+        `${band.name} night ground must be dark`).toBeLessThan(luminance(token(band.bg, 'day')) / 4)
+    })
+
+    it(`${band.name}: its edge is visible against its own ground`, () => {
+      // A band whose border matches its fill is a band with no border.
+      // ⚠ THE BAR IS 1.2 AND IT IS NOT TUNED TO JUST-PASS. The first cut asked for 1.5 and failed
+      // the DAY amber at 1.47 — a value that has shipped for months and that Peter has not
+      // complained about. Tightening a threshold until the shipped design fails it is redesigning
+      // by assertion; the job here is to catch an edge that has VANISHED (ratio ≈ 1.0), which is
+      // what happens when a band is themed and its border is forgotten. Measured, all four:
+      // amber 1.47 day / 1.94 night · alert 1.62 day / 1.79 night.
+      for (const theme of ['day', 'night'] as const) {
+        expect(contrastRatio(token(band.edge, theme), token(band.bg, theme)),
+          `${band.name} edge ${theme}`).toBeGreaterThan(1.2)
+      }
+    })
+  }
+
+  it('KNOWN-NEGATIVE: an edge equal to its own ground FAILS the bar above', () => {
+    // Without this, 1.2 is a number nobody has shown can be missed.
+    expect(contrastRatio('#fff7ed', '#fff7ed')).toBeLessThanOrEqual(1.2)
+    expect(contrastRatio('#fff7ed', '#fdf3e4')).toBeLessThanOrEqual(1.2)
+  })
+
+  it('the amber band reads on BOTH surfaces it is used on — chrome and reader paper', () => {
+    // PdfReaderView's band sits on reader paper with no `.iw-nightable` above it; TiptapEditor's
+    // sits in chrome. One token pair serves both, so it has to clear both grounds — which is also
+    // why these are declared UNSCOPED (a token defined inside .iw-nightable resolves to its DAY
+    // value on a night reading page: the --iw-countdown-fg bug).
+    for (const ground of [token('--iw-reader-paper', 'night'), NIGHT_PANEL]) {
+      expect(contrastRatio(token('--iw-notice-bg', 'night'), ground),
+        `the band must be distinguishable from ${ground}`).toBeGreaterThan(1.05)
+    }
+  })
+})
+
 // ── THE RESCUE ARMS — the two [style*=…] ones stay retired ──────────────────────────────────────
 // `pnpm prove:rescuearms` is the truth here: a real engine, both arms PLANTED and seen to fire, a
 // live sweep of 14 mounted panels finding zero matches, and the back chip measured NOT to depend on

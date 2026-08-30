@@ -3038,7 +3038,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {otherDevice && !conflictDismissed && (
           <div
             className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif"
-            style={{ background: '#fff7ed', borderBottom: '1px solid #f0c98a', color: '#92400e' }}
+            style={{ background: 'var(--iw-notice-bg, #fff7ed)', borderBottom: '1px solid var(--iw-notice-edge, #f0c98a)', color: 'var(--iw-notice-fg, #92400e)' }}
           >
             <span>
               ⚠ This document looks open on another device — edits there and here may overwrite each
@@ -3068,11 +3068,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif${fileOpenError.kind === 'info' ? ' iw-nightable' : ''}`}
             style={fileOpenError.kind === 'info'
               ? {
-                  background: '#faf7ff', // night: .iw-nightable overrides to dolphin grey
+                  background: '#faf7ff', // night: .iw-nightable overrides to dolphin grey; a token here would
+                  // have to carry a day value that disagrees with --iw-subtle-bg's #fcfcfb, which
+                  // is drift for no gain: this variant is already themed by the class.
                   borderBottom: '1px solid var(--iw-nightable-border, #e7e5e4)',
                   color: 'var(--iw-ink, #5c2d8a)',
                 }
-              : { background: '#fef2f2', borderBottom: '1px solid #fca5a5', color: '#991b1b' }}
+              : { background: 'var(--iw-alert-bg, #fef2f2)', borderBottom: '1px solid var(--iw-alert-edge, #fca5a5)', color: 'var(--iw-alert-fg, #991b1b)' }}
           >
             <span>{fileOpenError.kind === 'info' ? '✓' : '⚠'} {fileOpenError.message}</span>
             <button
