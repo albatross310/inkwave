@@ -1,36 +1,39 @@
-// LIVE FRAMING — DEFAULT OFF (2026-08-30), after a day of building it and an hour of it breaking.
+// LIVE FRAMING — DEFAULT ON.
 //
-// Peter: "literally nothings working. not even google" → "Try a bit more then revert."
+// ⚠ THIS FLAG WENT OFF AND BACK ON WITHIN AN HOUR, AND THE REASON MATTERS MORE THAN THE VALUE.
+// It was switched off after live view went in and out of working while Peter was reading. But the
+// instability was FOUR BUGS I INTRODUCED WHILE PATCHING IT, not the mechanism:
+//   1. a cleanup written for one lifetime ("while live view is on") attached to an effect with
+//      another ("this page"), so every navigation raced a release against its own install;
+//   2. `frameKey` bumped on every install, remounting an iframe mid-load — and mid-VIDEO;
+//   3. an `isPlayable` skip that returned early AFTER the cleanup had already removed the rule,
+//      so opening one video tore down framing for the whole tab;
+//   4. the flag itself read in two places where only one was updated, so search routed to a live
+//      page that framing had been switched off for.
+// All four are fixed and each is pinned. Turning the feature off was treating the symptom.
 //
-// WHAT THIS TURNS OFF: the extension's header-stripping, which lets the reader show sites that
-// refuse to be displayed inside another page. It does NOT touch page FETCHING from the writer's own
-// connection (that path is older, independent, and works), nor reader mode, nor anything else.
+// Peter: "I want live working on all websites like it used to." That is the feature working, and
+// with framing OFF it cannot: every site that sends X-Frame-Options refuses, and — less obviously —
+// a SEARCH is pinned to reader view by `mustUseReader`, so the ⌂/▤ toggle looks dead from the one
+// page a writer starts on. Off was not a smaller version of the feature; it was a broken one.
 //
-// WHY OFF RATHER THAN DELETED. The mechanism is real and measured — `pnpm prove:framing` shows a
-// live canary, a control that refuses, and REFUSED → framed for a page, a sibling subdomain and a
-// click-through. What is NOT established is that it is an improvement in daily use: it went in and
-// out of working for an hour while Peter was trying to read, I shipped four corrections in that
-// time, and two of them broke something that had been fine. Shipping churn to someone mid-thesis is
-// worse than shipping less.
+// WHAT IT STILL DOES NOT FIX, measured with the rule live and not to be re-litigated: abc.net.au
+// renders 14,662 chars and sets cookies normally, while jstor.org serves an 87-char "Client
+// Challenge", youtube.com's HOME page 159 chars, and google.com/search redirects itself to /sorry.
+// Those are bot-detection and login-context failures — a framed page is a third-party context, so
+// `SameSite=Lax` (the default) is never sent and a site you are signed into renders signed out.
+// No header we remove reaches any of that.
 //
-// AND THE HONEST LIMIT, MEASURED, which is why the feature is smaller than it looked: stripping the
-// headers makes a page FRAMEABLE, not usable. In one run with the rule live — abc.net.au rendered
-// 14,662 chars and set cookies normally, while jstor.org served an 87-char "Client Challenge",
-// youtube.com 159 chars, and google.com/search redirected itself to /sorry. Those are bot-detection
-// and login-context failures, not header failures, and no rule we install can reach them. A framed
-// page is also a third-party context, so `SameSite=Lax` — the default a cookie gets when it says
-// nothing — is never sent: a site you are signed into renders signed out.
-//
-// TO TURN IT BACK ON: `?liveFrame=1` (sticky, the `?auth` pattern). `?liveFrame=off` clears it.
-// Graduating it needs a day of ordinary use without a regression, not another probe.
+// `?liveFrame=off` turns it off and is sticky; `?liveFrame=1` clears that.
 const KEY = 'inkwave:liveFrame'
 
 export function liveFrameEnabled(): boolean {
   if (typeof window === 'undefined') return false          // SSR/prerender: never
   try {
     const p = new URLSearchParams(window.location.search).get('liveFrame')
-    if (p === '1') localStorage.setItem(KEY, '1')
-    else if (p === 'off' || p === '0') localStorage.removeItem(KEY)
-    return localStorage.getItem(KEY) === '1'
-  } catch { return false }                                  // private mode → the safe answer
+    if (p === 'off' || p === '0') localStorage.setItem(KEY, '0')
+    else if (p === '1') localStorage.removeItem(KEY)
+    return localStorage.getItem(KEY) !== '0'                // absent means ON
+  } catch { return true }                                   // storage refused → the feature, not a
+                                                            // silent downgrade the writer cannot see
 }
