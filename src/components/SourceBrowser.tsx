@@ -174,7 +174,7 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 // The address layer lives in `reader/address.ts` — pure URL rules with no React in them, tested
 // next to the module in `reader/address.test.ts`.
 import {
-  isInkwaveItself, embeddableUrl, isPlayable, isSearch, queryOf,
+  isInkwaveItself, embeddableUrl, isPlayable, isSearch, queryOf, SEARCH_URL,
   mustUseReader, addressToUrl, stripTracking, unwrapRedirect, likelyRefusesFraming, hostOf,
 } from '../reader/address'
 
@@ -792,6 +792,30 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   useEffect(() => {
     if (framed && mustUseReader(here, canFrameRef.current)) setFramed(false)
   }, [here, framed, extState])
+
+  // ⚠ A REFUSED SEARCH FALLS BACK TO THE READER INSTEAD OF SHOWING A CARD.
+  // Peter, repeatedly: "its broken again… its not doing basic things." Every time, the same chain —
+  // framing is ON, so a typed query routes to the real duckduckgo.com in the live frame; the
+  // extension's rule does not apply (most often because the worker is a build behind: reloading the
+  // EXTENSION is a separate act from reloading the tab, and I changed that worker six times today);
+  // Chrome refuses the frame; and the panel shows a refusal card on the one page he starts from. So
+  // the whole panel reads as dead when a single request failed.
+  //
+  // Searching is the load-bearing case, so it must not depend on an extension being current. If a
+  // search is refused, drop to the endpoint a plain fetch CAN read and show results. The live
+  // attempt is an upgrade; the reader is the floor, and a floor you fall through is not one.
+  //
+  // Scoped to searches deliberately: for an ordinary page the refusal card is correct and offers
+  // real choices (read it here / open in a tab). It is only a search — where we chose the live URL
+  // on the writer's behalf — that must repair itself rather than blame the site.
+  useEffect(() => {
+    if (!framed || !frameRefused || !isSearch(here)) return
+    const q = queryOf(here)
+    if (!q) { setFramed(false); return }
+    setFramed(false)
+    go(SEARCH_URL + encodeURIComponent(q))     // the no-JS endpoint, which a server fetch can read
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framed, frameRefused, here])
 
   // ── A READABLE DIAGNOSTIC, BECAUSE "still broken" IS NOT A STAGE ─────────────────────────────
   // Live view through the extension has FIVE places it can fail and they are indistinguishable
