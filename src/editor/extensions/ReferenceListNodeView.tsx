@@ -61,7 +61,7 @@ function NotePanel({ value, onChange, onDelete }: { value: string; onChange: (v:
     <div style={{ margin: '0.25em 0 0 1.6em', paddingLeft: '0.7em', borderLeft: `2px solid ${INK}44`, position: 'relative' }}>
       <button
         type="button" contentEditable={false} onClick={onDelete} title="Delete note" aria-label="Delete note"
-        style={{ position: 'absolute', top: 2, right: 4, background: 'transparent', border: 'none', color: '#9d174d', fontWeight: 700, fontSize: '1.15rem', lineHeight: 1, cursor: 'pointer', padding: '0 3px', zIndex: 1 }}
+        style={{ position: 'absolute', top: 2, right: 4, background: 'transparent', border: 'none', color: 'var(--iw-danger, #b91c1c)', fontWeight: 700, fontSize: '1.15rem', lineHeight: 1, cursor: 'pointer', padding: '0 3px', zIndex: 1 }}
       >×</button>
       <textarea
         ref={bindStopPM}
@@ -71,7 +71,7 @@ function NotePanel({ value, onChange, onDelete }: { value: string; onChange: (v:
         rows={2}
         style={{
           width: '100%', resize: 'vertical', boxSizing: 'border-box',
-          fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: '#4a4a4a',
+          fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: 'inherit',
           background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
           padding: '0.4em 1.6em 0.4em 0.55em', outline: 'none',
         }}
@@ -297,11 +297,11 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           18px base, not the h2's 20.7px). Without a class the harvest could only select the h2,
           whose margin is 0 — reading the row's spacing as zero. Keep the class. */}
       <div className="iw-bib-header" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.6em' }}>
-        <h2 style={{ fontSize: '1.15em', fontWeight: 600, color: INK, margin: 0 }}>References</h2>
-        <span className="iw-bib-mode" style={{ fontSize: '0.7em', color: '#9ca3af', fontStyle: 'italic' }}>{MODE_LABEL[mode]}</span>
+        <h2 style={{ fontSize: '1.15em', fontWeight: 600, color: 'var(--iw-doc-accent, #5c2d8a)', margin: 0 }}>References</h2>
+        <span className="iw-bib-mode" style={{ fontSize: '0.7em', color: 'var(--iw-doc-muted, #6b5b7a)', fontStyle: 'italic' }}>{MODE_LABEL[mode]}</span>
       </div>
       {count === 0 ? (
-        <p style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: '0.9em' }}>
+        <p style={{ color: 'var(--iw-doc-muted, #6b5b7a)', fontStyle: 'italic', fontSize: '0.9em' }}>
           No references yet — cite a source and it will appear here.
         </p>
       ) : usingCsl ? (

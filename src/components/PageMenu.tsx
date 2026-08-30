@@ -180,23 +180,23 @@ export function PageMenu({ editor }: { editor?: Editor }) {
             {/* Header (drag to move) */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100"
               style={{ cursor: 'grab' }} onMouseDown={onHeaderMouseDown}>
-              <span className="text-[11px] uppercase tracking-wide text-stone-400">Page</span>
+              <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Page</span>
               <div className="flex items-center gap-2">
                 {parFocus && editor ? (
                   <>
-                    <span className="text-[11px] italic" style={{ color: INK }}>↳ paragraph</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>↳ paragraph</span>
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
                       className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
-                      style={{ background: `${INK}18`, color: INK, border: `1px solid ${INK}44` }}>
+                      style={{ background: 'transparent', color: 'var(--iw-ink, #5c2d8a)', border: '1px solid var(--iw-nightable-border, #d1d5db)' }}>
                       Apply to all
                     </button>
                   </>
                 ) : (
-                  <span className="text-[11px] text-stone-400 italic">changes apply to all text</span>
+                  <span className="text-[11px] italic" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>changes apply to all text</span>
                 )}
                 <button type="button" onClick={() => setOpen(false)} onMouseDown={e => e.preventDefault()}
-                  className="ml-1 text-stone-400 hover:text-stone-600 transition-colors leading-none"
-                  style={{ fontSize: 18, lineHeight: 1 }} title="Close (Esc)">
+                  className="ml-1 hover:text-stone-600 transition-colors leading-none"
+                  style={{ fontSize: 18, lineHeight: 1, color: 'var(--iw-pill-fg, #78716c)' }} title="Close (Esc)">
                   ×
                 </button>
               </div>
@@ -319,7 +319,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
 
 function SectionHead({ label }: { label: string }) {
   return (
-    <div className="px-5 pt-2.5 pb-1 text-[10px] uppercase tracking-widest text-stone-400">{label}</div>
+    <div className="px-5 pt-2.5 pb-1 text-[10px] uppercase tracking-widest" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{label}</div>
   )
 }
 
@@ -328,7 +328,11 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
     <button type="button" onClick={onClick}
       onMouseDown={e => e.preventDefault()}
       className="px-3 py-0.5 rounded-full text-xs transition-colors whitespace-nowrap"
-      style={{ background: active ? INK : 'transparent', color: active ? 'white' : '#6b7280', border: `1px solid ${active ? INK : '#d1d5db'}` }}>
+      style={{
+        background: active ? 'var(--iw-ink, #5c2d8a)' : 'transparent',
+        color: active ? 'var(--iw-on-ink, #ffffff)' : 'var(--iw-pill-fg, #78716c)',
+        border: `1px solid ${active ? 'var(--iw-ink, #5c2d8a)' : 'var(--iw-nightable-border, #d1d5db)'}`,
+      }}>
       {label}
     </button>
   )
@@ -357,8 +361,8 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
   const inc = () => { if (!readOnly) onChange(conv.fromCm(clamp(snap(displayed + STEP)))) }
 
   const inputStyle: React.CSSProperties = readOnly
-    ? { color: '#9ca3af', cursor: 'default' }
-    : { color: INK }
+    ? { color: 'var(--iw-pill-fg, #78716c)', cursor: 'default' }
+    : { color: 'var(--iw-ink, #5c2d8a)' }
 
   return (
     <div className="flex items-center px-5 py-2 gap-3">
@@ -372,7 +376,8 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
       </div>
       {/* Spinner: ▲▼ arrows stacked inside the right side of the input box */}
       <div className="flex items-center shrink-0 gap-1">
-        <div className="flex items-center border border-stone-200 rounded overflow-hidden" style={{ width: 72 }}>
+        <div className="flex items-center rounded overflow-hidden"
+          style={{ width: 72, border: '1px solid var(--iw-nightable-border, #e7e5e4)' }}>
           <input
             type="text" inputMode="decimal"
             value={inputFocused ? inputStr : displayed.toFixed(1)}
@@ -396,20 +401,20 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
             className="flex-1 min-w-0 text-xs py-0.5 px-1.5 bg-transparent outline-none text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
             style={inputStyle}
           />
-          <div className="flex flex-col border-l border-stone-200 shrink-0" style={{ width: 16 }}>
+          <div className="flex flex-col shrink-0" style={{ width: 16, borderLeft: '1px solid var(--iw-nightable-border, #e7e5e4)' }}>
             <button type="button" onClick={inc} onMouseDown={e => e.preventDefault()} tabIndex={-1}
-              className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
-              style={{ height: 13, fontSize: 7 }}>
+              className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#5c2d8a] hover:bg-stone-50'}`}
+              style={{ height: 13, fontSize: 7, color: readOnly ? undefined : 'var(--iw-pill-fg, #78716c)' }}>
               ▲
             </button>
             <button type="button" onClick={dec} onMouseDown={e => e.preventDefault()} tabIndex={-1}
-              className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'text-stone-400 hover:text-[#5c2d8a] hover:bg-stone-50'}`}
-              style={{ height: 13, fontSize: 7 }}>
+              className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#5c2d8a] hover:bg-stone-50'}`}
+              style={{ height: 13, fontSize: 7, color: readOnly ? undefined : 'var(--iw-pill-fg, #78716c)' }}>
               ▼
             </button>
           </div>
         </div>
-        <span className="text-[10px] text-stone-400 shrink-0">cm</span>
+        <span className="text-[10px] shrink-0" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>cm</span>
       </div>
     </div>
   )

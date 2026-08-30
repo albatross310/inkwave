@@ -43,31 +43,33 @@ export function ensureNavStyles(): void {
       55%  { background-color: rgba(92,45,138,0.10); box-shadow: 0 0 0 3px rgba(92,45,138,0.10); }
       100% { background-color: transparent; color: inherit; box-shadow: 0 0 0 3px transparent; }
     }
-    .iw-backref-group { margin-left: 0.5em; font-size: 1em; color: ${INK}99; user-select: none; white-space: nowrap; }
+    .iw-backref-group { margin-left: 0.5em; font-size: 1em; color: var(--iw-doc-muted, ${INK}99); user-select: none; white-space: nowrap; }
     .iw-backref-group .iw-backref-arrow { font-size: 1.15em; }
-    .iw-backref-group .iw-cite-link { color: ${INK}; font-weight: 600; padding: 0 0.22em; }
+    .iw-backref-group .iw-cite-link { color: var(--iw-doc-accent, ${INK}); font-weight: 600; padding: 0 0.22em; }
     .iw-note-add {
-      margin-left: 0.5em; font-size: 0.95em; line-height: 1; color: ${INK}; cursor: pointer;
-      border: 1px solid ${INK}44; border-radius: 4px; background: transparent; padding: 0 0.35em;
+      margin-left: 0.5em; font-size: 0.95em; line-height: 1; color: var(--iw-doc-accent, ${INK}); cursor: pointer;
+      border: 1px solid var(--iw-doc-muted, ${INK}44); border-radius: 4px; background: transparent; padding: 0 0.35em;
       user-select: none; transition: background-color 120ms ease, border-color 120ms ease;
     }
     .iw-note-add:hover { background-color: rgba(92,45,138,0.12); border-color: ${INK}88; }
-    .iw-esp { font-style: italic; color: #3a1e5e; font-size: 0.95em; }
+    .iw-esp { font-style: italic; color: var(--iw-doc-muted, #3a1e5e); font-size: 0.95em; }
     /* ⤵ bib button: a circle ~as tall as a capital letter, sitting on the text baseline (bottom fixed),
-       roomy sides, light hard-coded purple outline (visible on both the cream day + dark night surfaces).
+       roomy sides, outlined in --iw-doc-accent (the page's own accent, which IS light at night —
+       the old hard-coded #9a7dc0 was a compromise picked to survive both surfaces and measured
+       3.06:1 on parchment / 3.92:1 on the night sheet; the token is 9.7:1 and ~10:1).
        The arrow matches the outline colour and is nudged up so it sits centred, not low. */
     .iw-cite-biblink {
       display: inline-flex; align-items: center; justify-content: center;
       width: 0.82em; height: 0.82em; margin: 0 0.34em; vertical-align: -0.02em;
       font-size: 1em; line-height: 1; cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; font-family: inherit;
-      color: #9a7dc0; font-weight: 700;
-      border: 1px solid #9a7dc0; border-radius: 50%; background: transparent;
+      color: var(--iw-doc-accent, #9a7dc0); font-weight: 700;
+      border: 1px solid var(--iw-doc-accent, #9a7dc0); border-radius: 50%; background: transparent;
       transition: background-color 120ms ease;
     }
     .iw-cite-biblink:hover { background-color: rgba(92,45,138,0.14); }
     .iw-biblink-arrow { font-size: 0.66em; line-height: 1; display: block; margin-top: -0.08em; }
     /* First-few-words preview shown after each back-ref number, to jog the reader's memory. */
-    .iw-backref-quote { font-style: italic; color: #3a1e5e; font-size: 0.86em; font-weight: 500; }
+    .iw-backref-quote { font-style: italic; color: var(--iw-doc-muted, #3a1e5e); font-size: 0.86em; font-weight: 500; }
     /* "Where you came from" flash on the back-ref: light-blue wash + dark-blue box, slow ~5s exp fade. */
     .iw-backref-flash { animation: iw-backref-flash-kf 5s cubic-bezier(0.15, 0.75, 0.2, 1) forwards; border-radius: 3px; }
     .iw-cite-biblink.iw-backref-flash { border-radius: 50%; } /* keep the ⤵ circle round while flashing */

@@ -1596,16 +1596,86 @@
 /* Charcoal paper. Sheets are a touch lighter than the black surround so pages read as distinct. */
 :root[data-theme="night"] .scroll-paper,
 :root[data-theme="night"] .inkwave-sheet { background-color: #2c2e35; }
-:root[data-theme="night"] .inkwave-sheet { box-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
-/* Phone keeps the cheap zero-blur ring in night too (the blurred shadow is the mobile raster cost). */
-:root[data-theme="night"] .is-phone .inkwave-sheet { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+
+/* ── THE PAGE NEEDS AN EDGE AT NIGHT (Peter, 2026-08-30) ─────────────────────────────────────────
+   In day the sheet is cream on aqua and its own drop shadow draws the boundary. At night it is
+   #2c2e35 on a #0a0b0e surface and the shadow is BLACK ON NEAR-BLACK — measured: the only edge on
+   the page was `rgba(0,0,0,0.6) 0 1px 12px`, i.e. nothing. The page boundary simply vanished.
+   ⚠ IT MUST BE A box-shadow SPREAD RING, NEVER A BORDER OR AN OUTLINE-WITH-OFFSET THAT GROWS THE
+   BOX. Page GEOMETRY is load-bearing here: canonical pagination measures against the paper's width
+   (editor/pageModel.ts, canonicalMeasure.ts), and a 1px border would add 2px to the content box and
+   move every break in the document. A box-shadow paints outside the border box and takes part in
+   no layout at all — `getBoundingClientRect` is byte-identical with and without it, which is what
+   the probe asserts.
+   DAY IS DELIBERATELY UNCHANGED: cream paper on aqua water already reads as a page, and its
+   8px/32px drop shadow draws the boundary. Only the night page had lost its edge, and adding a hard
+   ring to a design nobody complained about is not a fix. The token still carries a day value so the
+   pair is declared in one place and a future light palette has somewhere to put its own edge.
+   #5b6272 (not the first cut's #4d5361, which measured 2.55:1 against the surface) — a boundary is a
+   UI component's visual edge, so WCAG 1.4.11's 3:1 is the bar it has to clear. */
+:root { --iw-sheet-edge: rgba(80, 50, 10, 0.16); }
+:root[data-theme="night"] { --iw-sheet-edge: #5b6272; }
+:root[data-theme="night"] .inkwave-sheet {
+  box-shadow: 0 0 0 1px var(--iw-sheet-edge), 0 1px 12px rgba(0, 0, 0, 0.6);
+}
+/* Phone keeps the cheap zero-blur ring in night too (the blurred shadow is the mobile raster cost) —
+   now a VISIBLE one, which costs exactly what the invisible one did. */
+:root[data-theme="night"] .is-phone .inkwave-sheet { box-shadow: 0 0 0 1px var(--iw-sheet-edge); }
+/* UNGAPPED ('scroll' paper, or gaps switched off) has no .inkwave-sheet panels at all — the paper IS
+   the .scroll-paper block, and it had no edge in either theme. Same ring, same no-layout guarantee. */
+:root[data-theme="night"] .scroll-paper:not(.inkwave-gapped) {
+  box-shadow: 0 0 0 1px var(--iw-sheet-edge);
+}
 /* In GAPPED mode the scroll-paper must stay transparent (the real sheets are the .inkwave-sheet panels,
    the gaps show the black surface + grey waves) — override the charcoal fill above, which otherwise wins
    on specificity and paints the whole area, killing the discrete-page look. */
 :root[data-theme="night"] .scroll-paper.inkwave-gapped { background-color: transparent; }
 
-/* Light-grey body text; page numbers match it; inline citations go light blue (via the cite var). */
-:root[data-theme="night"] { --iw-cite-color: #93c5fd; --iw-page-num: #eceef2; }
+/* ── PAGE TOKENS — the accent and the muted voice AS THEY APPEAR ON THE DOCUMENT ─────────────────
+   ⚠ `--iw-ink` IS A CHROME TOKEN. It is redefined inside `.iw-nightable` and NOWHERE ELSE, so
+   anything painted on the PAGE that reaches for it resolves the DAY purple on a charcoal sheet —
+   which is exactly why the reference list's "References" heading measured 1.23:1 against its own
+   paper. So the page gets its own pair, defined at `:root` in BOTH themes (the --iw-countdown-fg
+   precedent: a token that resolves only inside one scope is a bug waiting for its first caller
+   outside it).
+     --iw-doc-accent  the app's purple as it reads on the page: citations, the References heading,
+                      the ⤵ / ↩ / + controls beside an entry. A citation is a LIVE CONTROL, so at
+                      night it is deliberately as PRESENT as the body text (Peter, 2026-08-30: it
+                      "sits noticeably darker than the body text beside them… that is backwards").
+     --iw-doc-muted   a caption or ornament on the page (the bibliography's mode line, the ↩ arrow,
+                      "esp. pp 4–6", a back-ref's quoted words). Muted, never invisible.
+   `--iw-cite-color` is KEPT as an ALIAS of --iw-doc-accent rather than a second value: it has ~6
+   call sites and the reader lane reads it, and two names for one colour is how this palette drifted
+   in the first place. One value, one place to change it. */
+:root { --iw-doc-accent: #5c2d8a; --iw-doc-muted: #6b5b7a; --iw-cite-color: var(--iw-doc-accent); }
+:root[data-theme="night"] { --iw-doc-accent: #e4d7ff; --iw-doc-muted: #b0a6c4; }
+
+/* An error the writer must SEE — an unresolved citekey, a destructive control. `#b91c1c` reads on
+   parchment and measured 2.09:1 on the night sheet, and Peter read it as "a saturated pure red on
+   charcoal": at night it goes soft rather than loud, which is also the calmer thing to put in front
+   of someone writing at 1am. */
+:root { --iw-danger: #b91c1c; }
+:root[data-theme="night"] { --iw-danger: #f2a0a0; }
+
+/* ── INK ON A LIGHT PATCH — TOKENS THAT DELIBERATELY DO NOT INVERT ───────────────────────────────
+   A writer's HIGHLIGHT is a piece of light paper they coloured: every swatch in StyleBar's
+   HIGHLIGHT_COLORS is a pastel (#fca5a5 … #a5b4fc), and the colour is stored in the MARK, so
+   re-toning it would rewrite the writer's own document. Same argument as --iw-reader-*: the paper
+   does not invert, so the INK on it must not either. MEASURED before this existed (2026-08-30,
+   night, a green highlight #b7f7c4): body text 1.06:1, the citation label 1.29:1, a SCAS-flagged
+   word 1.23:1 — the whole highlighted passage was gone, not just the citation Peter reported.
+   These three are one FAMILY, and they are the same idea as --iw-reader-ink one surface over.
+   ⚠ THESE ARE CHOSEN AGAINST THE DARKEST SWATCH IN THE PALETTE, NOT AGAINST THE ONE IN THE FIXTURE.
+   HIGHLIGHT_COLORS runs from #fef08a to Indigo #a5b4fc, and a token that clears AA on the green a
+   test happens to use can still fail on the indigo a writer picks. The audit's own fixture carries
+   ONE swatch and SCAS flags words stochastically, so its clean pass was luck: a mutation run that
+   shifted which word got flagged surfaced `#237a47 on #bbf7d0 = 4.39:1` — under AA, in DAY, in code
+   that predates this lane. Computed against #a5b4fc (the darkest): ink 8.7:1, accent 5.5:1, flag
+   4.6:1. So all eleven swatches are covered by construction rather than by the fixture's choice. */
+:root { --iw-on-light-ink: #1a1a1a; --iw-on-light-accent: #5c2d8a; --iw-on-light-flag: #14532d; }
+
+/* Light-grey body text; page numbers match it. */
+:root[data-theme="night"] { --iw-page-num: #eceef2; }
 :root[data-theme="night"] .ProseMirror { color: #eceef2; } /* nearly white (but not pure) */
 :root[data-theme="night"] .inkwave-sheet-num { color: #eceef2; } /* match the body text */
 :root[data-theme="night"] .ProseMirror ::selection { background-color: rgba(147, 197, 253, 0.26); }
@@ -1624,10 +1694,35 @@
 :root[data-theme="night"] .scas-secondary,
 :root[data-theme="night"] .scas-focused,
 :root[data-theme="night"] .scas-red[data-scas-old] { color: #c9a9ff; }
-/* Reference-list back-ref links + note buttons → very light purple. */
-:root[data-theme="night"] .iw-cite-link,
-:root[data-theme="night"] .iw-backref-group .iw-cite-link,
-:root[data-theme="night"] .iw-note-add { color: #d6c6f5 !important; border-color: #d6c6f5 !important; }
+/* ⚠ THE RULE THAT USED TO LIVE HERE PAINTED AN IN-TEXT CITATION TWO COLOURS AT ONCE.
+   It read `.iw-cite-link { color: #d6c6f5 !important }` and was written for the reference list's
+   back-ref numbers — but `.iw-cite-link` is ALSO the label inside an in-text citation, whose
+   brackets and comma are painted by the NodeView with `var(--iw-cite-color)`. MEASURED in the
+   editor at night: the brackets came out #93c5fd (light blue) and the label #d6c6f5 (light violet),
+   on the same citation, on the same line. `!important` meant the token could never win.
+   Now both take --iw-doc-accent (via ensureNavStyles + the NodeView's var), so there is ONE colour
+   for one thing. Nothing here overrides it. */
+
+/* ── A WRITER'S HIGHLIGHT KEEPS ITS COLOUR; THE INK ON IT FLIPS ─────────────────────────────────
+   See --iw-on-light-* above for the argument and the measurements. Setting `color` on the MARK
+   (not on its descendants) means an author-chosen text colour inside the highlight still wins,
+   which is right: that colour is the writer's too. Re-pointing --iw-cite-color on the mark carries
+   the citation NodeView's inline `var()` with it — no extra selector, and no way for the two to
+   disagree. */
+/* ⚠ `!important` IS LOAD-BEARING HERE AND IT IS THE NARROWEST POSSIBLE USE. @tiptap/extension-
+   highlight renders `<mark data-color="…" style="background-color: …; color: inherit">` — an INLINE
+   `color`, which no stylesheet rule can outrank. Measured: with a plain rule the mark still computed
+   rgb(236,238,242) at 1.06:1; the custom-property re-points below took effect (a var() is unaffected
+   by the inline `color`), so the citation went dark while the prose around it did not — the two
+   halves of one passage disagreeing, which is worse than either alone. One selector, one theme. */
+:root[data-theme="night"] .ProseMirror mark {
+  color: var(--iw-on-light-ink) !important;
+  --iw-doc-accent: var(--iw-on-light-accent);
+  --iw-cite-color: var(--iw-on-light-accent);
+}
+.ProseMirror mark .scas-red,
+.ProseMirror mark .scas-secondary,
+.ProseMirror mark .scas-focused { color: var(--iw-on-light-flag) !important; }
 :root[data-theme="night"] .iw-comment { border-bottom-color: #c9a9ff; }
 /* Insertion/deletion colours are set inline per reviewer, so night mode needs no colour override. */
 :root[data-theme="night"] .iw-change-current { outline-color: #c9a9ff; }
@@ -1640,6 +1735,20 @@
    on the ledger drop-up: white-on-#cbb8f2). Same shape as --iw-newbtn-fg's "darker on its light-blue
    chip in night". Any new filled control must use this, never a hard-coded white. */
 :root { --iw-on-ink: #ffffff; }
+
+/* ── THE REST OF A CHROME PANEL, AS TOKENS ───────────────────────────────────────────────────────
+   These three were previously reachable ONLY inside the night `.iw-nightable` block (or not at all),
+   so a panel that wanted them in DAY had to inline a literal — and the literal is what survives into
+   night, because an inline colour on a CHILD beats the panel's inherited `color`. That is the whole
+   mechanism behind the Guide panel measuring 1.20:1 on every shortcut description while its own
+   container was correctly dolphin-grey. Defined at `:root` in both themes so a call site can write
+   one `var()` and be right in both.
+     --iw-panel-fg     body text inside a chrome panel. ⚠ SAME VALUE as `.iw-nightable`'s own
+                       `color` at night — a real duplicate, flagged for the palette-consolidation
+                       lane rather than silently left as two sources of one colour.
+     --iw-pill-fg      a muted label: a pill's text, a section heading, an unselected control.
+     --iw-nightable-border  the outline of an inline-styled control. */
+:root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #d1d5db; }
 
 /* The corner countdown (CountdownOverlay) is PORTALLED to <body>, OUTSIDE any .iw-nightable surface.
    A token defined only inside that scope (like --iw-pill-fg) falls back to its DAY value on the night
@@ -1697,9 +1806,14 @@
   background-color: #454e59 !important;   /* dolphin-back grey */
   color: #dfe3e9 !important;
   border-color: #5c6672 !important;
+  --iw-panel-fg: #dfe3e9;                  /* panel body text (== this block's own `color`) */
   --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
   --iw-nightable-border: #7c8794;          /* inline-styled control borders (light) */
-  --iw-ink: #cbb8f2;                        /* light purple in place of #5c2d8a inline colours */
+  /* Lifted from #cbb8f2 (2026-08-30). As TEXT on the #454e59 chrome that measured 4.70:1 — over the
+     AA line but under the panel's own body text at 6.55:1, so anything purple (a panel title, the
+     Guide's key column) sat QUIETER than the prose beside it, which inverts the hierarchy in every
+     panel at once. As a FILL it is unaffected: --iw-on-ink still reads 8.5:1 on it. */
+  --iw-ink: #d7c8f8;                        /* light purple in place of #5c2d8a inline colours */
   --iw-on-ink: #2c2e35;                     /* text on an --iw-ink fill — dark, because the fill is light */
   --iw-light: #c3a8ef;                      /* lighter purple accent (was #9b5ccc) */
   --iw-verified: #6ee7a0;                    /* verified ✓ box — light green on dark */

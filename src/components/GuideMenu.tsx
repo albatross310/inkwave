@@ -130,9 +130,9 @@ export function GuideMenu() {
             {/* Drag handle */}
             <div onMouseDown={onHeaderDown}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', cursor: 'move', userSelect: 'none' }}>
-              <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: INK, margin: 0 }}>Guide</h2>
+              <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: 'var(--iw-ink, #5c2d8a)', margin: 0 }}>Guide</h2>
               <button type="button" aria-label="Close" onMouseDown={e => e.stopPropagation()} onClick={() => setOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--iw-pill-fg, #78716c)', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
             </div>
 
             {/* One master column: keys right-aligned in a max-content column, descriptions left-aligned —
@@ -148,11 +148,11 @@ export function GuideMenu() {
                 { title: 'Custom symbols', rows: SYMBOLS },
               ]).map(sec => (
                 <Fragment key={sec.title}>
-                  <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: '#a89a86', margin: '14px 0 3px' }}>{sec.title}</div>
+                  <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--iw-pill-fg, #78716c)', margin: '14px 0 3px' }}>{sec.title}</div>
                   {sec.rows.map(({ k, d }) => (
                     <Fragment key={k}>
-                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: '#7a6e65', textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
-                      <span style={{ fontSize: '1.02rem', color: '#4a4035', lineHeight: 1.4 }}>{d}</span>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: 'var(--iw-ink, #5c2d8a)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontSize: '1.02rem', color: 'var(--iw-panel-fg, #4a4035)', lineHeight: 1.4 }}>{d}</span>
                     </Fragment>
                   ))}
                 </Fragment>
