@@ -451,6 +451,46 @@ try {
       `left=${edgePop.left} right=${edgePop.right} vw=${edgePop.vw}`)
   } else note('reader: edge-selection popover VOID (no popover raised) — not scored')
 
+  // ── LIVE VIEW AT 375px (2026-08-30) ────────────────────────────────────────────────────────────
+  // Peter asked for zoom + two-finger pan in the live browser, and for the PDF's zoom controls to be
+  // ported into it. That adds FIVE controls to a panel whose every control was broken at this width
+  // until it was audited — so they are measured here as they land, not after he finds them.
+  console.log('\n── THE READER IN LIVE VIEW, at 375px with touch ─────────────────────────────────')
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('Live page'))
+    if (b) b.click()
+  })
+  await page.waitForTimeout(1200)
+  const live = await page.evaluate(new Function('return ' + AUDIT)(), '[data-probe-reader]')
+  if (live.error) {
+    check(false, 'VOID: the reader panel vanished when switching to live view', live.error)
+  } else {
+    report('reader (live)', live)
+    // THE BAR'S OWN CONTROLS. Named, so a missing one is a failure rather than a smaller list.
+    const wanted = ['Zoom out', 'Zoom in', 'Fit the page to the panel width', 'Reload this page']
+    for (const w of wanted) {
+      const hit = live.controls.find((c) => c.label.startsWith(w))
+      check(!!hit, `live: the "${w}" control renders at 375px`, hit ? `${hit.w}x${hit.h} hit ${Math.round(hit.hitW)}x${Math.round(hit.hitH)}` : 'ABSENT')
+      if (hit) {
+        check(hit.hitH >= TAP_MIN, `live: "${w}" has a >= ${TAP_MIN}px tall hit area`,
+          `painted ${hit.h}px, hit ${Math.round(hit.hitH)}px`)
+      }
+    }
+    // A <select> can borrow no pseudo-element, so its own box is the only target it has.
+    const sel = live.controls.find((c) => c.tag === 'select')
+    check(!!sel && sel.h >= 40, 'live: the page-width select gets a real >= 40px box', sel ? `${sel.w}x${sel.h}` : 'ABSENT')
+    // AND NOTHING PAINTS PAST THE EDGE. The live bar carries a label, a select and four controls;
+    // at 375px they cannot fit on one line, which is why it wraps rather than overflowing.
+    check(live.widest <= live.vv.w + 1, 'live: the bar wraps rather than pushing its own controls off screen',
+      `widest=${live.widest} (${live.widestSel}) vw=${live.vv.w}`)
+  }
+  // Back to reader view so the sections below are unaffected.
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('Reader view'))
+    if (b) b.click()
+  })
+  await page.waitForTimeout(900)
+
   // ── THE PDF TOOLBAR + READER VIEW ──────────────────────────────────────────────────────────────
   console.log('\n── THE PDF READER, at 375px with touch ─────────────────────────────────────────')
   // ⚠ THE PANEL RESOLVES THE BYTES ITSELF. `openPdf({data})` is not a thing: PdfSidePanel reads

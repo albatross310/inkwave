@@ -33,6 +33,13 @@ const PAGE_HTML = `<!doctype html><html><head><title>Identity Over Time</title><
   <p>Geach, P., 1967.</p>
 </main></body></html>`
 
+// The LIVE-VIEW fixture. Deliberately TALL and NOT WIDE: the site must have its own vertical
+// scrolling (so the frame keeps that axis) and no horizontal scroll of its own (so a horizontal
+// gesture CHAINS out of the frame into our host, which is the whole pan mechanism).
+const LIVE_HTML = `<!doctype html><html><head><title>Identity Over Time</title>
+  <style>body{margin:0;font:16px/1.6 serif}main{padding:24px}p{max-width:100%}</style></head>
+  <body><main><h1>Identity Over Time</h1>${'<p>A paragraph of the live page, long enough to make it scroll vertically the way a real article does.</p>'.repeat(60)}</main></body></html>`
+
 const { base, stop } = await startProbeServer()
 const b = await chromium.launch({ headless: true })
 // ⚠ BLOCK THE SERVICE WORKER. Inkwave registers one (public/sw.js) and it answers from its own
@@ -237,6 +244,224 @@ try {
   check(titleCase.some((t) => t === 'quote this'), '…but quoting is still offered there')
 
   // SEP-STYLE IN-PAGE ANCHOR: same page, different fragment — must scroll, not refetch.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // LIVE VIEW — ZOOM, PAN, REFRESH, AND THE SELF-FRAME REFUSAL (2026-08-30)
+  // Peter: "need zoom and left right two finger scroll to work on the windowed browser" and "copy a
+  // bunch of the editing and the centre around text buttons from the pdf viewer".
+  //
+  // WARNING THESE CELLS MEASURE PAINTED PIXELS, NOT THE PRESENCE OF A HANDLER. A cell that asserts a
+  // listener exists proves nothing - this repo is full of probes that passed while the feature was
+  // broken. Every check below reads geometry off the layout engine or a real scroll offset.
+  //
+  // AND getBoundingClientRect UNDER A TRANSFORM RETURNS VISUAL px. That is what is wanted here
+  // (the question IS how big the page is drawn), but it must be deliberate - CLAUDE.md records the
+  // magnify convention for exactly this confusion.
+  // ⚠ `ctx.route`, NOT `page.route`. A cross-origin frame is an OUT-OF-PROCESS iframe in Chromium
+  // and a page-level route does not reach it: MEASURED, the frame navigated to
+  // `chrome-error://chromewebdata/` while every geometry cell above still passed, because those
+  // measure OUR element. The pan cell in particular would then have been scoring a chained scroll
+  // out of an ERROR PAGE — which has no content of its own to consume the gesture, i.e. the
+  // easiest possible case, dressed up as the real one. A probe that passes against a fixture that
+  // never loaded is the house disease.
+  await ctx.route((u) => u.hostname === 'plato.stanford.edu',
+    (route) => route.fulfill({ status: 200, contentType: 'text/html', body: LIVE_HTML }))
+  // ⚠ COUNT THE FRAME'S OWN NAVIGATIONS, NOT `page.on('request')`. A cross-origin sub-frame
+  // navigation does not surface as a page-level request event here (measured: the first cut read
+  // 0 loads on a frame that had visibly loaded, which would have reported a working refresh button
+  // as broken — the most expensive direction to be wrong in). `page.on('framenavigated')` is the
+  // event that describes what actually happened.
+  let liveLoads = 0
+  page.on('framenavigated', (f) => { if (f !== page.mainFrame() && f.url().includes('plato.stanford.edu')) liveLoads++ })
+  page.on('requestfailed', (r) => { if (r.url().includes('plato.stanford')) console.log('  [frame req FAILED]', r.failure()?.errorText, r.resourceType()) })
+
+  const clickBy = (title) => page.evaluate((t) => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith(t) || (x.getAttribute('aria-label') || '') === t)
+    if (!b) return false
+    b.click(); return true
+  }, title)
+
+  // Geometry, read from the layout engine. Returns NULL - never an empty object - when the frame is
+  // not on screen, so "the page did not grow" and "there is no page" stay different answers (the
+  // distinction readJson and readSnapshotsFromDisk exist to keep).
+  const liveGeom = () => page.evaluate(() => {
+    const f = document.querySelector('[data-iw-selectable] iframe')
+    if (!f) return null
+    const host = f.parentElement && f.parentElement.parentElement
+    if (!host) return null
+    const r = f.getBoundingClientRect()
+    const fit = [...document.querySelectorAll('button')].find((b) => b.hasAttribute('data-iw-live-fit'))
+    return {
+      paintedW: Math.round(r.width * 100) / 100, paintedH: Math.round(r.height * 100) / 100,
+      cssW: f.clientWidth, cssH: f.clientHeight,
+      hostW: host.clientWidth, hostH: host.clientHeight,
+      scrollW: host.scrollWidth, scrollLeft: Math.round(host.scrollLeft),
+      overflowX: getComputedStyle(host).overflowX, overflowY: getComputedStyle(host).overflowY,
+      pct: ((fit && fit.textContent) || '').trim(),
+    }
+  })
+
+  // Into live view, by the header toggle a reader actually presses.
+  await clickBy('Live page')
+  await page.waitForSelector('[data-iw-selectable] iframe', { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(900)
+
+  // ⚠ VOID GUARD, AND IT EARNED ITSELF IMMEDIATELY. The probe server sent no `frame-src`, so
+  // `default-src 'self'` refused the frame before any request existed and it sat at
+  // `chrome-error://chromewebdata/` — and EVERY cell below still passed, because they measure OUR
+  // element. The pan cell was the dangerous one: it was scoring a scroll chained out of an error
+  // page, which has no content to consume the gesture. So the fixture must be proved LOADED, with
+  // real content and its own vertical scroll, before any verdict here is read.
+  const loaded = await page.evaluate(async () => {
+    const f = document.querySelector('[data-iw-selectable] iframe')
+    return f ? f.getAttribute('src') : null
+  })
+  const frameUrls = page.frames().filter((f) => f !== page.mainFrame()).map((f) => f.url())
+  check(!!loaded && frameUrls.some((u) => u.startsWith('https://plato.stanford.edu')),
+    'VOID GUARD: the live fixture actually LOADED — an error page would pass every cell below',
+    frameUrls.join(' | ') || 'no child frame')
+  const inner = page.frames().find((f) => f.url().startsWith('https://plato.stanford.edu'))
+  const innerScroll = inner ? await inner.evaluate(() => ({
+    v: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+    h: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  })).catch(() => null) : null
+  check(!!innerScroll && innerScroll.v > 200 && innerScroll.h <= 1,
+    '…and it is the shape the pan claim needs: its OWN vertical scroll, and no horizontal scroll to swallow the gesture',
+    JSON.stringify(innerScroll))
+  const g0 = await liveGeom()
+  if (!g0) {
+    check(false, 'VOID: live view never rendered a frame - nothing below can be read')
+  } else {
+    check(Math.abs(g0.paintedW - g0.hostW) <= 1.5,
+      'at fit the page is drawn exactly as wide as the panel - no dead background strip',
+      `painted ${g0.paintedW} vs host ${g0.hostW}`)
+    check(g0.overflowY === 'hidden',
+      'the host never scrolls vertically - the SITE keeps that axis, so there is no second scrollbar',
+      g0.overflowY)
+    check(g0.pct === '100%', 'the zoom reads 100% at fit', g0.pct)
+
+    // ZOOM IN, three presses of the ported + button.
+    await clickBy('Zoom in'); await clickBy('Zoom in'); await clickBy('Zoom in')
+    await page.waitForTimeout(400)
+    const g1 = await liveGeom()
+    const want = g0.hostW * Math.pow(1.15, 3)
+    check(!!g1 && Math.abs(g1.paintedW - want) <= 2,
+      'three presses of + draw the page 1.15^3 WIDER - measured in painted px, not asserted',
+      g1 ? `${g0.paintedW} -> ${g1.paintedW} (expected ${Math.round(want * 100) / 100})` : 'no frame')
+    check(!!g1 && Math.abs(g1.paintedH - g0.paintedH) <= 1.5,
+      'and NOT taller - the frame still fills the host, so the site keeps its own vertical scroll',
+      g1 ? `${g0.paintedH} -> ${g1.paintedH}` : 'no frame')
+    check(!!g1 && g1.cssW === g0.cssW,
+      'the CSS viewport handed to the site is UNCHANGED - zoom magnifies, it does not re-lay-out',
+      g1 ? `${g0.cssW} -> ${g1.cssW}` : 'no frame')
+    check(!!g1 && g1.overflowX === 'auto' && g1.scrollW > g1.hostW + 1,
+      'the host has become a real horizontal scroller',
+      g1 ? `overflow-x ${g1.overflowX}, scrollWidth ${g1.scrollW} > host ${g1.hostW}` : 'no frame')
+    check(!!g1 && g1.pct === '152%', 'the readout follows', g1 ? g1.pct : 'no frame')
+
+    // PAN. THE POINT OF THE WHOLE MEASUREMENT: a two-finger horizontal gesture delivered OVER the
+    // cross-origin frame - where no listener of ours is ever called - must still move the host,
+    // because the browser chains the scroll out of the frame. If this reads 0 the feature is dead
+    // however many handlers exist.
+    const box = await page.locator('[data-iw-selectable] iframe').boundingBox()
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      for (let i = 0; i < 6; i++) { await page.mouse.wheel(60, 0); await page.waitForTimeout(60) }
+      await page.waitForTimeout(400)
+    }
+    const g2 = await liveGeom()
+    check(!!g2 && g2.scrollLeft > 20,
+      'a horizontal two-finger scroll OVER the frame pans the page - the browser chains it out',
+      g2 ? `scrollLeft ${g2.scrollLeft}` : 'no frame')
+
+    // FIT. The honest port of the PDF's fit button: there is no text bounding box to read inside a
+    // cross-origin document, so it fits the PAGE to the panel and resets the pan.
+    await clickBy('Fit the page to the panel width and re-centre')
+    await page.waitForTimeout(400)
+    const g3 = await liveGeom()
+    check(!!g3 && g3.pct === '100%' && Math.abs(g3.paintedW - g3.hostW) <= 1.5 && g3.scrollLeft === 0,
+      'fit-to-width returns the page to the panel and re-centres the pan',
+      g3 ? `${g3.pct}, painted ${g3.paintedW} vs host ${g3.hostW}, scrollLeft ${g3.scrollLeft}` : 'no frame')
+    check(!!g3 && g3.overflowX === 'hidden',
+      'and the scrollbar goes away - a page that fits is not pannable', g3 ? g3.overflowX : 'no frame')
+
+    // ZOOM OUT IS REFUSED BELOW FIT. The PDF's minUserZoom argument: below fit the page is
+    // narrower than the panel and sits in a strip of dead background, which is what Peter reported
+    // on the PDF and what got fixed there this morning.
+    await clickBy('Zoom out'); await clickBy('Zoom out')
+    await page.waitForTimeout(300)
+    const g4 = await liveGeom()
+    check(!!g4 && g4.pct === '100%' && Math.abs(g4.paintedW - g4.hostW) <= 1.5,
+      'zooming out below fit is refused - the page can never be narrower than the panel',
+      g4 ? `${g4.pct}, painted ${g4.paintedW} vs host ${g4.hostW}` : 'no frame')
+  }
+
+  // REFRESH (Peter, 2026-08-30). LIVE reloads by remounting the frame; the site decides where it
+  // lands. Counted as a real document request, because "the button exists" is not the claim.
+  const beforeLoads = liveLoads
+  await page.evaluate(() => { const b = document.querySelector('[data-iw-reader-refresh]'); if (b) b.click() })
+  await page.waitForTimeout(1500)
+  check(liveLoads > beforeLoads, 'refresh in LIVE view re-fetches the page', `${beforeLoads} -> ${liveLoads} document loads`)
+
+  // INKWAVE MAY NOT OPEN INKWAVE - and the KNOWN-NEGATIVE is the other half. Refusing something
+  // proves nothing about whether the check DISCRIMINATES; an ordinary site must still frame in the
+  // same run, on the same build, seconds apart.
+  const typeAddress = async (u) => {
+    await page.evaluate((url) => {
+      const i = [...document.querySelectorAll('input')].find((x) => x.placeholder === 'address or search')
+      if (!i) return
+      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      set.call(i, url)
+      i.dispatchEvent(new Event('input', { bubbles: true }))
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    }, u)
+    await page.waitForTimeout(1600)
+  }
+  await typeAddress('https://iwzero.me/')
+  const self = await page.evaluate(() => ({
+    said: /can.t open Inkwave in its own panel/.test(document.body.innerText),
+    frames: document.querySelectorAll('[data-iw-selectable] iframe').length,
+    blamedHeader: /header telling browsers/.test(document.body.innerText),
+  }))
+  check(self.said && self.frames === 0,
+    'Inkwave refuses to open Inkwave in its own panel, and renders NO frame',
+    JSON.stringify(self))
+  check(!self.blamedHeader,
+    'and it does NOT blame a framing header - that sentence is false about our own app',
+    String(self.blamedHeader))
+  await typeAddress('https://plato.stanford.edu/entries/identity-time/')
+  const ordinary = await page.evaluate(() => document.querySelectorAll('[data-iw-selectable] iframe').length)
+  check(ordinary === 1,
+    'KNOWN-NEGATIVE: an ordinary source still frames in the same run - the check discriminates',
+    `${ordinary} frame(s)`)
+
+  // REFRESH IN READER MODE KEEPS THE WRITER'S PLACE. Deliberate and different from live: it is
+  // the same article re-fetched, so losing your position would be a punishment for a slow network.
+  await clickBy('Reader view')
+  await page.waitForFunction(() => document.querySelectorAll('[data-iw-selectable] p').length > 3, null, { timeout: 15000 }).catch(() => {})
+  await page.waitForTimeout(900)
+  const scrolled = await page.evaluate(() => {
+    const el = document.querySelector('[data-iw-selectable]')
+    if (!el || el.scrollHeight - el.clientHeight < 60) return null
+    el.scrollTop = 120
+    el.dispatchEvent(new Event('scroll'))
+    return el.scrollTop
+  })
+  if (scrolled == null) {
+    console.log('  - SKIPPED: the reader fixture is too short to scroll; position cannot be measured here')
+  } else {
+    await page.waitForTimeout(500)
+    await page.evaluate(() => { const b = document.querySelector('[data-iw-reader-refresh]'); if (b) b.click() })
+    await page.waitForTimeout(2500)
+    const after = await page.evaluate(() => {
+      const el = document.querySelector('[data-iw-selectable]')
+      return { top: el ? Math.round(el.scrollTop) : -1, paras: document.querySelectorAll('[data-iw-selectable] p').length }
+    })
+    check(after.paras >= 4, 'refresh in READER view re-renders the article', JSON.stringify(after))
+    check(Math.abs(after.top - scrolled) <= 24,
+      'and keeps the reader place - it is the same article, not a new navigation',
+      `${scrolled} -> ${after.top}`)
+  }
+
   const anchored = await page.evaluate((sel) => {
     const el = document.querySelector(sel)
     const before = el.scrollTop

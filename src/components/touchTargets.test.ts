@@ -110,6 +110,34 @@ describe('--iw-tap-x is set wherever the rule is used', () => {
   })
 })
 
+// ── THE LIVE-VIEW CONTROLS ADDED 2026-08-30 ─────────────────────────────────────────────────────
+// Peter asked for zoom + pan in the live browser and for the PDF's zoom controls to be ported. Every
+// control in this file that shipped without a hit region had to be found by an audit; these are
+// pinned as they land instead.
+describe('the live-view zoom cluster and the refresh button are reachable by a finger', () => {
+  it('every new control carries the hit region', () => {
+    // The zoom cluster is four controls at a 2px gap, which is exactly the density that makes a
+    // painted 22px button unhittable without one.
+    for (const marker of ['Zoom out', 'Zoom in', 'Fit the page to the panel width and re-centre']) {
+      const at = READER.indexOf(marker)
+      expect(at, marker).toBeGreaterThan(-1)
+      // The className sits within the same element as its aria-label/title.
+      expect(READER.slice(at, at + 400), marker).toContain('iw-tap')
+    }
+    const refresh = READER.indexOf('data-iw-reader-refresh')
+    expect(refresh).toBeGreaterThan(-1)
+    expect(READER.slice(refresh, refresh + 400)).toContain('iw-tap')
+  })
+  it('the live bar WRAPS — at 375px its label, select and four controls do not fit on one line', () => {
+    // A bar that overflows takes its own controls off the screen, which is the failure this file
+    // was written after.
+    const at = READER.indexOf("background: 'var(--iw-reader-bar")
+    expect(at).toBeGreaterThan(-1)
+    // Both bars that use that background declare flex-wrap; find the one carrying the zoom cluster.
+    expect(READER).toMatch(/border-t border-stone-200 flex-wrap[\s\S]{0,4000}Fit the page to the panel width/)
+  })
+})
+
 // ── THE iOS 16px FLOOR NEEDS A BOX THAT CAN HOLD IT ─────────────────────────────────────────────
 describe('typing controls are sized for the forced 16px phone font', () => {
   it('index.css still floors every phone form control at 16px', () => {

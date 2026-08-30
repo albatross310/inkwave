@@ -27,6 +27,10 @@ import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKi
 import { readerInk } from '../reader/markInk'
 import { pdfZoomFactor } from './zoomGesture'
 import {
+  clampLiveZoom, liveFrameGeom, liveZoomStep, panAfterZoom, ZOOM_STEP_FACTOR, type PageWidth,
+} from './liveFrameZoom'
+import { APP_INITIATORS } from '../reader/framingRule'
+import {
   allowFramingVia, extensionState, loadSource, openExtensionPopup, releaseFraming, windowPort,
   type ExtensionState, type Via,
 } from '../reader/pageSource'
@@ -56,6 +60,10 @@ const CHROME_DIM = 'var(--iw-reader-chrome-dim, #d6d3d1)' // …and its disabled
 const INKP = 'var(--iw-reader-accent, #5c2d8a)'           // purple ON reader paper / the markup bar
 const CTL = 'var(--iw-reader-ctl, #fff)'                  // a control FACE on a reader surface
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'             // …its border
+// The filled "open it in a tab" action, declared ONCE. It appeared as an inline literal in each of
+// the four dead-end cards, which is four chances for one of them to drift — and a fifth card
+// (Inkwave-in-Inkwave, 2026-08-30) would have made five.
+const OPEN_TAB_FILL = `linear-gradient(135deg, #7a4fb0, ${INK})`
 const HAIR = 'var(--iw-reader-hair, rgba(92,45,138,0.13))'// hairline rules/dividers on paper
 const TINT = 'var(--iw-reader-tint, rgba(92,45,138,0.08))'// the lit-tool fill
 // Ink laid ON a mark's own fill. A highlight/note/box is an opaque PALE patch in both themes, so
@@ -144,9 +152,10 @@ export function clampReaderZoom(z: number): number {
   return Math.min(READER_ZOOM_MAX, Math.max(READER_ZOOM_MIN, z))
 }
 /** One −/+ press. A fixed ×1.15 rather than a ladder: the ladder and the wheel would be two rules
- *  for one question, and the writer would meet both. */
+ *  for one question, and the writer would meet both. The FACTOR is imported (liveFrameZoom.ts) so
+ *  reader mode and live mode step by the same amount under the same button. */
 export function readerZoomStep(z: number, dir: 1 | -1): number {
-  return clampReaderZoom(z * (dir === 1 ? 1.15 : 1 / 1.15))
+  return clampReaderZoom(z * (dir === 1 ? ZOOM_STEP_FACTOR : 1 / ZOOM_STEP_FACTOR))
 }
 
 // A textbox anchors to the OPENING of the paragraph it was dropped on — the one part of a block
@@ -183,6 +192,19 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 // results rather than a worse version of the same wall.
 export const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
+/** The REAL DuckDuckGo — its own styling, its own JavaScript. Only reachable with framing. */
+export const LIVE_SEARCH_URL = 'https://duckduckgo.com/?q='
+/**
+ * ⚠ ECOSIA WAS ASKED FOR AND IS REFUSED ON MEASUREMENT (Peter, 2026-08-30: "lets use ecosia instead
+ * of duckduckgo. its more sexy"). It is a reasonable-sounding idea, so record why it cannot work or
+ * the next reader will try it again. Measured both paths, headed, with the shipped framing rule:
+ *   • READ (server or extension fetch): **403**, 2 blocks, 0 links — Cloudflare refuses the fetch.
+ *   • FRAMED, with the extension stripping the framing headers: it frames, and then renders
+ *     **"Just a moment…"** — a Cloudflare interstitial. 147 characters, 0 result links.
+ * Shipping it would put a challenge page where the results go. It is not a header we can strip and
+ * not a path an extension changes: Cloudflare is judging the CLIENT, and we are not one it trusts.
+ */
+export const ECOSIA_SEARCH_URL = 'https://www.ecosia.org/search?q='
 
 /**
  * The endpoint a typed query becomes.
@@ -199,9 +221,43 @@ export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
  * WITH the extension and without it. `canFrame` is kept in the signature because it still decides
  * the MODE — a search we can frame no longer has to force reader view — but it must not choose an
  * engine that answers with a CAPTCHA.
+ *
+ * ⚠ IT IS NOW DuckDuckGo TWICE OVER, BUT NOT THE SAME ENDPOINT (2026-08-30). Peter asked for Ecosia
+ * ("more sexy") and it is refused above on measurement — but the same measuring run found the
+ * answer he actually wanted: with framing, **the real `duckduckgo.com` frames and renders in full**
+ * (5,993 characters, 34 result links), which is a proper search engine with its own styling rather
+ * than the bare `html.duckduckgo.com` transcript. So the ENGINE does not follow the capability —
+ * Google still cannot serve a framed search — but the ENDPOINT does: the pretty one where it works,
+ * the plain one a server fetch can read where it does not.
  */
-export function searchUrlFor(_canFrame: boolean): string {
-  return SEARCH_URL
+export function searchUrlFor(canFrame: boolean): string {
+  return canFrame ? LIVE_SEARCH_URL : SEARCH_URL
+}
+
+/**
+ * ⚠ INKWAVE MAY NOT OPEN INKWAVE (2026-08-30 — Peter loaded `https://iwzero.me` in the panel).
+ *
+ * Today it shows the browser's broken-page icon, because the app sends `x-frame-options: DENY` and
+ * `frame-ancestors 'none'`. That is not what makes this a refusal: the extension's rule STRIPS both,
+ * so once it is installed this would very likely start working — and working is the problem.
+ *
+ * A framed Inkwave boots a SECOND full editor inside the first: a second Tiptap, a second OPFS
+ * client, a second provenance session — and a second claimant on the SAME document lock
+ * (`storage/tabDoc.ts` `claimDocLock`). This repo has already lived through one tab holding two
+ * document locks: StrictMode's double-invoke did it by accident and the writer-facing symptom was
+ * "This document is open in another window" on a plain refresh. Framing ourselves reproduces that
+ * on purpose. And the inner copy has a reader panel of its own, so it recurses.
+ *
+ * MODE-INDEPENDENT deliberately: reader mode is no better, because the app is a client-rendered SPA
+ * and extracting its shell yields a page with no prose in it.
+ *
+ * The origins come from `APP_INITIATORS` (reader/framingRule.ts) — the SAME list the extension
+ * scopes its rule to. A private copy here is how a rename puts a guard quietly to sleep.
+ */
+export function isInkwaveItself(url: string): boolean {
+  let host: string
+  try { host = new URL(url).hostname.toLowerCase() } catch { return false }
+  return APP_INITIATORS.some((d) => host === d || host.endsWith(`.${d}`))
 }
 
 // ── PLAYABLE MEDIA ───────────────────────────────────────────────────────────────────────────────
@@ -525,6 +581,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const [idx, setIdx] = useState(0)
   useEffect(() => { setStack([url]); setIdx(0) }, [url])
   const here = stack[idx] ?? url
+  /** Inkwave, in Inkwave's own panel — refused in BOTH modes. See `isInkwaveItself`. */
+  const selfOpen = isInkwaveItself(here)
   const [addr, setAddr] = useState(url)
   useEffect(() => { setAddr(here) }, [here])
 
@@ -633,8 +691,16 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   //   wide   — lay out at 1400px and scale DOWN: the full desktop layout, smaller text
   // Implemented by sizing the iframe to the chosen viewport and transform-scaling it to fit, which
   // is the only way to give a cross-origin document a viewport it did not ask for.
-  const [pageWidth, setPageWidth] = useState<'auto' | 'narrow' | 'wide'>(() => {
-    try { return (localStorage.getItem('inkwave:readerPageWidth') as 'auto' | 'narrow' | 'wide') || 'auto' } catch { return 'auto' }
+  const [pageWidth, setPageWidth] = useState<PageWidth>(() => {
+    try { return (localStorage.getItem('inkwave:readerPageWidth') as PageWidth) || 'auto' } catch { return 'auto' }
+  })
+  // ── LIVE ZOOM (Peter, 2026-08-30: "need zoom and left right two finger scroll to work on the
+  // windowed browser") ────────────────────────────────────────────────────────────────────────────
+  // A MULTIPLIER ON THE PAGE-WIDTH FIT, never a second transform beside it — see liveFrameZoom.ts
+  // for why one scale, why the floor is 1, and why this is buttons rather than a pinch (measured:
+  // a wheel over a cross-origin frame reaches our handler 0 times out of 0).
+  const [liveZoom, setLiveZoom] = useState(() => {
+    try { return clampLiveZoom(Number(localStorage.getItem('inkwave:readerLiveZoom')) || 1) } catch { return 1 }
   })
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose
   const handingOverRef = useRef(false)
@@ -648,13 +714,23 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     setHostBox({ w: el.clientWidth, h: el.clientHeight })
     return () => ro.disconnect()
   }, [framed])
-  const frameGeom = (() => {
-    const w = hostBox.w || 900, h = hostBox.h || 600
-    if (pageWidth === 'auto' || w === 0) return { w, h, scale: 1 }
-    const target = pageWidth === 'narrow' ? 520 : 1400
-    const scale = w / target
-    return { w: target, h: h / scale, scale }
-  })()
+  const frameGeom = liveFrameGeom({ hostW: hostBox.w, hostH: hostBox.h, pageWidth, zoom: liveZoom })
+  // ⚠ THE PAN IS RE-CENTRED HERE, NOT IN A LAYOUT EFFECT READING THE NEW GEOMETRY. The host's
+  // scrollLeft still describes the OLD painted width at the moment the button is pressed, so the
+  // ratio is applied while both numbers are consistent; a next-frame correction would be comparing
+  // an old offset against a new range. `panAfterZoom`'s header records why the simple form is legal
+  // in this host and would not be in the PDF's.
+  const applyLiveZoom = (next: number) => {
+    const z = clampLiveZoom(next)
+    const el = frameHostRef.current
+    if (el && z !== liveZoom) {
+      const ratio = z / liveZoom
+      const nextMax = Math.max(0, frameGeom.paintedW * ratio - el.clientWidth)
+      el.scrollLeft = panAfterZoom(el.scrollLeft, el.clientWidth, ratio, nextMax)
+    }
+    setLiveZoom(z)
+    try { localStorage.setItem('inkwave:readerLiveZoom', String(z)) } catch { /* private */ }
+  }
 
   // Live view through the extension. The STATE is declared here because the refusal detector just
   // below reads it; the EFFECT that installs the rule lives after `extState`, since it cannot run
@@ -797,6 +873,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   useEffect(() => {
     let live = true
     setDoc(null); setError(null); setVia(null)
+    // Our own app is refused in both modes, so do not spend a fetch (or the writer's own
+    // connection) asking a server to extract prose from a client-rendered SPA shell.
+    if (selfOpen) return
     void (async () => {
       // Asked ONCE per page load and memoised (reader/pageSource.ts) — otherwise this deadline
       // would sit in front of every link the reader follows.
@@ -813,7 +892,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       }
     })()
     return () => { live = false }
-  }, [here, reloadKey])
+  }, [here, reloadKey, selfOpen])
 
   // ⚠ THE GRANT HAPPENS SOMEWHERE WE CANNOT WATCH. `permissions.request()` is only honoured inside
   // an extension page, so the writer turns page fetching on in the popup and this page is told
@@ -928,6 +1007,78 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     if (port) void openExtensionPopup(port)
   }
 
+  // ── "GET THE EXTENSION", AT THE WALL (Peter, 2026-08-30: "can we build a little 'download the
+  // extension' prompt for whenever the user hits a link or tries to search etc. to something not
+  // supported without the extension") ────────────────────────────────────────────────────────────
+  // There are exactly THREE walls it removes, and the panel already knows which one it is standing
+  // at: a site that refuses framing, a search our server is not served, and an article our server
+  // cannot fetch. So the offer goes INSIDE each of those three cards rather than floating as a
+  // banner — an offer that appears where the disappointment is, and nowhere else.
+  //
+  // ⚠ THREE RULES, AND EACH ONE IS THE DIFFERENCE BETWEEN AN OFFER AND A NAG:
+  //  1. ONLY WHEN IT IS GENUINELY ABSENT. `extState` is 'absent' | 'blocked' | 'ready', and
+  //     'blocked' means INSTALLED BUT NOT GRANTED — which already has its own correct affordance
+  //     (askForFetchPermission + the printed instruction). Offering a download to someone who has
+  //     it installed is telling them to install what they have.
+  //  2. DISMISSIBLE AND REMEMBERED — the anti-nag clause the unsynced-work notice established:
+  //     never again once waved away. Keyed per ORIGIN, not per document: whether you have a browser
+  //     extension is a fact about your browser, not about the essay you are writing.
+  //  3. NO DEAD "DOWNLOAD" BUTTON. It is in no store: it is built from the repo and loaded
+  //     unpacked. A button labelled Download that opens instructions is the dead control this panel
+  //     has already shipped twice, so the button says what it does — it shows the instructions.
+  const [extOffer, setExtOffer] = useState(() => {
+    try { return localStorage.getItem('inkwave:readerExtOffer') !== '0' } catch { return true }
+  })
+  const [extHow, setExtHow] = useState(false)
+  const dismissExtOffer = () => {
+    setExtOffer(false)
+    try { localStorage.setItem('inkwave:readerExtOffer', '0') } catch { /* private */ }
+  }
+  /** The offer itself. Rendered inside a dead end, never on its own. */
+  const extensionOffer = (): React.ReactNode => {
+    if (extState !== 'absent' || !extOffer) return null
+    return (
+      <div style={{ maxWidth: 470, width: '100%', textAlign: 'left', borderRadius: 10,
+        border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: `${INK}0a`,
+        padding: '10px 12px', fontSize: '12.5px', lineHeight: 1.55, ['--iw-tap-x' as string]: '8px' }}>
+        <div className="flex items-start gap-2">
+          <span style={{ flex: 1 }}>
+            {/* ⚠ WHAT IT BUYS, AND WHAT IT DOES NOT. The second sentence is not hedging: MEASURED,
+                a framed page does not carry your session — SameSite=Lax is the default a cookie
+                gets when it says nothing, and Lax and Strict are both dropped in a third-party
+                frame. So a site you are signed in to renders signed out, and no header the
+                extension removes can change that. Saying it here is the difference between a known
+                limit and Inkwave looking broken the first time he tries it on a journal. */}
+            <strong style={{ color: CHROME_FG }}>The Inkwave extension fixes this.</strong>{' '}
+            It fetches sources from your own connection instead of Inkwave’s server, which is what
+            makes web search work here and lets sites that refuse to be shown inside another page
+            open live. It doesn’t sign you in to anything — a page in a panel never carries your
+            browser’s session, so a site you’re logged into still shows as logged out.
+          </span>
+          <button type="button" onClick={dismissExtOffer} title="Don’t offer this again"
+            aria-label="Don’t offer this again" className="iw-tap"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: MUTED_CHROME, fontSize: '14px', lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>×</button>
+        </div>
+        {/* NOT "Download" — there is nowhere to download it from. It is built from the Inkwave
+            repository and loaded unpacked, so the only honest action is to show how. */}
+        {!extHow ? (
+          <button type="button" onClick={() => setExtHow(true)} data-iw-ext-how
+            className="rounded-full px-3 py-1.5 iw-tap"
+            style={{ marginTop: 8, border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '12px', background: 'transparent', cursor: 'pointer' }}>
+            How to install it
+          </button>
+        ) : (
+          <ol style={{ marginTop: 8, paddingLeft: 18, listStyle: 'decimal' }}>
+            <li>Build it from the Inkwave repository: <code>pnpm ext:build</code></li>
+            <li>Open <code>chrome://extensions</code> and turn on Developer mode</li>
+            <li>Choose <strong>Load unpacked</strong> and pick <code>extension-src/.output/chrome-mv3</code></li>
+            <li>It opens its own page on install — turn on <strong>Fetch pages for the reader</strong> there</li>
+          </ol>
+        )}
+      </div>
+    )
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -1025,11 +1176,27 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       hs.forEach((h, i) => { if (h.getBoundingClientRect().top <= mark) n = i })
       setSectionNow(n)
     }
-    const onScroll = () => { if (!raf) raf = requestAnimationFrame(read); readerScrollRef.current.set(here, el.scrollTop) }
+    // ⚠ A SCROLL TO 0 BECAUSE THE ARTICLE VANISHED IS NOT THE READER GOING TO THE TOP — and until
+    // 2026-08-30 the two were the same write. MEASURED by `prove:reader`'s new refresh cell: the
+    // refresh button sets `doc` to null, the article is replaced by "reading…", the pane loses its
+    // height, the BROWSER clamps scrollTop to 0 and fires a real scroll event — which landed here
+    // and overwrote the remembered offset with 0 before anything could restore it. So refresh (and
+    // any re-render that shrinks the pane) silently sent the writer back to the top. Same family as
+    // this repo's other absence-vs-failure distinctions: the offset of a placeholder is not a
+    // reading position, so it is not recorded as one.
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(read)
+      if (doc) readerScrollRef.current.set(here, el.scrollTop)
+    }
     read()
-    // Restore the place we left this article at, once it has its height.
+    // Restore the place we left this article at, once it has its height. `Math.min` rather than a
+    // refusal: landing as close as the article allows beats not moving at all, and before layout
+    // the max is 0, so an early frame is a harmless no-op rather than a jump.
     const want = readerScrollRef.current.get(here)
-    if (want && want > 8) requestAnimationFrame(() => { if (el.scrollHeight - el.clientHeight > want) el.scrollTop = want })
+    if (want && want > 8) requestAnimationFrame(() => {
+      const max = el.scrollHeight - el.clientHeight
+      if (max > 8) el.scrollTop = Math.min(want, max)
+    })
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => { el.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
   }, [doc, framed, here])
@@ -1262,6 +1429,22 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <button type="button" title="Forward" disabled={idx >= stack.length - 1} onClick={() => setIdx((i) => Math.min(stack.length - 1, i + 1))}
             className="iw-tap"
             style={{ background: 'transparent', border: 'none', cursor: idx >= stack.length - 1 ? 'default' : 'pointer', color: idx >= stack.length - 1 ? CHROME_DIM : CHROME_FG, fontSize: '15px', padding: '0 2px' }}>→</button>
+          {/* REFRESH (Peter, 2026-08-30). Ordinary browser furniture, and its absence is felt
+              exactly when a page half-loads — which is when he asked for it.
+              ⚠ THE TWO MODES RELOAD BY DIFFERENT MECHANISMS AND IT REUSES BOTH RATHER THAN ADDING A
+              THIRD. Live: bump `frameKey`, which REMOUNTS the iframe — assigning the same `src` does
+              not reliably re-fetch, and `frameKey` already exists for exactly this (it is how the
+              framing rule gets to land before the frame tries). Reader: bump `reloadKey`, the same
+              re-fetch the extension-permission grant uses.
+              ⚠ AND THEY KEEP THE READER'S PLACE ON PURPOSE, WHILE LIVE RESETS. Reader mode is the
+              same article re-fetched, so losing your place would be a punishment for a slow network:
+              `readerScrollRef` is keyed by URL and the restore effect re-runs when the new doc
+              arrives, so the position comes back for free. A live reload is a fresh navigation of a
+              document we do not own — where it lands is the site's decision, not ours to fake. */}
+          <button type="button" title="Reload this page" aria-label="Reload this page" data-iw-reader-refresh
+            onClick={() => { if (framed) setFrameKey((k) => k + 1); else setReloadKey((k) => k + 1) }}
+            className="iw-tap"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: CHROME_FG, fontSize: '14px', padding: '0 2px' }}>⟳</button>
           {/* The title is the FIRST thing to go on a phone (Peter's iPhone 8 is 375px): four header
               actions, a back/forward pair and a usable address bar do not fit beside it, and the
               address bar already says where you are. Desktop keeps it. */}
@@ -1396,7 +1579,31 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 the deploy healthy. Search worked in my terminal and never once worked in production.
                 Wikipedia's search DOES serve us, so it is offered as the one that works here; the
                 writer's own browser is not blocked by anyone, so a tab always works. */}
-            {error && !framed && isSearch(here) && (
+            {/* ⚠ INKWAVE IN INKWAVE — REFUSED, AND SAID PLAINLY (2026-08-30, Peter loaded
+                iwzero.me here and got Chrome's broken-page icon). The reason he saw it is that the
+                app sends X-Frame-Options: DENY — but the extension STRIPS that, so this is on its
+                way to working, and working is the failure. See `isInkwaveItself` for the mechanism.
+                It deliberately does NOT say "this site refuses to be framed": that sentence is
+                false about our own app and would send the next reader hunting a header. */}
+            {selfOpen && (
+              <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
+                <div style={{ color: framed ? CHROME_FG : INKP, fontSize: '15px' }}>Inkwave can’t open Inkwave in its own panel.</div>
+                <div style={{ maxWidth: 470, lineHeight: 1.55 }}>
+                  The copy inside would be a second, complete editor — and it would claim the same
+                  document as this one, so the two would compete over the same file. Your work is in
+                  the window behind this panel already.
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={onClose}
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: framed ? CHROME_FG : INKP, fontSize: '13px' }}>
+                    Close this panel
+                  </button>
+                  <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
+                    style={{ background: OPEN_TAB_FILL, fontSize: '13px' }}>Open it in a tab ↗</a>
+                </div>
+              </div>
+            )}
+            {!selfOpen && error && !framed && isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
                 <div style={{ color: CHROME_FG, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
                 {/* ⚠ THE REMEDY IS NAMED, AND IT DEPENDS ON WHAT THE WRITER ALREADY HAS. The
@@ -1409,10 +1616,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   exist. Your own browser isn’t blocked — opening the search in a tab always works.
                   {extState === 'blocked'
                     ? ' The Inkwave extension can fetch it from your own connection instead, but hasn’t been given permission yet.'
-                    : extState === 'absent'
-                      ? ' The Inkwave browser extension fetches sources from your own connection, which makes search work here.'
-                      : ''}
+                    : ''}
                 </div>
+                {/* WALL 1 of 3 — a search our server is not served. */}
+                {extensionOffer()}
                 <div className="flex gap-2 flex-wrap justify-center">
                   {extState === 'blocked' && (
                     <button type="button" onClick={askForFetchPermission}
@@ -1425,15 +1632,17 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     Search Wikipedia here
                   </button>
                   <a href={`https://duckduckgo.com/?q=${encodeURIComponent(queryOf(here))}`} target="_blank" rel="noreferrer noopener"
-                    className="rounded-full px-3 py-1.5 text-white" style={{ background: `linear-gradient(135deg, #7a4fb0, ${INK})`, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5 text-white" style={{ background: OPEN_TAB_FILL, fontSize: '13px' }}>
                     Search the web in a tab ↗
                   </a>
                 </div>
               </div>
             )}
-            {error && !framed && !isSearch(here) && (
+            {!selfOpen && error && !framed && !isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
                 <div style={{ color: CHROME_FG, fontSize: '15px' }}>{error}</div>
+                {/* WALL 2 of 3 — an article our server cannot fetch at all. */}
+                <div className="px-8" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>{extensionOffer()}</div>
                 {!likelyRefusesFraming(here) && (
                   <button type="button" onClick={() => setFramed(true)}
                     className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
@@ -1441,13 +1650,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   </button>
                 )}
                 <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
-                  style={{ background: `linear-gradient(135deg, #7a4fb0, ${INK})`, fontSize: '13px' }}>Open it in a tab ↗</a>
+                  style={{ background: OPEN_TAB_FILL, fontSize: '13px' }}>Open it in a tab ↗</a>
               </div>
             )}
-            {!error && !doc && !framed && (
+            {!selfOpen && !error && !doc && !framed && (
               <div className="flex items-center justify-center h-full" style={{ color: MUTED_PAPER, fontSize: '13px' }}>reading…</div>
             )}
-            {framed && frameRefused && (
+            {!selfOpen && framed && frameRefused && (
               // ⚠ SAY IT, DON'T SHOW CHROME'S GREY FACE (2026-08-28, Peter: "it's not working for
               // this abc website" — iview.abc.net.au sends X-Frame-Options and the panel showed the
               // browser's "refused to connect" error, which reads as OUR bug). A refused frame
@@ -1461,20 +1670,38 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   it. Reader view usually still works — it fetches the article text and shows it here,
                   where you can highlight and cite it.
                 </div>
+                {/* WALL 3 of 3 — a site that refuses framing. The extension strips those headers
+                    before the browser reads them, which is the one thing that opens this page live;
+                    the copy above still stands, because nothing in the PAGE can override it. */}
+                {extensionOffer()}
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setFramed(false)}
                     className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Read it here instead
                   </button>
                   <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
-                    style={{ background: `linear-gradient(135deg, #7a4fb0, ${INK})`, fontSize: '13px' }}>Open in a tab ↗</a>
+                    style={{ background: OPEN_TAB_FILL, fontSize: '13px' }}>Open in a tab ↗</a>
                 </div>
               </div>
             )}
-            {framed && !frameRefused && (
+            {!selfOpen && framed && !frameRefused && (
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
-              <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: CTL }}>
+              // ⚠ A REAL HORIZONTAL SCROLLER, AND THAT IS THE WHOLE PAN MECHANISM. MEASURED before
+              // it was built: a two-finger horizontal gesture over a cross-origin frame CHAINS out
+              // of it into the nearest scrollable ancestor (360px in six notches) while our own
+              // wheel listener is called ZERO times. So the browser pans this for free the moment
+              // the host can scroll — and a JS handler here would be a mechanism with no surface,
+              // which this repo has shipped before and had to go looking for.
+              // Vertical stays HIDDEN on purpose: the frame is sized so its painted height is
+              // exactly the host's, so the site keeps its own vertical scrolling and the reader
+              // never meets a second scrollbar wrapped around the first.
+              <div ref={frameHostRef}
+                style={{ width: '100%', height: '100%', background: CTL,
+                  overflowX: frameGeom.pannable ? 'auto' : 'hidden', overflowY: 'hidden' }}>
+                {/* A transform does not change layout, so the scrollable extent has to be declared:
+                    this spacer is the PAINTED size and the frame is drawn inside it. */}
+                <div style={{ width: frameGeom.paintedW, height: frameGeom.paintedH }}>
                 <iframe key={frameKey} src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
@@ -1487,9 +1714,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     width: frameGeom.w, height: frameGeom.h,
                     transform: frameGeom.scale === 1 ? undefined : `scale(${frameGeom.scale})`,
                     transformOrigin: '0 0' }} />
+                </div>
               </div>
             )}
-            {doc && !framed && doc.blocks.map((b, i) => {
+            {!selfOpen && doc && !framed && doc.blocks.map((b, i) => {
               // `data-iw-blk` is how a CLICK finds its block. The point tools resolve their anchor
               // by TEXT like every other mark, but they consult the clicked block FIRST, so a
               // phrase that also occurs elsewhere in the article cannot drag the mark across it.
@@ -1683,7 +1911,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             near-white slab Peter saw under a night reading column, with chrome rescues washing its
             labels out on top of it. The bar belongs to the PAPER: it wears the marks' own colours,
             and a swatch has to be shown against the surface its mark lands on. */}
-        {!framed && (
+        {!framed && !selfOpen && (
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-t flex-wrap"
             style={{ fontSize: '12px', background: 'var(--iw-reader-bar, #faf8fc)', borderTopColor: EDGE,
               ['--iw-tap-x' as string]: '6px' }}>
@@ -1870,21 +2098,51 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             boxShadow: '0 3px 12px rgba(0,0,0,0.25)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>{toast}</div>
         )}
 
-        {/* LIVE MODE gets its own thin bar — just the width choice. It is not a fifth header button
-            (Peter asked for four, symmetric) and it is not a markup tool, because there is nothing
-            in a live page we are allowed to mark. */}
-        {framed && !frameRefused && (
-          <div className="flex items-center gap-2 px-2 py-1.5 border-t border-stone-200"
-            style={{ fontSize: '11px', background: 'var(--iw-reader-bar, #faf8fc)', color: MUTED_PAPER, borderTopColor: EDGE }}>
-            <span>Page width</span>
+        {/* LIVE MODE gets its own thin bar — the width choice and the zoom. It is not a fifth header
+            button (Peter asked for four, symmetric) and it is not a markup tool, because there is
+            nothing in a live page we are allowed to mark.
+            ⚠ IT WRAPS. At 375px the label, a three-option select and four controls do not fit on one
+            line, and a bar that overflows takes its own controls off the screen — the failure this
+            file has already been audited for once. `--iw-tap-x` is this row's own gap (8px), so each
+            `.iw-tap` control claims 4px per side and no two neighbours contend. */}
+        {framed && !frameRefused && !selfOpen && (
+          <div className="flex items-center gap-2 px-2 py-1.5 border-t border-stone-200 flex-wrap"
+            style={{ fontSize: '11px', background: 'var(--iw-reader-bar, #faf8fc)', color: MUTED_PAPER, borderTopColor: EDGE,
+              ['--iw-tap-x' as string]: '8px' }}>
+            <span>{isPhone ? 'Width' : 'Page width'}</span>
             <select value={pageWidth} title="How wide a screen the site should lay out for"
-              onChange={(e) => { const v = e.target.value as 'auto' | 'narrow' | 'wide'; setPageWidth(v); try { localStorage.setItem('inkwave:readerPageWidth', v) } catch { /* private */ } }}
+              onChange={(e) => { const v = e.target.value as PageWidth; setPageWidth(v); try { localStorage.setItem('inkwave:readerPageWidth', v) } catch { /* private */ } }}
               className="iw-nightable iw-reader-field"
-              style={{ height: isPhone ? TOUCH_FIELD_H : 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
+              style={{ height: isPhone ? TOUCH_FIELD_H : 22, minWidth: 0, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
               <option value="auto">Fit the panel</option>
               <option value="narrow">Big text (phone layout)</option>
               <option value="wide">Wide (desktop layout)</option>
             </select>
+            {/* THE PDF's −/%/+ PAIR AND ITS FIT BUTTON, PORTED (Peter: "copy a bunch of the editing
+                and the centre around text buttons from the pdf viewer").
+                ⚠ AND ONE OF THEM IS DELIBERATELY NOT PORTED. The PDF's ⤢ is "fit the TEXT to the
+                window" — it reads the page's own text bounding box out of the text layer and scales
+                so the ink is flush. Nothing here can read where the text sits: the page is
+                cross-origin, so its layout, its scroll position and its DOM are all closed to us.
+                A button labelled "centre on the text" would be a promise we cannot keep, so the
+                honest equivalent is offered instead: fit the page to the panel and reset the pan. */}
+            <div className="flex items-center ml-auto" style={{ gap: 2, ['--iw-tap-x' as string]: '2px' }}>
+              <button type="button" title="Zoom out" aria-label="Zoom out" className="iw-tap"
+                onClick={() => applyLiveZoom(liveZoomStep(liveZoom, -1))}
+                style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, cursor: 'pointer', lineHeight: 1 }}>−</button>
+              <button type="button" title="Fit the page to the panel width" data-iw-live-fit
+                onClick={() => { applyLiveZoom(1); const el = frameHostRef.current; if (el) el.scrollLeft = 0 }} className="iw-tap"
+                style={{ minWidth: 42, height: 22, borderRadius: 6, border: '1px solid transparent', background: 'transparent',
+                  color: MUTED_PAPER, cursor: 'pointer', fontSize: '11px', fontFamily: 'system-ui, sans-serif' }}>
+                {Math.round(liveZoom * 100)}%
+              </button>
+              <button type="button" title="Zoom in" aria-label="Zoom in" className="iw-tap"
+                onClick={() => applyLiveZoom(liveZoomStep(liveZoom, 1))}
+                style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, cursor: 'pointer', lineHeight: 1 }}>+</button>
+              <button type="button" title="Fit the page to the panel width and re-centre" aria-label="Fit to width"
+                onClick={() => { applyLiveZoom(1); const el = frameHostRef.current; if (el) el.scrollLeft = 0 }} className="iw-tap"
+                style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, cursor: 'pointer', fontSize: '12px', lineHeight: 1 }}>⤢</button>
+            </div>
           </div>
         )}
 

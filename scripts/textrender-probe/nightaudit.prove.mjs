@@ -618,6 +618,66 @@ try {
       })
       check(popover, `[${theme}] the selection popover appeared`)
       if (popover) await audit(theme, 'reader selection popover', '[data-iw-probe="popover"]')
+
+      // ── 1b. LIVE VIEW'S OWN BAR, AND THE TWO REFUSAL CARDS (2026-08-30) ───────────────────────
+      // Five controls landed in this panel today (zoom -, the % readout, zoom +, fit-to-width, and
+      // refresh) plus two full-height cards (Inkwave-in-Inkwave, and the "get the extension" offer).
+      // None of them is reachable from the reader-mode walk above, so without this section a night
+      // bug in any of them would be invisible — which is exactly what happened the last time this
+      // file was extended: "the walker ran 0 failures in BOTH themes on the build Peter complained
+      // about."
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('Live page'))
+        if (b) b.click()
+      })
+      await page.waitForTimeout(1000)
+      const liveBar = await page.evaluate(() => {
+        const fit = document.querySelector('[data-iw-live-fit]')
+        const bar = fit && fit.closest('div.flex.items-center')
+        const row = bar && bar.parentElement
+        if (!row) return false
+        row.setAttribute('data-iw-probe', 'livebar')
+        return true
+      })
+      check(liveBar, `[${theme}] the live-view zoom bar rendered`)
+      if (liveBar) await audit(theme, 'live-view bar', '[data-iw-probe="livebar"]')
+
+      // THE SELF-FRAME REFUSAL. Driven through the real address bar, so the card is the one a writer
+      // would actually meet rather than a fixture of it.
+      await page.evaluate(() => {
+        const i = [...document.querySelectorAll('input')].find((x) => x.placeholder === 'address or search')
+        if (!i) return
+        const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        set.call(i, 'https://iwzero.me/')
+        i.dispatchEvent(new Event('input', { bubbles: true }))
+        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      })
+      await page.waitForTimeout(1400)
+      const selfCard = await page.evaluate(() => {
+        const el = [...document.querySelectorAll('div')].find((d) => /can.t open Inkwave in its own panel/.test(d.textContent || '') && d.children.length >= 2)
+        if (!el) return false
+        el.setAttribute('data-iw-probe', 'selfcard')
+        return true
+      })
+      check(selfCard, `[${theme}] the Inkwave-in-Inkwave refusal card rendered`)
+      if (selfCard) await audit(theme, 'self-frame refusal card', '[data-iw-probe="selfcard"]')
+
+      // Back to reader view on the original source for the sections below.
+      await page.evaluate(() => {
+        const i = [...document.querySelectorAll('input')].find((x) => x.placeholder === 'address or search')
+        if (!i) return
+        const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        set.call(i, 'https://plato.stanford.edu/entries/identity-time/')
+        i.dispatchEvent(new Event('input', { bubbles: true }))
+        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      })
+      await page.waitForTimeout(1200)
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('Reader view'))
+        if (b) b.click()
+      })
+      await page.waitForTimeout(900)
+
       await page.keyboard.press('Escape')
       await page.waitForTimeout(400)
     }
