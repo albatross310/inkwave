@@ -139,7 +139,7 @@ export function VerifyModal({
                 style={{
                   width: 64, height: 64, borderRadius: '50%', flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: `conic-gradient(${INK} ${((COUNTDOWN_FROM - countdown) / COUNTDOWN_FROM) * 360}deg, rgba(92,45,138,0.14) 0deg)`,
+                  background: `conic-gradient(${INK} ${((COUNTDOWN_FROM - countdown) / COUNTDOWN_FROM) * 360}deg, rgb(var(--iw-ink-rgb) / 0.14) 0deg)`,
                 }}
               >
                 <div

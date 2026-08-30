@@ -190,7 +190,7 @@ export function ReceiptPanel({
             onClick={() => setOpen(!open)}
             className={`iw-nightable ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}
             style={{
-              border: `1px solid rgba(92, 45, 138, 0.75)`,
+              border: `1px solid rgb(var(--iw-ink-rgb) / 0.75)`,
               borderRadius: compact ? 9999 : 12,
               color: 'var(--iw-pill-fg, #5c2d8a)',
               // Shared with the sync pill opposite so the pair reads as a matched set — see
@@ -222,7 +222,7 @@ export function ReceiptPanel({
               position: 'absolute',
               bottom: '2.8rem',
               left: 0,
-              background: 'rgba(92, 45, 138, 0.85)',
+              background: 'rgb(var(--iw-ink-rgb) / 0.85)',
               color: '#fff',
               fontSize: '0.75rem',
               padding: '4px 10px',
@@ -240,7 +240,7 @@ export function ReceiptPanel({
         {panelOpen && (
           <div
             className="iw-nightable mb-1.5 bg-white overflow-auto"
-            style={{ border: `1px solid rgba(92, 45, 138, 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
+            style={{ border: `1px solid rgb(var(--iw-ink-rgb) / 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
           >
             {/* Save version — stays open so the new entry appears in-place */}
             {onSaveVersion && (
@@ -249,7 +249,7 @@ export function ReceiptPanel({
                 onClick={handleSaveVersion}
                 disabled={saving}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium disabled:opacity-50"
-                style={{ borderBottom: `1px solid rgba(92, 45, 138, 0.12)`, color: 'var(--iw-ink, #5c2d8a)', fontSize: '0.78rem' }}
+                style={{ borderBottom: `1px solid rgb(var(--iw-ink-rgb) / 0.12)`, color: 'var(--iw-ink, #5c2d8a)', fontSize: '0.78rem' }}
                 title="Save a named version of this document now"
               >
                 {saving ? '⊕ saving…' : '⊕ save version'}
@@ -257,7 +257,7 @@ export function ReceiptPanel({
             )}
 
             {typeof wordCount === 'number' && (
-              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', fontSize: '0.75rem' }}>
+              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}>
                 {wordCount} word{wordCount === 1 ? '' : 's'}
               </div>
             )}
@@ -266,7 +266,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onVerifyChain}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}
                 title="Verify the signed receipt chain against the published key"
               >
                 ✦ {chainStatus ? `chain: ${chainStatus}` : 'verify chain…'}
@@ -277,7 +277,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onCheckBitcoin}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)', color: 'var(--iw-light, #9b5ccc)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', color: 'var(--iw-light, #9b5ccc)', fontSize: '0.75rem' }}
               >
                 ⏳ check Bitcoin…
               </button>
@@ -301,7 +301,7 @@ export function ReceiptPanel({
                   // from ( /snapshot has its own "← editor" button), not a second workspace.
                   onClick={() => { window.location.href = `/snapshot?doc=${encodeURIComponent(documentId)}&snap=${encodeURIComponent(s.id)}` }}
                   className="w-full px-2.5 py-1 flex flex-col items-start text-left hover:bg-stone-50"
-                  style={{ borderBottom: '1px solid rgba(92, 45, 138, 0.12)' }}
+                  style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)' }}
                   title={s.summary ?? `bundle ${s.bundleHash}`}
                 >
                   {/* Row 1: v1s3 · Arvo. 30/06 · wordcount · OTS */}

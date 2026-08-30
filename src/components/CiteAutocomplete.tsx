@@ -114,7 +114,7 @@ export function CiteAutocomplete({ editor }: Props) {
         width: 280, maxHeight: 280, overflowY: 'auto',
         background: 'white', borderRadius: 10,
         border: `1px solid ${INK}44`,
-        boxShadow: '0 4px 16px rgba(92,45,138,0.14)',
+        boxShadow: '0 4px 16px rgb(var(--iw-ink-rgb) / 0.14)',
       }}
     >
       {results.length === 0 ? (

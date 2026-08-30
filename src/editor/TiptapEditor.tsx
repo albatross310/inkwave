@@ -3343,7 +3343,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 ['--iw-bar-budget' as string]: `calc((100vw - ${TOOLBAR_SIDE_RESERVE_PX * 2}px) / ${(zoom * 1.12).toFixed(4)})`,
                 maxWidth: 'var(--iw-bar-budget)',
               }),
-              border: '1px solid var(--iw-nightable-border, rgba(92, 45, 138, 0.75))',
+              border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
@@ -3475,7 +3475,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   const available = overflowSlots(toolbarSlots)
                   return (
                     <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
-                      style={{ border: '1px solid rgba(92,45,138,0.75)' }}
+                      style={{ border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)' }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">
@@ -3507,7 +3507,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                             style={{ color: '#5c2d8a' }}
                             title="Provenance record — snapshots"
                           >
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.75)] text-sm">◈</span>
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
                           </button>
                         </>
                       )}
@@ -3520,7 +3520,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                             className="flex items-center justify-center min-w-[44px] min-h-[44px]"
                             style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
                             title="Sync status">
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgba(92,45,138,0.5)] text-base">☁</span>
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.5)] text-base">☁</span>
                           </button>
                         </>
                       )}

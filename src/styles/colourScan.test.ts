@@ -223,6 +223,30 @@ describe('the token contract — no dangling reads, no drifted fallbacks', () =>
     expect(orphan, 'read, but nothing declares or writes them — are these colours?').toEqual([])
   })
 
+  it('--iw-ink-rgb is the SAME COLOUR as --iw-ink, in both themes', () => {
+    // Two declarations of one colour is exactly the drift this whole lane exists to remove, and a
+    // components token cannot be an alias (`rgb(var(--x) / .1)` needs the numbers, not a colour).
+    // So the duplication is unavoidable and this is what stops it rotting: lift --iw-ink for
+    // legibility and forget the tints, and every purple wash in the app quietly points at the OLD
+    // ink. Exactly the shape of the bug the tints already had.
+    const hexToRgb = (h: string) => {
+      const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h.trim())
+      return m ? [1, 2, 3].map((i) => parseInt(m[i], 16)).join(' ') : null
+    }
+    for (const [theme, map] of [['day', day], ['night', night]] as const) {
+      const ink = map.get('--iw-ink')
+      const rgb = map.get('--iw-ink-rgb')
+      expect(ink, `--iw-ink missing in ${theme}`).toBeTruthy()
+      expect(rgb, `--iw-ink-rgb missing in ${theme}`).toBeTruthy()
+      expect(rgb!.trim().replace(/\s+/g, ' '), `--iw-ink-rgb disagrees with --iw-ink in ${theme}`)
+        .toBe(hexToRgb(ink!))
+    }
+    // The converter must discriminate, or the loop above passes on nonsense.
+    expect(hexToRgb('#5c2d8a')).toBe('92 45 138')
+    expect(hexToRgb('#d7c8f8')).toBe('215 200 248')
+    expect(hexToRgb('not a colour')).toBeNull()
+  })
+
   it('the deliberately-undeclared list stays small and every entry is genuinely undeclared', () => {
     // An exemption nobody re-proves is how a real hole opens. If a token here HAS gained a day
     // value, it must leave this list — otherwise the list becomes a place to park drift.

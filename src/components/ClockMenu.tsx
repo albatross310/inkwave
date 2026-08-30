@@ -118,7 +118,7 @@ function Pill({ active, onClick, children, title }: {
         // NOT #fff: --iw-ink is light purple in night, so white text on it is illegible (measured).
         color: active ? 'var(--iw-on-ink, #fff)' : 'var(--iw-pill-fg, #78716c)',
         borderColor: active ? 'var(--iw-ink, #5c2d8a)' : undefined,
-        boxShadow: active ? '0 1px 5px rgba(92,45,138,0.25)' : 'none',
+        boxShadow: active ? '0 1px 5px rgb(var(--iw-ink-rgb) / 0.25)' : 'none',
       }}
     >
       {children}
@@ -134,7 +134,7 @@ function PrimaryButton({ onClick, children }: { onClick: () => void; children: R
       // it a little dimension, a soft purple cast lifts it off the panel, and it rises a hair on hover
       // and presses back on click. Nothing loud — the app's whole argument is calm.
       className="rounded-full px-6 py-2 transition-all hover:brightness-[1.07] hover:-translate-y-px active:translate-y-0 active:scale-[0.98]"
-      style={{ fontSize: TYPE.label, fontWeight: 500, letterSpacing: '0.01em', minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 10px rgba(92,45,138,0.30)' }}
+      style={{ fontSize: TYPE.label, fontWeight: 500, letterSpacing: '0.01em', minHeight: TOUCH_MIN, background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 10px rgb(var(--iw-ink-rgb) / 0.3)' }}
     >
       {children}
     </button>
