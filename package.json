@@ -12,6 +12,7 @@
     "test": "vitest",
     "test:e2e": "playwright test",
     "prove:pdfzoom": "node scripts/pdfzoom-probe/zoomanchor.prove.mjs",
+    "prove:pdfgeom": "node scripts/pdfzoom-probe/geom.prove.mjs",
     "prove:schema": "node scripts/textrender-probe/schemaIdentity.prove.mjs",
     "prove:mount": "node scripts/textrender-probe/mountcount.prove.mjs",
     "prove:breaks": "node scripts/textrender-probe/breaks.prove.mjs",

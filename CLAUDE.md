@@ -392,6 +392,62 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
     cursor during the gesture — reading "goes towards the cursor" as a report that the preview phase
     was fine. It is not: the preview is where the 180px drift lives. Scoring a control against what
     you assumed instead of what it does is how a probe certifies the wrong half.
+- **⚠ THE PDF PAGE STOPPED FILLING THE PANEL, AND STOPPED FOLLOWING THE WINDOW (2026-08-30,
+  `pnpm prove:pdfgeom`).** Peter: *"there's also a bug now where PDFs no longer change size, and
+  there's a no man's land space of empty background between the page and left side — page is a bit
+  narrower than web page viewer."* LIVE, no flag; this is the panel he reads his sources in.
+  **THREE SYMPTOMS, ONE STATE, ALL THREE REAL AND ALL THREE MEASURED.** They are not the 180px
+  gutter (the prime suspect, and it is inert at rest — `viewerPadL` reads 0 until `renderedZoom`
+  passes 1.02, confirmed on the DOM before anything was changed).
+  - **THE CAUSE: `zoom === 1` was being read as "the reader has not chosen a zoom", and it cannot
+    mean that.** `zoom` is a MULTIPLIER on the fit baseline, it is PERSISTED to
+    `inkwave:pdfUserZoom` for every document and every reload, and the ctrl+wheel gesture can never
+    land back on exactly 1 (a Mac trackpad pinch fires ctrl+wheel, so it is one careless gesture
+    away). Every re-fit path — the resize ResizeObserver, the comment-margin re-fit, the
+    fullscreen↔dock transition — opened with `if (zoom !== 1) return`, under the comment "manual
+    zoom wins, and rightly: a resize must not undo a zoom the reader chose". That reasoning is right
+    about the ZOOM and wrong about the FIT: re-basing the fit and rendering at fit × zoom respects
+    the chosen magnification exactly *and* follows the window. The ⤢ button was shipped 2026-08-28
+    as the remedy for this ("it RESETS THE ZOOM OVERRIDE… once you had zoomed, the flushness stopped
+    following the window") — i.e. the behaviour was known and papered over with a button labelled
+    "Fit the text to the window" rather than fixed.
+  - **MEASURED, control vs fixed in ONE build, at 570 / 1100 / 1440px** (Peter runs a ~570px
+    half-screen window; 570 is a BOTTOM dock and the two side-dock widths need the drag handle,
+    because a side dock's px `width` does NOT follow the viewport — resizing the window there widens
+    nothing and a naive probe reads "frozen" about a working build):
+        1440px, persisted zoom 0.6 · pane 719 → dock dragged 300px wider
+          CONTROL  page 503 → 503 (frozen), dead strip 108px → 258px
+          FIXED    page 695 → 1003,          dead strip 12px → 12px  (12 = the scroller's own padding)
+    And symptom 3, in the SAME dock: PDF page 695px vs the source reader's column 655px — the reader
+    is `flex-1` minus its own 64px of padding so it always fills the dock; the frozen PDF did not.
+  - **THE FIX IS A FLOOR THAT IS A FUNCTION OF THE PANE, NOT A CONSTANT** (`minUserZoom`,
+    exported + unit-tested). `computeTextFit` already refuses to go below whole-page fit
+    (`Math.max(pageFit, …)`); the user multiplier was the one path around that floor. Zooming OUT
+    still runs the whole useful range — text-flush down to page-flush, ~0.76× — it just stops where
+    the page stops filling the width. **It clamps the ZOOM VALUE, not the render**: clamping only
+    the render leaves `zoom` below the floor, so the first notches back IN would change nothing on
+    screen — "zoom does nothing", the very complaint, reintroduced one layer down.
+  - ALSO FIXED ON THE WAY, because the file had a fourth copy of the rule: the fullscreen refit
+    hand-rolled `computeTextFit` inline and **never subtracted the comment margin**, so entering
+    fullscreen with the margin open re-fitted as though it were not there. It calls the real one now.
+  - **STATED, NOT FIXED — THE OVERSCROLL REACH IS ASYMMETRIC AND ALWAYS WAS.** Sweeping the gutter
+    0 → 180 → 600px moved the LEFT reach 12 → 192 → 612px and the RIGHT reach **0 → 0 → 0**:
+    `.pdfViewer` is a block, so a page wider than its content box overflows it symmetrically under
+    `margin: 0 auto`, the left overflow is not scrollable, and the right padding sits underneath the
+    right overflow. So Peter's "scroll a bit of a way past the edge for a textbox at the edge of the
+    document" works on the LEFT margin only. Identical in both cells, untouched by this lane, and
+    reported rather than implied closed.
+  - **STATED CEILING:** above a ~1860px container `computeTextFit`'s own `Math.min(3, …)` cap binds
+    and a Letter page cannot fill the pane (40px residual at 1900px). Pre-existing; pinned by a test
+    so changing that cap is a decision.
+  - KEPT by `src/components/pdfFit.test.ts` — 12 tests, **8ms, no browser**, mutation-proved 8/2/1
+    (flat `ZOOM_MIN` floor / drop the cap at 1 / floor forgets the comment margin).
+    `scripts/pdfzoom-probe/geom.prove.mjs` is the in-browser truth, with
+    `window.__iwPdfFitRule = 'legacy'` as its live known-negative — the seam exists FOR that probe
+    and goes with it, the rule this file already applies to `__iwPdfZoomAnchor`.
+  - Regressions re-run clean: `prove:pdfzoom` (anchor 0.0/0.2px, control still reproduces),
+    `prove:pdfreader` 47/47, `prove:pdfexport` 16/16, and the default no-persisted-zoom path is
+    untouched (fit-to-text still overflows the pane on purpose: gapLeft −77, and still tracks).
 
 - **Media import (2026-07-17, `src/media/`, LIVE — no flag).** Peter's "photo import button (which
   has photo or audio or video)" — GENERAL, into any document, and the prerequisite for the music

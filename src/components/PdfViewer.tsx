@@ -106,6 +106,39 @@ export function computeTextFit(
   return Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / w))
 }
 
+/**
+ * THE SMALLEST ZOOM WORTH ALLOWING — the one at which the page still fills the panel's width.
+ *
+ * ⚠ MEASURED, 2026-08-30 (Peter: "PDFs no longer change size, and there's a no man's land space of
+ * empty background between the page and left side — page is a bit narrower than web page viewer").
+ * `zoom` is a MULTIPLIER on the fit baseline and it is PERSISTED, so one ctrl+wheel — a trackpad
+ * pinch will do it — leaves a value like 0.6 in localStorage for every PDF, for ever. At 1440px in
+ * a right-hand dock that renders the page 503px wide inside a 719px pane: a 108px strip of dead
+ * background either side, and the page narrower than the source reader's 655px column beside it.
+ * `computeTextFit` already refuses to go below whole-page fit (`Math.max(pageFit, …)`); the user
+ * multiplier was the one path around that floor. This closes it.
+ *
+ * Zooming OUT still runs the whole useful range — text-flush down to page-flush, ~0.76× here — it
+ * simply stops where the page stops filling the width. The floor is a function of the PANE, so it
+ * moves with the window; that is why it is computed rather than a constant, and why it can never
+ * exceed 1 (the fit baseline is itself ≥ page fit).
+ *
+ * It clamps the ZOOM VALUE, not the render: clamping only the render would leave `zoom` sitting
+ * below the floor, so the first few notches back IN would change nothing on screen — "zoom does
+ * nothing", which is the complaint this exists to fix, reintroduced one layer down.
+ */
+export function minUserZoom(
+  fit: number,
+  pageW: number,
+  clientWidth: number,
+  reservedRight = 0,
+): number {
+  if (!(fit > 0) || !(pageW > 0) || !(clientWidth > 0)) return ZOOM_MIN
+  const containerW = clientWidth - 24 - reservedRight
+  if (!(containerW > 0)) return ZOOM_MIN
+  return Math.min(1, containerW / (pageW * fit))
+}
+
 
 // A pink pencil-eraser icon (Material "eraser" glyph) for the erase tool.
 function EraserIcon() {
@@ -149,6 +182,14 @@ const TEXT_FIT_INSET = 10 // px of safety either side so glyphs never kiss the p
 // verifies the fix in. It exists FOR that probe; if the probe goes, this goes.
 const legacyZoomAnchor = (): boolean =>
   typeof window !== 'undefined' && (window as { __iwPdfZoomAnchor?: string }).__iwPdfZoomAnchor === 'legacy'
+
+// The FIT known-negative, same contract as the one above. `window.__iwPdfFitRule = 'legacy'`
+// restores BOTH halves of the pre-2026-08-30 behaviour — a manual zoom skips every re-fit, and
+// there is no pane-derived zoom floor — so scripts/pdfzoom-probe/geom.prove.mjs can reproduce
+// Peter's "PDFs no longer change size / no man's land of empty background" in the SAME build it
+// verifies the fix in. It exists FOR that probe; if the probe goes, this goes.
+const legacyFitRule = (): boolean =>
+  typeof window !== 'undefined' && (window as { __iwPdfFitRule?: string }).__iwPdfFitRule === 'legacy'
 
 // ── ZOOM ANCHORING: the two rules, as pure functions, so the gate can keep them apart ────────────
 // A browser probe proves this once; a unit test keeps it true. See pdfZoomAnchor.test.ts.
@@ -362,6 +403,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const colorRef = useRef(color); colorRef.current = color
   const noteSizeRef = useRef(noteSize); noteSizeRef.current = noteSize
   const zoomStateRef = useRef(zoom); zoomStateRef.current = zoom // live mirror for the resize tracker
+
+  /**
+   * The live zoom floor — `minUserZoom` fed this pane's current geometry. One accessor, so the five
+   * places that clamp a zoom cannot disagree about where the floor is (a second copy of that
+   * arithmetic is how the fullscreen path had already drifted away from `computeTextFit`).
+   * `fit` defaults to the RENDERED baseline; the re-fit paths pass the NEW one.
+   */
+  const zoomFloor = useCallback((fit = fitScaleRef.current, clientWidth?: number): number => {
+    if (legacyFitRule()) return ZOOM_MIN // the probe's control: no pane-derived floor at all
+    return minUserZoom(fit, fitInputsRef.current?.pageW ?? 0, clientWidth ?? scrollRef.current?.clientWidth ?? 0, commentMarginRef.current)
+  }, [])
 
   // Context-strip dismiss (Peter, 2026-07-10): the ✕ reclaims the vertical reading space for this
   // open only — the next citation click that brings a quote/context shows the strip again.
@@ -975,8 +1027,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           textFitX0Ref.current = null
         }
 
-        await renderPages(fitScaleRef.current * initZoom)
-        setRendered(initZoom) // drawn at fit×override → baseline for the CSS-zoom ratio
+        // A PERSISTED ZOOM MAY NOT OPEN THE PAGE NARROWER THAN THE PANEL. The override survives
+        // across documents and reloads, so a value stored on a wide window (or a stray pinch) would
+        // otherwise land every later PDF in the dead-background state. See `minUserZoom`.
+        const openZoom = Math.max(
+          initZoom,
+          zoomFloor(fitScaleRef.current),
+        )
+        if (openZoom !== initZoom) setZoom(openZoom)
+        await renderPages(fitScaleRef.current * openZoom)
+        setRendered(openZoom) // drawn at fit×override → baseline for the CSS-zoom ratio
         if (cancelled) return
         setStatus('ready')
         // Direct scroll (placeholder sizes are final, so no reflow to fight). Re-apply a couple of
@@ -1181,7 +1241,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       zoomAnchorRef.current = { x: e.clientX, y: e.clientY } // zoom around the pointer
-      setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * pdfZoomFactor(e.deltaY))))
+      // The floor is the pane's, not a constant: zoom out to whole-page-flush and no further, so
+      // the page can never end up floating in a strip of background (see `minUserZoom`).
+      const floor = zoomFloor(fitScaleRef.current, el.clientWidth)
+      setZoom(z => Math.max(floor, Math.min(ZOOM_MAX, z * pdfZoomFactor(e.deltaY))))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -1190,12 +1253,21 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // Re-fit as soon as the margin opens or closes: it changes the width the page has to fit into,
   // which is exactly what the ResizeObserver would react to if the PANEL had changed instead.
   useEffect(() => {
+    // ⚠ A MANUAL ZOOM NO LONGER STOPS THE RE-FIT — it is CARRIED THROUGH IT (2026-08-30). `zoom` is
+    // a multiplier on the fit baseline, so re-basing the fit and re-rendering at fit×zoom keeps the
+    // reader's chosen magnification exactly while the flushness goes on following the panel. The
+    // old `zoom !== 1` bail meant one ctrl+wheel froze the page size for ever — Peter's "PDFs no
+    // longer change size".
     const el = scrollRef.current
-    if (!el || status !== 'ready' || zoomStateRef.current !== 1) return
+    if (!el || status !== 'ready') return
+    if (legacyFitRule() && zoomStateRef.current !== 1) return // the probe's control: a manual zoom skipped the re-fit
     const fit = computeTextFit(fitInputsRef.current, el.clientWidth, fitScaleRef.current, commentMarginRef.current)
-    if (Math.abs(fit - fitScaleRef.current) < 0.001) return
+    const z = Math.max(zoomStateRef.current, zoomFloor(fit, el.clientWidth))
+    if (Math.abs(fit - fitScaleRef.current) < 0.001 && z === zoomStateRef.current) return
     fitScaleRef.current = fit
-    void renderPages(fit)
+    if (z !== zoomStateRef.current) setZoom(z)
+    setRendered(z)
+    void renderPages(fit * z)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commentMargin, status])
 
@@ -1249,47 +1321,64 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }, [])
 
   // ── LIVE FIT ON PANEL RESIZE (Peter, 2026-07-10) ─────────────────────────────────────────────
-  // While the panel is drag-resized (or the window changes width) at the DEFAULT zoom, the
-  // fit-to-text baseline tracks the live width so the text margins stay snapped to the panel edges
-  // through the whole drag. Per resize frame: recompute the fit from the stored inputs and
-  // CSS-scale the current render (cheap — no page repaint); on settle, ONE sharp re-render at the
-  // new fit (the same instant-transform + settle pattern as the wheel zoom). A manual zoom override
-  // (zoom ≠ 1 — the persisted user zoom) always wins: no tracking until they're back at 100%.
+  // While the panel is drag-resized (or the window changes width) the fit-to-text baseline tracks
+  // the live width so the text margins stay snapped to the panel edges through the whole drag. Per
+  // resize frame: recompute the fit from the stored inputs and CSS-scale the current render (cheap
+  // — no page repaint); on settle, ONE sharp re-render at the new fit (the same instant-transform +
+  // settle pattern as the wheel zoom).
+  //
+  // ⚠ A MANUAL ZOOM NO LONGER SKIPS THIS — 2026-08-30, and it is the whole of Peter's "PDFs no
+  // longer change size". The rule was "manual zoom wins: no tracking until they're back at 100%",
+  // which sounds right and is not, because `zoom` is PERSISTED and the gesture can never land back
+  // on exactly 1: one ctrl+wheel froze the page size for every PDF, for ever, and the only way out
+  // was a ⤢ button labelled "fit the text to the window". MEASURED at 1440px, a persisted 0.6:
+  // dragging the dock 250px wider left the page at 503px — byte-identical — while the dead strip
+  // beside it grew 108px → 233px. `zoom` is a MULTIPLIER on the fit, so re-basing the fit and
+  // re-rendering at fit×zoom respects their magnification exactly AND follows the window. Only
+  // ROTATION still skips (it swaps the page dims out from under the stored inputs).
   useEffect(() => {
     if (status !== 'ready') return
     const sc = scrollRef.current, viewer = viewerRef.current
     if (!sc || !viewer) return
     let baseW = sc.clientWidth
     let baseSt: number | null = null // scrollTop at gesture start — frames compose from it
+    let baseSl = 0                   // …and scrollLeft, for the manual-zoom branch below
     let settle: ReturnType<typeof setTimeout> | undefined
     const fitFor = (w: number): number => computeTextFit(fitInputsRef.current, w, fitScaleRef.current, commentMarginRef.current)
     const ro = new ResizeObserver(() => {
       const w = sc.clientWidth
       if (w === baseW) return
-      // Manual zoom wins; rotation swaps the page dims out from under the stored inputs — skip both.
-      if (zoomStateRef.current !== 1 || rotationRef.current % 360 !== 0) { baseW = w; return }
+      // Rotation swaps the page dims out from under the stored inputs — that one still skips.
+      if (rotationRef.current % 360 !== 0 || (legacyFitRule() && zoomStateRef.current !== 1)) { baseW = w; return }
       const newFit = fitFor(w)
       const r = newFit / fitScaleRef.current // vs the RENDERED fit baseline
-      if (baseSt == null) baseSt = sc.scrollTop
+      if (baseSt == null) { baseSt = sc.scrollTop; baseSl = sc.scrollLeft }
       viewer.style.transformOrigin = '0 0'
       viewer.style.transform = `scale(${r})`
       sc.scrollTop = baseSt * r // top-left origin ⇒ scaling scroll holds the top content line
-      if (textFitX0Ref.current != null)
+      // The left margin is only SNAPPED flush in the flush state. Under a manual zoom the reader
+      // has panned somewhere on purpose; scale their position instead of yanking it to the margin.
+      if (textFitX0Ref.current != null && zoomStateRef.current === 1)
         sc.scrollLeft = Math.max(0, textFitX0Ref.current * fitScaleRef.current * r - TEXT_FIT_INSET)
+      else sc.scrollLeft = baseSl * r
       clearTimeout(settle)
       settle = setTimeout(() => {
         baseW = sc.clientWidth
         baseSt = null
         const fit = fitFor(sc.clientWidth)
-        if (fit === fitScaleRef.current) { viewer.style.transform = ''; viewer.style.transformOrigin = ''; return }
+        // The floor moves with the pane, so a resize can put the reader's zoom below it.
+        const z = Math.max(zoomStateRef.current, zoomFloor(fit, sc.clientWidth))
+        if (fit === fitScaleRef.current && z === zoomStateRef.current) { viewer.style.transform = ''; viewer.style.transformOrigin = ''; return }
         const st = sc.scrollTop
         const unfreeze = freezeViewport() // cover the teardown+repaint — no blank flash
         fitScaleRef.current = fit
-        void renderPages(fit * zoomStateRef.current).then(async () => {
+        if (z !== zoomStateRef.current) setZoom(z)
+        setRendered(z)
+        void renderPages(fit * z).then(async () => {
           viewer.style.transform = ''
           viewer.style.transformOrigin = ''
           sc.scrollTop = st // the per-frame math already put the right content position here
-          if (textFitX0Ref.current != null) sc.scrollLeft = Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
+          if (textFitX0Ref.current != null && z === 1) sc.scrollLeft = Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
           await renderVisibleNow(renderTokenRef.current)
           requestAnimationFrame(() => requestAnimationFrame(unfreeze))
         }).catch(unfreeze)
@@ -1305,8 +1394,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // half-done: with a persisted manual zoom (zoomStateRef ≠ 1) the RO deliberately skips, so the
   // old fullscreen scrollLeft survived into the much narrower dock — text jammed off-screen. Drive
   // the transition deterministically: at the fit baseline, recompute fit for the NEW width, sharp
-  // re-render, and snap the text's left margin flush (same maths as the load path); under a manual
-  // zoom override, clamp scrollLeft into the new range (the user's zoom is respected, never reset).
+  // re-render, and snap the text's left margin flush; under a manual zoom the magnification is
+  // carried through the re-fit (2026-08-30 — the same change as the resize observer above: `zoom`
+  // multiplies the fit, so re-basing the fit keeps the reader's zoom AND follows the width) and the
+  // pan is SCALED rather than snapped, because a reader who zoomed in chose where they were looking.
+  // ⚠ THE FIT IS `computeTextFit` NOW, not a fourth hand-rolled copy of it — the old inline copy had
+  // already drifted: it never subtracted the comment margin, so entering fullscreen with the margin
+  // open re-fitted the page as though the margin were not there.
   const prevFsRef = useRef(!!fullscreen)
   useEffect(() => {
     const was = prevFsRef.current
@@ -1316,29 +1410,31 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     if (!sc || !viewer) return
     // Next frame: the panel's new geometry has laid out, clientWidth is the real new width.
     const raf = requestAnimationFrame(() => {
-      if (zoomStateRef.current !== 1 || rotationRef.current % 360 !== 0) {
+      if (rotationRef.current % 360 !== 0 || (legacyFitRule() && zoomStateRef.current !== 1)) {
         sc.scrollLeft = Math.max(0, Math.min(sc.scrollLeft, sc.scrollWidth - sc.clientWidth))
         return
       }
       const inputs = fitInputsRef.current
       if (!inputs) return
-      const containerW = sc.clientWidth - 24
-      const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
-      const fit = inputs.ext
-        ? Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / (inputs.ext.x1 - inputs.ext.x0)))
-        : pageFit
-      const snapLeft = (f: number) => {
-        sc.scrollLeft = textFitX0Ref.current != null ? Math.max(0, textFitX0Ref.current * f - TEXT_FIT_INSET) : 0
+      const fit = computeTextFit(inputs, sc.clientWidth, fitScaleRef.current, commentMarginRef.current)
+      const z = Math.max(zoomStateRef.current, zoomFloor(fit, sc.clientWidth))
+      const ratio = (fit * z) / (fitScaleRef.current * zoomStateRef.current)
+      const sl0 = sc.scrollLeft // read BEFORE the re-render — the browser clamps it as content relays out
+      const placeLeft = () => {
+        if (textFitX0Ref.current != null && z === 1) sc.scrollLeft = Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
+        else sc.scrollLeft = Math.max(0, Math.min(sl0 * ratio, sc.scrollWidth - sc.clientWidth))
       }
-      if (Math.abs(fit - fitScaleRef.current) < 0.001) { snapLeft(fit); return }
-      const st = sc.scrollTop * (fit / fitScaleRef.current) // hold the top content line through the rescale
+      if (Math.abs(fit - fitScaleRef.current) < 0.001 && z === zoomStateRef.current) { placeLeft(); return }
+      const st = sc.scrollTop * ratio // hold the top content line through the rescale
       const unfreeze = freezeViewport()
       fitScaleRef.current = fit
-      void renderPages(fit).then(async () => {
+      if (z !== zoomStateRef.current) setZoom(z)
+      setRendered(z)
+      void renderPages(fit * z).then(async () => {
         viewer.style.transform = ''
         viewer.style.transformOrigin = ''
         sc.scrollTop = st
-        snapLeft(fit)
+        placeLeft()
         await renderVisibleNow(renderTokenRef.current)
         requestAnimationFrame(() => requestAnimationFrame(unfreeze))
       }).catch(unfreeze)
