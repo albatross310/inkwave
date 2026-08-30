@@ -16,6 +16,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const REFUSER = 'https://www.abc.net.au/news'          // measured: sends X-Frame-Options
+// ⚠ A SIBLING SUBDOMAIN, and it is the case that broke in the field. Peter: "if I click shows in
+// abc it won't work either." The rule used to carry requestDomains:[host]; Chrome matches that
+// against a domain and its SUBdomains, so a rule for www.abc.net.au never covered iview.abc.net.au.
+// One click inside the framed page and the panel was back at the refusal card.
+const SIBLING = 'https://iview.abc.net.au/'
 const ok = []; const bad = []
 const check = (c, label, detail = '') => (c ? ok : bad).push(`${c ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`)
 
@@ -25,7 +30,7 @@ const check = (c, label, detail = '') => (c ? ok : bad).push(`${c ? '✓' : '✗
 // silently — which reads exactly like 'the scoping is wrong'. Two separate temp dirs.
 const root = mkdtempSync(join(tmpdir(), 'iw-framing-'))
 const dir = join(root, 'ext'); mkdirSync(dir, { recursive: true })
-const rule = frameRuleFor(new URL(REFUSER).hostname)
+const rule = frameRuleFor()
 writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
   manifest_version: 3, name: 'framing probe', version: '1.0',
   permissions: ['declarativeNetRequest'], host_permissions: ['<all_urls>'],
@@ -72,7 +77,7 @@ async function run(withExt) {
     await pg.waitForTimeout(400)
     return blocked.length ? 'BLOCKED' : refusals.length ? 'REFUSED' : 'framed'
   }
-  const out = { canary: await probe('https://example.org/'), refuser: await probe(REFUSER) }
+  const out = { canary: await probe('https://example.org/'), refuser: await probe(REFUSER), sibling: await probe(SIBLING) }
   await ctx.close(); return out
 }
 
@@ -93,6 +98,10 @@ if (off.refuser !== 'REFUSED') {
 check(true, 'canary blocked ⇒ the shipped ruleset is live')
 check(off.refuser === 'REFUSED', 'control: the site refuses framing without the extension')
 check(on.refuser === 'framed', 'THE SCOPED RULE FIRES from an Inkwave origin', `${off.refuser} → ${on.refuser}`)
+// The regression this rule shape exists to fix: a sibling subdomain, one click away inside the
+// framed page, must be covered too.
+check(on.sibling === 'framed', 'a SIBLING SUBDOMAIN is covered (clicking through works)',
+  `${off.sibling} → ${on.sibling}`)
 
 console.log('')
 for (const l of ok) console.log('  ' + l)

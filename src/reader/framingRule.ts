@@ -33,13 +33,12 @@ export interface FramingRule {
     responseHeaders: { header: string; operation: 'remove' }[]
   }
   condition: {
-    requestDomains: string[]
     initiatorDomains: string[]
     resourceTypes: ['sub_frame']
   }
 }
 
-export function frameRuleFor(host: string): FramingRule {
+export function frameRuleFor(_host?: string): FramingRule {
   return {
     id: FRAME_RULE_ID,
     priority: 1,
@@ -58,11 +57,21 @@ export function frameRuleFor(host: string): FramingRule {
       ],
     },
     condition: {
-      // ONE host — the page the reader was asked to show, never a pattern.
-      requestDomains: [host],
-      // ONLY a frame Inkwave itself created. The same page opened in the writer's own tab is
-      // untouched, because there the initiator is that page and not us. This single field is what
-      // keeps the capability inside the reader.
+      // ⚠ NO `requestDomains`, AND THAT IS A CORRECTION, NOT AN OVERSIGHT (2026-08-30).
+      // It was `[host]` — the one page the panel was asked to show — which sounded tighter and
+      // broke the panel as a BROWSER. Peter: "if I click shows in abc it won't work either."
+      // Chrome matches `requestDomains` against a domain and its SUBdomains, so a rule for
+      // `www.abc.net.au` does not cover `iview.abc.net.au`: a sibling host, one click away, and
+      // the writer is back at the refusal card. Deriving the registrable domain instead would need
+      // the public suffix list to know that `net.au` is a suffix and `abc.net.au` is the site —
+      // a table we would be carrying, and getting wrong, for no gain.
+      //
+      // What actually bounds this rule is the next line, and it always was. `initiatorDomains`
+      // means the rule can only ever apply to a frame INKWAVE ITSELF created; the same site opened
+      // in the writer's own tab is untouched, because there the initiator is that page. Add the
+      // session lifetime (installed when the panel shows a live page, removed when it closes) and
+      // `sub_frame`, and the reach is "pages inside Inkwave's own reader, while it is open" —
+      // which is the feature, stated exactly.
       initiatorDomains: [...APP_INITIATORS],
       // NEVER a top-level navigation.
       resourceTypes: ['sub_frame'],

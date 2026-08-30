@@ -119,15 +119,21 @@ describe('search endpoint follows the capability', () => {
     expect(addressToUrl('metaphysics of identity', false)).toBe(`${SEARCH_URL}metaphysics%20of%20identity`)
   })
 
-  it('with framing: Google, because the live frame is where its results exist at all', () => {
-    expect(searchUrlFor(true)).toBe(GOOGLE_SEARCH_URL)
-    expect(addressToUrl('metaphysics of identity', true)).toBe(`${GOOGLE_SEARCH_URL}metaphysics%20of%20identity`)
+  it('WITH framing: still DuckDuckGo — Google answers a framed search with a CAPTCHA', () => {
+    // ⚠ MEASURED, and it reverses the same day's earlier change. Framing google.com/search works —
+    // and Google then redirects ITSELF to /sorry/index. It declines to serve a search in a frame;
+    // no header we strip changes that. So the engine must not follow the capability even though
+    // the MODE does.
+    expect(searchUrlFor(true)).toBe(SEARCH_URL)
+    expect(addressToUrl('metaphysics of identity', true)).toBe(`${SEARCH_URL}metaphysics%20of%20identity`)
   })
 
-  it('the two endpoints are genuinely different (the choice is not decorative)', () => {
-    // A known-negative for the pair itself: if someone points both constants at one engine, the
-    // capability check above still passes while doing nothing. This is what catches that.
-    expect(searchUrlFor(true)).not.toBe(searchUrlFor(false))
+  it('GOOGLE_SEARCH_URL is not used as a search endpoint by any path', () => {
+    // Kept as a named constant (isSearch and the copy both reason about Google), but a regression
+    // that quietly re-points search at it would show up here rather than as a CAPTCHA on Peter's
+    // screen — which is exactly how this was found.
+    expect(searchUrlFor(true)).not.toBe(GOOGLE_SEARCH_URL)
+    expect(searchUrlFor(false)).not.toBe(GOOGLE_SEARCH_URL)
   })
 
   it('an engine is reader-only ONLY while we cannot frame it', () => {

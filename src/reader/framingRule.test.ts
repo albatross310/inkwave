@@ -32,10 +32,14 @@ describe('the framing rule is scoped', () => {
     expect(rule.condition.resourceTypes).toEqual(['sub_frame'])
   })
 
-  it('applies ONLY to the one host the reader asked for', () => {
-    expect(rule.condition.requestDomains).toEqual(['abc.net.au'])
-    // A rule that matched every host would be the browser-wide version wearing a scoped name.
-    expect(frameRuleFor('example.org').condition.requestDomains).toEqual(['example.org'])
+  it('does NOT narrow by host — that broke the panel as a browser', () => {
+    // ⚠ THIS TEST ASSERTS THE ABSENCE OF A RESTRICTION, WHICH NEEDS ITS REASON ON RECORD.
+    // The rule used to carry `requestDomains: [host]`. Chrome matches that against a domain and its
+    // SUBdomains, so a rule for www.abc.net.au did not cover iview.abc.net.au — one click inside
+    // the framed page and the writer was back at the refusal card ("if I click shows in abc it
+    // won't work either"). Getting it right would need the public suffix list to know net.au is a
+    // suffix; the bound that actually matters is initiatorDomains, asserted above.
+    expect('requestDomains' in rule.condition).toBe(false)
   })
 
   it('removes framing headers and nothing else', () => {

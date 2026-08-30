@@ -273,12 +273,13 @@ const dnr = (): DnrApi | null =>
 async function allowFraming(rawUrl: string): Promise<void> {
   const api = dnr()
   if (!api?.updateSessionRules) throw new Error('declarativeNetRequest unavailable')
-  // Parse rather than trust: a caller that passes something unparseable must not silently install
-  // a rule for a host we did not mean. (The page is the caller and the page is not the enemy, but
-  // a rule built from a typo is a rule nobody can account for later.)
-  const host = new URL(rawUrl).hostname
-  if (!host) throw new Error('no host')
-  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor(host)] })
+  // The url is still PARSED even though the rule no longer narrows by host: a caller that hands us
+  // something unparseable is a caller whose request we do not understand, and installing a
+  // framing rule on the strength of it is exactly the kind of thing that should fail loudly.
+  // (See framingRule.ts for why the host is no longer part of the condition — clicking through to
+  // a sibling subdomain broke, and initiatorDomains is what actually bounds this.)
+  if (!new URL(rawUrl).hostname) throw new Error('no host')
+  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor()] })
 }
 
 /** Drop it. Called when the panel closes, when it navigates away from live view, and on unload. */

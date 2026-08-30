@@ -183,9 +183,24 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 export const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
 
-/** The endpoint a typed query becomes, given whether this browser can frame a refusing site. */
-export function searchUrlFor(canFrame: boolean): string {
-  return canFrame ? GOOGLE_SEARCH_URL : SEARCH_URL
+/**
+ * The endpoint a typed query becomes.
+ *
+ * ⚠ IT IS DuckDuckGo EITHER WAY, AND THAT REVERSES A CHANGE MADE HOURS EARLIER THE SAME DAY.
+ * When framing started working I switched search to Google on the reasoning that the live frame is
+ * where its JavaScript runs. The reasoning was sound and the CONCLUSION WAS WRONG, because I never
+ * measured GOOGLE framed — only that framing worked in general. Measured now, with the shipped rule
+ * and a live canary: google.com/search frames successfully and then REDIRECTS ITSELF to
+ * /sorry/index, its anti-abuse page. Peter hit it immediately ("google search aren't [working]").
+ * Google declines to serve a search inside a frame; that is its policy, not a header we can strip.
+ *
+ * DuckDuckGo's no-JS endpoint returns 31 blocks and real result links to a plain fetch, so it works
+ * WITH the extension and without it. `canFrame` is kept in the signature because it still decides
+ * the MODE — a search we can frame no longer has to force reader view — but it must not choose an
+ * engine that answers with a CAPTCHA.
+ */
+export function searchUrlFor(_canFrame: boolean): string {
+  return SEARCH_URL
 }
 
 // ── PLAYABLE MEDIA ───────────────────────────────────────────────────────────────────────────────
