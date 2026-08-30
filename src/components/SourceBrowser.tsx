@@ -976,7 +976,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
   // Keep the ref in step. `ready` means the extension answered AND holds the <all_urls> grant, so
   // it is exactly the condition under which a framing rule can be installed.
-  useEffect(() => { canFrameRef.current = extState === 'ready' }, [extState])
+  // ⚠ THIS MUST AGREE WITH THE INSTALL EFFECT OR SEARCH BREAKS. `canFrame` decides that a typed
+  // query becomes the REAL duckduckgo.com opened in the live frame rather than the no-JS endpoint
+  // read in the panel — so if it says yes while framing is disabled, every search routes to a page
+  // we then refuse to show. Peter hit exactly that within a minute of the flag landing: "not
+  // working", on a search, with the refusal card. `liveFrameEnabled()` is not optional here.
+  useEffect(() => { canFrameRef.current = liveFrameEnabled() && extState === 'ready' }, [extState])
 
   // ── A READABLE DIAGNOSTIC, BECAUSE "still broken" IS NOT A STAGE ─────────────────────────────
   // Live view through the extension has FIVE places it can fail and they are indistinguishable
