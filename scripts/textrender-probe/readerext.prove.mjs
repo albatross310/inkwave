@@ -53,7 +53,20 @@ const ARTICLE_HTML = `<!doctype html><html><head><title>Identity Over Time</titl
 
 const { base, stop } = await startProbeServer()
 let fail = 0
+let voided = 0
 const check = (ok, msg, extra = '') => { console.log(`${ok ? '  ✓' : '  ✗'} ${msg}${extra ? ' — ' + extra : ''}`); if (!ok) fail++ }
+
+// ⚠ THIS PROBE HAD NO VOID PATH, AND THAT COST A DAY OF WRONG DIAGNOSIS (2026-08-30).
+// Every observation went through `check()`, which can only say PASS or FAIL. So when live framing
+// was switched on by default and a search began opening in the FRAME instead of the READER, the
+// probe reported the extension FETCH path as broken. It was fine — the probe was asserting a
+// routing decision it did not know had changed, and its report sent someone hunting a feature bug
+// that did not exist.
+//
+// `void_` marks a precondition under which the checks BELOW cannot mean anything. A voided run is
+// not a pass and not a feature failure: it exits 2 and names the precondition that moved, so the
+// next reader fixes the probe rather than the product.
+const void_ = (msg, extra = '') => { console.log(`  \u2298 VOID — ${msg}${extra ? ' — ' + extra : ''}`); voided++ }
 
 /**
  * One run of the whole flow. `canFetch` is the ONLY difference between the two cells.
@@ -174,6 +187,11 @@ async function run(browser, { canFetch }) {
   await page.waitForTimeout(800)
 
   const seen = await page.evaluate(() => ({
+    // THE ROUTING PRECONDITION, read from the panel's own diagnostic rather than assumed. Every
+    // check below is about what the READER rendered; if the search opened in the live FRAME instead,
+    // they are all measuring the wrong surface. `liveMode` is the panel's framed/reader state.
+    liveMode: (window.__iwReader || {}).liveMode === true,
+    framingInstalled: (window.__iwReader || {}).framingInstalled === true,
     results: /GEACHS-DOCTRINE-FROM-THE-EXTENSION/.test(document.body.innerText),
     saysExtension: /your connection/.test(document.body.innerText),
     saysServer: /Inkwave.s server/.test(document.body.innerText),
@@ -189,14 +207,29 @@ const b = await chromium.launch({ headless: true })
 try {
   console.log('\n  CELL A — the extension is installed AND permitted')
   const on = await run(b, { canFetch: true })
-  check(on.articleShown, 'the reader opened and rendered the article through the extension')
-  check(on.results, 'THE SEARCH RETURNED RESULTS, rendered from the extension’s bytes')
-  check(on.extFetches.some((u) => /duckduckgo/.test(u)),
-    'the search URL was fetched over the extension channel', JSON.stringify(on.extFetches.slice(-1)))
-  check(on.serverFetches.length === 0,
-    'and /api/reader was never asked — observed at the network, not inferred',
-    `serverFetches=${JSON.stringify(on.serverFetches)}`)
-  check(on.saysExtension, 'the panel SAYS the page came through the writer’s own connection')
+
+  // ── PRECONDITIONS, CHECKED BEFORE ANY VERDICT IS READ ────────────────────────────────────────
+  // This probe asserts what the READER rendered. Two things have to hold for that to be the right
+  // surface, and BOTH have moved under it before:
+  //   · live framing is DEFAULT OFF (reader/liveFrameFlag.ts), so `canFrame` is false and
+  //     `mustUseReader` routes a search to the reader. Flip that default and the search opens in the
+  //     frame — every check below then fails while the feature is perfectly healthy.
+  //   · the article rendered at all. If it did not, the search checks are measuring an empty panel.
+  if (on.liveMode) {
+    void_('live framing is ON by default — a search now opens in the FRAME, so the reader checks below address the wrong surface',
+      'expected liveFrameEnabled() === false without ?liveFrame=1')
+  } else if (!on.articleShown) {
+    void_('the article never rendered, so nothing below is a measurement of search')
+  } else {
+    check(on.articleShown, 'the reader opened and rendered the article through the extension')
+    check(on.results, 'THE SEARCH RETURNED RESULTS, rendered from the extension’s bytes')
+    check(on.extFetches.some((u) => /duckduckgo/.test(u)),
+      'the search URL was fetched over the extension channel', JSON.stringify(on.extFetches.slice(-1)))
+    check(on.serverFetches.length === 0,
+      'and /api/reader was never asked — observed at the network, not inferred',
+      `serverFetches=${JSON.stringify(on.serverFetches)}`)
+    check(on.saysExtension, 'the panel SAYS the page came through the writer’s own connection')
+  }
 
   console.log('\n  CELL B — KNOWN-NEGATIVE: installed, NOT permitted (one field flipped)')
   const off = await run(b, { canFetch: false })
@@ -216,8 +249,9 @@ try {
   fail++
 } finally { await b.close(); await stop() }
 
-console.log(fail ? `\nFAIL (${fail})` : '\nPASS')
+console.log(voided ? `\nVOID (${voided}) \u2014 a precondition moved; this run proves nothing about the feature`
+  : fail ? `\nFAIL (${fail})` : '\nPASS')
 console.log('\n  SCOPE: this proves the APP half — given an extension that fetches, search works and')
 console.log('  says so. The extension\'s own request to DuckDuckGo from the writer\'s IP is NOT')
 console.log('  exercised here and needs one real search on Peter\'s machine.')
-process.exitCode = fail ? 1 : 0
+process.exitCode = voided ? 2 : fail ? 1 : 0
