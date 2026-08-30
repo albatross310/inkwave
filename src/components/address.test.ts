@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL } from './SourceBrowser'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, searchUrlFor } from './SourceBrowser'
 
 describe('addressToUrl', () => {
   it('a URL is a URL', () => {
@@ -103,5 +103,46 @@ describe('stripTracking', () => {
     const u = 'https://plato.stanford.edu/entries/identity/'
     expect(stripTracking(u)).toBe(u)
     expect(stripTracking('not a url')).toBe('not a url')
+  })
+})
+
+// ── SEARCH TAKES THE PATH THAT CAN ACTUALLY SERVE IT (2026-08-30) ────────────────────────────────
+// Peter asked for Google. The reason it was refused before was measured — its results are
+// JavaScript-rendered, so a server fetch returns one block and "click here" — and half of that
+// reasoning stopped being true when the extension shipped: an extension strips X-Frame-Options, so
+// Google can run its own JavaScript inside the live frame. The choice is therefore a function of
+// the CAPABILITY, and these tests exist so a later edit cannot quietly collapse it back to one
+// engine and reintroduce either the empty page or the refusal.
+describe('search endpoint follows the capability', () => {
+  it('without framing: DuckDuckGo, which a server fetch can actually read', () => {
+    expect(searchUrlFor(false)).toBe(SEARCH_URL)
+    expect(addressToUrl('metaphysics of identity', false)).toBe(`${SEARCH_URL}metaphysics%20of%20identity`)
+  })
+
+  it('with framing: Google, because the live frame is where its results exist at all', () => {
+    expect(searchUrlFor(true)).toBe(GOOGLE_SEARCH_URL)
+    expect(addressToUrl('metaphysics of identity', true)).toBe(`${GOOGLE_SEARCH_URL}metaphysics%20of%20identity`)
+  })
+
+  it('the two endpoints are genuinely different (the choice is not decorative)', () => {
+    // A known-negative for the pair itself: if someone points both constants at one engine, the
+    // capability check above still passes while doing nothing. This is what catches that.
+    expect(searchUrlFor(true)).not.toBe(searchUrlFor(false))
+  })
+
+  it('an engine is reader-only ONLY while we cannot frame it', () => {
+    expect(mustUseReader('https://www.google.com/search?q=x')).toBe(true)          // no extension
+    expect(mustUseReader('https://www.google.com/search?q=x', false)).toBe(true)
+    expect(mustUseReader('https://www.google.com/search?q=x', true)).toBe(false)   // extension
+    // An ordinary page is never reader-only either way — the flag must not become a mode switch.
+    expect(mustUseReader('https://plato.stanford.edu/entries/identity/', true)).toBe(false)
+    expect(mustUseReader('https://plato.stanford.edu/entries/identity/', false)).toBe(false)
+  })
+
+  it('defaults to the conservative answer, so an un-updated caller cannot get an empty page', () => {
+    // Every pre-existing call site passes one argument. If the default were `true`, they would all
+    // silently start sending Google into a reader that cannot render it.
+    expect(addressToUrl('wittgenstein')).toBe(`${SEARCH_URL}wittgenstein`)
+    expect(mustUseReader('https://duckduckgo.com/?q=x')).toBe(true)
   })
 })

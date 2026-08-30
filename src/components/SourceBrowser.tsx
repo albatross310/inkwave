@@ -162,20 +162,31 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
   { label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
 ]
 
-// ⚠ SEARCH GOES THROUGH THE READER, NOT THE LIVE FRAME — and it has to be DuckDuckGo's HTML
-// endpoint, not Google. Peter asked for Google ("effectively search google") and then hit the wall:
-// "having trouble using the google thingo". MEASURED, both ways, because this is exactly the kind of
-// thing that should not be guessed:
-//   • FRAMING: google.com, duckduckgo.com, html.duckduckgo.com and bing all send X-Frame-Options or
-//     frame-ancestors 'self'. NO search engine can be shown in the live frame. That is not something
-//     any code here can change.
+// ⚠ SEARCH TAKES WHICHEVER PATH ACTUALLY WORKS, AND THAT NOW DEPENDS ON THE EXTENSION.
+// Peter asked for Google twice — "effectively search google", then again on 2026-08-30. The reason
+// it was refused before is MEASURED and half of it has since stopped being true:
 //   • READING: google.com/search fetched server-side returns ONE block and the words "click here" —
-//     its results need JavaScript, so there is nothing to extract. html.duckduckgo.com/html returns
-//     31 blocks and 123 real result links.
-// So: Google satisfies neither path, and DuckDuckGo's no-JS endpoint satisfies the reader path
-// completely. Searching switches to Reader mode, where it works, rather than to Live mode, where it
-// can only ever show a refusal.
+//     its results are JavaScript-rendered, so there is nothing to extract. STILL TRUE, and no
+//     extension changes it: fetching from the writer's own address changes WHO ASKS, not what comes
+//     back. Google can never be READ here.
+//   • FRAMING: every engine sends X-Frame-Options or frame-ancestors 'self'. The old note said this
+//     was "not something any code here can change" — and that was right for a web page and WRONG
+//     once the extension shipped (2026-08-30), because an extension strips those headers before the
+//     browser reads them. PROVED headed, `pnpm prove:framing`: REFUSED → framed.
+// So the rule is not "Google or DuckDuckGo", it is "which mode can serve a search at all":
+//   with framing  → GOOGLE, in the LIVE frame, where its own JavaScript runs and it is really Google.
+//   without       → DuckDuckGo's no-JS HTML endpoint, in the READER, which returns 31 blocks and
+//                   123 real result links against a server fetch.
+// Falling back rather than failing matters: without the extension, Google in a frame is a refusal
+// and Google in the reader is an empty page, so a writer who has not installed it must still get
+// results rather than a worse version of the same wall.
+export const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
+
+/** The endpoint a typed query becomes, given whether this browser can frame a refusing site. */
+export function searchUrlFor(canFrame: boolean): string {
+  return canFrame ? GOOGLE_SEARCH_URL : SEARCH_URL
+}
 
 // ── PLAYABLE MEDIA ───────────────────────────────────────────────────────────────────────────────
 // Peter, 2026-08-28: "if gpt can play youtube then surely we can?" — with a screenshot of ChatGPT
@@ -234,20 +245,25 @@ export function queryOf(url: string): string {
   } catch { return '' }
 }
 
-export function mustUseReader(url: string): boolean {
+/** ⚠ `canFrame` is not an optimisation — it changes the ANSWER. An engine can only be READ when we
+ *  cannot frame it; once the extension can, Google in the live frame is the better path and the
+ *  reader is the one that cannot work (its results are JS-rendered). Defaulting to false keeps
+ *  every existing caller, and every test, on the conservative reader-only answer. */
+export function mustUseReader(url: string, canFrame = false): boolean {
+  if (canFrame) return false
   return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing)\.[a-z.]+\//i.test(url)
 }
 
 /** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, or
  *  no dot) goes to the search endpoint, because a reader who types words expects to find something
  *  rather than an error. */
-export function addressToUrl(raw: string): string | null {
+export function addressToUrl(raw: string, canFrame = false): string | null {
   const t = raw.trim()
   if (!t) return null
   if (/^https?:\/\//i.test(t)) return t
   const looksLikeHost = /^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(t) && !/\s/.test(t)
   if (looksLikeHost) return `https://${t}`
-  return SEARCH_URL + encodeURIComponent(t)
+  return searchUrlFor(canFrame) + encodeURIComponent(t)
 }
 
 /** Tracking parameters a link picked up on its way to you. Peter, 2026-08-28, seeing
@@ -571,7 +587,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // A search (or a search engine) can only ever be READ — see the note on SEARCH_URL. Switching
     // here rather than letting the live frame show a refusal is the difference between a browser
     // and a browser-shaped disappointment.
-    if (mustUseReader(next)) setFramed(false)
+    if (mustUseReader(next, canFrameRef.current)) setFramed(false)
+    // …and a search we CAN frame belongs in the frame: that is the only place Google's own
+    // JavaScript runs, and its results do not exist without it.
+    else if (isSearch(next) && canFrameRef.current) setFramed(true)
     // A video has no article to extract — the reader would fetch it and find nothing. Play it.
     else if (isPlayable(next)) setFramed(true)
     setStack((st) => [...st.slice(0, idx + 1), next])
@@ -626,6 +645,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // before we know whether there is an extension to ask.
   const [framingOn, setFramingOn] = useState(false)
   const [frameKey, setFrameKey] = useState(0)
+  // ⚠ A REF, NOT THE STATE. `go` and the address-bar handler are both defined ABOVE where
+  // `extState` is declared, and both need the same answer to "can this browser frame a site that
+  // refuses?" — which decides whether a typed query becomes Google (framed) or DuckDuckGo (read).
+  // A second copy of that decision is how the address bar and the navigator start disagreeing.
+  const canFrameRef = useRef(false)
 
   const [frameRefused, setFrameRefused] = useState(false)
   // ⚠ ASK THE SERVER; `onLoad` LIES (2026-08-28, Peter: "we need to replace this with a proper
@@ -819,6 +843,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // mid-flight) cannot leave framing open past the browser session.
     return () => { live = false; setFramingOn(false); releaseFraming(port) }
   }, [framed, here, extState])
+
+  // Keep the ref in step. `ready` means the extension answered AND holds the <all_urls> grant, so
+  // it is exactly the condition under which a framing rule can be installed.
+  useEffect(() => { canFrameRef.current = extState === 'ready' }, [extState])
 
   // The offer, at the moment it would help. `openExtensionPopup` returns false when the browser
   // refuses — a real outcome, not a bug — so the instruction is shown either way and the button is
@@ -1180,7 +1208,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
               if (e.key !== 'Enter') return
-              const next = addressToUrl(addr)
+              const next = addressToUrl(addr, canFrameRef.current)
               if (next) { go(next); (e.currentTarget as HTMLInputElement).blur() }
             }}
             placeholder="address or search"
