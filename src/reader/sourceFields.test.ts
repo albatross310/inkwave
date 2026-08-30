@@ -51,12 +51,29 @@ describe('normNode — the per-node normaliser', () => {
     expect(normNode('école')).toBe(normNode('école'))
   })
 
-  // ⚠ PINNED AS BROKEN, DELIBERATELY, FOR EXACTLY ONE COMMIT. The move must be provably inert, so
-  // this states what the shipped code DOES; the very next commit fixes it and flips these two.
-  // See the header of sourceFields.ts for the defect and its user-visible cost.
-  it('⚠ DOES NOT FOLD CURLY QUOTES — the character classes were straightened to no-ops', () => {
-    expect(normNode('O’Brien')).toBe('o’brien')                 // wanted: o'brien
-    expect(normNode('“Quoted”')).toBe('“quoted”')     // wanted: "quoted"
+  it('folds curly apostrophes and quotes — a page says O’Brien, the extractor says O\'Brien', () => {
+    // THE DEFECT THIS REPLACES: both classes had been straightened to their ASCII form, so
+    // /['']/ was '->' and /[""]/ was "->" — two no-ops that silently cost hover-to-verify a target
+    // on most published prose. Pinned as broken for one commit so the move was provably inert.
+    expect(normNode('O’Brien')).toBe("o'brien")
+    expect(normNode('‛Odd’')).toBe("'odd'")
+    expect(normNode('“Quoted”')).toBe('"quoted"')
+    expect(normNode('‟Odd”')).toBe('"odd"')
+  })
+
+  it('KEEPER: no folding class holds a LITERAL non-ASCII character', () => {
+    // This is the actual fix. Correcting the two broken classes leaves the mechanism that broke
+    // them — a literal curly character in source, which any smart-quote-straightening tool silently
+    // converts back to ASCII, turning a fold into a no-op with no error and no visible diff in most
+    // editors. `\uXXXX` escapes cannot be straightened. The space, dash and soft-hyphen classes
+    // were still literals and still WORKED; they are escaped too, because they are one careless
+    // paste from the same fate and the behaviour is proved unchanged by the tests above.
+    const body = readFileSync(join(process.cwd(), 'src/reader/sourceFields.ts'), 'utf8')
+      .match(/export function normNode[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(body, 'normNode not found — re-aim this guard').not.toBe('')
+    const literals = [...body].filter(c => c.codePointAt(0)! > 126)
+      .map(c => 'U+' + c.codePointAt(0)!.toString(16).toUpperCase())
+    expect(literals, `literal non-ASCII in normNode: ${literals.join(' ')}`).toEqual([])
   })
 
   it('normText is normNode plus a trim', () => {

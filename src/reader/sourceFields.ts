@@ -13,25 +13,29 @@
 // passed there before this file existed, so it is scoring the shipped behaviour rather than my
 // rewrite of it. Two of its assertions contradicted me; both are marked in that file.
 //
-// ⚠ KNOWN DEFECT, PINNED NOT FIXED HERE (fixed in the commit immediately after this one, so that
-// the move itself is provably inert). `normNode`'s quote-folding character classes contain ONLY
-// the ASCII form — `/['']/` is `'`→`'` and `/[""]/` is `"`→`"`, two no-ops. The curly codepoints
-// were straightened out of the source at some point; the neighbouring space and dash classes still
-// carry theirs, which is why it went unseen. Cost: a page rendering `O’Brien` never matches an
-// extracted `O'Brien`, so hover-to-verify silently offers no target on most published prose.
-// It fails SAFE — `textHighlight.ts` folds those codepoints explicitly, so the panel under-promises
-// rather than pointing at nothing — which is exactly why nobody noticed.
+// ⚠ ALL FOLDING CLASSES USE \uXXXX ESCAPES, NOT LITERAL CHARACTERS, AND THAT IS THE FIX.
+// The quote-folding classes shipped as /['']/ and /[""]/ — i.e. containing ONLY the ASCII form,
+// so they were `'`->`'` and `"`->`"`, two no-ops. The curly codepoints had been straightened out of
+// the source at some point; the space and dash classes still carried theirs, which is why it went
+// unseen for so long. Cost: a page rendering a curly apostrophe never matched an extracted straight
+// one, so the capture panel silently offered no hover target on most published prose. It failed
+// SAFE — textHighlight.ts folds those codepoints explicitly, so the panel under-promised rather
+// than pointing at nothing — which is exactly why nobody noticed.
+//
+// Correcting the two classes would leave the MECHANISM in place, so every class is escaped: a
+// literal curly character in source is one careless paste from becoming a no-op again, with no
+// error and no visible diff. `sourceFields.test.ts` keeps it that way.
 
 // normNode: normalises a single text node without trimming — preserving the trailing
 // space in "Tyler " so cross-element names like "Tyler Graham" are found when the
 // first name and surname are in separate inline elements.
 export function normNode(s: string): string {
   return s.normalize('NFC')
-    .replace(/[   ]/g, ' ')
-    .replace(/['']/g, "'")
-    .replace(/[""]/g, '"')
-    .replace(/[–—]/g, '-')
-    .replace(/­/g, '')
+    .replace(/[\u00A0\u202F\u2009]/g, ' ')
+    .replace(/[\u2018\u2019\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201F]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u00AD/g, '')
     .replace(/\s+/g, ' ')
     .toLowerCase()
   // no .trim() here: trimming strips trailing spaces from nodes, breaking cross-element name matching
