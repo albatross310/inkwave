@@ -379,3 +379,98 @@ describe('EVERY READER TOKEN A COMPONENT READS IS ACTUALLY DECLARED', () => {
     expect(dangling, 'a var() with a fallback renders forever and never errors').toEqual([])
   })
 })
+
+// ── THE NOTICE BANDS ────────────────────────────────────────────────────────────────────────────
+// The amber "still reading this PDF" / "open on another device" strip and the red "that didn't
+// save" strip. They were written three times in bare literals — twice amber, a Tailwind step apart
+// — so none of them themed and the two amber ones did not even agree with each other.
+//
+// ⚠ A CONTRAST SWEEP ALONE WOULD CERTIFY THE BUG, and this is the surface that proves it: a
+// near-white band with dark orange text passes AA beautifully, at midnight, on a night reading
+// page. So the darkening assertion is not decoration here — it is the whole claim, and the ratio
+// is the floor beneath it.
+describe('the notice bands theme, and the ratio is not the only question', () => {
+  const BANDS = [
+    { name: 'notice (amber)', bg: '--iw-notice-bg', fg: '--iw-notice-fg', edge: '--iw-notice-edge' },
+    { name: 'alert (red)', bg: '--iw-alert-bg', fg: '--iw-alert-fg', edge: '--iw-alert-edge' },
+  ]
+
+  for (const band of BANDS) {
+    it(`${band.name}: its text is legible on its own ground, in BOTH themes`, () => {
+      for (const theme of ['day', 'night'] as const) {
+        expect(contrastRatio(token(band.fg, theme), token(band.bg, theme)),
+          `${band.name} ${theme}`).toBeGreaterThanOrEqual(BODY)
+      }
+    })
+
+    it(`${band.name}: the night ground is DARKER, not merely different`, () => {
+      // The assertion a ratio cannot make. Reverting either band to its literal leaves the contrast
+      // arm above perfectly green and fails this one.
+      expect(luminance(token(band.bg, 'night')),
+        `${band.name} night ground must be dark`).toBeLessThan(luminance(token(band.bg, 'day')) / 4)
+    })
+
+    it(`${band.name}: its edge is visible against its own ground`, () => {
+      // A band whose border matches its fill is a band with no border.
+      // ⚠ THE BAR IS 1.2 AND IT IS NOT TUNED TO JUST-PASS. The first cut asked for 1.5 and failed
+      // the DAY amber at 1.47 — a value that has shipped for months and that Peter has not
+      // complained about. Tightening a threshold until the shipped design fails it is redesigning
+      // by assertion; the job here is to catch an edge that has VANISHED (ratio ≈ 1.0), which is
+      // what happens when a band is themed and its border is forgotten. Measured, all four:
+      // amber 1.47 day / 1.94 night · alert 1.62 day / 1.79 night.
+      for (const theme of ['day', 'night'] as const) {
+        expect(contrastRatio(token(band.edge, theme), token(band.bg, theme)),
+          `${band.name} edge ${theme}`).toBeGreaterThan(1.2)
+      }
+    })
+  }
+
+  it('KNOWN-NEGATIVE: an edge equal to its own ground FAILS the bar above', () => {
+    // Without this, 1.2 is a number nobody has shown can be missed.
+    expect(contrastRatio('#fff7ed', '#fff7ed')).toBeLessThanOrEqual(1.2)
+    expect(contrastRatio('#fff7ed', '#fdf3e4')).toBeLessThanOrEqual(1.2)
+  })
+
+  it('the amber band reads on BOTH surfaces it is used on — chrome and reader paper', () => {
+    // PdfReaderView's band sits on reader paper with no `.iw-nightable` above it; TiptapEditor's
+    // sits in chrome. One token pair serves both, so it has to clear both grounds — which is also
+    // why these are declared UNSCOPED (a token defined inside .iw-nightable resolves to its DAY
+    // value on a night reading page: the --iw-countdown-fg bug).
+    for (const ground of [token('--iw-reader-paper', 'night'), NIGHT_PANEL]) {
+      expect(contrastRatio(token('--iw-notice-bg', 'night'), ground),
+        `the band must be distinguishable from ${ground}`).toBeGreaterThan(1.05)
+    }
+  })
+})
+
+// ── THE RESCUE ARMS — the two [style*=…] ones stay retired ──────────────────────────────────────
+// `pnpm prove:rescuearms` is the truth here: a real engine, both arms PLANTED and seen to fire, a
+// live sweep of 14 mounted panels finding zero matches, and the back chip measured NOT to depend on
+// them. This is the cheap half that KEEPS it — a browser probe that ran once is not a guard — and
+// the temptation it pins is specific: the next person who finds a white slab on a night panel can
+// make it go away by re-adding a substring arm, which re-tones every unaudited panel in the app at
+// once and is a change nobody measured. The fix for a React component is a token.
+describe('the .iw-nightable rescue arms', () => {
+  const ARM_RE = /\[style\*=("|')([^"']*)\1\]/g
+  const armed = [...css.matchAll(ARM_RE)].map((m) => m[2])
+
+  it('KNOWN-NEGATIVE: this scan can SEE a [style*=…] arm — proved before its zero is read', () => {
+    // Both spellings, because the two that were removed differed only by a space, and a scan blind
+    // to one of them would report a serene zero on exactly the half that came back.
+    const fake = ':root .iw-nightable [style*="background: #fff"], .x [style*=\'background:#fff\'] { color: red }'
+    expect([...fake.matchAll(ARM_RE)].map((m) => m[2])).toEqual(['background: #fff', 'background:#fff'])
+  })
+
+  it('index.css declares no [style*=…] arm at all', () => {
+    expect(armed, 'a substring match on a style ATTRIBUTE cannot reach a React component (the CSSOM ' +
+      'serialises), and the one hand-written consumer was measured not to depend on it — see the ' +
+      'note beside .iw-nightable .bg-white and prove:rescuearms').toEqual([])
+  })
+
+  it('…and the class arm beside them is untouched, so this was a removal and not a rewrite', () => {
+    // The blast-radius argument in reverse: the class arms are still catching live elements (44 on
+    // [class*="5c2d8a"] alone), so retiring one is a per-surface job, not a sed.
+    expect(css).toMatch(/\.iw-nightable \.bg-white \{ background-color: #3c444e !important; \}/)
+    expect(css).toContain('[class*="5c2d8a"]')
+  })
+})

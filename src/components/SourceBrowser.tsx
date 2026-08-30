@@ -1835,7 +1835,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               }
               if (b.kind === 'code') {
                 return wrap(
-                  <pre key={i} {...blk} style={{ margin: '0.9em 0', padding: '0.7em', background: '#00000008', borderRadius: 6, overflowX: 'auto', fontSize: '0.88em' }}>
+                  <pre key={i} {...blk} style={{ margin: '0.9em 0', padding: '0.7em', background: 'var(--iw-reader-code-bg, rgba(0,0,0,0.03))', borderRadius: 6, overflowX: 'auto', fontSize: '0.88em' }}>
                     <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
                   </pre>,
                 )
@@ -2147,7 +2147,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
         {toast && (
           <div style={{ position: 'absolute', left: '50%', bottom: 54, transform: 'translateX(-50%)', zIndex: 402,
-            background: INK, color: '#fff', fontSize: '12px', padding: '6px 12px', borderRadius: 999,
+            background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', fontSize: '12px', padding: '6px 12px', borderRadius: 999,
             boxShadow: '0 3px 12px rgba(0,0,0,0.25)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>{toast}</div>
         )}
 

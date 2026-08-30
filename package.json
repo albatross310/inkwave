@@ -31,6 +31,7 @@
     "prove:pdfreader": "node scripts/textrender-probe/pdfreader.prove.mjs",
     "prove:liveimages": "node scripts/textrender-probe/liveimages.prove.mjs",
     "prove:nightaudit": "node scripts/textrender-probe/nightaudit.prove.mjs",
+    "prove:rescuearms": "node scripts/textrender-probe/rescuearms.prove.mjs",
     "prove:snapnight": "node scripts/textrender-probe/snapnight.prove.mjs",
     "prove:snapswipe": "node scripts/textrender-probe/snapswipe.prove.mjs",
     "prove:framing": "node scripts/framing.prove.mjs",

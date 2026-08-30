@@ -1670,6 +1670,52 @@
 :root { --iw-danger: #b91c1c; }
 :root[data-theme="night"] { --iw-danger: #f2a0a0; }
 
+/* ── THE NOTICE BANDS — one amber, one red, and there were THREE copies of them (2026-08-30) ─────
+   The strip that says "the extension is still installing", "still reading this PDF", "that didn't
+   save". Written three times in bare literals — twice amber (TiptapEditor #fff7ed/#f0c98a/#92400e,
+   PdfReaderView #fff7ed/#fed7aa/#7c2d12, the same band a Tailwind step apart) and once red — so
+   none of them themed, and the two amber ones did not even agree with each other.
+   These are UNSCOPED :root in both themes ON PURPOSE: PdfReaderView's band sits on reader paper
+   with no `.iw-nightable` anywhere above it, so a token declared inside that block would resolve to
+   its DAY value on a night reading page — the conditional-resolution bug --iw-countdown-fg
+   documents. The night values are a warm dark band rather than an inverted pastel, because a
+   near-white slab is exactly what these three were at midnight.
+   MEASURED: amber fg-on-bg 6.68:1 day / 8.46:1 night · alert 6.34:1 day / 6.99:1 night. */
+:root {
+  --iw-notice-bg: #fff7ed; --iw-notice-edge: #f0c98a; --iw-notice-fg: #92400e;
+  --iw-alert-bg: #fef2f2;  --iw-alert-edge: #fca5a5;  --iw-alert-fg: #991b1b;
+}
+:root[data-theme="night"] {
+  --iw-notice-bg: #3a2f21; --iw-notice-edge: #7a5c33; --iw-notice-fg: #f5c98a;
+  --iw-alert-bg: #3d2424;  --iw-alert-edge: #7a4444;  --iw-alert-fg: #f2a0a0;
+}
+
+/* A fenced code block INSIDE a reading column. `#00000008` (3% black) is a wash you can only see on
+   white — over the night reading page it is nothing at all, so a <pre> stopped being a <pre>. It is
+   the surface's own ink at low alpha instead, which reads in both directions. */
+:root { --iw-reader-code-bg: rgba(0, 0, 0, 0.03); }
+:root[data-theme="night"] { --iw-reader-code-bg: rgba(232, 226, 214, 0.06); }
+
+/* ── THE DIAGNOSTIC HUD (`?snapThumbs=debug` on /snapshot) — DELIBERATELY THEME-INVARIANT ────────
+   A black instrument panel with monospace readouts, pinned over whatever is behind it. It is not
+   chrome and it is not paper: it is a dev overlay, and a dev overlay that changed colour with the
+   theme would be harder to read a burst off, not easier.
+   ⚠ SO WHY TOKENS AT ALL, if both themes are the same value? Because a LITERAL cannot say that. A
+   bare `#ffd479` in a component is indistinguishable from one nobody has audited yet — that is the
+   whole finding behind the palette gate, and the PDF toolbar sat unthemed for two months looking
+   exactly like a choice. A token declared identically in both blocks STATES the invariance where a
+   literal merely fails to theme, and it lets this HUD move to its own file without the colour
+   ratchet reading the move as new debt. `--iw-score-gap` is the same idea one family over ("music
+   reflow: the inserted band — paper, both themes"). */
+:root, :root[data-theme="night"] {
+  --iw-hud-bg: rgba(0, 0, 0, 0.86);
+  --iw-hud-fg: #ffffff;
+  --iw-hud-edge: #444444;
+  --iw-hud-head: #ffd479;   /* a section heading */
+  --iw-hud-ok: #c8ffc8;     /* a reading that is what it should be */
+  --iw-hud-bad: #ff8080;    /* …and one that is not */
+}
+
 /* ── INK ON A LIGHT PATCH — TOKENS THAT DELIBERATELY DO NOT INVERT ───────────────────────────────
    A writer's HIGHLIGHT is a piece of light paper they coloured: every swatch in StyleBar's
    HIGHLIGHT_COLORS is a pastel (#fca5a5 … #a5b4fc), and the colour is stored in the MARK, so
@@ -1861,6 +1907,21 @@
    Only PdfReaderView had been migrated to --iw-reader-bar; the web reader was left behind. */
 :root { --iw-reader-bar: #faf8fc; --iw-reader-ctl: #ffffff; --iw-reader-edge: #d6cfe0; }
 :root[data-theme="night"] { --iw-reader-bar: #302d27; --iw-reader-ctl: #3a3630; --iw-reader-edge: #57514a; }
+/* THE PDF VIEWER'S BOTTOM TOOLBAR JOINS THIS FAMILY (2026-08-30), and the argument is that its day
+   values already WERE these: bar #faf8fc, control face #fff, outline #d6cfe0, glyph #5c2d8a — the
+   four literals PdfViewer.tsx had been carrying since July. Not a coincidence and not a new palette:
+   PdfReaderView's header is the SAME bar in the SAME panel (the ¶ toggle swaps what is between
+   them), so a bar that stayed daylight while the header above it went dark was one panel wearing two
+   themes. Day is byte-unchanged by construction; night follows for free.
+   --iw-reader-accent-rgb is the accent's COMPONENTS, for the toolbar's tints (a lit toggle's fill,
+   the divider pips, the bar's top rule). A tint needs the numbers, not a colour, which is the same
+   reason --iw-ink-rgb exists — and the same gate keeps each in step with the colour it tints.
+   --iw-reader-gallery is the VOID BEHIND THE PAGES in the page view. It is not paper: the pages
+   themselves are pdf.js canvases and stay a picture of white paper in both themes (re-toning one
+   would reinterpret the document). It is the darkest of the family so a page reads as an object
+   lying on it, the way every PDF reader's dark mode does it. */
+:root { --iw-reader-accent-rgb: 92 45 138; --iw-reader-gallery: #e9e7e3; }
+:root[data-theme="night"] { --iw-reader-accent-rgb: 195 168 239; --iw-reader-gallery: #1c1a17; }
 /* THE READER PANEL'S OWN CHROME — the header strip, which is .iw-nightable dolphin grey at night and
    is NOT a reading surface. Peter: *"the top bar's fonts are too dark."* Two separate faults, both
    measured on the live panel: the back/forward arrows carried the LITERAL #5c2d8a, which is 1.13:1
@@ -2027,19 +2088,28 @@
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-50:hover,
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-100:hover { background-color: #3c444e !important; }
 /* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey.
-   ⚠ THE TWO [style*=…] ARMS ONLY EVER MATCH A HAND-WRITTEN style ATTRIBUTE, NEVER A REACT ONE, and
-   the difference is not a subtlety — it is most of this app. React sets inline styles through the
-   CSSOM (`el.style.setProperty`), and the CSSOM SERIALISES COLOURS: the attribute then reads
-   `background: rgb(255, 255, 255);`, which neither substring matches. MEASURED both ways in a real
-   engine (2026-08-30): setAttribute('style','background: #fff') matches; style.setProperty
-   ('background','#fff') does not. So every React `style={{ background: '#fff' }}` in a night panel
-   has always stayed WHITE, and only `.iw-nightable` elements written imperatively (citationNav's
-   back chip) were ever repainted here. The arms are KEPT because that chip depends on them.
+   ⚠ THE TWO [style*=…] ARMS THAT USED TO BE HERE ARE GONE (2026-08-30), and they were catching
+   NOTHING — proved in a real engine before removal, `pnpm prove:rescuearms`, both arms PLANTED and
+   seen to fire first so a zero could not be the empty-list trap. Three independent reasons, each
+   measured:
+     · React sets inline styles through the CSSOM, which SERIALISES colours — `style={{ background:
+       '#fff' }}` becomes the attribute `background: rgb(255, 255, 255)`, which neither substring
+       matches. So no React component was ever reached, which is most of this app.
+     · Only ONE thing in the repo hand-writes `background:#fff` into a style ATTRIBUTE on a themed
+       element (citationNav's back chip), and index.css used to say the arms were KEPT for it. It
+       does not depend on them, twice over: these are DESCENDANT selectors and the chip IS the
+       `.iw-nightable` (so `.iw-nightable [style*=…]` never selected it — `.iw-nightable`'s own
+       background-color rule paints it), AND the next thing citationNav does is `chip.style.opacity
+       = '1'`, which reserialises the whole attribute one frame later. Measured: the attribute goes
+       from `background:#fff` to `background: rgb(255, 255, 255)` across that rAF.
+     · A live sweep over 14 mounted panels with every reachable menu open: 0 matches, either arm.
    THE FIX FOR A REACT COMPONENT IS A TOKEN, not another substring: an rgb() arm would silently
-   re-tone every unaudited panel in the app at once, which is a change nobody measured. */
-:root[data-theme="night"] .iw-nightable .bg-white,
-:root[data-theme="night"] .iw-nightable [style*="background: #fff"],
-:root[data-theme="night"] .iw-nightable [style*="background:#fff"] { background-color: #3c444e !important; }
+   re-tone every unaudited panel in the app at once, which is a change nobody measured — and taking
+   an arm away has the SAME property in the other direction, which is why the class arms beside this
+   one are still here. `prove:rescuearms` prints what each of those is currently catching (44
+   elements on `[class*="5c2d8a"]`, 42 on `[class*="text-stone"]`, 26 on `[class*="border-stone"]`
+   on the editor screen alone), so retiring one is a per-surface job scheduled against a number. */
+:root[data-theme="night"] .iw-nightable .bg-white { background-color: #3c444e !important; }
 :root[data-theme="night"] .iw-nightable [class*="text-stone"],
 :root[data-theme="night"] .iw-nightable [class*="text-gray"],
 :root[data-theme="night"] .iw-nightable [class*="text-neutral"] { color: #dfe3e9 !important; }
@@ -2081,6 +2151,12 @@
 :root {
   --iw-snap-bar: rgba(255, 255, 255, 0.95);  /* fixed header bar */
   --iw-snap-pane: #f9f7f4;                   /* diff / hunk panel ground */
+  /* Selecting text in the diff pane. Its literal was a dark violet wash with white on top, written
+     once for the day pane — over the near-black night pane that is a smudge you cannot see you have
+     selected anything, and the white it puts on top is the one part that still reads. Same shape as
+     --iw-snap-on-ink beside it: the fill and the ink on the fill are ONE decision, never two. */
+  --iw-snap-selection: rgba(70, 50, 110, 0.85);
+  --iw-snap-on-selection: #ffffff;
   --iw-snap-side: #fbfaf6;                   /* summary + minimap column ground */
   --iw-snap-card: #ffffff;                   /* raised objects: summary box, version pill, unlit toggle */
   --iw-snap-ink: #5c2d8a;                    /* the route's purple — labels, borders, lit fills */
@@ -2139,6 +2215,8 @@
   --iw-snap-ink: #cbb8f2;
   --iw-snap-ink-hover: #ddcffa;
   --iw-snap-on-ink: #221d2b;
+  --iw-snap-selection: rgba(190, 165, 245, 0.5);   /* a pale wash, so the SELECTED TEXT stays the */
+  --iw-snap-on-selection: #17141d;                 /* readable element (see --iw-snap-on-ink) */
   --iw-snap-text: #dfe3e9;
   --iw-snap-muted: #9aa3af;
   --iw-snap-edge: rgba(203, 184, 242, 0.22);
