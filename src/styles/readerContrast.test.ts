@@ -379,3 +379,35 @@ describe('EVERY READER TOKEN A COMPONENT READS IS ACTUALLY DECLARED', () => {
     expect(dangling, 'a var() with a fallback renders forever and never errors').toEqual([])
   })
 })
+
+// ── THE RESCUE ARMS — the two [style*=…] ones stay retired ──────────────────────────────────────
+// `pnpm prove:rescuearms` is the truth here: a real engine, both arms PLANTED and seen to fire, a
+// live sweep of 14 mounted panels finding zero matches, and the back chip measured NOT to depend on
+// them. This is the cheap half that KEEPS it — a browser probe that ran once is not a guard — and
+// the temptation it pins is specific: the next person who finds a white slab on a night panel can
+// make it go away by re-adding a substring arm, which re-tones every unaudited panel in the app at
+// once and is a change nobody measured. The fix for a React component is a token.
+describe('the .iw-nightable rescue arms', () => {
+  const ARM_RE = /\[style\*=("|')([^"']*)\1\]/g
+  const armed = [...css.matchAll(ARM_RE)].map((m) => m[2])
+
+  it('KNOWN-NEGATIVE: this scan can SEE a [style*=…] arm — proved before its zero is read', () => {
+    // Both spellings, because the two that were removed differed only by a space, and a scan blind
+    // to one of them would report a serene zero on exactly the half that came back.
+    const fake = ':root .iw-nightable [style*="background: #fff"], .x [style*=\'background:#fff\'] { color: red }'
+    expect([...fake.matchAll(ARM_RE)].map((m) => m[2])).toEqual(['background: #fff', 'background:#fff'])
+  })
+
+  it('index.css declares no [style*=…] arm at all', () => {
+    expect(armed, 'a substring match on a style ATTRIBUTE cannot reach a React component (the CSSOM ' +
+      'serialises), and the one hand-written consumer was measured not to depend on it — see the ' +
+      'note beside .iw-nightable .bg-white and prove:rescuearms').toEqual([])
+  })
+
+  it('…and the class arm beside them is untouched, so this was a removal and not a rewrite', () => {
+    // The blast-radius argument in reverse: the class arms are still catching live elements (44 on
+    // [class*="5c2d8a"] alone), so retiring one is a per-surface job, not a sed.
+    expect(css).toMatch(/\.iw-nightable \.bg-white \{ background-color: #3c444e !important; \}/)
+    expect(css).toContain('[class*="5c2d8a"]')
+  })
+})

@@ -2042,19 +2042,28 @@
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-50:hover,
 :root[data-theme="night"] .iw-nightable .hover\:bg-stone-100:hover { background-color: #3c444e !important; }
 /* Repaint inner white/cream fills + dark utility text so nested chrome reads on the grey.
-   ⚠ THE TWO [style*=…] ARMS ONLY EVER MATCH A HAND-WRITTEN style ATTRIBUTE, NEVER A REACT ONE, and
-   the difference is not a subtlety — it is most of this app. React sets inline styles through the
-   CSSOM (`el.style.setProperty`), and the CSSOM SERIALISES COLOURS: the attribute then reads
-   `background: rgb(255, 255, 255);`, which neither substring matches. MEASURED both ways in a real
-   engine (2026-08-30): setAttribute('style','background: #fff') matches; style.setProperty
-   ('background','#fff') does not. So every React `style={{ background: '#fff' }}` in a night panel
-   has always stayed WHITE, and only `.iw-nightable` elements written imperatively (citationNav's
-   back chip) were ever repainted here. The arms are KEPT because that chip depends on them.
+   ⚠ THE TWO [style*=…] ARMS THAT USED TO BE HERE ARE GONE (2026-08-30), and they were catching
+   NOTHING — proved in a real engine before removal, `pnpm prove:rescuearms`, both arms PLANTED and
+   seen to fire first so a zero could not be the empty-list trap. Three independent reasons, each
+   measured:
+     · React sets inline styles through the CSSOM, which SERIALISES colours — `style={{ background:
+       '#fff' }}` becomes the attribute `background: rgb(255, 255, 255)`, which neither substring
+       matches. So no React component was ever reached, which is most of this app.
+     · Only ONE thing in the repo hand-writes `background:#fff` into a style ATTRIBUTE on a themed
+       element (citationNav's back chip), and index.css used to say the arms were KEPT for it. It
+       does not depend on them, twice over: these are DESCENDANT selectors and the chip IS the
+       `.iw-nightable` (so `.iw-nightable [style*=…]` never selected it — `.iw-nightable`'s own
+       background-color rule paints it), AND the next thing citationNav does is `chip.style.opacity
+       = '1'`, which reserialises the whole attribute one frame later. Measured: the attribute goes
+       from `background:#fff` to `background: rgb(255, 255, 255)` across that rAF.
+     · A live sweep over 14 mounted panels with every reachable menu open: 0 matches, either arm.
    THE FIX FOR A REACT COMPONENT IS A TOKEN, not another substring: an rgb() arm would silently
-   re-tone every unaudited panel in the app at once, which is a change nobody measured. */
-:root[data-theme="night"] .iw-nightable .bg-white,
-:root[data-theme="night"] .iw-nightable [style*="background: #fff"],
-:root[data-theme="night"] .iw-nightable [style*="background:#fff"] { background-color: #3c444e !important; }
+   re-tone every unaudited panel in the app at once, which is a change nobody measured — and taking
+   an arm away has the SAME property in the other direction, which is why the class arms beside this
+   one are still here. `prove:rescuearms` prints what each of those is currently catching (44
+   elements on `[class*="5c2d8a"]`, 42 on `[class*="text-stone"]`, 26 on `[class*="border-stone"]`
+   on the editor screen alone), so retiring one is a per-surface job scheduled against a number. */
+:root[data-theme="night"] .iw-nightable .bg-white { background-color: #3c444e !important; }
 :root[data-theme="night"] .iw-nightable [class*="text-stone"],
 :root[data-theme="night"] .iw-nightable [class*="text-gray"],
 :root[data-theme="night"] .iw-nightable [class*="text-neutral"] { color: #dfe3e9 !important; }
