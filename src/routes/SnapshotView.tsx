@@ -64,6 +64,7 @@ const ADD_BG = 'var(--iw-snap-add-bg, rgba(22,163,74,0.16))'
 const DEL_FG = 'var(--iw-snap-del-fg, #b91c1c)'
 const DEL_BG = 'var(--iw-snap-del-bg, rgba(185,28,28,0.07))'
 const RULE = 'var(--iw-snap-rule, rgba(92,45,138,0.32))'
+const MIDLINE = 'var(--iw-snap-midline, rgba(92,45,138,0.38))'  // the golden-ratio reading line
 const PAGE_NUM = 'var(--iw-snap-page-num, rgba(92,45,138,0.85))'
 const CARD_SHADOW = 'var(--iw-snap-map-shadow, rgba(80,50,10,0.15))'
 
@@ -2600,7 +2601,7 @@ function SplitDiffView({
   const midline = (
     <div aria-hidden="true" style={{
       position: 'absolute', top: `${midFrac * 100}%`, left: 0, right: 0, zIndex: 5,
-      borderTop: '1px dashed rgba(92,45,138,0.38)', pointerEvents: 'none', transform: 'translateY(-0.5px)',
+      borderTop: `1px dashed ${MIDLINE}`, pointerEvents: 'none', transform: 'translateY(-0.5px)',
     }} />
   )
 
@@ -2868,6 +2869,19 @@ export function SnapshotView() {
     }
     window.addEventListener('inkwave:ai-settings-changed', onChange)
     return () => window.removeEventListener('inkwave:ai-settings-changed', onChange)
+  }, [])
+  // ── The browser must not steal the sideways swipe (Peter, 2026-08-30) ────────────────────────
+  // On a Mac trackpad a two-finger horizontal swipe fired the browser's own back/forward and threw
+  // him out of the review mid-read — while THIS VIEW already owns that gesture (the deltaX position
+  // scrubber below). `overscroll-behavior-x` on the ROOT is what suppresses it, and it must be the
+  // root because the rule propagates to the viewport only from `<html>`; a swipe landing on the
+  // minimap or the header has no scroller under it at all and chains straight there. Scoped to this
+  // route by adding the class on mount, so nothing about the editor's own gestures changes.
+  // See the `.iw-no-swipe-nav` block in index.css for why preventDefault is not the mechanism.
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.add('iw-no-swipe-nav')
+    return () => root.classList.remove('iw-no-swipe-nav')
   }, [])
   // Nav flash setters kept (no-op now the floating summary panels are gone; harmless, may return).
   const [, setLeftSnapFlash]  = useState(0)
@@ -3540,7 +3554,7 @@ export function SnapshotView() {
       className="font-serif"
       // touchAction pan-y: the swipe scrub owns horizontal on this view (native x-pan raced it);
       // touch-action doesn't inherit, so the scrollable panes repeat it below.
-      style={{ height: '100dvh', overflow: 'hidden', color: '#3a3a3a', display: 'flex', flexDirection: 'column', touchAction: 'pan-y' }}
+      style={{ height: '100dvh', overflow: 'hidden', color: TEXT, display: 'flex', flexDirection: 'column', touchAction: 'pan-y' }}
     >
       {/* Wave loading choreography (Peter, 2026-07-09): the same drifting-waves veil as the
           editor's load covers the snapshot view until its content is genuinely ready (snapshots

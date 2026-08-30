@@ -1801,6 +1801,7 @@
   --iw-snap-edge: rgba(92, 45, 138, 0.2);    /* the header's hairline */
   --iw-snap-card-edge: rgba(92, 45, 138, 0.4);
   --iw-snap-rule: rgba(92, 45, 138, 0.32);   /* the diff panel's dashed page rules */
+  --iw-snap-midline: rgba(92, 45, 138, 0.38); /* the golden-ratio reading line across both panes */
   --iw-snap-page-num: rgba(92, 45, 138, 0.85);
   --iw-snap-chip-bg: rgba(92, 45, 138, 0.08);      /* header pill, unlit */
   --iw-snap-chip-bg-on: rgba(92, 45, 138, 0.16);   /* header pill, lit / hovered */
@@ -1853,6 +1854,7 @@
   --iw-snap-edge: rgba(203, 184, 242, 0.22);
   --iw-snap-card-edge: rgba(203, 184, 242, 0.4);
   --iw-snap-rule: rgba(203, 184, 242, 0.3);
+  --iw-snap-midline: rgba(203, 184, 242, 0.42);
   --iw-snap-page-num: rgba(203, 184, 242, 0.85);
   --iw-snap-chip-bg: rgba(203, 184, 242, 0.1);
   --iw-snap-chip-bg-on: rgba(203, 184, 242, 0.18);
@@ -1895,8 +1897,42 @@
   --iw-snap-del-tick-hi: #ffc9c2;
 }
 
+/* ── THE BROWSER MUST NOT STEAL THE SIDEWAYS SWIPE ON /snapshot (2026-08-30) ─────────────────────
+   Peter, on a Mac trackpad: a two-finger horizontal swipe fires the browser's own history
+   navigation and throws him out of the review mid-read. This is a COLLISION, not an annoyance —
+   that exact gesture is already a shipped feature here: SnapshotView binds a `wheel` listener that
+   reads `deltaX` and drives the position scrubber (the Apple-Photos-style version fly-through).
+
+   TWO PLACES, because they fail differently and only one of them is obvious:
+   · `.iw-snap-scroll` — the doc pane, the diff panel and the summary card. These have
+     `overflow-x: auto`, so a swipe scrolls them until they hit their own edge and then CHAINS
+     outward; `contain` terminates the chain at the pane.
+   · `html.iw-no-swipe-nav` — the root, and this is the one that actually matters. The route is
+     `overflow: hidden`, so a swipe that lands anywhere WITHOUT a scroller under it — the minimap,
+     the side panel, the header bar, the divider, the gaps between panes — chains straight to a
+     viewport with nothing to scroll, which is precisely when the browser decides the gesture was
+     meant for it. `overscroll-behavior` on the ROOT ELEMENT propagates to the viewport (it does
+     NOT propagate from `body`), so the root is where the rule has to live. SnapshotView adds the
+     class on mount and drops it on unmount — the `.iw-water-ready` / `.iw-wave-video-wait` shape.
+
+   `contain` RATHER THAN `none`: both suppress the native swipe navigation, and `contain` keeps the
+   rubber-band affordance, so nothing about how the panes feel changes.
+
+   ⚠ THIS IS THE DECLARATIVE MECHANISM, NOT `preventDefault`. The scrub's own handler already calls
+   preventDefault, and it is not enough for two independent reasons: it is only bound to the two
+   pane scrollers (so it is absent everywhere else on the route), and it only fires when the swipe
+   is steeply horizontal (|dX| > 1.3·|dY|) — a shallow diagonal falls through it untouched. Both
+   holes are exactly where the browser was taking the gesture. Do not "simplify" this back into a
+   preventDefault: a gesture recogniser that has already decided it owns the stream cannot be
+   talked out of it by a later cancelled event.
+
+   ⚠ WHAT IT DOES NOT COVER, stated: iOS/iPadOS EDGE-swipe back is a system gesture, not scroll
+   overflow, and no web page can suppress it. This is the trackpad/scroll-driven case only. */
+html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
+
 /* Snapshot-view scroll panes: force an always-visible classic scrollbar (overlay bars auto-hide). */
 .iw-snap-scroll {
+  overscroll-behavior-x: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--iw-snap-scrollbar-thumb, #b8b2a8) var(--iw-snap-scrollbar-track, #efe9df);
   scrollbar-gutter: stable;
