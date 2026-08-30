@@ -74,3 +74,73 @@ That the extension path returns results **in Peter's real browser** has not been
 because nothing on this machine can stand in for it. Everything up to that point is measured. If
 it fails there, the overlay-style question to ask is which of the three it is: the grant, the
 worker's fetch, or extraction.
+
+---
+
+# Would the extension give live view of every site? Measured, 2026-08-30 (HEADED)
+
+Peter asked directly. The answer is **no**, but not for the reason I first gave — I was wrong
+about the framing half and right about the session half, and only the headed run could tell.
+
+**Headless could not answer this at all.** Playwright's headless Chromium does not load
+extensions: a canary rule (`block` on example.org in a sub_frame) never fired, so two earlier
+runs were VOID. Without the canary they would have read as "header stripping doesn't help" —
+a confident wrong answer that would have ended a viable path. Run headed, the canary fires and
+the verdict becomes readable.
+
+## Framing: header-stripping WORKS
+
+A throwaway MV3 extension removing `x-frame-options` and `content-security-policy` on
+`sub_frame` responses. Control run first, so a refusal is known to be detectable:
+
+| | without ext | with ext |
+|---|---|---|
+| example.org (canary) | framed | **BLOCKED-BY-EXT** ⇒ ruleset live |
+| wikipedia, plato.stanford.edu | framed | framed |
+| google.com | REFUSED | **framed** |
+| youtube.com/watch | REFUSED | **framed** |
+| abc.net.au | REFUSED | **framed** |
+| facebook.com | REFUSED | **framed** |
+
+## But "not refused" is not "usable" — read INSIDE the frames
+
+Playwright reaches into cross-origin frames over CDP, which page JS cannot. What actually
+rendered:
+
+| site | chars | verdict |
+|---|---|---|
+| abc.net.au | 14,921 | **real page** |
+| en.wikipedia.org | 17,373 | real page (control) |
+| youtube.com/watch | 1,227 | **real video page** — title "Rick Astley – Never Gonna Give You Up" |
+| google.com | 1,423 | framed, then redirected to **`/sorry/index`** — bot CAPTCHA |
+| facebook.com | 113 | framed, title **"Error"** — refused in the BODY, not a header |
+
+No framebusting anywhere (`window.top !== window.self` held on every site, top never navigated),
+so that predicted failure did not materialise. Google's `/sorry` may be automation detection
+rather than framing — this browser is CDP-controlled and cannot distinguish those.
+
+## Sessions: this is what actually kills it
+
+Three cookies on one origin, then the same endpoint read first-party and framed:
+
+| | Lax (the DEFAULT) | None | Strict |
+|---|---|---|---|
+| first-party (control) | ✅ | ✅ | ✅ |
+| framed (third-party) | **✗** | ✅ | **✗** |
+
+`SameSite=Lax` is what a cookie gets when it does not say otherwise, so **ordinary session
+cookies are dropped inside a frame**: live view renders logged-out. No header can fix this —
+it is not a header, it is the browser's third-party context rule, and stripping CSP does not
+touch it.
+
+## The conclusion, and why a desktop app differs in kind
+
+The extension is worth having: it fixes search (datacentre block) and unlocks live view of
+**public content sites**, which is most of what a thesis cites. It does not give "live view of
+every website", and the gap is not closable by an extension — logged-in sites frame but sign
+you out, and Facebook-class sites detect framing server-side.
+
+A desktop app is not "the same thing, easier": a webview is a **top-level browsing context**, so
+nothing is being framed. XFO never applies, cookies are first-party (you stay signed in),
+framebusters see `top === self`, and JS renders — so Google results exist at all. Every failure
+above stops arising rather than being patched.
