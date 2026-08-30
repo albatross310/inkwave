@@ -227,4 +227,7 @@ console.log(allSame
   ? '  => zoom is a pure PAINT SCALE. One break table is reusable across zooms.'
   : '  => the break table needs a PER-ZOOM REBUILD. The free-zoom claim dies.')
 await browser.close()
-process.exit(0)
+// ⚠ THIS WAS `process.exit(0)`, UNCONDITIONALLY. The line above could print "the free-zoom claim
+// dies" and the probe still exited 0 — the known-positive and known-negative could fail it, but its
+// own SUBJECT could not. A probe that can only fail on its instrument is an instrument, not a guard.
+process.exit(allSame ? 0 : 1)

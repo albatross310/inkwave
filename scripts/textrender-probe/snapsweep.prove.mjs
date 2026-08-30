@@ -166,8 +166,15 @@ for (const kind of ['plain', 'thesis']) {
   const wired = await page.evaluate(async () => {
     const r = await fetch(location.origin + '/', { cache: 'no-store' })
     const html = await r.text()
-    return /snapshot-[A-Za-z0-9_-]+\.js/.test(html) || true
+    // ⚠ THIS ENDED `|| true`, so the "served bundle must be mine" assertion the comment above
+    // promises was unfalsifiable — and `wired` was never read anywhere either. A stale or foreign
+    // build was measured silently, which is the one failure this check exists to prevent.
+    return /snapshot-[A-Za-z0-9_-]+\.js/.test(html)
   })
+  if (!wired) {
+    console.log('\n⊘ VOID — the served page carries no snapshot chunk: this is not our build.')
+    process.exit(2)
+  }
 
   // Wait for the sweep's own completion event (it starts 2.5s after open; 116 versions is ~10s).
   const done = await page.waitForFunction(() => !!window.__iwSnapBreakSweep, null, { timeout: 180000 })

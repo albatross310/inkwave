@@ -13,7 +13,6 @@
   "scripts/textrender-probe/csszoom.prove.mjs",
   "scripts/textrender-probe/incremental.prove.mjs",
   "scripts/textrender-probe/isolate.prove.mjs",
-  "scripts/textrender-probe/jumpguard.prove.mjs",
   "scripts/textrender-probe/linecount.prove.mjs",
   "scripts/textrender-probe/liveimages.prove.mjs",
   "scripts/textrender-probe/opfs.prove.mjs",

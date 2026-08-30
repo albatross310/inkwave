@@ -208,15 +208,23 @@ try {
     }
     if (!maxes.length) { console.log('VOID: every load failed to sample'); bad = true }
     else {
+      // ⚠ THE MEASUREMENT NOW SETS `bad`, AND IT DID NOT BEFORE. Both branches below printed and
+      // neither touched the exit code, so `bad` was written only by the VOID paths — meaning a
+      // measured 25px mark-vs-wave skew printed "REPRODUCED" and exited 0. This probe is cited in
+      // `docs/archive/wave-system-rounds.md` as the KEEPER for `a11bd94` ("before, surface-vs-surface
+      // drift up to 25px; after, 0.00px across 10/10 loads"). Reverting that fix would have left it
+      // green — a guard that cannot fail on the exact regression it exists to catch.
+      const SKEW_TOL_PX = 1 // a mark within 1px of its crest is aligned; 25px was the live bug
       const worst = Math.max(...maxes), xworst = Math.max(...crosses)
       console.log(`\nMARK-vs-ITS-OWN-WAVE, worst over ${LOADS} loads: ${worst.toFixed(2)}px`)
-      console.log(worst <= 1
+      console.log(worst <= SKEW_TOL_PX
         ? "  → marks ARE clocked to the wave they are drawn over. The alignment is NOT the desync."
         : `  → REPRODUCED: marks off their crest by up to ${worst.toFixed(1)}px.`)
       console.log(`SURFACE-vs-SURFACE drift phase, worst over ${LOADS} loads: ${xworst.toFixed(2)}px`)
-      console.log(xworst <= 1
+      console.log(xworst <= SKEW_TOL_PX
         ? '  → the two drifting surfaces are phase-identical (the sibling adopt holds).'
         : `  → the two surfaces' WAVES differ by up to ${xworst.toFixed(1)}px — the sibling adopt is NOT holding.`)
+      if (worst > SKEW_TOL_PX || xworst > SKEW_TOL_PX) bad = true
     }
   }
 } finally {
