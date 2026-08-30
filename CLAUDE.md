@@ -625,6 +625,17 @@ class) and SETTLE (`inkwave:reveal-imminent`).
   caret-reveal nudge must not read as full-rate velocity.
 - **Dash respawns must never rasterise** — relocate on the 140px lattice; `toDataURL` on the scroll
   path cost ~150ms/frame.
+- **NAMED OPEN QUESTION — a known-redundant write on the sway path, deliberately NOT removed
+  (2026-08-30).** `writeWave()` sets `--wave-x` and calls `swayFields()` on every rAF of every
+  scroll. During a ZOOM HOLD the value is provably unchanged — the base is rebased equal-and-opposite
+  precisely so the sway holds still — so those frames write an identical string to the surface var
+  and re-write literal transforms across ~300 twinkle leaves for no pixel change. Skipping identical
+  writes looks free and was not taken, because a field that MOUNTS during the skipped window would
+  never receive its transform, and this box has no GPU to tell a real fix from a new residual.
+  **WHAT WOULD LICENSE IT:** an on-device capture showing (a) no dropped transform on a field
+  created mid-gesture, and (b) a measured frame-time win — or, better, making `swayFields` idempotent
+  for new leaves so the skip cannot strand one. Until then this is a documented cost, not a bug.
+  The residuals below came from exactly this kind of unproved guess; do not close it by reasoning.
 - KNOWN RESIDUALS (Peter, live, build `72783da`): no consistent tick, but occasional blue flash and
   white lines briefly lagging their wave, worst on phone then Chrome. Probes pass 9/9 — this class
   is real-device raster scheduling that a GPU-less headless box structurally cannot see. **The next
@@ -1135,6 +1146,25 @@ excuse.** The browser probes stay (they are the in-browser truth, and they catch
 structurally cannot); they are simply not guards. Corollary for reviewers: `git diff master..<branch>`
 on a branch that is BEHIND renders enormous fictional deletions (one lane showed 18,393 deletions for
 a real change of 3 files, +196/−11) — always diff `$(git merge-base HEAD origin/master)..HEAD`.
+
+**WRITE THE CHARACTERIZATION TEST BEFORE THE MOVE, NOT AFTER (2026-08-30).** A test written after
+a refactor encodes what you BELIEVE the code does — and a refactor is precisely when that belief is
+least reliable, because you have just finished reading the code closely enough to feel certain about
+it. Written first, against the original, the test can contradict you; written second, it agrees with
+you by construction and then FREEZES your misunderstanding as the spec.
+
+Demonstrated on this repo rather than asserted. Extracting `bestGrid` from SnapshotView, I asserted
+the invariant its comment implies — every minimap cell inside Peter's 1:2…1:4 band. It is FALSE and
+unachievable: at n=2 in a 300×800 panel the only splits give 1.33 and 5.33, so the function takes the
+lesser miss. **The band is a target it minimises deviation from, not a promise it makes.** Written
+after the move, that test would have passed against my own rewritten copy and I would have "fixed" a
+correct function to satisfy a guarantee it never made. The replacement asserts what is actually true
+and is strictly stronger: the chosen split is OPTIMAL — no other rows/cols scores better, checked
+exhaustively. Worked example: `src/routes/snapshotLayout.test.ts`.
+
+**Corollary:** when a characterization test fails on the ORIGINAL code, that is the test working.
+Do not adjust it until you can say which of the two — your assertion or the code — is wrong, and
+why. Most of the time it is the assertion.
 
 **Standing preferences (Peter, 2026-07-10):**
 - **No browser windows over Peter's screen.** Agents running HEADED browsers (Playwright probes
