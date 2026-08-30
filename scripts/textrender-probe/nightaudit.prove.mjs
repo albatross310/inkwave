@@ -12,11 +12,25 @@
 // and `page.route` does not intercept service-worker-originated requests — reader.prove.mjs records
 // the four wrong theories that cost. `serviceWorkers: 'block'` on the context.
 //
-// WHAT IS DELIBERATELY EXEMPT. The reader's ARTICLE and the PDF's PAGE are PAPER: a mark's colour is
-// stored in the mark and shared with the PDF viewer, so a theme that reinterpreted it would make one
-// highlight two colours on two devices (index.css, `.iw-reader-page`). Paper stays light in both
-// themes; night only takes the glare off it. So paper surfaces are audited for legibility (they must
-// still pass) and NOT for "did it go dark".
+// ⚠ THE PAPER EXEMPTION IS RETIRED (2026-08-30). This header used to say the reader's ARTICLE and
+// the PDF's reader PAGE stay light in both themes, so they were audited for legibility only and
+// never for "did it go dark". Peter: *"the whole read mode on both pdfs and web pages needs a night
+// mode too — but make sure the palette is slightly different from the main page and there's a
+// dividing line between."* The reading surfaces now INVERT, and this probe measures that directly
+// (`readingSurface()`, below) instead of exempting it.
+//
+// What survives of the old argument — and what makes the inversion safe — is the FILL/STROKE split:
+// a mark's FILL keeps its exact stored hex in both themes, so one highlight is still one colour on
+// every device, and gains a stated dark ink on top. The probe PLACES A REAL HIGHLIGHT and reads
+// both back, because that is the claim Peter actually made ("a yellow highlight has to look like a
+// yellow highlight") and no token assertion can see it.
+//
+// ⚠ AND THE CONTRAST WALKER ALONE COULD NOT HAVE CAUGHT WHAT HE REPORTED. It ran 0 failures in BOTH
+// themes on the build he complained about: the markup bar was a near-white slab reading an
+// undefined token (`--iw-panel-bg`, declared nowhere), and dark-on-near-white passes; the invisible
+// back arrow was DISABLED in the probe's one-entry history and therefore exempt under WCAG 1.4.3.
+// Contrast is the FLOOR. So the checks below ask what the pixels ARE — and the probe now NAVIGATES,
+// so the arrows are live when they are read.
 import { chromium } from '@playwright/test'
 import { startProbeServer } from './serve.mjs'
 import { CONTRAST_WALKER } from './contrastWalker.mjs'
@@ -150,6 +164,21 @@ try {
     'a glyph outlined in a contrasting colour passes BY ITS OUTLINE', JSON.stringify(known['outlined dar']))
   check(known['badly outlin'] && !known['badly outlin'].ok,
     '…and an outline carrying no contrast does NOT rescue it', JSON.stringify(known['badly outlin']))
+  // ⚠ THE SURFACE COMPARATOR NEEDS ARMING TOO, and it failed its first real use for want of it:
+  // `__iwRatio` parsed only rgb() while every other helper here REPORTS hex, so comparing two
+  // surfaces returned null — and a null read as "these two are the same", i.e. as a verdict about
+  // the app rather than about the instrument. A comparator that cannot report a number must VOID.
+  const cmp = await page.evaluate(() => ({
+    hexPair: window.__iwRatio('#26241f', '#2c2e35'),
+    mixed: window.__iwRatio('rgb(255,255,255)', '#000000'),
+    same: window.__iwRatio('#26241f', '#26241f'),
+    junk: window.__iwRatio('not-a-colour', '#000'),
+  }))
+  check(cmp.hexPair !== null && cmp.hexPair > 1 && cmp.hexPair < 2,
+    'the surface comparator reads HEX (its own output format)', JSON.stringify(cmp))
+  check(cmp.mixed !== null && Math.abs(cmp.mixed - 21) < 0.1 && cmp.same === 1,
+    '…mixes formats, and bottoms out at 1 for identical surfaces', JSON.stringify(cmp))
+  check(cmp.junk === null, '…and returns null ONLY when it genuinely cannot parse', JSON.stringify(cmp))
 
   // ⚠ AND THE BACKDROP RULE NEEDS ITS OWN PAIR. `__iwBgOf` now prefers the .inkwave-sheet under an
   // element over its ancestor chain; a mechanism with no known-negative is how "0 failures" comes to
@@ -436,6 +465,38 @@ try {
     })
     check(readerRoot, `[${theme}] the source reader opened`)
     if (readerRoot) {
+      // ── NAVIGATE, SO THE BACK ARROW IS LIVE ──────────────────────────────────────────────────
+      // ⚠ WITHOUT THIS THE PROBE CANNOT SEE THE BUG PETER REPORTED. With a one-entry history both
+      // arrows are `disabled`, and the walker exempts disabled controls (WCAG 1.4.3 — a greyed
+      // control is meant to look unavailable, and scoring it is the instrument inventing work).
+      // So the enabled arrow's colour — the literal #5c2d8a that measured 1.13:1 on the night
+      // header — had never been scored by anything. A second page in the stack is what makes the
+      // exemption stop covering it.
+      const navigated = await page.evaluate(() => {
+        const i = document.querySelector('input[placeholder="address or search"]')
+        if (!i) return 'no address bar'
+        const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        set.call(i, 'https://plato.stanford.edu/entries/change/')
+        i.dispatchEvent(new Event('input', { bubbles: true }))
+        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+        return 'went'
+      })
+      await page.waitForTimeout(1600)
+      const arrows = await page.evaluate(() => {
+        const back = [...document.querySelectorAll('[data-iw-probe="reader"] button')]
+          .find((b) => b.getAttribute('title') === 'Back')
+        return back ? { disabled: back.disabled, ...window.__iwSurface('[data-iw-probe="reader"] button[title="Back"]') } : null
+      })
+      check(navigated === 'went' && arrows && !arrows.disabled,
+        `[${theme}] the reader navigated, so the BACK arrow is enabled and no longer exempt`,
+        JSON.stringify(arrows))
+      if (arrows && !arrows.disabled) {
+        // 3:1 — it is a glyph, which is what the walker's own `glyph` rule asks of a one-character
+        // control. The literal it replaced scored 1.13.
+        check(arrows.ratio >= 3, `[${theme}] the enabled BACK arrow is legible on the header`,
+          `${arrows.fg} on ${arrows.bg} = ${arrows.ratio}:1`)
+      }
+
       // Open a hold-palette FIRST so the chrome audit sees it. A palette that is only reachable by
       // a 500ms hold is exactly the surface nobody eyeballs.
       const heldPalette = await page.evaluate(async () => {
@@ -451,6 +512,94 @@ try {
       // The reader's CHROME (everything but the article — the article is paper, audited separately).
       await audit(theme, 'reader chrome', '[data-iw-probe="reader"]', { skip: '.iw-reader-page' })
       await audit(theme, 'reader article (paper)', '.iw-reader-page')
+      await page.evaluate(() => document.body.click())
+      await page.waitForTimeout(200)
+
+      // ── THE READING SURFACE ITSELF ────────────────────────────────────────────────────────────
+      // What the ratio walker cannot ask: what colour IS this. Peter's markup bar passed every
+      // contrast check while being a near-white slab at midnight.
+      const surf = await page.evaluate(() => ({
+        page: window.__iwSurface('.iw-reader-page'),
+        bar: window.__iwSurface('[data-iw-probe="reader"] .flex-wrap'),
+        panel: window.__iwSurface('[data-iw-probe="reader"]'),
+        editor: window.__iwEditorPaper(),
+      }))
+      const ok = surf.page && surf.bar && surf.panel
+      check(ok, `[${theme}] read back the reading page, the markup bar and the panel`, JSON.stringify(surf))
+      if (ok) {
+        console.log(`      · page ${surf.page.bg} (lum ${surf.page.lum}) · bar ${surf.bar.bg} · panel ${surf.panel.bg} · editor ${surf.editor}`)
+        if (theme === 'night') {
+          check(surf.page.lum < 0.1, '[night] the reading page INVERTED', `${surf.page.bg} lum ${surf.page.lum}`)
+          // The bug: the bar stayed #faf8fc while the page went dark. Byte-identical day and night.
+          check(surf.bar.lum < 0.1, '[night] the MARKUP BAR inverted with it', `${surf.bar.bg} lum ${surf.bar.lum}`)
+          check(surf.page.bg !== surf.editor,
+            '[night] …and it is NOT the editor page — "slightly different from the main page"',
+            `reader ${surf.page.bg} vs editor ${surf.editor}`)
+          check(surf.page.bg !== surf.panel.bg,
+            '[night] …nor the chrome grey', `reader ${surf.page.bg} vs panel ${surf.panel.bg}`)
+          // ⚠ `page.evaluate` takes ONE argument. Passing two silently throws "Too many arguments"
+          // and aborts the whole theme pass — which is what it did on the first run here.
+          const sep = await page.evaluate(([a, b]) => window.__iwRatio(a, b), [surf.page.bg, surf.editor])
+          check(sep !== null && sep > 1.05 && sep < 2,
+            '[night] the two pages are near in value but distinct', `ratio ${sep}`)
+          // ── THE DIVIDING LINE ──────────────────────────────────────────────────────────────────
+          // Read the edge that actually FACES the editor, not an arbitrary side: `dockPanelPos`
+          // borders exactly one (or two, fullscreen), so asking about border-top on a side-docked
+          // panel measures a 0px edge and would pass or fail for the wrong reason.
+          const edge = await page.evaluate(([sel, ed]) => {
+            const el = document.querySelector(sel)
+            const cs = getComputedStyle(el)
+            const sides = ['Top', 'Right', 'Bottom', 'Left']
+              .map((s) => ({ s, w: parseFloat(cs[`border${s}Width`]), c: cs[`border${s}Color`] }))
+              .filter((x) => x.w > 0)
+            return { sides, vs: sides.length ? window.__iwRatio(sides[0].c, ed) : null }
+          }, ['[data-iw-probe="reader"]', surf.editor])
+          check(edge.sides.length > 0, '[night] the docked reader draws an edge against the editor',
+            JSON.stringify(edge.sides))
+          // A line you cannot see is not a line. The literal it replaced (#5c2d8a at 20% alpha over
+          // the night panel) composited to almost exactly the panel itself.
+          check(edge.vs !== null && edge.vs > 1.5,
+            '[night] …and that edge is VISIBLE against the editor page', `ratio ${edge.vs}`)
+        } else {
+          check(surf.page.lum > 0.5, '[day] the reading page is UNCHANGED — still light', surf.page.bg)
+          check(surf.bar.lum > 0.5, '[day] and so is the markup bar', surf.bar.bg)
+        }
+      }
+
+      // ── A REAL MARK, PLACED AND READ BACK ─────────────────────────────────────────────────────
+      // "A yellow highlight has to look like a yellow highlight." No token assertion can see this:
+      // it needs the mark to exist, be painted, and be measured off the DOM in both themes.
+      const mark = await page.evaluate(async () => {
+        const page2 = document.querySelector('.iw-reader-page')
+        const p = page2 && page2.querySelectorAll('p')[1]
+        if (!p) return { err: 'no paragraph' }
+        const r = document.createRange(); r.selectNodeContents(p)
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r)
+        p.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+        await new Promise((x) => setTimeout(x, 400))
+        // The selection popover's first swatch is #ffe066 — highlight in that colour immediately.
+        const dot = [...document.querySelectorAll('button[title="Highlight"]')]
+          .find((b) => /255,\s*224,\s*102/.test(getComputedStyle(b).backgroundColor))
+        if (!dot) return { err: 'no yellow swatch in the popover' }
+        dot.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await new Promise((x) => setTimeout(x, 600))
+        const span = [...page2.querySelectorAll('span')]
+          .find((el) => /255,\s*224,\s*102/.test(getComputedStyle(el).backgroundColor))
+        if (!span) return { err: 'the highlight did not paint' }
+        const cs = getComputedStyle(span)
+        return { fill: cs.backgroundColor, ink: cs.color, ratio: window.__iwRatio(cs.color, cs.backgroundColor) }
+      })
+      check(!mark.err, `[${theme}] a real highlight was placed on the article`, JSON.stringify(mark))
+      if (!mark.err) {
+        // THE STORED COLOUR IS UNTOUCHED — the invariant the inversion had to not cost.
+        check(mark.fill === 'rgb(255, 224, 102)',
+          `[${theme}] the highlight FILL is the stored #ffe066, not a theme's reading of it`, mark.fill)
+        // …and the ink on it is dark, in BOTH themes, so the words on it are readable.
+        check(mark.ratio >= 4.5, `[${theme}] the text ON the highlight reads`,
+          `${mark.ink} on ${mark.fill} = ${mark.ratio}:1`)
+      }
+      // ⚠ NOT Escape. This panel listens for it and CLOSES — every later check would then be
+      // measuring a reader that is not on screen (phonetouch.prove.mjs records the same trap).
       await page.evaluate(() => document.body.click())
       await page.waitForTimeout(200)
       // Selection popover.

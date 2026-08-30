@@ -23,6 +23,7 @@ import { splitMath, hasMath } from '../reader/readerMath'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
+import { readerInk } from '../reader/markInk'
 import { pdfZoomFactor } from './zoomGesture'
 import {
   extensionState, loadSource, openExtensionPopup, windowPort,
@@ -40,12 +41,26 @@ import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
-// `INKC` is the TOKEN, and every colour on the panel's CHROME must use it: --iw-ink is DARK
-// purple by day and LIGHT purple at night, so a literal #5c2d8a measured 1.13:1 on the night
-// header — invisible, not dim. `INK` survives only where it tints a PAPER surface.
-const INKC = 'var(--iw-ink, #5c2d8a)'
-// Two muted greys, because there are two kinds of surface: CHROME darkens at night, PAPER
-// dims and never inverts (a swatch has to be shown against the paper its mark lands on).
+// ── TWO SURFACES, TWO PALETTES, AND EVERY COLOUR HERE BELONGS TO EXACTLY ONE OF THEM ────────────
+// This panel is not one surface. Its HEADER is chrome (the dolphin-grey `.iw-nightable` panel);
+// its ARTICLE, its MARKUP BAR and every control face in that bar are reader PAPER, which now has
+// its own night (index.css, the reader token block). Getting a control's surface wrong is not a
+// near-miss — it produced BOTH of Peter's 2026-08-30 complaints at once, in opposite directions:
+// a literal `#5c2d8a` left on the night HEADER measured 1.13:1 (invisible), and chrome tokens
+// leaking onto the near-white markup BAR washed its labels out to ~1.2:1.
+// So: ask which surface the control sits on FIRST, then take that surface's token.
+const INKC = 'var(--iw-ink, #5c2d8a)'                     // purple inside a floating chrome bubble
+const CHROME_FG = 'var(--iw-reader-chrome-fg, #5c2d8a)'   // the header strip's own ink
+const CHROME_DIM = 'var(--iw-reader-chrome-dim, #d6d3d1)' // …and its disabled glyphs
+const INKP = 'var(--iw-reader-accent, #5c2d8a)'           // purple ON reader paper / the markup bar
+const CTL = 'var(--iw-reader-ctl, #fff)'                  // a control FACE on a reader surface
+const EDGE = 'var(--iw-reader-edge, #d6cfe0)'             // …its border
+const HAIR = 'var(--iw-reader-hair, rgba(92,45,138,0.13))'// hairline rules/dividers on paper
+const TINT = 'var(--iw-reader-tint, rgba(92,45,138,0.08))'// the lit-tool fill
+// Ink laid ON a mark's own fill. A highlight/note/box is an opaque PALE patch in both themes, so
+// its text is dark in both — stated here rather than inherited from a page that now inverts.
+const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
+// Two muted greys, because there are two kinds of surface.
 const MUTED_CHROME = 'var(--iw-pill-fg, #78716c)'
 const MUTED_PAPER = 'var(--iw-reader-muted, #6b645f)'
 
@@ -298,6 +313,14 @@ function markedStyle(ms: Located[]): React.CSSProperties | undefined {
   const note = ms.find((m) => m.kind === 'note')
   return {
     background: hl ? hl.color : undefined,
+    // ⚠ A HIGHLIGHTED RUN CARRIES ITS OWN INK. The fill is an opaque PALE colour — the mark's, at
+    // its stored value, in both themes — so the text on it must be dark whatever the page behind is
+    // doing. Day is byte-unchanged (--iw-reader-on-mark's day value IS the day paper ink); at night
+    // this is what keeps the highlight looking like a highlighter instead of turning into pale ink
+    // on pale yellow the moment the reading column went dark.
+    color: hl ? ON_MARK : undefined,
+    // A sticky note is a STROKE under ordinary text, so it needs no ink of its own — a pale rule on
+    // a dark page reads better than it ever did on a light one.
     borderBottom: note ? `2px solid ${note.color}` : undefined,
     borderRadius: hl ? 2 : undefined,
   }
@@ -312,10 +335,12 @@ function markedStyle(ms: Located[]): React.CSSProperties | undefined {
  */
 function InsertedText({ mark, onErase }: { mark: Located; onErase?: (id: string) => void }) {
   return (
+    // ⚠ THE ONE MARK WHOSE COLOUR IS THE READABLE ELEMENT, so it is the one that must be cast for
+    // the surface — see reader/markInk.ts. The STORED value is untouched; this is paint only.
     <span data-iw-ins={mark.id} title="Your note — armed eraser removes it"
       onClick={onErase ? (e) => { e.stopPropagation(); onErase(mark.id) } : undefined}
-      style={{ color: mark.color, fontWeight: 600, whiteSpace: 'pre-wrap',
-        borderBottom: `1px dotted ${mark.color}`, padding: '0 0.15em' }}>
+      style={{ color: readerInk(mark.color), fontWeight: 600, whiteSpace: 'pre-wrap',
+        borderBottom: `1px dotted ${readerInk(mark.color)}`, padding: '0 0.15em' }}>
       {mark.body}
     </span>
   )
@@ -342,7 +367,8 @@ function BoxCard({ mark, editing, onOpen, onChange, onDone, onDelete }: {
   return (
     <div data-iw-box={mark.id}
       style={{ margin: '0.4em 0 0.9em', padding: '6px 9px', borderRadius: 8, position: 'relative',
-        background: mark.color, color: '#2a2a2a', border: '1px solid rgba(0,0,0,0.16)',
+        // A textbox is a FILL of the mark's own pale colour: stored value, dark ink on top, both themes.
+        background: mark.color, color: ON_MARK, border: '1px solid rgba(0,0,0,0.16)',
         boxShadow: '0 1px 4px rgba(0,0,0,0.16)', fontFamily: 'system-ui, sans-serif',
         fontSize: '0.8em', lineHeight: 1.4 }}>
       {editing ? (
@@ -362,7 +388,9 @@ function BoxCard({ mark, editing, onOpen, onChange, onDone, onDelete }: {
       <button type="button" title="Delete this note" aria-label="Delete this note"
         onClick={(e) => { e.stopPropagation(); onDelete() }}
         style={{ position: 'absolute', top: -7, right: -7, width: 16, height: 16, borderRadius: '50%',
-          border: '1px solid #7f1d1d', background: 'var(--iw-reader-ctl, #fff)', color: '#7f1d1d', fontSize: '11px',
+          // The delete badge sits on a CONTROL FACE, not on the note's own fill — so its red is the
+          // paper-cast ink, or it disappears into the night control face.
+          border: `1px solid ${readerInk('#991b1b')}`, background: CTL, color: readerInk('#991b1b'), fontSize: '11px',
           lineHeight: '13px', padding: 0, cursor: 'pointer' }}>×</button>
     </div>
   )
@@ -433,7 +461,7 @@ function Runs({ runs, onNavigate, marks, points, onEraseMark }: {
         if (r.href && /^https?:\/\//i.test(r.href)) {
           const href = r.href
           node = (
-            <a href={href} rel="noreferrer noopener" style={{ color: INK, textDecoration: 'underline' }}
+            <a href={href} rel="noreferrer noopener" style={{ color: INKP, textDecoration: 'underline' }}
               // Plain click = follow it HERE. ⌘/Ctrl/middle-click keeps the browser's own meaning
               // (a real tab), because a panel that swallows every modifier is not a browser either.
               onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); onNavigate?.(href) }}>
@@ -890,8 +918,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     <button type="button" title={title} aria-label={title} onClick={onPress} className="iw-tap"
       style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, display: 'flex', alignItems: 'center',
         justifyContent: 'center', cursor: 'pointer', fontSize: '13px', lineHeight: 1,
-        border: `1px solid ${lit ? INK : 'var(--iw-nightable-border, #d6cfe0)'}`,
-        background: lit ? `${INK}14` : 'transparent', color: INKC }}>{glyph}</button>
+        border: `1px solid ${lit ? CHROME_FG : 'var(--iw-nightable-border, #d6cfe0)'}`,
+        background: lit ? `${INK}14` : 'transparent', color: CHROME_FG }}>{glyph}</button>
   )
 
   /** below → side-right → side-left → below. Two controls' worth of state on one button. */
@@ -1059,7 +1087,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }
 
   return createPortal(
-    <div className="iw-nightable iw-touch-guard flex flex-col bg-white"
+    // ⚠ THE DIVIDING LINE (Peter, 2026-08-30: "there's a dividing line between"). `dockPanelPos`
+    // already draws it on the edge facing the editor — it just drew it in a 20%-alpha DARK purple
+    // that vanished into the night panel. The colour is a token now (see dockLayout.ts), and
+    // `iw-dock-panel` is what lets that token beat `.iw-nightable`'s !important border-color.
+    // Do NOT add a competing border here: dockPanelPos is spread AFTER this style object, so an
+    // inline `border` would be half-overridden per edge and the two rules would drift.
+    <div className="iw-nightable iw-touch-guard iw-dock-panel flex flex-col bg-white"
       style={{ position: 'fixed', zIndex: 80, ...dockPanelPos({ orientation, dockSide, width, height }) }}
       onMouseDown={(e) => e.stopPropagation()}>
       {/* Resize handle on the edge facing the editor — the same rule and the same 10px grab strip
@@ -1080,17 +1114,21 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             per side, so neighbours never contend. See the rule's header in index.css. */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-200"
           style={{ fontSize: '13px', ['--iw-tap-x' as string]: '8px' }}>
+          {/* ⚠ THE ENABLED ARROW WAS THE LITERAL #5c2d8a ON THE NIGHT HEADER — 1.13:1, invisible,
+              and no gate ever saw it: with a one-entry history BOTH arrows are disabled, and a
+              disabled control is exempt from contrast auditing by WCAG 1.4.3. It only appears once
+              the reader has actually navigated, which a probe has to do on purpose. */}
           <button type="button" title="Back" disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))}
             className="iw-tap"
-            style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>←</button>
+            style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? CHROME_DIM : CHROME_FG, fontSize: '15px', padding: '0 2px' }}>←</button>
           <button type="button" title="Forward" disabled={idx >= stack.length - 1} onClick={() => setIdx((i) => Math.min(stack.length - 1, i + 1))}
             className="iw-tap"
-            style={{ background: 'transparent', border: 'none', cursor: idx >= stack.length - 1 ? 'default' : 'pointer', color: idx >= stack.length - 1 ? '#d6d3d1' : INK, fontSize: '15px', padding: '0 2px' }}>→</button>
+            style={{ background: 'transparent', border: 'none', cursor: idx >= stack.length - 1 ? 'default' : 'pointer', color: idx >= stack.length - 1 ? CHROME_DIM : CHROME_FG, fontSize: '15px', padding: '0 2px' }}>→</button>
           {/* The title is the FIRST thing to go on a phone (Peter's iPhone 8 is 375px): four header
               actions, a back/forward pair and a usable address bar do not fit beside it, and the
               address bar already says where you are. Desktop keeps it. */}
           {!isPhone && (
-          <span style={{ color: INKC, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: '30%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ color: CHROME_FG, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: '30%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {doc?.title || title || hostOf(here)}
           </span>
           )}
@@ -1146,8 +1184,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           {!framed && headings.length > 1 && !showNav && (
             <button type="button" title="Show the section list" onClick={toggleNav} className="iw-tap"
               style={{ position: 'absolute', left: 6, top: 6, zIndex: 5, width: 24, height: 24,
-                borderRadius: 6, border: '1px solid var(--iw-nightable-border, #d6cfe0)',
-                background: 'rgba(255,255,255,0.92)', color: INK, cursor: 'pointer', fontSize: '13px',
+                borderRadius: 6, border: `1px solid ${EDGE}`,
+                background: CTL, color: INKP, cursor: 'pointer', fontSize: '13px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }}>☰</button>
           )}
@@ -1222,7 +1260,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 writer's own browser is not blocked by anyone, so a tab always works. */}
             {error && !framed && isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
-                <div style={{ color: INK, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
+                <div style={{ color: CHROME_FG, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
                 {/* ⚠ THE REMEDY IS NAMED, AND IT DEPENDS ON WHAT THE WRITER ALREADY HAS. The
                     extension fetches from their own address, which is the whole reason a search
                     engine refuses us and serves them — so where it is installed-but-unpermitted the
@@ -1240,12 +1278,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 <div className="flex gap-2 flex-wrap justify-center">
                   {extState === 'blocked' && (
                     <button type="button" onClick={askForFetchPermission}
-                      className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                      className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
                       Use my own connection
                     </button>
                   )}
                   <button type="button" onClick={() => go(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(queryOf(here))}`)}
-                    className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Search Wikipedia here
                   </button>
                   <a href={`https://duckduckgo.com/?q=${encodeURIComponent(queryOf(here))}`} target="_blank" rel="noreferrer noopener"
@@ -1257,10 +1295,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             )}
             {error && !framed && !isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
-                <div style={{ color: INK, fontSize: '15px' }}>{error}</div>
+                <div style={{ color: CHROME_FG, fontSize: '15px' }}>{error}</div>
                 {!likelyRefusesFraming(here) && (
                   <button type="button" onClick={() => setFramed(true)}
-                    className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Try showing the live page instead
                   </button>
                 )}
@@ -1278,7 +1316,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               // fires no error event, so the detector is a deadline; generous, because a slow site
               // called "refused" would be the worse lie.
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
-                <div style={{ color: INK, fontSize: '15px' }}>{hostOf(here)} can’t be shown in its original form here.</div>
+                <div style={{ color: CHROME_FG, fontSize: '15px' }}>{hostOf(here)} can’t be shown in its original form here.</div>
                 <div style={{ maxWidth: 470, lineHeight: 1.55 }}>
                   Some sites send a header telling browsers not to display them inside another page. It’s
                   what stops a page wrapping your bank in a disguise, so nothing in Inkwave can override
@@ -1287,7 +1325,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 </div>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setFramed(false)}
-                    className="rounded-full px-3 py-1.5" style={{ border: `1px solid ${INK}55`, color: INK, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Read it here instead
                   </button>
                   <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
@@ -1298,7 +1336,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             {framed && !frameRefused && (
               // Live page: readable, but the browser keeps its text out of our reach — so the
               // selection actions are absent here rather than present and silently inert.
-              <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: 'var(--iw-reader-ctl, #fff)' }}>
+              <div ref={frameHostRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: CTL }}>
                 <iframe src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
@@ -1307,7 +1345,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   // protection, and stripping it is a plausible cause of the missing pictures Peter
                   // saw. The default (strict-origin-when-cross-origin) sends the origin only —
                   // enough for those checks, and it leaks no path.
-                  style={{ display: 'block', border: 'none', background: 'var(--iw-reader-ctl, #fff)',
+                  style={{ display: 'block', border: 'none', background: CTL,
                     width: frameGeom.w, height: frameGeom.h,
                     transform: frameGeom.scale === 1 ? undefined : `scale(${frameGeom.scale})`,
                     transformOrigin: '0 0' }} />
@@ -1349,7 +1387,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                         // from the article's own text, which must stay selectable (that selection
                         // is the entire reason the page is fetched rather than framed). So it grows
                         // for real, in the space a heading's line box already has.
-                        style={{ marginLeft: '0.5em', fontSize: '0.6em', color: INK, border: `1px solid ${INK}44`, borderRadius: 6, padding: isPhone ? '9px 10px' : '2px 7px', background: 'transparent', cursor: 'pointer', verticalAlign: 'middle' }}>
+                        style={{ marginLeft: '0.5em', fontSize: '0.6em', color: INKP, border: `1px solid ${EDGE}`, borderRadius: 6, padding: isPhone ? '9px 10px' : '2px 7px', background: 'transparent', cursor: 'pointer', verticalAlign: 'middle' }}>
                         cite §
                       </button>
                     )}
@@ -1371,7 +1409,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               }
               if (b.kind === 'quote') {
                 return wrap(
-                  <blockquote key={i} {...blk} style={{ margin: '0.9em 0', paddingLeft: '1em', borderLeft: `3px solid ${INK}33`, opacity: 0.85 }}>
+                  <blockquote key={i} {...blk} style={{ margin: '0.9em 0', paddingLeft: '1em', borderLeft: `3px solid ${HAIR}`, opacity: 0.85 }}>
                     <Runs onNavigate={go} runs={b.runs} marks={byBlock.get(i)} points={pts} onEraseMark={eraseMark} />
                   </blockquote>,
                 )
@@ -1402,13 +1440,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <div ref={composerBoxRef} className="iw-nightable fixed z-[402] flex items-center gap-1.5 bg-white rounded-full shadow-lg px-2 py-1.5"
             style={{ left: composer.x, top: Math.max(8, composer.y - 46), transform: 'translateX(-50%)',
               maxWidth: 'calc(100vw - 16px)',
-              border: `1px solid ${INK}44`, fontSize: '12px', ['--iw-tap-x' as string]: '6px' }}>
+              border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '6px' }}>
             {TEXT_COLORS.map((c) => (
               <button key={c} type="button" title="Ink" className="iw-tap"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setTextColor(c); textColorRef.current = c }}
-                style={{ width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer',
-                  flexShrink: 0, border: textColor === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.2)' }} />
+                style={{ width: 16, height: 16, borderRadius: '50%', background: readerInk(c), cursor: 'pointer',
+                  flexShrink: 0, border: textColor === c ? `2px solid ${INKC}` : '1px solid rgba(0,0,0,0.2)' }} />
             ))}
             <input autoFocus value={composer.value} placeholder="your words…"
               onChange={(e) => setComposer((c) => (c ? { ...c, value: e.target.value } : c))}
@@ -1421,9 +1459,9 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               className="iw-nightable"
               style={{ width: 190, height: isPhone ? TOUCH_FIELD_H : 22, fontSize: '12px', padding: '0 8px', borderRadius: 999,
                 border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
-                color: textColor, fontWeight: 600, outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
+                color: readerInk(textColor), fontWeight: 600, outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
             <button type="button" title="Write it in" onMouseDown={(e) => e.preventDefault()} onClick={commitComposer}
-              className="rounded-full px-2 py-0.5 iw-tap" style={{ color: INK, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
+              className="rounded-full px-2 py-0.5 iw-tap" style={{ color: INKC, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
             <button type="button" title="Cancel" onMouseDown={(e) => e.preventDefault()} onClick={() => setComposer(null)}
               className="iw-tap"
               style={{ color: 'var(--iw-pill-fg, #78716c)', background: 'transparent', border: 'none', cursor: 'pointer' }}>✕</button>
@@ -1434,7 +1472,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
         {sel && !framed && (onCite || onQuote) && (
           <div ref={selBoxRef} className="iw-nightable fixed z-[401] flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1"
             style={{ left: sel.x, top: Math.max(8, sel.y - 42), transform: 'translateX(-50%)',
-              maxWidth: 'calc(100vw - 16px)', border: `1px solid ${INK}44`, fontSize: '12px', ['--iw-tap-x' as string]: '4px' }}
+              maxWidth: 'calc(100vw - 16px)', border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '4px' }}
             onMouseDown={(e) => e.preventDefault()}>
             {/* THE SAME COLOURED DOTS AS THE PDF (Peter: "highlighting text without any mode on
                 should put up the coloured dots and link to citation panel"). One gesture, one
@@ -1445,7 +1483,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 onClick={() => { setMarkColor(c); markColorRef.current = c; markSelection('highlight') }}
                 style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', flexShrink: 0 }} />
             ))}
-            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 2px' }} />
+            <span style={{ width: 1, height: 16, background: 'var(--iw-nightable-border, rgba(92,45,138,0.28))', margin: '0 2px' }} />
             {onQuote && (
               <button type="button" onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onQuote(sel.text); setSel(null); flash('Saved as the cited sentence') }}
@@ -1501,20 +1539,26 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             highlight means the same thing in both readers. READER MODE ONLY: a live page is the
             publisher's document and the browser seals it off from us — we cannot mark what we
             cannot read, and offering a tool that silently does nothing is worse than not offering
-            it, so the bar renders the reason instead. */}
+            it, so the bar renders the reason instead.
+            ⚠ THIS BAR READ `var(--iw-panel-bg, …)` AND THAT TOKEN IS DEFINED NOWHERE IN THE REPO —
+            so it painted the #faf8fc fallback in BOTH themes (measured byte-identical), which is the
+            near-white slab Peter saw under a night reading column, with chrome rescues washing its
+            labels out on top of it. The bar belongs to the PAPER: it wears the marks' own colours,
+            and a swatch has to be shown against the surface its mark lands on. */}
         {!framed && (
-          <div className="flex items-center gap-1.5 px-2 py-1.5 border-t border-stone-200 flex-wrap"
-            style={{ fontSize: '12px', background: 'var(--iw-panel-bg, #faf8fc)', ['--iw-tap-x' as string]: '6px' }}>
+          <div className="flex items-center gap-1.5 px-2 py-1.5 border-t flex-wrap"
+            style={{ fontSize: '12px', background: 'var(--iw-reader-bar, #faf8fc)', borderTopColor: EDGE,
+              ['--iw-tap-x' as string]: '6px' }}>
             {/* TWO GESTURES, AND THE TOOL DECIDES WHICH. A highlight and a sticky note act on a
                 SELECTION; coloured text and a textbox are placed by a CLICK, because they add words
                 the page never had and so have nothing to select. Giving the placing tools the
                 selection gesture would mean "select some text to write something that isn't in it",
                 which is why they arm and wait instead. */}
             {([
-              { kind: 'highlight' as const, mode: 'select' as const, label: '▮', title: 'Highlight — select text, then click · hold for colours', palette: MARK_COLORS, color: markColor, setColor: setMarkColor, glyph: '#8a6a04' },
-              { kind: 'note' as const, mode: 'select' as const, label: '🗒', title: 'Sticky note — select text, then click · hold for colours', palette: NOTE_COLORS, color: markColor, setColor: setMarkColor, glyph: INK },
-              { kind: 'text' as const, mode: 'place' as const, label: 'T', title: 'Coloured text — click, then click where the words should go · hold for inks', palette: TEXT_COLORS, color: textColor, setColor: setTextColor, glyph: textColor },
-              { kind: 'box' as const, mode: 'place' as const, label: '▭', title: 'Textbox — click, then click a paragraph to hang a note under it · hold for colours', palette: BOX_COLORS, color: boxColor, setColor: setBoxColor, glyph: INK },
+              { kind: 'highlight' as const, mode: 'select' as const, label: '▮', title: 'Highlight — select text, then click · hold for colours', palette: MARK_COLORS, color: markColor, setColor: setMarkColor, glyph: readerInk('#8a6a04') },
+              { kind: 'note' as const, mode: 'select' as const, label: '🗒', title: 'Sticky note — select text, then click · hold for colours', palette: NOTE_COLORS, color: markColor, setColor: setMarkColor, glyph: INKP },
+              { kind: 'text' as const, mode: 'place' as const, label: 'T', title: 'Coloured text — click, then click where the words should go · hold for inks', palette: TEXT_COLORS, color: textColor, setColor: setTextColor, glyph: readerInk(textColor) },
+              { kind: 'box' as const, mode: 'place' as const, label: '▭', title: 'Textbox — click, then click a paragraph to hang a note under it · hold for colours', palette: BOX_COLORS, color: boxColor, setColor: setBoxColor, glyph: INKP },
             ]).map((t) => (
               <div key={t.kind} style={{ position: 'relative' }}>
                 <button type="button" title={t.title} className="iw-tap"
@@ -1545,7 +1589,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                     // to scroll under a toolbar button, so nothing is lost.
                     touchAction: 'none',
                     fontWeight: t.kind === 'text' ? 700 : undefined,
-                    border: `1px solid ${tool === t.kind ? INK : '#d6cfe0'}`, background: tool === t.kind ? `${INK}14` : '#fff',
+                    border: `1px solid ${tool === t.kind ? INKP : EDGE}`, background: tool === t.kind ? TINT : CTL,
                     color: t.glyph }}>{t.label}</button>
                 {paletteOpen === t.kind && (
                   <>
@@ -1555,14 +1599,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                         panel's own `.iw-touch-guard` handler (TiptapEditor) does. So the dismiss
                         scrim was listening for an event a finger is not guaranteed to send. */}
                     <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onPointerDown={() => setPaletteOpen(null)} />
-                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: 'var(--iw-reader-ctl, #fff)', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '6px' }}>
+                    <div className="iw-nightable" style={{ position: 'absolute', bottom: 32, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: CTL, border: `1px solid ${EDGE}`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '6px' }}>
                       {t.palette.map((c) => (
                         <button key={c} type="button" className="iw-tap" onMouseDown={(ev) => ev.preventDefault()}
                           // EACH TOOL REMEMBERS ITS OWN COLOUR. One shared "current colour" would
                           // mean picking an ink for the T tool silently recoloured the highlighter,
                           // and the two palettes do not even overlap (washes vs inks).
                           onClick={() => { t.setColor(c); setPaletteOpen(null) }}
-                          style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: t.color === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                          style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: t.color === c ? `2px solid ${INKP}` : '1px solid rgba(0,0,0,0.15)' }} />
                       ))}
                     </div>
                   </>
@@ -1574,7 +1618,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             <button type="button" title="Eraser — click a mark to remove it" className="iw-tap"
               onClick={() => setTool((cur) => (cur === 'erase' ? null : 'erase'))}
               style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: `1px solid ${tool === 'erase' ? INK : '#d6cfe0'}`, background: tool === 'erase' ? `${INK}14` : '#fff' }}>
+                border: `1px solid ${tool === 'erase' ? INKP : EDGE}`, background: tool === 'erase' ? TINT : CTL }}>
               <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="#e8a0c0" stroke="#c76fa0" strokeWidth="1.1"
                   d="M15.6 3.5 3.5 15.6a2 2 0 0 0 0 2.8l2.1 2.1a2 2 0 0 0 2.8 0L20.5 8.4a2 2 0 0 0 0-2.8l-2.1-2.1a2 2 0 0 0-2.8 0Z" />
@@ -1582,13 +1626,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </svg>
             </button>
 
-            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
+            <span style={{ width: 1, height: 16, background: HAIR, margin: '0 3px' }} />
             {/* Reading face — Peter's "preset sexy fonts". Reader mode only; a live page's
                 typography is the publisher's. */}
             <select value={font} title="Reading font"
               onChange={(e) => { setFont(e.target.value); try { localStorage.setItem('inkwave:readerFont', e.target.value) } catch { /* private */ } }}
-              className="iw-nightable"
-              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              className="iw-nightable iw-reader-field"
+              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
               {READER_FONTS.map((f) => <option key={f.css} value={f.css}>{f.label}</option>)}
             </select>
             {/* Line spacing (Peter, 2026-08-28). Sits beside the face because they are one decision
@@ -1596,8 +1640,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 than one you are skimming. */}
             <select value={String(leading)} title="Line spacing"
               onChange={(e) => { const v = Number(e.target.value); setLeading(v); try { localStorage.setItem('inkwave:readerLeading', String(v)) } catch { /* private */ } }}
-              className="iw-nightable"
-              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
+              className="iw-nightable iw-reader-field"
+              style={{ height: isPhone ? TOUCH_FIELD_H : 26, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '0.76rem', padding: '0 4px', cursor: 'pointer' }}>
               <option value="1.35">Tight</option>
               <option value="1.62">Normal</option>
               <option value="1.9">Airy</option>
@@ -1610,11 +1654,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 grows the second scrollbar the PDF has to. ⌘/Ctrl+wheel over the article does the
                 same thing; the percentage is a button because a number you cannot get back to 100%
                 from is a trap. */}
-            <span style={{ width: 1, height: 16, background: `${INK}22`, margin: '0 3px' }} />
+            <span style={{ width: 1, height: 16, background: HAIR, margin: '0 3px' }} />
             <div className="flex items-center" style={{ gap: 2, ['--iw-tap-x' as string]: '2px' }}>
               <button type="button" title="Smaller text" aria-label="Smaller text" className="iw-tap"
                 onClick={() => applyZoom(readerZoomStep(zoom, -1))}
-                style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, cursor: 'pointer', lineHeight: 1 }}>−</button>
+                style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, cursor: 'pointer', lineHeight: 1 }}>−</button>
               <button type="button" title="Back to 100%" onClick={() => applyZoom(1)} className="iw-tap"
                 style={{ minWidth: 42, height: 22, borderRadius: 6, border: '1px solid transparent', background: 'transparent',
                   color: MUTED_PAPER, cursor: 'pointer', fontSize: '11px', fontFamily: 'system-ui, sans-serif' }}>
@@ -1622,7 +1666,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </button>
               <button type="button" title="Bigger text" aria-label="Bigger text" className="iw-tap"
                 onClick={() => applyZoom(readerZoomStep(zoom, 1))}
-                style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, cursor: 'pointer', lineHeight: 1 }}>+</button>
+                style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, cursor: 'pointer', lineHeight: 1 }}>+</button>
             </div>
 
             {/* ⚠ WHOSE CONNECTION FETCHED THIS. Always visible in reader mode, because the whole
@@ -1646,13 +1690,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {via === 'extension' ? (
                   <span title="Fetched by the Inkwave extension, from your own connection and address. Inkwave’s server was not involved and never saw this address."
-                    style={{ fontSize: '11px', color: 'var(--iw-verified, #15803d)', whiteSpace: 'nowrap' }}>
+                    style={{ fontSize: '11px', color: 'var(--iw-reader-ok, #15803d)', whiteSpace: 'nowrap' }}>
                     ⌂ your connection
                   </span>
                 ) : extState === 'blocked' ? (
                   <button type="button" onClick={askForFetchPermission}
                     title="The Inkwave extension is installed but hasn’t been allowed to fetch pages. Turning that on loads sources from your own connection instead."
-                    style={{ fontSize: '11px', color: 'var(--iw-reader-ink, #2c2a28)', background: 'transparent', border: `1px solid ${INK}44`,
+                    style={{ fontSize: '11px', color: 'var(--iw-reader-ink, #2c2a28)', background: 'transparent', border: `1px solid ${EDGE}`,
                       borderRadius: 999, padding: '1px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                     ☁ Inkwave’s server — use my connection
                   </button>
@@ -1675,7 +1719,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             percentage rather than inventing a page number the source does not have. */}
         {!framed && doc && (
           <div style={{ position: 'absolute', left: 8, bottom: 42, zIndex: 401, pointerEvents: 'none',
-            background: 'var(--iw-reader-ctl, #fff)', color: INK, border: `1px solid ${INK}55`,
+            background: CTL, color: INKP, border: `1px solid ${EDGE}`,
             borderRadius: 999, padding: '3px 11px', fontSize: '12px', fontWeight: 600,
             fontFamily: 'system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
             {headings.length > 1 ? `§ ${Math.min(headings.length, sectionNow + 1)} / ${headings.length}` : `${readPct}%`}
@@ -1693,12 +1737,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             in a live page we are allowed to mark. */}
         {framed && !frameRefused && (
           <div className="flex items-center gap-2 px-2 py-1.5 border-t border-stone-200"
-            style={{ fontSize: '11px', background: 'var(--iw-panel-bg, #faf8fc)', color: 'var(--iw-pill-fg, #78716c)' }}>
+            style={{ fontSize: '11px', background: 'var(--iw-reader-bar, #faf8fc)', color: MUTED_PAPER, borderTopColor: EDGE }}>
             <span>Page width</span>
             <select value={pageWidth} title="How wide a screen the site should lay out for"
               onChange={(e) => { const v = e.target.value as 'auto' | 'narrow' | 'wide'; setPageWidth(v); try { localStorage.setItem('inkwave:readerPageWidth', v) } catch { /* private */ } }}
-              className="iw-nightable"
-              style={{ height: isPhone ? TOUCH_FIELD_H : 22, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
+              className="iw-nightable iw-reader-field"
+              style={{ height: isPhone ? TOUCH_FIELD_H : 22, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '11px', padding: '0 4px', cursor: 'pointer' }}>
               <option value="auto">Fit the panel</option>
               <option value="narrow">Big text (phone layout)</option>
               <option value="wide">Wide (desktop layout)</option>

@@ -162,5 +162,47 @@ export const CONTRAST_WALKER = `
     walk(root)
     return { items: out }
   }
+
+  // ── carried forward on the merge (2026-08-30) from the read-view lane ──────────────────
+  // Its own probe needs these; they were written against a private copy of this walker, and
+  // taking either side whole would have dropped one lane's work. Same resolution as the
+  // backdrop fix above: keep the shared module, merge the capability into it.
+  /** Contrast between two arbitrary painted colours, so a probe can compare two surfaces.
+   *  ⚠ IT MUST TAKE HEX AS WELL AS rgb(). Everything else here reports hex (that is what \`hex()\`
+   *  is for), so a parser that only reads rgb() returns null for its own output — which the caller
+   *  then has to distinguish from "these two surfaces are identical". Measured: it did exactly
+   *  that, and \`ratio null\` read as a failing comparison rather than a broken instrument. */
+  const anyColor = (c) => {
+    const s = String(c || '').trim()
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s)
+    if (m) {
+      const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1]
+      return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16), a: 1 }
+    }
+    return parse(s)
+  }
+  window.__iwRatio = (a, b) => {
+    const pa = anyColor(a), pb = anyColor(b)
+    return pa && pb ? Math.round(ratio(pa, pb) * 100) / 100 : null
+  }
+  /** The effective background of whatever paints the editor page behind the panel. */
+  window.__iwEditorPaper = () => {
+    const el = document.querySelector('.inkwave-sheet') || document.querySelector('.scroll-paper')
+    return el ? hex(window.__iwBgOf(el)) : null
+  }
+
+  window.__iwSurface = (sel) => {
+    const el = document.querySelector(sel)
+    if (!el) return null
+    const cs = getComputedStyle(el)
+    const bg = window.__iwBgOf(el)
+    const fg = parse(cs.color)
+    return {
+      bg: hex(bg), lum: Math.round(lum(bg) * 10000) / 10000,
+      fg: fg ? hex(fg.a < 1 ? over(fg, bg) : fg) : null,
+      ratio: fg ? Math.round(ratio(fg.a < 1 ? over(fg, bg) : fg, bg) * 100) / 100 : null,
+      borderTop: cs.borderTopWidth, borderColor: cs.borderTopColor,
+    }
+  }
 })()
 `

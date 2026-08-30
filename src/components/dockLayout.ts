@@ -74,7 +74,15 @@ export function dockPanelPos(o: {
   orientation: DockOrientation; dockSide: DockSide; width: number; height: number
   fullscreen?: boolean; fullscreenWidth?: number
 }): Record<string, string | number> {
-  const border = '1px solid #5c2d8a33'
+  // ⚠ THE DIVIDING LINE PETER ASKED FOR ALREADY EXISTED — as a literal, and it was invisible in the
+  // theme that needed it (2026-08-30: "make sure … there's a dividing line between"). `#5c2d8a33` is
+  // a 20%-alpha DARK purple: over cream it reads as a faint edge, over the night panel it composites
+  // to very nearly the panel itself, so a docked reader butted onto the night editor with nothing
+  // between them. It is a token now, and the night value is a LIGHT grey-blue.
+  // NB `.iw-nightable { border-color: … !important }` would otherwise beat this inline value — the
+  // `.iw-dock-panel` rule in index.css is what lets the token win at night. A panel using this
+  // MUST carry that class, or its divider silently reverts to the chrome border colour.
+  const border = '1px solid var(--iw-reader-divider, #cfc7dc)'
   if (o.fullscreen) {
     return { top: 0, bottom: 0, left: '50%', width: o.fullscreenWidth ?? 800, transform: 'translateX(-50%)',
       borderRadius: 0, borderLeft: border, borderRight: border, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }

@@ -243,15 +243,15 @@ export function PdfSidePanel() {
     // Fullscreen float: a canonical-page-wide column, centred over the water, running the FULL
     // viewport height with SQUARE corners (Peter, 2026-07-10 rev2) — like one of the editor's own
     // sheets surfaced above the water, wave strips visible either side.
-    ? { top: 0, bottom: 0, left: '50%', width: fullscreenWidth(fsViewportW), transform: 'translateX(-50%)', borderRadius: 0, borderLeft: `1px solid ${INK}33`, borderRight: `1px solid ${INK}33`, boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
+    ? { top: 0, bottom: 0, left: '50%', width: fullscreenWidth(fsViewportW), transform: 'translateX(-50%)', borderRadius: 0, borderLeft: '1px solid var(--iw-reader-divider, #cfc7dc)', borderRight: '1px solid var(--iw-reader-divider, #cfc7dc)', boxShadow: '0 14px 52px rgba(0,0,0,0.35)', overflow: 'hidden' }
     : orientation === 'top'
       // PHONE: the viewer pops up ABOVE, full width, top half — the editor keeps the bottom half.
-      ? { top: 0, left: 0, right: 0, height: PHONE_TOP_H, paddingTop: 'env(safe-area-inset-top)' /* notch, standalone PWA */, borderBottom: `1px solid ${INK}33`, boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }
+      ? { top: 0, left: 0, right: 0, height: PHONE_TOP_H, paddingTop: 'env(safe-area-inset-top)' /* notch, standalone PWA */, borderBottom: '1px solid var(--iw-reader-divider, #cfc7dc)', boxShadow: '0 4px 24px rgba(0,0,0,0.18)' }
       : side
       ? (dockSide === 'left'
-        ? { top: 0, left: 0, bottom: 0, width, maxWidth: '100vw', borderRight: `1px solid ${INK}33`, boxShadow: '4px 0 24px rgba(0,0,0,0.18)' }
-        : { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: `1px solid ${INK}33`, boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' })
-      : { left: 0, right: 0, bottom: 0, height, maxHeight: '92vh', borderTop: `1px solid ${INK}33`, boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }
+        ? { top: 0, left: 0, bottom: 0, width, maxWidth: '100vw', borderRight: '1px solid var(--iw-reader-divider, #cfc7dc)', boxShadow: '4px 0 24px rgba(0,0,0,0.18)' }
+        : { top: 0, right: 0, bottom: 0, width, maxWidth: '100vw', borderLeft: '1px solid var(--iw-reader-divider, #cfc7dc)', boxShadow: '-4px 0 24px rgba(0,0,0,0.18)' })
+      : { left: 0, right: 0, bottom: 0, height, maxHeight: '92vh', borderTop: '1px solid var(--iw-reader-divider, #cfc7dc)', boxShadow: '0 -4px 24px rgba(0,0,0,0.18)' }
   // Resize handle rides the panel's INNER edge (the one facing the editor) — flips with the dock side.
   const handlePos: React.CSSProperties = side
     ? { ...(dockSide === 'left' ? { right: 0 } : { left: 0 }), top: 0, bottom: 0, width: 10, cursor: 'col-resize' }
@@ -259,7 +259,10 @@ export function PdfSidePanel() {
 
   return (
     <>
-      <div style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
+      {/* `iw-dock-panel` owns the divider colour — see dockLayout.ts. This root carries no
+          `iw-nightable`, so its inline border already resolves the token; the class is here so the
+          two dock panels answer to ONE rule rather than to whichever happens to apply. */}
+      <div className="iw-dock-panel" style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
         {/* Resize handle on the edge facing the editor (hidden in fullscreen, and on the phone's
             fixed 50dvh top dock — a touch drag there fights scrolling). */}
         {!fullscreen && orientation !== 'top' && (

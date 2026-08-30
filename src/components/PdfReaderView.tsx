@@ -31,7 +31,17 @@ import { getPageReflow } from './pdfReflowStore'
 import { isTouchDevice } from '../editor/Scroll'
 import { FONTS } from './StyleBar'
 
-const INK = '#5c2d8a'
+// This whole view is reader PAPER (it is a reading column, not chrome), so every colour in it comes
+// from the reader token family — the same one the source reader uses, because two reading columns
+// themed by two rules is how they drift. See index.css's reader block for the night palette.
+const INKP = 'var(--iw-reader-accent, #5c2d8a)'
+const CTL = 'var(--iw-reader-ctl, #fff)'
+const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
+const HAIR = 'var(--iw-reader-hair, rgba(92,45,138,0.13))'
+const MUTED = 'var(--iw-reader-muted, #6b645f)'
+// Ink laid ON a mark's own fill. A highlight or note card is an opaque PALE patch in both themes,
+// so its text is dark in both — day is byte-unchanged, night stops it turning to pale-on-pale.
+const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> }
@@ -41,14 +51,15 @@ export const READER_FONT_KEY = 'inkwave:pdfReaderFont'
 export const READER_SIZE_KEY = 'inkwave:pdfReaderSize'
 export const READER_LEAD_KEY = 'inkwave:pdfReaderLeading'
 
-/** A pale wash for a highlight background — the palette's colours are inks at full strength and a
- *  solid fill over body text is unreadable, which is the one thing a reading view may not be. */
-function wash(hex: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!m) return hex
-  const n = parseInt(m[1], 16)
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, 0.55)`
-}
+/** ⚠ `wash()` IS GONE, AND ITS PREMISE WITH IT. It faded a highlight to 55% alpha because "a solid
+ *  fill over body text is unreadable" — true only while nothing set the ink ON the fill, which the
+ *  source reader has always done (it paints the mark at full strength and reads perfectly). Over a
+ *  NIGHT reading column the wash is worse than merely dim: rgba(255,224,102,.55) over #26241f
+ *  composites to #9d8b46, a muddy olive that no longer looks yellow at all.
+ *  So the strength is a token (`--iw-reader-wash`, 55% by day and opaque at night) applied in CSS
+ *  via `.iw-mark-fill`, and the ink on top is `--iw-reader-on-mark`. The mark's own colour is handed
+ *  in as `--iw-mark` and is never reinterpreted by either theme. Day renders byte-identically. */
+const markFill = (hex: string) => ({ ['--iw-mark' as string]: hex })
 
 type PageState = { n: number; reflow: PageReflow | null }
 type Mk = ReaderMark & { hl: PdfHighlight }
@@ -300,14 +311,15 @@ export function PdfReaderView({
     ? { width: 110, height: 40, touchAction: 'none' }
     : { width: 86 }
   return (
-    <div className="iw-pdf-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fbfaf7' }}>
+    <div className="iw-pdf-reader" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--iw-reader-paper, #fbfaf7)' }}>
       {/* THE CONTROLS PETER ASKED FOR FIRST — font, size, line spacing. They are the reason this
           view exists, so they are in it rather than buried in the viewer's already-full toolbar. */}
       <div className="iw-tap-row" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        padding: '6px 10px', borderBottom: `1px solid ${INK}22`, background: 'var(--iw-reader-bar, #faf8fc)', fontSize: '0.78rem', color: INK,
+        padding: '6px 10px', borderBottom: `1px solid ${EDGE}`, background: 'var(--iw-reader-bar, #faf8fc)', fontSize: '0.78rem', color: INKP,
         ['--iw-tap-x' as string]: '8px' }}>
         <select value={font} onChange={e => setFont(e.target.value)} title="Reading font"
-          style={{ height: touch ? 40 : 26, borderRadius: 6, border: '1px solid var(--iw-reader-edge, #d6cfe0)', background: 'var(--iw-reader-ctl, #fff)', color: INK, fontSize: '0.78rem', padding: '0 4px' }}>
+          className="iw-reader-field"
+          style={{ height: touch ? 40 : 26, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '0.78rem', padding: '0 4px' }}>
           {FONTS.map(f => <option key={f.label} value={f.css}>{f.label}</option>)}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Text size">
@@ -355,16 +367,16 @@ export function PdfReaderView({
       <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto' }}>
         <div ref={rootRef} onMouseUp={onMouseUpOuter} className="iw-pdf-reader-page"
           style={{ maxWidth: Math.min(760, 46 * size), margin: '0 auto', padding: '26px 22px 90px',
-            fontFamily: font, fontSize: size, lineHeight: lead, color: '#241f2b',
+            fontFamily: font, fontSize: size, lineHeight: lead, color: 'var(--iw-reader-ink, #241f2b)',
             cursor: tool === 'text' ? 'crosshair' : tool === 'erase' ? 'not-allowed' : undefined }}>
-          {!pages.length && <p style={{ color: '#9ca3af' }}>Reading the text…</p>}
+          {!pages.length && <p style={{ color: MUTED }}>Reading the text…</p>}
           {pages.map(p => (
             <section key={p.n} data-page={p.n}>
               <div style={{ margin: '26px 0 12px', display: 'flex', alignItems: 'center', gap: 10,
                 fontSize: '0.68em', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--iw-reader-muted, #6b645f)' }}>
-                <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
+                <span style={{ flex: 1, height: 1, background: HAIR }} />
                 page {p.n + pageOffset}
-                <span style={{ flex: 1, height: 1, background: '#e4dfec' }} />
+                <span style={{ flex: 1, height: 1, background: HAIR }} />
               </div>
               {!p.reflow && (
                 <p style={{ color: '#9a3412', fontStyle: 'italic', fontSize: '0.85em' }}>
@@ -383,7 +395,7 @@ export function PdfReaderView({
 
         {pending && (
           <div style={{ position: 'absolute', left: Math.max(8, pending.x - 100), top: pending.y + 8, zIndex: 20,
-            background: 'var(--iw-reader-ctl, #fff)', border: `1px solid ${INK}44`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+            background: CTL, border: `1px solid ${EDGE}`, borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
             padding: '6px 8px', display: 'flex', gap: 6 }}>
             {['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6'].map(c => (
               <button key={c} type="button" title="Highlight" onMouseDown={ev => ev.preventDefault()}
@@ -415,14 +427,19 @@ function Block({ page, bi, text, heading, marks, notes, onPatch, onRemove }: {
         {runs.map((r, i) => {
           const top = r.marks[r.marks.length - 1] as Pl | undefined
           const kind = top?.hl.kind ?? 'highlight'
+          const filled = !!top && kind === 'highlight'
           return (
             <span key={i} data-from={r.from} data-mark-id={top?.id}
+              className={filled ? 'iw-mark-fill' : undefined}
               style={top ? {
-                background: kind === 'highlight' ? wash(top.hl.color) : undefined,
+                ...(filled ? markFill(top.hl.color) : null),
+                // The fill is pale in both themes, so the ink on it is dark in both. An underline or
+                // a strike is a STROKE over ordinary prose and keeps the page's own ink.
+                color: filled ? ON_MARK : undefined,
                 borderBottom: kind === 'underline' ? `2px solid ${top.hl.color}` : undefined,
                 textDecoration: kind === 'strike' ? 'line-through' : undefined,
                 textDecorationColor: kind === 'strike' ? top.hl.color : undefined,
-                borderRadius: kind === 'highlight' ? 2 : undefined,
+                borderRadius: filled ? 2 : undefined,
               } : undefined}>
               {text.slice(r.from, r.to)}
             </span>
@@ -433,7 +450,7 @@ function Block({ page, bi, text, heading, marks, notes, onPatch, onRemove }: {
         <div key={n.id} data-note-id={n.id} style={{
           margin: '0 0 0.9em', padding: '7px 10px', borderRadius: 8, background: n.hl.color,
           border: '1px solid rgba(0,0,0,0.14)', fontSize: `${n.hl.size ?? 12}px`, lineHeight: 1.4,
-          color: '#2a2a2a', position: 'relative', fontFamily: 'system-ui, sans-serif',
+          color: ON_MARK, position: 'relative', fontFamily: 'system-ui, sans-serif',
         }}>
           <div contentEditable suppressContentEditableWarning spellCheck={false}
             onBlur={e => onPatch(n.id, { note: e.currentTarget.textContent ?? '' })}
@@ -442,7 +459,7 @@ function Block({ page, bi, text, heading, marks, notes, onPatch, onRemove }: {
           </div>
           <button type="button" title="Remove this note" onClick={() => onRemove(n.id)} className="iw-tap"
             style={{ position: 'absolute', top: -8, right: -8, width: 18, height: 18, borderRadius: '50%',
-              border: '1px solid rgba(0,0,0,0.2)', background: 'var(--iw-reader-ctl, #fff)', color: '#7f1d1d', cursor: 'pointer',
+              border: '1px solid rgba(0,0,0,0.2)', background: CTL, color: 'var(--iw-reader-ink-red, #991b1b)', cursor: 'pointer',
               fontSize: 11, lineHeight: 1, padding: 0 }}>×</button>
         </div>
       ))}
