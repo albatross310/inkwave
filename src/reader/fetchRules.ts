@@ -22,6 +22,7 @@
 // into {kind, text, href} blocks by the shared extractor and no markup ever reaches the renderer.
 
 import { EXT_MAX_BYTES } from './extensionProtocol'
+import { PDF_MAX_BYTES, looksLikePdfBytes } from './pdfAddress'
 
 /** Everything wrong with a URL that can be seen without asking the network. Throws the short code
  *  the reader's error map already speaks, never a sentence. */
@@ -64,4 +65,44 @@ export function decodeHtml(buf: ArrayBuffer, ctype: string | null | undefined, m
   if (buf.byteLength > maxBytes) throw new Error('too large')
   const charset = charsetOf(ctype)
   try { return new TextDecoder(charset).decode(buf) } catch { return new TextDecoder('utf-8').decode(buf) }
+}
+
+// ── THE PDF ANSWER (2026-08-30) ─────────────────────────────────────────────────────────────────
+// `decodeHtml`'s own comment says "the reader has a separate answer for a PDF". This is it, and it
+// lives here for the same reason everything else in this file does: the background worker cannot be
+// reached by `pnpm test`, so the only rules it is allowed to hold are the ones that need a network.
+//
+// ⚠ THE ORDER OF THE TWO REFUSALS IS DELIBERATE. Size first, because it is decided by the bytes
+// that arrived and needs nothing else; type second, because a "too large" file that also is not a
+// PDF should say the thing the writer can act on. Neither answer is EVER "it worked but smaller":
+// a truncated PDF is a file the writer believes they have.
+//
+// ⚠ AND `not a pdf` IS DECIDED BY THE FILE, NOT THE HEADER. A publisher's "download PDF" that has
+// quietly become a login wall answers 200 `application/pdf` with an HTML body; a content-type check
+// would store it and the writer would find out months later, opening a source to nothing.
+
+/** Bytes → bytes, with the two refusals that can only happen after the body arrives. */
+export function checkPdfBytes(buf: ArrayBuffer, maxBytes = PDF_MAX_BYTES): Uint8Array {
+  if (buf.byteLength > maxBytes) throw new Error('too large')
+  const bytes = new Uint8Array(buf)
+  if (!looksLikePdfBytes(bytes)) throw new Error('not a pdf')
+  return bytes
+}
+
+/**
+ * Bytes → base64, for the one hop that cannot carry them intact (see extensionProtocol.ts).
+ *
+ * CHUNKED, because `String.fromCharCode(...bytes)` on a multi-megabyte array is a spread of
+ * millions of arguments and throws `RangeError: Maximum call stack size exceeded` — which arrives
+ * as an ordinary rejected fetch and reads as the site being unavailable. This runs in the extension
+ * WORKER, off any page's main thread, which is the only reason a hand-rolled encode is acceptable
+ * here at all; nothing on the page side may copy it (`base64ToBlob` is the page's decode).
+ */
+export function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000
+  let s = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)))
+  }
+  return btoa(s)
 }

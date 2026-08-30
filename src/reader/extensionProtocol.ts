@@ -141,3 +141,43 @@ export function isReaderFramed(d: unknown, uuid: string): d is { ok: boolean; er
   return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_FRAMED
     && d.uuid === uuid && typeof d.ok === 'boolean'
 }
+
+// ── FETCHING A FILE, NOT A PAGE (2026-08-30) ────────────────────────────────────────────────────
+// Peter: "also can we have a downloads", said while browsing in the source panel. The reading that
+// serves the writing is "the PDF I am looking at becomes a source I can cite" — see
+// src/reader/pdfAddress.ts for why, and for the observability boundary that decides its shape.
+//
+// ⚠ WHY THIS IS A SECOND MESSAGE AND NOT A FLAG ON `reader/fetch`. That exchange is DEFINED to
+// return text: `decodeHtml` (fetchRules.ts) throws `not html` on anything else, deliberately — "the
+// reader has a separate answer for a PDF", as its own comment already said. Widening it would make
+// one message whose reply is sometimes a string and sometimes bytes, and every existing caller
+// would have to learn the difference. A separate pair keeps `FetchPageResult` exactly as narrow as
+// it is, and keeps a page fetch structurally incapable of returning a binary blob.
+//
+// ⚠ AND WHY THE BYTES ARE BASE64. `runtime.sendMessage` serialises as JSON — it is NOT structured
+// clone — so an ArrayBuffer cannot cross the content-script↔worker hop intact. base64 is the honest
+// cost of that boundary, and it is why PDF_MAX_BYTES exists at all. The page decodes it with
+// `base64ToBlob` (citations/pdfStore.ts), the same native data-URL decode every other binary path
+// here uses — never a hand-rolled atob loop, which was a 20M-iteration main-thread stall the last
+// time somebody wrote one.
+
+// page ↔ content script
+export const READER_FILE = 'reader/file'
+export const READER_FILED = 'reader/filed'
+// content script ↔ background worker
+export const BG_FETCH_FILE = 'inkwave:fetchFile'
+
+/** One file, fetched by the extension. `mime` is what the SERVER said — kept for the record and for
+ *  the diagnosis in a refusal, and never what decides whether the bytes are stored. */
+export type FetchFileResult =
+  | { ok: true; finalUrl: string; mime: string; size: number; b64: string }
+  | { ok: false; error: string }
+
+export function isReaderFiled(d: unknown, uuid: string): d is FetchFileResult & { uuid: string } {
+  if (!isRecord(d) || d.source !== EXT_SOURCE || d.type !== READER_FILED || d.uuid !== uuid) return false
+  if (d.ok === true) {
+    return typeof d.finalUrl === 'string' && typeof d.mime === 'string'
+      && typeof d.size === 'number' && typeof d.b64 === 'string'
+  }
+  return d.ok === false && typeof d.error === 'string'
+}

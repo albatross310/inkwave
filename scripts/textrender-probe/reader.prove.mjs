@@ -469,6 +469,170 @@ try {
     return { hasLink: !!a, before }
   }, body)
   check(anchored.hasLink, 'links in the article render as links')
+
+  // ── "SAVE THIS PDF TO MY SOURCES" (Peter, 2026-08-30: "also can we have a downloads") ──────────
+  // The unit tests prove the rules and the write order; the component test proves the panel calls
+  // them. What only a real browser can show is that the bytes END UP ON DISK — so this audits OPFS
+  // DIRECTLY, out of the app's own code path. Asking the suspect to certify itself is how a probe
+  // ends up structurally incapable of seeing its bug (the archive-guard lesson, one lane along).
+  // ⚠ SAME ORIGIN, AND THAT IS A FINDING RATHER THAN A CONVENIENCE. The first cut of this cell
+  // served the PDF from example.edu with `access-control-allow-origin: *` and it FAILED — not on
+  // CORS, but on Inkwave's OWN Content-Security-Policy: `middleware.ts` sets
+  // `connect-src 'self' <named hosts>`, so a cross-origin fetch is refused before it leaves the
+  // document. That refuted the "try the extension, fall back to a direct fetch" design, and the
+  // panel now decides the route BEFORE drawing a button (`pdfRouteFor`). What remains fetchable by
+  // the page alone is `'self'` — a PDF on Inkwave's own origin — which is what this serves, and
+  // which is the ONLY save path a probe can drive, since no probe can load an unpacked extension.
+  // The cross-origin case is measured too, a few cells down, as the state it actually is: no route.
+  const PDF_ADDR = `${base}/probe/probe-source-2026.pdf`
+  // A real, minimal, openable PDF — one page, no fonts. `%PDF-` matters (it is what the byte check
+  // reads); the rest is here so nothing downstream is looking at a truncated file.
+  const PDF_BODY = [
+    '%PDF-1.4', '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
+    '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj',
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj',
+    'trailer<</Root 1 0 R>>', '%%EOF',
+  ].join('\n')
+  await page.route((u) => u.pathname === '/probe/probe-source-2026.pdf', (route) => route.fulfill({
+    status: 200, contentType: 'application/pdf', body: PDF_BODY,
+  }))
+
+  const apiBefore = apiCalls
+  await typeAddress(PDF_ADDR)
+  const card = await page.evaluate(() => ({
+    said: /This is a PDF\./.test(document.body.innerText),
+    named: /probe-source-2026\.pdf/.test(document.body.innerText),
+    save: !!document.querySelector('[data-iw-pdf-save]'),
+    show: !!document.querySelector('[data-iw-pdf-show]'),
+  }))
+  check(card.said && card.named, 'a PDF address raises the save card instead of a read failure',
+    JSON.stringify(card))
+  // The escape hatch is load-bearing: without it a writer whose save cannot fetch would be left
+  // with LESS than before, since live mode renders a PDF perfectly well in the browser's own viewer.
+  check(card.show, 'and still offers to show the file in the panel')
+  check(apiCalls === apiBefore, 'and spends no /api/reader fetch on a file it cannot extract prose from',
+    `${apiBefore} -> ${apiCalls}`)
+
+  if (!card.save) {
+    check(false, 'VOID: no save button, so nothing below can be read')
+  } else {
+    await page.evaluate(() => document.querySelector('[data-iw-pdf-save]').click())
+    await page.waitForFunction(() => /Saved as|couldn|won’t let|didn’t return/.test(document.body.innerText),
+      null, { timeout: 15000 }).catch(() => {})
+    const said = await page.evaluate(() => document.body.innerText.match(/Saved as “([^”]+)”/)?.[1] ?? null)
+    check(said === 'probe-source-2026', 'pressing it saves the file as a source',
+      said === null ? 'panel said: ' + (await page.evaluate(() => (document.body.innerText.match(/[^\n]*(couldn|won’t let|didn’t return)[^\n]*/) || [''])[0])) : said)
+
+    // THE AUDIT, off the disk, not through the app. `hasPdf` is `!!_iw.pdfName` and nothing else,
+    // so an entry claiming a PDF with no bytes behind it is the "file is gone" bug this whole
+    // ordering exists to prevent — and only a read of OPFS can tell those two states apart.
+    const onDisk = await page.evaluate(async () => {
+      try {
+        const root = await navigator.storage.getDirectory()
+        const lib = await root.getDirectoryHandle('library')
+        const pdfs = await lib.getDirectoryHandle('pdfs')
+        const f = await (await pdfs.getFileHandle('probe-source-2026.pdf')).getFile()
+        const head = new TextDecoder().decode(await f.slice(0, 5).arrayBuffer())
+        return { size: f.size, head }
+      } catch (e) {
+        // An absence and a failure are different answers; say which.
+        return { error: e && e.name === 'NotFoundError' ? 'absent' : String((e && e.message) || e) }
+      }
+    })
+    check(onDisk.head === '%PDF-' && onDisk.size > 0,
+      'and the BYTES are really in OPFS, audited outside the app’s own read path',
+      JSON.stringify(onDisk))
+  }
+
+  // ⚠ NIGHT, MEASURED RATHER THAN REASONED. `prove:nightaudit` walks this panel but never navigates
+  // to a PDF, so the card is a surface it cannot reach — and the reader's night is recent enough
+  // that "it uses the same tokens" is the kind of claim that has been wrong here twice. The one
+  // genuinely new pairing is the SUCCESS line: `--iw-verified` laid on reader PAPER, which is a
+  // warm charcoal at night and near-white by day.
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'night'))
+  await page.waitForTimeout(500)
+  const lum = (c) => {
+    const [r, g, bl] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((n) => {
+      const v = Number(n) / 255
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+    })
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+  }
+  const nightPair = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('div')].find((d) =>
+      d.children.length === 0 && /^Saved as/.test((d.textContent || '').trim()))
+    if (!el) return null   // null, never a fabricated pair — the panel may be showing the error state
+    // Walk to the first ancestor that actually paints, so the "background" is what is really behind.
+    let bg = 'rgba(0, 0, 0, 0)'
+    for (let n = el; n; n = n.parentElement) {
+      const c = getComputedStyle(n).backgroundColor
+      if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) { bg = c; break }
+    }
+    return { fg: getComputedStyle(el).color, bg }
+  })
+  if (!nightPair) check(false, 'VOID: no success line on screen at night, so its colours cannot be read')
+  else {
+    const [a, bb] = [lum(nightPair.fg), lum(nightPair.bg)].sort((x, y) => y - x)
+    const ratio = (a + 0.05) / (bb + 0.05)
+    check(ratio >= 4.5, 'the “saved” line is legible on the night reading page',
+      `${nightPair.fg} on ${nightPair.bg} → ${ratio.toFixed(2)}:1`)
+  }
+  await page.evaluate(() => document.documentElement.removeAttribute('data-theme'))
+  await page.waitForTimeout(300)
+
+  // ⚠ THE CROSS-ORIGIN CASE, WHICH IS EVERY REAL PUBLISHER WITHOUT THE EXTENSION. It must NOT draw
+  // a save button: with `connect-src 'self'` the fetch cannot leave this document, so a button
+  // labelled "save" would be guaranteed to fail — the dead control wearing an error message.
+  await typeAddress('https://example.edu/papers/no-route-2026.pdf')
+  const noRoute = await page.evaluate(() => ({
+    card: /This is a PDF\./.test(document.body.innerText),
+    save: !!document.querySelector('[data-iw-pdf-save]'),
+    said: /only allowed to\s+talk to a short list|only allowed to talk to a short list/.test(document.body.innerText),
+    offered: /The Inkwave extension fixes this\./.test(document.body.innerText),
+    tab: !!document.querySelector('[data-iw-pdf-show]'),
+  }))
+  check(noRoute.card, 'a cross-origin PDF still raises the card', JSON.stringify(noRoute))
+  check(!noRoute.save, 'but draws NO save button, because this document cannot fetch it')
+  check(noRoute.said, 'and says why BEFORE a press rather than after one')
+  check(noRoute.offered, 'and offers the extension, which is what removes that wall')
+  check(noRoute.tab, 'and still lets the writer show the file in the panel')
+
+  await typeAddress(PDF_ADDR)
+  await page.waitForTimeout(400)
+
+  // The literal half of the ask, read off the LIVE element rather than off the source: without
+  // `allow-downloads` a download link inside a framed page does nothing at all, silently.
+  await clickBy('Live page')
+  await page.waitForTimeout(900)
+  const sandbox = await page.evaluate(() => {
+    const f = document.querySelector('[data-iw-selectable] iframe')
+    return f ? f.getAttribute('sandbox') : null   // null, never '', when there is no frame to read
+  })
+  if (sandbox === null) check(false, 'VOID: no live frame on screen, so its sandbox cannot be read')
+  else {
+    check(sandbox.split(/\s+/).includes('allow-downloads'), 'the live frame may start a download', sandbox)
+    check(!sandbox.includes('allow-top-navigation'),
+      'and nothing else was widened — a framed page still cannot replace the Inkwave tab')
+  }
+
+  // 375px: the card is a column of wrapped pill buttons, and Peter reads on an iPhone.
+  await page.setViewportSize({ width: 375, height: 667 })
+  await clickBy('Reader view')
+  await page.waitForTimeout(900)
+  const phone = await page.evaluate(() => {
+    const btn = document.querySelector('[data-iw-pdf-show]')
+    if (!btn) return null
+    const row = btn.parentElement
+    const r = row.getBoundingClientRect()
+    return { rowRight: Math.round(r.right), rowLeft: Math.round(r.left), vw: window.innerWidth,
+      h: Math.round(btn.getBoundingClientRect().height) }
+  })
+  if (!phone) check(false, 'VOID: the PDF card is not on screen at 375px, so nothing can be measured')
+  else {
+    check(phone.rowLeft >= -1 && phone.rowRight <= phone.vw + 1,
+      'at 375px the card’s actions stay inside the screen', JSON.stringify(phone))
+    check(phone.h >= 26, 'and its buttons are not hairlines', `${phone.h}px`)
+  }
 } catch (e) {
   console.log(`  ✗ ${e.message}`)
   fail++

@@ -30,9 +30,12 @@ import {
   clampLiveZoom, liveFrameGeom, liveZoomStep, panAfterZoom, ZOOM_STEP_FACTOR, type PageWidth,
 } from './liveFrameZoom'
 import {
-  allowFramingVia, extensionState, loadSource, openExtensionPopup, releaseFraming, windowPort,
-  type ExtensionState, type Via,
+  allowFramingVia, extensionState, fetchPdfBytes, loadSource, openExtensionPopup, releaseFraming,
+  windowPort, type ExtensionState, type Via,
 } from '../reader/pageSource'
+import { looksLikePdfAddress, pdfFileNameFor, pdfRouteFor } from '../reader/pdfAddress'
+import { EXTENSION_RELEASES_URL, EXTENSION_UNPACKED_DIR, EXTENSION_ZIP_URL } from '../reader/extensionDownload'
+import { explainFetchFailure, savePdfAsSource, type SavePdfResult } from '../reader/savePdfSource'
 import { v4 as uuidv4 } from 'uuid'
 import type { LocatorKind } from '../citations/locator'
 import {
@@ -42,7 +45,7 @@ import {
 } from './dockLayout'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { tabDocId } from '../storage/tabDoc'
-import { OPEN_PDF_EVENT } from '../citations/pdfViewer'
+import { OPEN_PDF_EVENT, openPdf } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
 // ── TWO SURFACES, TWO PALETTES, AND EVERY COLOUR HERE BELONGS TO EXACTLY ONE OF THEM ────────────
@@ -678,6 +681,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       const st = await extensionState()
       if (!live) return
       setExtState(st)
+      // ⚠ A PDF IS NOT AN ARTICLE THAT FAILED TO EXTRACT, and it used to be told it was. The
+      // extractor reads prose out of HTML; handed a PDF it finds none, so the panel answered
+      // "That page couldn't be read here" — a dead end for the commonest thing an academic
+      // reader clicks. The address is enough to know that in advance, so the fetch is not spent
+      // and the PDF card below answers instead. `extState` is still resolved above, because the
+      // save action needs to know whether the extension can fetch on the writer's behalf.
+      if (looksLikePdfAddress(here)) return
       try {
         const { doc: d, via: v } = await loadSource(here, { port: st === 'ready' ? windowPort() : null })
         if (!live) return
@@ -689,6 +699,38 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     })()
     return () => { live = false }
   }, [here, reloadKey, selfOpen])
+
+  // ── "ALSO CAN WE HAVE A DOWNLOADS" (Peter, 2026-08-30) ────────────────────────────────────────
+  // He said it while browsing here, and he browses here to find papers to cite — so the reading
+  // that serves the writing is the one that closes that loop: the PDF in front of him becomes a
+  // SOURCE, bytes and all, in the same store every other source PDF uses. See
+  // reader/pdfAddress.ts for the whole argument, including why the literal reading (a downloads
+  // folder) is answered separately by `allow-downloads` on the live frame's sandbox.
+  const isPdfHere = !selfOpen && looksLikePdfAddress(here)
+  // ⚠ MEASURED, AND IT REFUTED THE FIRST DESIGN (`pnpm prove:reader`, 2026-08-30). The save cannot
+  // simply "try and report": with no extension, a cross-origin fetch from this document is refused
+  // by OUR OWN `connect-src` before it leaves, every time, for every publisher. So the route is
+  // decided BEFORE the card is drawn — a button labelled "save" that is guaranteed to fail is the
+  // dead control this panel has already shipped twice, wearing an error message.
+  const pdfRoute = isPdfHere ? pdfRouteFor(here, extState === 'ready') : 'none'
+  const [pdfSave, setPdfSave] = useState<{ busy: boolean; result: SavePdfResult | null }>({ busy: false, result: null })
+  // A new address is a new file: a verdict about the last one must not sit over it.
+  useEffect(() => { setPdfSave({ busy: false, result: null }) }, [here])
+  const savePdfHere = async () => {
+    if (pdfSave.busy) return
+    setPdfSave({ busy: true, result: null })
+    try {
+      // The extension when it can fetch, the direct request otherwise — `fetchPdfBytes` owns that
+      // order and the reason for it (CORS, which is a browser rule and not a preference).
+      const got = await fetchPdfBytes(here, { port: extState === 'ready' ? windowPort() : null })
+      const res = await savePdfAsSource({ url: got.finalUrl, bytes: got.bytes, pageTitle: doc?.title ?? title })
+      setPdfSave({ busy: false, result: res })
+    } catch (e) {
+      // Every code the fetch can fail with becomes a sentence, and only the two the extension
+      // genuinely removes offer it. Never a silent no-op: this panel has shipped two dead controls.
+      setPdfSave({ busy: false, result: explainFetchFailure((e as Error)?.message ?? '') })
+    }
+  }
 
   // ⚠ THE GRANT HAPPENS SOMEWHERE WE CANNOT WATCH. `permissions.request()` is only honoured inside
   // an extension page, so the writer turns page fetching on in the popup and this page is told
@@ -907,12 +949,40 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             How to install it
           </button>
         ) : (
-          <ol style={{ marginTop: 8, paddingLeft: 18, listStyle: 'decimal' }}>
-            <li>Build it from the Inkwave repository: <code>pnpm ext:build</code></li>
-            <li>Open <code>chrome://extensions</code> and turn on Developer mode</li>
-            <li>Choose <strong>Load unpacked</strong> and pick <code>extension-src/.output/chrome-mv3</code></li>
-            <li>It opens its own page on install — turn on <strong>Fetch pages for the reader</strong> there</li>
-          </ol>
+          <>
+            {/* ⚠ STEPS A READER CAN ACTUALLY FOLLOW (Peter, 2026-08-30: "this is for others not us:
+                we need to host the file on our github and give instructions on how the user
+                downloads it on github and then installs with developer mode"). What was here told
+                them to run `pnpm ext:build`, which assumes a clone, a toolchain and pnpm — an
+                instruction only its authors can execute, which is this card's own "no dead button"
+                rule failing in prose.
+                The link goes to the Releases PAGE and not to a versioned asset: an asset URL is a
+                404 until somebody cuts that release by hand, and that is the dead-button failure
+                with an extra step. See reader/extensionDownload.ts. */}
+            <ol style={{ marginTop: 8, paddingLeft: 18, listStyle: 'decimal' }}>
+              <li>
+                <a href={EXTENSION_ZIP_URL} target="_blank" rel="noreferrer noopener"
+                  style={{ color: CHROME_FG, textDecoration: 'underline' }}>Download the zip ↗</a>{' '}
+                and unzip it{' '}
+                <span style={{ color: MUTED_CHROME }}>
+                  (<a href={EXTENSION_RELEASES_URL} target="_blank" rel="noreferrer noopener"
+                    style={{ color: 'inherit', textDecoration: 'underline' }}>all versions and release notes</a>)
+                </span>
+              </li>
+              <li>Open <code>chrome://extensions</code> and turn on Developer mode</li>
+              <li>Choose <strong>Load unpacked</strong> and pick the <code>{EXTENSION_UNPACKED_DIR}</code> folder from inside the unzipped one</li>
+              <li>It opens its own page on install — turn on <strong>Fetch pages for the reader</strong> there</li>
+            </ol>
+            {/* ⚠ SAY WHAT THEY ARE AGREEING TO. Developer mode is a real ask and Chrome nags about
+                it on every startup — a writer who meets that warning without having been told will
+                reasonably assume something went wrong. One sentence, describing what happens; not a
+                reassurance, and no claim about the extension the code does not keep. */}
+            <div style={{ marginTop: 8, color: MUTED_CHROME }}>
+              Chrome calls this Developer mode because the extension isn’t in its store yet, and it
+              will ask you about it each time you start the browser. You can remove it from the same{' '}
+              <code>chrome://extensions</code> page whenever you like.
+            </div>
+          </>
         )}
       </div>
     )
@@ -1341,6 +1411,38 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               and make it not a whole column just a little button at the top"). A full-height strip
               to re-open a list is a piece of furniture standing in for a control; it also stole
               22px of reading width down the entire article for a click you make once. */}
+          {/* ⚠ THE SAME ACTION HAS TO BE REACHABLE IN LIVE MODE, and it cannot be the card. Live
+              mode renders a PDF in the browser's OWN viewer, which is genuinely useful and must
+              not be replaced — and the reader/live toggle is STICKY, so somebody who chose live
+              once meets every PDF there. So: a chip over the frame, the pattern the ☰ button
+              beside it already uses. BOTTOM-right, not top: Chrome's PDF viewer puts its own
+              toolbar across the top and a chip up there would sit on its download button.
+              One handler, two surfaces — never a second copy of the save. */}
+          {isPdfHere && framed && !frameRefused && pdfRoute !== 'none' && !pdfSave.result?.ok && (
+            <button type="button" data-iw-pdf-save onClick={() => void savePdfHere()} disabled={pdfSave.busy}
+              title={`Save ${pdfFileNameFor(here)} to this document’s sources`}
+              className="rounded-full px-3 py-1.5 iw-tap"
+              style={{ position: 'absolute', right: 10, bottom: 10, zIndex: 5,
+                border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '13px',
+                cursor: pdfSave.busy ? 'default' : 'pointer', opacity: pdfSave.busy ? 0.7 : 1,
+                boxShadow: '0 1px 6px rgba(0,0,0,0.16)', ['--iw-tap-x' as string]: '4px' }}>
+              {pdfSave.busy ? 'Downloading…' : '⤓ Save to my sources'}
+            </button>
+          )}
+          {/* The verdict has to land somewhere in live mode too — a press that reports nothing is
+              the dead control this panel has already shipped twice. */}
+          {isPdfHere && framed && pdfSave.result && (
+            <div role="status" data-iw-pdf-note
+              style={{ position: 'absolute', right: 10, bottom: 10, zIndex: 5, maxWidth: 320,
+                borderRadius: 10, border: `1px solid ${EDGE}`, background: CTL, padding: '8px 10px',
+                fontSize: '12.5px', lineHeight: 1.5, textAlign: 'left',
+                color: pdfSave.result.ok ? 'var(--iw-verified, #15803d)' : INKP,
+                boxShadow: '0 1px 6px rgba(0,0,0,0.16)' }}>
+              {pdfSave.result.ok
+                ? `Saved as “${pdfSave.result.citekey}” — it needs its author and year.`
+                : pdfSave.result.reason}
+            </div>
+          )}
           {!framed && headings.length > 1 && !showNav && (
             <button type="button" title="Show the section list" onClick={toggleNav} className="iw-tap"
               style={{ position: 'absolute', left: 6, top: 6, zIndex: 5, width: 24, height: 24,
@@ -1442,6 +1544,76 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 </div>
               </div>
             )}
+            {/* ── A PDF, AND WHAT TO DO WITH IT (Peter, 2026-08-30: "also can we have a downloads")
+                ────────────────────────────────────────────────────────────────────────────────
+                What used to be here was "That page couldn't be read here" — the extractor pulls
+                prose out of HTML and a PDF has none, so the commonest thing an academic reader
+                clicks was a dead end. The action that serves the writing is not a downloads folder:
+                it is getting this file into the document's own sources, where the PDF viewer and
+                its markup tools already live and where a citation can point at it.
+
+                THREE ACTIONS, and the second is load-bearing rather than decorative: without it a
+                writer whose save cannot fetch (no extension, and a host that refuses cross-origin
+                reads) would be LEFT WITH LESS than before — live mode renders a PDF perfectly well
+                in the browser's own viewer, and this card must not take that away. */}
+            {isPdfHere && !framed && (
+              <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: MUTED_PAPER }}>
+                <div style={{ color: INKP, fontSize: '15px' }}>This is a PDF.</div>
+                <div style={{ maxWidth: 470, lineHeight: 1.55, wordBreak: 'break-word' }}>
+                  <strong style={{ color: INKP, fontWeight: 600 }}>{pdfFileNameFor(here)}</strong>
+                  {' — '}saving it adds a source to this document and keeps the file itself on your
+                  device, so it opens in Inkwave’s own reader with highlighting and notes. You’ll
+                  need to fill in the author and year: a file tells us its address, not who wrote it.
+                </div>
+                {pdfSave.result?.ok && (
+                  <div style={{ maxWidth: 470, lineHeight: 1.55, color: 'var(--iw-verified, #15803d)' }}>
+                    Saved as “{pdfSave.result.citekey}”.
+                  </div>
+                )}
+                {pdfSave.result && !pdfSave.result.ok && (
+                  <div style={{ maxWidth: 470, lineHeight: 1.55, color: INKP }}>{pdfSave.result.reason}</div>
+                )}
+                {/* ⚠ SAID BEFORE THE PRESS, NOT AFTER IT. With no extension this document's own
+                    `connect-src` refuses the fetch for every publisher — so there is no press worth
+                    offering, and the honest card states the wall and offers what removes it. */}
+                {pdfRoute === 'none' && !pdfSave.result && (
+                  <div style={{ maxWidth: 470, lineHeight: 1.55, color: INKP }}>
+                    Inkwave can’t download it from here on its own — the page is only allowed to
+                    talk to a short list of addresses, which is what keeps your document’s own
+                    storage out of reach of anything else running in it.
+                  </div>
+                )}
+                {/* WALL 4 of 4 — a file this origin is not allowed to read. Offered ONLY where the
+                    extension would actually remove the wall; `explainFetchFailure` decides that
+                    after a press, because a too-large or not-a-PDF file fails identically with it
+                    installed — and `pdfRoute` decides it before one. */}
+                {((pdfRoute === 'none' && !pdfSave.result)
+                  || (pdfSave.result && !pdfSave.result.ok && pdfSave.result.offerExtension)) && extensionOffer()}
+                <div className="flex gap-2 flex-wrap justify-center" style={{ ['--iw-tap-x' as string]: '4px' }}>
+                  {pdfSave.result?.ok ? (
+                    <button type="button" data-iw-pdf-open onClick={() => openPdf({ citekey: (pdfSave.result as { citekey: string }).citekey })}
+                      className="rounded-full px-3 py-1.5 text-white iw-tap"
+                      style={{ background: OPEN_TAB_FILL, fontSize: '13px', border: 'none', cursor: 'pointer' }}>
+                      Open it in Inkwave
+                    </button>
+                  ) : pdfRoute !== 'none' ? (
+                    <button type="button" data-iw-pdf-save onClick={() => void savePdfHere()} disabled={pdfSave.busy}
+                      className="rounded-full px-3 py-1.5 text-white iw-tap"
+                      style={{ background: OPEN_TAB_FILL, fontSize: '13px', border: 'none',
+                        cursor: pdfSave.busy ? 'default' : 'pointer', opacity: pdfSave.busy ? 0.7 : 1 }}>
+                      {pdfSave.busy ? 'Downloading…' : 'Save to my sources'}
+                    </button>
+                  ) : null}
+                  <button type="button" data-iw-pdf-show onClick={() => setFramed(true)}
+                    className="rounded-full px-3 py-1.5 iw-tap"
+                    style={{ border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '13px', cursor: 'pointer' }}>
+                    Show it here
+                  </button>
+                  <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 iw-tap"
+                    style={{ border: `1px solid ${EDGE}`, background: CTL, color: INKP, fontSize: '13px' }}>Open in a tab ↗</a>
+                </div>
+              </div>
+            )}
             {!selfOpen && error && !framed && isSearch(here) && (
               <div className="flex flex-col items-center justify-center gap-3 h-full text-center px-8" style={{ fontSize: '14px', color: 'var(--iw-pill-fg, #57534e)' }}>
                 <div style={{ color: CHROME_FG, fontSize: '15px' }}>Search engines don’t answer Inkwave’s server.</div>
@@ -1492,7 +1664,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   style={{ background: OPEN_TAB_FILL, fontSize: '13px' }}>Open it in a tab ↗</a>
               </div>
             )}
-            {!selfOpen && !error && !doc && !framed && (
+            {!selfOpen && !error && !doc && !framed && !isPdfHere && (
               <div className="flex items-center justify-center h-full" style={{ color: MUTED_PAPER, fontSize: '13px' }}>reading…</div>
             )}
             {!selfOpen && framed && frameRefused && (
@@ -1544,7 +1716,28 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 <iframe key={frameKey} src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation"
+                  // ⚠ `allow-downloads` (2026-08-30) — THE LITERAL HALF OF "also can we have a
+                  // downloads", and a silent bug on its own account. Without it a download link
+                  // inside a framed page does NOTHING AT ALL: the browser blocks the navigation
+                  // and reports it only to its own console, so the site looks broken and Inkwave
+                  // looks like the reason. It was absent by omission, not by decision — every
+                  // other token here was chosen deliberately and this one was never considered.
+                  //
+                  // WHAT IT PERMITS, precisely: a framed page may start a download, which lands in
+                  // the writer's ordinary Downloads folder through the browser's own UI. It does
+                  // NOT let the page read anything of ours, write anywhere we can see, or install
+                  // anything — a sandboxed frame with `allow-downloads` still cannot reach this
+                  // origin, and the download is subject to the browser's normal prompts, its
+                  // Safe Browsing checks and the file-type rules it applies to every other tab.
+                  // The page could already navigate ITSELF anywhere (allow-scripts + allow-forms),
+                  // so the new capability is narrower than what it holds.
+                  //
+                  // NOT CONDITIONAL ON LIVE FRAMING BEING ON, and that is deliberate: this frame
+                  // only exists in live mode, so there is no second state to guard — and gating a
+                  // sandbox token on a feature flag would mean the same page behaved differently
+                  // in ways nothing in the UI could explain. The extension's framing rule widens
+                  // WHICH pages may be shown; it has no bearing on what a shown page may do.
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads"
                   // NO referrerPolicy override: many image CDNs use the referer for hotlink
                   // protection, and stripping it is a plausible cause of the missing pictures Peter
                   // saw. The default (strict-origin-when-cross-origin) sends the origin only —
