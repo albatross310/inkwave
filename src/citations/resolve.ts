@@ -8,6 +8,7 @@
 // doc.bibliography ALSO serves as the offline-resolution source for in-text CitationNodeView.
 
 import type { InkwaveDocument, TiptapJSON, Bibliography, CSLItem } from '../types/document'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import { bibProvider } from './bibProvider'
 
 export type RefMode = 'cited' | 'all' | 'manual'
@@ -60,6 +61,34 @@ export function referenceListKeys(contentJson: TiptapJSON): string[] {
  *  JSON tree of a 100-page doc just to read citekeys (2026-07-11 typing-lag work). Identical
  *  semantics: pre-order document walk, first-appearance key order, last referenceList's cfg wins. */
 export function referenceListKeysFromDoc(doc: import('@tiptap/pm/model').Node): string[] {
+  const { used, cfg } = citeIndexFromDoc(doc)
+  return resolveRefKeys(used, cfg)
+}
+
+// ── ONE MEMOISED WALK PER DOCUMENT VERSION ────────────────────────────────────────────────────
+// Everything above that reads citations out of the LIVE document goes through here. PM docs are
+// persistent structures — same reference ⇔ unchanged content — so one walk per version serves every
+// caller, and a caller that re-reads an unchanged document pays nothing at all. This mirrors
+// `citationNav.ts`'s `citationNodes` index, added in the same 2026-07-11 typing-lag work; the two
+// exist separately because that one keeps POSITIONS (for navigation) and this one keeps the
+// resolution inputs, and a caller wanting keys should not pay to collect positions.
+//
+// ⚠ THE JSON WALKERS ABOVE ARE NOT REDUNDANT. `usedCitekeys`/`referenceListConfig` take a
+// `TiptapJSON` and are used where there is no live document at all — a snapshot's `contentJson`,
+// an export bundle, the verifier. They must keep answering identically, which
+// `citeWalk.perf.test.ts` asserts directly rather than by inspection.
+let _docIndex: { doc: PMNode; index: DocCiteIndex } | null = null
+
+export interface DocCiteIndex {
+  /** Every in-text citation key, in first-appearance order. */
+  used: Set<string>
+  /** The LAST reference list's config (matching the JSON walker), or null if there is none. */
+  cfg: RefListConfig | null
+}
+
+/** The citation resolution inputs for a live PM document. Memoised on document identity. */
+export function citeIndexFromDoc(doc: PMNode): DocCiteIndex {
+  if (_docIndex && _docIndex.doc === doc) return _docIndex.index
   const used = new Set<string>()
   let cfg: RefListConfig | null = null
   doc.descendants((node) => {
@@ -73,7 +102,22 @@ export function referenceListKeysFromDoc(doc: import('@tiptap/pm/model').Node): 
       }
     }
   })
-  return resolveRefKeys(used, cfg)
+  const index = { used, cfg }
+  _docIndex = { doc, index }
+  return index
+}
+
+/** Test seam: drop the memo so a cold walk can be measured. Not used in production. */
+export function _resetCiteIndexForTest(): void { _docIndex = null }
+
+/** `usedCitekeys` for a live document — no `editor.getJSON()` serialisation. */
+export function usedCitekeysFromDoc(doc: PMNode): string[] {
+  return [...citeIndexFromDoc(doc).used]
+}
+
+/** `referenceListConfig` for a live document — no `editor.getJSON()` serialisation. */
+export function referenceListConfigFromDoc(doc: PMNode): RefListConfig | null {
+  return citeIndexFromDoc(doc).cfg
 }
 
 function resolveRefKeys(used: Set<string>, cfgIn: RefListConfig | null): string[] {

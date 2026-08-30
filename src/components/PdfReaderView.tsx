@@ -28,7 +28,7 @@ import type { HighlightKind, PdfHighlight } from '../citations/pdfHighlights'
 import { noteAnchorText, rectsForRange } from './pdfReflow'
 import type { PageReflow } from './pdfReflow'
 import { getPageReflow } from './pdfReflowStore'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { FONTS } from './StyleBar'
 
 // This whole view is reader PAPER (it is a reading column, not chrome), so every colour in it comes

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 import {

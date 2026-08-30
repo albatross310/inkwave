@@ -17,7 +17,7 @@
 // THEMING IS MANDATORY (CLAUDE.md): `iw-nightable` on the outer container + theme tokens with day
 // fallbacks for every custom colour. A panel without it renders white-on-white in night mode.
 
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 
 export function UnsyncedNotice({
   show,

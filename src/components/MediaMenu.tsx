@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { importMedia, mb, MEDIA_LIMIT_BYTES } from '../media/mediaStore'
 import type { MediaAsset, MediaKind } from '../media/types'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import { cameraSupported } from '../media/camera'
 import { CameraCapturePopup } from './CameraCapturePopup'
 

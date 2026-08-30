@@ -8,11 +8,11 @@ import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
 import { citeClickOpensReader, setCiteClickOpensReader } from './dockLayout'
 import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
-import { isTouchDevice } from '../editor/Scroll'
+import { isTouchDevice } from '../editor/isTouchDevice'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
-import { usedCitekeys, referenceListConfig, type RefMode } from '../citations/resolve'
+import { usedCitekeysFromDoc, referenceListConfigFromDoc, type RefMode } from '../citations/resolve'
 import { captureFromInput, isUrlCapture, parseAuthor, parseDate } from '../citations/capture'
 import { detectIdentifier, isUrl } from '../citations/identifiers'
 import { urlLookupEnabled, setUrlLookup, markAiConsent } from '../editor/aiSettings'
@@ -507,9 +507,16 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     }
   }) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const json = editor.getJSON()
-  const usedKeys = new Set(usedCitekeys(json))
-  const refCfg = referenceListConfig(json)
+  // ⚠ THE LIVE DOCUMENT, NOT `editor.getJSON()`. This panel re-renders on every editor transaction
+  // (the `editor.on('update')` subscription above), so anything here runs per KEYSTROKE while the
+  // panel is open. `getJSON()` serialises the ENTIRE document to a fresh JSON tree; doing that plus
+  // two walks over the result measured 0.431ms/keystroke on a thesis-scale doc. The live-doc index
+  // is memoised on document identity, so it is 0.057ms on a keystroke and free on any re-render
+  // where the document did not change. CLAUDE.md: all citation doc-walks go through the live-PM-doc
+  // path — this call site had been missed. See `citeWalk.perf.test.ts` for the numbers and for the
+  // assertion that both paths answer identically.
+  const usedKeys = new Set(usedCitekeysFromDoc(editor.state.doc))
+  const refCfg = referenceListConfigFromDoc(editor.state.doc)
   const refMode: RefMode | null = refCfg?.mode ?? null
   const manualKeys = new Set(refCfg?.manualKeys ?? [])
   const query = input.trim()
