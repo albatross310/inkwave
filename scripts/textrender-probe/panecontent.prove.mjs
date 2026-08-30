@@ -31,8 +31,9 @@
 //
 // This probe reads ONLY the DOM. It builds nothing, wires nothing and mutates no production path.
 import { chromium } from '@playwright/test'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
+const BASE = await autoBase()
 const DOC_ID = 'probe-doc-scrub'
 
 // ── Fixture: thesis-SHAPED (headings + lists + citations + prose), synthetic content only.

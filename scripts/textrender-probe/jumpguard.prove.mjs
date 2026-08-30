@@ -46,11 +46,20 @@ try {
   const parked2 = await page.evaluate(() => window.__parked)
   const worst = samples.reduce((m, v) => Math.max(m, Math.abs(v - parked2)), 0)
   console.log(`distinct pagination signatures seen during the idle window: ${sigs} (checked=${measures})`)
-  if (sigs === 0) { console.log('\nVOID — no pagination measure ran in the window, so nothing was tested.'); process.exitCode = 1 }
+  // ⚠ THE VOID USED TO BE OVERWRITTEN BY THE VERDICT TWO LINES DOWN, and it inverted the meaning
+  // of a passing run. A window in which NO pagination measure fired also cannot DRIFT — worst is 0,
+  // `ok` is true, and the old unconditional `process.exitCode = …` on the last line then scored
+  // "nothing ran" as PASS. The precondition this probe declares load-bearing was unenforceable, and
+  // the run that proved least looked exactly like the run that proved most. Return instead.
   console.log(`parked at ${parked}px`)
   console.log(`samples : ${samples.join(', ')}`)
   console.log(`worst drift while IDLE: ${worst}px`)
-  const ok = worst <= 2
-  console.log(ok ? '\nPASS — the document stayed put.' : `\nFAIL — it moved ${worst}px on its own.`)
-  process.exitCode = CONTROL ? (ok ? 1 : 0) : (ok ? 0 : 1)
+  if (sigs === 0) {
+    console.log('\nVOID — no pagination measure ran in the window, so idle drift was never at risk.')
+    process.exitCode = 2
+  } else {
+    const ok = worst <= 2
+    console.log(ok ? '\nPASS — the document stayed put.' : `\nFAIL — it moved ${worst}px on its own.`)
+    process.exitCode = CONTROL ? (ok ? 1 : 0) : (ok ? 0 : 1)
+  }
 } finally { await b.close(); await stop() }

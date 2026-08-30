@@ -64,5 +64,40 @@ export async function startProbeServer() {
     throw e
   }
   // Only ever kills the child THIS process spawned — never a pkill by name.
-  return { base, stop: async () => { child.kill('SIGKILL') }, owned: true }
+  return { base, stop: async () => { child.kill('SIGKILL') }, owned: true, child }
+}
+
+/**
+ * THE ONE-LINE FORM, for probes that were written against an externally-started server.
+ *
+ * ⚠ WHY THIS EXISTS (2026-08-30). 52 `.prove.mjs` files were wired into `package.json` so they could
+ * be run at all — but 27 of them opened with `const BASE = http://127.0.0.1:${PROBE_PORT || 4242}`
+ * and booted NOTHING. `pnpm prove:isolate` therefore died at `page.goto` with
+ * ERR_CONNECTION_REFUSED, which reads as a broken APP rather than a missing harness. Wiring without
+ * migration turned "unrunnable" into "accuses the product" — the exact direction this repo keeps
+ * paying for.
+ *
+ * Honours PROBE_PORT when set (an existing workflow, or a server you deliberately want to reuse).
+ * Otherwise boots a private server on an OS-assigned port, which cannot collide by construction.
+ * The child is UNREF'd and killed on exit, so a probe that never calls `stop()` neither hangs nor
+ * leaks — that is what makes this a one-line change at each call site rather than a two-line one
+ * that someone forgets the second half of.
+ *
+ * The legacy default port is deliberately NOT honoured: a fixed default is a shared mutable global
+ * between processes that do not know about each other, which is the hazard this file was written to
+ * remove.
+ */
+export async function autoBase() {
+  const { base, stop, owned, child } = await startProbeServer()
+  if (owned) {
+    // ⚠ UNREF, AND IT IS NOT AN OPTIMISATION. A spawned child keeps the parent's event loop
+    // referenced, so a probe that ends by falling off the bottom of the file — which most of these
+    // do, having no `process.exit` — would HANG FOREVER instead of finishing. I introduced exactly
+    // that hang on the first cut of this helper and watched `pnpm prove:isolate` run past ten
+    // minutes with its work already done. Unref lets the process exit naturally; the exit hook then
+    // kills the server.
+    child?.unref()
+    process.once('exit', () => { try { void stop() } catch { /* already gone */ } })
+  }
+  return base
 }

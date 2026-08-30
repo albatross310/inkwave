@@ -13,8 +13,9 @@
 // notion of "truth" is itself wrong and nothing here means anything.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4239}`
+const BASE = await autoBase()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
 const page = await b.newPage({ deviceScaleFactor: 2, viewport: { width: 1600, height: 1400 } })
 await page.goto(`${BASE}/?textRender`, { waitUntil: 'domcontentloaded' })

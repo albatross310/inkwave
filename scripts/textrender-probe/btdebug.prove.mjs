@@ -3,7 +3,8 @@
 // Chromium here proves the FLOW + the negative. It cannot prove the iOS worker branch (Chromium has
 // createWritable) — that is the whole point of shipping it to his device.
 import { chromium } from '@playwright/test'
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4295}`
+import { autoBase } from './serve.mjs'
+const BASE = await autoBase()
 const browser = await chromium.launch({ headless: true })
 
 async function run(label, sabotage) {

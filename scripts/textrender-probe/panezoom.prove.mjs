@@ -39,11 +39,11 @@
 // engines. The known-negative must fire ON THE ENGINE UNDER TEST before any verdict is read: a gate
 // proved on Chromium proves nothing about WebKit's own instrument.
 import { chromium, webkit } from '@playwright/test'
+import { autoBase } from './serve.mjs'
 
 const ENGINE = process.env.PROBE_ENGINE === 'webkit' ? 'webkit' : 'chromium'
 const BROWSER = ENGINE === 'webkit' ? webkit : chromium
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
-
+const BASE = await autoBase()
 function buildSnapshots() {
   let s = 42
   const rnd = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648
@@ -227,4 +227,7 @@ console.log(allSame
   ? '  => zoom is a pure PAINT SCALE. One break table is reusable across zooms.'
   : '  => the break table needs a PER-ZOOM REBUILD. The free-zoom claim dies.')
 await browser.close()
-process.exit(0)
+// ⚠ THIS WAS `process.exit(0)`, UNCONDITIONALLY. The line above could print "the free-zoom claim
+// dies" and the probe still exited 0 — the known-positive and known-negative could fail it, but its
+// own SUBJECT could not. A probe that can only fail on its instrument is an instrument, not a guard.
+process.exit(allSame ? 0 : 1)

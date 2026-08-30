@@ -27,14 +27,14 @@
 //
 // Usage: node scripts/wave-video/twoload.prove.mjs [--loads 3] [--port 4319] [--h264] [--expect-broken]
 import { webkit } from '@playwright/test'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const expectBroken = args.includes('--expect-broken')
 const forceH264 = args.includes('--h264')
 const port = Number(args[args.indexOf('--port') + 1]) || 4319
 const loads = Number(args[args.indexOf('--loads') + 1]) || 3
-const BASE = `http://127.0.0.1:${port}`
-
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const b = await webkit.launch()
 // ONE context for every load — the SW, Cache Storage, localStorage and OPFS all persist across
 // them, exactly as they do on Peter's phone when he reloads.

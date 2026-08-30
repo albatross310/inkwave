@@ -59,8 +59,9 @@
 // ~1). If both panes look the same, the probe is measuring one thing twice and NO VERDICT is read.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
+const BASE = await autoBase()
 const TRIALS = Number(process.env.TRIALS || 12)
 const DOC_ID = 'probe-doc-scrub'
 

@@ -12,7 +12,8 @@
 // table.prove.mjs, and re-asserted here so this file's comparison can fail.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT||4240}`
+import { autoBase } from './serve.mjs'
+const BASE = await autoBase()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none','--disable-lcd-text'] })
 const page = await b.newPage({ deviceScaleFactor: 2, viewport: { width: 1600, height: 1400 } })
 await page.goto(`${BASE}/?textRender`, { waitUntil: 'domcontentloaded' })

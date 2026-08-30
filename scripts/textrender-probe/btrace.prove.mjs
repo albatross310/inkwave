@@ -19,7 +19,8 @@
 // actually there before reading any verdict. The race only exists where there is something to
 // hydrate.
 import { chromium } from '@playwright/test'
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4296}`
+import { autoBase } from './serve.mjs'
+const BASE = await autoBase()
 const browser = await chromium.launch({ headless: true })
 
 const ENTRIES = Array.from({ length: 20 }, (_, i) => ({
@@ -73,4 +74,9 @@ const closed = fixed.verdict === 'PASS'
 console.log('race REPRODUCES the bug :', reproduced, reproduced ? '(the probe can see it)' : '(⚠ CANNOT SEE THE BUG — verdict below is worthless)')
 console.log('fix CLOSES it           :', closed)
 await browser.close()
-process.exit(reproduced && closed ? 0 : 1)
+// ⚠ A KNOWN-NEGATIVE THAT STOPS REPRODUCING IS A BLIND PROBE, NOT A BROKEN FEATURE — and this
+// exited 1 for both, so "I cannot see the bug" was indistinguishable from "the fix regressed". The
+// line above already says the verdict is WORTHLESS in that case; the exit code disagreed with it.
+// Blind ⇒ 2 (void). Only a genuine failure of the FIX, on an instrument proved able to see the bug,
+// is a 1.
+process.exit(!reproduced ? 2 : closed ? 0 : 1)

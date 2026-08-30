@@ -24,8 +24,9 @@
 // byte-identical. Types interact, so singles cannot certify the set: pairs and the full set run too.
 import { chromium } from '@playwright/test'
 import { buildTypeDoc, countTypes } from './typefixtures.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
+const BASE = await autoBase()
 const WORDS = Number(process.env.WORDS || 13000)
 const MIN_BREAKS = 8
 
@@ -226,5 +227,15 @@ const run = async () => {
     console.log('  A SILENT one is not: wrong words on a page, reported trustworthy.')
   }
   if (vd.length) { console.log('\n  VOID (no verdict — the row could not fail):'); for (const [l] of vd) console.log(`    • ${l}`) }
+
+  // ⚠ `run()` USED TO END HERE, SETTING NO EXIT CODE — so a row the file itself calls unshippable
+  // ("SILENT: claims full reliability while wrong", i.e. wrong words on a page reported trustworthy)
+  // printed and exited 0. Only the served-bundle void and the legacy control could ever fail it.
+  // The rule is the file's own: a DECLARED miss is shippable, a SILENT one is not.
+  const silent = fail.filter(([, r]) => r && r.est === 0 && r.reliablePages >= r.pages)
+  if (silent.length) {
+    console.log(`\n  ✗ ${silent.length} SILENT divergence(s) — reliability claimed, offsets wrong.`)
+    process.exitCode = 1
+  }
 }
 run().catch((e) => { console.error(e); process.exit(1) })

@@ -24,12 +24,12 @@
 // Serving: scripts/wave-video/server.mjs (mp4 MIME + real Range/206). NOT vite preview.
 // Usage: node scripts/wave-video/barrier.prove.mjs [--expect-broken] [--port 4317]
 import { webkit } from '@playwright/test'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const expectBroken = args.includes('--expect-broken')
 const port = Number(args[args.indexOf('--port') + 1]) || 4317
-const BASE = `http://127.0.0.1:${port}`
-
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const CASES = {
   A_normal: () => {},
   // The beacon has ALREADY fired by the time waveVideo subscribes.

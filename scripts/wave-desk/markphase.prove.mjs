@@ -31,13 +31,14 @@
 // Serving: scripts/wave-video/server.mjs. NOT `vite preview` (CLAUDE.md PROBE RULES).
 // Usage: node scripts/wave-desk/markphase.prove.mjs [--spike MS] [--perturb MS] [--port 4321]
 import { chromium } from '@playwright/test'
+import { autoWaveBase } from '../wave-video/autoserve.mjs'
 
 const args = process.argv.slice(2)
 const num = (f, d) => (args.includes(f) ? Number(args[args.indexOf(f) + 1]) : d)
 const port = num('--port', 4321)
 const spike = num('--spike', 0)
 const perturb = num('--perturb', 0)
-const BASE = `http://127.0.0.1:${port}`
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const LOOP_MS = 1944
 const PX_PER_MS = 140 / 1944 // 72px/s — the drift's exact velocity
 

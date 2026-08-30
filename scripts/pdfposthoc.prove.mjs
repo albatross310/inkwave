@@ -27,7 +27,12 @@ const server = spawn('npx', ['vite', 'preview', '--outDir', 'build/client', '--p
 const stopServer = () => { try { server.kill('SIGTERM') } catch { /* gone */ } }
 process.on('exit', stopServer)
 let failed = 0
+let voided = 0
 const fail = (m) => { console.error(`  ✗ ${m}`); failed++ }
+// A THIRD ANSWER. This probe drives a panel whose SHAPE changed under it once already — the sections
+// moved behind a nav row and six checks reported the features broken. A structural change to the
+// panel is not a finding about the reading indicator, and must not be scored as one.
+const voidRun = (m) => { console.error(`  ⊘ VOID — ${m}`); voided++ }
 const ok = (m) => console.log(`  ✓ ${m}`)
 
 /** The shared-box rule: prove the port serves THIS worktree before believing any verdict. */
@@ -91,9 +96,31 @@ async function openDropUp(page, tag) {
   // this one sent me hunting a feature bug that did not exist. Wait for the CONTENT, not the clock.
   try {
     await panel.waitFor({ state: 'visible', timeout: 10_000 })
+  } catch {
+    fail(`${tag}: the clock drop-up did not open within 10s`)
+    return null
+  }
+
+  // ⚠ THE PANEL IS A NAV SHELL NOW, AND THE SECTIONS MOVED ONE SCREEN IN (2026-07-19, `f8dd8aa`).
+  // `ClockMenu` was restructured into five nav rows; `ReadingSection` and `PostHocAdd` render inside
+  // `ProjectsView`, i.e. only when `view === 'projects'`. This probe still drove the old FLAT
+  // drop-up, so it waited on the home screen for a section that is no longer there and reported
+  // "drop-up did not render its Today section within 10s" — six failures accusing the reading
+  // indicator and the post-hoc add, both of which work. The COPY never changed; the SCREEN did.
+  // Nothing here is a product bug, and the fix is to navigate the way a writer does.
+  const projects = panel.getByRole('button', { name: /Manage projects/ })
+  if (!(await projects.count())) {
+    // Distinguish "the nav shell changed again" from "the sections are broken" — they need
+    // different people, and the old message conflated them.
+    voidRun(`${tag}: no "Manage projects" nav row — the clock panel's shape has changed again`)
+    return null
+  }
+  await projects.click()
+
+  try {
     await panel.getByText('Add time you didn\u2019t track').waitFor({ state: 'attached', timeout: 10_000 })
   } catch {
-    fail(`${tag}: drop-up did not render its Today section within 10s`)
+    fail(`${tag}: the projects view rendered no post-hoc add section within 10s`)
     return null
   }
   return panel
@@ -186,4 +213,6 @@ for (const theme of ['day', 'night']) {
 await browser.close()
 stopServer()
 console.log(failed ? `\n✗ ${failed} FAILED` : '\n✓ ALL PASSED')
-process.exit(failed ? 1 : 0)
+console.log(voided ? `\nVOID (${voided}) — a precondition moved; this run proves nothing about the feature`
+  : failed ? `\nFAILED (${failed})` : '\nPASS')
+process.exit(voided ? 2 : failed ? 1 : 0)

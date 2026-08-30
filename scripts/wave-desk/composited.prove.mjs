@@ -33,11 +33,12 @@
 //
 // Usage: node scripts/wave-desk/composited.prove.mjs [--sabotage] [--port 4321]
 import { chromium } from '@playwright/test'
+import { autoWaveBase } from '../wave-video/autoserve.mjs'
 
 const args = process.argv.slice(2)
 const sabotage = args.includes('--sabotage')
 const port = Number(args[args.indexOf('--port') + 1]) || 4321
-const BASE = `http://127.0.0.1:${port}`
+const BASE = await autoWaveBase(args.includes('--port') ? port : null)
 const STARVE_MS = 900
 const VW = 1440, VH = 900
 

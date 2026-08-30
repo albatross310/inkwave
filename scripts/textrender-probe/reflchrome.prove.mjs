@@ -33,8 +33,9 @@
 // and VOID unless quotes and multi-mark groups are actually present.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4251}`
+const BASE = await autoBase()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
 const page = await b.newPage({ deviceScaleFactor: 2, viewport: { width: 1600, height: 1400 } })
 page.on('pageerror', e => console.log('PAGEERROR', e.message))

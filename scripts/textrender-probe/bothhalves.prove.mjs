@@ -26,8 +26,9 @@
 // not a bug to fix but a claim that cannot currently be made.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
+const BASE = await autoBase()
 const DOC_ID = 'probe-doc-scrub'
 
 // THE CONTROL BISECT. The control failed on the FULL thesis shape (canvas 58 vs DOM 61 pages with
