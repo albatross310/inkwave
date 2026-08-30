@@ -30,7 +30,14 @@ const check = (c, label, detail = '') => (c ? ok : bad).push(`${c ? '✓' : '✗
 // silently — which reads exactly like 'the scoping is wrong'. Two separate temp dirs.
 const root = mkdtempSync(join(tmpdir(), 'iw-framing-'))
 const dir = join(root, 'ext'); mkdirSync(dir, { recursive: true })
-const rule = frameRuleFor()
+// ⚠ TAB 1 IS A GUESS THE PROBE MUST NOT MAKE. A static ruleset cannot know the tab id, so this
+// harness installs the rule for "any tab" by omitting tabIds — which means it proves the HEADER
+// STRIPPING and the CLICK-THROUGH, not the tab scoping. The tab scoping is proved by the unit
+// guard (framingRule.test.ts) and by the shape below being byte-identical to the shipped one
+// apart from that single condition. Stated rather than implied, because a probe that quietly
+// tests a different rule than the one that ships is worse than no probe.
+const shipped = frameRuleFor(1)
+const rule = { ...shipped, condition: { resourceTypes: shipped.condition.resourceTypes } }
 writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
   manifest_version: 3, name: 'framing probe', version: '1.0',
   permissions: ['declarativeNetRequest'], host_permissions: ['<all_urls>'],
@@ -78,6 +85,19 @@ async function run(withExt) {
     return blocked.length ? 'BLOCKED' : refusals.length ? 'REFUSED' : 'framed'
   }
   const out = { canary: await probe('https://example.org/'), refuser: await probe(REFUSER), sibling: await probe(SIBLING) }
+  // ⚠ THE CASE THE OLD PROBE COULD NOT SEE. Every check above creates a frame FROM THE TOP PAGE,
+  // where the request's initiator is this page — so an initiator-scoped rule passed them all and
+  // still broke on the writer's first click, because a navigation started INSIDE the frame is
+  // initiated by the framed page instead. Navigating the frame itself is the real gesture.
+  refusals.length = 0
+  await pg.evaluate(async () => {
+    const f = document.querySelector('iframe')
+    if (!f) return
+    f.src = 'https://www.abc.net.au/news/politics'      // the frame navigating itself
+    await new Promise((r) => { f.onload = () => setTimeout(r, 2500); setTimeout(r, 15000) })
+  })
+  await pg.waitForTimeout(500)
+  out.clicked = refusals.length ? 'REFUSED' : 'framed'
   await ctx.close(); return out
 }
 
@@ -100,8 +120,9 @@ check(off.refuser === 'REFUSED', 'control: the site refuses framing without the 
 check(on.refuser === 'framed', 'THE SCOPED RULE FIRES from an Inkwave origin', `${off.refuser} → ${on.refuser}`)
 // The regression this rule shape exists to fix: a sibling subdomain, one click away inside the
 // framed page, must be covered too.
-check(on.sibling === 'framed', 'a SIBLING SUBDOMAIN is covered (clicking through works)',
-  `${off.sibling} → ${on.sibling}`)
+check(on.sibling === 'framed', 'a SIBLING SUBDOMAIN is covered', `${off.sibling} → ${on.sibling}`)
+check(on.clicked === 'framed', 'CLICKING A LINK INSIDE THE FRAME still works',
+  `${off.clicked} → ${on.clicked}`)
 
 console.log('')
 for (const l of ok) console.log('  ' + l)

@@ -33,12 +33,12 @@ export interface FramingRule {
     responseHeaders: { header: string; operation: 'remove' }[]
   }
   condition: {
-    initiatorDomains: string[]
+    tabIds: number[]
     resourceTypes: ['sub_frame']
   }
 }
 
-export function frameRuleFor(_host?: string): FramingRule {
+export function frameRuleFor(tabId: number): FramingRule {
   return {
     id: FRAME_RULE_ID,
     priority: 1,
@@ -57,23 +57,24 @@ export function frameRuleFor(_host?: string): FramingRule {
       ],
     },
     condition: {
-      // ⚠ NO `requestDomains`, AND THAT IS A CORRECTION, NOT AN OVERSIGHT (2026-08-30).
-      // It was `[host]` — the one page the panel was asked to show — which sounded tighter and
-      // broke the panel as a BROWSER. Peter: "if I click shows in abc it won't work either."
-      // Chrome matches `requestDomains` against a domain and its SUBdomains, so a rule for
-      // `www.abc.net.au` does not cover `iview.abc.net.au`: a sibling host, one click away, and
-      // the writer is back at the refusal card. Deriving the registrable domain instead would need
-      // the public suffix list to know that `net.au` is a suffix and `abc.net.au` is the site —
-      // a table we would be carrying, and getting wrong, for no gain.
+      // ⚠ SCOPED BY TAB, NOT BY INITIATOR — AND THE DIFFERENCE IS WHAT MAKES IT A BROWSER.
+      // It was `initiatorDomains: APP_INITIATORS`, which sounds exactly right and silently breaks
+      // the moment the writer clicks a link. Peter: "abc fails as soon as you click a site."
+      // The reason: for a sub-frame navigation started by a click INSIDE the frame, the request's
+      // initiator is the FRAMED PAGE (abc.net.au), not the page hosting the frame. So the rule
+      // matched when Inkwave created the frame and stopped matching on the very next click.
       //
-      // What actually bounds this rule is the next line, and it always was. `initiatorDomains`
-      // means the rule can only ever apply to a frame INKWAVE ITSELF created; the same site opened
-      // in the writer's own tab is untouched, because there the initiator is that page. Add the
-      // session lifetime (installed when the panel shows a live page, removed when it closes) and
-      // `sub_frame`, and the reach is "pages inside Inkwave's own reader, while it is open" —
-      // which is the feature, stated exactly.
-      initiatorDomains: [...APP_INITIATORS],
-      // NEVER a top-level navigation.
+      // ⚠ AND MY PROBE COULD NOT SEE IT. It only ever created frames from the top page, where the
+      // initiator IS Inkwave — so it passed by construction, which is this repo's oldest trap
+      // wearing a new hat. The probe now clicks a link inside the frame.
+      //
+      // `tabIds` is available ONLY on session rules, which is what these are. It scopes the rule to
+      // the one tab the reader is open in: every frame inside that tab, for as long as the panel is
+      // open, and nothing in any other tab. That is a HONEST statement of the reach — slightly
+      // wider than "the page we asked for" (a framed page's own sub-frames are included), and
+      // narrower in the way that matters, since a second tab on the same site is untouched.
+      tabIds: [tabId],
+      // NEVER a top-level navigation — the writer's own tab is never rewritten.
       resourceTypes: ['sub_frame'],
     },
   }

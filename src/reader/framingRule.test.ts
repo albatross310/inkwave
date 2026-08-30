@@ -18,14 +18,20 @@ import { describe, it, expect } from 'vitest'
 import { APP_INITIATORS, frameRuleFor } from './framingRule'
 
 describe('the framing rule is scoped', () => {
-  const rule = frameRuleFor('abc.net.au')
+  const TAB = 42
+  const rule = frameRuleFor(TAB)
 
-  it('applies ONLY to frames Inkwave itself created', () => {
-    // Without this the rule fires for a frame on ANY page — including one built by a site the
-    // writer merely visited, which is the clickjacking case. `initiatorDomains` is the whole of
-    // what keeps this feature inside the reader.
-    expect(rule.condition.initiatorDomains).toEqual([...APP_INITIATORS])
-    expect(rule.condition.initiatorDomains.length).toBeGreaterThan(0)
+  it('applies ONLY inside the tab the reader is open in', () => {
+    // ⚠ THIS REPLACED `initiatorDomains`, WHICH READ AS TIGHTER AND BROKE CLICKING THROUGH.
+    // For a sub-frame navigation started by a click INSIDE the frame, the request's initiator is
+    // the framed page, not the page hosting it — so an initiator rule matched when Inkwave created
+    // the frame and stopped matching on the next click ("abc fails as soon as you click a site").
+    // The tab is the honest boundary: every frame in the reader's tab, nothing in any other.
+    expect(rule.condition.tabIds).toEqual([TAB])
+    expect(frameRuleFor(7).condition.tabIds).toEqual([7])
+    // And it must be a REAL tab, never a wildcard: -1 is Chrome's "no tab" sentinel and a rule
+    // carrying it would apply outside any tab at all.
+    expect(rule.condition.tabIds.every((t) => t >= 0)).toBe(true)
   })
 
   it('applies ONLY to sub-frames, never a top-level navigation', () => {
@@ -54,10 +60,9 @@ describe('the framing rule is scoped', () => {
 
   it('KNOWN-NEGATIVE: the assertions can see an unscoped rule', () => {
     // Prove these checks discriminate rather than passing on whatever they are handed — the
-    // "control that cannot fail" trap CLAUDE.md records for this repo's own probes. A rule missing
-    // its initiator restriction must fail the first test's comparison.
-    const unscoped = { condition: { initiatorDomains: undefined as unknown as string[] } }
-    expect(unscoped.condition.initiatorDomains).not.toEqual([...APP_INITIATORS])
+    // "control that cannot fail" trap this repo records against its own probes.
+    const noTab = { condition: { tabIds: undefined as unknown as number[] } }
+    expect(noTab.condition.tabIds).not.toEqual([TAB])
     const wide = { condition: { resourceTypes: ['sub_frame', 'main_frame'] } }
     expect(wide.condition.resourceTypes).not.toEqual(['sub_frame'])
   })

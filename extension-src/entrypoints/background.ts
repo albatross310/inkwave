@@ -121,7 +121,7 @@ export default defineBackground(() => {
     await injectAndShowCapture(tabId, capture)
   })
 
-  browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const m = msg as { type?: string; tabId?: number; quote?: string; capture?: CaptureMsg; url?: string; id?: string; updates?: unknown } | null
     if (!m) return false
 
@@ -189,7 +189,7 @@ export default defineBackground(() => {
     // (anything behind a login, because Lax cookies do not survive a third-party frame). The panel
     // must not report success on the strength of this.
     if (m.type === BG_ALLOW_FRAME && typeof m.url === 'string') {
-      allowFraming(m.url)
+      allowFraming(m.url, sender.tab?.id)
         .then(() => sendResponse({ ok: true }))
         .catch(e => sendResponse({ ok: false, error: String((e as Error)?.message || e) }))
       return true
@@ -270,7 +270,7 @@ const dnr = (): DnrApi | null =>
 
 /** Install the framing rule for ONE host. Replaces any previous one — the panel shows a single
  *  page at a time, so a second call means the writer navigated, not that they want both. */
-async function allowFraming(rawUrl: string): Promise<void> {
+async function allowFraming(rawUrl: string, tabId: number | undefined): Promise<void> {
   const api = dnr()
   if (!api?.updateSessionRules) throw new Error('declarativeNetRequest unavailable')
   // The url is still PARSED even though the rule no longer narrows by host: a caller that hands us
@@ -279,7 +279,11 @@ async function allowFraming(rawUrl: string): Promise<void> {
   // (See framingRule.ts for why the host is no longer part of the condition — clicking through to
   // a sibling subdomain broke, and initiatorDomains is what actually bounds this.)
   if (!new URL(rawUrl).hostname) throw new Error('no host')
-  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor()] })
+  // ⚠ THE TAB IS THE SCOPE, so no tab means no rule — never a wider one. A message with no sender
+  // tab is not a reader asking politely; it is a request we cannot account for, and the failure
+  // mode of guessing here is a framing rule with no owner.
+  if (typeof tabId !== 'number') throw new Error('no tab')
+  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor(tabId)] })
 }
 
 /** Drop it. Called when the panel closes, when it navigates away from live view, and on unload. */
