@@ -848,6 +848,17 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // the whole tab ("youtube stopped working… it just never loads"): worked once, then never,
     // which is the signature of STATE rather than a race.
     if (!framed || extState !== 'ready') { setFramingOn(false); return }
+    // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLED A PLAYING VIDEO. Peter, watching a cat
+    // video: "youtube was working a minute ago." youtube-nocookie /embed/ sends no framing headers,
+    // so the rule buys nothing there — but installing it bumps `frameKey`, which REMOUNTS the
+    // iframe, which restarts the player under him.
+    //
+    // This skip existed before and I removed it, correctly at the time: back then the early return
+    // sat above a cleanup that RELEASED the tab's rule, so skipping also tore down framing for
+    // every other page. Now that teardown lives in its own effect below, the skip is inert rather
+    // than destructive — it declines to install and removes nothing. Both facts had to be true
+    // before this line was safe, which is why it is worth the paragraph.
+    if (isPlayable(here)) { setFramingOn(false); return }
     const port = windowPort()
     if (!port) { setFramingOn(false); return }
     let live = true
