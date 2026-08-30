@@ -42,6 +42,25 @@ export const CONTRAST_WALKER = `
   const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]; return (hi + 0.05) / (lo + 0.05) }
   const hex = (c) => '#' + [c.r, c.g, c.b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('')
 
+  /**
+   * The WORST (highest-luminance, i.e. least helpful to light ink… and lowest for dark ink) colour
+   * stop of a CSS gradient, or null when background-image carries no gradient.
+   *
+   * Returning the worst rather than an average is deliberate: a gradient that passes at one end and
+   * fails at the other IS a failure, and averaging would launder it — the same argument this repo
+   * made about the defensive clamp that hid a broken Pearson formula. It scores against BOTH
+   * extremes by returning whichever stop is furthest from mid-grey in the direction that hurts,
+   * which for a two-stop button fill is simply the lighter end.
+   */
+  const worstStop = (bgImage) => {
+    if (!bgImage || bgImage === 'none' || !/gradient\\(/.test(bgImage)) return null
+    const stops = []
+    for (const m of bgImage.matchAll(/rgba?\\([^)]*\\)/g)) { const c = parse(m[0]); if (c && c.a > 0) stops.push(c) }
+    if (!stops.length) return null
+    // The lightest stop — the one a white label has the least chance against.
+    return stops.reduce((a, b) => (lum(b) > lum(a) ? b : a))
+  }
+
   // The effective background BEHIND an element: composite every translucent layer from the element
   // upward onto the first opaque one. Reading only the element's own background-color reports
   // "rgba(0,0,0,0)" for the overwhelming majority of nodes and would score everything against black.
@@ -75,7 +94,15 @@ export const CONTRAST_WALKER = `
       // nothing at or above the surface may be composited on top of it.
       if (paper && n.classList && n.classList.contains('inkwave-editor-surface')) break
       const cs = getComputedStyle(n)
-      const c = parse(cs.backgroundColor)
+      // ⚠ A GRADIENT IS A BACKGROUND TOO, AND THE WALKER WAS BLIND TO IT (2026-08-30). It read
+      // background-color only, so a button filled with linear-gradient(135deg,#7a4fb0,#5c2d8a)
+      // — which four of the reader's dead-end cards ship, all carrying text-white — resolved to
+      // the WHITE of the panel behind it and scored 1:1. That is an alarm firing on a working
+      // control, and CLAUDE.md is explicit that this is worse than a green on a broken one: it
+      // trains the one person whose eyes are the ground truth to distrust the instrument.
+      // Scored on the WORST stop, so a gradient can never pass on its friendliest end.
+      const grad = worstStop(cs.backgroundImage)
+      const c = grad || parse(cs.backgroundColor)
       // An ancestor's opacity dims what is painted over it too; treat it as extra alpha.
       const op = parseFloat(cs.opacity)
       if (c && c.a > 0) stack.push({ ...c, a: c.a * (Number.isFinite(op) ? op : 1) })

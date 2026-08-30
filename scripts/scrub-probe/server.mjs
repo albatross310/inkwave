@@ -24,6 +24,17 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "worker-src 'self' blob:",
+  // ⚠ WITHOUT THIS THE READER'S LIVE VIEW CANNOT LOAD ANYTHING, AND IT FAILS SILENTLY.
+  // There was no `frame-src` here, so framing fell back to `default-src 'self'` and every
+  // cross-origin frame was refused BEFORE any network request existed — no request event, no
+  // requestfailed, just a frame sitting at `chrome-error://chromewebdata/`. `page.route` and
+  // `context.route` are both powerless against that, because there is nothing to intercept.
+  // MEASURED 2026-08-30: `prove:reader`'s new live-view cells all passed against that error page,
+  // because they measure OUR element — including the PAN cell, which was scoring a scroll chained
+  // out of a page with no content of its own to consume the gesture, i.e. the easiest possible
+  // case wearing the costume of the real one. The header now mirrors production's
+  // (`middleware.ts`: `frame-src 'self' blob: https: …`), which is strictly more faithful.
+  "frame-src 'self' blob: https:",
 ].join('; ')
 
 http.createServer(async (req, res) => {

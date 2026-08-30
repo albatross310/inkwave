@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, searchUrlFor } from './SourceBrowser'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself } from './SourceBrowser'
+import { APP_INITIATORS } from '../reader/framingRule'
 
 describe('addressToUrl', () => {
   it('a URL is a URL', () => {
@@ -119,13 +120,26 @@ describe('search endpoint follows the capability', () => {
     expect(addressToUrl('metaphysics of identity', false)).toBe(`${SEARCH_URL}metaphysics%20of%20identity`)
   })
 
-  it('WITH framing: still DuckDuckGo — Google answers a framed search with a CAPTCHA', () => {
-    // ⚠ MEASURED, and it reverses the same day's earlier change. Framing google.com/search works —
-    // and Google then redirects ITSELF to /sorry/index. It declines to serve a search in a frame;
-    // no header we strip changes that. So the engine must not follow the capability even though
-    // the MODE does.
-    expect(searchUrlFor(true)).toBe(SEARCH_URL)
-    expect(addressToUrl('metaphysics of identity', true)).toBe(`${SEARCH_URL}metaphysics%20of%20identity`)
+  it('WITH framing: the REAL duckduckgo.com, which renders in full inside a frame', () => {
+    // ⚠ THE ENGINE DOES NOT FOLLOW THE CAPABILITY; THE ENDPOINT DOES. Framing google.com/search
+    // works and Google then redirects ITSELF to /sorry/index — it declines to serve a search in a
+    // frame, and no header we strip changes that. But MEASURED the same day: the real
+    // duckduckgo.com framed renders 5,993 characters and 34 result links, i.e. a proper search
+    // engine with its own styling rather than the bare html.duckduckgo.com transcript.
+    expect(searchUrlFor(true)).toBe(LIVE_SEARCH_URL)
+    expect(addressToUrl('metaphysics of identity', true)).toBe(`${LIVE_SEARCH_URL}metaphysics%20of%20identity`)
+    // …and it is still recognised as a search, or `go` would not switch it into live view.
+    expect(mustUseReader(`${LIVE_SEARCH_URL}x`, true)).toBe(false)
+  })
+
+  it('ECOSIA is refused on measurement, in both directions', () => {
+    // Peter asked for it ("more sexy"). Measured: a server/extension fetch gets 403 (Cloudflare),
+    // and FRAMED it renders "Just a moment…" — a challenge page, 147 characters, 0 links. The
+    // constant is kept because the reasoning is worth keeping; no path may use it as an endpoint.
+    expect(searchUrlFor(true)).not.toBe(ECOSIA_SEARCH_URL)
+    expect(searchUrlFor(false)).not.toBe(ECOSIA_SEARCH_URL)
+    expect(addressToUrl('metaphysics of identity', true)?.startsWith(ECOSIA_SEARCH_URL)).toBe(false)
+    expect(addressToUrl('metaphysics of identity', false)?.startsWith(ECOSIA_SEARCH_URL)).toBe(false)
   })
 
   it('GOOGLE_SEARCH_URL is not used as a search endpoint by any path', () => {
@@ -150,5 +164,38 @@ describe('search endpoint follows the capability', () => {
     // silently start sending Google into a reader that cannot render it.
     expect(addressToUrl('wittgenstein')).toBe(`${SEARCH_URL}wittgenstein`)
     expect(mustUseReader('https://duckduckgo.com/?q=x')).toBe(true)
+  })
+})
+
+
+// ── INKWAVE MAY NOT OPEN INKWAVE (2026-08-30) ───────────────────────────────────────
+// Peter loaded iwzero.me in the panel and got Chrome's broken-page icon — the app sends
+// X-Frame-Options: DENY. That is NOT why this is refused: the extension strips that header, so
+// without this check it would start working, and working means a second editor claiming the same
+// document lock as the outer one. The tab would fight itself.
+describe('isInkwaveItself', () => {
+  it('recognises every origin the extension scopes its own rule to', () => {
+    // The SAME list, imported — a private copy here is how a rename puts a guard quietly to sleep.
+    expect(APP_INITIATORS.length).toBeGreaterThan(0)
+    for (const d of APP_INITIATORS) {
+      expect(isInkwaveItself(`https://${d}/`), d).toBe(true)
+      expect(isInkwaveItself(`https://${d}/?doc=abc`), d).toBe(true)
+      expect(isInkwaveItself(`https://www.${d}/entries/x`), d).toBe(true)   // subdomains too
+    }
+    expect(isInkwaveItself('http://localhost:5173/')).toBe(true)
+  })
+  it('DISCRIMINATES — an ordinary source is not us', () => {
+    // Without this arm, "we refused something" says nothing about whether the check can tell.
+    for (const u of [
+      'https://plato.stanford.edu/entries/identity-time/',
+      'https://en.wikipedia.org/wiki/Identity',
+      'https://duckduckgo.com/?q=x',
+      'https://notiwzero.me.example.com/',   // the substring trap
+      'https://iwzero.me.evil.test/',        // …and its mirror image
+    ]) expect(isInkwaveItself(u), u).toBe(false)
+  })
+  it('rubbish is not us either — it must never throw in front of the writer', () => {
+    expect(isInkwaveItself('not a url')).toBe(false)
+    expect(isInkwaveItself('')).toBe(false)
   })
 })
