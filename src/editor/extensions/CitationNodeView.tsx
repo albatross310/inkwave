@@ -249,7 +249,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           // splitting mid-label — which is what you usually want typographically anyway.
           whiteSpace: 'nowrap',
           // via a CSS var so night mode can recolour citations (light blue) without an inline override.
-          color: hasMissing ? '#b91c1c' : 'var(--iw-cite-color, #5c2d8a)',
+          color: hasMissing ? 'var(--iw-danger, #b91c1c)' : 'var(--iw-cite-color, #5c2d8a)',
           background: selected ? `${INK}18` : undefined,
           borderRadius: 3,
           // margin, not padding: margins are OUTSIDE the hit box, so a click immediately beside the
@@ -385,7 +385,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       ><span className="iw-biblink-arrow">⤵</span></button>
                     </>
                   ) : (
-                    <span id={citeAnchorId(s.key, s.occ)} style={{ color: '#b91c1c' }} title={`Unresolved: ${s.key}`}>
+                    <span id={citeAnchorId(s.key, s.occ)} style={{ color: 'var(--iw-danger, #b91c1c)' }} title={`Unresolved: ${s.key}`}>
                       {s.text}
                     </span>
                   )}

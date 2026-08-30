@@ -59,10 +59,35 @@ const WALKER = `
   // The effective background BEHIND an element: composite every translucent layer from the element
   // upward onto the first opaque one. Reading only the element's own background-color reports
   // "rgba(0,0,0,0)" for the overwhelming majority of nodes and would score everything against black.
+  // ⚠ THE PAPER IS NOT AN ANCESTOR OF THE PROSE, AND AN ANCESTOR WALK SCORES THE WRONG COLOUR.
+  // In gapped mode the page sheets live in a SIBLING layer (.inkwave-sheets > .inkwave-sheet,
+  // absolutely positioned behind the text), so climbing from a paragraph reaches
+  // .inkwave-editor-surface — the aqua water in day, near-black in night — and never touches the
+  // parchment/charcoal the words are actually printed on. MEASURED both ways on the same build: the
+  // "References" heading scored 2.06:1 against the night surface and 1.23:1 against its own sheet,
+  // and in DAY the walker was scoring prose against #00bfa8 AQUA. Both errors flatter the palette
+  // here, which is the dangerous direction. So: if a sheet contains the element's centre, that
+  // sheet is the backdrop and the walk stops at the surface.
+  const sheetUnder = (el) => {
+    const r = el.getBoundingClientRect()
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+    for (const s of document.querySelectorAll('.inkwave-sheet')) {
+      const q = s.getBoundingClientRect()
+      if (cx >= q.left && cx <= q.right && cy >= q.top && cy <= q.bottom) {
+        const c = parse(getComputedStyle(s).backgroundColor)
+        if (c && c.a >= 0.999) return c
+      }
+    }
+    return null
+  }
   window.__iwBgOf = (el) => {
+    const paper = sheetUnder(el)
     const stack = []
     let n = el
     while (n && n.nodeType === 1) {
+      // The surface paints BELOW the sheet layer, so once a sheet is established as the backdrop
+      // nothing at or above the surface may be composited on top of it.
+      if (paper && n.classList && n.classList.contains('inkwave-editor-surface')) break
       const cs = getComputedStyle(n)
       const c = parse(cs.backgroundColor)
       // An ancestor's opacity dims what is painted over it too; treat it as extra alpha.
@@ -71,7 +96,7 @@ const WALKER = `
       if (c && c.a * (Number.isFinite(op) ? op : 1) >= 0.999) break
       n = n.parentElement
     }
-    let base = { r: 255, g: 255, b: 255, a: 1 }   // the page is white under everything
+    let base = paper || { r: 255, g: 255, b: 255, a: 1 }   // the page is white under everything
     for (let i = stack.length - 1; i >= 0; i--) base = over(stack[i], base)
     return base
   }
@@ -265,6 +290,46 @@ try {
   check(known['badly outlin'] && !known['badly outlin'].ok,
     '…and an outline carrying no contrast does NOT rescue it', JSON.stringify(known['badly outlin']))
 
+  // ⚠ AND THE BACKDROP RULE NEEDS ITS OWN PAIR. `__iwBgOf` now prefers the .inkwave-sheet under an
+  // element over its ancestor chain; a mechanism with no known-negative is how "0 failures" comes to
+  // mean "nothing was measured". Two probes, identical but for POSITION: one over a real sheet must
+  // report the SHEET's colour, one outside every sheet must report the surface's. If the sheets have
+  // not laid out yet the arm VOIDS loudly rather than passing.
+  const backdrop = await page.evaluate(() => {
+    const s = document.querySelector('.inkwave-sheet')
+    if (!s) return { void: 'no .inkwave-sheet laid out' }
+    const q = s.getBoundingClientRect()
+    if (q.width < 4 || q.height < 4) return { void: 'sheet has no box' }
+    // ⚠ THE HOST MATTERS, and the first cut of this arm got it wrong in a way worth keeping.
+    // Appended to <body>, a probe div's ancestor chain never passes through .inkwave-editor-surface,
+    // so the "stop at the surface" clause could not fire and BOTH samples came back as the surface's
+    // own colour — the negative reported the rule broken while the rule was fine. A page sheet only
+    // paints under things INSIDE the surface, so the probe has to live where the prose lives.
+    const host = document.querySelector('.scroll-paper') || document.querySelector('.inkwave-editor-surface')
+    if (!host) return { void: 'no paper host' }
+    const mk = (x, y) => {
+      const d = document.createElement('div')
+      d.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:6px;height:6px;background:transparent`
+      host.appendChild(d)
+      const bg = window.__iwBgOf(d)
+      d.remove()
+      return '#' + [bg.r, bg.g, bg.b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('')
+    }
+    return {
+      sheetHex: getComputedStyle(s).backgroundColor,
+      onSheet: mk(q.left + q.width / 2 - 3, q.top + q.height / 2 - 3),
+      offSheet: mk(Math.max(2, q.left - 60), q.top + q.height / 2 - 3),
+    }
+  })
+  if (backdrop.void) check(false, 'backdrop known-negative could not run', backdrop.void)
+  else {
+    const rgbHex = (c) => { const m = /rgba?\(([^)]+)\)/.exec(c); const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number); return '#' + p.slice(0, 3).map(v => Math.round(v).toString(16).padStart(2, '0')).join('') }
+    check(backdrop.onSheet === rgbHex(backdrop.sheetHex),
+      'an element OVER a page sheet is scored against the SHEET', JSON.stringify(backdrop))
+    check(backdrop.offSheet !== backdrop.onSheet,
+      '…and one beside it is NOT (the rule discriminates by position)', JSON.stringify(backdrop))
+  }
+
   const docId = 'nightaudit-' + Math.random().toString(36).slice(2, 8)
   const pdfBytes = tinyPdf()
   // ⚠ TWO SOURCES, NOT ONE. A citation whose source has an embedded PDF opens the PDF VIEWER on a
@@ -283,13 +348,30 @@ try {
       _iw: { pdfName: 'parfit.pdf', source: 'crossref' },
     }
     const cite = (k) => ({ type: 'citation', attrs: { citekeys: [k], prefix: '', suffix: '', locator: '', suppressAuthor: false } })
+    // A mid-palette swatch from StyleBar's HIGHLIGHT_COLORS (they are all pastels by design).
+    const hl = { type: 'highlight', attrs: { color: '#bbf7d0' } }
     const doc = {
       id, title: 'Night audit', createdAt: new Date().toISOString(), schemaVersion: '1',
+      // ⚠ THE PAGE IS A SURFACE TOO, and until 2026-08-30 nothing in this probe ever looked at it —
+      // which is precisely where Peter found the "References" heading at 1.23:1 against its own
+      // paper. The fixture therefore carries the three page states that can each be wrong on their
+      // own: a plain citation, a citation inside a WRITER'S HIGHLIGHT (a light pastel in both
+      // themes — the worst pair measured anywhere, body text at 1.06:1), and an UNRESOLVED key
+      // (the red glyph). A highlight the fixture never contains is a rule the audit cannot see.
       contentJson: { type: 'doc', content: [
         { type: 'paragraph', content: [
           { type: 'text', text: 'As argued ' }, cite('sider2001'),
           { type: 'text', text: ' the puzzle persists, and again ' }, cite('parfit1984'),
           { type: 'text', text: ' at length.' },
+        ] },
+        { type: 'paragraph', content: [
+          { type: 'text', marks: [hl], text: 'A highlighted passage carrying ' },
+          { ...cite('sider2001'), marks: [hl] },
+          { type: 'text', marks: [hl], text: ' inside the wash itself.' },
+        ] },
+        { type: 'paragraph', content: [
+          { type: 'text', text: 'An unresolved key renders as ' }, cite('nosuchsource1999'),
+          { type: 'text', text: ' until it is fixed.' },
         ] },
         { type: 'referenceList' },
       ] },
@@ -317,6 +399,162 @@ try {
     await page.goto(`${base}/?doc=${docId}`, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector(EDITOR, { timeout: 60000 })
     await setTheme(theme)
+
+    // ── 0. THE DOCUMENT PAGE ITSELF ───────────────────────────────────────────────────────────
+    // Prose, in-text citations, a citation inside a writer's highlight, an unresolved key, and the
+    // whole reference list (heading, "esp. pp", the ↩ back-refs, the + note button). This is the
+    // surface the writer actually looks at and it was the one surface this probe never opened.
+    await audit(theme, 'document page', '.ProseMirror')
+    // ⚠ THE FIXTURE'S HIGHLIGHT COVERAGE IS PARTLY LUCK, and this arm removes the luck. SCAS flags
+    // words STOCHASTICALLY, so whether a flagged word lands inside the highlighted passage varies
+    // run to run — a mutation run that happened to flag a different word surfaced a real DAY failure
+    // (#237a47 on #bbf7d0 = 4.39:1) that the clean run had sailed straight past. And the fixture can
+    // only carry ONE of the eleven HIGHLIGHT_COLORS swatches. So: a deterministic probe on the
+    // DARKEST swatch (#a5b4fc, Indigo — the worst case for dark ink), carrying the three things that
+    // can sit on a highlight. It reproduces the real element exactly, `color: inherit` included,
+    // because that inline declaration is what the night rule's `!important` exists to outrank — a
+    // stand-in without it would be testing a cascade the app never has.
+    const onHighlight = await page.evaluate(() => {
+      const pm = document.querySelector('.ProseMirror[contenteditable="true"]')
+      if (!pm) return { void: 'no editor' }
+      const host = document.createElement('p')
+      host.setAttribute('data-iw-probe', 'onlight')
+      host.innerHTML = '<mark data-color="#a5b4fc" style="background-color: rgb(165, 180, 252); color: inherit;">' +
+        'prose on the darkest swatch ' +
+        '<span style="color: var(--iw-cite-color, #5c2d8a)">(Author, 2001)</span> ' +
+        '<span class="scas-red">flagged</span></mark>'
+      pm.appendChild(host)
+      const r = window.__iwAudit('[data-iw-probe="onlight"]')
+      host.remove()
+      return r
+    })
+    if (onHighlight.void) check(false, `[${theme}] the darkest-swatch highlight probe could not run`, onHighlight.void)
+    else {
+      const hi = onHighlight.items || []
+      const fails = hi.filter((i) => !i.ok)
+      check(hi.length >= 3, `[${theme}] the highlight probe painted prose, a citation and a flag`, String(hi.length))
+      check(fails.length === 0, `[${theme}] every ink on the DARKEST highlight swatch is legible`,
+        fails.map((f) => `${f.fg} on ${f.bg} ${f.ratio}:1 "${f.label}"`).join(' · '))
+      for (const f of fails) bad.push({ theme, label: 'darkest highlight swatch', ...f })
+    }
+    // THE PAGE MUST HAVE AN EDGE, and it must cost NO LAYOUT. Peter: the sheet against the near-black
+    // water had no boundary at all. The ring is a box-shadow spread precisely because canonical
+    // pagination measures the paper's box — so the check is BOTH: a visible ring against the surface
+    // behind it, AND a border box byte-identical to the one with the shadow suppressed.
+    const edge = await page.evaluate(() => {
+      const s = document.querySelector('.inkwave-sheet')
+      if (!s) return { void: 'no sheet' }
+      const before = s.getBoundingClientRect()
+      const b = { x: before.x, y: before.y, w: before.width, h: before.height }
+      const prev = s.style.boxShadow
+      s.style.boxShadow = 'none'
+      const after = s.getBoundingClientRect()
+      s.style.boxShadow = prev
+      const cs = getComputedStyle(s)
+      const surf = getComputedStyle(document.querySelector('.inkwave-editor-surface')).backgroundColor
+      return {
+        shadow: cs.boxShadow, surface: surf,
+        layoutMoved: Math.abs(after.x - b.x) + Math.abs(after.y - b.y) + Math.abs(after.width - b.w) + Math.abs(after.height - b.h),
+      }
+    })
+    if (edge.void) check(false, `[${theme}] page-edge check could not run`, edge.void)
+    else if (theme === 'day') {
+      // DAY IS A DIFFERENT CLAIM, not an exemption. Cream paper on aqua water with an 8px/32px drop
+      // shadow already reads as a page, and Peter reported no day problem — so the day assertion is
+      // that the shadow it relies on is STILL THERE. A future change that deletes it is caught here;
+      // what is NOT asserted in day is a 1px ring, because day does not have one by design.
+      check(/\dpx\s+\d+px/.test(edge.shadow) && edge.shadow.includes('rgba'),
+        `[day] the page sheet keeps its drop shadow (day's own boundary)`, edge.shadow.slice(0, 60))
+      check(edge.layoutMoved === 0, `[day] …and the shadow changes NO layout (px moved)`, String(edge.layoutMoved))
+    } else {
+      const ring = /(rgba?\([^)]+\))\s+0px\s+0px\s+0px\s+1px/.exec(edge.shadow)
+      check(!!ring, `[${theme}] the page sheet carries a 1px edge ring`, edge.shadow.slice(0, 80))
+      check(edge.layoutMoved === 0, `[${theme}] …and the ring changes NO layout (px moved)`, String(edge.layoutMoved))
+      if (ring) {
+        const r = await page.evaluate(([a, b2]) => {
+          const host = document.createElement('div')
+          host.style.cssText = `position:fixed;left:-9999px;top:0;background:${b2};padding:4px`
+          host.innerHTML = `<span style="color:${a}">edge</span>`
+          document.body.appendChild(host)
+          const out = window.__iwAudit('div[style*="-9999px"]')
+          host.remove()
+          return out.items[0]
+        }, [ring[1], edge.surface])
+        // An edge is a non-text boundary: WCAG 1.4.11 asks 3:1 of a UI component's visual boundary.
+        check(r && r.ratio >= 3, `[${theme}] the edge is visible against the surface behind it`,
+          r ? `${r.fg} on ${r.bg} = ${r.ratio}:1` : 'unreadable')
+      }
+    }
+
+    // ── 0b. THE PAGE SETTINGS PANEL (P) ───────────────────────────────────────────────────────
+    // Peter: the unselected Low/High pills were "nearly invisible" beside a readable Mid, which
+    // makes the control look BROKEN rather than dim. Measured before the fix: #6b7280 on #454e59 =
+    // 1.75:1, inside a bright #d1d5db ring.
+    await page.evaluate(() => { const b2 = [...document.querySelectorAll('button')].find(x => (x.getAttribute('title') || '') === 'Page settings'); b2 && b2.click() })
+    await page.waitForTimeout(700)
+    const pageMenu = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="Page settings"]')
+      if (!d) return false
+      d.setAttribute('data-iw-probe', 'pagemenu'); return true
+    })
+    check(pageMenu, `[${theme}] the page settings panel opened`)
+    if (pageMenu) {
+      const items = await audit(theme, 'page settings panel', '[data-iw-probe="pagemenu"]')
+      check(Array.isArray(items), `[${theme}] the page settings panel was actually read`)
+      // A SET of preset pills is only usable if the unselected ones are legible AS WELL as the
+      // selected one — scoring the panel as a whole would let one bright pill carry the average.
+      const pills = await page.evaluate(() => {
+        const on = [], off = []
+        for (const b2 of document.querySelectorAll('[data-iw-probe="pagemenu"] button')) {
+          const t = b2.textContent.trim()
+          if (!/^(Low|Mid|High|None)$/.test(t)) continue
+          const cs = getComputedStyle(b2)
+          const filled = !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor)
+          ;(filled ? on : off).push({ t, fg: cs.color, bg: cs.backgroundColor, bd: cs.borderTopColor })
+        }
+        return { on, off }
+      })
+      check(pills.on.length > 0 && pills.off.length > 0,
+        `[${theme}] the pill audit saw BOTH states (selected ${pills.on.length}, unselected ${pills.off.length})`)
+    }
+    await page.evaluate(() => { const d = document.querySelector('[data-iw-probe="pagemenu"]'); const c = d && [...d.querySelectorAll('button')].find(x => x.textContent.trim() === '×'); c && c.click() })
+    await page.waitForTimeout(300)
+
+    // ── 0c. THE KEYBOARD-SHORTCUTS PANEL (ⓘ Guide) ────────────────────────────────────────────
+    // Peter: the section headings read as "a muddy brown/olive… a rendering fault", and the key
+    // glyphs were darker than the descriptions beside them — "the column you scan is the one you
+    // cannot see". Measured before the fix: headings 3.07:1, keys 1.71:1, descriptions 1.20:1.
+    await page.evaluate(() => { const b2 = [...document.querySelectorAll('button')].find(x => (x.getAttribute('title') || '') === 'Guide'); b2 && b2.click() })
+    await page.waitForTimeout(700)
+    const guide = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="Guide"]')
+      if (!d) return false
+      d.setAttribute('data-iw-probe', 'guide'); return true
+    })
+    check(guide, `[${theme}] the keyboard-shortcuts panel opened`)
+    if (guide) {
+      const items = await audit(theme, 'shortcuts panel', '[data-iw-probe="guide"]')
+      check(Array.isArray(items), `[${theme}] the shortcuts panel was actually read`)
+      // THE HIERARCHY CLAIM, not merely the floor: the keys are the subject of this panel, so the
+      // key column must not be QUIETER than the descriptions it labels. A contrast floor alone
+      // passes the exact arrangement Peter complained about.
+      const cols = await page.evaluate(() => {
+        const g = document.querySelector('[data-iw-probe="guide"] div[style*="grid"]')
+        if (!g) return null
+        const kids = [...g.children].filter(c => c.tagName === 'SPAN')
+        const key = kids.find(c => /monospace/.test(getComputedStyle(c).fontFamily))
+        const desc = kids.find(c => !/monospace/.test(getComputedStyle(c).fontFamily))
+        if (!key || !desc) return null
+        const bg = window.__iwBgOf(key)
+        return { key: getComputedStyle(key).color, keyW: getComputedStyle(key).fontWeight, desc: getComputedStyle(desc).color, bg }
+      })
+      check(!!cols, `[${theme}] the shortcuts panel's key/description columns were found`)
+      if (cols) check(cols.key !== cols.desc && parseInt(cols.keyW, 10) >= 600,
+        `[${theme}] the key column is distinct and at least as heavy as its description`,
+        `key ${cols.key} @${cols.keyW} vs desc ${cols.desc}`)
+    }
+    await page.evaluate(() => { const d = document.querySelector('[data-iw-probe="guide"]'); const c = d && [...d.querySelectorAll('button')].find(x => x.getAttribute('aria-label') === 'Close'); c && c.click() })
+    await page.waitForTimeout(300)
 
     // ── 1. THE SOURCE READER ──────────────────────────────────────────────────────────────────
     await page.evaluate(() => {
