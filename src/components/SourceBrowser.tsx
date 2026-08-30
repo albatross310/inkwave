@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
 import { splitMath, hasMath } from '../reader/readerMath'
+import { liveFrameEnabled } from '../reader/liveFrameFlag'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
@@ -847,7 +848,8 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // return happens AFTER the previous run's cleanup ran. Opening one video tore down framing for
     // the whole tab ("youtube stopped working… it just never loads"): worked once, then never,
     // which is the signature of STATE rather than a race.
-    if (!framed || extState !== 'ready') { setFramingOn(false); return }
+    // DEFAULT OFF — see src/reader/liveFrameFlag.ts for why, and for what it does not fix.
+    if (!liveFrameEnabled() || !framed || extState !== 'ready') { setFramingOn(false); return }
     // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLED A PLAYING VIDEO. Peter, watching a cat
     // video: "youtube was working a minute ago." youtube-nocookie /embed/ sends no framing headers,
     // so the rule buys nothing there — but installing it bumps `frameKey`, which REMOUNTS the
