@@ -21,7 +21,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { INKWAVE_ORIGINS } from '../../extension-src/utils/constants'
 
-const MANIFEST = join(process.cwd(), 'extension-src/.output/chrome-mv3/manifest.json')
+const OUT = join(process.cwd(), 'extension-src/.output/chrome-mv3')
+const MANIFEST = join(OUT, 'manifest.json')
 const built = () => JSON.parse(readFileSync(MANIFEST, 'utf8'))
 
 describe.skipIf(!existsSync(MANIFEST))('the built extension manifest declares the app bridge', () => {
@@ -54,5 +55,102 @@ describe.skipIf(!existsSync(MANIFEST))('the built extension manifest declares th
   it('still grants the framing permission', () => {
     // The other half of live view: without this the rule cannot be installed at all.
     expect(built().permissions).toContain('declarativeNetRequestWithHostAccess')
+  })
+})
+
+// ── THE PERMISSION SHAPE, WHICH IS A PRODUCT DECISION AND NOT A DETAIL ─────────────────────────
+// Everything below guards a choice argued at length in wxt.config.ts, where the ARGUMENT lives and
+// nothing checks it. Each is one careless edit away, and each edit is silent: the extension keeps
+// working for the developer who made it and changes what every installed copy prompts for.
+describe.skipIf(!existsSync(MANIFEST))('the built manifest keeps page fetching OPTIONAL', () => {
+  it('offers <all_urls> as an OPTIONAL host permission', () => {
+    // Firefox (MV2) spells the same grant `optional_permissions`; this is the Chrome build.
+    expect(built().optional_host_permissions).toContain('<all_urls>')
+  })
+
+  it('KEEPER: <all_urls> is NOT required, in either list', () => {
+    // The whole of wxt.config.ts's argument. A REQUIRED `<all_urls>` rewrites the install prompt
+    // for every user into "Read and change all your data on all websites" — including the users who
+    // only ever press Alt+Shift+C on a DOI page — and Chrome DISABLES existing installs pending
+    // re-approval. Promoting it is a one-line edit that a developer who has already granted the
+    // permission would never notice.
+    const m = built()
+    expect(m.permissions ?? [], 'promoted to a required permission').not.toContain('<all_urls>')
+    expect(m.host_permissions ?? [], 'promoted to a required host permission').not.toContain('<all_urls>')
+    // And no wildcard smuggled in under another spelling.
+    for (const p of m.host_permissions ?? []) {
+      expect(p, `host_permissions entry is an all-sites wildcard: ${p}`).not.toMatch(/^(\*|<all_urls>|https?:\/\/\*\/\*$)/)
+    }
+  })
+
+  it('KEEPER: the framing permission is the NARROW form only', () => {
+    // `declarativeNetRequestWithHostAccess` installs rules only where host access is already held,
+    // so the framing rule inherits the optional grant instead of being a second, broader permission
+    // the writer never agreed to — and its install prompt is silent, where the plain form warns
+    // about reading browsing activity, which would be a warning about something this extension does
+    // not do. `.toContain` on the narrow name passes with BOTH present, so the negative is the
+    // assertion that matters.
+    const perms: string[] = built().permissions ?? []
+    expect(perms).toContain('declarativeNetRequestWithHostAccess')
+    expect(perms, 'the broad declarativeNetRequest would warn about browsing activity').not.toContain('declarativeNetRequest')
+  })
+
+  it('grants no permission that observes browsing', () => {
+    // A tripwire rather than a prediction: these are the names that would change what the extension
+    // IS, and adding one should be a decision somebody argues for, not a diff nobody reads.
+    const perms: string[] = built().permissions ?? []
+    for (const forbidden of ['webRequest', 'webRequestBlocking', 'history', 'cookies', 'tabCapture', 'debugger']) {
+      expect(perms, `unexpected permission: ${forbidden}`).not.toContain(forbidden)
+    }
+  })
+})
+
+// ── FILES INJECTED BY NAME ─────────────────────────────────────────────────────────────────────
+// The SAME failure class as the missing content_scripts key this file was written for, one level
+// along: `background.ts` injects content scripts with `scripting.executeScript({ files: [...] })`,
+// i.e. by STRING. WXT names those outputs after the ENTRYPOINT FILENAME, so nothing declarative
+// couples the two — renaming `content-source.ts` moves the built file out from under four call
+// sites, TypeScript is happy, the build is happy, and citation capture silently stops showing its
+// verification panel. Only the artifact can answer this.
+describe.skipIf(!existsSync(MANIFEST))('every script the worker injects by name exists in the build', () => {
+  const workerSource = () =>
+    readFileSync(join(process.cwd(), 'extension-src/entrypoints/background.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')   // comments stripped: they name these files to explain them
+
+  const injected = () => {
+    const names = new Set<string>()
+    for (const m of workerSource().matchAll(/files:\s*\[([^\]]*)\]/g)) {
+      for (const f of m[1].matchAll(/['"]([^'"]+)['"]/g)) names.add(f[1])
+    }
+    return [...names]
+  }
+
+  it('VOID GUARD: the scan finds the injection call sites at all', () => {
+    // "Every named file exists" is vacuously true of an empty list, which is exactly what a renamed
+    // API or a refactor into a helper would produce.
+    expect(injected().length, 'no executeScript file list found in background.ts').toBeGreaterThan(0)
+  })
+
+  it('each injected filename is a real file in .output', () => {
+    for (const name of injected()) {
+      expect(existsSync(join(OUT, name)), `background.ts injects '${name}', which the build does not produce`).toBe(true)
+    }
+  })
+
+  it('the popup the install-time onboarding opens is really there', () => {
+    // `runtime.onInstalled` opens `runtime.getURL('popup.html')` so the optional grant is offered
+    // once rather than hidden behind the puzzle-piece icon. If that file is not built, a fresh
+    // install opens a blank tab and the reader's whole point stays off with nothing to explain it.
+    const popup = built().action?.default_popup
+    expect(popup, 'no default_popup declared').toBeTruthy()
+    expect(existsSync(join(OUT, popup)), `default_popup '${popup}' is not in the build`).toBe(true)
+    expect(workerSource(), 'onboarding no longer opens the popup by that name').toContain(popup)
+  })
+
+  it('the background service worker names a file that exists', () => {
+    const sw = built().background?.service_worker
+    expect(sw, 'no service_worker declared').toBeTruthy()
+    expect(existsSync(join(OUT, sw)), `service_worker '${sw}' is not in the build`).toBe(true)
   })
 })
