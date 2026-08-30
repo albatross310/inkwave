@@ -3082,18 +3082,31 @@ write shim, so metadata can say a PDF exists with no local bytes).
   follow-up: per-run canvas advances + greedy breaking feeding computeBreaks as a third
   acquisition path, DOM full measure as idle verifier, pagCheck as prover, gated on
   document.fonts.ready + certified fonts only.
-- **`?arithLayout`'s parked rationale was STALE — corrected 2026-07-18 (`96b0edb`), flag still OFF.**
-  The reflow-free canvas-advance pagination engine was parked 2026-07-15 for a ~1-break-in-20 wrap
-  divergence from the DOM canonical measure. That rationale no longer holds: the LU-quantisation wrap
-  fix (`88ebf39`) landed the day AFTER the revert and addresses exactly that divergence class — but
-  nobody flipped the flag back on, and the stale comment kept blaming a bug that was already fixed.
-  `scripts/textrender-probe/arith.prove.mjs` (`pnpm prove:arith`) is the new graduation keeper: drives
-  the real wired whole-doc arith path and checks its canonical breaks are byte-identical to the DOM
-  canonical measure — 0 divergences across 4k/6k/8k fully-eligible prose (15/23/31 breaks) incl.
-  hyphenated compounds. **Flag stays DEFAULT OFF regardless** — the actual remaining blocker is a
-  WebKit cross-device pass (the probe above is Chromium-only, and canonical breaks are a cross-device
-  invariant) plus a scoped-arith desktop-typing A/B. Do not flip it on the Chromium proof alone. No
-  runtime change from this commit: comment + new script + one package.json line only.
+- **⚠ `?arithLayout` — DO NOT GRADUATE. The engine no longer agrees with live pagination, and the
+  "0 divergences" below it is STALE (measured 2026-08-30).** The reflow-free canvas-advance engine
+  was parked 2026-07-15, unparked in rationale 2026-07-18 (`96b0edb`) on `prove:arith` reporting
+  **0 divergences across 4k/6k/8k (15/23/31 breaks)**. That number was true when written and is
+  false now: HEAD measures **every break divergent — 17/17, 25/25, 34/34**.
+  - **NOT a platform difference, and not a regression in anything a writer sees.** Bisected on ONE
+    machine, same fonts, with the probe file itself unchanged since it landed: clean through
+    `68ff277`, red from **`8f5ae9d` (2026-08-28, "page breaks no longer cut a line in half at any
+    zoom")** onward. The **arith side is byte-unchanged** across the whole range (15/23/31 both
+    before and after); it is the **DOM side that moved**, to 17/25/34.
+  - **WHY, and it is structural rather than a bug in either half.** `8f5ae9d` snaps a break to the
+    block boundary when `!liveIsCanonical` (`shouldSnapToBlock`), so no line is cut at a non-1 font
+    zoom. Whole-doc arith is gated to `!canonicalIsLive`, and `arith.prove.mjs` therefore *sets*
+    `inkwave:editorZoom = 1.2` to reach the engine at all. **The two gates are exact complements:
+    the engine only ever runs in the condition the new snap rule governs**, so it is now guaranteed
+    to disagree on every break. Canonical rendering is byte-unchanged (`prove:breaks` green), which
+    is why live pagination and print are unaffected.
+  - **THE REAL BLOCKER IS NOW `arithmeticLayout.ts`, NOT WebKit.** It does not implement
+    `shouldSnapToBlock`. Graduating on a WebKit pass alone would ship an engine that cuts lines in
+    half at every zoom — reintroducing verbatim the bug Peter reported on 2026-08-28. The WebKit
+    cross-device pass and the scoped-arith typing A/B are still required, just no longer first.
+  - **IT WAS RED FOR TWO DAYS AND THE GATE SAID GREEN**, because `prove:arith` was one of 52
+    `.prove.mjs` files not wired into `package.json` (fixed 2026-08-30). This is the file's own
+    headline — "a proof that ran once is indistinguishable from one that never ran" — happening to
+    the very entry that claims it.
 - Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
   wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
   fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
@@ -3320,8 +3333,10 @@ now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the
 - **A flag is now the EXCEPTION and must earn itself** — only for work genuinely not ready (incomplete, experimental, blocked on an external dependency). It's a temporary scaffold, not a home: it comes with a plan to graduate, and the report says WHY it's not live and WHAT closes the gap.
 - **Graduating ≠ flipping a switch on a stub.** Turn a flag on only when the thing behind it is real. `musicEnabled()`=true over a placeholder panel ships a stub to every writer — worse than the flag.
 - **Genuinely-unfinished stay gated for now** (updated 2026-07-19): the wave video (`?waveVideo`,
-  unresolved desync), the parked arithmetic layout (`?arithLayout`, held on a WebKit cross-device
-  pass), email send (`?email`, blocked on Google verification). Name the reason when you touch them.
+  unresolved desync), the parked arithmetic layout (`?arithLayout`, held because the engine does not
+  implement `8f5ae9d`'s mid-line snap and now diverges from the DOM measure on EVERY break — see the
+  ⚠ entry in the iOS/WebKit section; the WebKit pass is no longer the first blocker), email send
+  (`?email`, blocked on Google verification). Name the reason when you touch them.
   ~~The experimental scrub renderer (`?textRender`)~~ **GRADUATED 2026-07-18 (`ef96306`)** — see the
   "graduate textRender to default-ON" entry in round 14/15 of the canonical-pagination section below;
   it no longer belongs on this still-gated list.
