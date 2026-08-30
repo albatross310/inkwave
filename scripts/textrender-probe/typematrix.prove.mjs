@@ -24,8 +24,9 @@
 // byte-identical. Types interact, so singles cannot certify the set: pairs and the full set run too.
 import { chromium } from '@playwright/test'
 import { buildTypeDoc, countTypes } from './typefixtures.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
+const BASE = await autoBase()
 const WORDS = Number(process.env.WORDS || 13000)
 const MIN_BREAKS = 8
 

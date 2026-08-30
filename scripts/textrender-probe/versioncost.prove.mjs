@@ -36,8 +36,9 @@
 // rule). A blind instrument reporting "no cost" is this codebase's signature failure.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4231}`
+const BASE = await autoBase()
 const VERSIONS = Number(process.env.VERSIONS || 116) // Peter's real count
 
 const browser = await chromium.launch({

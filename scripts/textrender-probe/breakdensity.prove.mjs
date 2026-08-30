@@ -22,9 +22,9 @@
 // Those are opposite problems and a page count cannot tell them apart.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
-
+const BASE = await autoBase()
 // The legacy control — byte-for-byte the fixture breaks.prove.mjs builds, so a disagreement here
 // would mean the harness moved, not the claim.
 function legacyProseDoc() {

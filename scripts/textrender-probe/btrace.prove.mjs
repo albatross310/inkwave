@@ -19,7 +19,8 @@
 // actually there before reading any verdict. The race only exists where there is something to
 // hydrate.
 import { chromium } from '@playwright/test'
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4296}`
+import { autoBase } from './serve.mjs'
+const BASE = await autoBase()
 const browser = await chromium.launch({ headless: true })
 
 const ENTRIES = Array.from({ length: 20 }, (_, i) => ({

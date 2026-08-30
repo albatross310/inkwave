@@ -97,7 +97,13 @@ async function run(flagOn) {
   // Set the flag BEFORE any app code runs — it is cached in a module variable on first read.
   await page.addInitScript((on) => {
     if (on) localStorage.setItem('inkwave:prodLedger', '1')
-    else localStorage.removeItem('inkwave:prodLedger')
+    // ⚠ '0' IS THE OFF, NOT ABSENCE — and this is the exact shape of a control that stops
+    // controlling. `prodLedgerEnabled()` graduated to DEFAULT ON (`ledgerFlag.ts`: the reader is
+    // `!== '0'`), so `removeItem` RE-ENABLES the feature. The known-negative was therefore running
+    // the app in its ON state and then failing "flag OFF wrote a ledger — capture is not gated",
+    // accusing `capture.ts` of a gating bug on healthy code, at the probe's very first check.
+    // A control must be written in terms of the mechanism that actually disables the thing.
+    else localStorage.setItem('inkwave:prodLedger', '0')
     localStorage.setItem('inkwave:ledgerPlace', 'library')
   }, flagOn)
 

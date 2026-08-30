@@ -615,11 +615,22 @@ try {
           note(`pdf reader view: ${ranges.length} slider(s) ${ranges.map((r) => `${r.w}×${r.h}`).join(', ')} — a native range's thumb is the OS's own target, not ours`)
         }
         // Back to the page view so the note checks below run against the surface they mean.
+        //
+        // ⚠ ANCHOR ON THE HOOK, NOT THE TITLE. This matched `/^Reader view|^Page view/` against the
+        // button's title — but in READER mode the title is 'Back to the page view', which matches
+        // neither. `b` was undefined, `b?.click()` was a silent no-op, and the probe never left the
+        // reader. The note checks below then ran against `PdfReaderView`, which emits
+        // `data-note-id`, while they look for `data-hl-id` — an attribute only the page-view overlay
+        // renders. So it reported "the seeded text note did not render" about a note the viewer
+        // draws correctly. `data-iw-reader-toggle` (PdfViewer.tsx) is the stable hook.
         await page.evaluate(() => {
-          const b = [...document.querySelectorAll('[data-probe-pdf] button')].find((x) => /^Reader view|^Page view/.test(x.title || ''))
-          b?.click()
+          document.querySelector('[data-probe-pdf] [data-iw-reader-toggle]')?.click()
         })
-        await page.waitForTimeout(1500)
+        // ASSERT WE ACTUALLY LEFT, rather than assuming the click worked — the whole bug above was a
+        // no-op click nobody checked. `.iw-pdf-reader` is the reader's own root.
+        await page.waitForFunction(() => !document.querySelector('[data-probe-pdf] .iw-pdf-reader'),
+          null, { timeout: 5000 }).catch(() => {})
+        await page.waitForTimeout(500)
       }
 
       // ── THE ⋮ EXPORT MENU, OPEN. A vertical menu is the one place the hit-region expansion must

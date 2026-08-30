@@ -31,8 +31,9 @@
 // build alone would understate exactly the number Peter judges.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4297}`
+const BASE = await autoBase()
 const VERSIONS = Number(process.env.VERSIONS || 116)
 
 const browser = await chromium.launch({

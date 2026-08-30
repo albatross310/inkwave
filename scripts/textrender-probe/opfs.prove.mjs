@@ -36,8 +36,9 @@
 //      MISSES (if it hit, something in memory survived and the reload proved nothing).
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4231}`
+const BASE = await autoBase()
 const DOC_ID = 'probe-opfs-tables'
 const VERSIONS = Number(process.env.VERSIONS || 116)
 

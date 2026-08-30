@@ -37,9 +37,9 @@
 // depend on it. If the control diverges the harness is wrong and no verdict may be read.
 import { chromium } from '@playwright/test'
 import { buildTypeDoc } from './typefixtures.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4242}`
-
+const BASE = await autoBase()
 const STACKS = [
   ['DEFAULT (control)', "'EB Garamond', Georgia, serif"],
   ['Fell', "'IM Fell DW Pica', 'EB Garamond', Georgia, serif"],

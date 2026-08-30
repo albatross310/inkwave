@@ -4,7 +4,6 @@
   "scripts/ledger-wiring.prove.mjs",
   "scripts/musiclayer.prove.mjs",
   "scripts/pdfexport.prove.mjs",
-  "scripts/pdfposthoc.prove.mjs",
   "scripts/prodreport.prove.mjs",
   "scripts/renderWrap.prove.mjs",
   "scripts/tabdoc-probe/newtab.prove.mjs",

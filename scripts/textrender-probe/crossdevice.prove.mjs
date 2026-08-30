@@ -12,8 +12,9 @@
 // Fixtures are synthetic — Peter's thesis never enters the repo.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4239}`
+const BASE = await autoBase()
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
 
 async function breaksOn(ctxOpts, label) {

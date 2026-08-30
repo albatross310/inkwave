@@ -16,8 +16,9 @@
 // the repo, in fixtures, output or logs.
 import { chromium } from '@playwright/test'
 import { buildCitationDoc } from './fixture.mjs'
+import { autoBase } from './serve.mjs'
 
-const BASE = `http://127.0.0.1:${process.env.PROBE_PORT || 4239}`
+const BASE = await autoBase()
 const EXPECT_POSITIVE = process.env.EXPECT_POSITIVE === '1'
 
 const b = await chromium.launch({ headless: true, args: ['--font-render-hinting=none', '--disable-lcd-text'] })
